@@ -163,7 +163,7 @@ Each step ends with `npm run verify` passing and the PRD's affected requirements
 6. **Panel and ad-hoc source.** Work item list and every R27 control, plus the ad-hoc prompt box. The ad-hoc source comes here because it exercises the whole session path without touching a real ticket.
 7. **Live acceptance.** Run the procedure in [testing.md](testing.md#live-acceptance) and record the results.
 
-8. **Operator configuration.** Write the operator's `~/.switchboard/settings.json` for GitHub, a `triage:github` playbook ported from Ground Control's triage prompt (`packages/board/src/triagePrompt.ts`) and the deterministic rules it applies before the model, and `dev:*` playbooks from their Ground Control action table, all with `autoStart: false`. The operator reviews them before use. In first use, verify Open in VS Code for a session from another folder.
+8. **Operator configuration.** Write the operator's `~/.switchboard/settings.json` for GitHub, a `triage:github` playbook ported from Ground Control's triage prompt (`packages/board/src/triagePrompt.ts`) and the deterministic rules it applies before the model, and `dev:*` playbooks from their Ground Control action table, with `autoStart` set by the design rule "Start automatically unless it writes". The operator reviews them before use.
 9. **Zoho Desk source** (R4, R26, R46) and `support:*` playbooks.
 10. **Forum source** (R5).
 
@@ -171,9 +171,8 @@ Steps 1–7 deliver GitHub and ad-hoc end to end: R1–R4, R6–R25, R27–R45. 
 
 ## Implementation gaps
 
-Steps 1–7 are delivered: R1–R4 for GitHub, R6–R25 and R27–R45 work end to end, verified by live acceptance on 2026-10-03 ([mechanics.md](mechanics.md) M9). Not yet verified live: Open in VS Code for a session from another folder. Step 8 is delivered: the operator's home has the GitHub settings and playbooks, and their hub triaged their 9 assigned issues to the same actions Ground Control chose, all awaiting approval. Steps 9 and 10 are delivered in code: the Zoho Desk source (R46), the Forum source (R5), the pool and its triage (R47), pick sessions (R48), approval reports (R23, R31) and the Icebox (R49) are implemented and tested, pick sessions with fake runners only. Both pools were triaged live, read-only ([mechanics.md](mechanics.md) M10, M11). The operator's Support setup is installed: on 2026-10-03 their hub triaged 6 Zoho and 7 Forum pool tickets into `support:case` with no errors, after the Git Bash fix ([mechanics.md](mechanics.md) M12).
+Steps 1–7 are delivered: R1–R4 for GitHub, R6–R25 and R27–R45 work end to end, verified by live acceptance on 2026-10-03 ([mechanics.md](mechanics.md) M9). Open in VS Code for a session from another folder and approval reports were verified live in a second round ([mechanics.md](mechanics.md) M13). Step 8 is delivered: the operator's home has the GitHub settings and playbooks, and their hub triaged their 9 assigned issues to the same actions Ground Control chose, all awaiting approval. Steps 9 and 10 are delivered in code: the Zoho Desk source (R46), the Forum source (R5), the pool and its triage (R47), pick sessions (R48), approval reports (R23, R31) and the Icebox (R49) are implemented and tested, pick sessions with fake runners only. Both pools were triaged live, read-only ([mechanics.md](mechanics.md) M10, M11). The operator's Support setup is installed: on 2026-10-03 their hub triaged 6 Zoho and 7 Forum pool tickets into `support:case` with no errors, after the Git Bash fix ([mechanics.md](mechanics.md) M12).
 
-- Open in VS Code for a session from another folder is not yet verified live.
 - No pick has run against a real ticket; the first real pick is the operator's.
 - Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 ## Open questions
