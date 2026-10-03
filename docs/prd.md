@@ -93,7 +93,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
   - `queued` waits for a session slot (R38), or for an earlier work item of the same ticket to finish its active session (R17).
   - `blocked` means a session ended its turn without reporting done, or reported blocked. The operator resumes it, retries, or marks it done.
   - `failed` means a Switchboard step failed: triage, a session start, or a setup session that ended without a worktree. The panel shows the cause and offers Retry.
-- R35. The operator can change a work item's playbook, or triage it again, while it has no active session. A changed playbook puts the work item in `unstarted`, so the operator starts the new choice.
+- R35. The operator can triage a work item again while it has no active session. There is no control to choose a playbook by hand; the operator handles that rare case outside Switchboard, for example with Mark done and an ad-hoc session.
 - R45. Retry repeats the step that stopped:
   - After failed triage, triage runs again.
   - After a failed setup or setup start, a new setup session starts, unless a worktree is now linked; then the task starts.
@@ -147,7 +147,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
     - **Working:** the phase: triaging, queued, claiming or setting up, running.
     - **Done:** how it ended: the session reported done, the operator marked it done, or the ticket left with no done report (with the warning).
     - **Icebox:** the mark the item would have in the group it returns to.
-  - Controls appear only when they apply: Start, Approve, Retry, Stop, Mark done, Change playbook, Triage again and Icebox, plus the session button. Each row shows only its main control (Start, Approve, Retry, or Triage again for a failed triage) and the session button; the rest are in the row's menu. A control's verb matches the status it acts on: Start for `unstarted` and pool tickets, Approve only for `awaiting-approval`.
+  - Controls appear only when they apply: Start, Approve, Retry, Stop, Mark done, Triage again and Icebox, plus the session button. Each row shows only its main control (Start, Approve, Retry, or Triage again for a failed triage) and the session button; the rest are in the row's menu. A control's verb matches the status it acts on: Start for `unstarted` and pool tickets, Approve only for `awaiting-approval`.
   - The time in the queue is in whole minutes, hours, days or weeks, from the source's sort time or the work item's creation, and stops when the work item is done.
   - The panel uses VS Code's theme and codicons. It is not a kanban board.
 - R28. The operator can attach to a background session in a console. Attaching does not create a session, and detaching does not end it.
