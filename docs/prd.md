@@ -140,6 +140,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 - R27. A VS Code panel lists work items. The panel centres on the work item; sessions are secondary and shown only as one control.
   - Rows do not expand. Every row's first line is the mark, the source and key linked to the source, the title, the playbook name, the time in the queue and the controls. The second line holds the stage and its age, the approval summary, link badges (R52), "Returned ×N" (R51), the Unclaimed tag, and any warning or error. Every row keeps the two-line height, with room between rows, even when the second line is empty; the list stays easy to scan rather than as dense as possible.
+  - The playbook name shows its namespace muted and its name in the foreground colour and bold, such as `dev:` **review-followup**, because the name says what the work is and the namespace follows from the source.
   - There is no status text: the group and the mark already say it, and the mark's tooltip names it.
   - The triage summary, the triage context and the task prompt are not shown; Switchboard keeps them in the store. An approval report's summary is shown, because it says what Approve publishes.
   - A worktree shows as an icon; its branch and path are in the tooltip.
