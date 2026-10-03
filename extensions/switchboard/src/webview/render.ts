@@ -183,6 +183,16 @@ function errors(snapshot: Snapshot): string {
   return lines.length === 0 ? '' : `<div class="errors">${lines.map((line) => `<div class="note"><span class="codicon codicon-warning"></span> ${escape(line)}</div>`).join('')}</div>`;
 }
 
+/** Says plainly what an unconfigured home is missing. */
+function setup(snapshot: Snapshot): string {
+  const lines = [
+    snapshot.sources.length === 0 ? `No source is polled. Enable a source in ${snapshot.home}\\settings.json.` : null,
+    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under ${snapshot.home}\\playbooks.` : null,
+  ].filter((line): line is string => line !== null);
+
+  return lines.map((line) => `<p class="empty"><span class="codicon codicon-info"></span> ${escape(line)}</p>`).join('');
+}
+
 function adhocBox(snapshot: Snapshot): string {
   const repos = snapshot.repoRoots.map((root) => `<option value="${escape(root)}">${escape(root)}</option>`).join('');
 
@@ -199,7 +209,7 @@ export function renderPanel(snapshot: Snapshot, now: number, expanded: ReadonlyS
 
   const list = (items: WorkItemView[]) => items.map((item) => row(item, snapshot, now, expanded.has(item.id))).join('\n');
 
-  return `${errors(snapshot)}${adhocBox(snapshot)}
+  return `${errors(snapshot)}${setup(snapshot)}${adhocBox(snapshot)}
 <h3>Needs you (${groups.needs.length})</h3>${list(groups.needs) || '<p class="empty">Nothing needs you.</p>'}
 <h3>Working (${groups.working.length})</h3>${list(groups.working) || '<p class="empty">Nothing is running.</p>'}
 <details class="done"${showDone ? ' open' : ''}><summary><h3>Done (${groups.done.length})</h3></summary>${list(groups.done)}</details>`;

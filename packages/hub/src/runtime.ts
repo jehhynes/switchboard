@@ -40,6 +40,10 @@ export interface Snapshot {
   playbooks: { name: string; description: string }[];
   /** Repos an ad-hoc prompt can run in: each source's repo root, the first being the default. */
   repoRoots: string[];
+  /** Sources being polled. */
+  sources: string[];
+  /** The Switchboard home, where settings.json and playbooks/ live. */
+  home: string;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
 }
 
@@ -276,6 +280,8 @@ export class Runtime {
       })),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
+      sources: [...this.sources.keys()],
+      home: this.home,
       errors: {
         settings: settingsError,
         playbooks: playbookErrors.map((entry) => `${entry.file}: ${entry.error}`),

@@ -61,6 +61,8 @@ function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): Snapsho
       { name: 'support:defect', description: 'Research a defect' },
     ],
     repoRoots: ['D:/git/widgets', 'D:/git/support'],
+    sources: ['github'],
+    home: 'C:\\Users\\me\\.switchboard',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
     ...patch,
   };
@@ -177,6 +179,18 @@ describe('renderPanel', () => {
     expect(root.querySelector('summary .worktree')?.textContent?.trim()).toBe('101-fix');
     expect(root.querySelector('summary .worktree')?.getAttribute('title')).toBe('D:/git/widgets-wt/101-fix');
     expect(root.querySelector('summary .status')?.textContent).toBe('Done, session running');
+  });
+
+  it('says what an unconfigured home is missing', () => {
+    const root = document.createElement('div');
+    root.innerHTML = renderPanel(snapshot([], { sources: [], playbooks: [], repoRoots: [] }), NOW, new Set(), false);
+
+    expect([...root.querySelectorAll('p.empty')].slice(0, 2).map((p) => p.textContent?.trim())).toEqual([
+      'No source is polled. Enable a source in C:\\Users\\me\\.switchboard\\settings.json.',
+      'No task playbooks are loaded. Add them under C:\\Users\\me\\.switchboard\\playbooks.',
+    ]);
+    expect(root.querySelector('form.adhoc button')?.hasAttribute('disabled')).toBe(true);
+    expect(renderPanel(snapshot([]), NOW, new Set(), false)).not.toContain('No source is polled');
   });
 
   it('formats ages', () => {
