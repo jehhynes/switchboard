@@ -153,11 +153,15 @@ Each step ends with `npm run verify` passing and the PRD's affected requirements
 6. **Panel and ad-hoc source.** Work item list and every R27 control, plus the ad-hoc prompt box. The ad-hoc source comes here because it exercises the whole session path without touching a real ticket.
 7. **Live acceptance.** Run the procedure in [testing.md](testing.md#live-acceptance) and record the results.
 
-Steps 1–7 deliver GitHub and ad-hoc end to end: R1–R4, R6–R25, R27–R45. Later steps add Zoho Desk (R4, R26, R46) and Forum (R5), ported from the operator's Support board in `D:\git\support`.
+8. **Operator configuration.** Write the operator's `~/.switchboard/settings.json` for GitHub, a `triage:github` playbook ported from Ground Control's triage prompt (`packages/board/src/triagePrompt.ts`) and the deterministic rules it applies before the model, and `dev:*` playbooks from their Ground Control action table, all with `autoStart: false`. The operator reviews them before use. In first use, verify Open in VS Code for a session from another folder.
+9. **Zoho Desk source** (R4, R26, R46) and `support:*` playbooks.
+10. **Forum source** (R5).
+
+Steps 1–7 deliver GitHub and ad-hoc end to end: R1–R4, R6–R25, R27–R45. Zoho Desk and Forum port the operator's Support board in `D:\git\support`.
 
 ## Implementation gaps
 
-Step 1 is done: R33 is implemented. Step 2 is done: `packages/core` decides R6–R25, R34–R41 and R45, and loads and validates settings and playbooks (R42 without reloading), tested with fake sources and runners. Step 3 is done: `packages/github` reads R44's assigned state and builds the triage context (R1 for GitHub). Step 4 adds the Claude Code runner and classifier, and step 5 the hub that runs them with the core and the GitHub source: R1–R4 for GitHub, R7–R25, R33 and R34–R45 work end to end. Step 6 adds the panel and the ad-hoc prompt box (R6, R27–R32). The `--bg` mechanics they rely on are verified in mechanics.md or listed there as pending. Zoho Desk and Forum (R4, R5, R26, R46) are unimplemented.
+Steps 1–7 are delivered: R1–R4 for GitHub, R6–R25 and R27–R45 work end to end, verified by live acceptance on 2026-10-03 ([mechanics.md](mechanics.md) M9). Not yet verified live: Open in VS Code for a session from another folder. Zoho Desk and Forum (R5, R26, R46) are unimplemented. The operator's real home has no settings or playbooks yet (step 8).
 
 - Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 ## Open questions
