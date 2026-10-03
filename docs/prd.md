@@ -26,7 +26,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - Changing git state: no commits, branches, or creating, cleaning up or removing worktrees. Read-only git queries that validate and link worktrees are allowed.
 - Answering a session's permission prompts or questions for the operator.
 - Inferring state it did not observe: no stuck-session detection, and no check that a session's done report is true.
-- Reproducing the source's ticket view or conversation. The panel shows the clipped triage context Switchboard recorded and links to the source.
+- Reproducing the source's ticket view or conversation. The panel links to the source.
 - Replacing Ground Control's board, lanes or review workflow.
 - Built-in playbooks or namespaces.
 - Unattended overnight operation as a committed goal.
@@ -37,6 +37,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - **Existing tools are context, not requirements.** Ground Control, the Support board and the operator's skills show how the work is done today. Switchboard adopts a behavior from them only when it serves this PRD's goals, and states its own reason.
 - **Skills drive the work; Switchboard is the harness.** Switchboard finds tickets, triages them, starts and observes sessions, and shows their state. Every change to a source, a repository or a worktree is made by a skill a session runs. When a feature needs a write, add a session that runs a skill, not Switchboard code that writes.
 - **Least authority.** An unattended session gets the least permission mode under which it can finish. The default is `auto`; a playbook can override it.
+- **The work item first, sessions second.** The operator manages work items; a session is how one runs, and the panel shows it as one control, not as content.
 - **Simple first.** Choose the simplest behavior that keeps common work correct. Handle a rare case by showing it, not with special machinery.
 - **Visible failure.** Every failure shows on its work item with the cause. Switchboard does not retry work automatically; Retry is the operator's. A failed source poll is tried again at the next interval.
 - **Observed state only.** The panel shows what the roster and session reports say, and how old that observation is. A session's report is its claim and is shown as such.
@@ -132,21 +133,22 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ### Observation and control
 
-- R27. A VS Code panel lists work items with ticket, playbook, status, stage, worktree, active session and warnings.
+- R27. A VS Code panel lists work items. The panel centres on the work item; sessions are secondary and shown only as one control.
+  - Rows do not expand. Every row is one or two lines: the mark, the source and key linked to the source, the title, the playbook name, the time in the queue, then the status, the stage and its age, link badges (R52), "Returned ×N" (R51), any warning or error, and the controls.
+  - The triage summary, the triage context and the task prompt are not shown; Switchboard keeps them in the store. An approval report's summary is shown, because it says what Approve publishes.
+  - A worktree shows as an icon; its branch and path are in the tooltip.
+  - The session shows as one icon button with a dot for its state: running, waiting, idle, failed, or none when no session is active. Its tooltip names the state. It opens the work item's latest session: Attach while the background process runs, otherwise Open in VS Code.
   - Every group can be collapsed; Needs you, Working and Unstarted start open, Done and Icebox start closed, and the operator's choice is kept.
-  - An **Icebox** group, collapsed at the bottom, holds iceboxed tickets (R49).
-  - An **Unstarted** group holds everything waiting for the operator to start it, from every source: `unstarted` work items and pool tickets. It sorts by importance (R50), counting an unrated ticket as rank 2, then oldest first by the source's sort time (Zoho's customer response time, Forum's last public post) or the work item's creation, so the most urgent and then the longest-waiting come first. Each row shows the importance, the source and key, the title, the triage summary, the chosen playbook, whether the ticket is **Unclaimed** (a pool ticket, which Start claims) or **Assigned** to the operator, and a Start control.
-  - It groups work items, checking in this order: **Done** when the work item is `done` (the last 7 days, collapsed; an active session still shows its mark); **Unstarted** when the status is `unstarted`; **Needs you** when the status is `awaiting-approval`, `blocked` or `failed`, or the active session is `waiting`; **Working** otherwise.
-  - Each row shows the source and key linked to the source, the title, the playbook, a mark, the stage and its age, and any warning.
+  - Groups, in this order: **Needs you** when the status is `awaiting-approval`, `blocked` or `failed`, or the active session is `waiting`; **Working** otherwise, while not done or unstarted; **Unstarted**; **Done** when the work item is `done` (the last 7 days; an active session still shows its state); **Icebox** for iceboxed tickets (R49).
+  - The **Unstarted** group holds everything waiting for the operator to start it, from every source: `unstarted` work items and pool tickets. It sorts by importance (R50), counting an unrated ticket as rank 2, then oldest first by the source's sort time (Zoho's customer response time, Forum's last public post) or the work item's creation, so the most urgent and then the longest-waiting come first. Its status line says **Unclaimed** (a pool ticket, which Start claims) or **Assigned** to the operator.
   - The mark shows what differs between rows of the same group, because the group header already says what they share; its tooltip names it in words:
     - **Unstarted:** the importance rank as a coloured dot: red for rank 0–1, orange for 2, grey for 3–4, hollow when unrated.
     - **Needs you:** what the operator must do: approve a publish (an approval report), answer a question (`waiting`, or blocked with a question), look at a block, or deal with a failure (red).
     - **Working:** the phase: triaging, queued, claiming or setting up, running.
     - **Done:** how it ended: the session reported done, the operator marked it done, or the ticket left with no done report (with the warning).
     - **Icebox:** the mark the item would have in the group it returns to.
-  - Expanding a row shows the triage summary, the triage context, the task prompt and the session history.
-  - Controls appear only when they apply: Approve, Change playbook, Triage again, Retry, Stop, Mark done, Attach, Open in VS Code, Start and Icebox. Each row shows only its main control (Start, Approve, Retry, Attach, or Triage again for a failed pool triage); the rest are in the row's menu. A control's verb matches the status it acts on: Start for `unstarted` and pool tickets, Approve only for `awaiting-approval`.
-  - Each row shows its time in the queue in whole minutes, hours, days or weeks, from the source's sort time or the work item's creation, stopping when it is done.
+  - Controls appear only when they apply: Start, Approve, Retry, Stop, Mark done, Change playbook, Triage again and Icebox, plus the session button. Each row shows only its main control (Start, Approve, Retry, or Triage again for a failed triage) and the session button; the rest are in the row's menu. A control's verb matches the status it acts on: Start for `unstarted` and pool tickets, Approve only for `awaiting-approval`.
+  - The time in the queue is in whole minutes, hours, days or weeks, from the source's sort time or the work item's creation, and stops when the work item is done.
   - The panel uses VS Code's theme and codicons. It is not a kanban board.
 - R28. The operator can attach to a background session in a console. Attaching does not create a session, and detaching does not end it.
 - R29. The operator can open a work item's session in a VS Code Claude Code tab. A session that is not running resumes in a new tab; a session already open in VS Code gets focus.
