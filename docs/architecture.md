@@ -105,6 +105,7 @@ Report progress with `{{report}} stage {{session.id}} <stage>`.
 - Front matter: `description` (required), `autoStart` (default false), `requiresWorktree` (default false), `permissionMode` and `model` (defaults from `sessions` settings), `kind` (`task` by default, or `triage`), and `workdir` (`worktree` by default: the ticket's worktree when one exists, otherwise the repo root; or `repoRoot`: always the source's repo root, for playbooks whose skills belong to that repository).
 - `description` tells the classifier when to choose the playbook.
 - A source's triage playbook has `kind: triage`. Its body is the classifier's system prompt. Triage playbooks are never offered to the classifier as choices.
+- Each source's `namespace` setting limits the classifier's choices to that namespace's task playbooks, such as `dev` for GitHub and `support` for Zoho Desk and Forum. With one playbook in the namespace, triage still writes the summary.
 - Every session prompt ends with the report contract: the session ID and the `stage`, `worktree`, `done` and `blocked` commands. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
 
 ## Triage
@@ -113,7 +114,7 @@ Triage follows Ground Control's classifier (GC R38, M31).
 
 1. The source plugin builds the triage context: it fetches the ticket's text, clips each field at a word boundary to a size limit, and formats it with authors, status changes and assignees. Ground Control clips the issue body and each comment to 2,000 characters.
 2. The classifier runs `claude -p --output-format json --json-schema <schema> --no-session-persistence --setting-sources "" --tools "" --strict-mcp-config --system-prompt <triage playbook + playbook descriptions>`, with the context on stdin. Stdin avoids the Windows 32,767-character command-line limit (M31).
-3. The schema is `{playbook: enum of loaded playbook names, summary: string}`. The classifier reads `structured_output`.
+3. The schema is `{playbook: enum of the source namespace's task playbook names, summary: string}`. The classifier reads `structured_output`.
 
 Triage has no tools, settings, MCP servers or saved transcript, so it is not a session and does not count toward the one-active-session rule. The hub runs at most one triage per work item at a time, at most `triage.concurrency` at once (default 2), with a `triage.timeoutSeconds` limit (default 180).
 
@@ -203,6 +204,7 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
       "pollIntervalSeconds": 300,
       "repoRoot": "D:/git/widgets",
       "triagePlaybook": "triage:github",
+      "namespace": "dev",
       "setupPrompt": "/init-worktree {{ticket.sourceKey}}",
       "ghPath": "gh",
       "repo": "acme/widgets",
@@ -217,6 +219,7 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
       "pollIntervalSeconds": 300,
       "repoRoot": "D:/git/support",
       "triagePlaybook": "triage:zoho",
+      "namespace": "support",
       "credentialsPath": "~/.claude/secrets/zoho-selfclient.json",
       "orgId": "700000001",
       "agentId": "8000000000000000001",
@@ -228,6 +231,7 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
       "pollIntervalSeconds": 300,
       "repoRoot": "D:/git/support",
       "triagePlaybook": "triage:forum",
+      "namespace": "support",
       "databaseEnvPath": "~/.claude/secrets/read-database.env",
       "forumId": 1,
       "userId": 7
@@ -251,4 +255,6 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
   - Triage context: the topic title and posts in order. Deleted posts (`DeletedUtc` set), posts with `Status = 2` (private notes) and posts by `UserId = 2` (the automatic AI analysis) are left out. The source key is `Thread.Id`, and the URL is `https://forum.example.com/t/forum/<Thread.Key>`.
 - A Forum topic and a Zoho ticket about the same case are separate tickets (PRD R26).
 
-The operator's first playbooks mirror their Ground Control action table: `dev:develop` (`/gc-plan`), `dev:review-others` (`/review-pr`), `dev:review-followup` (`/review-pr-followup`), `dev:address-review` (`/address-pr-review`), `dev:qa-failure` and `dev:qa-question` (`/address-feedback`). The Support playbooks follow the intake types of the board's classifier (`support-classify`): `support:defect`, `support:how-to`, `support:partner-inquiry`, `support:feature-request` and `support:data-fix-request`, each running `/support-process #<ticket number>` or `/support-process T<topic id>` with `requiresWorktree: false` and `workdir: repoRoot`. The Support skills are project skills of `D:\git\support`, so Support sources use it as their repo root; `/support-fix` makes the widgets worktree when a case needs code. All playbooks live in the operator's home, not in this repository.
+The operator's first playbooks mirror their Ground Control action table: `dev:develop` (`/gc-plan`), `dev:review-others` (`/review-pr`), `dev:review-followup` (`/review-pr-followup`), `dev:address-review` (`/address-pr-review`), `dev:qa-failure` and `dev:qa-question` (`/address-feedback`). Support has one playbook, `support:case`, because `/support-process` routes every case type itself. It runs `/support-process #<ticket number>` for Zoho or `/support-process T<topic id>` for Forum, with `autoStart: false`, `requiresWorktree: false` and `workdir: repoRoot`. Approve is the operator starting the case, which is what lets `/support-bind` claim it; an automatic start would claim tickets with no human start. Support sessions stop early, often at a request for a local reproduction, and end with a draft reply handed back to the operator.
+
+The operator's Support board (`support-kanban`) starts no sessions itself, but its hooks register any Claude session in `D:\git\support` on the case's card. Switchboard does not coordinate with it: the operator does not press Investigate on a card whose case Switchboard is running. The Support skills are project skills of `D:\git\support`, so Support sources use it as their repo root; `/support-fix` makes the widgets worktree when a case needs code. All playbooks live in the operator's home, not in this repository.
