@@ -15,27 +15,52 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "contributes": {},
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "switchboard",
+          "title": "Switchboard",
+          "icon": "media/switchboard.svg"
+        }
+      ]
+    },
+    "views": {
+      "switchboard": [
+        {
+          "type": "webview",
+          "id": "switchboard.workItems",
+          "name": "Work items"
+        }
+      ]
+    }
+  },
   "scripts": {
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc -p tsconfig.json",
     "package": "vsce package --no-dependencies --allow-missing-repository --skip-license",
-    "test:integration": "node test-integration/run.mjs"
+    "test:integration": "node test-integration/run.mjs",
+    "test": "vitest run --coverage"
   },
   "dependencies": {
     "@switchboard/core": "*",
     "@switchboard/hub": "*"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.104.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "@vscode/codicons": "^0.0.46-24",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.0",
+    "jsdom": "^29.1.1",
     "mocha": "^12.0.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.7"
   }
 }

@@ -1,0 +1,28 @@
+body { padding: 0 8px; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 4px; color: var(--vscode-descriptionForeground); }
+details.done > summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
+details.done > summary h3 { display: inline; }
+.item { border-bottom: 1px solid var(--vscode-widget-border, transparent); padding: 4px 0; }
+.item > summary { cursor: pointer; display: flex; flex-wrap: wrap; row-gap: 2px; }
+.line { display: flex; flex-basis: 100%; gap: 6px; align-items: center; min-width: 0; }
+.line.second { padding-left: 22px; }
+.title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playbook-name, .stage, .empty { color: var(--vscode-descriptionForeground); }
+.status { font-weight: 600; }
+summary .control { margin-left: auto; }
+.note { color: var(--vscode-editorWarning-foreground); flex-basis: 100%; padding-left: 22px; }
+.worktree { color: var(--vscode-descriptionForeground); }
+.errors .note { display: block; padding-left: 0; margin: 4px 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 4px 22px; }
+button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 2px 8px; cursor: pointer; }
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button[type=submit] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+select, textarea { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); }
+.detail { margin-left: 22px; }
+.detail pre { white-space: pre-wrap; max-height: 240px; overflow: auto; background: var(--vscode-textCodeBlock-background); padding: 4px; }
+.adhoc { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.adhoc textarea { width: 100%; box-sizing: border-box; resize: vertical; font-family: inherit; }
+.adhoc-row { display: flex; gap: 4px; }
+.adhoc-row select { flex: 1; min-width: 0; }
+a { color: var(--vscode-textLink-foreground); }
+.line > a, .playbook-name, .status, .stage { white-space: nowrap; flex-shrink: 0; }

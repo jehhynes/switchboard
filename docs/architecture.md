@@ -1,12 +1,12 @@
 # Switchboard architecture
 
-Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, the core's store, settings, playbooks and [flow decisions](#core-decisions), and the GitHub source's reads. Every other section is planned.
+Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, the core's store, settings, playbooks and [flow decisions](#core-decisions), the GitHub source, the Claude Code runner and classifier, the hub runtime, the report command, and the panel with the ad-hoc prompt box. Zoho Desk and Forum are planned.
 
 Session and triage mechanics come from Ground Control (`D:\git\ground-control`), where they are verified. M IDs below refer to its [mechanics.md](../../ground-control/docs/mechanics.md). Re-verify them in Switchboard's own mechanics.md before relying on a version-fragile one.
 
 ## Packages
 
-npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core` (store, settings, playbooks, flow decisions), `packages/github` (poll and triage context), and `packages/hub`, `apps/hub` and `extensions/switchboard` for the hub lifecycle.
+npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/github`, `packages/claude`, `packages/hub`, `apps/hub`, and `extensions/switchboard`. `packages/zoho` and `packages/forum` are planned.
 
 | Package | Contents | Depends on |
 |---|---|---|
@@ -17,7 +17,7 @@ npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, fol
 | `packages/forum` | Forum source over the forum database | core |
 | `packages/hub` | Polling scheduler, flow execution, loopback HTTP/SSE server, report endpoint | core, sources, claude |
 | `apps/hub` | Hub entry point and the `switchboard report` CLI, bundled as one file | hub |
-| `extensions/switchboard` | Hub process lifecycle, panel webview, attach, open in Claude Code tab | hub protocol types from core |
+| `extensions/switchboard` | Hub process lifecycle, panel webview, attach, open in Claude Code tab | core, hub client |
 
 The ad-hoc source is local and lives in `packages/hub`. State, playbooks and the hub bundle live in the Switchboard home, `~/.switchboard`.
 
@@ -61,10 +61,20 @@ Implemented. Follows Ground Control's hub (GC R35, M25).
 
 - **Start:** extension activation copies `dist/hub.js` to `~/.switchboard/hub.js` when it differs. It accepts a running hub only when the hub's `build`, a hash of its bundle, matches the bundle installed at that moment. It asks a hub of another build to stop and starts a new one only after the old one has gone; if the old hub refuses, the window reports it. Otherwise it starts one detached with VS Code's executable and `ELECTRON_RUN_AS_NODE=1`, with `ELECTRON_*`, `VSCODE_*` and `NODE_OPTIONS` removed from its environment. Output goes to `~/.switchboard/hub.log`.
 - **Record:** the hub listens on `127.0.0.1` on an ephemeral port and writes `~/.switchboard/hub.json` with `protocol`, `version`, `build`, `port`, `token`, `pid` and `startedAt`. The hub holds a lock for its lifetime: a named pipe `\\.\pipe\switchboard-<hash of home>` on Windows, `~/.switchboard/hub.sock` elsewhere. Only the lock holder writes or removes the record, so concurrent starts leave one hub, and the OS releases the pipe when the hub dies. A hub that cannot take the lock waits up to 5 seconds for the holder's record and otherwise exits. A forced exit on Windows leaves the record behind, so clients accept it only when `GET /status` with the token returns the recorded pid.
-- **Endpoints:** `GET /hub` returns identity without a token. `GET /status`, `GET /events` and `POST /shutdown` require `Authorization: Bearer <token>`.
-- **Clients:** each window holds one `/events` stream. The hub exits 30 minutes after its last stream closes, but not while any session is active (PRD R43, planned). A stream that sends no response headers within 5 seconds counts as refused. When a stream ends, the window finds or starts a hub and reconnects. It gives up and shows an error after three consecutive failures; a connection that lasts under 10 seconds counts as a failure.
-- **Entry point:** `hub.js [--home=<dir>] [--idle-ms=<ms>]` serves; `hub.js --stop` stops the running hub.
-- **Home override:** when `SWITCHBOARD_HOME` is set in VS Code's environment, the extension uses it as the Switchboard home and passes it to the hub as `--home`. It does not change the user profile that Claude and `gh` see. Live acceptance depends on it (planned).
+- **Endpoints:** `GET /hub` returns identity without a token. `GET /status`, `GET /events`, `POST /shutdown`, `POST /report`, `POST /action`, `POST /open` and `POST /claim` require `Authorization: Bearer <token>`. `/events` sends a `state` event with the whole panel snapshot when it opens and after every change. `/action` takes an operator event (`adhoc`, `approve`, `retry`, `mark-done`, `retriage`, `change-playbook`, `stop`) and answers 409 with the core's refusal.
+- **Clients:** each window holds one `/events` stream. The hub exits 30 minutes after its last stream closes, but not while any session is active (PRD R43). A stream that sends no response headers within 5 seconds counts as refused. When a stream ends, the window finds or starts a hub and reconnects. It gives up and shows an error after three consecutive failures; a connection that lasts under 10 seconds counts as a failure.
+- **Entry point:** `hub.js [--home=<dir>] [--idle-ms=<ms>]` serves; `hub.js --stop` stops the running hub; `hub.js report …` sends a session report.
+- **Runtime:** the hub opens the store, loads settings and playbooks and reloads them on change, polls each enabled source every `pollIntervalSeconds`, then reads `git worktree list` in its repo root for the branch convention. While any session has started, it reads the roster every 30 seconds and hook markers every 5 seconds. Before a roster read or a release stop can end a setup session, it reads the convention again, so an unreported worktree still counts.
+- **Startup:** the hub installs hooks when `sessions.installHooks` is on, runs again any triage it abandoned, fails any session still `starting` with "The hub stopped while the session was starting.", and reads the roster (PRD R43).
+- **Home override:** when `SWITCHBOARD_HOME` is set in VS Code's environment, the extension uses it as the Switchboard home and passes it to the hub as `--home`. It does not change the user profile that Claude and `gh` see. Live acceptance depends on it.
+
+## Panel
+
+- The extension contributes a **Switchboard** view container in the activity bar with one webview view, **Work items**. The webview renders each `state` event the window's `/events` stream delivers; it keeps the rows the operator expanded and a half-typed ad-hoc prompt across redraws.
+- Groups and controls follow PRD R27. Controls run the extension's `switchboard.action`, `switchboard.attach` and `switchboard.open` commands. An operator event goes to `POST /action`, and a refusal shows as a warning. Attach and Stop apply to a session running in the background; Attach opens a terminal running `claude attach <shortId>`. Open in VS Code applies to a session that is not running, or that was released and is active again because the operator resumed it. It follows [Open in VS Code](#claude-code-runner) below. A ticket link opens in the browser.
+- Each row shows the ticket, title, playbook, status, stage and its age, the worktree's branch, and any warning or error; a done work item with an active session shows the session's state.
+- The ad-hoc box takes a prompt and a repo from the configured repo roots, the first by default, and sends `adhoc`.
+- Styles use VS Code's theme variables and codicons from `@vscode/codicons`, copied into `dist/`. The script runs under a nonce content security policy.
 
 ## Store
 
@@ -142,11 +152,11 @@ Actions are `triage`, `start-session` and `stop-session`. After every event the 
 
 ## Claude Code runner
 
-- Start: `claude --bg --permission-mode <mode> --settings '{"worktree":{"bgIsolation":"none"}}' -n <name> [--model <model>] <prompt>`, with no shell, so a leading slash command survives. The name is `switchboard · <playbook> · <source> <key>`. Claude's background service owns the process, so sessions survive VS Code and the hub. `--bg` ignores `--session-id`; the runner parses the short ID from `backgrounded · <id> · <name>` and matches it as a prefix against `claude agents --json` (M1, M33). A session not on the roster within 60 seconds fails the start.
+- Start: `claude --bg --permission-mode <mode> --settings '{"worktree":{"bgIsolation":"none"}}' -n <name> [--model <model>] <prompt>`, with no shell, so a leading slash command survives. The name is `switchboard · <playbook> · <source> <key>`. Claude's background service owns the process, so sessions survive VS Code and the hub. `--bg` ignores `--session-id`; the runner parses the short ID from `backgrounded · <id> · <name>` and matches it as a prefix against `claude agents --json` (GC M1, M33; mechanics M5). The start is confirmed when the roster lists it with a pid; a new entry has no pid for its first seconds. A session not listed with a pid within 60 seconds fails the start.
 - Environment: pass `CLAUDE_CONFIG_DIR` through exactly as the hub inherited it, and never set it. Setting it, even to `~/.claude`, moves where Claude reads folder trust (GC M62). Strip `ELECTRON_*`, `VSCODE_*` and `NODE_OPTIONS`.
 - Trust: `--bg` exits 1 with `Workspace not trusted` in a directory Claude has not trusted; a linked worktree inherits its main checkout's trust (GC M62). The failed start shows that message (PRD R41).
 - Background sessions inherit the service's environment, not the caller's, so per-run values such as the Switchboard session ID travel in the prompt (M33).
-- Liveness: poll `claude agents --json` (without `--all`) every 30 seconds while the hub runs, and again just before each start (PRD R17). The roster alone decides liveness: a session is active while the last successful roster read lists it, and `ended` once a successful read does not. A failed read changes no session. Hook markers only set the state of a live session, because a killed process leaves its last marker behind (GC M20). The roster `state` is the fallback when no hook marker exists: `working` maps to `running`, `blocked` to `waiting`, and `done` or `stopped` to `idle`.
+- Liveness: poll `claude agents --json` (without `--all`) every 30 seconds for every session a start confirmed, so a session resumed after its release is seen again. The roster alone decides liveness: a session is active while the last successful roster read lists it with a pid, and `ended` once a successful read does not. An entry without a pid is a process that is gone (GC M33). A failed read changes no session. Hook markers only set the state of a live session, because a killed process leaves its last marker behind (GC M20). The roster `state` is the fallback when no hook marker exists: `working` maps to `running`, `blocked` to `waiting`, and `done` or `stopped` to `idle`.
 - State: hook markers decide the observed state, following GC's mapping (GC M2, M20):
   - `UserPromptSubmit`, `PostToolBatch` and `PermissionDenied` mean `running`, as does `SessionStart` with `source=compact`.
   - `PermissionRequest`, `Elicitation`, `PreToolUse` for `AskUserQuestion` or `ExitPlanMode`, and `Notification` of type `permission_prompt`, `worker_permission_prompt` or `agent_needs_input` mean `waiting`.
@@ -154,12 +164,12 @@ Actions are `triage`, `start-session` and `stop-session`. After every event the 
   - `StopFailure` means `failed`, with its error kind and message.
 - Hooks:
   - The hub installs async command hooks for those events plus `SessionEnd` in `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`. It preserves other entries, refuses to edit malformed JSON, and adds missing entries at startup. The `sessions.installHooks` setting is on by default; when it is off, the roster alone decides state.
-  - The hook runs `node "<home>/hook.mjs"`. It skips subagent events, always exits 0 and prints nothing, and writes `<home>/activity/<nativeSessionId>.json` atomically: `{v, sessionId, event, at, cwd, notificationType, source, toolName, backgroundTasks, error, errorMessage}`, with `errorMessage` capped at 500 characters. `SessionEnd` deletes the marker.
+  - The hook runs `node "<home>/hook.mjs"`. It skips subagent events, always exits 0 and prints nothing, and writes `<home>/activity/<nativeSessionId>.json` atomically: `{v, sessionId, event, at, notificationType, source, toolName, backgroundTasks, error, errorMessage}`, with `errorMessage` capped at 500 characters. `SessionEnd` deletes the marker.
   - Ground Control's hooks stay separate; the two do not share markers.
 - Release: after a done or blocked report, or an `idle` or `failed` turn, run `claude stop <id>` once when the session is no longer `running` (PRD R39).
 - Stop: `claude stop <id>`, 15-second timeout. A failed stop leaves the session stoppable. Never `claude rm`, which can delete the worktree.
 - Attach: a VS Code terminal running `claude attach <id>`. Leaving it keeps the session running (M33, M45).
-- Open in VS Code: `claude-vscode.primaryEditor.open(sessionId)`. Focus an open tab first; resume only after confirming the session is not running in the background (M5–M7, M21, M22, M33).
+- Open in VS Code: `claude-vscode.primaryEditor.open(<native session ID>)`, which resumes the session or focuses its tab. Claude's tab lists only the sessions of its window's first folder, and opening another session there starts an empty one (GC M6, M7, M52). So when the session's directory is the window's first folder, the window opens it directly. Otherwise the window posts `{sessionId, cwd}` to the hub's `POST /open` and opens that folder with `vscode.openFolder` and `forceNewWindow`, which focuses a window already on it. A window claims a pending open for its folder with `POST /claim` when it connects to the hub and whenever it gains focus, and opens it. A pending open expires after 2 minutes and lives only in the hub's memory.
 
 ## Session reports
 

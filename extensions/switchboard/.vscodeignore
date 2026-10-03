@@ -7,3 +7,6 @@ test-integration/**
 tsconfig.json
 esbuild.js
 **/*.map
+test/**
+vitest.config.ts
+coverage/**

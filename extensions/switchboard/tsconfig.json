@@ -7,7 +7,18 @@
     "declarationMap": false,
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": ["node", "vscode"]
+    "types": [
+      "node",
+      "vscode"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ]
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "vitest.config.ts"
+  ]
 }

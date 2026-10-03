@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const esbuild = require('esbuild');
 const { version } = require('./package.json');
 
@@ -19,16 +21,42 @@ const options = {
   logLevel: 'info',
 };
 
-async function main() {
-  if (process.argv.includes('--watch')) {
-    const context = await esbuild.context(options);
+// The panel script runs in the webview, a browser.
+const webview = {
+  entryPoints: { webview: 'src/webview/main.ts' },
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2022',
+  outdir: 'dist',
+  sourcemap: true,
+  logLevel: 'info',
+};
 
-    await context.watch();
+function copyAssets() {
+  const codicons = path.dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
+
+  fs.mkdirSync('dist/codicons', { recursive: true });
+
+  for (const file of ['codicon.css', 'codicon.ttf']) {
+    fs.copyFileSync(path.join(codicons, file), path.join('dist/codicons', file));
+  }
+
+  fs.copyFileSync('src/webview/webview.css', 'dist/webview.css');
+}
+
+async function main() {
+  copyAssets();
+
+  if (process.argv.includes('--watch')) {
+    for (const config of [options, webview]) {
+      await (await esbuild.context(config)).watch();
+    }
 
     return;
   }
 
-  await esbuild.build(options);
+  await Promise.all([esbuild.build(options), esbuild.build(webview)]);
 }
 
 main().catch((error) => {

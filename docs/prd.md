@@ -101,7 +101,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ### Sessions
 
-- R17. A ticket has at most one active session across all its work items, because its work items share one worktree. Switchboard refuses to start a session while another session for the same ticket is active, and reads the roster again just before each start. A work item of a reassigned ticket waits as `queued` while the earlier work item's session is still active. Ended sessions are kept as history.
+- R17. A ticket has at most one active session across all its work items, because its work items share one worktree. Switchboard refuses to start a session while the store shows another session for the same ticket as active. A work item of a reassigned ticket waits as `queued` while the earlier work item's session is still active. Ended sessions are kept as history.
 - R18. A new work item is triaged first. Triage is a one-shot classifier with no tools: it receives the source's triage context and triage playbook, and returns the playbook that handles the work item and a summary of the ticket.
 - R19. When the chosen playbook requires a worktree and the ticket has none, a setup session runs after triage to create one.
 - R20. The task session runs the rendered playbook prompt and handles the work item from start to finish.
@@ -157,7 +157,7 @@ Steps 1–7 deliver GitHub and ad-hoc end to end: R1–R4, R6–R25, R27–R45. 
 
 ## Implementation gaps
 
-Step 1 is done: R33 is implemented. Step 2 is done: `packages/core` decides R6–R25, R34–R41 and R45, and loads and validates settings and playbooks (R42 without reloading), tested with fake sources and runners. Step 3 is done: `packages/github` reads R44's assigned state and builds the triage context (R1 for GitHub). No requirement except R33 works end to end until the hub runs the core and sources in step 5. Every other requirement is unimplemented.
+Step 1 is done: R33 is implemented. Step 2 is done: `packages/core` decides R6–R25, R34–R41 and R45, and loads and validates settings and playbooks (R42 without reloading), tested with fake sources and runners. Step 3 is done: `packages/github` reads R44's assigned state and builds the triage context (R1 for GitHub). Step 4 adds the Claude Code runner and classifier, and step 5 the hub that runs them with the core and the GitHub source: R1–R4 for GitHub, R7–R25, R33 and R34–R45 work end to end. Step 6 adds the panel and the ad-hoc prompt box (R6, R27–R32). The `--bg` mechanics they rely on are verified in mechanics.md or listed there as pending. Zoho Desk and Forum (R4, R5, R26, R46) are unimplemented.
 
 - Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 ## Open questions
