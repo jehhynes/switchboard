@@ -236,8 +236,8 @@ describe('renderPanel', () => {
     expect(root.querySelector('.status')).toBeNull();
     expect([...root.querySelectorAll('.item')].map((row) => row.textContent).join(' ')).not.toMatch(/Failed|Running|Finished/);
     expect(titles(root, '[data-item="3"] .mark')).toEqual(['Running']);
-    // A row with nothing more to say keeps an empty second line.
-    expect(root.querySelector('[data-item="1"] .line.second')?.textContent).toBe('');
+    // A row with nothing more to say keeps its second line, holding only the playbook.
+    expect(root.querySelector('[data-item="1"] .line.second')?.textContent).toBe('dev:develop');
     expect(root.querySelector('[data-item="2"] .mark.codicon-error.error')?.getAttribute('title')).toBe('Failed');
     expect(root.querySelector('[data-item="3"] .stage')?.textContent).toBe('Planning · 3m');
     expect([...root.querySelectorAll('.errors .note')].map((note) => note.textContent?.trim())).toEqual([
@@ -338,7 +338,10 @@ describe('renderPanel', () => {
     // An unrated row keeps the empty mark slot, so its key lines up.
     expect(byId(4).querySelector('.mark')?.innerHTML).toBe('');
     expect(rows.map((row) => row.querySelector('.line.second .tag')?.textContent)).toEqual(['Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed']);
-    expect(titles(byId(1), '.line:first-child .actions > button.control.icon-button')).toEqual(['Start']);
+    expect(titles(byId(1), '.line.second .actions > button.control.icon-button')).toEqual(['Start']);
+    expect(byId(1).querySelector('.line:first-child .actions')).toBeNull();
+    expect(byId(1).querySelector('.line.second .meta > .playbook-name:first-child')?.textContent).toBe('support:case');
+    expect(byId(1).querySelector('.line:first-child .playbook-name')).toBeNull();
     expect(byId(1).querySelector('button.icon-button')?.textContent).toBe('');
     expect(root.textContent).not.toContain('URGENT/MED');
     expect(byId(1).querySelector('.queue')?.textContent).toBe('1h');

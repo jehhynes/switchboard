@@ -325,8 +325,8 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const dot = item.status === 'unstarted' || (rankOf(item.triage) ?? 3) > 2 ? '' : priorityDot(item.triage);
 
   return `<div class="item" data-item="${item.id}">
-<div class="line">${markHtml(item)} ${ticket} <span class="title" title="${escape(item.ticket.title)}">${dot}${escape(item.ticket.title)}</span> ${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${queued(since, item.doneAt ?? now)}<span class="actions">${main === null ? '' : iconButton(main)}${sessionButton(item)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
-<div class="line second"><span class="meta">${stage}${worktree}${approval}${links}${returned(item.returned)}${notes}</span></div>
+<div class="line">${markHtml(item)} ${ticket} <span class="title" title="${escape(item.ticket.title)}">${dot}${escape(item.ticket.title)}</span>${queued(since, item.doneAt ?? now)}</div>
+<div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${stage}${worktree}${approval}${links}${returned(item.returned)}${notes}</span><span class="actions">${main === null ? '' : iconButton(main)}${sessionButton(item)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
 </div>`;
 }
 
@@ -366,8 +366,8 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   const [main, ...others] = failed ? [again, pick, iceboxControl(ticket.id, ticket.iceboxed)] : [pick, iceboxControl(ticket.id, ticket.iceboxed)];
 
   return `<div class="item pool-item" data-ticket="${ticket.id}">
-<div class="line">${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : `<span class="mark">${priorityDot(triage)}</span>`} ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> ${playbookLabel(triage?.playbook ?? '')}${queued(ticket.sortAt, now)}<span class="actions">${iconButton(main!)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
-<div class="line second"><span class="meta"><span class="tag" title="Start claims it">Unclaimed</span>${returned(entry.returned)}${failed ? `<span class="note" title="${escape(triage!.error!)}">${escape(triage!.error!)}</span>` : ''}</span></div>
+<div class="line">${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : `<span class="mark">${priorityDot(triage)}</span>`} ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span>${queued(ticket.sortAt, now)}</div>
+<div class="line second"><span class="meta">${playbookLabel(triage?.playbook ?? '')}<span class="tag" title="Start claims it">Unclaimed</span>${returned(entry.returned)}${failed ? `<span class="note" title="${escape(triage!.error!)}">${escape(triage!.error!)}</span>` : ''}</span><span class="actions">${iconButton(main!)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
 </div>`;
 }
 
