@@ -56,12 +56,14 @@ class FakeCli {
   roster: object[] = [];
   calls: string[][] = [];
   classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 'Build the thing.' } }));
+  /** Per-ticket classifier output by triage context, overriding `classifyResult`. */
+  classifyByContext = new Map<string, ExecResult>();
   startResult: ExecResult | null = null;
   stopResult = ok('');
   worktrees = 'worktree D:/git/widgets\nHEAD abc\nbranch refs/heads/master\n\nworktree D:/git/widgets-wt/7-fix\nHEAD def\nbranch refs/heads/7-fix\n';
   private started = 0;
 
-  exec: Exec = async (file, args) => {
+  exec: Exec = async (file, args, options) => {
     this.calls.push([file, ...args]);
 
     if (file === 'git') {
@@ -69,7 +71,7 @@ class FakeCli {
     }
 
     if (args[0] === '-p') {
-      return this.classifyResult;
+      return this.classifyByContext.get(options.stdin ?? '') ?? this.classifyResult;
     }
 
     if (args[0] === '--bg') {
@@ -387,6 +389,47 @@ describe('Runtime', () => {
     expect(store.session('s1')).toMatchObject({ kind: 'pick', state: 'running' });
     expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['9']);
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'setup', needsPick: true, triage: { playbook: 'dev:develop' } }]);
+  });
+
+  it('sorts the pool by importance, then age, and counts the done work items of a returned ticket (PRD R50, R51)', async () => {
+    const { store, cli, source, runtime } = setup();
+    const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 's', immediacy, severity } }));
+    cli.classifyByContext.set('Issue 2 text', rated('NON-BLOCKING', 'LOW'));
+    cli.classifyByContext.set('Issue 3 text', rated('BLOCKING', 'HIGH'));
+    cli.classifyByContext.set('Issue 4 text', rated('URGENT', 'MED'));
+    const pooled = (key: string, sortAt: number) => ({ ...issue(key), assigned: false, pool: true, sortAt });
+    source.result = { tickets: [pooled('1', 10), pooled('2', 20), pooled('3', 30), pooled('4', 25), pooled('5', 5)] };
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    // 3 and 4 both rank 1, so 4, polled later but older, comes first; unrated 5 and 1 follow by age.
+    expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['4', '3', '2', '5', '1']);
+    expect(runtime.snapshot().pool[0]!.triage).toMatchObject({ immediacy: 'URGENT', severity: 'MED' });
+
+    const ticket = store.findTicket('github', '1')!;
+    store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, createdAt: T0, doneAt: T0, doneReason: 'operator' });
+
+    expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['4', 0], ['3', 0], ['2', 0], ['5', 0], ['1', 1]]);
+  });
+
+  it('records a link report and lists the ticket links and earlier work items on the work item (PRD R51, R52)', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(await runtime.report({ sessionId: 's1', kind: 'link', label: 'PR #12', target: 'https://github.com/o/r/pull/12' })).toEqual({ refused: null });
+    expect(await runtime.report({ sessionId: 'nope', kind: 'link', label: 'x', target: 'https://x' })).toEqual({ refused: 'Unknown session nope.' });
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ returned: 0, links: [{ label: 'PR #12', target: 'https://github.com/o/r/pull/12' }] });
+
+    // The earlier work item is counted after it leaves the Done list, and the new one keeps the ticket's links.
+    const { id: _id, ...first } = store.workItem(1)!;
+    store.updateWorkItem(1, { status: 'done', doneAt: T0 - 30 * 86_400_000, doneReason: 'operator' });
+    store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
+    store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
+
+    expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned, item.links.length])).toEqual([[3, 2, 1], [2, 1, 1]]);
   });
 
   it('reports an unknown or misconfigured source', () => {

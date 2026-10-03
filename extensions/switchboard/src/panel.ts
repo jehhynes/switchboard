@@ -59,9 +59,18 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
         await vscode.commands.executeCommand('switchboard.open', message['sessionId'], message['cwd']);
         return;
       case 'openUrl':
-        await vscode.env.openExternal(vscode.Uri.parse(String(message['url'])));
+        await vscode.commands.executeCommand('switchboard.openLink', String(message['url']));
         return;
     }
+  }
+}
+
+/** Opens an http(s) URL in the browser and anything else, a reported file path, in VS Code (PRD R52). */
+export async function openLink(target: string): Promise<void> {
+  if (/^https?:\/\//i.test(target)) {
+    await vscode.env.openExternal(vscode.Uri.parse(target));
+  } else {
+    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
   }
 }
 

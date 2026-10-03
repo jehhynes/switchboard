@@ -29,5 +29,10 @@ a { color: var(--vscode-textLink-foreground); }
 .worktree { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 summary .control { white-space: nowrap; flex-shrink: 0; }
 .pool-item .summary { flex: 1 1 auto; min-width: 0; color: var(--vscode-descriptionForeground); }
-.pool-item .control { margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+.pool-item .control { white-space: nowrap; flex-shrink: 0; }
+.pool-item .actions { justify-content: flex-end; }
+.importance, .returned { white-space: nowrap; flex-shrink: 0; font-size: 11px; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.importance.urgent { background: var(--vscode-inputValidation-errorBackground, var(--vscode-badge-background)); }
+.links { flex-wrap: wrap; }
+.badge { white-space: nowrap; text-decoration: none; padding: 0 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-textLink-foreground)); border-radius: 2px; }
 .approval { color: var(--vscode-descriptionForeground); font-style: italic; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

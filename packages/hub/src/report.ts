@@ -4,7 +4,9 @@ function valueOf(argv: readonly string[], name: string): string | null {
   const at = argv.indexOf(`--${name}`);
 
   if (at !== -1) {
-    return argv[at + 1] ?? null;
+    const value = argv[at + 1];
+
+    return value === undefined || value.startsWith('--') ? null : value;
   }
 
   const inline = argv.find((argument) => argument.startsWith(`--${name}=`));
@@ -36,6 +38,17 @@ export function reportBody(argv: readonly string[]): Record<string, unknown> | n
       const prompt = valueOf(argv, 'prompt');
 
       return prompt === null || prompt === '' ? null : { sessionId, kind, prompt, summary: valueOf(argv, 'summary') };
+    }
+    case 'link': {
+      const label = valueOf(argv, 'label');
+      const target = valueOf(argv, 'target');
+
+      // Any other URL scheme is refused rather than read as a relative path.
+      if (label === null || label === '' || target === null || target === '' || (/^[a-z][a-z0-9+.-]*:\/\//i.test(target) && !/^https?:\/\//i.test(target))) {
+        return null;
+      }
+
+      return { sessionId, kind, label, target: /^https?:\/\//i.test(target) ? target : resolve(target) };
     }
     default:
       return null;

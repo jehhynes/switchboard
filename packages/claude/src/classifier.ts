@@ -1,4 +1,5 @@
-import type { TriageChoice } from '@switchboard/core';
+import { IMMEDIACIES, SEVERITIES } from '@switchboard/core';
+import type { Immediacy, Severity, TriageChoice } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { failureOf } from './exec.js';
 
@@ -14,18 +15,23 @@ export interface ClassifyInput {
   cwd: string;
 }
 
-export type ClassifyResult = { playbook: string; summary: string } | { error: string };
+export type ClassifyResult = { playbook: string; summary: string; immediacy: Immediacy | null; severity: Severity | null } | { error: string };
 
 /** The classifier's system prompt: the triage playbook, then each choice and when to use it. */
 export function classifierPrompt(systemPrompt: string, choices: TriageChoice[]): string {
-  return `${systemPrompt.trimEnd()}\n\nChoose one playbook:\n${choices.map((choice) => `- ${choice.name}: ${choice.description}`).join('\n')}\n\nThe ticket follows as the user message. Summarize it in a few sentences.`;
+  return `${systemPrompt.trimEnd()}\n\nChoose one playbook:\n${choices.map((choice) => `- ${choice.name}: ${choice.description}`).join('\n')}\n\nThe ticket follows as the user message. Summarize it in a few sentences. Set immediacy and severity only when the instructions above ask you to rate the ticket.`;
 }
 
 /** One-shot triage with no tools, settings, MCP servers or saved transcript (mechanics M3). */
 export function classifierArgs(input: ClassifyInput): string[] {
   const schema = {
     type: 'object',
-    properties: { playbook: { type: 'string', enum: input.choices.map((choice) => choice.name) }, summary: { type: 'string' } },
+    properties: {
+      playbook: { type: 'string', enum: input.choices.map((choice) => choice.name) },
+      summary: { type: 'string' },
+      immediacy: { type: 'string', enum: IMMEDIACIES },
+      severity: { type: 'string', enum: SEVERITIES },
+    },
     required: ['playbook', 'summary'],
     additionalProperties: false,
   };
@@ -51,7 +57,7 @@ export function classifierArgs(input: ClassifyInput): string[] {
 
 /** Reads `structured_output` from `--output-format json`. A body-level error fails even when the process exits 0. */
 export function parseClassifierOutput(stdout: string, choices: TriageChoice[]): ClassifyResult {
-  let output: { is_error?: boolean; subtype?: string; result?: string; structured_output?: { playbook?: unknown; summary?: unknown } };
+  let output: { is_error?: boolean; subtype?: string; result?: string; structured_output?: { playbook?: unknown; summary?: unknown; immediacy?: unknown; severity?: unknown } };
 
   try {
     output = JSON.parse(stdout);
@@ -63,7 +69,7 @@ export function parseClassifierOutput(stdout: string, choices: TriageChoice[]): 
     return { error: `Claude did not finish triage (${output.subtype ?? 'error'}): ${output.result ?? ''}`.trim() };
   }
 
-  const { playbook, summary } = output.structured_output ?? {};
+  const { playbook, summary, immediacy, severity } = output.structured_output ?? {};
 
   if (typeof playbook !== 'string' || typeof summary !== 'string') {
     return { error: 'Claude returned no playbook and summary.' };
@@ -73,7 +79,12 @@ export function parseClassifierOutput(stdout: string, choices: TriageChoice[]): 
     return { error: `Triage chose an unknown playbook: ${playbook}.` };
   }
 
-  return { playbook, summary };
+  return {
+    playbook,
+    summary,
+    immediacy: (IMMEDIACIES as readonly unknown[]).includes(immediacy) ? (immediacy as Immediacy) : null,
+    severity: (SEVERITIES as readonly unknown[]).includes(severity) ? (severity as Severity) : null,
+  };
 }
 
 export async function classify(input: ClassifyInput, exec: Exec): Promise<ClassifyResult> {

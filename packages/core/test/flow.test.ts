@@ -12,6 +12,7 @@ const CONTRACT = (id: string) =>
     `- ${REPORT} done ${id} [--summary <text>], when the work is finished`,
     `- ${REPORT} blocked ${id} --reason <text>, when you cannot continue`,
     `- ${REPORT} approval ${id} --prompt <prompt> [--summary <text>], when the work is ready but posting or publishing it needs the operator's approval`,
+    `- ${REPORT} link ${id} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md`,
     'When you need the operator for a question or a choice, report blocked with the question and end your turn instead of waiting. When the work is ready but posting or publishing it needs approval, report approval with the prompt that would do it, such as /review-pr pr:123 publish, and end your turn.',
   ].join('\n');
 

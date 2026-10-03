@@ -91,7 +91,7 @@ export class Harness {
       throw new Error(`Expected a triage action, got ${JSON.stringify(action)}`);
     }
 
-    return this.act({ type: 'triage-succeeded', triageId: action.triageId, context: `Context ${action.ticket.sourceKey}`, playbook, summary, model: 'claude-sonnet-5' });
+    return this.act({ type: 'triage-succeeded', triageId: action.triageId, context: `Context ${action.ticket.sourceKey}`, playbook, summary, immediacy: null, severity: null, model: 'claude-sonnet-5' });
   }
 
   started(action: FlowAction | undefined, shortId = 'abc12345'): string {

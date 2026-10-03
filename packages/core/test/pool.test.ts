@@ -17,17 +17,17 @@ const pollZoho = (h: Harness, ...tickets: PolledTicket[]) => h.act({ type: 'poll
 
 const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': '---\ndescription: A Support case\nautoStart: true\nworkdir: repoRoot\n---\n/support-process #{{ticket.sourceKey}}' });
 
-describe('pool triage (PRD R47)', () => {
-  it('triages a ticket entering the pool, offering only its namespace, and creates no work item', () => {
+describe('pool triage (PRD R47, R50)', () => {
+  it('triages a ticket entering the pool, offering only its namespace, stores its rating, and creates no work item', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool'), zoho('501', 'neither')), 'triage');
 
     expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the Support case.', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A Support case' }] });
     expect(h.store.workItem(1)).toBeNull();
 
-    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 'Fix the sync — defect, BLOCKING/MED', model: null });
+    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 'Fix the sync — defect', immediacy: 'BLOCKING', severity: 'MED', model: null });
 
-    expect(h.store.poolTriages(1)).toMatchObject([{ ticketId: 1, workItemId: null, playbook: 'support:case', summary: 'Fix the sync — defect, BLOCKING/MED' }]);
+    expect(h.store.poolTriages(1)).toMatchObject([{ ticketId: 1, workItemId: null, playbook: 'support:case', summary: 'Fix the sync — defect', immediacy: 'BLOCKING', severity: 'MED' }]);
     expect(h.store.workItem(1)).toBeNull();
     expect(pollZoho(h, zoho('500', 'pool'))).toEqual([]);
   });
@@ -57,7 +57,7 @@ describe('pool triage (PRD R47)', () => {
   it('drops the pool triage of a ticket that leaves the pool, and triages it again if it returns', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool')), 'triage');
-    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 's', model: null });
+    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 's', immediacy: null, severity: null, model: null });
 
     pollZoho(h);
     expect(h.store.ticket(1)).toMatchObject({ pool: false, assigned: false });
@@ -79,7 +79,7 @@ describe('pick (PRD R48)', () => {
     const triage = only(pollZoho(h, zoho(key, 'pool')), 'triage');
 
     if (playbook !== null) {
-      h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook, summary: 'A summary.', model: null });
+      h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook, summary: 'A summary.', immediacy: null, severity: null, model: null });
     } else {
       h.act({ type: 'triage-failed', triageId: triage.triageId, error: 'x', context: null });
     }
@@ -135,11 +135,11 @@ describe('pick (PRD R48)', () => {
 
     h.report(pick, { kind: 'done', summary: null });
     const triage = only(h.act({ type: 'roster', sessions: [] }), 'triage');
-    const task = only(h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'support:case', summary: 's', model: null }), 'start-session');
+    const task = only(h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'support:case', summary: 's', immediacy: null, severity: null, model: null }), 'start-session');
     expect(task.kind).toBe('task');
 
     const reopened = only(pollZoho(h, zoho('600', 'assigned')), 'triage');
-    expect(h.act({ type: 'triage-succeeded', triageId: reopened.triageId, context: 'c', playbook: 'support:case', summary: 's', model: null })).toEqual([]);
+    expect(h.act({ type: 'triage-succeeded', triageId: reopened.triageId, context: 'c', playbook: 'support:case', summary: 's', immediacy: null, severity: null, model: null })).toEqual([]);
     expect(h.item(2).status).toBe('awaiting-approval');
   });
 

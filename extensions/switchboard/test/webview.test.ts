@@ -52,6 +52,8 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     triage: null,
     sessions: [],
     worktree: null,
+    links: [],
+    returned: 0,
     ...patch,
   };
 }
@@ -161,7 +163,7 @@ describe('renderPanel', () => {
   it('shows the triage summary, context, prompt and session history when expanded', () => {
     const root = document.createElement('div');
     root.innerHTML = renderPanel(
-      snapshot([item(1, { status: 'blocked', taskPrompt: 'Build 101.', triage: { id: 1, ticketId: 1, workItemId: 1, context: 'Issue text', playbook: 'dev:develop', summary: 'A summary.', model: null, startedAt: NOW, endedAt: NOW, error: null }, sessions: [session({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' })] })]),
+      snapshot([item(1, { status: 'blocked', taskPrompt: 'Build 101.', triage: { id: 1, ticketId: 1, workItemId: 1, context: 'Issue text', playbook: 'dev:develop', summary: 'A summary.', immediacy: null, severity: null, model: null, startedAt: NOW, endedAt: NOW, error: null }, sessions: [session({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' })] })]),
       NOW,
       new Set([1]),
       new Set(),
@@ -198,16 +200,16 @@ describe('renderPanel', () => {
     expect(renderPanel(snapshot([]), NOW, new Set(), new Set())).not.toContain('No source is polled');
   });
 
-  it('lists the pool with each summary and Pick, and Triage again for a failed triage', () => {
+  it('lists the pool with each rating, summary, Returned mark, Pick and Icebox, and Triage again for a failed triage', () => {
     const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, iceboxed: false, sortAt: id, lastPolledAt: NOW, repoRoot: '' });
-    const triage = (id: number, patch: object) => ({ id, ticketId: id, workItemId: null, context: 'ctx', playbook: 'support:case', summary: 'Fix sync — defect, BLOCKING/MED', model: null, startedAt: NOW, endedAt: NOW, error: null, ...patch });
+    const triage = (id: number, patch: object) => ({ id, ticketId: id, workItemId: null, context: 'ctx', playbook: 'support:case', summary: 'Fix sync — defect', immediacy: 'BLOCKING' as const, severity: 'MED' as const, model: null, startedAt: NOW, endedAt: NOW, error: null, ...patch });
     const root = document.createElement('div');
     root.innerHTML = renderPanel(
       snapshot([], {
         pool: [
-          { ticket: ticket(1), triage: triage(1, {}) },
-          { ticket: ticket(2), triage: triage(2, { playbook: null, summary: null, error: 'Timed out.' }) },
-          { ticket: ticket(3), triage: null },
+          { ticket: ticket(1), triage: triage(1, {}), returned: 2 },
+          { ticket: ticket(2), triage: triage(2, { playbook: null, summary: null, immediacy: null, severity: null, error: 'Timed out.' }), returned: 0 },
+          { ticket: ticket(3), triage: null, returned: 0 },
         ],
       }),
       NOW,
@@ -218,7 +220,14 @@ describe('renderPanel', () => {
 
     expect([...root.querySelectorAll('h3')].map((h) => h.textContent).at(-1)).toBe('Pool (3)');
     expect(rows.map((row) => row.querySelector('.title')?.textContent)).toEqual(['Case <1>', 'Case <2>', 'Case <3>']);
-    expect(rows[0]!.querySelector('.summary')?.textContent).toBe('Fix sync — defect, BLOCKING/MED');
+    expect(rows[0]!.querySelector('.summary')?.textContent).toBe('Fix sync — defect');
+    expect(rows[0]!.querySelector('.importance')?.textContent).toBe('BLOCKING/MED');
+    expect(rows[0]!.querySelector('.returned')?.textContent).toBe('Returned ×2');
+    expect(rows[0]!.querySelector('.returned')?.getAttribute('title')).toBe('2 earlier work items');
+    expect([...rows[0]!.querySelectorAll('.line.second button.control')].map((b) => b.getAttribute('title'))).toEqual(['Pick', 'Icebox']);
+    expect(rows[0]!.querySelectorAll('.line.second')).toHaveLength(1);
+    expect(rows[1]!.querySelector('.importance')).toBeNull();
+    expect(rows[1]!.querySelector('.returned')).toBeNull();
     expect(rows[0]!.querySelector('.playbook-name')?.textContent).toBe('support:case');
     expect(JSON.parse(rows[0]!.querySelector<HTMLElement>('button.control[title="Pick"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
     expect(rows[1]!.querySelector('.note')?.textContent).toBe('Timed out.');
@@ -232,7 +241,7 @@ describe('renderPanel', () => {
     const ready = item(3, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.' });
     const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, lastPolledAt: NOW, repoRoot: '' };
     const root = document.createElement('div');
-    root.innerHTML = renderPanel(snapshot([icy, ready], { pool: [{ ticket: poolTicket, triage: null }] }), NOW, new Set(), new Set());
+    root.innerHTML = renderPanel(snapshot([icy, ready], { pool: [{ ticket: poolTicket, triage: null, returned: 0 }] }), NOW, new Set(), new Set());
     const icebox = root.querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!;
 
     expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (0)', 'Done (0)', 'Icebox (2)']);
@@ -242,6 +251,35 @@ describe('renderPanel', () => {
     expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
     expect(renderPanel(snapshot([icy]), NOW, new Set(), new Set(['icebox']))).toContain('data-group="icebox" open');
     expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, iceboxed: true } }))).toEqual(['Restore']);
+  });
+
+  it('shows the rating, Returned and link badges on a work item, and opens a link through the extension (PRD R50–R52)', () => {
+    const rated = item(1, {
+      returned: 1,
+      triage: { id: 1, ticketId: 1, workItemId: 1, context: 'c', playbook: 'support:case', summary: 's', immediacy: 'URGENT', severity: 'HIGH', model: null, startedAt: NOW, endedAt: NOW, error: null },
+      links: [
+        { id: 1, ticketId: 1, label: 'PR #12', target: 'https://github.com/o/r/pull/12', reportedAt: NOW },
+        { id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW },
+      ],
+    });
+    const root = document.createElement('div');
+    const posted: unknown[] = [];
+    startPanel(root, { postMessage: (message) => posted.push(message) }, () => NOW);
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', snapshot: snapshot([rated, item(2)]) } }));
+    const row = root.querySelector('[data-item="1"]')!;
+
+    expect(row.querySelector('.importance.urgent')?.textContent).toBe('URGENT/HIGH');
+    expect(row.querySelector('.returned')?.textContent).toBe('Returned ×1');
+    expect([...row.querySelectorAll('a.badge')].map((a) => [a.textContent?.trim(), a.getAttribute('href')])).toEqual([
+      ['PR #12', 'https://github.com/o/r/pull/12'],
+      ['case.md', 'D:\\cases\\1\\case.md'],
+    ]);
+    expect(root.querySelector('[data-item="2"] .links')).toBeNull();
+    expect(root.querySelector('[data-item="2"] .importance')).toBeNull();
+
+    row.querySelectorAll<HTMLElement>('a.badge')[1]!.click();
+    expect(posted.at(-1)).toEqual({ type: 'openUrl', url: 'D:\\cases\\1\\case.md' });
+    expect(row.hasAttribute('open')).toBe(false);
   });
 
   it('formats ages', () => {

@@ -1,7 +1,7 @@
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
-import { ADHOC_SOURCE, handle, switchboardHome } from '@switchboard/core';
-import type { FlowAction, FlowEvent, FlowResult, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import { ADHOC_SOURCE, handle, importanceRank, switchboardHome } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, Link, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -33,18 +33,23 @@ export interface WorkItemView extends WorkItem {
   triage: Triage | null;
   sessions: Session[];
   worktree: Worktree | null;
+  links: Link[];
+  /** Earlier work items for the same ticket; above 0 the panel marks the work item Returned (PRD R51). */
+  returned: number;
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
 export interface PoolView {
   ticket: Ticket;
   triage: Triage | null;
+  /** Done work items for the ticket; above 0 the panel marks it Returned (PRD R51). */
+  returned: number;
 }
 
 /** Everything the panel shows, sent whole on each change. */
 export interface Snapshot {
   workItems: WorkItemView[];
-  /** Oldest first by the source's creation time. */
+  /** By importance, then oldest first by the source's sort time (PRD R50). */
   pool: PoolView[];
   playbooks: { name: string; description: string }[];
   /** Repos an ad-hoc prompt can run in: each source's repo root, the first being the default. */
@@ -61,7 +66,15 @@ export type ReportBody =
   | { sessionId: string; kind: 'worktree'; path: string }
   | { sessionId: string; kind: 'done'; summary: string | null }
   | { sessionId: string; kind: 'blocked'; reason: string }
-  | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null };
+  | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null }
+  | { sessionId: string; kind: 'link'; label: string; target: string };
+
+/** Orders the pool by importance rank, unrated last, keeping the store's sort-time order within a rank (PRD R50). */
+export function sortPool(pool: PoolView[]): PoolView[] {
+  const rank = (entry: PoolView) => importanceRank(entry.triage?.immediacy ?? null, entry.triage?.severity ?? null) ?? Infinity;
+
+  return pool.map((entry, index) => ({ entry, index })).sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index).map(({ entry }) => entry);
+}
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -267,7 +280,9 @@ export class Runtime {
           ? { kind: body.kind, summary: body.summary }
           : body.kind === 'approval'
             ? { kind: body.kind, prompt: body.prompt, summary: body.summary }
-            : { kind: body.kind, reason: body.reason };
+            : body.kind === 'link'
+              ? { kind: body.kind, label: body.label, target: body.target }
+              : { kind: body.kind, reason: body.reason };
 
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }
@@ -298,11 +313,16 @@ export class Runtime {
         triage: store.triagesFor(item.id).at(-1) ?? null,
         sessions: store.sessionsFor(item.id),
         worktree: store.worktreeFor(item.ticketId),
+        links: store.linksFor(item.ticketId),
+        returned: store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id).length,
       })),
-      pool: store
-        .poolTickets()
-        .filter((ticket) => store.workItemsForTicket(ticket.id).every((item) => item.status === 'done'))
-        .map((ticket) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null })),
+      pool: sortPool(
+        store
+          .poolTickets()
+          .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
+          .filter(({ items }) => items.every((item) => item.status === 'done'))
+          .map(({ ticket, items }) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null, returned: items.length })),
+      ),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
       sources: [...this.sources.keys()],
@@ -412,7 +432,16 @@ export class Runtime {
         this.send(
           'error' in result
             ? { type: 'triage-failed', triageId: action.triageId, error: result.error, context: context.context }
-            : { type: 'triage-succeeded', triageId: action.triageId, context: context.context, playbook: result.playbook, summary: result.summary, model: action.model },
+            : {
+                type: 'triage-succeeded',
+                triageId: action.triageId,
+                context: context.context,
+                playbook: result.playbook,
+                summary: result.summary,
+                immediacy: result.immediacy,
+                severity: result.severity,
+                model: action.model,
+              },
         );
         return;
       }

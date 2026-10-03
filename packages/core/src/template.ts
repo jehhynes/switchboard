@@ -34,6 +34,7 @@ Switchboard session {{session.id}} tracks this work. Report progress with these 
 - {{report}} done {{session.id}} [--summary <text>], when the work is finished
 - {{report}} blocked {{session.id}} --reason <text>, when you cannot continue
 - {{report}} approval {{session.id}} --prompt <prompt> [--summary <text>], when the work is ready but posting or publishing it needs the operator's approval
+- {{report}} link {{session.id}} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md
 When you need the operator for a question or a choice, report blocked with the question and end your turn instead of waiting. When the work is ready but posting or publishing it needs approval, report approval with the prompt that would do it, such as /review-pr pr:123 publish, and end your turn.`;
 
 /** The prompt one session runs: the task prompt with its session ID filled in, plus the report contract. */

@@ -4,7 +4,7 @@ import { hubBundlePath, hubLogPath } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { startHub } from './hubProcess.js';
-import { WorkItemsView, act, attach, claimOpen, openSession } from './panel.js';
+import { WorkItemsView, act, attach, claimOpen, openLink, openSession } from './panel.js';
 
 export interface SwitchboardApi {
   /** The hub this window is connected to, or null. */
@@ -40,6 +40,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.action', (action: unknown) => act(keeper.current(), action)),
     vscode.commands.registerCommand('switchboard.attach', (shortId: string, name: string) => attach(shortId, name)),
     vscode.commands.registerCommand('switchboard.open', (sessionId: string, cwd: string) => openSession(keeper.current(), sessionId, cwd)),
+    vscode.commands.registerCommand('switchboard.openLink', (target: string) => openLink(target)),
     vscode.commands.registerCommand('switchboard.claim', () => {
       const record = keeper.current();
 

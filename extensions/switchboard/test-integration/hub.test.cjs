@@ -145,4 +145,14 @@ describe('the hub process', () => {
       fake.dispose();
     }
   });
+
+  it('opens a reported file link in an editor', async () => {
+    await api();
+    const file = join(process.env.SWITCHBOARD_TEST_HOME, 'case.md');
+    require('node:fs').writeFileSync(file, '# Case\n');
+
+    await vscode.commands.executeCommand('switchboard.openLink', file);
+
+    assert.strictEqual(vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase(), file.toLowerCase());
+  });
 });

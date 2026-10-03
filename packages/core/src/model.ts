@@ -14,6 +14,18 @@ export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed
 
 export type SessionOutcome = 'done' | 'blocked' | 'failed' | 'stopped';
 
+/** Triage's importance rating (PRD R50). Earlier values rank first. */
+export const IMMEDIACIES = ['URGENT', 'BLOCKING', 'NON-BLOCKING'] as const;
+export const SEVERITIES = ['HIGH', 'MED', 'LOW'] as const;
+
+export type Immediacy = (typeof IMMEDIACIES)[number];
+export type Severity = (typeof SEVERITIES)[number];
+
+/** Immediacy rank plus severity rank, lowest first; null when triage did not rate both (PRD R50). */
+export function importanceRank(immediacy: Immediacy | null, severity: Severity | null): number | null {
+  return immediacy === null || severity === null ? null : IMMEDIACIES.indexOf(immediacy) + SEVERITIES.indexOf(severity);
+}
+
 export interface Ticket {
   id: number;
   source: string;
@@ -72,6 +84,8 @@ export interface Triage {
   context: string | null;
   playbook: string | null;
   summary: string | null;
+  immediacy: Immediacy | null;
+  severity: Severity | null;
   model: string | null;
   startedAt: number;
   endedAt: number | null;
@@ -84,6 +98,16 @@ export interface Worktree {
   path: string;
   branch: string | null;
   linkedBy: 'report' | 'convention';
+}
+
+/** A link a session reported for its ticket, such as an issue, a pull request or a case file (PRD R52). */
+export interface Link {
+  id: number;
+  ticketId: number;
+  label: string;
+  /** An http(s) URL or an absolute file path. */
+  target: string;
+  reportedAt: number;
 }
 
 export interface Session {

@@ -1,10 +1,12 @@
 import type { Playbook } from './playbook.js';
 import type { PermissionMode, Settings } from './settings.js';
-import type { FailedStep, Session, SessionKind, SessionState, Ticket, WorkItem } from './model.js';
+import type { FailedStep, Immediacy, Session, SessionKind, SessionState, Severity, Ticket, WorkItem } from './model.js';
 import type { Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
+
+const EMPTY_TRIAGE = { context: null, playbook: null, summary: null, immediacy: null, severity: null, model: null } as const;
 
 export const MESSAGES = {
   unassigned: 'The ticket left the assigned state without a done report.',
@@ -34,7 +36,8 @@ export type Report =
   | { kind: 'worktree'; path: string; branch: string | null }
   | { kind: 'done'; summary: string | null }
   | { kind: 'blocked'; reason: string }
-  | { kind: 'approval'; prompt: string; summary: string | null };
+  | { kind: 'approval'; prompt: string; summary: string | null }
+  | { kind: 'link'; label: string; target: string };
 
 export type StopReason = 'operator' | 'release';
 
@@ -52,7 +55,16 @@ export interface ObservedSession {
 export type FlowEvent =
   | { type: 'poll'; source: string; tickets: PolledTicket[] }
   | { type: 'poll-failed'; source: string; error: string }
-  | { type: 'triage-succeeded'; triageId: number; context: string; playbook: string; summary: string; model: string | null }
+  | {
+      type: 'triage-succeeded';
+      triageId: number;
+      context: string;
+      playbook: string;
+      summary: string;
+      immediacy: Immediacy | null;
+      severity: Severity | null;
+      model: string | null;
+    }
   | { type: 'triage-failed'; triageId: number; error: string; context: string | null }
   /** The hub stopped during triage. Nothing failed, so the work item is triaged again. */
   | { type: 'triage-cancelled'; triageId: number }
@@ -367,7 +379,15 @@ class Flow {
       return;
     }
 
-    this.store.updateTriage(triage.id, { endedAt: this.now, context: event.context, playbook: event.playbook, summary: event.summary, model: event.model });
+    this.store.updateTriage(triage.id, {
+      endedAt: this.now,
+      context: event.context,
+      playbook: event.playbook,
+      summary: event.summary,
+      immediacy: event.immediacy,
+      severity: event.severity,
+      model: event.model,
+    });
 
     const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
 
@@ -423,7 +443,7 @@ class Flow {
     const prefix = source?.namespace ? `${source.namespace}:` : '';
     const fail = (error: string) => {
       if (item === null) {
-        this.store.insertTriage({ ticketId: ticket.id, workItemId: null, context: null, playbook: null, summary: null, model: null, startedAt: this.now, endedAt: this.now, error });
+        this.store.insertTriage({ ...EMPTY_TRIAGE, ticketId: ticket.id, workItemId: null, startedAt: this.now, endedAt: this.now, error });
       } else {
         this.fail(item, 'triage', error);
       }
@@ -443,17 +463,7 @@ class Flow {
       return;
     }
 
-    const triage = this.store.insertTriage({
-      ticketId: ticket.id,
-      workItemId: item?.id ?? null,
-      context: null,
-      playbook: null,
-      summary: null,
-      model: null,
-      startedAt: this.now,
-      endedAt: null,
-      error: null,
-    });
+    const triage = this.store.insertTriage({ ...EMPTY_TRIAGE, ticketId: ticket.id, workItemId: item?.id ?? null, startedAt: this.now, endedAt: null, error: null });
 
     this.actions.push({
       type: 'triage',
@@ -693,6 +703,10 @@ class Flow {
           this.store.updateWorkItem(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, error: null, failedStep: null });
         }
 
+        return;
+      case 'link':
+        // Links belong to the ticket, so a returned ticket keeps them (PRD R52).
+        this.store.addLink({ ticketId: this.store.workItem(session.workItemId)!.ticketId, label: report.label, target: report.target, reportedAt: this.now });
         return;
     }
   }

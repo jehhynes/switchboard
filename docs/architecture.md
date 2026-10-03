@@ -72,10 +72,10 @@ Implemented. Follows Ground Control's hub (GC R35, M25).
 ## Panel
 
 - The extension contributes a **Switchboard** view container in the activity bar with one webview view, **Work items**. The webview renders each `state` event the window's `/events` stream delivers; it keeps the rows the operator expanded and a half-typed ad-hoc prompt across redraws.
-- Groups and controls follow PRD R27. Controls run the extension's `switchboard.action`, `switchboard.attach` and `switchboard.open` commands. An operator event goes to `POST /action`, and a refusal shows as a warning. Attach and Stop apply to a session running in the background; Attach opens a terminal running `claude attach <shortId>`. Open in VS Code applies to a session that is not running, or that was released and is active again because the operator resumed it. It follows [Open in VS Code](#claude-code-runner) below. A ticket link opens in the browser.
-- Each row shows the ticket, title, playbook, status, stage and its age, the worktree's branch, and any warning or error; a done work item with an active session shows the session's state.
+- Groups and controls follow PRD R27. Controls run the extension's `switchboard.action`, `switchboard.attach`, `switchboard.open` and `switchboard.openLink` commands. An operator event goes to `POST /action`, and a refusal shows as a warning. Attach and Stop apply to a session running in the background; Attach opens a terminal running `claude attach <shortId>`. Open in VS Code applies to a session that is not running, or that was released and is active again because the operator resumed it. It follows [Open in VS Code](#claude-code-runner) below. A ticket link opens in the browser. A link badge opens its URL in the browser, or its path in a VS Code editor.
+- Each row shows the ticket, title, "Returned ×N" when the ticket has N earlier work items (PRD R51), the triage rating such as `BLOCKING/MED` (PRD R50), playbook, status, stage and its age, the worktree's branch, the ticket's link badges (PRD R52), and any warning or error; a done work item with an active session shows the session's state.
 - The ad-hoc box takes a prompt and a repo from the configured repo roots, the first by default, and sends `adhoc`.
-- The Pool group lists pool tickets with no open work item, oldest first: source and key, title, the pool triage's summary and playbook, and Pick (`pick`). A failed pool triage shows its error with Triage again (`retriage-pool`) beside Pick; a running one shows "Triaging…". A picked work item shows the status "Claiming" while its pick session runs.
+- The Pool group lists pool tickets with no open work item by importance rank, unrated last, then oldest first: source and key, title, "Returned ×N" for N done work items, the rating, the pool triage's summary and playbook, and Pick (`pick`) and Icebox beside it. A failed pool triage shows its error, then Triage again (`retriage-pool`), Pick and Icebox; a running one shows "Triaging…". A picked work item shows the status "Claiming" while its pick session runs.
 - Endpoint additions for the pool: `/action` also takes `pick` and `retriage-pool` with a `ticketId`.
 - Styles use VS Code's theme variables and codicons from `@vscode/codicons`, copied into `dist/`. The script runs under a nonce content security policy.
 
@@ -117,7 +117,7 @@ Triage follows Ground Control's classifier (GC R38, M31).
 
 1. The source plugin builds the triage context: it fetches the ticket's text, clips each field at a word boundary to a size limit, and formats it with authors, status changes and assignees. Ground Control clips the issue body and each comment to 2,000 characters.
 2. The classifier runs `claude -p --output-format json --json-schema <schema> --no-session-persistence --setting-sources "" --tools "" --strict-mcp-config --system-prompt <triage playbook + playbook descriptions>`, with the context on stdin. Stdin avoids the Windows 32,767-character command-line limit (M31).
-3. The schema is `{playbook: enum of the source namespace's task playbook names, summary: string, immediacy?: URGENT | BLOCKING | NON-BLOCKING, severity?: HIGH | MED | LOW}` (PRD R50). The classifier reads `structured_output`.
+3. The schema is `{playbook: enum of the source namespace's task playbook names, summary: string, immediacy?: URGENT | BLOCKING | NON-BLOCKING, severity?: HIGH | MED | LOW}` (PRD R50). The classifier reads `structured_output`. The system prompt tells the model to set `immediacy` and `severity` only when the triage playbook asks for a rating; a value outside the enum is stored as empty.
 
 Triage has no tools, settings, MCP servers or saved transcript, so it is not a session and does not count toward the one-active-session rule. The hub runs at most one triage per work item at a time, at most `triage.concurrency` at once (default 2), with a `triage.timeoutSeconds` limit (default 180).
 
@@ -199,7 +199,8 @@ node "<home>/hub.js" report link <sessionId> --label <text> --target <url or abs
 - The CLI finds the hub through `hub.json` and never starts one. Timeout: 10 seconds. Repeating a report is safe, because each report sets a value.
 - When no hub answers, the CLI exits 2 and prints that the hub is not running. The hub stays up while sessions are active, so this is rare; the work item then ends `blocked`, and the operator marks it done.
 - Exit codes: 0 recorded, 2 no hub, 1 usage, 3 refused (unknown session, or a path that `git worktree list` run in that path does not show as a worktree). A worktree can belong to a different repository than the source's repo root, as when a Support session in `D:\git\support` reports an widgets worktree.
-- A report for a work item that is already done does not reopen it: `done` and `blocked` set the session's outcome, `worktree` links the ticket's worktree, and `stage` and `approval` are ignored.
+- A report for a work item that is already done does not reopen it: `done` and `blocked` set the session's outcome, `worktree` links the ticket's worktree, `link` adds the ticket's link, and `stage` and `approval` are ignored.
+- `link` takes an http(s) URL or an absolute path; the CLI resolves a relative path against its working directory, and the hub refuses any other target with exit 1. A link to a target the ticket already has replaces its label.
 
 ## Settings
 

@@ -155,6 +155,18 @@ function button(control: Control): string {
   return `<button class="control" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span> ${escape(control.label)}</button>`;
 }
 
+/** The triage rating, such as `BLOCKING/MED` (PRD R50). */
+function importance(triage: { immediacy: string | null; severity: string | null } | null): string {
+  const rating = [triage?.immediacy, triage?.severity].filter((part): part is string => part != null);
+
+  return rating.length === 0 ? '' : `<span class="importance${triage?.immediacy === 'URGENT' ? ' urgent' : ''}">${escape(rating.join('/'))}</span>`;
+}
+
+/** Marks a ticket that came back after earlier work items (PRD R51). */
+function returned(count: number): string {
+  return count === 0 ? '' : `<span class="returned" title="${count} earlier work item${count === 1 ? '' : 's'}">Returned ×${count}</span>`;
+}
+
 function section(title: string, body: string | null | undefined): string {
   return body ? `<h4>${escape(title)}</h4><pre>${escape(body)}</pre>` : '';
 }
@@ -176,13 +188,16 @@ function row(item: WorkItemView, snapshot: Snapshot, now: number, expanded: bool
         .map((playbook) => `<option value="${escape(playbook.name)}" title="${escape(playbook.description)}">${escape(playbook.name)}</option>`)
         .join('')}</select>`
     : '';
+  const links = item.links
+    .map((link) => `<a class="badge" href="${escape(link.target)}" title="${escape(link.target)}"><span class="codicon codicon-link"></span> ${escape(link.label)}</a>`)
+    .join('');
   const history = item.sessions
     .map((entry) => `<li>${escape(entry.kind)} ${escape(entry.id)}: ${escape(entry.state)}${entry.outcome === null ? '' : `, ${escape(entry.outcome)}`}${entry.outcomeDetail === null ? '' : ` (${escape(entry.outcomeDetail)})`}, started ${age(entry.startedAt, now)} ago</li>`)
     .join('');
 
   return `<details class="item" data-item="${item.id}"${expanded ? ' open' : ''}>
-<summary><span class="line"><span class="codicon codicon-${MARKS[mark] ?? 'circle-outline'}" title="${escape(status)}"></span> ${ticket} <span class="title" title="${escape(item.ticket.title)}">${escape(item.ticket.title)}</span> <span class="playbook-name">${escape(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}</span></span>
-<span class="line second"><span class="status">${escape(status)}</span> ${stage} ${worktree}${approval}${main === null ? '' : button(main)}</span>${notes}</summary>
+<summary><span class="line"><span class="codicon codicon-${MARKS[mark] ?? 'circle-outline'}" title="${escape(status)}"></span> ${ticket} <span class="title" title="${escape(item.ticket.title)}">${escape(item.ticket.title)}</span> ${returned(item.returned)}${importance(item.triage)}<span class="playbook-name">${escape(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}</span></span>
+<span class="line second"><span class="status">${escape(status)}</span> ${stage} ${worktree}${approval}${main === null ? '' : button(main)}</span>${links === '' ? '' : `<span class="line second links">${links}</span>`}${notes}</summary>
 <div class="controls">${controlsOf(item).filter((control) => control.label !== main?.label).map(button).join('')}${playbooks}</div>
 <div class="detail">${section('Summary', item.triage?.summary)}${section('Triage context', item.triage?.context)}${section('Task prompt', item.taskPrompt)}${history === '' ? '' : `<h4>Sessions</h4><ul>${history}</ul>`}</div>
 </details>`;
@@ -215,7 +230,7 @@ function adhocBox(snapshot: Snapshot): string {
   return `<form class="adhoc"><textarea name="prompt" rows="2" placeholder="Ad-hoc prompt for a new session"></textarea><div class="adhoc-row"><select name="repo">${repos}</select><button type="submit"${repos === '' ? ' disabled title="Set a repoRoot on a source to choose a repo."' : ''}><span class="codicon codicon-play"></span> Start</button></div></form>`;
 }
 
-/** A pool row: the ticket, its triage summary and playbook, and Pick (PRD R47, R48). */
+/** A pool row: the ticket, its rating, triage summary and playbook, Pick and Icebox (PRD R47, R48, R50, R51). */
 function poolRow(entry: PoolView): string {
   const { ticket, triage } = entry;
   const key = `${ticket.source} ${ticket.sourceKey}`;
@@ -224,12 +239,11 @@ function poolRow(entry: PoolView): string {
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const failed = triage?.error != null;
   const summary = triage === null || triage.endedAt === null ? 'Triaging…' : failed ? '' : (triage.summary ?? '');
+  const icebox = button(iceboxControl(ticket.id, ticket.iceboxed));
 
   return `<div class="item pool-item" data-ticket="${ticket.id}">
-<div class="line"><span class="codicon codicon-inbox"></span> ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> <span class="playbook-name">${escape(triage?.playbook ?? '')}</span></div>
-<div class="line second"><span class="summary">${escape(summary)}</span>${failed ? '' : button(pick)}</div>
-${failed ? `<div class="line second"><span class="note">${escape(triage!.error!)}</span>${button(again)}${button(pick)}</div>` : ''}
-<div class="line second">${button(iceboxControl(ticket.id, ticket.iceboxed))}</div>
+<div class="line"><span class="codicon codicon-inbox"></span> ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> ${returned(entry.returned)}${importance(triage)}<span class="playbook-name">${escape(triage?.playbook ?? '')}</span></div>
+${failed ? `<div class="line second"><span class="note">${escape(triage!.error!)}</span></div><div class="line second actions">${button(again)}${button(pick)}${icebox}</div>` : `<div class="line second"><span class="summary">${escape(summary)}</span>${button(pick)}${icebox}</div>`}
 </div>`;
 }
 

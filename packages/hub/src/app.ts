@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
@@ -20,7 +20,12 @@ const RELOAD_DEBOUNCE_MS = 300;
 /** Operator events the panel may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'approve', 'retry', 'mark-done', 'retriage', 'change-playbook', 'stop', 'pick', 'retriage-pool', 'icebox', 'restore']);
 
-const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval']);
+const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval', 'link']);
+
+/** A link target the panel can open: an http(s) URL, or an absolute path, which opens in VS Code (PRD R52). */
+export function isLinkTarget(target: unknown): target is string {
+  return typeof target === 'string' && (/^https?:\/\/\S+$/i.test(target) || win32.isAbsolute(target) || posix.isAbsolute(target));
+}
 
 const BASH = findBash(process.platform, process.env);
 
@@ -41,13 +46,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** A report body names a session, one of the four kinds, and that kind's text. */
+/** A report body names a session, one of the report kinds, and that kind's text. */
 export function parseReport(body: unknown): ReportBody | null {
   if (!isRecord(body) || typeof body['sessionId'] !== 'string' || !REPORT_KINDS.has(String(body['kind']))) {
     return null;
   }
 
-  const text = { stage: 'stage', worktree: 'path', done: 'summary', blocked: 'reason', approval: 'prompt' }[body['kind'] as ReportBody['kind']];
+  if (body['kind'] === 'link') {
+    const label = body['label'];
+
+    return typeof label === 'string' && label.trim() !== '' && isLinkTarget(body['target'])
+      ? { sessionId: body['sessionId'], kind: 'link', label: label.trim(), target: body['target'] }
+      : null;
+  }
+
+  const text = { stage: 'stage', worktree: 'path', done: 'summary', blocked: 'reason', approval: 'prompt' }[body['kind'] as Exclude<ReportBody['kind'], 'link'>];
   const value = body[text];
 
   if (body['kind'] === 'approval' && body['summary'] !== undefined && body['summary'] !== null && typeof body['summary'] !== 'string') {
@@ -122,7 +135,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         const report = parseReport(body);
 
         if (report === null) {
-          return { status: 400, body: { error: 'Expected {sessionId, kind, stage|path|summary|reason|prompt}.' } };
+          return { status: 400, body: { error: 'Expected {sessionId, kind, stage|path|summary|reason|prompt|label and target}.' } };
         }
 
         const { refused } = await runtime.report(report);

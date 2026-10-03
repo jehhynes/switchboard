@@ -1,5 +1,5 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import type { Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
+import type { Link, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -96,6 +96,17 @@ export const MIGRATIONS = [
   ALTER TABLE triagesByTicket RENAME TO triages;
   CREATE INDEX triagesByWorkItem ON triages (workItemId);
   CREATE INDEX triagesByTicket ON triages (ticketId);`,
+  // Importance and links (PRD R50, R52).
+  `ALTER TABLE triages ADD COLUMN immediacy TEXT;
+  ALTER TABLE triages ADD COLUMN severity TEXT;
+  CREATE TABLE links (
+    id INTEGER PRIMARY KEY,
+    ticketId INTEGER NOT NULL REFERENCES tickets(id),
+    label TEXT NOT NULL,
+    target TEXT NOT NULL,
+    reportedAt INTEGER NOT NULL,
+    UNIQUE (ticketId, target)
+  );`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'iceboxed', 'needsPick', 'released']);
@@ -313,6 +324,20 @@ export class Store {
           'ON CONFLICT (ticketId) DO UPDATE SET path = excluded.path, branch = excluded.branch, linkedBy = excluded.linkedBy',
       )
       .run(toParams(worktree as unknown as Row));
+  }
+
+  /** Adds a link to the ticket; a link to the same target replaces its label. */
+  addLink(link: Omit<Link, 'id'>): void {
+    this.#db
+      .prepare(
+        'INSERT INTO links (ticketId, label, target, reportedAt) VALUES (:ticketId, :label, :target, :reportedAt) ' +
+          'ON CONFLICT (ticketId, target) DO UPDATE SET label = excluded.label, reportedAt = excluded.reportedAt',
+      )
+      .run(toParams(link as unknown as Row));
+  }
+
+  linksFor(ticketId: number): Link[] {
+    return this.#all('SELECT * FROM links WHERE ticketId = ? ORDER BY id', ticketId);
   }
 
   insertSession(session: Session): void {

@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -33,7 +33,7 @@ describe('Store', () => {
     reopened.close();
   });
 
-  it('moves a version 1 database to the pool schema, keeping each triage with its ticket', () => {
+  it('moves a version 1 database to the current schema, keeping each triage with its ticket and leaving it unrated', () => {
     const path = join(dir, 'v1.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS[0]!);
@@ -47,7 +47,7 @@ describe('Store', () => {
 
     expect(store.ticket(7)).toMatchObject({ pool: false, iceboxed: false, sortAt: null });
     expect(store.workItem(3)).toMatchObject({ needsPick: false, approvalPrompt: null, approvalSummary: null });
-    expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, summary: 'A summary.', model: null, startedAt: 1, endedAt: 2, error: null }]);
+    expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, summary: 'A summary.', immediacy: null, severity: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
     store.close();
   });
 
@@ -57,7 +57,7 @@ describe('Store', () => {
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (2).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (3).');
   });
 
   it('rolls back a transaction that throws', () => {
