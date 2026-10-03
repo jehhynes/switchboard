@@ -10,7 +10,7 @@ import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
-import { loadConfig, playbooksDir } from './config.js';
+import { loadConfig, playbooksDir, setSourceEnabled } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
@@ -157,6 +157,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         return { status: 200, body: { sessionId: runtime.claimOpen(body['folder']) } };
+      },
+      '/sources': async (body) => {
+        if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['enabled'] !== 'boolean') {
+          return { status: 400, body: { error: 'Expected {name, enabled}.' } };
+        }
+
+        const error = setSourceEnabled(options.home, body['name'], body['enabled']);
+
+        return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },
       '/action': async (body) => {
         const event = parseAction(body);

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
+import type { Snapshot } from '@switchboard/hub';
 import { postToHub } from '@switchboard/hub';
 
 const ACTION_TIMEOUT_MS = 10_000;
@@ -138,4 +139,57 @@ export async function claimOpen(record: HubRecord): Promise<string | null> {
   await vscode.commands.executeCommand('claude-vscode.primaryEditor.open', sessionId);
 
   return sessionId;
+}
+
+/** Asks for a repo, when there is more than one, and a prompt, then starts an ad-hoc session (PRD R4). */
+export async function startAdhoc(record: HubRecord | null, snapshot: Snapshot | null): Promise<void> {
+  const repos = snapshot?.repoRoots ?? [];
+
+  if (repos.length === 0) {
+    void vscode.window.showWarningMessage('Switchboard: set a repoRoot on a source to start an ad-hoc session.');
+    return;
+  }
+
+  const repoRoot = repos.length === 1 ? repos[0] : await vscode.window.showQuickPick(repos, { title: 'Switchboard: repo for the ad-hoc session' });
+
+  if (repoRoot === undefined) {
+    return;
+  }
+
+  const prompt = await vscode.window.showInputBox({ title: 'Switchboard: ad-hoc session', prompt: `Runs in ${repoRoot}`, placeHolder: 'Prompt for a new session', ignoreFocusOut: true });
+
+  if (prompt !== undefined && prompt.trim() !== '') {
+    await act(record, { type: 'adhoc', prompt, repoRoot });
+  }
+}
+
+/** Lets the operator turn sources on and off, such as the Support sources outside a Support week. */
+export async function chooseSources(record: HubRecord | null, snapshot: Snapshot | null): Promise<void> {
+  const states = snapshot?.sourceStates ?? [];
+
+  if (record === null || states.length === 0) {
+    void vscode.window.showWarningMessage('Switchboard: no sources are configured.');
+    return;
+  }
+
+  const picked = await vscode.window.showQuickPick(
+    states.map((state) => ({ label: state.name, picked: state.enabled })),
+    { title: 'Switchboard: sources to poll', canPickMany: true },
+  );
+
+  if (picked === undefined) {
+    return;
+  }
+
+  for (const state of states) {
+    const enabled = picked.some((item) => item.label === state.name);
+
+    if (enabled !== state.enabled) {
+      const reply = await postToHub(record, '/sources', { name: state.name, enabled }, ACTION_TIMEOUT_MS);
+
+      if (reply?.status !== 200) {
+        void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+      }
+    }
+  }
 }

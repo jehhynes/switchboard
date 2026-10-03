@@ -19,18 +19,6 @@ export function activeSession(item: WorkItemView): WorkItemView['sessions'][numb
   return item.sessions.find((session) => session.state !== 'ended') ?? null;
 }
 
-const MARKS: Record<string, string> = {
-  triaging: 'search',
-  'awaiting-approval': 'question',
-  queued: 'clock',
-  setup: 'tools',
-  running: 'play-circle',
-  waiting: 'bell',
-  blocked: 'debug-pause',
-  failed: 'error',
-  done: 'check',
-};
-
 const STATUS_WORDS: Record<string, string> = {
   triaging: 'Triaging',
   'awaiting-approval': 'Awaiting approval',
@@ -42,9 +30,18 @@ const STATUS_WORDS: Record<string, string> = {
   done: 'Done',
 };
 
+const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left without a done report' };
+
 /** The row's status in words; an active session waiting on the operator, or still running after done, says so. */
 export function statusOf(item: WorkItemView): string {
   const session = activeSession(item);
+
+  if (item.status === 'done') {
+    // The Done group already says done, so the row says how it ended.
+    const ended = DONE_WORDS[item.doneReason ?? 'session'];
+
+    return session === null ? ended : `${ended}, session ${session.state}`;
+  }
 
   if (session?.state === 'waiting') {
     return 'Waiting on you';
@@ -54,7 +51,7 @@ export function statusOf(item: WorkItemView): string {
     return 'Claiming';
   }
 
-  return item.status === 'done' && session !== null ? `Done, session ${session.state}` : (STATUS_WORDS[item.status] ?? item.status);
+  return STATUS_WORDS[item.status] ?? item.status;
 }
 
 /** The one control a Needs you row shows without expanding, when one applies. */
@@ -152,14 +149,106 @@ export function canChangePlaybook(item: WorkItemView): boolean {
 }
 
 function button(control: Control): string {
-  return `<button class="control" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span> ${escape(control.label)}</button>`;
+  return `<button class="control" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span><span>${escape(control.label)}</span></button>`;
 }
 
-/** The triage rating, such as `BLOCKING/MED` (PRD R50). */
-function importance(triage: { immediacy: string | null; severity: string | null } | null): string {
-  const rating = [triage?.immediacy, triage?.severity].filter((part): part is string => part != null);
+/** Time in queue as a whole number of minutes, hours, days or weeks, such as `40m`, `5h`, `3d` or `2w`. */
+export function queueTime(since: number, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - since) / 60_000));
 
-  return rating.length === 0 ? '' : `<span class="importance${triage?.immediacy === 'URGENT' ? ' urgent' : ''}">${escape(rating.join('/'))}</span>`;
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+
+  const days = Math.floor(hours / 24);
+
+  return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
+}
+
+function queued(since: number | null, until: number): string {
+  return since === null ? '' : `<span class="queue" title="In queue since ${escape(new Date(since).toISOString().slice(0, 16).replace('T', ' '))} UTC">${queueTime(since, until)}</span>`;
+}
+
+type Rating = { immediacy: string | null; severity: string | null } | null;
+
+const RANKS: Record<string, number> = { URGENT: 0, BLOCKING: 1, 'NON-BLOCKING': 2, HIGH: 0, MED: 1, LOW: 2 };
+
+/** Immediacy rank plus severity rank, or null unless both are rated (PRD R50). */
+export function rankOf(triage: Rating): number | null {
+  const immediacy = triage?.immediacy == null ? undefined : RANKS[triage.immediacy];
+  const severity = triage?.severity == null ? undefined : RANKS[triage.severity];
+
+  return immediacy === undefined || severity === undefined ? null : immediacy + severity;
+}
+
+/** The priority dot: red for rank 0–1, orange for 2, grey for 3–4, hollow when unrated (PRD R27, R50). */
+export function priorityDot(triage: Rating): string {
+  const rank = rankOf(triage);
+  const level = rank === null ? 'unrated' : rank <= 1 ? 'high' : rank === 2 ? 'medium' : 'low';
+  const title = rank === null ? 'Not rated' : `Priority ${level}: ${triage!.immediacy}/${triage!.severity}`;
+
+  return `<span class="priority ${level}" title="${escape(title)}"></span>`;
+}
+
+export interface Mark {
+  icon: string;
+  /** What the mark means, in words, for its tooltip. */
+  title: string;
+  /** `error` or `warning` colours the mark. */
+  tone?: 'error' | 'warning';
+}
+
+/** A blocked report that asks the operator something. */
+function asksQuestion(item: WorkItemView): boolean {
+  return item.status === 'blocked' && (item.error ?? '').trim().endsWith('?');
+}
+
+/** The row mark shows what differs between rows of the same group; an iceboxed item shows its group's mark (PRD R27). */
+export function markOf(item: WorkItemView): Mark {
+  const session = activeSession(item);
+
+  switch (groupOf(item)) {
+    case 'needs':
+      if (session?.state === 'waiting' || asksQuestion(item)) {
+        return { icon: 'comment-discussion', title: 'Answer a question' };
+      }
+
+      if (item.status === 'awaiting-approval') {
+        return item.approvalPrompt === null ? { icon: 'rocket', title: 'Approve the start' } : { icon: 'cloud-upload', title: 'Approve the publish' };
+      }
+
+      return item.status === 'failed' ? { icon: 'error', title: 'Failed', tone: 'error' } : { icon: 'debug-pause', title: 'Blocked' };
+    case 'working':
+      if (item.status === 'triaging') {
+        return { icon: 'search', title: 'Triaging' };
+      }
+
+      if (item.status === 'queued') {
+        return { icon: 'clock', title: 'Queued' };
+      }
+
+      if (item.status === 'setup') {
+        return { icon: 'tools', title: item.needsPick ? 'Claiming' : 'Setting up' };
+      }
+
+      return { icon: 'sync codicon-modifier-spin', title: 'Running' };
+    case 'done':
+      return item.doneReason === 'operator'
+        ? { icon: 'account', title: DONE_WORDS.operator }
+        : item.doneReason === 'unassigned'
+          ? { icon: 'warning', title: DONE_WORDS.unassigned, tone: 'warning' }
+          : { icon: 'check', title: DONE_WORDS.session };
+  }
+}
+
+function markIcon(mark: Mark): string {
+  return `<span class="mark codicon codicon-${mark.icon}${mark.tone === undefined ? '' : ` ${mark.tone}`}" title="${escape(mark.title)}"></span>`;
 }
 
 /** Marks a ticket that came back after earlier work items (PRD R51). */
@@ -167,16 +256,26 @@ function returned(count: number): string {
   return count === 0 ? '' : `<span class="returned" title="${count} earlier work item${count === 1 ? '' : 's'}">Returned ×${count}</span>`;
 }
 
+/** The ... button and, when open, the menu with the row's other controls. */
+function moreMenu(key: string, controls: Control[], extra: string, open: boolean): string {
+  if (controls.length === 0 && extra === '') {
+    return '';
+  }
+
+  return `<span class="more"><button class="more-button" title="More actions" data-menu="${escape(key)}"><span class="codicon codicon-ellipsis"></span></button>${
+    open ? `<div class="menu">${controls.map(button).join('')}${extra}</div>` : ''
+  }</span>`;
+}
+
 function section(title: string, body: string | null | undefined): string {
   return body ? `<h4>${escape(title)}</h4><pre>${escape(body)}</pre>` : '';
 }
 
-function row(item: WorkItemView, snapshot: Snapshot, now: number, expanded: boolean): string {
-  const session = activeSession(item);
-  const mark = session?.state === 'waiting' ? 'waiting' : item.status;
+function row(item: WorkItemView, snapshot: Snapshot, now: number, ui: PanelUi): string {
   const status = statusOf(item);
   const main = mainControl(item);
   const key = `${item.ticket.source} ${item.ticket.sourceKey}`;
+  const menuKey = `item:${item.id}`;
   const ticket = item.ticket.url === '' ? `<span class="key">${escape(key)}</span>` : `<a class="key" href="${escape(item.ticket.url)}">${escape(key)}</a>`;
   const stage = item.stage === null ? '' : `<span class="stage">${escape(item.stage)}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}</span>`;
   const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : `<span class="approval">${escape(item.approvalSummary)}</span>`;
@@ -194,11 +293,13 @@ function row(item: WorkItemView, snapshot: Snapshot, now: number, expanded: bool
   const history = item.sessions
     .map((entry) => `<li>${escape(entry.kind)} ${escape(entry.id)}: ${escape(entry.state)}${entry.outcome === null ? '' : `, ${escape(entry.outcome)}`}${entry.outcomeDetail === null ? '' : ` (${escape(entry.outcomeDetail)})`}, started ${age(entry.startedAt, now)} ago</li>`)
     .join('');
+  // A pool ticket has waited since the customer's last message; any other since its work item was created.
+  const since = item.ticket.sortAt ?? item.createdAt;
+  const others = controlsOf(item).filter((control) => control.label !== main?.label);
 
-  return `<details class="item" data-item="${item.id}"${expanded ? ' open' : ''}>
-<summary><span class="line"><span class="codicon codicon-${MARKS[mark] ?? 'circle-outline'}" title="${escape(status)}"></span> ${ticket} <span class="title" title="${escape(item.ticket.title)}">${escape(item.ticket.title)}</span> ${returned(item.returned)}${importance(item.triage)}<span class="playbook-name">${escape(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}</span></span>
-<span class="line second"><span class="status">${escape(status)}</span> ${stage} ${worktree}${approval}${main === null ? '' : button(main)}</span>${links === '' ? '' : `<span class="line second links">${links}</span>`}${notes}</summary>
-<div class="controls">${controlsOf(item).filter((control) => control.label !== main?.label).map(button).join('')}${playbooks}</div>
+  return `<details class="item" data-item="${item.id}"${ui.expanded.has(item.id) ? ' open' : ''}>
+<summary><span class="line">${markIcon(markOf(item))} ${ticket} <span class="title" title="${escape(item.ticket.title)}">${(rankOf(item.triage) ?? 3) <= 2 ? priorityDot(item.triage) : ''}${escape(item.ticket.title)}</span> ${returned(item.returned)}${queued(since, item.doneAt ?? now)}<span class="playbook-name">${escape(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}</span></span>
+<span class="line second"><span class="status">${escape(status)}</span> ${stage} ${worktree}${approval}<span class="actions">${main === null ? '' : button(main)}${moreMenu(menuKey, others, playbooks, ui.menu === menuKey)}</span></span>${links === '' ? '' : `<span class="line second links">${links}</span>`}${notes}</summary>
 <div class="detail">${section('Summary', item.triage?.summary)}${section('Triage context', item.triage?.context)}${section('Task prompt', item.taskPrompt)}${history === '' ? '' : `<h4>Sessions</h4><ul>${history}</ul>`}</div>
 </details>`;
 }
@@ -224,31 +325,44 @@ function setup(snapshot: Snapshot): string {
   return lines.map((line) => `<p class="empty"><span class="codicon codicon-info"></span> ${escape(line)}</p>`).join('');
 }
 
-function adhocBox(snapshot: Snapshot): string {
-  const repos = snapshot.repoRoots.map((root) => `<option value="${escape(root)}">${escape(root)}</option>`).join('');
 
-  return `<form class="adhoc"><textarea name="prompt" rows="2" placeholder="Ad-hoc prompt for a new session"></textarea><div class="adhoc-row"><select name="repo">${repos}</select><button type="submit"${repos === '' ? ' disabled title="Set a repoRoot on a source to choose a repo."' : ''}><span class="codicon codicon-play"></span> Start</button></div></form>`;
-}
-
-/** A pool row: the ticket, its rating, triage summary and playbook, Pick and Icebox (PRD R47, R48, R50, R51). */
-function poolRow(entry: PoolView): string {
+/** A pool row: the ticket, priority, time in queue, triage summary and playbook, Pick, and Icebox in the menu (PRD R47, R48, R50, R51). */
+function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   const { ticket, triage } = entry;
   const key = `${ticket.source} ${ticket.sourceKey}`;
+  const menuKey = `ticket:${ticket.id}`;
   const link = ticket.url === '' ? `<span class="key">${escape(key)}</span>` : `<a class="key" href="${escape(ticket.url)}">${escape(key)}</a>`;
   const pick: Control = { label: 'Pick', icon: 'pass-filled', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const failed = triage?.error != null;
   const summary = triage === null || triage.endedAt === null ? 'Triaging…' : failed ? '' : (triage.summary ?? '');
-  const icebox = button(iceboxControl(ticket.id, ticket.iceboxed));
+  const [main, ...others] = failed ? [again, pick, iceboxControl(ticket.id, ticket.iceboxed)] : [pick, iceboxControl(ticket.id, ticket.iceboxed)];
 
   return `<div class="item pool-item" data-ticket="${ticket.id}">
-<div class="line"><span class="codicon codicon-inbox"></span> ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> ${returned(entry.returned)}${importance(triage)}<span class="playbook-name">${escape(triage?.playbook ?? '')}</span></div>
-${failed ? `<div class="line second"><span class="note">${escape(triage!.error!)}</span></div><div class="line second actions">${button(again)}${button(pick)}${icebox}</div>` : `<div class="line second"><span class="summary">${escape(summary)}</span>${button(pick)}${icebox}</div>`}
+<div class="line"><span class="mark">${priorityDot(triage)}</span> ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> ${returned(entry.returned)}${queued(ticket.sortAt, now)}<span class="playbook-name">${escape(triage?.playbook ?? '')}</span></div>
+<div class="line second">${failed ? `<span class="note">${escape(triage!.error!)}</span>` : `<span class="summary">${escape(summary)}</span>`}<span class="actions">${button(main!)}${moreMenu(menuKey, others, '', ui.menu === menuKey)}</span></div>
 </div>`;
 }
 
-/** The whole panel. `expanded` keeps the rows the operator opened; `open` the collapsible groups they opened (`done`, `icebox`). */
-export function renderPanel(snapshot: Snapshot, now: number, expanded: ReadonlySet<number>, open: ReadonlySet<string>): string {
+/** What the operator changed in the panel: expanded rows, opened or closed groups, and the open ... menu. */
+export interface PanelUi {
+  expanded: ReadonlySet<number>;
+  /** Groups the operator opened or closed; others take their default. */
+  groups: ReadonlyMap<string, boolean>;
+  menu: string | null;
+}
+
+/** Needs you, Working and Pool start open; Done and Icebox start closed. */
+const OPEN_BY_DEFAULT = new Set(['needs', 'working', 'pool']);
+
+function group(key: string, title: string, count: number, body: string, ui: PanelUi): string {
+  const open = ui.groups.get(key) ?? OPEN_BY_DEFAULT.has(key);
+
+  return `<details class="group" data-group="${key}"${open ? ' open' : ''}><summary><h3>${escape(title)} (${count})</h3></summary>${body}</details>`;
+}
+
+/** The whole panel. */
+export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): string {
   const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], done: [] };
   const iceboxedItems = snapshot.workItems.filter((item) => item.ticket.iceboxed);
   const iceboxedPool = snapshot.pool.filter((entry) => entry.ticket.iceboxed);
@@ -260,13 +374,14 @@ export function renderPanel(snapshot: Snapshot, now: number, expanded: ReadonlyS
     }
   }
 
-  const list = (items: WorkItemView[]) => items.map((item) => row(item, snapshot, now, expanded.has(item.id))).join('\n');
+  const list = (items: WorkItemView[]) => items.map((item) => row(item, snapshot, now, ui)).join('\n');
+  const pooled = (entries: PoolView[]) => entries.map((entry) => poolRow(entry, now, ui)).join('\n');
   const iceboxCount = iceboxedItems.length + iceboxedPool.length;
 
-  return `${errors(snapshot)}${setup(snapshot)}${adhocBox(snapshot)}
-<h3>Needs you (${groups.needs.length})</h3>${list(groups.needs) || '<p class="empty">Nothing needs you.</p>'}
-<h3>Working (${groups.working.length})</h3>${list(groups.working) || '<p class="empty">Nothing is running.</p>'}
-<details class="group" data-group="done"${open.has('done') ? ' open' : ''}><summary><h3>Done (${groups.done.length})</h3></summary>${list(groups.done)}</details>
-${pool.length === 0 ? '' : `<h3>Pool (${pool.length})</h3>${pool.map(poolRow).join('\n')}`}
-${iceboxCount === 0 ? '' : `<details class="group" data-group="icebox"${open.has('icebox') ? ' open' : ''}><summary><h3>Icebox (${iceboxCount})</h3></summary>${list(iceboxedItems)}${iceboxedPool.map(poolRow).join('\n')}</details>`}`;
+  return `${errors(snapshot)}${setup(snapshot)}
+${group('needs', 'Needs you', groups.needs.length, list(groups.needs) || '<p class="empty">Nothing needs you.</p>', ui)}
+${group('working', 'Working', groups.working.length, list(groups.working) || '<p class="empty">Nothing is running.</p>', ui)}
+${group('done', 'Done', groups.done.length, list(groups.done), ui)}
+${pool.length === 0 ? '' : group('pool', 'Pool', pool.length, pooled(pool), ui)}
+${iceboxCount === 0 ? '' : group('icebox', 'Icebox', iceboxCount, `${list(iceboxedItems)}${pooled(iceboxedPool)}`, ui)}`;
 }

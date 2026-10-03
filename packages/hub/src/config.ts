@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS, loadPlaybooks, parseSettings, switchboardHome } from '@switchboard/core';
 import type { Playbook, PlaybookError, Settings } from '@switchboard/core';
@@ -17,6 +17,33 @@ export function settingsPath(home: string): string {
 
 export function playbooksDir(home: string): string {
   return join(switchboardHome(home), 'playbooks');
+}
+
+/**
+ * Turns a configured source on or off in settings.json, which the hub then reloads. The file is rewritten as formatted JSON.
+ * Returns why it could not, or null.
+ */
+export function setSourceEnabled(home: string, name: string, enabled: boolean): string | null {
+  const path = settingsPath(home);
+  let settings: { sources?: Record<string, Record<string, unknown>> };
+
+  try {
+    settings = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    return `settings.json could not be read: ${(error as Error).message}`;
+  }
+
+  const source = settings.sources?.[name];
+
+  if (source === undefined) {
+    return `settings.json has no source named ${name}.`;
+  }
+
+  source['enabled'] = enabled;
+  writeFileSync(`${path}.tmp`, `${JSON.stringify(settings, null, 2)}\n`);
+  renameSync(`${path}.tmp`, path);
+
+  return null;
 }
 
 /** Reads settings and playbooks. A missing settings file means the defaults; an invalid one keeps `previous`. */

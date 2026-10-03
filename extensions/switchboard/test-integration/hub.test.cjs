@@ -146,6 +146,17 @@ describe('the hub process', () => {
     }
   });
 
+  it('puts New Ad-hoc Session and Choose Sources in the view menu', async () => {
+    await api();
+    const commands = await vscode.commands.getCommands(true);
+    const menu = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes.menus['view/title'];
+
+    for (const command of ['switchboard.newAdhoc', 'switchboard.chooseSources']) {
+      assert.ok(commands.includes(command), `${command} is not registered`);
+      assert.ok(menu.some((entry) => entry.command === command && entry.when === 'view == switchboard.workItems'), `${command} is not in the view menu`);
+    }
+  });
+
   it('opens a reported file link in an editor', async () => {
     await api();
     const file = join(process.env.SWITCHBOARD_TEST_HOME, 'case.md');

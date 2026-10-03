@@ -56,6 +56,8 @@ export interface Snapshot {
   repoRoots: string[];
   /** Sources being polled. */
   sources: string[];
+  /** Every configured source but ad-hoc, for the operator's source filter. */
+  sourceStates: { name: string; enabled: boolean }[];
   /** The Switchboard home, where settings.json and playbooks/ live. */
   home: string;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
@@ -320,12 +322,16 @@ export class Runtime {
         store
           .poolTickets()
           .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
-          .filter(({ items }) => items.every((item) => item.status === 'done'))
+          // A disabled source's pool is not read, so its tickets are not shown.
+          .filter(({ ticket, items }) => this.sources.has(ticket.source) && items.every((item) => item.status === 'done'))
           .map(({ ticket, items }) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null, returned: items.length })),
       ),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
       sources: [...this.sources.keys()],
+      sourceStates: Object.entries(settings.sources)
+        .filter(([name]) => name !== ADHOC_SOURCE)
+        .map(([name, source]) => ({ name, enabled: source.enabled })),
       home: this.home,
       errors: {
         settings: settingsError,

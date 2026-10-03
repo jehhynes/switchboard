@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -128,6 +128,21 @@ describe('createHubApp', () => {
     writeSettings('{ broken');
     await until(() => ((app.snapshot() as { errors: { settings: string | null } }).errors.settings?.startsWith('settings.json is not valid JSON') ? true : null));
     expect(changes).toBeGreaterThan(0);
+  });
+
+  it('turns a source on and off in settings.json, keeping its other settings, and refuses an unknown source', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { zoho: { enabled: true, repoRoot: 'D:/support', orgId: '1' }, adhoc: { repoRoot: 'D:/scratch' } } });
+    const app = await start();
+    const states = () => (app.snapshot() as { sourceStates: unknown }).sourceStates;
+    const file = () => JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'));
+
+    expect(states()).toEqual([{ name: 'zoho', enabled: true }]);
+    expect(await app.post['/sources']!({ name: 'zoho', enabled: false })).toEqual({ status: 200, body: { done: true } });
+    expect(file().sources.zoho).toEqual({ enabled: false, repoRoot: 'D:/support', orgId: '1' });
+    await until(() => (JSON.stringify(states()) === '[{"name":"zoho","enabled":false}]' ? true : null));
+
+    expect(await app.post['/sources']!({ name: 'forum', enabled: true })).toEqual({ status: 409, body: { error: 'settings.json has no source named forum.' } });
+    expect(await app.post['/sources']!({ name: 'zoho', enabled: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {name, enabled}.' } });
   });
 
   it('answers posts through the server', async () => {
