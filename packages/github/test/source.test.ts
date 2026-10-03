@@ -96,8 +96,8 @@ describe('GithubSource.context', () => {
     const text = (result as { context: string }).context;
     const lines = text.split('\n');
 
-    expect(lines.slice(0, 5)).toEqual(['GitHub issue #19504: Issue 19504', 'https://github.com/acme/widgets/issues/19504', 'Assignees: work-login', '', '## Issue body']);
-    expect(lines[5]).toBe("Issue body starts here.");
+    expect(lines.slice(0, 6)).toEqual(['GitHub issue #19504: Issue 19504', 'https://github.com/acme/widgets/issues/19504', 'Board status: ⚒️ Dev', 'Assignees: work-login', '', '## Issue body']);
+    expect(lines[6]).toBe("Issue body starts here.");
     expect(text).toContain('Issue body ends here.\n\n## Status and assignment history\n2026-09-07 12:18 user-b: status (none) → 🆕 New\n2026-09-07 12:18 user-a: status 🆕 New → 🔖 Planned\n2026-09-07 12:18 user-a: assigned user-a\n');
     expect(text.match(/\[…\d+ characters omitted…\]/g)).toEqual(['[…39262 characters omitted…]', '[…984 characters omitted…]', '[…50924 characters omitted…]', '[…8178 characters omitted…]', '[…1335 characters omitted…]']);
     expect(text.match(/^### .*, \d{4}-\d\d-\d\d \d\d:\d\d$/gm)).toHaveLength(5 + 5 + 10);

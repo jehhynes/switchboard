@@ -158,9 +158,11 @@ export class GithubSource implements Source {
   }
 
   private format(issue: ContextIssue): string {
+    const status = issue.timelineItems.nodes.filter((event) => event.__typename === 'ProjectV2ItemStatusChangedEvent' && event.status && this.onProject(event.project)).at(-1)?.status;
     const lines = [
       `GitHub issue #${issue.number}: ${issue.title}`,
       issue.url,
+      `Board status: ${status ?? 'unknown'}`,
       `Assignees: ${issue.assignees.nodes.map((assignee) => assignee.login).join(', ') || 'none'}`,
       '',
       '## Issue body',
