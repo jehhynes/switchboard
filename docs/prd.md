@@ -168,7 +168,7 @@ Steps 1–7 deliver GitHub and ad-hoc end to end: R1–R4, R6–R25, R27–R45. 
 
 ## Implementation gaps
 
-Steps 1–7 are delivered: R1–R4 for GitHub, R6–R25 and R27–R45 work end to end, verified by live acceptance on 2026-10-03 ([mechanics.md](mechanics.md) M9). Not yet verified live: Open in VS Code for a session from another folder. Zoho Desk and Forum (R5, R26, R46) are unimplemented. The operator's real home has no settings or playbooks yet (step 8).
+Steps 1–7 are delivered: R1–R4 for GitHub, R6–R25 and R27–R45 work end to end, verified by live acceptance on 2026-10-03 ([mechanics.md](mechanics.md) M9). Not yet verified live: Open in VS Code for a session from another folder. Step 8 is delivered: the operator's home has the GitHub settings and playbooks, and their hub triaged their 9 assigned issues to the same actions Ground Control chose, all awaiting approval. Zoho Desk, Forum and the pool (R5, R26, R46–R48) are unimplemented.
 
 - Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 ## Open questions
