@@ -4,6 +4,17 @@ import type { HubRecord } from '@switchboard/core';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
 import { listenHub } from './server.js';
+import type { Reply } from './server.js';
+
+/** What the hub serves beyond its lifecycle: the panel state, requests, and the sessions that keep it running. */
+export interface HubApp {
+  post: Record<string, (body: unknown) => Promise<Reply>>;
+  snapshot(): unknown;
+  onChange(listener: () => void): void;
+  /** While true, the hub does not exit for lack of clients (PRD R43). */
+  busy(): boolean;
+  close(): void;
+}
 
 export interface ServeOptions {
   home: string;
@@ -14,6 +25,8 @@ export interface ServeOptions {
   waitMs?: number;
   exit?: (code: number) => void;
   log?: (line: string) => void;
+  /** Built once this process holds the hub lock, so a losing start never opens the store. */
+  app?: () => Promise<HubApp>;
 }
 
 export interface Served {
@@ -69,10 +82,14 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   let stopping: Promise<void> | undefined;
 
+  const app = options.app === undefined ? undefined : await options.app();
   const server = await listenHub({
     identity: { hub: HUB_NAME, protocol: PROTOCOL, version, pid: process.pid },
     onShutdown: () => void stop('a client asked it to stop').then(() => exit(0)),
+    ...(app === undefined ? {} : { post: app.post, snapshot: () => app.snapshot() }),
   });
+
+  app?.onChange(() => server.broadcast('state', app.snapshot()));
 
   const record: HubRecord = {
     protocol: PROTOCOL,
@@ -100,7 +117,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     () => {
       const since = server.emptySince();
 
-      if (since !== null && Date.now() - since >= idleMs) {
+      if (since !== null && Date.now() - since >= idleMs && app?.busy() !== true) {
         void stop('no client connected').then(() => exit(0));
       }
     },
@@ -114,6 +131,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       log(`stopping: ${reason}`);
       clearInterval(idle);
       process.off('exit', unclaim);
+      app?.close();
       await server.close();
       unclaim();
       await releaseLock(lock);

@@ -3,9 +3,18 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
 
+export interface Reply {
+  status: number;
+  body: unknown;
+}
+
 export interface HubServerOptions {
   identity: HubIdentity;
   onShutdown(): void;
+  /** Handlers for authorized `POST` paths, given the parsed JSON body. */
+  post?: Record<string, (body: unknown) => Promise<Reply>>;
+  /** The panel state, sent as a `state` event when a stream opens. */
+  snapshot?: () => unknown;
   heartbeatMs?: number;
   now?: () => number;
 }
@@ -17,10 +26,37 @@ export interface HubServer {
   clients(): number;
   /** When the last event stream closed, or null while one is open. Starts at listen time. */
   emptySince(): number | null;
+  /** Sends an event to every open stream. */
+  broadcast(event: string, data: unknown): void;
   close(): Promise<void>;
 }
 
 const HEARTBEAT_MS = 15_000;
+const BODY_LIMIT = 1024 * 1024;
+
+function readJson(request: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let text = '';
+
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => {
+      text += chunk;
+
+      if (text.length > BODY_LIMIT) {
+        reject(new Error('body too large'));
+        request.destroy();
+      }
+    });
+    request.on('end', () => {
+      try {
+        resolve(JSON.parse(text));
+      } catch {
+        reject(new Error('body is not JSON'));
+      }
+    });
+    request.on('error', reject);
+  });
+}
 
 function json(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { 'Content-Type': 'application/json' });
@@ -48,6 +84,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const openStream = (request: IncomingMessage, response: ServerResponse): void => {
     response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     response.write(`event: hello\ndata: ${JSON.stringify(options.identity)}\n\n`);
+
+    if (options.snapshot !== undefined) {
+      response.write(`event: state\ndata: ${JSON.stringify(options.snapshot())}\n\n`);
+    }
+
     streams.add(response);
     emptySince = null;
     request.on('close', () => {
@@ -73,6 +114,17 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();
+    } else if (request.method === 'POST' && options.post?.[path] !== undefined) {
+      const handler = options.post[path];
+
+      readJson(request).then(
+        (body) =>
+          handler(body).then(
+            (reply) => json(response, reply.status, reply.body),
+            (error: unknown) => json(response, 500, { error: String(error) }),
+          ),
+        (error: Error) => json(response, 400, { error: error.message }),
+      );
     } else {
       json(response, 404, { error: 'not found' });
     }
@@ -100,6 +152,13 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         token,
         clients: () => streams.size,
         emptySince: () => emptySince,
+        broadcast: (event, data) => {
+          const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
+          for (const stream of streams) {
+            stream.write(message);
+          }
+        },
         close: () =>
           new Promise<void>((done) => {
             clearInterval(heartbeat);

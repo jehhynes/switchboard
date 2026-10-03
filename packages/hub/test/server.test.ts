@@ -120,3 +120,37 @@ describe('listenHub', () => {
     expect(text).toContain(': ping\n\n');
   });
 });
+
+describe('listenHub routes and state', () => {
+  it('sends JSON bodies to POST handlers, refuses bad JSON, and reports handler errors', async () => {
+    server = await listenHub({
+      identity,
+      onShutdown: () => {},
+      post: { '/echo': async (body) => ({ status: 200, body: { got: body } }), '/boom': async () => Promise.reject(new Error('broken')) },
+    });
+
+    expect(await call(server.port, 'POST', '/echo', server.token, 2000, { a: 1 })).toEqual({ status: 200, body: '{"got":{"a":1}}' });
+    expect((await call(server.port, 'POST', '/boom', server.token, 2000, {}))?.status).toBe(500);
+    expect((await call(server.port, 'POST', '/echo', server.token))?.body).toBe('{"error":"body is not JSON"}');
+    expect((await call(server.port, 'POST', '/echo', null, 2000, {}))?.status).toBe(401);
+  });
+
+  it('sends the state when a stream opens and broadcasts later events', async () => {
+    let state = { n: 1 };
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => state });
+
+    const chunks: string[] = [];
+    const outbound = request({ host: '127.0.0.1', port: server.port, path: '/events', headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => chunks.push(chunk));
+    });
+    outbound.on('error', () => {});
+    outbound.end();
+
+    await until(() => (chunks.join('').includes('event: state\ndata: {"n":1}') ? true : null));
+    state = { n: 2 };
+    server.broadcast('state', state);
+    await until(() => (chunks.join('').includes('event: state\ndata: {"n":2}') ? true : null));
+    outbound.destroy();
+  });
+});

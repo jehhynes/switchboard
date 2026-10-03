@@ -1,0 +1,138 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Exec } from '@switchboard/claude';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createHubApp, parseAction, parseReport } from '../src/app.js';
+import { loadConfig } from '../src/config.js';
+import { postToHub } from '../src/client.js';
+import { listenHub } from '../src/server.js';
+import { reportBody } from '../src/report.js';
+import { tempHome, until } from './helpers.js';
+
+let temp: ReturnType<typeof tempHome>;
+let closers: (() => void | Promise<void>)[] = [];
+
+beforeEach(() => {
+  temp = tempHome();
+});
+
+afterEach(async () => {
+  for (const close of closers.splice(0).reverse()) {
+    await close();
+  }
+
+  temp.remove();
+});
+
+const noCli: Exec = async (file, args) => {
+  throw new Error(`unexpected call ${file} ${args.join(' ')}`);
+};
+
+function writeSettings(settings: unknown): void {
+  mkdirSync(join(temp.home, '.switchboard'), { recursive: true });
+  writeFileSync(join(temp.home, '.switchboard', 'settings.json'), typeof settings === 'string' ? settings : JSON.stringify(settings));
+}
+
+describe('parseReport and reportBody', () => {
+  it('reads the four report commands', () => {
+    expect(reportBody(['stage', 's1', 'Writing', 'tests'])).toEqual({ sessionId: 's1', kind: 'stage', stage: 'Writing tests' });
+    expect(reportBody(['worktree', 's1', 'D:/wt/1'])).toEqual({ sessionId: 's1', kind: 'worktree', path: join('D:/wt/1') });
+    expect(reportBody(['done', 's1'])).toEqual({ sessionId: 's1', kind: 'done', summary: null });
+    expect(reportBody(['done', 's1', '--summary', 'All good'])).toEqual({ sessionId: 's1', kind: 'done', summary: 'All good' });
+    expect(reportBody(['blocked', 's1', '--reason=Needs access'])).toEqual({ sessionId: 's1', kind: 'blocked', reason: 'Needs access' });
+  });
+
+  it('rejects bad usage', () => {
+    for (const argv of [[], ['stage'], ['stage', 's1'], ['blocked', 's1'], ['blocked', 's1', '--reason', ''], ['finish', 's1'], ['done', '--summary']]) {
+      expect(reportBody(argv)).toBeNull();
+    }
+  });
+
+  it('validates report and action bodies', () => {
+    expect(parseReport({ sessionId: 's1', kind: 'stage', stage: 'x' })).toEqual({ sessionId: 's1', kind: 'stage', stage: 'x' });
+    expect(parseReport({ sessionId: 's1', kind: 'done' })).toEqual({ sessionId: 's1', kind: 'done', summary: null });
+    expect(parseReport({ sessionId: 's1', kind: 'stage', stage: '' })).toBeNull();
+    expect(parseReport({ sessionId: 's1', kind: 'done', summary: 3 })).toBeNull();
+    expect(parseReport({ kind: 'stage', stage: 'x' })).toBeNull();
+    expect(parseReport('text')).toBeNull();
+    expect(parseAction({ type: 'approve', workItemId: 1 })).toEqual({ type: 'approve', workItemId: 1 });
+    expect(parseAction({ type: 'poll', source: 'github', tickets: [] })).toBeNull();
+  });
+});
+
+describe('loadConfig', () => {
+  it('uses defaults without a settings file, keeps the previous settings on an invalid file, and lists playbook errors', () => {
+    const fresh = loadConfig(temp.home);
+    expect(fresh.settingsError).toBeNull();
+    expect(fresh.settings.sessions.concurrency).toBe(2);
+
+    writeSettings({ sessions: { concurrency: 3 } });
+    const valid = loadConfig(temp.home);
+    expect(valid.settings.sessions.concurrency).toBe(3);
+
+    writeSettings({ sessions: { concurrency: 9 } });
+    const invalid = loadConfig(temp.home, valid.settings);
+    expect(invalid.settings.sessions.concurrency).toBe(3);
+    expect(invalid.settingsError).toBe('sessions.concurrency must be a whole number from 1 to 4.');
+
+    mkdirSync(join(temp.home, '.switchboard', 'playbooks', 'dev'), { recursive: true });
+    writeFileSync(join(temp.home, '.switchboard', 'playbooks', 'dev', 'bad.md'), 'no front matter');
+    expect(loadConfig(temp.home).playbookErrors).toEqual([{ file: 'dev/bad.md', error: 'The file must start with front matter between --- lines.' }]);
+  });
+});
+
+describe('createHubApp', () => {
+  async function start() {
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+    closers.push(() => app.close());
+
+    return app;
+  }
+
+  it('serves actions and reports, refusing what does not apply', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const app = await start();
+
+    expect(await app.post['/action']!({ type: 'approve', workItemId: 9 })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
+    expect(await app.post['/action']!({ type: 'poll' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
+    expect(await app.post['/report']!({ sessionId: 's9', kind: 'stage', stage: 'x' })).toEqual({ status: 409, body: { error: 'Unknown session s9.' } });
+    expect(await app.post['/report']!({ kind: 'stage' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, kind, stage|path|summary|reason}.' } });
+    expect(app.busy()).toBe(false);
+    expect((app.snapshot() as { repoRoots: string[] }).repoRoots).toEqual(['D:/scratch']);
+  });
+
+  it('reloads settings and playbooks when they change', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const app = await start();
+    let changes = 0;
+    app.onChange(() => changes++);
+
+    mkdirSync(join(temp.home, '.switchboard', 'playbooks', 'dev'), { recursive: true });
+    writeFileSync(join(temp.home, '.switchboard', 'playbooks', 'dev', 'develop.md'), '---\ndescription: Build it\n---\nBuild.');
+
+    await until(() => ((app.snapshot() as { playbooks: unknown[] }).playbooks.length === 1 ? true : null));
+
+    writeSettings('{ broken');
+    await until(() => ((app.snapshot() as { errors: { settings: string | null } }).errors.settings?.startsWith('settings.json is not valid JSON') ? true : null));
+    expect(changes).toBeGreaterThan(0);
+  });
+
+  it('answers posts through the server', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const app = await start();
+    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
+    closers.push(() => server.close());
+    const record = { protocol: 1, version: 't', build: 'b', port: server.port, token: server.token, pid: 1, startedAt: '' };
+
+    expect(await postToHub(record, '/action', { type: 'mark-done', workItemId: 1 }, 5000)).toMatchObject({ status: 409, error: 'Unknown work item 1.' });
+    expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|summary|reason}.' });
+
+    expect(await postToHub(record, '/open', { sessionId: 'abc-native', cwd: 'D:\\git\\widgets-wt\\7-fix' }, 5000)).toMatchObject({ status: 200 });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix/' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'abc-native' } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null } });
+    expect(await postToHub(record, '/open', { sessionId: 1 }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, cwd}.' });
+    expect(await postToHub(record, '/claim', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {folder}.' });
+    expect(await postToHub({ ...record, port: 1 }, '/action', {}, 1000)).toBeNull();
+  });
+});

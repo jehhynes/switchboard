@@ -233,6 +233,11 @@ export class Store {
     return this.#all('SELECT * FROM workItems WHERE status = ? ORDER BY id', status);
   }
 
+  /** Work items not done, plus those done since `doneSince`, newest first. */
+  workItems(doneSince: number): WorkItem[] {
+    return this.#all("SELECT * FROM workItems WHERE status <> 'done' OR doneAt >= ? ORDER BY id DESC", doneSince);
+  }
+
   insertTriage(triage: NewTriage): Triage {
     return { id: this.#insert('triages', triage as unknown as Row), ...triage };
   }
@@ -286,6 +291,11 @@ export class Store {
   /** Sessions whose process may be running: every state but `ended`. */
   activeSessions(): Session[] {
     return this.#all("SELECT * FROM sessions WHERE state <> 'ended' ORDER BY startedAt, rowid");
+  }
+
+  /** Sessions a start confirmed: a roster read can end them, or revive one the operator resumed. */
+  startedSessions(): Session[] {
+    return this.#all('SELECT * FROM sessions WHERE shortId IS NOT NULL ORDER BY startedAt, rowid');
   }
 
   activeSessionsForTicket(ticketId: number): Session[] {

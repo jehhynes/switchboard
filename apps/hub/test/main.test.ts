@@ -27,7 +27,9 @@ afterEach(() => {
 });
 
 function start(...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
-  const child = spawn(process.execPath, [main, `--home=${home}`, ...args], { windowsHide: true });
+  // CLAUDE_CONFIG_DIR keeps hook installation inside the temporary home.
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: join(home, '.claude') };
+  const child = spawn(process.execPath, [main, ...args, `--home=${home}`], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -120,6 +122,28 @@ describe('hub entry point', () => {
     } finally {
       await releaseLock(lock!);
     }
+  });
+
+  it('records reports through the running hub, with exit codes for usage, refusal and no hub', async () => {
+    const usage = await start('report', 'stage', 's1').exited;
+
+    expect(usage.code).toBe(1);
+    expect(usage.stderr).toContain('report stage <sessionId> <stage>');
+
+    const noHub = await start('report', 'stage', 's1', 'Planning').exited;
+
+    expect(noHub).toMatchObject({ code: 2, stderr: 'The Switchboard hub is not running, so the report was not recorded.\n' });
+
+    const hub = start('--idle-ms=60000');
+    await recorded();
+
+    const refused = await start('report', 'stage', 's1', 'Planning').exited;
+
+    expect(refused).toMatchObject({ code: 3, stderr: 'Refused: Unknown session s1.\n' });
+    expect(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks.Stop).toHaveLength(1);
+
+    await start('--stop').exited;
+    expect((await hub.exited).code).toBe(0);
   });
 
   it('exits after the idle time with no client and removes its record', async () => {

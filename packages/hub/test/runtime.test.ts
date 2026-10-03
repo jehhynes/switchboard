@@ -1,0 +1,348 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { Exec, ExecResult } from '@switchboard/claude';
+import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
+import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Config } from '../src/config.js';
+import { Runtime } from '../src/runtime.js';
+
+const T0 = Date.UTC(2026, 9, 3, 12);
+
+let home: string;
+
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), 'switchboard-runtime-'));
+});
+
+afterEach(() => {
+  rmSync(home, { recursive: true, force: true });
+});
+
+function playbook(name: string, text: string): [string, Playbook] {
+  const parsed = parsePlaybook(name, text);
+
+  if ('error' in parsed) {
+    throw new Error(parsed.error);
+  }
+
+  return [name, parsed.playbook];
+}
+
+const PLAYBOOKS = new Map([
+  playbook('triage:github', '---\ndescription: Triage\nkind: triage\n---\nClassify.'),
+  playbook('dev:develop', '---\ndescription: Build it\nautoStart: true\n---\nBuild {{ticket.sourceKey}}.'),
+]);
+
+function config(patch: Partial<Settings['sessions']> = {}): Config {
+  return {
+    settings: {
+      ...DEFAULT_SETTINGS,
+      sessions: { ...DEFAULT_SETTINGS.sessions, installHooks: false, ...patch },
+      sources: { github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', options: {} } },
+    },
+    settingsError: null,
+    playbooks: PLAYBOOKS,
+    playbookErrors: [],
+  };
+}
+
+const ok = (stdout: string): ExecResult => ({ code: 0, stdout, stderr: '', missing: false, timedOut: false });
+const fail = (stderr: string): ExecResult => ({ code: 1, stdout: '', stderr, missing: false, timedOut: false });
+
+/** A fake Claude CLI and git. `roster` is what `claude agents --json` lists. */
+class FakeCli {
+  roster: object[] = [];
+  calls: string[][] = [];
+  classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 'Build the thing.' } }));
+  startResult: ExecResult | null = null;
+  stopResult = ok('');
+  worktrees = 'worktree D:/git/widgets\nHEAD abc\nbranch refs/heads/master\n\nworktree D:/git/widgets-wt/7-fix\nHEAD def\nbranch refs/heads/7-fix\n';
+  private started = 0;
+
+  exec: Exec = async (file, args) => {
+    this.calls.push([file, ...args]);
+
+    if (file === 'git') {
+      return ok(this.worktrees);
+    }
+
+    if (args[0] === '-p') {
+      return this.classifyResult;
+    }
+
+    if (args[0] === '--bg') {
+      if (this.startResult !== null) {
+        return this.startResult;
+      }
+
+      const id = `0000000${++this.started}`;
+      this.roster.push({ id, sessionId: `${id}-native`, pid: 100 + this.started, kind: 'background', cwd: '', state: 'working' });
+
+      return ok(`backgrounded · ${id} · name\n`);
+    }
+
+    if (args[0] === 'agents') {
+      return ok(JSON.stringify(this.roster));
+    }
+
+    if (args[0] === 'stop') {
+      this.roster = this.roster.filter((entry) => (entry as { id: string }).id !== args[1]);
+      return this.stopResult;
+    }
+
+    throw new Error(`unexpected call ${file} ${args.join(' ')}`);
+  };
+}
+
+class FakeSource implements Source {
+  readonly name = 'github';
+  result: PollResult = { tickets: [] };
+  context: (ticket: { sourceKey: string }) => Promise<ContextResult> = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text` });
+
+  async poll(): Promise<PollResult> {
+    return this.result;
+  }
+
+  keyOfBranch(branch: string): string | null {
+    return /^(\d+)-/.exec(branch)?.[1] ?? null;
+  }
+}
+
+const issue = (key: string): PolledTicket => ({ sourceKey: key, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true });
+
+function setup(cfg = config(), now = () => T0) {
+  const store = Store.open(':memory:');
+  const cli = new FakeCli();
+  const source = new FakeSource();
+  let ids = 0;
+  const logs: string[] = [];
+  const runtime = new Runtime(
+    {
+      home,
+      store,
+      exec: cli.exec,
+      claudePath: 'claude',
+      makeSource: (name) => (name === 'github' ? { source } : null),
+      now,
+      sleep: async () => {},
+      newSessionId: () => `s${++ids}`,
+      env: {},
+      log: (line) => logs.push(line),
+    },
+    cfg,
+  );
+
+  return { store, cli, source, runtime, logs };
+}
+
+describe('Runtime', () => {
+  it('polls, triages through the source and classifier, and starts the chosen playbook', async () => {
+    const { store, cli, source, runtime } = setup();
+    let changes = 0;
+    runtime.onChange(() => changes++);
+    source.result = { tickets: [issue('7')] };
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const classifyCall = cli.calls.find((call) => call[1] === '-p');
+    expect(classifyCall?.at(-1)).toContain('Classify.');
+    expect(store.triage(1)).toMatchObject({ context: 'Issue 7 text', playbook: 'dev:develop', summary: 'Build the thing.' });
+    expect(store.session('s1')).toMatchObject({ shortId: '00000001', nativeSessionId: '00000001-native', state: 'running', cwd: 'D:/git/widgets-wt/7-fix' });
+    expect(store.workItem(1)?.status).toBe('running');
+    expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', branch: '7-fix', linkedBy: 'convention' });
+    expect(cli.calls.find((call) => call[0] === 'git')).toEqual(['git', 'worktree', 'list', '--porcelain']);
+    expect(changes).toBeGreaterThan(3);
+  });
+
+  it('records a failed poll and a failed triage', async () => {
+    const { store, cli, source, runtime } = setup();
+
+    source.result = { error: 'The GitHub CLI is not signed in. Run gh auth login.' };
+    await runtime.pollSource('github');
+    expect(runtime.snapshot().errors.sources).toEqual({ github: 'The GitHub CLI is not signed in. Run gh auth login.' });
+
+    source.result = { tickets: [issue('7')] };
+    cli.classifyResult = fail('API Error: 529');
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(runtime.snapshot().errors.sources).toEqual({});
+    expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'API Error: 529' });
+
+    source.context = async () => ({ error: 'Issue 7 was not found in acme/widgets.' });
+    runtime.send({ type: 'retry', workItemId: 1 });
+    await runtime.settled();
+    expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Issue 7 was not found in acme/widgets.' });
+  });
+
+  it("fails a start with Claude's message", async () => {
+    const { store, cli, source, runtime } = setup();
+    cli.startResult = fail('Workspace not trusted. Run `claude` in D:\\git\\widgets once and accept the trust prompt, then retry.');
+    source.result = { tickets: [issue('8')] };
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Workspace not trusted. Run `claude` in D:\\git\\widgets once and accept the trust prompt, then retry.' });
+  });
+
+  it('observes markers and the roster, releases the finished turn, and ends sessions that leave the roster', async () => {
+    const { store, cli, source, runtime } = setup(config({ installHooks: true }));
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    mkdirSync(join(home, '.switchboard', 'activity'), { recursive: true });
+    writeFileSync(join(home, '.switchboard', 'activity', '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'PermissionRequest' }));
+    runtime.readMarkers();
+    expect(store.session('s1')?.state).toBe('waiting');
+
+    writeFileSync(join(home, '.switchboard', 'activity', '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'Stop', backgroundTasks: 0 }));
+    await runtime.readRoster();
+    await runtime.settled();
+
+    expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([['claude', 'stop', '00000001']]);
+    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
+    expect(runtime.hasActiveSessions()).toBe(false);
+  });
+
+  it('ignores markers when hooks are off', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    mkdirSync(join(home, '.switchboard', 'activity'), { recursive: true });
+    writeFileSync(join(home, '.switchboard', 'activity', '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'PermissionRequest' }));
+    runtime.readMarkers();
+    await runtime.readRoster();
+
+    expect(store.session('s1')?.state).toBe('running');
+  });
+
+  it('links a setup worktree by branch name before the setup session ends', async () => {
+    const cfg = config();
+    cfg.settings.sources['github']!.setupPrompt = '/init-worktree {{ticket.sourceKey}}';
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('dev:develop', '---\ndescription: Build it\nautoStart: true\nrequiresWorktree: true\n---\nBuild.')]);
+    const { store, cli, source, runtime } = setup(cfg);
+    cli.worktrees = 'worktree D:/git/widgets\nHEAD abc\nbranch refs/heads/master\n';
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(store.session('s1')).toMatchObject({ kind: 'setup', state: 'running' });
+
+    cli.worktrees += '\nworktree D:/git/widgets-wt/8-new\nHEAD def\nbranch refs/heads/8-new\n';
+    cli.roster = [];
+    await runtime.readRoster();
+    await runtime.settled();
+
+    expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/8-new', linkedBy: 'convention' });
+    expect(store.session('s2')).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/8-new', state: 'running' });
+  });
+
+  it('skips a failed roster read', async () => {
+    const { store, cli, source, runtime, logs } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    cli.roster = 'not a list' as unknown as object[];
+    await runtime.readRoster();
+
+    expect(store.session('s1')?.state).toBe('running');
+    expect(logs).toEqual(['roster read failed: claude agents returned an unexpected response.']);
+  });
+
+  it('records reports, validating a worktree with git', async () => {
+    const { store, cli, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Planning' })).toEqual({ refused: null });
+    expect(store.workItem(1)?.stage).toBe('Planning');
+
+    expect(await runtime.report({ sessionId: 's1', kind: 'worktree', path: 'D:\\git\\widgets-wt\\7-fix\\' })).toEqual({ refused: null });
+    expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', branch: '7-fix', linkedBy: 'report' });
+    expect(cli.calls.at(-1)).toEqual(['git', 'worktree', 'list', '--porcelain']);
+
+    expect(await runtime.report({ sessionId: 's1', kind: 'worktree', path: 'D:/elsewhere' })).toEqual({ refused: 'D:/elsewhere is not a git worktree.' });
+    expect(await runtime.report({ sessionId: 's9', kind: 'done', summary: null })).toEqual({ refused: 'Unknown session s9.' });
+    expect(await runtime.report({ sessionId: 's1', kind: 'blocked', reason: 'Stuck.' })).toEqual({ refused: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stuck.' });
+    expect(await runtime.report({ sessionId: 's1', kind: 'done', summary: 'Done.' })).toEqual({ refused: null });
+    expect(store.workItem(1)?.status).toBe('done');
+  });
+
+  it('stops a session and reports a failed stop', async () => {
+    const { store, cli, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    cli.stopResult = fail('No such agent');
+    runtime.send({ type: 'stop', workItemId: 1 });
+    await runtime.settled();
+    expect(store.workItem(1)).toMatchObject({ status: 'running', error: 'Stop failed: No such agent' });
+
+    cli.stopResult = ok('');
+    runtime.send({ type: 'stop', workItemId: 1 });
+    await runtime.settled();
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
+  });
+
+  it('reconciles at startup and installs hooks when enabled', async () => {
+    const { store, runtime } = setup(config({ installHooks: true }));
+    store.insertTicket({ source: 'adhoc', sourceKey: '1', sourceId: null, title: 'x', url: '', assigned: true, lastPolledAt: null, repoRoot: 'D:/x' });
+    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch' });
+    await runtime.settled();
+    store.updateSession('s1', { state: 'starting', shortId: null });
+
+    await runtime.startup();
+
+    expect(store.session('s1')).toMatchObject({ state: 'ended', outcome: 'failed' });
+    expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'The hub stopped while the session was starting.' });
+    expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(11);
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
+  it('builds the panel snapshot', async () => {
+    const { source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const snapshot = runtime.snapshot();
+
+    expect(snapshot.workItems).toHaveLength(1);
+    expect(snapshot.workItems[0]).toMatchObject({ id: 1, status: 'running', ticket: { sourceKey: '8' }, triage: { playbook: 'dev:develop' }, sessions: [{ id: 's1' }] });
+    expect(snapshot.playbooks).toEqual([{ name: 'dev:develop', description: 'Build it' }]);
+    expect(snapshot.repoRoots).toEqual(['D:/git/widgets']);
+    expect(runtime.reportCommand).toBe(`node "${join(home, '.switchboard').replaceAll('\\', '/')}/hub.js" report`);
+  });
+
+  it('hands a pending open to the first window on its folder within two minutes', () => {
+    let now = T0;
+    const { runtime } = setup(config(), () => now);
+
+    runtime.recordOpen('a-native', 'D:/git/widgets-wt/7-fix');
+    now += 2 * 60_000;
+    expect(runtime.claimOpen('D:\\git\\widgets-wt\\7-fix')).toBe('a-native');
+
+    runtime.recordOpen('b-native', 'D:/git/widgets-wt/8-fix');
+    now += 2 * 60_000 + 1;
+    expect(runtime.claimOpen('D:/git/widgets-wt/8-fix')).toBeNull();
+  });
+
+  it('reports an unknown or misconfigured source', () => {
+    const cfg = config();
+    cfg.settings.sources['zoho'] = { ...cfg.settings.sources['github']!, enabled: true };
+    const { runtime } = setup(cfg);
+
+    expect(runtime.snapshot().errors.sources).toEqual({ zoho: 'Switchboard has no source named zoho.' });
+  });
+});
