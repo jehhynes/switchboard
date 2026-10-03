@@ -134,7 +134,13 @@ Switchboard is a local software factory for one developer. It ingests work assig
   - An **Icebox** group, collapsed at the bottom, holds iceboxed tickets (R49).
   - A **Pool** group, below the work items, lists pool tickets by importance (R50), then oldest first by the source's sort time (Zoho's customer response time, Forum's last public post), so the most urgent and then the longest-waiting customer come first, with the importance, the source and key, the title, the triage summary, the chosen playbook and a Pick control.
   - It groups work items, checking in this order: **Done** when the work item is `done` (the last 7 days, collapsed; an active session still shows its mark); **Needs you** when the status is `awaiting-approval`, `blocked` or `failed`, or the active session is `waiting`; **Working** otherwise.
-  - Each row shows the source and key linked to the source, the title, the playbook, a status mark, the stage and its age, and any warning.
+  - Each row shows the source and key linked to the source, the title, the playbook, a mark, the stage and its age, and any warning.
+  - The mark shows what differs between rows of the same group, because the group header already says what they share; its tooltip names it in words:
+    - **Pool:** the importance rank as a coloured dot: red for rank 0–1, orange for 2, grey for 3–4, hollow when unrated.
+    - **Needs you:** what the operator must do: approve a start, approve a publish (an approval report), answer a question (`waiting`, or blocked with a question), look at a block, or deal with a failure (red).
+    - **Working:** the phase: triaging, queued, claiming or setting up, running.
+    - **Done:** how it ended: the session reported done, the operator marked it done, or the ticket left with no done report (with the warning).
+    - **Icebox:** the mark the item would have in the group it returns to.
   - Expanding a row shows the triage summary, the triage context, the task prompt and the session history.
   - Controls appear only when they apply: Approve, Change playbook, Triage again, Retry, Stop, Mark done, Attach and Open in VS Code.
   - The panel uses VS Code's theme and codicons. It is not a kanban board.
