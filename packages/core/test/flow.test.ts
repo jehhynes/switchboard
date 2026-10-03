@@ -594,17 +594,12 @@ describe('limits and the one-active-session rule', () => {
 });
 
 describe('operator actions', () => {
-  it('changes the playbook to awaiting approval, and refuses it with an active session or an unknown playbook', () => {
+  it('refuses Triage again with an active session', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
 
-    expect(h.send({ type: 'change-playbook', workItemId: 1, playbook: 'triage:github' }).refused).toBe('triage:github is not a loaded task playbook.');
-    h.act({ type: 'change-playbook', workItemId: 1, playbook: 'support:defect' });
-    expect(h.item(1)).toMatchObject({ status: 'unstarted', playbook: 'support:defect' });
-
     h.started(h.act({ type: 'start', workItemId: 1 })[0]);
-    expect(h.send({ type: 'change-playbook', workItemId: 1, playbook: 'dev:question' }).refused).toBe('The work item has an active session.');
     expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('The work item has an active session.');
   });
 
@@ -671,7 +666,6 @@ describe('ad-hoc', () => {
 
     expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('The work item has an active session.');
     expect(h.send({ type: 'retriage', workItemId: 2 }).refused).toBe('An ad-hoc work item is not triaged.');
-    expect(h.send({ type: 'change-playbook', workItemId: 2, playbook: 'dev:question' }).refused).toBe('An ad-hoc work item has no playbook.');
   });
 
   it('refuses an empty prompt or no repo', () => {

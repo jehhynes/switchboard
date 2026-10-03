@@ -18,7 +18,7 @@ import type { ReportBody, RuntimeDeps } from './runtime.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the panel may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'change-playbook', 'stop', 'pick', 'retriage-pool', 'icebox', 'restore']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'icebox', 'restore']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval', 'link']);
 

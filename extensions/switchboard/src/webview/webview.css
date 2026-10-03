@@ -3,30 +3,38 @@ h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin:
 details.group > summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
 details.group > summary h3 { display: inline; }
 .item { border-bottom: 1px solid var(--vscode-widget-border, transparent); padding: 4px 0; }
-.item > summary { cursor: pointer; display: flex; flex-wrap: wrap; row-gap: 2px; }
+.item { display: flex; flex-direction: column; row-gap: 2px; }
 .line { display: flex; flex-basis: 100%; gap: 6px; align-items: center; min-width: 0; }
 .line.second { padding-left: 22px; }
 .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .playbook-name, .stage, .empty { color: var(--vscode-descriptionForeground); }
 .status { font-weight: 600; }
-.note { color: var(--vscode-editorWarning-foreground); flex-basis: 100%; padding-left: 22px; }
-.worktree { color: var(--vscode-descriptionForeground); }
-.errors .note { display: block; padding-left: 0; margin: 4px 0; }
+.note { color: var(--vscode-editorWarning-foreground); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.errors .note { display: block; margin: 4px 0; white-space: normal; }
 button { display: inline-flex; align-items: center; gap: 4px; line-height: 16px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 2px 8px; cursor: pointer; }
 button .codicon { font-size: 14px; line-height: 16px; }
 button:hover { background: var(--vscode-button-secondaryHoverBackground); }
-select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); }
-.detail { margin-left: 22px; }
-.detail pre { white-space: pre-wrap; max-height: 240px; overflow: auto; background: var(--vscode-textCodeBlock-background); padding: 4px; }
 a { color: var(--vscode-textLink-foreground); }
 .key, .playbook-name, .status, .stage { white-space: nowrap; flex-shrink: 0; }
-.worktree { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worktree { flex-shrink: 0; color: var(--vscode-descriptionForeground); }
+.session-button { position: relative; padding: 2px 6px; }
+.session-button:disabled { opacity: 0.6; cursor: default; }
+.state-dot { position: absolute; right: 2px; top: 2px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--vscode-button-secondaryBackground); }
+.state-dot.running { background: var(--vscode-charts-green, #89d185); }
+.state-dot.waiting { background: var(--vscode-charts-orange, #d18616); }
+.state-dot.idle { background: var(--vscode-disabledForeground, #8b8b8b); }
+.state-dot.failed { background: var(--vscode-charts-red, #f14c4c); }
+/* The metadata shrinks and clips so the controls stay visible on a narrow panel; clipped text is in tooltips. */
+.meta { display: flex; gap: 6px; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.meta > * { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta > .status { flex-shrink: 0; }
+/* The approval summary says what Approve publishes, so part of it stays visible to hover. */
+.meta > .approval { flex: 1 0 3em; }
 .actions { margin-left: auto; display: flex; gap: 4px; align-items: center; flex-shrink: 0; white-space: nowrap; }
 .more { position: relative; }
 .more-button { padding: 2px 4px; }
 .menu { position: absolute; right: 0; top: calc(100% + 2px); z-index: 10; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 160px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, transparent)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
 .menu button { justify-content: flex-start; width: 100%; }
-.line .summary { flex: 1 1 auto; min-width: 0; color: var(--vscode-descriptionForeground); }
 .returned { white-space: nowrap; flex-shrink: 0; font-size: 11px; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .mark { width: 16px; flex-shrink: 0; display: inline-flex; justify-content: center; }
 .mark.error { color: var(--vscode-errorForeground); }
@@ -38,9 +46,8 @@ a { color: var(--vscode-textLink-foreground); }
 .priority.low { background: var(--vscode-disabledForeground, #8b8b8b); }
 .priority.unrated { border: 1.5px solid var(--vscode-descriptionForeground); }
 .queue { white-space: nowrap; flex-shrink: 0; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
-.links { flex-wrap: wrap; }
-.badge { white-space: nowrap; text-decoration: none; padding: 0 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-textLink-foreground)); border-radius: 2px; }
-.approval { color: var(--vscode-descriptionForeground); font-style: italic; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; padding: 0 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-textLink-foreground)); border-radius: 2px; }
+.approval { color: var(--vscode-descriptionForeground); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Scrollbars like VS Code's own: thin, theme-coloured, and shown only while the scrollable area is hovered. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }

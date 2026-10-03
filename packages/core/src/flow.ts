@@ -78,7 +78,6 @@ export type FlowEvent =
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
   | { type: 'start' | 'approve' | 'retry' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
-  | { type: 'change-playbook'; workItemId: number; playbook: string }
   | { type: 'pick' | 'retriage-pool' | 'icebox' | 'restore'; ticketId: number }
   | { type: 'tick' };
 
@@ -203,8 +202,6 @@ class Flow {
         return this.done(this.openItem(event.workItemId), 'operator', null);
       case 'retriage':
         return this.retriage(this.openItem(event.workItemId));
-      case 'change-playbook':
-        return this.changePlaybook(this.openItem(event.workItemId), event.playbook);
       case 'stop':
         return this.stop(this.knownItem(event.workItemId));
       case 'pick':
@@ -916,20 +913,6 @@ class Flow {
     }
 
     this.store.updateWorkItem(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
-  }
-
-  private changePlaybook(item: WorkItem, name: string): void {
-    this.requireNoSession(item);
-
-    if (this.store.ticket(item.ticketId)!.source === ADHOC_SOURCE) {
-      throw new Refusal('An ad-hoc work item has no playbook.');
-    }
-
-    if (this.context.playbooks.get(name)?.kind !== 'task') {
-      throw new Refusal(`${name} is not a loaded task playbook.`);
-    }
-
-    this.store.updateWorkItem(item.id, { playbook: name, taskPrompt: null, status: 'unstarted', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
   }
 
   private requireNoSession(item: WorkItem): void {

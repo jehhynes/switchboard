@@ -38,14 +38,14 @@ describe('approval reports (PRD R23, R31)', () => {
     expect(retry.prompt.startsWith('/review-pr pr:123 publish\n\n')).toBe(true);
   });
 
-  it('drops the pending approval when the playbook changes', () => {
+  it('drops the pending approval when the work item is triaged again', () => {
     const h = new Harness();
     const { item, session } = running(h);
 
-    h.report(session, { kind: 'approval', prompt: '/publish', summary: null });
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.' });
     h.act({ type: 'roster', sessions: [] });
-    h.act({ type: 'change-playbook', workItemId: item, playbook: 'support:defect' });
-    expect(h.item(item)).toMatchObject({ playbook: 'support:defect', approvalPrompt: null });
+    h.act({ type: 'retriage', workItemId: item });
+    expect(h.item(item)).toMatchObject({ status: 'triaging', approvalPrompt: null, approvalSummary: null });
   });
 });
 
