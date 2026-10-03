@@ -19,3 +19,5 @@ These mechanisms are planned but not yet verified for Switchboard:
 - `claude --bg` output and short-ID matching against `claude agents --json` (GC M1, M33) on the installed CLI version.
 - `claude -p --json-schema` classifier flags and stdin input (GC M31).
 - `claude attach` and `claude-vscode.primaryEditor.open` behavior (GC M5–M7, M33, M45).
+- Hook events and payload fields for activity markers, including in `--bg` sessions (GC M2, M20).
+- Whether a session resumed in a VS Code tab after its release stop appears in `claude agents --json`. If it does not, R17 cannot see it, and a Retry could start a second session on the ticket while the operator works in the tab.

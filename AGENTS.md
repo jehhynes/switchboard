@@ -10,7 +10,17 @@ Session and triage mechanics come from Ground Control (`D:\git\ground-control`).
 2. Implement the change and update affected docs in the same task. Test new behavior according to [testing.md](docs/testing.md).
 3. Before each commit, review the change with the `cross-check` skill, so the other provider reviews it. Cover requirements, correctness, regressions, and UI behavior where applicable. Fix or answer each finding before committing.
 4. Complete the required checks. For executable changes to the extension or hub, [rebuild and reinstall](#reinstalling-after-a-change).
-5. Commit each self-contained story or task after review, verification, and user acceptance.
+5. Commit each self-contained story or task after review, verification, and acceptance by the operator or the product manager session.
+
+Settle product questions with the Goals, Non-goals and Design rules in [prd.md](docs/prd.md#goals), and record each new decision in the document that owns it. Escalate only what those rules do not settle.
+
+### Roles
+
+When the operator appoints a product manager session:
+
+- The product manager session owns product decisions and the docs, accepts work against the PRD, and writes no code and runs no tests.
+- The developer session builds and tests, itself or through subagents, and asks the product manager session the product questions that the Goals, Non-goals and Design rules do not settle.
+- The developer session sends the product manager session readable evidence before each commit: test names and counts, check output or its file path, integration and live acceptance results, and the R IDs implemented.
 
 Continue until the task is complete or blocked. Ask for clarification when required intent is unresolved, credentials are missing, the work would deviate from the PRD, or verification is inadequate.
 
