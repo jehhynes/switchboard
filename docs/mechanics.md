@@ -12,6 +12,15 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Result:** works in both runtimes with no native module. System Node prints `ExperimentalWarning: SQLite is an experimental feature`; the module's API may still change between Node versions.
 - **Current use:** the store (architecture.md § Store). Re-run after a VS Code or Node upgrade.
 
+## M2. GitHub issue search through `gh api graphql`
+
+- **Date:** 2026-10-03.
+- **Versions:** gh 2.100.0, signed in as `work-ai-login`; repository `acme/widgets`, project `acme/3`.
+- **Experiment:** `search(type:ISSUE)` with `repo:acme/widgets is:issue is:open project:acme/3` plus `assignee:work-login`, `assignee:work-ai-login`, or both. Then `GithubSource.poll` and `context` against the same repository.
+- **Result:** 10, 1 and 11 issues: repeated `assignee:` qualifiers are ORed, as GC found. The poll listed 11 issues, 9 of them in an assigned status. The context of issue 19504 (a 41,253-character body, 5 comments, 32 timeline events, and one open closing PR with 5 comments, one of them 52,900 characters, and 5 review threads) formatted to 28,996 characters with each text clipped to 2,000.
+- **Fixtures:** `packages/github/test/fixtures` are these responses, scrubbed: titles, bodies and comments are replaced by filler of the same length, and logins other than the operator's and `acme` by `user-a`, `user-b`, ….
+- **Current use:** the GitHub source (architecture.md § Settings).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

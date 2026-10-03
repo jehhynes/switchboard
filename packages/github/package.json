@@ -1,0 +1,30 @@
+{
+  "name": "@switchboard/github",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub source: reads assigned issues and builds triage context through the gh CLI. Must not import vscode.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -b -w",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@switchboard/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

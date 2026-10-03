@@ -157,7 +157,7 @@ Steps 1–7 deliver GitHub and ad-hoc end to end: R1–R4, R6–R25, R27–R45. 
 
 ## Implementation gaps
 
-Step 1 is done: R33 is implemented. Step 2 is done: `packages/core` decides R6–R25, R34–R41 and R45, and loads and validates settings and playbooks (R42 without reloading), tested with fake sources and runners. No requirement except R33 works end to end until the hub runs the core in step 5. Every other requirement is unimplemented.
+Step 1 is done: R33 is implemented. Step 2 is done: `packages/core` decides R6–R25, R34–R41 and R45, and loads and validates settings and playbooks (R42 without reloading), tested with fake sources and runners. Step 3 is done: `packages/github` reads R44's assigned state and builds the triage context (R1 for GitHub). No requirement except R33 works end to end until the hub runs the core and sources in step 5. Every other requirement is unimplemented.
 
 - Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 ## Open questions

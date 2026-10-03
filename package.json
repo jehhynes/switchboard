@@ -8,6 +8,7 @@
   },
   "workspaces": [
     "packages/core",
+    "packages/github",
     "packages/hub",
     "apps/hub",
     "extensions/switchboard"

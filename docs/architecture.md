@@ -1,12 +1,12 @@
 # Switchboard architecture
 
-Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, and the core's store, settings, playbooks and [flow decisions](#core-decisions). Every other section is planned.
+Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, the core's store, settings, playbooks and [flow decisions](#core-decisions), and the GitHub source's reads. Every other section is planned.
 
 Session and triage mechanics come from Ground Control (`D:\git\ground-control`), where they are verified. M IDs below refer to its [mechanics.md](../../ground-control/docs/mechanics.md). Re-verify them in Switchboard's own mechanics.md before relying on a version-fragile one.
 
 ## Packages
 
-npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core` (store, settings, playbooks, flow decisions), and `packages/hub`, `apps/hub` and `extensions/switchboard` for the hub lifecycle.
+npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core` (store, settings, playbooks, flow decisions), `packages/github` (poll and triage context), and `packages/hub`, `apps/hub` and `extensions/switchboard` for the hub lifecycle.
 
 | Package | Contents | Depends on |
 |---|---|---|
@@ -227,7 +227,8 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
 
 - The values shown are the operator's, taken from their Ground Control configuration. Defaults are empty for `repo`, `logins`, `project` and `assignedStatuses`, and the GitHub source refuses to poll until they are set.
 - Per playbook: `description`, `autoStart`, `requiresWorktree`, `permissionMode`, `model` and `kind`, in the playbook file's front matter.
-- GitHub reads go through `gh api graphql`. The issue query is GC's: `repo:<repo> is:issue is:open assignee:<login>… project:<owner>/<number>`, then a filter on project status. Triage context ports GC's card context: the issue body, the last 5 comments, the last 100 assignment and status events, and a linked pull request's state, checks, reviews and last 5 review threads, with each text clipped to 2,000 characters keeping the start and end.
+- A source implements core's `Source`: `poll()` returns a complete read or an error, `context(ticket)` returns the triage context or an error, and `keyOfBranch(branch)` reads a ticket key from a worktree branch.
+- GitHub reads go through `gh api graphql`. The issue query is GC's: `repo:<repo> is:issue is:open assignee:<login>… project:<owner>/<number>`, then a filter on project status; an issue on another status is listed as not assigned (mechanics M2). A poll that needs more than `maxPages` pages of 100 fails. Triage context ports GC's card context: the issue body, the last 5 comments, the last 100 assignment and status events, and a linked pull request's author, review requests, state, checks, last 5 comments, reviews and last 5 review threads, with each text clipped to 2,000 characters keeping the start and end.
 - GitHub errors: offline, timeout and rate limits are temporary. The poll changes nothing and runs again at the next interval. Missing `gh` or failed authentication shows in the panel.
 - Zoho Desk and Forum port the operator's Support board, `D:\git\support\extensions\support-kanban\lib\zoho.js` and `forum.js`. Read those and the `support-*` skills before building either source.
 - Zoho reads go through the Desk REST API at `https://desk.zoho.com/api/v1`. They use an access token refreshed from the self-client credentials file, plus the `orgId` header. Keep 19-digit IDs as strings.

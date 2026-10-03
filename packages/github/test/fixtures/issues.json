@@ -1,0 +1,232 @@
+{
+  "data": {
+    "search": {
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOjEx"
+      },
+      "nodes": [
+        {
+          "number": 20190,
+          "title": "Issue 20190",
+          "url": "https://github.com/acme/widgets/issues/20190",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🔍 Review"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 20127,
+          "title": "Issue 20127",
+          "url": "https://github.com/acme/widgets/issues/20127",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🔍 Review"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 19964,
+          "title": "Issue 19964",
+          "url": "https://github.com/acme/widgets/issues/19964",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "⚒️ Dev"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 19769,
+          "title": "Issue 19769",
+          "url": "https://github.com/acme/widgets/issues/19769",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🎁 Assigned"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 19504,
+          "title": "Issue 19504",
+          "url": "https://github.com/acme/widgets/issues/19504",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🔍 Review"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 19484,
+          "title": "Issue 19484",
+          "url": "https://github.com/acme/widgets/issues/19484",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🔍 Review"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 19231,
+          "title": "Issue 19231",
+          "url": "https://github.com/acme/widgets/issues/19231",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🆕 New"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 19230,
+          "title": "Issue 19230",
+          "url": "https://github.com/acme/widgets/issues/19230",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🆕 New"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 18531,
+          "title": "Issue 18531",
+          "url": "https://github.com/acme/widgets/issues/18531",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "⚒️ Dev"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 18388,
+          "title": "Issue 18388",
+          "url": "https://github.com/acme/widgets/issues/18388",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🎁 Assigned"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 18111,
+          "title": "Issue 18111",
+          "url": "https://github.com/acme/widgets/issues/18111",
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🎁 Assigned"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
