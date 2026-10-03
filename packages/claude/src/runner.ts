@@ -1,0 +1,148 @@
+import type { FlowAction, LiveState, ObservedSession } from '@switchboard/core';
+import type { Exec } from './exec.js';
+import { failureOf } from './exec.js';
+import { markerState } from './hooks.js';
+import type { Marker } from './hooks.js';
+
+export type StartAction = Extract<FlowAction, { type: 'start-session' }>;
+
+/** One `claude agents --json` entry. A background session has a short `id` and a `state`. */
+export interface RosterEntry {
+  id?: string;
+  sessionId: string;
+  pid?: number;
+  kind: string;
+  state?: string;
+  cwd: string;
+  name?: string;
+}
+
+export type StartResult = { shortId: string; nativeSessionId: string } | { error: string };
+
+export const START_TIMEOUT_MS = 60_000;
+const LAUNCH_TIMEOUT_MS = 60_000;
+const ROSTER_TIMEOUT_MS = 15_000;
+export const STOP_TIMEOUT_MS = 15_000;
+const ROSTER_POLL_MS = 2_000;
+
+/**
+ * Background session start (GC M33). `bgIsolation: none` lets the session edit its working directory; the prompt is one
+ * argument, so a leading slash command survives. `--bg` ignores `--session-id`, so the short ID comes from its output.
+ */
+export function startArgs(action: StartAction): string[] {
+  return [
+    '--bg',
+    '--permission-mode',
+    action.permissionMode,
+    '--settings',
+    JSON.stringify({ worktree: { bgIsolation: 'none' } }),
+    '-n',
+    action.name,
+    ...(action.model === null ? [] : ['--model', action.model]),
+    action.prompt,
+  ];
+}
+
+/** Reads the short ID from `backgrounded · <id> · <name>`. */
+export function shortIdFrom(stdout: string): string | null {
+  return /^\s*backgrounded\s+·\s+([0-9a-f]{8})\s+·/m.exec(stdout)?.[1] ?? null;
+}
+
+export type RosterResult = { entries: RosterEntry[] } | { error: string };
+
+export async function readRoster(claudePath: string, exec: Exec): Promise<RosterResult> {
+  const result = await exec(claudePath, ['agents', '--json'], { timeoutMs: ROSTER_TIMEOUT_MS });
+
+  if (result.code !== 0) {
+    return { error: failureOf(claudePath, result, ROSTER_TIMEOUT_MS) };
+  }
+
+  try {
+    const entries: unknown = JSON.parse(result.stdout);
+
+    return Array.isArray(entries) ? { entries: entries as RosterEntry[] } : { error: 'claude agents returned an unexpected response.' };
+  } catch {
+    return { error: 'claude agents returned output that is not JSON.' };
+  }
+}
+
+/** The roster entry of a background session, matched by short ID. */
+export function entryFor(entries: RosterEntry[], shortId: string): RosterEntry | undefined {
+  return entries.find((entry) => entry.id === shortId || entry.sessionId.startsWith(shortId));
+}
+
+/** The roster's state for a session without a hook marker: `working` runs, `blocked` waits for the operator, `done` and `stopped` ended the turn. */
+export function rosterState(entry: RosterEntry): LiveState {
+  switch (entry.state) {
+    case 'blocked':
+      return 'waiting';
+    case 'done':
+    case 'stopped':
+      return 'idle';
+    default:
+      return 'running';
+  }
+}
+
+export interface StartDeps {
+  exec: Exec;
+  sleep(ms: number): Promise<void>;
+  now(): number;
+}
+
+/** Starts a background session and waits for its roster entry to have a pid. Claude's own message explains a refusal, such as an untrusted directory. */
+export async function startSession(claudePath: string, action: StartAction, deps: StartDeps): Promise<StartResult> {
+  const launched = await deps.exec(claudePath, startArgs(action), { cwd: action.cwd, timeoutMs: LAUNCH_TIMEOUT_MS });
+
+  if (launched.code !== 0) {
+    return { error: failureOf(claudePath, launched, LAUNCH_TIMEOUT_MS) };
+  }
+
+  const shortId = shortIdFrom(launched.stdout);
+
+  if (shortId === null) {
+    return { error: `Claude started a session without printing its ID: ${launched.stdout.trim()}` };
+  }
+
+  for (const deadline = deps.now() + START_TIMEOUT_MS; deps.now() < deadline; await deps.sleep(ROSTER_POLL_MS)) {
+    const roster = await readRoster(claudePath, deps.exec);
+    const entry = 'entries' in roster ? entryFor(roster.entries, shortId) : undefined;
+
+    // A new entry has no pid for its first seconds (mechanics M5); the session is alive once it does.
+    if (entry?.pid !== undefined) {
+      return { shortId, nativeSessionId: entry.sessionId };
+    }
+  }
+
+  return { error: `Session ${shortId} did not appear in claude agents within ${START_TIMEOUT_MS / 1000} seconds.` };
+}
+
+/** `claude stop`, never `claude rm`, which can delete the session's worktree (GC M33). */
+export async function stopSession(claudePath: string, shortId: string, exec: Exec): Promise<{ error: string } | null> {
+  const result = await exec(claudePath, ['stop', shortId], { timeoutMs: STOP_TIMEOUT_MS });
+
+  return result.code === 0 ? null : { error: failureOf(claudePath, result, STOP_TIMEOUT_MS) };
+}
+
+/**
+ * The roster event for Switchboard's sessions: those whose roster entry holds a process, with the state their hook
+ * marker gives, else the roster's. A listed entry without a pid holds no process (GC M33).
+ */
+export function observe(entries: RosterEntry[], sessions: { id: string; shortId: string | null }[], markers: ReadonlyMap<string, Marker>): ObservedSession[] {
+  const observed: ObservedSession[] = [];
+
+  for (const session of sessions) {
+    const entry = session.shortId === null ? undefined : entryFor(entries, session.shortId);
+
+    if (entry?.pid === undefined) {
+      continue;
+    }
+
+    const marker = markers.get(entry.sessionId);
+    const fromMarker = marker === undefined ? null : markerState(marker);
+
+    observed.push({ sessionId: session.id, ...(fromMarker ?? { state: rosterState(entry), detail: null }) });
+  }
+
+  return observed;
+}

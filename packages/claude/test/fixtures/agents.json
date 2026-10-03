@@ -1,0 +1,40 @@
+[
+  {
+    "id": "45503b04",
+    "cwd": "D:\\git\\repo0",
+    "kind": "background",
+    "startedAt": 1790639902417,
+    "sessionId": "45503b04-3e5b-4aa5-806b-473ae36418f6",
+    "name": "ground-control · action · #100",
+    "state": "blocked"
+  },
+  {
+    "pid": 8292,
+    "id": "a54bd2e6",
+    "cwd": "D:\\git\\repo1",
+    "kind": "background",
+    "startedAt": 1790986258868,
+    "sessionId": "a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9",
+    "name": "ground-control · action · #101",
+    "status": "busy",
+    "state": "blocked"
+  },
+  {
+    "pid": 60112,
+    "cwd": "D:\\git\\repo2",
+    "kind": "interactive",
+    "startedAt": 1790994181483,
+    "sessionId": "3e065e9f-2816-4e7f-a186-ad57273c4375",
+    "name": "session 2",
+    "status": "busy"
+  },
+  {
+    "pid": 29384,
+    "cwd": "D:\\git\\repo3",
+    "kind": "interactive",
+    "startedAt": 1790999464643,
+    "sessionId": "c3693100-51b2-4e92-9e82-311aacd7c496",
+    "name": "session 3",
+    "status": "idle"
+  }
+]
