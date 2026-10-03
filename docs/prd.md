@@ -132,7 +132,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 - R27. A VS Code panel lists work items with ticket, playbook, status, stage, worktree, active session and warnings.
   - An **Icebox** group, collapsed at the bottom, holds iceboxed tickets (R49).
-  - A **Pool** group, below the work items, lists pool tickets oldest first by the source's sort time (Zoho's customer response time, Forum's last public post), so the longest-waiting customer comes first, with the source and key, the title, the triage summary, the chosen playbook and a Pick control.
+  - A **Pool** group, below the work items, lists pool tickets by importance (R50), then oldest first by the source's sort time (Zoho's customer response time, Forum's last public post), so the most urgent and then the longest-waiting customer come first, with the importance, the source and key, the title, the triage summary, the chosen playbook and a Pick control.
   - It groups work items, checking in this order: **Done** when the work item is `done` (the last 7 days, collapsed; an active session still shows its mark); **Needs you** when the status is `awaiting-approval`, `blocked` or `failed`, or the active session is `waiting`; **Working** otherwise.
   - Each row shows the source and key linked to the source, the title, the playbook, a status mark, the stage and its age, and any warning.
   - Expanding a row shows the triage summary, the triage context, the task prompt and the session history.
@@ -143,6 +143,9 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R30. Resuming an ended session always opens it in VS Code.
 - R31. The operator can approve a work item waiting for approval, which starts its task session, or the session with the prompt an approval report named (R23). The panel shows the report's summary next to Approve.
 - R49. The operator can move a pool ticket or a work item to the Icebox, and restore it. An iceboxed ticket shows only in a collapsed Icebox group, gets no automatic triage or start, and returns to its group when restored. The Icebox is local and never written to the source.
+- R50. Triage can rate a ticket's importance as immediacy (`URGENT`, `BLOCKING` or `NON-BLOCKING`) and severity (`HIGH`, `MED` or `LOW`), as the source's triage playbook instructs; a playbook that does not rate leaves both empty. The panel shows the rating on pool tickets and work items. Importance rank is the immediacy rank plus the severity rank, lowest first; unrated tickets sort after rated ones.
+- R51. A ticket that returns after an earlier work item for it was done is marked **Returned**, with the number of earlier work items, on its pool row or its new work item.
+- R52. A session can report links for its work item: a label and a URL or local file path, such as the GitHub issue and pull request it created or found, or a Support case's `case.md`. The panel shows them as badges on the work item that open the URL in the browser or the file in VS Code. Links stay with the ticket, so a returned ticket keeps them.
 - R32. The operator can mark a work item done.
 
 ### Runtime

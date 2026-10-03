@@ -39,8 +39,9 @@ The ad-hoc source is local and lives in `packages/hub`. State, playbooks and the
 ```
 Ticket     id, source, sourceKey, sourceId, title, url, assigned, pool, iceboxed, sortAt, lastPolledAt, repoRoot
 WorkItem   id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, failedStep, unassignedAt, queuedAt, needsPick, createdAt, doneAt, doneReason, approvalPrompt, approvalSummary
-Triage     id, ticketId, workItemId, context, playbook, summary, model, startedAt, endedAt, error
+Triage     id, ticketId, workItemId, context, playbook, summary, immediacy, severity, model, startedAt, endedAt, error
 Worktree   id, ticketId, path, branch, linkedBy (report | convention)
+Link       id, ticketId, label, target, reportedAt
 Session    id, workItemId, kind (pick | setup | task), provider, nativeSessionId, shortId, cwd, state, stateAt, stateDetail, outcome, outcomeDetail, startedAt, endedAt, released
 ```
 
@@ -108,7 +109,7 @@ Report progress with `{{report}} stage {{session.id}} <stage>`.
 - `description` tells the classifier when to choose the playbook. Adding a playbook is adding its file: the hub reloads it, and the classifier sees its description. Edit the triage playbook only for a rule that must take precedence over the descriptions.
 - A source's triage playbook has `kind: triage`. Its body is the classifier's system prompt. Triage playbooks are never offered to the classifier as choices.
 - Each source's `namespace` setting limits the classifier's choices to that namespace's task playbooks, such as `dev` for GitHub and `support` for Zoho Desk and Forum. With one playbook in the namespace, triage still writes the summary.
-- Every session prompt ends with the report contract: the session ID and the `stage`, `worktree`, `done`, `blocked` and `approval` commands, and two rules. When the session needs the operator for a question or a choice, it reports `blocked` with the question and ends its turn instead of waiting, so it does not hold a session slot. When its work is ready but posting or publishing it needs the operator's approval, it reports `approval` with the prompt that would do it, such as `/review-pr pr:123 publish`, and ends its turn. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
+- Every session prompt ends with the report contract: the session ID and the `stage`, `worktree`, `done`, `blocked`, `approval` and `link` commands, and three rules. It reports a `link` for each GitHub issue or pull request it creates or finds for the work, and for a case file such as Support's `case.md`. When the session needs the operator for a question or a choice, it reports `blocked` with the question and ends its turn instead of waiting, so it does not hold a session slot. When its work is ready but posting or publishing it needs the operator's approval, it reports `approval` with the prompt that would do it, such as `/review-pr pr:123 publish`, and ends its turn. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
 
 ## Triage
 
@@ -116,7 +117,7 @@ Triage follows Ground Control's classifier (GC R38, M31).
 
 1. The source plugin builds the triage context: it fetches the ticket's text, clips each field at a word boundary to a size limit, and formats it with authors, status changes and assignees. Ground Control clips the issue body and each comment to 2,000 characters.
 2. The classifier runs `claude -p --output-format json --json-schema <schema> --no-session-persistence --setting-sources "" --tools "" --strict-mcp-config --system-prompt <triage playbook + playbook descriptions>`, with the context on stdin. Stdin avoids the Windows 32,767-character command-line limit (M31).
-3. The schema is `{playbook: enum of the source namespace's task playbook names, summary: string}`. The classifier reads `structured_output`.
+3. The schema is `{playbook: enum of the source namespace's task playbook names, summary: string, immediacy?: URGENT | BLOCKING | NON-BLOCKING, severity?: HIGH | MED | LOW}` (PRD R50). The classifier reads `structured_output`.
 
 Triage has no tools, settings, MCP servers or saved transcript, so it is not a session and does not count toward the one-active-session rule. The hub runs at most one triage per work item at a time, at most `triage.concurrency` at once (default 2), with a `triage.timeoutSeconds` limit (default 180).
 
@@ -191,6 +192,7 @@ node "<home>/hub.js" report worktree <sessionId> <path>
 node "<home>/hub.js" report done <sessionId> [--summary <text>]
 node "<home>/hub.js" report blocked <sessionId> --reason <text>
 node "<home>/hub.js" report approval <sessionId> --prompt <prompt> [--summary <text>]
+node "<home>/hub.js" report link <sessionId> --label <text> --target <url or absolute path>
 ```
 
 - The CLI's home is the directory that holds the `hub.js` it runs from, so a session started by a hub with `--home` reports to that home.
