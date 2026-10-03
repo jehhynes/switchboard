@@ -30,14 +30,16 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - Replacing Ground Control's board, lanes or review workflow.
 - Built-in playbooks or namespaces.
 - Unattended overnight operation as a committed goal.
+- Complex error handling or support for rare edge cases. A failure shows its cause, and the operator recovers with Retry, Mark done, or a fix to their configuration.
 
 ## Design rules
 
 - **Least authority.** An unattended session gets the least permission mode under which it can finish. The default is `auto`; a playbook can override it.
-- **Visible failure.** Every failure shows on its work item with the cause and a recovery action. Work retries automatically only on triage's fixed schedule (R37). Source reads retry on their own backoff, which changes no work item.
+- **Simple first.** Choose the simplest behavior that keeps common work correct. Handle a rare case by showing it, not with special machinery.
+- **Visible failure.** Every failure shows on its work item with the cause. Switchboard does not retry work automatically; Retry is the operator's. A failed source poll is tried again at the next interval.
 - **Observed state only.** The panel shows what the roster and session reports say, and how old that observation is. A session's report is its claim and is shown as such.
 - **Never cut off work.** Switchboard stops a session only when the operator asks, or to release a session that has finished its turn so the operator can resume it in VS Code (R39).
-- **Bounded automation.** Concurrency and daily limits cap automatic starts (R38).
+- **Bounded automation.** A concurrency limit caps running sessions (R38), and a playbook starts on its own only when the operator set `autoStart`.
 - **A failed read changes nothing.** A failed or incomplete source poll never moves a ticket out of the assigned state.
 - **Files for configuration, the store for state.** Settings and playbooks are files the operator edits and can keep in git. Work items, sessions and history live in the store.
 
@@ -68,7 +70,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R46. The Zoho Desk source reads tickets through the Desk API. A ticket is in the assigned state when its status type is Open, its escalation field is `Support`, and it is assigned to the operator, to no one, or to a support agent or team. A ticket assigned to another engineer is not the operator's. General escalations stay assigned to the escalating General agent, so a support assignee counts as unclaimed.
 - R6. The ad-hoc source creates a ticket and a work item from a prompt the operator types in the panel. The typed prompt replaces the playbook template: triage does not run, and the task session runs the typed prompt.
   - The operator picks the repository from the configured repo roots; the first one is the default. The session runs there with no worktree requirement and no playbook, using the `sessions` permission mode and model.
-  - The start is the operator's: it bypasses the daily limit but not the concurrency limit.
+  - It starts at once, subject to the concurrency limit.
   - The ticket key is a local sequence number, and its title is the prompt's first line.
 
 ### Work items
@@ -84,7 +86,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
   - `failed` means a Switchboard step failed: triage, a session start, or a setup session that ended without a worktree. The panel shows the cause and offers Retry.
 - R35. The operator can change a work item's playbook, or triage it again, while it has no active session. A changed playbook puts the work item in `awaiting-approval`, so the operator approves the new choice.
 - R45. Retry repeats the step that stopped:
-  - After failed triage, triage runs again with a fresh attempt count.
+  - After failed triage, triage runs again.
   - After a failed setup or setup start, a new setup session starts.
   - After a failed task start, or a blocked task, a new task session starts from the same playbook, ticket and triage result, rendered again with the new session's ID and report contract, in the directory its `workdir` names. It is a new conversation; Open in VS Code is how to continue the old one.
   - Only reports from a work item's latest session change the work item. Reports from earlier sessions are recorded on those sessions.
@@ -107,14 +109,11 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R22. All sessions use Claude Code for now. The provider is stored per session so Codex can be added later.
 - R23. A session can report its stage, a worktree link, that it is done, or that it is blocked with a reason. Reports are accepted from the session after it is resumed in VS Code.
 - R36. A session's observed state is `starting`, `running`, `waiting` (needs the operator: a permission prompt or a question), `idle` (its turn ended), `failed` (the turn stopped on an error, with its kind) or `ended`. Hook markers that Switchboard installs in the operator's Claude settings decide the state. The Claude roster decides whether the session is alive, and supplies the state when no marker exists. A session's outcome is `done`, `blocked`, `failed` or `stopped`.
-- R37. Triage that fails retries automatically after 1, 2, 5 and 30 minutes, and then fails. A configuration error, such as a missing triage playbook or no task playbooks to choose from, fails at once, because waiting cannot fix it. A failed session start does not retry automatically. Retry is the operator's action.
-- R38. At most `sessions.concurrency` sessions run at once (default 2, range 1–4). At most `sessions.dailyLimit` automatic starts happen per rolling 24 hours (default 20). An approval or retry by the operator bypasses the daily limit but not the concurrency limit. A start that has no free slot waits as `queued`.
-  - A setup session and the task session that follows it count as one start and hold one slot.
-  - An automatic start that would exceed the daily limit becomes `awaiting-approval`, with "Daily limit reached" shown on the work item.
-  - Automatic triage that would exceed `triage.dailyLimit` fails the work item with "Triage daily limit reached"; Retry bypasses the limit.
+- R37. A triage or session start that fails makes the work item `failed`, with the error. Switchboard does not retry it automatically.
+- R38. At most `sessions.concurrency` sessions run at once (default 2, range 1–4). A start that has no free slot waits as `queued`. A setup session and the task session that follows it hold one slot.
 - R39. After a session reports done or blocked, or its turn ends, Switchboard stops its background process once the turn is no longer running, so that the session can resume in VS Code. This never deletes the session or its worktree.
 - R40. The operator can stop an active session. The work item becomes `blocked` with the reason "Stopped by you." once `claude stop` succeeds. A failed stop shows its error and leaves the session stoppable.
-- R41. When Claude refuses a start because the directory is not trusted, the work item fails with the recovery step: run `claude` in that directory once and accept the trust prompt, then retry. Switchboard never writes Claude's trust settings.
+- R41. A failed start shows Claude's own message, which for an untrusted directory says how to trust it. Switchboard never writes Claude's trust settings.
 
 ### Worktrees
 
@@ -140,7 +139,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 - R33. Switchboard's core runs in a separate process from VS Code and keeps running when the window reloads or closes.
 - R42. Settings and playbooks are files in the Switchboard home. The hub reloads them when they change. An invalid settings file leaves the last valid settings in force; an invalid playbook is left out. Either error shows in the panel.
-- R43. On startup the hub reconciles sessions recorded as active against the Claude roster and ingests reports made while it was down.
+- R43. On startup the hub reconciles sessions recorded as active against the Claude roster. The hub stays running while any session is active, so sessions can always report.
 
 ## Delivery
 
@@ -150,7 +149,7 @@ Each step ends with `npm run verify` passing and the PRD's affected requirements
 2. **Core.** Store, data model, settings and playbook loading and rendering, assigned-state transitions, work item statuses, the one-active-session rule, approval, `requiresWorktree`, retry and limit decisions. Tested with fake sources and runners.
 3. **GitHub source.** Assigned state and triage context, ported from Ground Control's fetch and clip.
 4. **Claude runner and classifier.** `claude -p --json-schema` triage, `claude --bg` sessions, roster polling, hook installation and markers, stop, and the trust refusal.
-5. **Hub.** Polling, flow execution, the report endpoint, the `switchboard report` CLI and its spool, startup reconciliation, the panel protocol.
+5. **Hub.** Polling, flow execution, the report endpoint, the `switchboard report` CLI, startup reconciliation, the panel protocol.
 6. **Panel and ad-hoc source.** Work item list and every R27 control, plus the ad-hoc prompt box. The ad-hoc source comes here because it exercises the whole session path without touching a real ticket.
 7. **Live acceptance.** Run the procedure in [testing.md](testing.md#live-acceptance) and record the results.
 

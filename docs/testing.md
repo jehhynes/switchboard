@@ -23,9 +23,8 @@ Test behavior that types cannot establish:
 - The one-active-session rule, approval gates, and `requiresWorktree` handling.
 - A failed or incomplete poll leaving every ticket's assigned state unchanged.
 - Unassignment during an active session deferring the done decision.
-- Work item status transitions, triage retry timing, the concurrency and daily limits, and `queued`.
-- Report spooling while the hub is down, and ingestion at startup.
-- Hook installation: entries preserved, malformed settings refused, repair, backups. The event-to-state mapping from recorded markers, and the roster fallback.
+- Work item status transitions, the concurrency limit, and `queued`.
+- Hook installation: entries preserved, malformed settings refused, missing entries added. The event-to-state mapping from recorded markers, and the roster fallback.
 - Playbook loading, front-matter errors, and template rendering.
 - Classifier output validation, including an unknown playbook name.
 - Report command handling, including unknown session IDs and worktree paths `git worktree list` does not show.
@@ -54,7 +53,6 @@ Run it with an isolated home (`hub.js --home=<repo>/.wip/acceptance-home`) and i
 1. **GitHub read.** Configure the GitHub source with the operator's settings and every playbook set to `autoStart: false`. Confirm that the work items match the issues currently assigned to the operator in the configured statuses, and that each has a triage result. Never approve a GitHub work item during acceptance, because its playbook would run the operator's skills against a real issue.
 2. **Ad-hoc session.** Use a scratch git repository under `.wip/`, trusted by running `claude` there once. Run an ad-hoc prompt that writes a file, reports a stage, reports a worktree, and reports done. Observe `running`, the stage, `done` and the release stop in the panel.
 3. **Controls.** Attach to a running ad-hoc session and detach. Open an ended session in VS Code. Stop a session; it should end up `blocked` with "Stopped by you." Retry it. Reach `waiting` with a prompt that asks a question. Get the trust refusal from an untrusted directory.
-4. **Hub down.** Stop the hub while a session runs. Let the session report done, start the hub, and confirm the queued report was ingested.
 
 Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, VS Code and Claude extension versions, and the result of each step. A failed step is a defect or a new mechanics finding, not a skipped check.
 
