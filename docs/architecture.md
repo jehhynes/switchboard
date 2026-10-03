@@ -1,12 +1,12 @@
 # Switchboard architecture
 
-Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Only the hub lifecycle is implemented; every other section is planned.
+Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, and the core's store, settings, playbooks and [flow decisions](#core-decisions). Every other section is planned.
 
 Session and triage mechanics come from Ground Control (`D:\git\ground-control`), where they are verified. M IDs below refer to its [mechanics.md](../../ground-control/docs/mechanics.md). Re-verify them in Switchboard's own mechanics.md before relying on a version-fragile one.
 
 ## Packages
 
-npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/hub`, `apps/hub` and `extensions/switchboard`, covering the hub lifecycle only.
+npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core` (store, settings, playbooks, flow decisions), and `packages/hub`, `apps/hub` and `extensions/switchboard` for the hub lifecycle.
 
 | Package | Contents | Depends on |
 |---|---|---|
@@ -37,20 +37,22 @@ The ad-hoc source is local and lives in `packages/hub`. State, playbooks and the
 ## Data model
 
 ```
-Ticket     id, source, sourceKey, sourceId, title, url, assigned, lastSeenState, lastPolledAt
-WorkItem   id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, createdAt, doneAt, doneReason
-Triage     workItemId, context, playbook, summary, model, startedAt, endedAt, error
-Worktree   id, ticketId, repo, path, branch, linkedBy (report | convention)
-Session    id, workItemId, kind (setup | task), provider, nativeSessionId, shortId, cwd, state, stateAt, outcome, outcomeDetail, startedAt, endedAt
+Ticket     id, source, sourceKey, sourceId, title, url, assigned, lastPolledAt, repoRoot
+WorkItem   id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, failedStep, unassignedAt, queuedAt, createdAt, doneAt, doneReason
+Triage     id, workItemId, context, playbook, summary, model, startedAt, endedAt, error
+Worktree   id, ticketId, path, branch, linkedBy (report | convention)
+Session    id, workItemId, kind (setup | task), provider, nativeSessionId, shortId, cwd, state, stateAt, stateDetail, outcome, outcomeDetail, startedAt, endedAt, released
 ```
 
+- `Ticket.assigned` is the assigned state the last complete poll saw. `Ticket.repoRoot` is the repo an ad-hoc prompt chose; it is empty for other sources, which use their `repoRoot` setting.
 - `Ticket.sourceKey` is the key people use, such as a GitHub issue number or a Zoho ticket number. `Ticket.sourceId` is the source's internal ID when API calls need a different one, such as Zoho's internal ticket ID.
 - `Triage.context` is the clipped text the classifier received. Keeping it shows why a playbook was chosen.
-- `WorkItem.status` takes the values in PRD R34. `WorkItem.error` holds the cause shown for `failed`.
+- `WorkItem.status` takes the values in PRD R34. `WorkItem.error` holds the cause shown for `failed` or `blocked`, and `WorkItem.failedStep` (`triage`, `setup` or `task`) is the step Retry repeats (PRD R45).
+- `WorkItem.unassignedAt` records that the ticket left the assigned state while a session was active (PRD R10). `WorkItem.queuedAt` orders queued starts.
 - `WorkItem.taskPrompt` is the rendered prompt the task session ran, or the typed prompt for an ad-hoc work item.
 - `WorkItem.doneReason` is `session`, `operator` or `unassigned`.
 - `WorkItem.warning` is set when the work item ends because its ticket left the assigned state with no done report (PRD R10, R11).
-- `Session.state` is the observed roster state and `Session.outcome` the reported or decided outcome (PRD R36).
+- `Session.state` is the observed state, `Session.stateDetail` the error kind of a `failed` turn, and `Session.outcome` the reported or decided outcome (PRD R36). `Session.released` records that the release stop was sent, so it is sent once (PRD R39).
 - A session's `cwd` follows its playbook's `workdir`: the ticket's worktree when one exists, otherwise the source's repo root.
 
 ## Hub lifecycle
@@ -93,7 +95,7 @@ Report progress with `{{report}} stage {{session.id}} <stage>`.
 - Front matter: `description` (required), `autoStart` (default false), `requiresWorktree` (default false), `permissionMode` and `model` (defaults from `sessions` settings), `kind` (`task` by default, or `triage`), and `workdir` (`worktree` by default: the ticket's worktree when one exists, otherwise the repo root; or `repoRoot`: always the source's repo root, for playbooks whose skills belong to that repository).
 - `description` tells the classifier when to choose the playbook.
 - A source's triage playbook has `kind: triage`. Its body is the classifier's system prompt. Triage playbooks are never offered to the classifier as choices.
-- The runner always appends the report contract to the rendered prompt: the session ID and the `stage`, `worktree`, `done` and `blocked` commands. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
+- Every session prompt ends with the report contract: the session ID and the `stage`, `worktree`, `done` and `blocked` commands. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
 
 ## Triage
 
@@ -120,6 +122,23 @@ A classifier error, an unparsable result, a timeout, or a playbook name outside 
 An ad-hoc prompt creates a ticket and work item and goes straight to step 5, with the typed prompt as the task prompt and the chosen repo root as the working directory (PRD R6).
 
 Steps 4 and 5 start a session only when no session for the ticket is active and a slot is free; otherwise the work item is `queued` (PRD R38).
+
+## Core decisions
+
+`packages/core` decides; the hub acts. `handle(store, event, context)` runs inside one store transaction, applies one event, and returns the actions for the hub to run, or a refusal for an operator action or report that does not apply. The context carries the clock, settings, loaded playbooks, the report command prefix and a session ID generator. The hub runs each action and sends its result back as an event, so every failure reaches the work item.
+
+| Events | From |
+|---|---|
+| `poll`, `poll-failed` | A source read. `poll` lists the source's tickets from a complete read; a ticket missing from it has left the assigned state. `poll-failed` changes nothing. |
+| `triage-succeeded`, `triage-failed`, `triage-cancelled` | The classifier. A cancelled triage runs again. |
+| `session-started`, `session-start-failed` | The runner's `start-session`. |
+| `roster`, `marker` | A successful roster read, with each listed session's state; a hook marker for a live session. |
+| `report` | The report command: `stage`, `worktree`, `done` or `blocked`. |
+| `stop-succeeded`, `stop-failed` | The runner's `stop-session`, for an operator stop or a release. |
+| `worktree-found` | The branch convention. It links a worktree only to a ticket that has none. |
+| `adhoc`, `approve`, `retry`, `mark-done`, `retriage`, `change-playbook`, `stop`, `tick` | The panel; `tick` re-runs scheduling after settings or playbooks change. |
+
+Actions are `triage`, `start-session` and `stop-session`. After every event the core starts triage for `triaging` work items up to `triage.concurrency`, then starts `queued` work items in queue order while fewer than `sessions.concurrency` sessions are active, skipping a ticket that already has an active session. A task that follows a setup session starts when the setup session ends, without waiting for a slot.
 
 ## Claude Code runner
 
