@@ -160,6 +160,7 @@ export class ForumSource implements Source {
 
       tickets.push({
         sourceKey: String(row['Id']),
+        ref: `T${String(row['Id'])}`,
         sourceId: null,
         title: String(row['Title'] ?? ''),
         url: `https://forum.example.com/t/forum/${String(row['Key'] ?? '')}`,

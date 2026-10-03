@@ -22,7 +22,8 @@ interface IssueNode {
   number: number;
   title: string;
   url: string;
-  projectItems: { nodes: { project: ProjectRef; fieldValueByName: { name?: string } | null }[] };
+  projectItems: { nodes: { project: ProjectRef; fieldValueByName: { name?: string; updatedAt?: string } | null }[] };
+  timelineItems?: { nodes: { createdAt?: string; assignee?: { login?: string } | null }[] };
 }
 
 interface SearchPage {
@@ -101,6 +102,17 @@ export class GithubSource implements Source {
     return this.config.branchPattern.exec(branch)?.[1] ?? null;
   }
 
+  /**
+   * When the issue last came to the operator: the later of their latest assignment and the last Status change. The Status
+   * field's updatedAt is read because status-change events have been missing from the issue timeline since about 2026-09-25.
+   */
+  private waitingSince(timeline: IssueNode['timelineItems'], statusUpdatedAt: string | undefined): number | null {
+    const assigned = (timeline?.nodes ?? []).filter((event) => event.assignee?.login !== undefined && this.config.logins.includes(event.assignee.login));
+    const times = [statusUpdatedAt, assigned.at(-1)?.createdAt].map((time) => (time === undefined ? NaN : Date.parse(time))).filter((time) => !Number.isNaN(time));
+
+    return times.length === 0 ? null : Math.max(...times);
+  }
+
   private async readIssues(): Promise<PollResult> {
     const { repo, logins, project, assignedStatuses, maxPages } = this.config;
     const q = [`repo:${repo}`, 'is:issue', 'is:open', ...logins.map((login) => `assignee:${login}`), `project:${project.owner}/${project.number}`].join(' ');
@@ -121,9 +133,19 @@ export class GithubSource implements Source {
           continue;
         }
 
-        const status = node.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName?.name;
+        const field = node.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName;
+        const status = field?.name;
 
-        tickets.push({ sourceKey: String(node.number), sourceId: null, title: node.title, url: node.url, assigned: status !== undefined && assignedStatuses.includes(status), pool: false, sortAt: null });
+        tickets.push({
+          sourceKey: String(node.number),
+          ref: `#${node.number}`,
+          sourceId: null,
+          title: node.title,
+          url: node.url,
+          assigned: status !== undefined && assignedStatuses.includes(status),
+          pool: false,
+          sortAt: this.waitingSince(node.timelineItems, field?.updatedAt),
+        });
       }
 
       if (!search.pageInfo.hasNextPage) {

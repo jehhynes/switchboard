@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
 import { Harness, REPORT, T0, playbooks } from './flowHarness.js';
 
-/** A Zoho ticket: in the pool, assigned to the operator, or neither. */
+/** A Zoho ticket: in the pool, assigned to the operator, or neither. Its R ref shows that the source, not core, chooses the reference. */
 function zoho(key: string, state: 'pool' | 'assigned' | 'neither', sortAt = Number(key)): PolledTicket {
-  return { sourceKey: key, sourceId: `id-${key}`, title: `Case ${key}`, url: `https://desk.example.test/${key}`, assigned: state === 'assigned', pool: state === 'pool', sortAt };
+  return { sourceKey: key, ref: `R${key}`, sourceId: `id-${key}`, title: `Case ${key}`, url: `https://desk.example.test/${key}`, assigned: state === 'assigned', pool: state === 'pool', sortAt };
 }
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
@@ -15,7 +15,7 @@ function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Ext
 
 const pollZoho = (h: Harness, ...tickets: PolledTicket[]) => h.act({ type: 'poll', source: 'zoho', tickets });
 
-const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': '---\ndescription: A Support case\nautoStart: true\nworkdir: repoRoot\n---\n/support-process #{{ticket.sourceKey}}' });
+const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': '---\ndescription: A Support case\nautoStart: true\nworkdir: repoRoot\n---\n/support-process {{ticket.ref}}' });
 
 describe('pool triage (PRD R47, R50)', () => {
   it('triages a ticket entering the pool, offering only its namespace, stores its rating, and creates no work item', () => {
@@ -113,7 +113,7 @@ describe('pick (PRD R48)', () => {
     const task = only(h.act({ type: 'stop-succeeded', sessionId: pick, reason: 'release' }), 'start-session');
 
     expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/support', name: 'switchboard · support:case · zoho 500' });
-    expect(task.prompt.startsWith('/support-process #500\n\n')).toBe(true);
+    expect(task.prompt.startsWith('/support-process R500\n\n')).toBe(true);
     expect(h.item(1)).toMatchObject({ status: 'running', needsPick: false });
   });
 

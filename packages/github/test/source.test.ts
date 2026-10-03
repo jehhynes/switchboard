@@ -34,7 +34,7 @@ function fakeGh(...answers: GhResult[]) {
   });
 }
 
-const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, sourceId: null, title: '', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
 
 describe('GithubSource.poll', () => {
   it('lists every searched issue, assigned only when its project status is configured', async () => {
@@ -45,6 +45,7 @@ describe('GithubSource.poll', () => {
     expect(result).toEqual({
       tickets: [20190, 20127, 19964, 19769, 19504, 19484, 19231, 19230, 18531, 18388, 18111].map((number) => ({
         sourceKey: String(number),
+        ref: `#${number}`,
         sourceId: null,
         title: `Issue ${number}`,
         url: `https://github.com/acme/widgets/issues/${number}`,
@@ -53,6 +54,33 @@ describe('GithubSource.poll', () => {
         sortAt: null,
       })),
     });
+  });
+
+  it("sets the sort time to the later of the operator's latest assignment and the last Status change", async () => {
+    const node = (number: number, statusAt: string | undefined, assignees: [string, string][]) => ({
+      number,
+      title: 'T',
+      url: 'u',
+      projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev', ...(statusAt === undefined ? {} : { updatedAt: statusAt }) } }] },
+      timelineItems: { nodes: assignees.map(([login, createdAt]) => ({ createdAt, assignee: { login } })) },
+    });
+    const json = {
+      data: {
+        search: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [
+            node(1, '2026-10-02T10:00:00Z', [['someone', '2026-10-03T09:00:00Z'], ['work-login', '2026-10-02T12:00:00Z']]),
+            node(2, '2026-10-02T15:00:00Z', [['work-ai-login', '2026-10-01T08:00:00Z']]),
+            node(3, undefined, []),
+          ],
+        },
+      },
+    };
+    const result = await new GithubSource(config(), fakeGh({ json })).poll();
+
+    expect('tickets' in result && result.tickets.map((t) => t.sortAt)).toEqual([Date.parse('2026-10-02T12:00:00Z'), Date.parse('2026-10-02T15:00:00Z'), null]);
+    expect(ISSUES_QUERY).toContain('ProjectV2ItemFieldSingleSelectValue{ name updatedAt }');
+    expect(ISSUES_QUERY).toContain('itemTypes:[ASSIGNED_EVENT]');
   });
 
   it('treats a status on another project as not assigned', async () => {

@@ -24,6 +24,7 @@ describe('ForumSource.poll', () => {
     expect(tickets.filter((ticket) => ticket.pool)).toHaveLength(7);
     expect(tickets.find((ticket) => ticket.sourceKey === '90100')).toEqual({
       sourceKey: '90100',
+      ref: 'T90100',
       sourceId: null,
       title: 'Topic 90100',
       url: 'https://forum.example.com/t/forum/topic-90100',
@@ -39,7 +40,7 @@ describe('ForumSource.poll', () => {
     const row = JSON.stringify({ Id: 5, Title: 't', Key: 'k', AssigneeId: null, CreatedUtc: '2026-01-02 03:04:05', LastPublicPostUtc: null });
 
     expect(await new ForumSource(CONFIG, async () => parseRows(row)).poll()).toEqual({
-      tickets: [{ sourceKey: '5', sourceId: null, title: 't', url: 'https://forum.example.com/t/forum/k', assigned: false, pool: true, sortAt: Date.UTC(2026, 0, 2, 3, 4, 5) }],
+      tickets: [{ sourceKey: '5', ref: 'T5', sourceId: null, title: 't', url: 'https://forum.example.com/t/forum/k', assigned: false, pool: true, sortAt: Date.UTC(2026, 0, 2, 3, 4, 5) }],
     });
     expect(await new ForumSource({ ...CONFIG, maxRows: 1 }, async () => parseRows(row)).poll()).toEqual({ error: '1 or more open Forum topics; raise sources.forum.maxRows.' });
     expect(await new ForumSource(CONFIG, async () => ({ error: 'The forum database cannot be reached; check the VPN.' })).poll()).toEqual({ error: 'The forum database cannot be reached; check the VPN.' });
@@ -47,7 +48,7 @@ describe('ForumSource.poll', () => {
 });
 
 describe('ForumSource.context', () => {
-  const ticket: Ticket = { id: 1, source: 'forum', sourceKey: '90001', sourceId: null, title: 'Topic 90001', url: 'https://forum.example.com/t/forum/topic-90001', assigned: false, pool: true, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' };
+  const ticket: Ticket = { id: 1, source: 'forum', sourceKey: '90001', ref: 'T90001', sourceId: null, title: 'Topic 90001', url: 'https://forum.example.com/t/forum/topic-90001', assigned: false, pool: true, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' };
 
   it('lists the public posts oldest first, without deleted posts, private notes or the AI analysis', async () => {
     const query = vi.fn<Query>(async () => parseRows(raw('posts')));

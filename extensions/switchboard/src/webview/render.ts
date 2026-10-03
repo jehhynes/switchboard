@@ -23,42 +23,7 @@ export function activeSession(item: WorkItemView): WorkItemView['sessions'][numb
   return item.sessions.find((session) => session.state !== 'ended') ?? null;
 }
 
-const STATUS_WORDS: Record<string, string> = {
-  triaging: 'Triaging',
-  // An unstarted work item is assigned to the operator; an unstarted pool ticket is Unclaimed (PRD R27).
-  unstarted: 'Assigned',
-  'awaiting-approval': 'Awaiting approval',
-  queued: 'Queued',
-  setup: 'Setting up',
-  running: 'Running',
-  blocked: 'Blocked',
-  failed: 'Failed',
-  done: 'Done',
-};
-
 const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left without a done report' };
-
-/** The row's status in words; an active session waiting on the operator, or still running after done, says so. */
-export function statusOf(item: WorkItemView): string {
-  const session = activeSession(item);
-
-  if (item.status === 'done') {
-    // The Done group already says done, so the row says how it ended.
-    const ended = DONE_WORDS[item.doneReason ?? 'session'];
-
-    return session === null ? ended : `${ended}, session ${session.state}`;
-  }
-
-  if (session?.state === 'waiting') {
-    return 'Waiting on you';
-  }
-
-  if (item.status === 'setup' && item.needsPick) {
-    return 'Claiming';
-  }
-
-  return STATUS_WORDS[item.status] ?? item.status;
-}
 
 /** The one control a Needs you or Unstarted row shows outside its menu, when one applies. */
 export function mainControl(item: WorkItemView): Control | null {
@@ -196,6 +161,12 @@ function iceboxControl(ticketId: number, iceboxed: boolean): Control {
     : { label: 'Icebox', icon: 'archive', message: { type: 'action', action: { type: 'icebox', ticketId } } };
 }
 
+/** A main control: the icon, with the verb in the tooltip (PRD R27). */
+function iconButton(control: Control): string {
+  return `<button class="control icon-button" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span></button>`;
+}
+
+/** A menu control, with its text. */
 function button(control: Control): string {
   return `<button class="control" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span><span>${escape(control.label)}</span></button>`;
 }
@@ -235,11 +206,15 @@ export function rankOf(triage: Rating): number | null {
   return immediacy === undefined || severity === undefined ? null : immediacy + severity;
 }
 
-/** The priority dot: red for rank 0–1, orange for 2, grey for 3–4, hollow when unrated (PRD R27, R50). */
+/** The priority dot: red for rank 0–1, orange for 2, grey for 3–4; nothing when unrated (PRD R27, R50). */
 export function priorityDot(triage: Rating): string {
   const rank = rankOf(triage);
-  const level = rank === null ? 'unrated' : rank <= 1 ? 'high' : rank === 2 ? 'medium' : 'low';
-  const title = rank === null ? 'Not rated' : `Priority ${level}: ${triage!.immediacy}/${triage!.severity}`;
+  if (rank === null) {
+    return '';
+  }
+
+  const level = rank <= 1 ? 'high' : rank === 2 ? 'medium' : 'low';
+  const title = `Priority ${level}: ${triage!.immediacy}/${triage!.severity}`;
 
   return `<span class="priority ${level}" title="${escape(title)}"></span>`;
 }
@@ -307,6 +282,14 @@ function markIcon(mark: Mark): string {
   return `<span class="mark codicon codicon-${mark.icon}${mark.tone === undefined ? '' : ` ${mark.tone}`}" title="${escape(mark.title)}"></span>`;
 }
 
+/** The playbook name: the namespace and colon muted, the name in bold (PRD R27). */
+function playbookLabel(name: string): string {
+  const colon = name.indexOf(':');
+  const namespace = colon === -1 ? '' : name.slice(0, colon + 1);
+
+  return `<span class="playbook-name" title="${escape(name)}"><span class="namespace">${escape(namespace)}</span><span class="name">${escape(name.slice(colon + 1))}</span></span>`;
+}
+
 /** Marks a ticket that came back after earlier work items (PRD R51). */
 function returned(count: number): string {
   return count === 0 ? '' : `<span class="returned" title="${count} earlier work item${count === 1 ? '' : 's'}">Returned ×${count}</span>`;
@@ -324,7 +307,6 @@ function moreMenu(key: string, controls: Control[], open: boolean): string {
 }
 
 function row(item: WorkItemView, now: number, ui: PanelUi): string {
-  const status = statusOf(item);
   const main = mainControl(item);
   const key = `${item.ticket.source} ${item.ticket.sourceKey}`;
   const menuKey = `item:${item.id}`;
@@ -343,8 +325,8 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const dot = item.status === 'unstarted' || (rankOf(item.triage) ?? 3) > 2 ? '' : priorityDot(item.triage);
 
   return `<div class="item" data-item="${item.id}">
-<div class="line">${markHtml(item)} ${ticket} <span class="title" title="${escape(item.ticket.title)}">${dot}${escape(item.ticket.title)}</span> <span class="playbook-name">${escape(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}</span>${queued(since, item.doneAt ?? now)}</div>
-<div class="line second"><span class="meta"><span class="status">${escape(status)}</span>${stage}${worktree}${approval}${links}${returned(item.returned)}${notes}</span><span class="actions">${main === null ? '' : button(main)}${sessionButton(item)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
+<div class="line">${markHtml(item)} ${ticket} <span class="title" title="${escape(item.ticket.title)}">${dot}${escape(item.ticket.title)}</span> ${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${queued(since, item.doneAt ?? now)}<span class="actions">${main === null ? '' : iconButton(main)}${sessionButton(item)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
+<div class="line second"><span class="meta">${stage}${worktree}${approval}${links}${returned(item.returned)}${notes}</span></div>
 </div>`;
 }
 
@@ -379,12 +361,13 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   const pick: Control = { label: 'Start', icon: 'play', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const failed = triage?.error != null;
-  const triaging = triage === null || triage.endedAt === null;
+  // An iceboxed ticket is never triaged, so a missing triage is not shown as running.
+  const triaging = triage !== null && triage.endedAt === null;
   const [main, ...others] = failed ? [again, pick, iceboxControl(ticket.id, ticket.iceboxed)] : [pick, iceboxControl(ticket.id, ticket.iceboxed)];
 
   return `<div class="item pool-item" data-ticket="${ticket.id}">
-<div class="line"><span class="mark">${priorityDot(triage)}</span> ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> <span class="playbook-name">${escape(triage?.playbook ?? '')}</span>${queued(ticket.sortAt, now)}</div>
-<div class="line second"><span class="meta"><span class="status">Unclaimed</span>${triaging ? '<span class="stage">Triaging…</span>' : ''}${returned(entry.returned)}${failed ? `<span class="note" title="${escape(triage!.error!)}">${escape(triage!.error!)}</span>` : ''}</span><span class="actions">${button(main!)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
+<div class="line">${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : `<span class="mark">${priorityDot(triage)}</span>`} ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> ${playbookLabel(triage?.playbook ?? '')}${queued(ticket.sortAt, now)}<span class="actions">${iconButton(main!)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
+<div class="line second"><span class="meta"><span class="tag" title="Start claims it">Unclaimed</span>${returned(entry.returned)}${failed ? `<span class="note" title="${escape(triage!.error!)}">${escape(triage!.error!)}</span>` : ''}</span></div>
 </div>`;
 }
 

@@ -7,8 +7,9 @@ query($q:String!, $status:String!, $after:String){
       number title url
       projectItems(first:20){ nodes{
         project{ number owner{ ... on Organization{ login } ... on User{ login } } }
-        fieldValueByName(name:$status){ ... on ProjectV2ItemFieldSingleSelectValue{ name } }
+        fieldValueByName(name:$status){ ... on ProjectV2ItemFieldSingleSelectValue{ name updatedAt } }
       }}
+      timelineItems(last:100, itemTypes:[ASSIGNED_EVENT]){ nodes{ ... on AssignedEvent{ createdAt assignee{ ... on User{ login } ... on Bot{ login } } } } }
     }}
   }
 }`;

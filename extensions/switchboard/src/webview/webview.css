@@ -2,20 +2,23 @@ body { padding: 0 8px; color: var(--vscode-foreground); font-family: var(--vscod
 h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 4px; color: var(--vscode-descriptionForeground); }
 details.group > summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
 details.group > summary h3 { display: inline; }
-.item { border-bottom: 1px solid var(--vscode-widget-border, transparent); padding: 4px 0; }
+.item { border-bottom: 1px solid var(--vscode-widget-border, transparent); padding: 6px 0; }
 .item { display: flex; flex-direction: column; row-gap: 2px; }
 .line { display: flex; flex-basis: 100%; gap: 6px; align-items: center; min-width: 0; }
-.line.second { padding-left: 22px; }
-.title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.playbook-name, .stage, .empty { color: var(--vscode-descriptionForeground); }
-.status { font-weight: 600; }
+/* Every row keeps two lines, with room between rows, even when the second line is empty (PRD R27). */
+.line.second { padding-left: 22px; min-height: 18px; }
+.title { flex: 1 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage, .empty, .playbook-name .namespace { color: var(--vscode-descriptionForeground); }
+.playbook-name .name { color: var(--vscode-foreground); font-weight: 600; }
 .note { color: var(--vscode-editorWarning-foreground); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .errors .note { display: block; margin: 4px 0; white-space: normal; }
 button { display: inline-flex; align-items: center; gap: 4px; line-height: 16px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 2px 8px; cursor: pointer; }
 button .codicon { font-size: 14px; line-height: 16px; }
 button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 a { color: var(--vscode-textLink-foreground); }
-.key, .playbook-name, .status, .stage { white-space: nowrap; flex-shrink: 0; }
+.key, .stage { white-space: nowrap; flex-shrink: 0; }
+/* On a narrow panel the playbook name clips after the title has kept a few characters. */
+.playbook-name { white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .worktree { flex-shrink: 0; color: var(--vscode-descriptionForeground); }
 .session-button { position: relative; padding: 2px 6px; }
 .session-button:disabled { opacity: 0.6; cursor: default; }
@@ -27,12 +30,12 @@ a { color: var(--vscode-textLink-foreground); }
 /* The metadata shrinks and clips so the controls stay visible on a narrow panel; clipped text is in tooltips. */
 .meta { display: flex; gap: 6px; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .meta > * { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta > .status { flex-shrink: 0; }
 /* The approval summary says what Approve publishes, so part of it stays visible to hover. */
 .meta > .approval { flex: 1 0 3em; }
 .actions { margin-left: auto; display: flex; gap: 4px; align-items: center; flex-shrink: 0; white-space: nowrap; }
 .more { position: relative; }
-.more-button { padding: 2px 4px; }
+.more-button, .icon-button { padding: 2px 4px; }
+.tag { flex-shrink: 0; font-size: 11px; padding: 0 4px; border-radius: 2px; border: 1px solid var(--vscode-descriptionForeground); color: var(--vscode-descriptionForeground); }
 .menu { position: absolute; right: 0; top: calc(100% + 2px); z-index: 10; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 160px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, transparent)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
 .menu button { justify-content: flex-start; width: 100%; }
 .returned { white-space: nowrap; flex-shrink: 0; font-size: 11px; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
@@ -44,7 +47,6 @@ a { color: var(--vscode-textLink-foreground); }
 .priority.high { background: var(--vscode-charts-red, #f14c4c); }
 .priority.medium { background: var(--vscode-charts-orange, #e8820c); }
 .priority.low { background: var(--vscode-disabledForeground, #8b8b8b); }
-.priority.unrated { border: 1.5px solid var(--vscode-descriptionForeground); }
 .queue { white-space: nowrap; flex-shrink: 0; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
 .badge { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; padding: 0 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-textLink-foreground)); border-radius: 2px; }
 .approval { color: var(--vscode-descriptionForeground); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

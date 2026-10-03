@@ -109,6 +109,9 @@ export const MIGRATIONS = [
   );`,
   // `awaiting-approval` now means only an approval report; a work item waiting to be started is `unstarted` (PRD R34).
   `UPDATE workItems SET status = 'unstarted' WHERE status = 'awaiting-approval' AND approvalPrompt IS NULL;`,
+  // The source's reference for a ticket (`{{ticket.ref}}`); the next poll fills polled tickets, and ad-hoc ones are `#<n>`.
+  `ALTER TABLE tickets ADD COLUMN ref TEXT NOT NULL DEFAULT '';
+  UPDATE tickets SET ref = '#' || sourceKey WHERE source = 'adhoc';`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'iceboxed', 'needsPick', 'released']);

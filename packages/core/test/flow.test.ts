@@ -32,7 +32,7 @@ describe('assigned-state transitions', () => {
       type: 'triage',
       triageId: 1,
       workItemId: 1,
-      ticket: { id: 1, source: 'github', sourceKey: '1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: T0, repoRoot: '' },
+      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: T0, repoRoot: '' },
       systemPrompt: 'Classify the GitHub issue.',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change' },
@@ -661,7 +661,7 @@ describe('ad-hoc', () => {
     expect(h.item(1)).toMatchObject({ playbook: null, taskPrompt: '  Write hello.txt\nthen report done', status: 'running' });
 
     h.act({ type: 'adhoc', prompt: 'Second', repoRoot: 'D:/scratch' });
-    expect(h.store.ticket(2)?.sourceKey).toBe('2');
+    expect(h.store.ticket(2)).toMatchObject({ sourceKey: '2', ref: '#2' });
     expect(h.status(2)).toBe('queued');
 
     expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('The work item has an active session.');

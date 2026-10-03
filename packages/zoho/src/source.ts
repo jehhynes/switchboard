@@ -125,6 +125,7 @@ export class ZohoSource implements Source {
 
             tickets.push({
               sourceKey: String(ticket.ticketNumber),
+              ref: `#${ticket.ticketNumber}`,
               sourceId: String(ticket.id),
               title: ticket.subject,
               url: ticket.webUrl,

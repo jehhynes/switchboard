@@ -112,7 +112,7 @@ class FakeSource implements Source {
   }
 }
 
-const issue = (key: string): PolledTicket => ({ sourceKey: key, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null });
+const issue = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null });
 
 function setup(cfg = config(), now = () => T0) {
   const store = Store.open(':memory:');
@@ -318,7 +318,7 @@ describe('Runtime', () => {
 
   it('reconciles at startup and installs hooks when enabled', async () => {
     const { store, runtime } = setup(config({ installHooks: true }));
-    store.insertTicket({ source: 'adhoc', sourceKey: '1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
+    store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
     runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch' });
     await runtime.settled();
     store.updateSession('s1', { state: 'starting', shortId: null });

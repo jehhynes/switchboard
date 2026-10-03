@@ -64,6 +64,7 @@ describe('ZohoSource.poll', () => {
     expect(result).toEqual({
       tickets: support.slice(0, 3).map((row) => ({
         sourceKey: row.ticketNumber,
+        ref: `#${row.ticketNumber}`,
         sourceId: row.id,
         title: `Ticket ${row.ticketNumber}`,
         url: `https://desk.example.test/tickets/${row.ticketNumber}`,
@@ -99,7 +100,7 @@ describe('ZohoSource.poll', () => {
     const mine = { json: { data: [{ id: '1', ticketNumber: '9', subject: 's', webUrl: 'u', assigneeId: SELF, cf: { cf_queue: 'Support' } }] } };
 
     expect(await new ZohoSource(CONFIG, desk({ '/tickets/search?status=Open&limit=100&from=1': mine })).poll()).toEqual({
-      tickets: [{ sourceKey: '9', sourceId: '1', title: 's', url: 'u', assigned: true, pool: false, sortAt: null }],
+      tickets: [{ sourceKey: '9', ref: '#9', sourceId: '1', title: 's', url: 'u', assigned: true, pool: false, sortAt: null }],
     });
   });
 
@@ -128,7 +129,7 @@ describe('ZohoSource.classify', () => {
 });
 
 describe('ZohoSource.context', () => {
-  const ticket = (sourceId: string | null): Ticket => ({ id: 1, source: 'zoho', sourceKey: '900007', sourceId, title: 'Ticket 900007', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+  const ticket = (sourceId: string | null): Ticket => ({ id: 1, source: 'zoho', sourceKey: '900007', ref: '#900007', sourceId, title: 'Ticket 900007', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
 
   it('formats the subject, fields, tier and owner history, and the conversation oldest first, clipping each text', async () => {
     const detail = fixture('ticket') as { id: string; ticketNumber: string; status: string };

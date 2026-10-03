@@ -20,16 +20,16 @@ describe('Store', () => {
     const path = join(dir, 'switchboard.db');
     const store = Store.open(path);
 
-    store.insertTicket({ source: 'github', sourceKey: '1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: 5, repoRoot: '' });
+    store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: 5, repoRoot: '' });
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
     const reopened = Store.open(path);
-    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: 5, repoRoot: '' });
+    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: 5, repoRoot: '' });
     reopened.close();
   });
 
@@ -68,13 +68,27 @@ describe('Store', () => {
     store.close();
   });
 
+  it('gives a version 4 ad-hoc ticket its #n reference and leaves polled ones for the next poll', () => {
+    const path = join(dir, 'v4.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 4).join(';'));
+    raw.exec('PRAGMA user_version = 4');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'adhoc', '3', 'a', '', 1, ''), (2, 'forum', '34295', 't', 'u', 0, '')");
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([store.ticket(1)?.ref, store.ticket(2)?.ref]).toEqual(['#3', '']);
+    store.close();
+  });
+
   it('refuses a database from a newer schema', () => {
     const path = join(dir, 'newer.db');
     const raw = new DatabaseSync(path);
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (4).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (5).');
   });
 
   it('rolls back a transaction that throws', () => {
@@ -82,13 +96,13 @@ describe('Store', () => {
 
     expect(() =>
       store.transaction(() => {
-        store.insertTicket({ source: 'github', sourceKey: '1', sourceId: null, title: 'One', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+        store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
         throw new Error('boom');
       }),
     ).toThrow('boom');
     expect(store.tickets('github')).toEqual([]);
 
-    expect(store.transaction(() => store.insertTicket({ source: 'github', sourceKey: '2', sourceId: null, title: 'Two', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' }).id)).toBe(1);
+    expect(store.transaction(() => store.insertTicket({ source: 'github', sourceKey: '2', ref: '#2', sourceId: null, title: 'Two', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' }).id)).toBe(1);
     expect(store.tickets('github')).toHaveLength(1);
   });
 
@@ -101,7 +115,7 @@ describe('Store', () => {
 
   it('replaces a ticket worktree link', () => {
     const store = Store.open(':memory:');
-    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
 
     store.linkWorktree({ ticketId: ticket.id, path: 'D:/wt/a', branch: '1-a', linkedBy: 'convention' });
     store.linkWorktree({ ticketId: ticket.id, path: 'D:/wt/b', branch: null, linkedBy: 'report' });

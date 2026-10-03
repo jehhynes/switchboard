@@ -31,6 +31,8 @@ export interface Ticket {
   source: string;
   /** The key people use, such as an issue number. */
   sourceKey: string;
+  /** The reference with its source's mark, such as `#123` or `T456`, set by the source; empty until the first poll after migration 5. */
+  ref: string;
   /** The source's internal ID when its API needs a different one, such as Zoho's. */
   sourceId: string | null;
   title: string;

@@ -21,6 +21,8 @@ export const MESSAGES = {
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
 export interface PolledTicket {
   sourceKey: string;
+  /** The reference people use, such as `#123` or `T456`; the source sets it (`{{ticket.ref}}`). */
+  ref: string;
   sourceId: string | null;
   title: string;
   url: string;
@@ -223,7 +225,7 @@ class Flow {
       seen.add(entry.sourceKey);
 
       const known = this.store.findTicket(source, entry.sourceKey);
-      const fields = { sourceId: entry.sourceId, title: entry.title, url: entry.url, assigned: entry.assigned, pool: entry.pool, sortAt: entry.sortAt, lastPolledAt: this.now };
+      const fields = { ref: entry.ref, sourceId: entry.sourceId, title: entry.title, url: entry.url, assigned: entry.assigned, pool: entry.pool, sortAt: entry.sortAt, lastPolledAt: this.now };
 
       if (known === null) {
         const ticket = this.store.insertTicket({ source, sourceKey: entry.sourceKey, repoRoot: '', iceboxed: false, ...fields });
@@ -340,7 +342,7 @@ class Flow {
 
     const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
     const sourceKey = String(Math.max(0, ...keys) + 1);
-    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, sourceId: null, title, url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot });
+    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot });
     const item = this.store.insertWorkItem({
       ticketId: ticket.id,
       playbook: null,
@@ -1117,6 +1119,7 @@ class Flow {
     return {
       'ticket.source': ticket.source,
       'ticket.sourceKey': ticket.sourceKey,
+      'ticket.ref': ticket.ref,
       'ticket.title': ticket.title,
       'ticket.url': ticket.url,
       'ticket.context': triage?.context ?? '',
