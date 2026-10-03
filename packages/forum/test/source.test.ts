@@ -86,6 +86,7 @@ describe('parseRows and commandQuery', () => {
     expect(await commandQuery('cat #')('{"n":1}')).toEqual({ rows: [{ n: 1 }] });
     expect(await commandQuery('exit 7 #')('x')).toEqual({ error: 'The forum database cannot be reached; check the VPN.' });
     expect(await commandQuery('echo denied >&2; exit 2 #')('x')).toEqual({ error: 'The Forum query failed: denied' });
+    expect(await commandQuery('cat #', 'no-such-bash')('x')).toEqual({ error: expect.stringMatching(/^The Forum query failed: .*ENOENT/) });
   });
 });
 

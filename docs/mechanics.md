@@ -119,6 +119,18 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Fixtures:** `packages/forum/test/fixtures`: the recorded rows with topic IDs from 90001, titles "Topic <n>", keys "topic-<n>", authors "Person <k>" and same-length filler bodies; timestamps are kept. Two synthetic rows add a topic assigned to the operator and one assigned to someone else, because the live forum had neither.
 - **Current use:** the Forum source (architecture.md § Settings).
 
+## M12. Which bash runs source commands
+
+- **Date:** 2026-10-03.
+- **Versions:** VS Code with Code.exe as the hub's Node, Git for Windows at `C:\Program Files\Git`, Windows 11.
+- **Experiment:** the operator's hub, started by the extension, polled Zoho and Forum with the installed settings. Then a read-only poll of both sources from PowerShell, where `bash` resolves as it does for the hub.
+- **Result:**
+  - Under Code.exe, and from PowerShell, `bash` resolves to WSL's `C:\Windows\System32\bash.exe`. The runner scripts ran under `/home/operator` and failed: `jq: command not found` for Zoho, `mysqlsh: No such file or directory` for Forum.
+  - M10 and M11 passed only because they ran from Git Bash, where `bash` is Git Bash.
+  - With `findBash`, which picked `C:\Program Files\Git\bin\bash.exe` beside `git.exe` in `Git\cmd`, the PowerShell poll read Zoho pool 6 and Forum pool 7.
+- **Lesson:** run live source checks the way the hub runs them, under Code.exe's environment, not from a shell.
+- **Current use:** `findBash` in the hub (architecture.md § Settings).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

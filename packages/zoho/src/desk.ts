@@ -15,10 +15,10 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_LIFETIME_MS = 50 * 60_000;
 
 /** Runs `tokenCommand` through bash, so `~` and the operator's runner script work as written. The token is never logged. */
-export function commandToken(command: string): TokenSource {
+export function commandToken(command: string, bash = 'bash'): TokenSource {
   return () =>
     new Promise((resolve) => {
-      execFile('bash', ['-c', command], { timeout: TOKEN_TIMEOUT_MS, windowsHide: true }, (error, stdout, stderr) => {
+      execFile(bash, ['-c', command], { timeout: TOKEN_TIMEOUT_MS, windowsHide: true }, (error, stdout, stderr) => {
         const token = stdout.trim();
 
         if (error !== null || token === '') {

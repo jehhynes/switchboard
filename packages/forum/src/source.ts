@@ -75,10 +75,10 @@ export function parseRows(stdout: string): QueryResult {
 }
 
 /** Pipes SQL to the query command through bash, so `~` and the runner script work as written. */
-export function commandQuery(command: string): Query {
+export function commandQuery(command: string, bash = 'bash'): Query {
   return (sql) =>
     new Promise((resolve) => {
-      const child = execFile('bash', ['-c', `${command} --result-format=json/raw -`], { timeout: QUERY_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+      const child = execFile(bash, ['-c', `${command} --result-format=json/raw -`], { timeout: QUERY_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
         if (error !== null) {
           resolve({
             error: error.code === OFFLINE ? 'The forum database cannot be reached; check the VPN.' : `The Forum query failed: ${stderr.trim().split(/\r?\n/).at(-1) || error.message}`,

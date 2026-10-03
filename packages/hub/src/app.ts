@@ -9,6 +9,7 @@ import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
+import { findBash } from './bash.js';
 import { loadConfig, playbooksDir } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
@@ -21,14 +22,16 @@ const OPERATOR_EVENTS = new Set(['adhoc', 'approve', 'retry', 'mark-done', 'retr
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval']);
 
+const BASH = findBash(process.platform, process.env);
+
 function makeSource(name: string, settings: SourceSettings) {
   switch (name) {
     case 'github':
       return githubSource(settings);
     case 'zoho':
-      return zohoSource(settings);
+      return zohoSource(settings, BASH);
     case 'forum':
-      return forumSource(settings);
+      return forumSource(settings, BASH);
     default:
       return null;
   }
