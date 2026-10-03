@@ -38,6 +38,11 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - **Skills drive the work; Switchboard is the harness.** Switchboard finds tickets, triages them, starts and observes sessions, and shows their state. Every change to a source, a repository or a worktree is made by a skill a session runs. When a feature needs a write, add a session that runs a skill, not Switchboard code that writes.
 - **Least authority.** An unattended session gets the least permission mode under which it can finish. The default is `auto`; a playbook can override it.
 - **The work item first, sessions second.** The operator manages work items; a session is how one runs, and the panel shows it as one control, not as content.
+- **Show each fact once.** The panel follows four rules:
+  - What the row's group already says is not repeated on the row.
+  - What an icon says is not repeated in text; a button whose icon makes its action clear shows the icon, with the verb in its tooltip.
+  - An indicator that is the same on every row it can appear on, or that means nothing, is not shown.
+  - A label carries the most specific fact available: a playbook name that also names the kind of work, such as `support:defect`, rather than a generic one.
 - **Simple first.** Choose the simplest behavior that keeps common work correct. Handle a rare case by showing it, not with special machinery.
 - **Visible failure.** Every failure shows on its work item with the cause. Switchboard does not retry work automatically; Retry is the operator's. A failed source poll is tried again at the next interval.
 - **Observed state only.** The panel shows what the roster and session reports say, and how old that observation is. A session's report is its claim and is shown as such.
@@ -134,20 +139,21 @@ Switchboard is a local software factory for one developer. It ingests work assig
 ### Observation and control
 
 - R27. A VS Code panel lists work items. The panel centres on the work item; sessions are secondary and shown only as one control.
-  - Rows do not expand. Every row is one or two lines: the mark, the source and key linked to the source, the title, the playbook name, the time in the queue, then the status, the stage and its age, link badges (R52), "Returned ×N" (R51), any warning or error, and the controls.
+  - Rows do not expand. Every row's first line is the mark, the source and key linked to the source, the title, the playbook name, the time in the queue and the controls. A second line appears only when there is more to say: the stage and its age, the approval summary, link badges (R52), "Returned ×N" (R51), the Unclaimed tag, or a warning or error.
+  - There is no status text: the group and the mark already say it, and the mark's tooltip names it.
   - The triage summary, the triage context and the task prompt are not shown; Switchboard keeps them in the store. An approval report's summary is shown, because it says what Approve publishes.
   - A worktree shows as an icon; its branch and path are in the tooltip.
   - The session shows as one icon button with a dot for its state: running, waiting, idle, failed, or none when no session is active. Its tooltip names the state. It opens the work item's latest session: Attach while the background process runs, otherwise Open in VS Code.
   - Every group can be collapsed; Needs you, Working and Unstarted start open, Done and Icebox start closed, and the operator's choice is kept.
   - Groups, in this order: **Needs you** when the status is `awaiting-approval`, `blocked` or `failed`, or the active session is `waiting`; **Working** otherwise, while not done or unstarted; **Unstarted**; **Done** when the work item is `done` (the last 7 days; an active session still shows its state); **Icebox** for iceboxed tickets (R49).
-  - The **Unstarted** group holds everything waiting for the operator to start it, from every source: `unstarted` work items and pool tickets. It sorts by importance (R50), counting an unrated ticket as rank 2, then oldest first by the source's sort time (Zoho's customer response time, Forum's last public post) or the work item's creation, so the most urgent and then the longest-waiting come first. Its status line says **Unclaimed** (a pool ticket, which Start claims) or **Assigned** to the operator.
+  - The **Unstarted** group holds everything waiting for the operator to start it, from every source: `unstarted` work items and pool tickets. It sorts by importance (R50), counting an unrated ticket as rank 2, then oldest first by the source's sort time (Zoho's customer response time, Forum's last public post) or the work item's creation, so the most urgent and then the longest-waiting come first. A pool ticket carries an **Unclaimed** tag, because Start claims it; an assigned work item carries none.
   - The mark shows what differs between rows of the same group, because the group header already says what they share; its tooltip names it in words:
-    - **Unstarted:** the importance rank as a coloured dot: red for rank 0–1, orange for 2, grey for 3–4, hollow when unrated.
+    - **Unstarted:** the importance rank as a coloured dot: red for rank 0–1, orange for 2, grey for 3–4; no mark when unrated.
     - **Needs you:** what the operator must do: approve a publish (an approval report), answer a question (`waiting`, or blocked with a question), look at a block, or deal with a failure (red).
     - **Working:** the phase: triaging, queued, claiming or setting up, running.
     - **Done:** how it ended: the session reported done, the operator marked it done, or the ticket left with no done report (with the warning).
     - **Icebox:** the mark the item would have in the group it returns to.
-  - Controls appear only when they apply: Start, Approve, Retry, Stop, Mark done, Triage again and Icebox, plus the session button. Each row shows only its main control (Start, Approve, Retry, or Triage again for a failed triage) and the session button; the rest are in the row's menu. A control's verb matches the status it acts on: Start for `unstarted` and pool tickets, Approve only for `awaiting-approval`.
+  - Controls appear only when they apply: Start, Approve, Retry, Stop, Mark done, Triage again and Icebox, plus the session button. Each row shows only its main control (Start, Approve, Retry, or Triage again for a failed triage) and the session button, as icons with the verb in the tooltip; the rest are in the row's menu, with text. A control's verb matches the status it acts on: Start for `unstarted` and pool tickets, Approve only for `awaiting-approval`.
   - The time in the queue is in whole minutes, hours, days or weeks, from the source's sort time or the work item's creation, and stops when the work item is done.
   - The panel uses VS Code's theme and codicons. It is not a kanban board.
 - R28. The operator can attach to a background session in a console. Attaching does not create a session, and detaching does not end it.
