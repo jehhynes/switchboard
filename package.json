@@ -9,6 +9,7 @@
   "workspaces": [
     "packages/core",
     "packages/github",
+    "packages/zoho",
     "packages/claude",
     "packages/hub",
     "apps/hub",

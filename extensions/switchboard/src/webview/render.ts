@@ -1,4 +1,4 @@
-import type { Snapshot, WorkItemView } from '@switchboard/hub';
+import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 
 export type Group = 'needs' | 'working' | 'done';
 
@@ -48,6 +48,10 @@ export function statusOf(item: WorkItemView): string {
 
   if (session?.state === 'waiting') {
     return 'Waiting on you';
+  }
+
+  if (item.status === 'setup' && item.needsPick) {
+    return 'Claiming';
   }
 
   return item.status === 'done' && session !== null ? `Done, session ${session.state}` : (STATUS_WORDS[item.status] ?? item.status);
@@ -128,7 +132,18 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Mark done', icon: 'pass', message: action('mark-done') });
   }
 
+  if (item.status !== 'done' || item.ticket.iceboxed) {
+    controls.push(iceboxControl(item.ticket.id, item.ticket.iceboxed));
+  }
+
   return controls;
+}
+
+/** Icebox or Restore for a ticket (PRD R49). */
+function iceboxControl(ticketId: number, iceboxed: boolean): Control {
+  return iceboxed
+    ? { label: 'Restore', icon: 'debug-restart', message: { type: 'action', action: { type: 'restore', ticketId } } }
+    : { label: 'Icebox', icon: 'archive', message: { type: 'action', action: { type: 'icebox', ticketId } } };
 }
 
 /** Change playbook applies with no active session, to a work item that is not done and not ad-hoc. */
@@ -152,6 +167,7 @@ function row(item: WorkItemView, snapshot: Snapshot, now: number, expanded: bool
   const key = `${item.ticket.source} ${item.ticket.sourceKey}`;
   const ticket = item.ticket.url === '' ? `<span class="key">${escape(key)}</span>` : `<a class="key" href="${escape(item.ticket.url)}">${escape(key)}</a>`;
   const stage = item.stage === null ? '' : `<span class="stage">${escape(item.stage)}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}</span>`;
+  const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : `<span class="approval">${escape(item.approvalSummary)}</span>`;
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => `<span class="note">${escape(note)}</span>`).join('');
   const worktree = item.worktree === null ? '' : `<span class="worktree" title="${escape(item.worktree.path)}"><span class="codicon codicon-git-branch"></span> ${escape(item.worktree.branch ?? item.worktree.path)}</span>`;
   const playbooks = canChangePlaybook(item)
@@ -166,7 +182,7 @@ function row(item: WorkItemView, snapshot: Snapshot, now: number, expanded: bool
 
   return `<details class="item" data-item="${item.id}"${expanded ? ' open' : ''}>
 <summary><span class="line"><span class="codicon codicon-${MARKS[mark] ?? 'circle-outline'}" title="${escape(status)}"></span> ${ticket} <span class="title" title="${escape(item.ticket.title)}">${escape(item.ticket.title)}</span> <span class="playbook-name">${escape(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}</span></span>
-<span class="line second"><span class="status">${escape(status)}</span> ${stage} ${worktree}${main === null ? '' : button(main)}</span>${notes}</summary>
+<span class="line second"><span class="status">${escape(status)}</span> ${stage} ${worktree}${approval}${main === null ? '' : button(main)}</span>${notes}</summary>
 <div class="controls">${controlsOf(item).filter((control) => control.label !== main?.label).map(button).join('')}${playbooks}</div>
 <div class="detail">${section('Summary', item.triage?.summary)}${section('Triage context', item.triage?.context)}${section('Task prompt', item.taskPrompt)}${history === '' ? '' : `<h4>Sessions</h4><ul>${history}</ul>`}</div>
 </details>`;
@@ -199,18 +215,44 @@ function adhocBox(snapshot: Snapshot): string {
   return `<form class="adhoc"><textarea name="prompt" rows="2" placeholder="Ad-hoc prompt for a new session"></textarea><div class="adhoc-row"><select name="repo">${repos}</select><button type="submit"${repos === '' ? ' disabled title="Set a repoRoot on a source to choose a repo."' : ''}><span class="codicon codicon-play"></span> Start</button></div></form>`;
 }
 
-/** The whole panel. `expanded` keeps the rows the operator opened. */
-export function renderPanel(snapshot: Snapshot, now: number, expanded: ReadonlySet<number>, showDone: boolean): string {
+/** A pool row: the ticket, its triage summary and playbook, and Pick (PRD R47, R48). */
+function poolRow(entry: PoolView): string {
+  const { ticket, triage } = entry;
+  const key = `${ticket.source} ${ticket.sourceKey}`;
+  const link = ticket.url === '' ? `<span class="key">${escape(key)}</span>` : `<a class="key" href="${escape(ticket.url)}">${escape(key)}</a>`;
+  const pick: Control = { label: 'Pick', icon: 'pass-filled', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
+  const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
+  const failed = triage?.error != null;
+  const summary = triage === null || triage.endedAt === null ? 'Triaging…' : failed ? '' : (triage.summary ?? '');
+
+  return `<div class="item pool-item" data-ticket="${ticket.id}">
+<div class="line"><span class="codicon codicon-inbox"></span> ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span> <span class="playbook-name">${escape(triage?.playbook ?? '')}</span></div>
+<div class="line second"><span class="summary">${escape(summary)}</span>${failed ? '' : button(pick)}</div>
+${failed ? `<div class="line second"><span class="note">${escape(triage!.error!)}</span>${button(again)}${button(pick)}</div>` : ''}
+<div class="line second">${button(iceboxControl(ticket.id, ticket.iceboxed))}</div>
+</div>`;
+}
+
+/** The whole panel. `expanded` keeps the rows the operator opened; `open` the collapsible groups they opened (`done`, `icebox`). */
+export function renderPanel(snapshot: Snapshot, now: number, expanded: ReadonlySet<number>, open: ReadonlySet<string>): string {
   const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], done: [] };
+  const iceboxedItems = snapshot.workItems.filter((item) => item.ticket.iceboxed);
+  const iceboxedPool = snapshot.pool.filter((entry) => entry.ticket.iceboxed);
+  const pool = snapshot.pool.filter((entry) => !entry.ticket.iceboxed);
 
   for (const item of snapshot.workItems) {
-    groups[groupOf(item)].push(item);
+    if (!iceboxedItems.includes(item)) {
+      groups[groupOf(item)].push(item);
+    }
   }
 
   const list = (items: WorkItemView[]) => items.map((item) => row(item, snapshot, now, expanded.has(item.id))).join('\n');
+  const iceboxCount = iceboxedItems.length + iceboxedPool.length;
 
   return `${errors(snapshot)}${setup(snapshot)}${adhocBox(snapshot)}
 <h3>Needs you (${groups.needs.length})</h3>${list(groups.needs) || '<p class="empty">Nothing needs you.</p>'}
 <h3>Working (${groups.working.length})</h3>${list(groups.working) || '<p class="empty">Nothing is running.</p>'}
-<details class="done"${showDone ? ' open' : ''}><summary><h3>Done (${groups.done.length})</h3></summary>${list(groups.done)}</details>`;
+<details class="group" data-group="done"${open.has('done') ? ' open' : ''}><summary><h3>Done (${groups.done.length})</h3></summary>${list(groups.done)}</details>
+${pool.length === 0 ? '' : `<h3>Pool (${pool.length})</h3>${pool.map(poolRow).join('\n')}`}
+${iceboxCount === 0 ? '' : `<details class="group" data-group="icebox"${open.has('icebox') ? ' open' : ''}><summary><h3>Icebox (${iceboxCount})</h3></summary>${list(iceboxedItems)}${iceboxedPool.map(poolRow).join('\n')}</details>`}`;
 }

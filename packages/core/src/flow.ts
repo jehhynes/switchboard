@@ -1,6 +1,6 @@
 import type { Playbook } from './playbook.js';
 import type { PermissionMode, Settings } from './settings.js';
-import type { Session, SessionKind, SessionState, Ticket, WorkItem } from './model.js';
+import type { FailedStep, Session, SessionKind, SessionState, Ticket, WorkItem } from './model.js';
 import type { Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt } from './template.js';
 
@@ -13,6 +13,7 @@ export const MESSAGES = {
   turnEnded: 'The turn ended without a done report.',
   sessionEnded: 'The session ended without a done report.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
+  pickEnded: 'The pick session ended without a done report.',
 } as const;
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
@@ -22,13 +23,18 @@ export interface PolledTicket {
   title: string;
   url: string;
   assigned: boolean;
+  /** Unclaimed in a queue the operator works, so they may pick it (PRD R47). Never true with `assigned`. */
+  pool: boolean;
+  /** When the customer has waited since, such as Zoho's `customerResponseTime`; it orders the pool (PRD R27). */
+  sortAt: number | null;
 }
 
 export type Report =
   | { kind: 'stage'; stage: string }
   | { kind: 'worktree'; path: string; branch: string | null }
   | { kind: 'done'; summary: string | null }
-  | { kind: 'blocked'; reason: string };
+  | { kind: 'blocked'; reason: string }
+  | { kind: 'approval'; prompt: string; summary: string | null };
 
 export type StopReason = 'operator' | 'release';
 
@@ -61,6 +67,7 @@ export type FlowEvent =
   | { type: 'adhoc'; prompt: string; repoRoot: string }
   | { type: 'approve' | 'retry' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
   | { type: 'change-playbook'; workItemId: number; playbook: string }
+  | { type: 'pick' | 'retriage-pool' | 'icebox' | 'restore'; ticketId: number }
   | { type: 'tick' };
 
 export interface TriageChoice {
@@ -72,7 +79,8 @@ export type FlowAction =
   | {
       type: 'triage';
       triageId: number;
-      workItemId: number;
+      /** Null for a pool triage. */
+      workItemId: number | null;
       ticket: Ticket;
       systemPrompt: string;
       choices: TriageChoice[];
@@ -185,6 +193,13 @@ class Flow {
         return this.changePlaybook(this.openItem(event.workItemId), event.playbook);
       case 'stop':
         return this.stop(this.knownItem(event.workItemId));
+      case 'pick':
+        return this.pick(this.poolTicket(event.ticketId));
+      case 'retriage-pool':
+        return this.retriagePool(this.poolTicket(event.ticketId));
+      case 'icebox':
+      case 'restore':
+        return this.icebox(event.ticketId, event.type === 'icebox');
     }
   }
 
@@ -197,9 +212,10 @@ class Flow {
       seen.add(entry.sourceKey);
 
       const known = this.store.findTicket(source, entry.sourceKey);
+      const fields = { sourceId: entry.sourceId, title: entry.title, url: entry.url, assigned: entry.assigned, pool: entry.pool, sortAt: entry.sortAt, lastPolledAt: this.now };
 
       if (known === null) {
-        const ticket = this.store.insertTicket({ source, sourceKey: entry.sourceKey, sourceId: entry.sourceId, title: entry.title, url: entry.url, assigned: entry.assigned, lastPolledAt: this.now, repoRoot: '' });
+        const ticket = this.store.insertTicket({ source, sourceKey: entry.sourceKey, repoRoot: '', iceboxed: false, ...fields });
 
         if (entry.assigned) {
           this.createWorkItem(ticket.id);
@@ -208,7 +224,11 @@ class Flow {
         continue;
       }
 
-      this.store.updateTicket(known.id, { sourceId: entry.sourceId, title: entry.title, url: entry.url, assigned: entry.assigned, lastPolledAt: this.now });
+      this.store.updateTicket(known.id, fields);
+
+      if (known.pool && !entry.pool) {
+        this.leftPool(known.id);
+      }
 
       if (entry.assigned && !known.assigned) {
         this.createWorkItem(known.id);
@@ -218,14 +238,33 @@ class Flow {
     }
 
     for (const ticket of this.store.tickets(source)) {
-      if (!seen.has(ticket.sourceKey) && ticket.assigned) {
-        this.store.updateTicket(ticket.id, { assigned: false, lastPolledAt: this.now });
-        this.left(ticket.id);
+      if (!seen.has(ticket.sourceKey) && (ticket.assigned || ticket.pool)) {
+        this.store.updateTicket(ticket.id, { assigned: false, pool: false, lastPolledAt: this.now });
+
+        if (ticket.pool) {
+          this.leftPool(ticket.id);
+        }
+
+        if (ticket.assigned) {
+          this.left(ticket.id);
+        }
       }
     }
   }
 
+  /** A ticket that entered the assigned state gets a work item, unless it already has an open one, such as a pick's (PRD R48). */
   private createWorkItem(ticketId: number): void {
+    const open = this.store.workItemsForTicket(ticketId).filter((item) => item.status !== 'done');
+
+    if (open.length > 0) {
+      // Assigned again: the deferred unassignment no longer applies (PRD R10).
+      for (const item of open.filter((entry) => entry.unassignedAt !== null)) {
+        this.store.updateWorkItem(item.id, { unassignedAt: null });
+      }
+
+      return;
+    }
+
     this.store.insertWorkItem({
       ticketId,
       playbook: null,
@@ -238,10 +277,20 @@ class Flow {
       failedStep: null,
       unassignedAt: null,
       queuedAt: null,
+      needsPick: false,
+      approvalPrompt: null,
+      approvalSummary: null,
       createdAt: this.now,
       doneAt: null,
       doneReason: null,
     });
+  }
+
+  /** A ticket that left the pool without a pick loses its pool triage, so it is triaged again if it returns (PRD R47). */
+  private leftPool(ticketId: number): void {
+    for (const triage of this.store.poolTriages(ticketId)) {
+      this.store.deleteTriage(triage.id);
+    }
   }
 
   /** PRD R10: done now when no session is active, otherwise when the active session reports or ends. */
@@ -280,7 +329,7 @@ class Flow {
 
     const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
     const sourceKey = String(Math.max(0, ...keys) + 1);
-    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, sourceId: null, title, url: '', assigned: true, lastPolledAt: null, repoRoot });
+    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, sourceId: null, title, url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot });
     const item = this.store.insertWorkItem({
       ticketId: ticket.id,
       playbook: null,
@@ -293,6 +342,9 @@ class Flow {
       failedStep: null,
       unassignedAt: null,
       queuedAt: this.now,
+      needsPick: false,
+      approvalPrompt: null,
+      approvalSummary: null,
       createdAt: this.now,
       doneAt: null,
       doneReason: null,
@@ -317,15 +369,15 @@ class Flow {
 
     this.store.updateTriage(triage.id, { endedAt: this.now, context: event.context, playbook: event.playbook, summary: event.summary, model: event.model });
 
-    const item = this.store.workItem(triage.workItemId)!;
+    const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
 
-    if (item.status !== 'triaging') {
+    if (item?.status !== 'triaging') {
       return;
     }
 
     this.store.updateWorkItem(item.id, { playbook: playbook.name, taskPrompt: null, error: null, failedStep: null });
 
-    if (playbook.autoStart) {
+    if (playbook.autoStart || this.picked(item)) {
       this.queue(item);
     } else {
       this.store.updateWorkItem(item.id, { status: 'awaiting-approval' });
@@ -341,9 +393,9 @@ class Flow {
 
     this.store.updateTriage(triage.id, { endedAt: this.now, error, context });
 
-    const item = this.store.workItem(triage.workItemId)!;
+    const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
 
-    if (item.status === 'triaging') {
+    if (item?.status === 'triaging') {
       this.fail(item, 'triage', error);
     }
   }
@@ -351,32 +403,49 @@ class Flow {
   private triageCancelled(triageId: number): void {
     const triage = this.store.triage(triageId);
 
-    if (triage !== null && triage.endedAt === null) {
+    if (triage === null || triage.endedAt !== null) {
+      return;
+    }
+
+    // A cancelled pool triage is removed, so the pool ticket is due again; a work item stays triaging.
+    if (triage.workItemId === null) {
+      this.store.deleteTriage(triage.id);
+    } else {
       this.store.updateTriage(triage.id, { endedAt: this.now, error: 'Cancelled.' });
     }
   }
 
-  private startTriage(item: WorkItem): void {
-    const ticket = this.store.ticket(item.ticketId)!;
-    const name = this.context.settings.sources[ticket.source]?.triagePlaybook ?? '';
+  /** Triages a work item, or a pool ticket when `item` is null. Choices are the task playbooks of the source's namespace. */
+  private startTriage(ticket: Ticket, item: WorkItem | null): void {
+    const source = this.context.settings.sources[ticket.source];
+    const name = source?.triagePlaybook ?? '';
     const playbook = this.context.playbooks.get(name);
+    const prefix = source?.namespace ? `${source.namespace}:` : '';
+    const fail = (error: string) => {
+      if (item === null) {
+        this.store.insertTriage({ ticketId: ticket.id, workItemId: null, context: null, playbook: null, summary: null, model: null, startedAt: this.now, endedAt: this.now, error });
+      } else {
+        this.fail(item, 'triage', error);
+      }
+    };
 
     if (playbook === undefined || playbook.kind !== 'triage') {
-      this.fail(item, 'triage', name === '' ? `sources.${ticket.source}.triagePlaybook is not set.` : `Triage playbook ${name} is not loaded.`);
+      fail(name === '' ? `sources.${ticket.source}.triagePlaybook is not set.` : `Triage playbook ${name} is not loaded.`);
       return;
     }
 
     const choices = [...this.context.playbooks.values()]
-      .filter((candidate) => candidate.kind === 'task')
+      .filter((candidate) => candidate.kind === 'task' && candidate.name.startsWith(prefix))
       .map((candidate) => ({ name: candidate.name, description: candidate.description }));
 
     if (choices.length === 0) {
-      this.fail(item, 'triage', MESSAGES.noTaskPlaybooks);
+      fail(prefix === '' ? MESSAGES.noTaskPlaybooks : `No task playbooks in the ${source!.namespace} namespace.`);
       return;
     }
 
     const triage = this.store.insertTriage({
-      workItemId: item.id,
+      ticketId: ticket.id,
+      workItemId: item?.id ?? null,
       context: null,
       playbook: null,
       summary: null,
@@ -389,7 +458,7 @@ class Flow {
     this.actions.push({
       type: 'triage',
       triageId: triage.id,
-      workItemId: item.id,
+      workItemId: item?.id ?? null,
       ticket,
       systemPrompt: playbook.template,
       choices,
@@ -490,6 +559,13 @@ class Flow {
 
     const item = this.latest(current);
 
+    if (item !== null && current.kind === 'pick' && resumed && item.status === 'blocked') {
+      // The operator resumed a blocked pick; its done report and end can still advance the work item.
+      this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
+      this.store.updateWorkItem(item.id, { status: 'setup', error: null, failedStep: null });
+      return;
+    }
+
     if (item === null || current.kind !== 'task') {
       return;
     }
@@ -514,6 +590,20 @@ class Flow {
       return;
     }
 
+    if (session.kind === 'pick') {
+      if (item.status !== 'setup') {
+        return;
+      }
+
+      if (session.outcome === 'done') {
+        this.afterPick(item);
+      } else {
+        this.block(item, session.outcomeDetail ?? MESSAGES.pickEnded, 'pick');
+      }
+
+      return;
+    }
+
     if (session.kind === 'setup') {
       if (item.status !== 'setup') {
         return;
@@ -527,7 +617,13 @@ class Flow {
         this.fail(item, 'setup', MESSAGES.setupWithoutWorktree);
       } else {
         this.store.updateSession(session.id, { outcome: 'done' });
-        this.startSession(item);
+
+        // An iceboxed ticket's task waits in the queue until it is restored (PRD R49).
+        if (this.store.ticket(item.ticketId)!.iceboxed) {
+          this.queue(item);
+        } else {
+          this.startSession(item);
+        }
       }
 
       return;
@@ -586,6 +682,15 @@ class Flow {
           } else {
             this.block(item, report.reason);
           }
+        } else if (item !== null && session.kind === 'pick') {
+          this.block(item, report.reason, 'pick');
+        }
+
+        return;
+      case 'approval':
+        // The work is ready; Approve starts a new task session with the prompt that publishes it (PRD R23, R31).
+        if (item !== null && session.kind === 'task') {
+          this.store.updateWorkItem(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, error: null, failedStep: null });
         }
 
         return;
@@ -670,6 +775,89 @@ class Flow {
     return item;
   }
 
+  /** PRD R49: local only; an iceboxed ticket gets no automatic triage or start. */
+  private icebox(ticketId: number, iceboxed: boolean): void {
+    const ticket = this.store.ticket(ticketId);
+
+    if (ticket === null) {
+      throw new Refusal(`Unknown ticket ${ticketId}.`);
+    }
+
+    this.store.updateTicket(ticket.id, { iceboxed });
+  }
+
+  private poolTicket(ticketId: number): Ticket {
+    const ticket = this.store.ticket(ticketId);
+
+    if (ticket === null || !ticket.pool) {
+      throw new Refusal('The ticket is not in the pool.');
+    }
+
+    if (this.hasOpenWorkItem(ticket.id)) {
+      throw new Refusal('The ticket already has a work item.');
+    }
+
+    return ticket;
+  }
+
+  /** PRD R48: a work item that reuses the pool triage, and a pick session to claim the ticket. */
+  private pick(ticket: Ticket): void {
+    const triages = this.store.poolTriages(ticket.id);
+    const triaged = triages.filter((triage) => triage.summary !== null).at(-1);
+    const item = this.store.insertWorkItem({
+      ticketId: ticket.id,
+      playbook: triaged?.playbook ?? null,
+      status: 'queued',
+      stage: null,
+      stageAt: null,
+      taskPrompt: null,
+      warning: null,
+      error: null,
+      failedStep: null,
+      unassignedAt: null,
+      queuedAt: this.now,
+      needsPick: true,
+      approvalPrompt: null,
+      approvalSummary: null,
+      createdAt: this.now,
+      doneAt: null,
+      doneReason: null,
+    });
+
+    for (const triage of triages) {
+      this.store.updateTriage(triage.id, { workItemId: item.id });
+    }
+  }
+
+  private retriagePool(ticket: Ticket): void {
+    const triages = this.store.poolTriages(ticket.id);
+
+    if (triages.some((triage) => triage.endedAt === null)) {
+      throw new Refusal('Triage is already running.');
+    }
+
+    for (const triage of triages) {
+      this.store.deleteTriage(triage.id);
+    }
+  }
+
+  /** After the claim the task starts as the operator's start, because the pick is their approval; without a pool triage result it is triaged first (PRD R48). */
+  private afterPick(item: WorkItem): void {
+    const playbook = item.playbook === null ? undefined : this.context.playbooks.get(item.playbook);
+
+    this.store.updateWorkItem(item.id, { needsPick: false });
+
+    if (playbook === undefined) {
+      this.store.updateWorkItem(item.id, { status: 'triaging', error: null, failedStep: null });
+    } else {
+      this.queue(item);
+    }
+  }
+
+  private picked(item: WorkItem): boolean {
+    return this.store.sessionsFor(item.id).some((session) => session.kind === 'pick' && session.outcome === 'done');
+  }
+
   private approve(item: WorkItem): void {
     if (item.status !== 'awaiting-approval') {
       throw new Refusal('The work item is not awaiting approval.');
@@ -703,7 +891,7 @@ class Flow {
       throw new Refusal('Triage is already running.');
     }
 
-    this.store.updateWorkItem(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null });
+    this.store.updateWorkItem(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
   }
 
   private changePlaybook(item: WorkItem, name: string): void {
@@ -717,7 +905,7 @@ class Flow {
       throw new Refusal(`${name} is not a loaded task playbook.`);
     }
 
-    this.store.updateWorkItem(item.id, { playbook: name, taskPrompt: null, status: 'awaiting-approval', error: null, failedStep: null, queuedAt: null });
+    this.store.updateWorkItem(item.id, { playbook: name, taskPrompt: null, status: 'awaiting-approval', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
   }
 
   private requireNoSession(item: WorkItem): void {
@@ -740,7 +928,7 @@ class Flow {
     this.store.updateWorkItem(item.id, { status: 'failed', failedStep: step, error: cause, queuedAt: null });
   }
 
-  private block(item: WorkItem, cause: string, step: SessionKind = 'task'): void {
+  private block(item: WorkItem, cause: string, step: FailedStep = 'task'): void {
     this.store.updateWorkItem(item.id, { status: 'blocked', failedStep: step, error: cause });
   }
 
@@ -763,23 +951,42 @@ class Flow {
     this.scheduleStarts();
   }
 
-  /** Triages work items in order, up to `triage.concurrency` at once. */
+  /** Triages work items, then pool tickets that have no triage yet, up to `triage.concurrency` at once (PRD R47). */
   private scheduleTriage(): void {
     const running = this.store.runningTriages();
     const busy = new Set(running.map((triage) => triage.workItemId));
     let free = this.context.settings.triage.concurrency - running.length;
+    const start = (ticket: Ticket, item: WorkItem | null) => {
+      const before = this.actions.length;
+      this.startTriage(ticket, item);
+      free -= this.actions.length - before;
+    };
 
     for (const item of this.store.workItemsWithStatus('triaging')) {
       if (free <= 0) {
         return;
       }
 
-      if (!busy.has(item.id)) {
-        const before = this.actions.length;
-        this.startTriage(item);
-        free -= this.actions.length - before;
+      const ticket = this.store.ticket(item.ticketId)!;
+
+      if (!busy.has(item.id) && !ticket.iceboxed) {
+        start(ticket, item);
       }
     }
+
+    for (const ticket of this.store.poolTickets()) {
+      if (free <= 0) {
+        return;
+      }
+
+      if (!ticket.iceboxed && this.store.poolTriages(ticket.id).length === 0 && !this.hasOpenWorkItem(ticket.id)) {
+        start(ticket, null);
+      }
+    }
+  }
+
+  private hasOpenWorkItem(ticketId: number): boolean {
+    return this.store.workItemsForTicket(ticketId).some((item) => item.status !== 'done');
   }
 
   /** Starts queued work items in order while slots are free, skipping a ticket that already has an active session (PRD R17, R38). */
@@ -791,7 +998,7 @@ class Flow {
         return;
       }
 
-      if (this.store.activeSessionsForTicket(item.ticketId).length === 0) {
+      if (this.store.activeSessionsForTicket(item.ticketId).length === 0 && !this.store.ticket(item.ticketId)!.iceboxed) {
         this.startSession(item);
       }
     }
@@ -804,15 +1011,17 @@ class Flow {
     const sessions = this.context.settings.sessions;
     const playbook = item.playbook === null ? null : (this.context.playbooks.get(item.playbook) ?? null);
 
-    if (item.playbook !== null && playbook === null) {
+    if (item.playbook !== null && playbook === null && !item.needsPick) {
       this.fail(item, 'task', `Playbook ${item.playbook} is not loaded.`);
       return;
     }
 
     const worktree = this.store.worktreeFor(ticket.id);
     const repoRoot = ticket.repoRoot || source?.repoRoot || '';
-    const cwd = playbook?.workdir === 'repoRoot' ? repoRoot : (worktree?.path ?? repoRoot);
-    const kind: SessionKind = playbook?.requiresWorktree === true && worktree === null ? 'setup' : 'task';
+    const approved = item.approvalPrompt !== null;
+    const kind: SessionKind = item.needsPick ? 'pick' : !approved && playbook?.requiresWorktree === true && worktree === null ? 'setup' : 'task';
+    // A pick runs the source's claim skill, which belongs to the source's repo (PRD R48).
+    const cwd = kind === 'pick' || playbook?.workdir === 'repoRoot' ? repoRoot : (worktree?.path ?? repoRoot);
 
     if (cwd === '') {
       this.fail(item, kind, `sources.${ticket.source}.repoRoot is not set.`);
@@ -823,22 +1032,25 @@ class Flow {
     const values = this.values(ticket, item);
     let prompt: string;
 
-    if (kind === 'setup') {
-      const setup = source?.setupPrompt ?? '';
+    if (kind === 'setup' || kind === 'pick') {
+      const key = kind === 'setup' ? 'setupPrompt' : 'pickPrompt';
+      const template = source?.[key] ?? '';
 
-      if (setup === '') {
-        this.fail(item, 'setup', `sources.${ticket.source}.setupPrompt is not set.`);
+      if (template === '') {
+        this.fail(item, kind, `sources.${ticket.source}.${key} is not set.`);
         return;
       }
 
-      const rendered = renderTaskPrompt(setup, values);
+      const rendered = renderTaskPrompt(template, values);
 
       if ('error' in rendered) {
-        this.fail(item, 'setup', `sources.${ticket.source}.setupPrompt: ${rendered.error}`);
+        this.fail(item, kind, `sources.${ticket.source}.${key}: ${rendered.error}`);
         return;
       }
 
       prompt = rendered.text;
+    } else if (approved) {
+      prompt = item.approvalPrompt!;
     } else if (playbook === null) {
       prompt = item.taskPrompt ?? '';
     } else {
@@ -857,7 +1069,8 @@ class Flow {
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
     }
-    const label = kind === 'setup' ? 'setup' : (item.playbook ?? 'ad-hoc');
+    const label = kind === 'task' ? (item.playbook ?? 'ad-hoc') : kind;
+    const own = kind === 'task' ? playbook : null;
 
     this.store.insertSession({
       id,
@@ -876,7 +1089,8 @@ class Flow {
       endedAt: null,
       released: false,
     });
-    this.store.updateWorkItem(item.id, { status: kind === 'setup' ? 'setup' : 'running', queuedAt: null, error: null, failedStep: null });
+    // An approved prompt is kept, so a Retry of a failed or blocked approval session runs it again.
+    this.store.updateWorkItem(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null, failedStep: null });
     this.actions.push({
       type: 'start-session',
       sessionId: id,
@@ -885,8 +1099,8 @@ class Flow {
       cwd,
       prompt: full,
       name: `switchboard · ${label} · ${ticket.source} ${ticket.sourceKey}`,
-      permissionMode: playbook?.permissionMode ?? sessions.permissionMode,
-      model: playbook?.model ?? (sessions.model || null),
+      permissionMode: own?.permissionMode ?? sessions.permissionMode,
+      model: own?.model ?? (sessions.model || null),
     });
   }
 

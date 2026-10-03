@@ -40,7 +40,7 @@ function config(patch: Partial<Settings['sessions']> = {}): Config {
     settings: {
       ...DEFAULT_SETTINGS,
       sessions: { ...DEFAULT_SETTINGS.sessions, installHooks: false, ...patch },
-      sources: { github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', options: {} } },
+      sources: { github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', pickPrompt: '', options: {} } },
     },
     settingsError: null,
     playbooks: PLAYBOOKS,
@@ -110,7 +110,7 @@ class FakeSource implements Source {
   }
 }
 
-const issue = (key: string): PolledTicket => ({ sourceKey: key, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true });
+const issue = (key: string): PolledTicket => ({ sourceKey: key, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null });
 
 function setup(cfg = config(), now = () => T0) {
   const store = Store.open(':memory:');
@@ -291,6 +291,8 @@ describe('Runtime', () => {
     expect(await runtime.report({ sessionId: 's9', kind: 'done', summary: null })).toEqual({ refused: 'Unknown session s9.' });
     expect(await runtime.report({ sessionId: 's1', kind: 'blocked', reason: 'Stuck.' })).toEqual({ refused: null });
     expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stuck.' });
+    expect(await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/publish', summary: 'Ready.' })).toEqual({ refused: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: 'Ready.' });
     expect(await runtime.report({ sessionId: 's1', kind: 'done', summary: 'Done.' })).toEqual({ refused: null });
     expect(store.workItem(1)?.status).toBe('done');
   });
@@ -314,7 +316,7 @@ describe('Runtime', () => {
 
   it('reconciles at startup and installs hooks when enabled', async () => {
     const { store, runtime } = setup(config({ installHooks: true }));
-    store.insertTicket({ source: 'adhoc', sourceKey: '1', sourceId: null, title: 'x', url: '', assigned: true, lastPolledAt: null, repoRoot: 'D:/x' });
+    store.insertTicket({ source: 'adhoc', sourceKey: '1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
     runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch' });
     await runtime.settled();
     store.updateSession('s1', { state: 'starting', shortId: null });
@@ -362,6 +364,29 @@ describe('Runtime', () => {
     runtime.recordOpen('b-native', 'D:/git/widgets-wt/8-fix');
     now += 2 * 60_000 + 1;
     expect(runtime.claimOpen('D:/git/widgets-wt/8-fix')).toBeNull();
+  });
+
+  it('triages the pool, lists it oldest first, and runs a pick with fake runners', async () => {
+    const cfg = config();
+    cfg.settings.sources['github']!.pickPrompt = 'Claim {{ticket.sourceKey}}, then stop.';
+    const { store, cli, source, runtime } = setup(cfg);
+    source.result = { tickets: [{ ...issue('9'), assigned: false, pool: true, sortAt: 20 }, { ...issue('8'), assigned: false, pool: true, sortAt: 10 }] };
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const pool = runtime.snapshot().pool;
+    expect(pool.map((entry) => [entry.ticket.sourceKey, entry.triage?.playbook])).toEqual([['8', 'dev:develop'], ['9', 'dev:develop']]);
+    expect(runtime.snapshot().workItems).toEqual([]);
+
+    expect(runtime.send({ type: 'pick', ticketId: pool[0]!.ticket.id }).refused).toBeNull();
+    await runtime.settled();
+
+    const start = cli.calls.find((call) => call[1] === '--bg');
+    expect(start?.at(-1)).toMatch(/^Claim 8, then stop\.\n\nSwitchboard session s1 tracks this work\./);
+    expect(store.session('s1')).toMatchObject({ kind: 'pick', state: 'running' });
+    expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['9']);
+    expect(runtime.snapshot().workItems).toMatchObject([{ status: 'setup', needsPick: true, triage: { playbook: 'dev:develop' } }]);
   });
 
   it('reports an unknown or misconfigured source', () => {

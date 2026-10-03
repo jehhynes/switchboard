@@ -32,6 +32,11 @@ export function reportBody(argv: readonly string[]): Record<string, unknown> | n
 
       return reason === null || reason === '' ? null : { sessionId, kind, reason };
     }
+    case 'approval': {
+      const prompt = valueOf(argv, 'prompt');
+
+      return prompt === null || prompt === '' ? null : { sessionId, kind, prompt, summary: valueOf(argv, 'summary') };
+    }
     default:
       return null;
   }

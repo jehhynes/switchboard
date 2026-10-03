@@ -42,10 +42,13 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     failedStep: null,
     unassignedAt: null,
     queuedAt: null,
+    needsPick: false,
+    approvalPrompt: null,
+    approvalSummary: null,
     createdAt: NOW,
     doneAt: null,
     doneReason: null,
-    ticket: { id, source: 'github', sourceKey: String(100 + id), sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, lastPolledAt: NOW, repoRoot: '' },
+    ticket: { id, source: 'github', sourceKey: String(100 + id), sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
     sessions: [],
     worktree: null,
@@ -56,6 +59,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
 function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): Snapshot {
   return {
     workItems: items,
+    pool: [],
     playbooks: [
       { name: 'dev:develop', description: 'Build it' },
       { name: 'support:defect', description: 'Research a defect' },
@@ -81,14 +85,14 @@ describe('groupOf', () => {
 
 describe('controlsOf', () => {
   it('shows only the controls that apply', () => {
-    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Attach', 'Stop', 'Mark done']);
-    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Retry', 'Open in VS Code', 'Triage again', 'Mark done']);
-    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done']);
+    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Icebox']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Attach', 'Stop', 'Mark done', 'Icebox']);
+    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Icebox']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Retry', 'Open in VS Code', 'Triage again', 'Mark done', 'Icebox']);
+    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Icebox']);
     expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Open in VS Code']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Retry', 'Open in VS Code', 'Mark done']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Icebox']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Retry', 'Open in VS Code', 'Mark done', 'Icebox']);
   });
 
   it('posts the action, attach or open message', () => {
@@ -104,6 +108,7 @@ describe('statusOf and mainControl', () => {
   it('words the status and puts the one main control on a Needs you row', () => {
     expect(statusOf(item(1, { status: 'awaiting-approval' }))).toBe('Awaiting approval');
     expect(statusOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('Waiting on you');
+    expect(statusOf(item(1, { status: 'setup', needsPick: true }))).toBe('Claiming');
     expect(['queued', 'running', 'blocked'].map((status) => statusOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['Queued', 'Running', 'Blocked']);
 
     expect(mainControl(item(1, { status: 'awaiting-approval' }))?.label).toBe('Approve');
@@ -114,10 +119,10 @@ describe('statusOf and mainControl', () => {
 
   it('shows the main control on the collapsed row and not again in the expanded controls', () => {
     const root = document.createElement('div');
-    root.innerHTML = renderPanel(snapshot([item(1, { status: 'awaiting-approval' })]), NOW, new Set(), false);
+    root.innerHTML = renderPanel(snapshot([item(1, { status: 'awaiting-approval' })]), NOW, new Set(), new Set());
 
     expect([...root.querySelectorAll('summary button.control')].map((b) => b.getAttribute('title'))).toEqual(['Approve']);
-    expect([...root.querySelectorAll('.controls button.control')].map((b) => b.getAttribute('title'))).toEqual(['Triage again', 'Mark done']);
+    expect([...root.querySelectorAll('.controls button.control')].map((b) => b.getAttribute('title'))).toEqual(['Triage again', 'Mark done', 'Icebox']);
   });
 });
 
@@ -134,14 +139,14 @@ describe('renderPanel', () => {
       ),
       NOW,
       new Set([3]),
-      false,
+      new Set(),
     );
     const root = document.createElement('div');
     root.innerHTML = html;
 
     expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (1)', 'Done (1)']);
     expect(root.querySelector('details.item[data-item="3"]')?.hasAttribute('open')).toBe(true);
-    expect(root.querySelector('details.done')?.hasAttribute('open')).toBe(false);
+    expect(root.querySelector('details[data-group="done"]')?.hasAttribute('open')).toBe(false);
     expect(root.querySelector('[data-item="2"] .title')?.textContent).toBe('Issue <2>');
     expect(root.querySelector('[data-item="2"] summary .note')?.textContent).toBe('Workspace not trusted.');
     expect(root.querySelector('[data-item="3"] .stage')?.textContent).toBe('Planning · 3m');
@@ -156,10 +161,10 @@ describe('renderPanel', () => {
   it('shows the triage summary, context, prompt and session history when expanded', () => {
     const root = document.createElement('div');
     root.innerHTML = renderPanel(
-      snapshot([item(1, { status: 'blocked', taskPrompt: 'Build 101.', triage: { id: 1, workItemId: 1, context: 'Issue text', playbook: 'dev:develop', summary: 'A summary.', model: null, startedAt: NOW, endedAt: NOW, error: null }, sessions: [session({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' })] })]),
+      snapshot([item(1, { status: 'blocked', taskPrompt: 'Build 101.', triage: { id: 1, ticketId: 1, workItemId: 1, context: 'Issue text', playbook: 'dev:develop', summary: 'A summary.', model: null, startedAt: NOW, endedAt: NOW, error: null }, sessions: [session({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' })] })]),
       NOW,
       new Set([1]),
-      false,
+      new Set(),
     );
 
     expect([...root.querySelectorAll('.detail h4')].map((h) => h.textContent)).toEqual(['Summary', 'Triage context', 'Task prompt', 'Sessions']);
@@ -173,7 +178,7 @@ describe('renderPanel', () => {
       snapshot([item(1, { status: 'done', doneAt: NOW, sessions: [session()], worktree: { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' } })]),
       NOW,
       new Set(),
-      true,
+      new Set(['done']),
     );
 
     expect(root.querySelector('summary .worktree')?.textContent?.trim()).toBe('101-fix');
@@ -183,14 +188,60 @@ describe('renderPanel', () => {
 
   it('says what an unconfigured home is missing', () => {
     const root = document.createElement('div');
-    root.innerHTML = renderPanel(snapshot([], { sources: [], playbooks: [], repoRoots: [] }), NOW, new Set(), false);
+    root.innerHTML = renderPanel(snapshot([], { sources: [], playbooks: [], repoRoots: [] }), NOW, new Set(), new Set());
 
     expect([...root.querySelectorAll('p.empty')].slice(0, 2).map((p) => p.textContent?.trim())).toEqual([
       'No source is polled. Enable a source in C:\\Users\\me\\.switchboard\\settings.json.',
       'No task playbooks are loaded. Add them under C:\\Users\\me\\.switchboard\\playbooks.',
     ]);
     expect(root.querySelector('form.adhoc button')?.hasAttribute('disabled')).toBe(true);
-    expect(renderPanel(snapshot([]), NOW, new Set(), false)).not.toContain('No source is polled');
+    expect(renderPanel(snapshot([]), NOW, new Set(), new Set())).not.toContain('No source is polled');
+  });
+
+  it('lists the pool with each summary and Pick, and Triage again for a failed triage', () => {
+    const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, iceboxed: false, sortAt: id, lastPolledAt: NOW, repoRoot: '' });
+    const triage = (id: number, patch: object) => ({ id, ticketId: id, workItemId: null, context: 'ctx', playbook: 'support:case', summary: 'Fix sync — defect, BLOCKING/MED', model: null, startedAt: NOW, endedAt: NOW, error: null, ...patch });
+    const root = document.createElement('div');
+    root.innerHTML = renderPanel(
+      snapshot([], {
+        pool: [
+          { ticket: ticket(1), triage: triage(1, {}) },
+          { ticket: ticket(2), triage: triage(2, { playbook: null, summary: null, error: 'Timed out.' }) },
+          { ticket: ticket(3), triage: null },
+        ],
+      }),
+      NOW,
+      new Set(),
+      new Set(),
+    );
+    const rows = [...root.querySelectorAll('.pool-item')];
+
+    expect([...root.querySelectorAll('h3')].map((h) => h.textContent).at(-1)).toBe('Pool (3)');
+    expect(rows.map((row) => row.querySelector('.title')?.textContent)).toEqual(['Case <1>', 'Case <2>', 'Case <3>']);
+    expect(rows[0]!.querySelector('.summary')?.textContent).toBe('Fix sync — defect, BLOCKING/MED');
+    expect(rows[0]!.querySelector('.playbook-name')?.textContent).toBe('support:case');
+    expect(JSON.parse(rows[0]!.querySelector<HTMLElement>('button.control[title="Pick"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
+    expect(rows[1]!.querySelector('.note')?.textContent).toBe('Timed out.');
+    expect([...rows[1]!.querySelectorAll('button.control')].map((b) => b.getAttribute('title'))).toEqual(['Triage again', 'Pick', 'Icebox']);
+    expect(rows[2]!.querySelector('.summary')?.textContent).toBe('Triaging…');
+    expect(renderPanel(snapshot([]), NOW, new Set(), new Set())).not.toContain('Pool (');
+  });
+
+  it('moves iceboxed work items and pool tickets into a collapsed Icebox group, and shows an approval summary', () => {
+    const icy = item(2, { status: 'awaiting-approval', ticket: { ...item(2).ticket, iceboxed: true } });
+    const ready = item(3, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.' });
+    const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, lastPolledAt: NOW, repoRoot: '' };
+    const root = document.createElement('div');
+    root.innerHTML = renderPanel(snapshot([icy, ready], { pool: [{ ticket: poolTicket, triage: null }] }), NOW, new Set(), new Set());
+    const icebox = root.querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!;
+
+    expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (0)', 'Done (0)', 'Icebox (2)']);
+    expect(icebox.open).toBe(false);
+    expect([...icebox.querySelectorAll('.title')].map((t) => t.textContent)).toEqual(['Issue <2>', 'Cold case']);
+    expect(JSON.parse(icebox.querySelector<HTMLElement>('button.control[title="Restore"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'restore', ticketId: 2 } });
+    expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
+    expect(renderPanel(snapshot([icy]), NOW, new Set(), new Set(['icebox']))).toContain('data-group="icebox" open');
+    expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, iceboxed: true } }))).toEqual(['Restore']);
   });
 
   it('formats ages', () => {
@@ -262,14 +313,14 @@ describe('startPanel', () => {
     const row = root.querySelector<HTMLDetailsElement>('details.item[data-item="1"]')!;
     row.open = true;
     row.dispatchEvent(new Event('toggle'));
-    const done = root.querySelector<HTMLDetailsElement>('details.done')!;
+    const done = root.querySelector<HTMLDetailsElement>('details[data-group="done"]')!;
     done.open = true;
     done.dispatchEvent(new Event('toggle'));
 
     send(snapshot([item(1), item(2, { status: 'done', doneAt: NOW })]));
 
     expect(root.querySelector<HTMLDetailsElement>('details.item[data-item="1"]')!.open).toBe(true);
-    expect(root.querySelector<HTMLDetailsElement>('details.done')!.open).toBe(true);
+    expect(root.querySelector<HTMLDetailsElement>('details[data-group="done"]')!.open).toBe(true);
   });
 
   it('ignores an empty ad-hoc prompt', () => {

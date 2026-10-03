@@ -26,6 +26,8 @@ describe('renderTaskPrompt and sessionPrompt', () => {
         '- node "C:/h/hub.js" report worktree s-1 <path>, when you create a worktree',
         '- node "C:/h/hub.js" report done s-1 [--summary <text>], when the work is finished',
         '- node "C:/h/hub.js" report blocked s-1 --reason <text>, when you cannot continue',
+        '- node "C:/h/hub.js" report approval s-1 --prompt <prompt> [--summary <text>], when the work is ready but posting or publishing it needs the operator\'s approval',
+        'When you need the operator for a question or a choice, report blocked with the question and end your turn instead of waiting. When the work is ready but posting or publishing it needs approval, report approval with the prompt that would do it, such as /review-pr pr:123 publish, and end your turn.',
       ].join('\n'),
     );
   });

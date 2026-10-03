@@ -11,7 +11,7 @@ declare function acquireVsCodeApi(): VsCodeApi;
 export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => number = Date.now): void {
   let snapshot: Snapshot | null = null;
   const expanded = new Set<number>();
-  let showDone = false;
+  const open = new Set<string>();
 
   const draw = () => {
     if (snapshot === null) {
@@ -26,7 +26,7 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
     const [start, end] = [textarea?.selectionStart ?? 0, textarea?.selectionEnd ?? 0];
     const repo = form?.querySelector('select')?.value;
 
-    root.innerHTML = renderPanel(snapshot, now(), expanded, showDone);
+    root.innerHTML = renderPanel(snapshot, now(), expanded, open);
 
     const next = root.querySelector<HTMLFormElement>('form.adhoc')!.querySelector('textarea')!;
     next.value = prompt;
@@ -52,8 +52,14 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
     const target = event.target as HTMLDetailsElement;
     const id = Number(target.dataset['item']);
 
-    if (target.classList.contains('done')) {
-      showDone = target.open;
+    const group = target.dataset['group'];
+
+    if (group !== undefined) {
+      if (target.open) {
+        open.add(group);
+      } else {
+        open.delete(group);
+      }
     } else if (id > 0) {
       if (target.open) {
         expanded.add(id);

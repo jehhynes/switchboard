@@ -4,9 +4,10 @@ export type WorkItemStatus = 'triaging' | 'awaiting-approval' | 'queued' | 'setu
 export type DoneReason = 'session' | 'operator' | 'unassigned';
 
 /** The step Retry repeats (PRD R45). */
-export type FailedStep = 'triage' | 'setup' | 'task';
+export type FailedStep = 'triage' | 'pick' | 'setup' | 'task';
 
-export type SessionKind = 'setup' | 'task';
+/** A `pick` session claims a pool ticket for the operator through a skill (PRD R48). */
+export type SessionKind = 'pick' | 'setup' | 'task';
 
 /** Observed session state (PRD R36). */
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed' | 'ended';
@@ -24,6 +25,12 @@ export interface Ticket {
   url: string;
   /** The assigned state the last complete poll saw. */
   assigned: boolean;
+  /** Whether the last complete poll saw the ticket in the source's pool (PRD R47). */
+  pool: boolean;
+  /** Moved to the Icebox by the operator: no automatic triage or start (PRD R49). Local only. */
+  iceboxed: boolean;
+  /** The source's sort time, which orders the pool so the longest-waiting customer comes first (PRD R27). */
+  sortAt: number | null;
   lastPolledAt: number | null;
   /** The repo an ad-hoc prompt chose. Empty takes the source's `repoRoot` setting. */
   repoRoot: string;
@@ -47,6 +54,11 @@ export interface WorkItem {
   unassignedAt: number | null;
   /** When a waiting start was queued, for first-in first-out order. */
   queuedAt: number | null;
+  /** Picked from the pool and not yet claimed: the next session is a pick session (PRD R48). */
+  needsPick: boolean;
+  /** The prompt an approval report named; Approve starts a task session with it (PRD R23, R31). */
+  approvalPrompt: string | null;
+  approvalSummary: string | null;
   createdAt: number;
   doneAt: number | null;
   doneReason: DoneReason | null;
@@ -54,7 +66,9 @@ export interface WorkItem {
 
 export interface Triage {
   id: number;
-  workItemId: number;
+  ticketId: number;
+  /** Null for a pool triage until a pick attaches it to the new work item. */
+  workItemId: number | null;
   context: string | null;
   playbook: string | null;
   summary: string | null;

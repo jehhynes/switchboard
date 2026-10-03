@@ -1,0 +1,13 @@
+{
+  "id": "9000000000000000009",
+  "ticketNumber": "900007",
+  "subject": "Ticket 900007",
+  "status": "Open",
+  "assigneeId": "9000000000000000002",
+  "cf": {
+    "cf_queue": "Support",
+    "cf_user_id": null,
+    "cf_account_id": null,
+    "cf_page_url": null
+  }
+}

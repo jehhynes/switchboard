@@ -1,0 +1,95 @@
+[
+  {
+    "eventTime": "2026-10-03T00:53:39.000Z",
+    "changes": [
+      {
+        "newValue": "Open",
+        "field": "Status",
+        "oldValue": "Deferred"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-03T00:50:35.000Z",
+    "agentName": "Agent 3",
+    "changes": [
+      {
+        "newValue": "Deferred",
+        "field": "Status",
+        "oldValue": "Open"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-02T18:52:10.000Z",
+    "agentName": "Agent 6",
+    "changes": [
+      {
+        "newValue": "Support",
+        "field": "Escalation",
+        "oldValue": "General"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-02T17:47:34.000Z",
+    "agentName": "Agent 6",
+    "changes": [
+      {
+        "field": "Case Owner",
+        "oldValue": "9000000000000000027",
+        "newValue": "9000000000000000002"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-02T17:22:09.000Z",
+    "agentName": "Agent 7",
+    "changes": [
+      {
+        "newValue": "General",
+        "field": "Escalation"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-02T16:48:47.000Z",
+    "changes": [
+      {
+        "newValue": "Open",
+        "field": "Status",
+        "oldValue": "Closed"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-02T16:46:25.000Z",
+    "agentName": "Agent 7",
+    "changes": [
+      {
+        "newValue": "Closed",
+        "field": "Status",
+        "oldValue": "Open"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-02T16:43:00.000Z",
+    "changes": [
+      {
+        "field": "Team",
+        "oldValue": null,
+        "newValue": "9000000000000000024"
+      }
+    ]
+  },
+  {
+    "eventTime": "2026-10-02T16:43:00.000Z",
+    "changes": [
+      {
+        "newValue": "Open",
+        "field": "Status"
+      }
+    ]
+  }
+]

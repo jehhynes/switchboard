@@ -11,6 +11,8 @@ const CONTRACT = (id: string) =>
     `- ${REPORT} worktree ${id} <path>, when you create a worktree`,
     `- ${REPORT} done ${id} [--summary <text>], when the work is finished`,
     `- ${REPORT} blocked ${id} --reason <text>, when you cannot continue`,
+    `- ${REPORT} approval ${id} --prompt <prompt> [--summary <text>], when the work is ready but posting or publishing it needs the operator's approval`,
+    'When you need the operator for a question or a choice, report blocked with the question and end your turn instead of waiting. When the work is ready but posting or publishing it needs approval, report approval with the prompt that would do it, such as /review-pr pr:123 publish, and end your turn.',
   ].join('\n');
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
@@ -29,7 +31,7 @@ describe('assigned-state transitions', () => {
       type: 'triage',
       triageId: 1,
       workItemId: 1,
-      ticket: { id: 1, source: 'github', sourceKey: '1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, lastPolledAt: T0, repoRoot: '' },
+      ticket: { id: 1, source: 'github', sourceKey: '1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: T0, repoRoot: '' },
       systemPrompt: 'Classify the GitHub issue.',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change' },
@@ -189,7 +191,7 @@ describe('triage', () => {
 describe('sessions', () => {
   function running(h: Harness, key = '1', playbook = 'dev:question'): { item: number; session: string } {
     const [triage] = h.poll(...[...h.store.tickets('github').filter((t) => t.assigned).map((t) => issue(t.sourceKey)), issue(key)]);
-    const item = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId;
+    const item = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId!;
     h.triaged(triage, playbook);
     const session = h.started(h.act({ type: 'approve', workItemId: item })[0]);
 
@@ -520,7 +522,7 @@ describe('limits and the one-active-session rule', () => {
     expect(h.status(3)).toBe('queued');
   });
 
-  it('holds a reassigned ticket’s new work item while the earlier session is active, and defers the old done decision', () => {
+  it('keeps one work item when its ticket is assigned again while the work item is open', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
@@ -528,12 +530,24 @@ describe('limits and the one-active-session rule', () => {
     h.poll();
     expect(h.item(1)).toMatchObject({ status: 'running', unassignedAt: T0 });
 
+    expect(h.poll(issue('1'))).toEqual([]);
+    expect(h.store.workItem(2)).toBeNull();
+    expect(h.item(1).unassignedAt).toBeNull();
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.', warning: null });
+  });
+
+  it('holds a reassigned ticket’s new work item while the done work item’s session is still active', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
+
+    h.report(session, { kind: 'done', summary: null });
+    h.poll();
     const [again] = h.poll(issue('1'));
     expect(h.triaged(again, 'support:defect')).toEqual([]);
     expect(h.status(2)).toBe('queued');
-
-    h.report(session, { kind: 'done', summary: null });
-    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'session', warning: null });
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     const next = only(h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' }), 'start-session');

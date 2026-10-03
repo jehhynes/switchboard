@@ -35,9 +35,17 @@ export interface WorkItemView extends WorkItem {
   worktree: Worktree | null;
 }
 
+/** A pool ticket the operator may pick, with its pool triage (PRD R47). */
+export interface PoolView {
+  ticket: Ticket;
+  triage: Triage | null;
+}
+
 /** Everything the panel shows, sent whole on each change. */
 export interface Snapshot {
   workItems: WorkItemView[];
+  /** Oldest first by the source's creation time. */
+  pool: PoolView[];
   playbooks: { name: string; description: string }[];
   /** Repos an ad-hoc prompt can run in: each source's repo root, the first being the default. */
   repoRoots: string[];
@@ -52,7 +60,8 @@ export type ReportBody =
   | { sessionId: string; kind: 'stage'; stage: string }
   | { sessionId: string; kind: 'worktree'; path: string }
   | { sessionId: string; kind: 'done'; summary: string | null }
-  | { sessionId: string; kind: 'blocked'; reason: string };
+  | { sessionId: string; kind: 'blocked'; reason: string }
+  | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null };
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -251,7 +260,14 @@ export class Runtime {
       return { refused: this.send({ type: 'report', sessionId: body.sessionId, report: { kind: 'worktree', path: worktree.path, branch: worktree.branch } }).refused };
     }
 
-    const report = body.kind === 'stage' ? { kind: body.kind, stage: body.stage } : body.kind === 'done' ? { kind: body.kind, summary: body.summary } : { kind: body.kind, reason: body.reason };
+    const report =
+      body.kind === 'stage'
+        ? { kind: body.kind, stage: body.stage }
+        : body.kind === 'done'
+          ? { kind: body.kind, summary: body.summary }
+          : body.kind === 'approval'
+            ? { kind: body.kind, prompt: body.prompt, summary: body.summary }
+            : { kind: body.kind, reason: body.reason };
 
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }
@@ -283,6 +299,10 @@ export class Runtime {
         sessions: store.sessionsFor(item.id),
         worktree: store.worktreeFor(item.ticketId),
       })),
+      pool: store
+        .poolTickets()
+        .filter((ticket) => store.workItemsForTicket(ticket.id).every((item) => item.status === 'done'))
+        .map((ticket) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null })),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
       sources: [...this.sources.keys()],

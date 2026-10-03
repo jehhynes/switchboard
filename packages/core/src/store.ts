@@ -1,7 +1,7 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `CREATE TABLE tickets (
     id INTEGER PRIMARY KEY,
     source TEXT NOT NULL,
@@ -70,9 +70,35 @@ const MIGRATIONS = [
     released INTEGER NOT NULL
   );
   CREATE INDEX sessionsByWorkItem ON sessions (workItemId);`,
+  // The pool (PRD R47, R48): a triage can belong to a ticket before it has a work item.
+  `ALTER TABLE tickets ADD COLUMN pool INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tickets ADD COLUMN sortAt INTEGER;
+  ALTER TABLE workItems ADD COLUMN needsPick INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE workItems ADD COLUMN approvalPrompt TEXT;
+  ALTER TABLE workItems ADD COLUMN approvalSummary TEXT;
+  ALTER TABLE tickets ADD COLUMN iceboxed INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE triagesByTicket (
+    -- Never reused: a late classifier result for a deleted pool triage must not land on a newer one.
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticketId INTEGER NOT NULL REFERENCES tickets(id),
+    workItemId INTEGER REFERENCES workItems(id),
+    context TEXT,
+    playbook TEXT,
+    summary TEXT,
+    model TEXT,
+    startedAt INTEGER NOT NULL,
+    endedAt INTEGER,
+    error TEXT
+  );
+  INSERT INTO triagesByTicket (id, ticketId, workItemId, context, playbook, summary, model, startedAt, endedAt, error)
+    SELECT t.id, w.ticketId, t.workItemId, t.context, t.playbook, t.summary, t.model, t.startedAt, t.endedAt, t.error FROM triages t JOIN workItems w ON w.id = t.workItemId;
+  DROP TABLE triages;
+  ALTER TABLE triagesByTicket RENAME TO triages;
+  CREATE INDEX triagesByWorkItem ON triages (workItemId);
+  CREATE INDEX triagesByTicket ON triages (ticketId);`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'released']);
+const BOOLEANS = new Set(['assigned', 'pool', 'iceboxed', 'needsPick', 'released']);
 
 type Row = Record<string, unknown>;
 
@@ -233,9 +259,12 @@ export class Store {
     return this.#all('SELECT * FROM workItems WHERE status = ? ORDER BY id', status);
   }
 
-  /** Work items not done, plus those done since `doneSince`, newest first. */
+  /** Work items not done, those done since `doneSince`, and every work item of an iceboxed ticket, newest first. */
   workItems(doneSince: number): WorkItem[] {
-    return this.#all("SELECT * FROM workItems WHERE status <> 'done' OR doneAt >= ? ORDER BY id DESC", doneSince);
+    return this.#all(
+      "SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE w.status <> 'done' OR w.doneAt >= ? OR t.iceboxed = 1 ORDER BY w.id DESC",
+      doneSince,
+    );
   }
 
   insertTriage(triage: NewTriage): Triage {
@@ -252,6 +281,20 @@ export class Store {
 
   triagesFor(workItemId: number): Triage[] {
     return this.#all('SELECT * FROM triages WHERE workItemId = ? ORDER BY id', workItemId);
+  }
+
+  /** Triages of a ticket made while it was in the pool and not yet attached to a work item. */
+  poolTriages(ticketId: number): Triage[] {
+    return this.#all('SELECT * FROM triages WHERE ticketId = ? AND workItemId IS NULL ORDER BY id', ticketId);
+  }
+
+  deleteTriage(id: number): void {
+    this.#db.prepare('DELETE FROM triages WHERE id = ?').run(id);
+  }
+
+  /** Tickets in the pool, the longest-waiting customer first. */
+  poolTickets(): Ticket[] {
+    return this.#all('SELECT * FROM tickets WHERE pool = 1 ORDER BY sortAt IS NULL, sortAt, id');
   }
 
   runningTriages(): Triage[] {

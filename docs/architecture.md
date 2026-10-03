@@ -1,12 +1,12 @@
 # Switchboard architecture
 
-Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, the core's store, settings, playbooks and [flow decisions](#core-decisions), the GitHub source, the Claude Code runner and classifier, the hub runtime, the report command, and the panel with the ad-hoc prompt box. Zoho Desk and Forum are planned.
+Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, the core's store, settings, playbooks and [flow decisions](#core-decisions), the GitHub source, the Claude Code runner and classifier, the hub runtime, the report command, the panel with the ad-hoc prompt box, the Zoho Desk source and the pool with pick sessions. Forum is planned.
 
 Session and triage mechanics come from Ground Control (`D:\git\ground-control`), where they are verified. M IDs below refer to its [mechanics.md](../../ground-control/docs/mechanics.md). Re-verify them in Switchboard's own mechanics.md before relying on a version-fragile one.
 
 ## Packages
 
-npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/github`, `packages/claude`, `packages/hub`, `apps/hub`, and `extensions/switchboard`. `packages/zoho` and `packages/forum` are planned.
+npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/github`, `packages/zoho`, `packages/claude`, `packages/hub`, `apps/hub`, and `extensions/switchboard`. `packages/forum` is planned.
 
 | Package | Contents | Depends on |
 |---|---|---|
@@ -37,18 +37,18 @@ The ad-hoc source is local and lives in `packages/hub`. State, playbooks and the
 ## Data model
 
 ```
-Ticket     id, source, sourceKey, sourceId, title, url, assigned, pool, createdAt, lastPolledAt, repoRoot
-WorkItem   id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, failedStep, unassignedAt, queuedAt, createdAt, doneAt, doneReason
+Ticket     id, source, sourceKey, sourceId, title, url, assigned, pool, iceboxed, sortAt, lastPolledAt, repoRoot
+WorkItem   id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, failedStep, unassignedAt, queuedAt, needsPick, createdAt, doneAt, doneReason, approvalPrompt, approvalSummary
 Triage     id, ticketId, workItemId, context, playbook, summary, model, startedAt, endedAt, error
 Worktree   id, ticketId, path, branch, linkedBy (report | convention)
 Session    id, workItemId, kind (pick | setup | task), provider, nativeSessionId, shortId, cwd, state, stateAt, stateDetail, outcome, outcomeDetail, startedAt, endedAt, released
 ```
 
-- `Ticket.assigned` is the assigned state the last complete poll saw, and `Ticket.pool` whether it saw the ticket in the pool. `Ticket.createdAt` is the source's creation time, which orders the pool. A pool triage has a `ticketId` and no `workItemId` until a pick creates the work item and attaches it. `Ticket.repoRoot` is the repo an ad-hoc prompt chose; it is empty for other sources, which use their `repoRoot` setting.
+- `Ticket.assigned` is the assigned state the last complete poll saw, and `Ticket.pool` whether it saw the ticket in the pool. `Ticket.sortAt` is the source's sort time, which orders the pool: Zoho's `customerResponseTime`, Forum's last public post. A pool triage has a `ticketId` and no `workItemId` until a pick creates the work item and attaches it. `Ticket.repoRoot` is the repo an ad-hoc prompt chose; it is empty for other sources, which use their `repoRoot` setting.
 - `Ticket.sourceKey` is the key people use, such as a GitHub issue number or a Zoho ticket number. `Ticket.sourceId` is the source's internal ID when API calls need a different one, such as Zoho's internal ticket ID.
 - `Triage.context` is the clipped text the classifier received. Keeping it shows why a playbook was chosen.
 - `WorkItem.status` takes the values in PRD R34. `WorkItem.error` holds the cause shown for `failed` or `blocked`, and `WorkItem.failedStep` (`triage`, `pick`, `setup` or `task`) is the step Retry repeats (PRD R45).
-- `WorkItem.unassignedAt` records that the ticket left the assigned state while a session was active (PRD R10). `WorkItem.queuedAt` orders queued starts.
+- `WorkItem.unassignedAt` records that the ticket left the assigned state while a session was active (PRD R10). `WorkItem.queuedAt` orders queued starts. `WorkItem.needsPick` marks a picked work item whose claim has not succeeded: its next session is a pick session.
 - `WorkItem.taskPrompt` is the rendered prompt the task session ran, or the typed prompt for an ad-hoc work item.
 - `WorkItem.doneReason` is `session`, `operator` or `unassigned`.
 - `WorkItem.warning` is set when the work item ends because its ticket left the assigned state with no done report (PRD R10, R11).
@@ -74,6 +74,8 @@ Implemented. Follows Ground Control's hub (GC R35, M25).
 - Groups and controls follow PRD R27. Controls run the extension's `switchboard.action`, `switchboard.attach` and `switchboard.open` commands. An operator event goes to `POST /action`, and a refusal shows as a warning. Attach and Stop apply to a session running in the background; Attach opens a terminal running `claude attach <shortId>`. Open in VS Code applies to a session that is not running, or that was released and is active again because the operator resumed it. It follows [Open in VS Code](#claude-code-runner) below. A ticket link opens in the browser.
 - Each row shows the ticket, title, playbook, status, stage and its age, the worktree's branch, and any warning or error; a done work item with an active session shows the session's state.
 - The ad-hoc box takes a prompt and a repo from the configured repo roots, the first by default, and sends `adhoc`.
+- The Pool group lists pool tickets with no open work item, oldest first: source and key, title, the pool triage's summary and playbook, and Pick (`pick`). A failed pool triage shows its error with Triage again (`retriage-pool`) beside Pick; a running one shows "Triaging…". A picked work item shows the status "Claiming" while its pick session runs.
+- Endpoint additions for the pool: `/action` also takes `pick` and `retriage-pool` with a `ticketId`.
 - Styles use VS Code's theme variables and codicons from `@vscode/codicons`, copied into `dist/`. The script runs under a nonce content security policy.
 
 ## Store
@@ -103,10 +105,10 @@ Report progress with `{{report}} stage {{session.id}} <stage>`.
 
 - Template variables: the ticket's fields, `{{ticket.context}}`, `{{triage.summary}}`, `{{session.id}}` and `{{report}}`. `{{report}}` is the report command prefix, `node "<home>/hub.js" report`. Rendering fails on an unknown variable.
 - Front matter: `description` (required), `autoStart` (default false), `requiresWorktree` (default false), `permissionMode` and `model` (defaults from `sessions` settings), `kind` (`task` by default, or `triage`), and `workdir` (`worktree` by default: the ticket's worktree when one exists, otherwise the repo root; or `repoRoot`: always the source's repo root, for playbooks whose skills belong to that repository).
-- `description` tells the classifier when to choose the playbook.
+- `description` tells the classifier when to choose the playbook. Adding a playbook is adding its file: the hub reloads it, and the classifier sees its description. Edit the triage playbook only for a rule that must take precedence over the descriptions.
 - A source's triage playbook has `kind: triage`. Its body is the classifier's system prompt. Triage playbooks are never offered to the classifier as choices.
 - Each source's `namespace` setting limits the classifier's choices to that namespace's task playbooks, such as `dev` for GitHub and `support` for Zoho Desk and Forum. With one playbook in the namespace, triage still writes the summary.
-- Every session prompt ends with the report contract: the session ID and the `stage`, `worktree`, `done` and `blocked` commands. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
+- Every session prompt ends with the report contract: the session ID and the `stage`, `worktree`, `done`, `blocked` and `approval` commands, and two rules. When the session needs the operator for a question or a choice, it reports `blocked` with the question and ends its turn instead of waiting, so it does not hold a session slot. When its work is ready but posting or publishing it needs the operator's approval, it reports `approval` with the prompt that would do it, such as `/review-pr pr:123 publish`, and ends its turn. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
 
 ## Triage
 
@@ -133,7 +135,7 @@ A classifier error, an unparsable result, a timeout, or a playbook name outside 
 Pool tickets (PRD R47, R48):
 
 - When a poll shows a ticket newly in the pool, the core starts a pool triage for the ticket; its result or error stays on the ticket.
-- A pick creates the work item, attaches the pool triage, and starts a `pick` session (status `setup`) running the source's `pickPrompt` in its repo root, under the concurrency limit. When the pick session reports done, the work item continues at step 3; with no pool triage result, the existing work item is triaged first (`triaging`). When it reports blocked or ends without done, the work item is `blocked`.
+- A pick creates the work item, attaches the pool triage, and starts a `pick` session (status `setup`) running the source's `pickPrompt` in its repo root, under the concurrency limit. When the pick session reports done, the task session starts as an operator start, skipping the approval in step 3; with no pool triage result, the existing work item is triaged first (`triaging`). When it reports blocked or ends without done, the work item is `blocked`.
 - A ticket that enters the assigned state while it has an open work item gets no second work item; the claim made by the pick session is seen this way.
 
 An ad-hoc prompt creates a ticket and work item and goes straight to step 5, with the typed prompt as the task prompt and the chosen repo root as the working directory (PRD R6).
@@ -188,6 +190,7 @@ node "<home>/hub.js" report stage <sessionId> <stage>
 node "<home>/hub.js" report worktree <sessionId> <path>
 node "<home>/hub.js" report done <sessionId> [--summary <text>]
 node "<home>/hub.js" report blocked <sessionId> --reason <text>
+node "<home>/hub.js" report approval <sessionId> --prompt <prompt> [--summary <text>]
 ```
 
 - The CLI's home is the directory that holds the `hub.js` it runs from, so a session started by a hub with `--home` reports to that home.
@@ -265,6 +268,6 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
   - Triage context: the topic title and posts in order. Deleted posts (`DeletedUtc` set), posts with `Status = 2` (private notes) and posts by `UserId = 2` (the automatic AI analysis) are left out. The source key is `Thread.Id`, and the URL is `https://forum.example.com/t/forum/<Thread.Key>`.
 - A Forum topic and a Zoho ticket about the same case are separate tickets (PRD R26).
 
-The operator's first playbooks mirror their Ground Control action table: `dev:develop` (`/gc-plan`), `dev:review-others` (`/review-pr`), `dev:review-followup` (`/review-pr-followup`), `dev:address-review` (`/address-pr-review`), `dev:qa-failure` and `dev:qa-question` (`/address-feedback`). Support has one playbook, `support:case`, because `/support-process` routes every case type itself. It runs `/support-process #<ticket number>` for Zoho or `/support-process T<topic id>` for Forum, with `autoStart: true`, `requiresWorktree: false` and `workdir: repoRoot`, so the case starts as soon as its pick session has claimed it. The operator's pick is the human start (PRD R48), which is why `support:case` can start automatically. Support sessions stop early, often at a request for a local reproduction, and end with a draft reply handed back to the operator.
+The operator's first playbooks mirror their Ground Control action table: `dev:develop` (`/gc-plan`), `dev:review-others` (`/review-pr`), `dev:review-followup` (`/review-pr-followup`), `dev:address-review` (`/address-pr-review`), `dev:qa-failure` and `dev:qa-question` (`/address-feedback`). Support has one playbook, `support:case`, because `/support-process` routes every case type itself. It runs `/support-process #<ticket number>` for Zoho or `/support-process T<topic id>` for Forum, with `autoStart: false`, `requiresWorktree: false` and `workdir: repoRoot`. A pick starts the case as soon as its pick session has claimed it (PRD R48); `autoStart: false` makes a case that reopens on its own, such as after On Hold, wait for Approve. The skills reuse the case's folder and journal, so `/support-process` resumes where the case stopped. Support sessions stop early, often at a request for a local reproduction, and end with a draft reply handed back to the operator. No playbook or Switchboard prompt ever sends `/support-release`: the Support hooks treat that literal prompt as the operator's own release.
 
 The operator's Support board (`support-kanban`) starts no sessions itself, but its hooks register any Claude session in `D:\git\support` on the case's card. Switchboard does not coordinate with it: the operator does not press Investigate on a card whose case Switchboard is running. The Support skills are project skills of `D:\git\support`, so Support sources use it as their repo root; `/support-fix` makes the widgets worktree when a case needs code. All playbooks live in the operator's home, not in this repository.

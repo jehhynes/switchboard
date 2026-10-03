@@ -3,7 +3,6 @@ import { parseGithubConfig } from './config.js';
 import { spawnGh } from './gh.js';
 import { GithubSource } from './source.js';
 
-export * from './clip.js';
 export * from './config.js';
 export * from './gh.js';
 export * from './source.js';

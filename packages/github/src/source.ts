@@ -1,5 +1,5 @@
 import type { ContextResult, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
-import { clip } from './clip.js';
+import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
 import { CONTEXT_QUERY, ISSUES_QUERY } from './queries.js';
@@ -123,7 +123,7 @@ export class GithubSource implements Source {
 
         const status = node.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName?.name;
 
-        tickets.push({ sourceKey: String(node.number), sourceId: null, title: node.title, url: node.url, assigned: status !== undefined && assignedStatuses.includes(status) });
+        tickets.push({ sourceKey: String(node.number), sourceId: null, title: node.title, url: node.url, assigned: status !== undefined && assignedStatuses.includes(status), pool: false, sortAt: null });
       }
 
       if (!search.pageInfo.hasNextPage) {

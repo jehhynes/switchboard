@@ -93,8 +93,23 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The settings.json and marker writes described in M8.
 - **Not covered:** Open in VS Code for a session from another folder (the pending open and claim). The instance had one folder, and that path opens another window.
 
+## M10. Zoho Desk reads and the Support pool
+
+- **Date:** 2026-10-03.
+- **Versions:** Zoho Desk REST API v1, the operator's `desk-token.sh` runner, Claude Code CLI 2.1.288.
+- **Experiment:** read-only GETs: `/tickets/search?status=Open` paged by 100, `/teams`, and one ticket's detail, conversations, threads and history. Then the Zoho source and a hub in an isolated home with the draft `triage:zoho` and `support:case` playbooks, which triaged the pool and started no session.
+- **Result:**
+  - The desk had 707 Open tickets: 8 search requests, about 5.5 seconds a poll. 5 had escalation `Support`. 3 were held by support agents and went to the pool; 2 were held by an engineer and were left out.
+  - `/tickets/search` returns `cf` and `createdTime`. The conversation list and the history come newest first. The list omits thread bodies, so each thread is read on its own.
+  - A history `Case Owner` change carries agent IDs, and a `Team` change carries team IDs.
+  - One ticket's triage context came to 26,209 characters over 20 conversation entries.
+  - The pool listed the 3 tickets oldest first. Each was triaged into `support:case` with a summary in the `<ask> — <intake type>, <immediacy>/<severity>` form; one was rated NON-BLOCKING and two BLOCKING. No work item or session was created, and nothing was written to Zoho.
+- **Fixtures:** `packages/zoho/test/fixtures`, built from these responses by whitelist: synthetic IDs, ticket numbers, names and text (synthetic 19-digit IDs except the operator's own and the two automations, ticket numbers from 900001, "Customer N" and "Agent N", same-length filler for every text, and only cf_queue kept as recorded).
+- **Current use:** the Zoho source and the pool (architecture.md § Settings, § Flow).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:
 
 - Open in VS Code for a session from another folder: the pending open, `vscode.openFolder` focusing an existing window, and the claim in that window.
+- A real pick session claiming a pool ticket through `support-bind`. By the operator's rule no test claims a case; the operator makes the first real pick.

@@ -1,7 +1,7 @@
 body { padding: 0 8px; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
 h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 4px; color: var(--vscode-descriptionForeground); }
-details.done > summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
-details.done > summary h3 { display: inline; }
+details.group > summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
+details.group > summary h3 { display: inline; }
 .item { border-bottom: 1px solid var(--vscode-widget-border, transparent); padding: 4px 0; }
 .item > summary { cursor: pointer; display: flex; flex-wrap: wrap; row-gap: 2px; }
 .line { display: flex; flex-basis: 100%; gap: 6px; align-items: center; min-width: 0; }
@@ -28,3 +28,6 @@ a { color: var(--vscode-textLink-foreground); }
 .key, .playbook-name, .status, .stage { white-space: nowrap; flex-shrink: 0; }
 .worktree { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 summary .control { white-space: nowrap; flex-shrink: 0; }
+.pool-item .summary { flex: 1 1 auto; min-width: 0; color: var(--vscode-descriptionForeground); }
+.pool-item .control { margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+.approval { color: var(--vscode-descriptionForeground); font-style: italic; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

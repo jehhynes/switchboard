@@ -14,6 +14,7 @@ const REPORT_USAGE = `Usage:
   report worktree <sessionId> <path>
   report done <sessionId> [--summary <text>]
   report blocked <sessionId> --reason <text>
+  report approval <sessionId> --prompt <prompt> [--summary <text>]
 `;
 
 function flag(argv: readonly string[], name: string): string | null {

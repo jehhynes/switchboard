@@ -13,6 +13,7 @@ export const REPORT = 'node "C:/home/.switchboard/hub.js" report';
 
 const PLAYBOOKS: Record<string, string> = {
   'triage:github': '---\ndescription: GitHub triage\nkind: triage\n---\nClassify the GitHub issue.',
+  'triage:zoho': '---\ndescription: Zoho triage\nkind: triage\n---\nTriage the Support case.',
   'dev:develop': '---\ndescription: Plan and build the change\nautoStart: true\nrequiresWorktree: true\n---\n/gc-plan {{ticket.sourceKey}}',
   'dev:question': '---\ndescription: Answer a question\npermissionMode: plan\nmodel: opus\n---\nAnswer {{ticket.title}}.\n{{triage.summary}}',
   'support:defect': '---\ndescription: Research a defect\nautoStart: true\nworkdir: repoRoot\n---\nResearch {{ticket.sourceKey}} in {{ticket.url}}.',
@@ -40,13 +41,14 @@ export function settings(patch: { sessions?: Partial<Settings['sessions']>; tria
     sessions: { ...DEFAULT_SETTINGS.sessions, ...patch.sessions },
     triage: { ...DEFAULT_SETTINGS.triage, ...patch.triage },
     sources: {
-      github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', options: {} },
+      github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', namespace: '', pickPrompt: '', options: {} },
+      zoho: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/support', triagePlaybook: 'triage:zoho', setupPrompt: '', namespace: 'support', pickPrompt: 'Claim case #{{ticket.sourceKey}}, then stop.', options: {} },
     },
   };
 }
 
 export function issue(key: string, assigned = true): PolledTicket {
-  return { sourceKey: key, sourceId: null, title: `Issue ${key}`, url: `https://github.com/acme/widgets/issues/${key}`, assigned };
+  return { sourceKey: key, sourceId: null, title: `Issue ${key}`, url: `https://github.com/acme/widgets/issues/${key}`, assigned, pool: false, sortAt: null };
 }
 
 /** Drives the flow against an in-memory store with a settable clock and sequential session IDs. */

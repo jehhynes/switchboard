@@ -24,6 +24,10 @@ export interface SourceSettings {
   repoRoot: string;
   triagePlaybook: string;
   setupPrompt: string;
+  /** Limits triage to this namespace's task playbooks; empty offers them all. */
+  namespace: string;
+  /** What a pick session runs to claim a pool ticket for the operator (PRD R48). */
+  pickPrompt: string;
   options: Record<string, unknown>;
 }
 
@@ -39,7 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
 };
 
-const SOURCE_DEFAULTS = { enabled: false, pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '' };
+const SOURCE_DEFAULTS = { enabled: false, pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', pickPrompt: '' };
 
 export type SettingsResult = { settings: Settings } | { errors: string[] };
 
@@ -173,8 +177,8 @@ export function parseSettings(text: string): SettingsResult {
   for (const name of Object.keys(sourcesIn)) {
     const path = `sources.${name}`;
     const sourceIn = read.section(sourcesIn, name, path);
-    const { enabled, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, ...options } = sourceIn;
-    const common = { enabled, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt };
+    const { enabled, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace, pickPrompt, ...options } = sourceIn;
+    const common = { enabled, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace, pickPrompt };
 
     sources[name] = {
       enabled: read.boolean(common, 'enabled', path, SOURCE_DEFAULTS.enabled),
@@ -182,6 +186,8 @@ export function parseSettings(text: string): SettingsResult {
       repoRoot: read.string(common, 'repoRoot', path, SOURCE_DEFAULTS.repoRoot),
       triagePlaybook: read.string(common, 'triagePlaybook', path, SOURCE_DEFAULTS.triagePlaybook),
       setupPrompt: read.string(common, 'setupPrompt', path, SOURCE_DEFAULTS.setupPrompt),
+      namespace: read.string(common, 'namespace', path, SOURCE_DEFAULTS.namespace),
+      pickPrompt: read.string(common, 'pickPrompt', path, SOURCE_DEFAULTS.pickPrompt),
       options,
     };
   }

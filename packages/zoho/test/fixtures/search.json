@@ -1,0 +1,243 @@
+{
+  "data": [
+    {
+      "id": "9000000000000000001",
+      "ticketNumber": "900001",
+      "createdTime": "2026-10-01T10:37:44.000Z",
+      "customerResponseTime": "2026-10-03T10:59:21.000Z",
+      "subject": "Ticket 900001",
+      "webUrl": "https://desk.example.test/tickets/900001",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000002",
+      "cf": {
+        "cf_queue": "General"
+      }
+    },
+    {
+      "id": "9000000000000000003",
+      "ticketNumber": "900002",
+      "createdTime": "2026-10-03T10:54:16.000Z",
+      "customerResponseTime": "2026-10-03T10:54:16.000Z",
+      "subject": "Ticket 900002",
+      "webUrl": "https://desk.example.test/tickets/900002",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": null
+      }
+    },
+    {
+      "id": "9000000000000000004",
+      "ticketNumber": "900003",
+      "createdTime": "2026-09-29T06:42:36.000Z",
+      "customerResponseTime": "2026-10-03T08:58:47.000Z",
+      "subject": "Ticket 900003",
+      "webUrl": "https://desk.example.test/tickets/900003",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000005",
+      "cf": {
+        "cf_queue": "General"
+      }
+    },
+    {
+      "id": "9000000000000000006",
+      "ticketNumber": "900004",
+      "createdTime": "2026-10-03T08:32:27.000Z",
+      "customerResponseTime": "2026-10-03T08:32:27.000Z",
+      "subject": "Ticket 900004",
+      "webUrl": "https://desk.example.test/tickets/900004",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": null
+      }
+    },
+    {
+      "id": "9000000000000000007",
+      "ticketNumber": "900005",
+      "createdTime": "2026-10-03T08:17:52.000Z",
+      "customerResponseTime": "2026-10-03T08:17:51.000Z",
+      "subject": "Ticket 900005",
+      "webUrl": "https://desk.example.test/tickets/900005",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": null
+      }
+    },
+    {
+      "id": "9000000000000000008",
+      "ticketNumber": "900006",
+      "createdTime": "2026-10-03T08:12:15.000Z",
+      "customerResponseTime": "2026-10-03T08:12:14.000Z",
+      "subject": "Ticket 900006",
+      "webUrl": "https://desk.example.test/tickets/900006",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": "General"
+      }
+    },
+    {
+      "id": "9000000000000000009",
+      "ticketNumber": "900007",
+      "createdTime": "2026-10-02T16:42:59.000Z",
+      "customerResponseTime": "2026-10-03T00:53:26.000Z",
+      "subject": "Ticket 900007",
+      "webUrl": "https://desk.example.test/tickets/900007",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000002",
+      "cf": {
+        "cf_queue": "Support"
+      }
+    },
+    {
+      "id": "9000000000000000010",
+      "ticketNumber": "900008",
+      "createdTime": "2026-04-14T14:42:45.000Z",
+      "customerResponseTime": "2026-04-14T14:42:44.000Z",
+      "subject": "Ticket 900008",
+      "webUrl": "https://desk.example.test/tickets/900008",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000011",
+      "cf": {
+        "cf_queue": "Support"
+      }
+    },
+    {
+      "id": "9000000000000000012",
+      "ticketNumber": "900009",
+      "createdTime": "2026-10-01T16:42:12.000Z",
+      "customerResponseTime": "2026-10-02T14:35:32.000Z",
+      "subject": "Ticket 900009",
+      "webUrl": "https://desk.example.test/tickets/900009",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000002",
+      "cf": {
+        "cf_queue": "Support"
+      }
+    },
+    {
+      "id": "9000000000000000013",
+      "ticketNumber": "900010",
+      "createdTime": "2026-09-30T08:36:28.000Z",
+      "customerResponseTime": "2026-09-30T08:36:27.000Z",
+      "subject": "Ticket 900010",
+      "webUrl": "https://desk.example.test/tickets/900010",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000014",
+      "cf": {
+        "cf_queue": "Support"
+      }
+    },
+    {
+      "id": "9000000000000000015",
+      "ticketNumber": "900011",
+      "createdTime": "2026-09-22T14:15:04.000Z",
+      "customerResponseTime": "2026-09-25T13:15:19.000Z",
+      "subject": "Ticket 900011",
+      "webUrl": "https://desk.example.test/tickets/900011",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000014",
+      "cf": {
+        "cf_queue": "Support"
+      }
+    },
+    {
+      "id": "9000000000000000016",
+      "ticketNumber": "900012",
+      "createdTime": "2026-10-03T08:08:48.000Z",
+      "customerResponseTime": "2026-10-03T08:08:48.000Z",
+      "subject": "Ticket 900012",
+      "webUrl": "https://desk.example.test/tickets/900012",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": null
+      }
+    },
+    {
+      "id": "9000000000000000017",
+      "ticketNumber": "900013",
+      "createdTime": "2026-10-02T19:32:23.000Z",
+      "customerResponseTime": "2026-10-02T19:32:23.000Z",
+      "subject": "Ticket 900013",
+      "webUrl": "https://desk.example.test/tickets/900013",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000018",
+      "cf": {
+        "cf_queue": null
+      }
+    },
+    {
+      "id": "9000000000000000019",
+      "ticketNumber": "900014",
+      "createdTime": "2026-09-08T13:46:35.000Z",
+      "customerResponseTime": "2026-10-03T07:34:35.000Z",
+      "subject": "Ticket 900014",
+      "webUrl": "https://desk.example.test/tickets/900014",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": "9000000000000000020",
+      "cf": {
+        "cf_queue": null
+      }
+    },
+    {
+      "id": "9000000000000000021",
+      "ticketNumber": "900015",
+      "createdTime": "2026-10-03T06:24:13.000Z",
+      "customerResponseTime": "2026-10-03T06:24:12.000Z",
+      "subject": "Ticket 900015",
+      "webUrl": "https://desk.example.test/tickets/900015",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": "General"
+      }
+    },
+    {
+      "id": "9000000000000000022",
+      "ticketNumber": "900016",
+      "createdTime": "2026-10-03T05:53:42.000Z",
+      "customerResponseTime": "2026-10-03T05:53:41.000Z",
+      "subject": "Ticket 900016",
+      "webUrl": "https://desk.example.test/tickets/900016",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": "General"
+      }
+    },
+    {
+      "id": "9000000000000000023",
+      "ticketNumber": "900017",
+      "createdTime": "2026-10-02T22:22:58.000Z",
+      "customerResponseTime": "2026-10-03T05:44:37.000Z",
+      "subject": "Ticket 900017",
+      "webUrl": "https://desk.example.test/tickets/900017",
+      "status": "Open",
+      "statusType": "Open",
+      "assigneeId": null,
+      "cf": {
+        "cf_queue": null
+      }
+    }
+  ],
+  "count": 17
+}

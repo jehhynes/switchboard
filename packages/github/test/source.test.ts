@@ -34,7 +34,7 @@ function fakeGh(...answers: GhResult[]) {
   });
 }
 
-const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, sourceId: null, title: '', url: '', assigned: true, lastPolledAt: null, repoRoot: '' });
+const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, sourceId: null, title: '', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
 
 describe('GithubSource.poll', () => {
   it('lists every searched issue, assigned only when its project status is configured', async () => {
@@ -49,6 +49,8 @@ describe('GithubSource.poll', () => {
         title: `Issue ${number}`,
         url: `https://github.com/acme/widgets/issues/${number}`,
         assigned: number !== 19231 && number !== 19230,
+        pool: false,
+        sortAt: null,
       })),
     });
   });

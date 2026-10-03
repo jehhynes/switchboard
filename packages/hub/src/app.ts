@@ -7,6 +7,7 @@ import { claudeSettingsPath, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
+import { zohoSource } from '@switchboard/zoho';
 import { loadConfig, playbooksDir } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
@@ -15,12 +16,12 @@ import type { ReportBody, RuntimeDeps } from './runtime.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the panel may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'approve', 'retry', 'mark-done', 'retriage', 'change-playbook', 'stop']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'approve', 'retry', 'mark-done', 'retriage', 'change-playbook', 'stop', 'pick', 'retriage-pool', 'icebox', 'restore']);
 
-const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked']);
+const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval']);
 
 function makeSource(name: string, settings: SourceSettings) {
-  return name === 'github' ? githubSource(settings) : null;
+  return name === 'github' ? githubSource(settings) : name === 'zoho' ? zohoSource(settings) : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,14 +34,18 @@ export function parseReport(body: unknown): ReportBody | null {
     return null;
   }
 
-  const text = { stage: 'stage', worktree: 'path', done: 'summary', blocked: 'reason' }[body['kind'] as ReportBody['kind']];
+  const text = { stage: 'stage', worktree: 'path', done: 'summary', blocked: 'reason', approval: 'prompt' }[body['kind'] as ReportBody['kind']];
   const value = body[text];
+
+  if (body['kind'] === 'approval' && body['summary'] !== undefined && body['summary'] !== null && typeof body['summary'] !== 'string') {
+    return null;
+  }
 
   if (body['kind'] === 'done' ? value !== null && value !== undefined && typeof value !== 'string' : typeof value !== 'string' || value === '') {
     return null;
   }
 
-  return { ...body, [text]: value ?? null } as ReportBody;
+  return { ...body, [text]: value ?? null, ...(body['kind'] === 'approval' ? { summary: body['summary'] ?? null } : {}) } as ReportBody;
 }
 
 /** An operator event from the panel. The core validates its target and refuses what does not apply. */
@@ -104,7 +109,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         const report = parseReport(body);
 
         if (report === null) {
-          return { status: 400, body: { error: 'Expected {sessionId, kind, stage|path|summary|reason}.' } };
+          return { status: 400, body: { error: 'Expected {sessionId, kind, stage|path|summary|reason|prompt}.' } };
         }
 
         const { refused } = await runtime.report(report);
