@@ -77,7 +77,7 @@ export type FlowEvent =
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
-  | { type: 'approve' | 'retry' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
+  | { type: 'start' | 'approve' | 'retry' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
   | { type: 'change-playbook'; workItemId: number; playbook: string }
   | { type: 'pick' | 'retriage-pool' | 'icebox' | 'restore'; ticketId: number }
   | { type: 'tick' };
@@ -193,6 +193,8 @@ class Flow {
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
         return this.adhoc(event.prompt, event.repoRoot);
+      case 'start':
+        return this.start(this.openItem(event.workItemId));
       case 'approve':
         return this.approve(this.openItem(event.workItemId));
       case 'retry':
@@ -400,7 +402,7 @@ class Flow {
     if (playbook.autoStart || this.picked(item)) {
       this.queue(item);
     } else {
-      this.store.updateWorkItem(item.id, { status: 'awaiting-approval' });
+      this.store.updateWorkItem(item.id, { status: 'unstarted' });
     }
   }
 
@@ -880,6 +882,14 @@ class Flow {
     this.queue(item);
   }
 
+  private start(item: WorkItem): void {
+    if (item.status !== 'unstarted') {
+      throw new Refusal('The work item is not unstarted.');
+    }
+
+    this.queue(item);
+  }
+
   /** PRD R45: repeat the step that stopped. */
   private retry(item: WorkItem): void {
     if (item.status !== 'failed' && item.status !== 'blocked') {
@@ -919,7 +929,7 @@ class Flow {
       throw new Refusal(`${name} is not a loaded task playbook.`);
     }
 
-    this.store.updateWorkItem(item.id, { playbook: name, taskPrompt: null, status: 'awaiting-approval', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
+    this.store.updateWorkItem(item.id, { playbook: name, taskPrompt: null, status: 'unstarted', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
   }
 
   private requireNoSession(item: WorkItem): void {

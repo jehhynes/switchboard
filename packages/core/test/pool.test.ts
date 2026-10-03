@@ -140,7 +140,7 @@ describe('pick (PRD R48)', () => {
 
     const reopened = only(pollZoho(h, zoho('600', 'assigned')), 'triage');
     expect(h.act({ type: 'triage-succeeded', triageId: reopened.triageId, context: 'c', playbook: 'support:case', summary: 's', immediacy: null, severity: null, model: null })).toEqual([]);
-    expect(h.item(2).status).toBe('awaiting-approval');
+    expect(h.item(2).status).toBe('unstarted');
   });
 
   it('lets a resumed blocked pick finish the claim', () => {

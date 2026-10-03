@@ -7,7 +7,7 @@ describe('link reports (PRD R52)', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    const session = h.started(h.act({ type: 'approve', workItemId: 1 })[0]);
+    const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
     h.report(session, { kind: 'link', label: 'Issue', target: 'https://github.com/o/r/issues/1' });
     h.report(session, { kind: 'link', label: 'Case file', target: 'D:\\cases\\1\\case.md' });

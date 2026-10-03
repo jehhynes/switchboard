@@ -1,7 +1,7 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { startPanel } from '../src/webview/main.js';
-import { age, controlsOf, groupOf, mainControl, markOf, queueTime, rankOf, renderPanel, statusOf } from '../src/webview/render.js';
+import { age, controlsOf, groupOf, mainControl, markOf, queueTime, rankOf, renderPanel, statusOf, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -155,13 +155,13 @@ describe('statusOf and mainControl', () => {
 
 describe('markOf', () => {
   const mark = (patch: Partial<WorkItemView>) => {
-    const { icon, title, tone } = markOf(item(1, patch));
-    return [icon, title, tone ?? null];
+    const found = markOf(item(1, patch));
+    return found === 'priority' ? found : [found.icon, found.title, found.tone ?? null];
   };
 
   it('shows what the operator must do in Needs you', () => {
-    expect(mark({ status: 'awaiting-approval' })).toEqual(['rocket', 'Approve the start', null]);
     expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish' })).toEqual(['cloud-upload', 'Approve the publish', null]);
+    expect(mark({ status: 'unstarted' })).toBe('priority');
     expect(mark({ sessions: [session({ state: 'waiting' })] })).toEqual(['comment-discussion', 'Answer a question', null]);
     expect(mark({ status: 'blocked', error: 'Which account should I use?' })).toEqual(['comment-discussion', 'Answer a question', null]);
     expect(mark({ status: 'blocked', error: 'Needs VPN access.' })).toEqual(['debug-pause', 'Blocked', null]);
@@ -217,12 +217,14 @@ describe('renderPanel', () => {
       { expanded: new Set([3]) },
     );
 
-    expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (1)', 'Done (1)']);
+    expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (1)', 'Unstarted (0)', 'Done (1)']);
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.group')].map((group) => [group.dataset['group'], group.open])).toEqual([
       ['needs', true],
       ['working', true],
+      ['unstarted', true],
       ['done', false],
     ]);
+    expect(root.querySelector('[data-group="unstarted"] p.empty')?.textContent).toBe('Nothing waits to be started.');
     expect(root.querySelector('details.item[data-item="3"]')?.hasAttribute('open')).toBe(true);
     expect(root.querySelector('[data-item="2"] .title')?.textContent).toBe('Issue <2>');
     expect(root.querySelector('[data-item="2"] summary .note')?.textContent).toBe('Workspace not trusted.');
@@ -239,7 +241,7 @@ describe('renderPanel', () => {
   it('honours groups the operator opened or closed', () => {
     const root = render(snapshot([item(1, { status: 'done', doneAt: NOW })]), { groups: new Map([['needs', false], ['done', true]]) });
 
-    expect([...root.querySelectorAll<HTMLDetailsElement>('details.group')].map((group) => group.open)).toEqual([false, true, true]);
+    expect([...root.querySelectorAll<HTMLDetailsElement>('details.group')].map((group) => group.open)).toEqual([false, true, true, true]);
   });
 
   it('shows only the primary control, with the others and the playbook list behind the ... menu', () => {
@@ -287,7 +289,7 @@ describe('renderPanel', () => {
     expect(renderPanel(snapshot([]), NOW, ui())).not.toContain('No source is polled');
   });
 
-  it('lists the pool with a priority dot, time in queue, summary, Returned mark and Pick, with Icebox in the menu', () => {
+  it('lists pool tickets in Unstarted as Unclaimed with a priority dot, time in queue, summary, Returned mark and Start, with Icebox in the menu', () => {
     const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, iceboxed: false, sortAt: NOW - id * 3_600_000, lastPolledAt: NOW, repoRoot: '' });
     const rated = (id: number, patch: Partial<Triage> = {}) => triage({ id, ticketId: id, workItemId: null, playbook: 'support:case', summary: 'Fix sync — defect', immediacy: 'BLOCKING', severity: 'MED', ...patch });
     const root = render(
@@ -302,41 +304,67 @@ describe('renderPanel', () => {
       }),
       { menu: 'ticket:4' },
     );
+    // Rank 1, then rank 2 with the unrated ones counted as 2, oldest first, then rank 3.
     const rows = [...root.querySelectorAll('.pool-item')];
+    const byId = (id: number) => root.querySelector(`.pool-item[data-ticket="${id}"]`)!;
 
-    expect([...root.querySelectorAll('h3')].map((h) => h.textContent).at(-1)).toBe('Pool (5)');
-    expect(rows.map((row) => row.querySelector('.mark .priority')?.className)).toEqual(['priority high', 'priority medium', 'priority low', 'priority unrated', 'priority unrated']);
-    expect(rows[0]!.querySelector('.priority')?.getAttribute('title')).toBe('Priority high: URGENT/MED');
-    expect(rows[3]!.querySelector('.priority')?.getAttribute('title')).toBe('Not rated');
+    expect(root.querySelector('[data-group="unstarted"] h3')?.textContent).toBe('Unstarted (5)');
+    expect(rows.map((row) => row.getAttribute('data-ticket'))).toEqual(['1', '5', '4', '2', '3']);
+    expect([1, 2, 3, 4, 5].map((id) => byId(id).querySelector('.mark .priority')?.className)).toEqual(['priority high', 'priority medium', 'priority low', 'priority unrated', 'priority unrated']);
+    expect(byId(1).querySelector('.priority')?.getAttribute('title')).toBe('Priority high: URGENT/MED');
+    expect(byId(4).querySelector('.priority')?.getAttribute('title')).toBe('Not rated');
+    expect(rows.map((row) => row.querySelector('.status')?.textContent)).toEqual(['Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed']);
     expect(root.textContent).not.toContain('URGENT/MED');
-    expect(rows[0]!.querySelector('.queue')?.textContent).toBe('1h');
-    expect(rows[0]!.querySelector('.summary')?.textContent).toBe('Fix sync — defect');
-    expect(rows[0]!.querySelector('.returned')?.textContent).toBe('Returned ×2');
-    expect(rows[0]!.querySelector('.returned')?.getAttribute('title')).toBe('2 earlier work items');
-    expect(rows[1]!.querySelector('.returned')).toBeNull();
-    expect(rows[0]!.querySelector('.playbook-name')?.textContent).toBe('support:case');
-    expect(titles(rows[0]!, 'button.control')).toEqual(['Pick']);
-    expect(JSON.parse(rows[0]!.querySelector<HTMLElement>('button.control[title="Pick"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
-    expect(rows[3]!.querySelector('.note')?.textContent).toBe('Timed out.');
-    expect(titles(rows[3]!, '.actions > button.control')).toEqual(['Triage again']);
-    expect(titles(rows[3]!, '.menu button.control')).toEqual(['Pick', 'Icebox']);
-    expect(rows[4]!.querySelector('.summary')?.textContent).toBe('Triaging…');
-    expect(renderPanel(snapshot([]), NOW, ui())).not.toContain('Pool (');
+    expect(byId(1).querySelector('.queue')?.textContent).toBe('1h');
+    expect(byId(1).querySelector('.summary')?.textContent).toBe('Fix sync — defect');
+    expect(byId(1).querySelector('.returned')?.textContent).toBe('Returned ×2');
+    expect(byId(1).querySelector('.returned')?.getAttribute('title')).toBe('2 earlier work items');
+    expect(byId(2).querySelector('.returned')).toBeNull();
+    expect(byId(1).querySelector('.playbook-name')?.textContent).toBe('support:case');
+    expect(titles(byId(1), 'button.control')).toEqual(['Start']);
+    expect(JSON.parse(byId(1).querySelector<HTMLElement>('button.control[title="Start"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
+    expect(byId(4).querySelector('.note')?.textContent).toBe('Timed out.');
+    expect(titles(byId(4), '.actions > button.control')).toEqual(['Triage again']);
+    expect(titles(byId(4), '.menu button.control')).toEqual(['Start', 'Icebox']);
+    expect(byId(5).querySelector('.summary')?.textContent).toBe('Triaging…');
+    expect(root.textContent).not.toContain('Pick');
+  });
+
+  it('puts unstarted work items in Unstarted as Assigned with Start, ordered with the pool by importance then age, and Approve only on an approval report', () => {
+    const rated = (immediacy: Triage['immediacy'], severity: Triage['severity']) => triage({ immediacy, severity, summary: 'Build it.' });
+    const assigned = item(1, { status: 'unstarted', createdAt: NOW - 5 * 3_600_000, triage: rated('BLOCKING', 'HIGH') });
+    const unrated = item(2, { status: 'unstarted', createdAt: NOW - 9 * 3_600_000 });
+    const ticket = { id: 9, source: 'forum', sourceKey: '509', sourceId: null, title: 'Topic', url: '', assigned: false, pool: true, iceboxed: false, sortAt: NOW - 3_600_000, lastPolledAt: NOW, repoRoot: '' };
+    const pool = [{ ticket, triage: rated('NON-BLOCKING', 'HIGH'), returned: 0 }];
+    const root = render(snapshot([assigned, unrated, item(3, { status: 'awaiting-approval', approvalPrompt: '/publish' })], { pool }));
+    const unstarted = root.querySelector('[data-group="unstarted"]')!;
+
+    expect(unstartedOrder([assigned, unrated], pool).map((entry) => entry.ticket.id)).toEqual([1, 2, 9]);
+    expect([...unstarted.querySelectorAll('.item')].map((row) => row.getAttribute('data-item') ?? `ticket ${row.getAttribute('data-ticket')}`)).toEqual(['1', '2', 'ticket 9']);
+    expect(unstarted.querySelector('h3')?.textContent).toBe('Unstarted (3)');
+    expect(unstarted.querySelector('[data-item="1"] .status')?.textContent).toBe('Assigned');
+    expect(unstarted.querySelector('[data-item="1"] .summary')?.textContent).toBe('Build it.');
+    expect(unstarted.querySelector('[data-item="1"] .mark .priority.high')).not.toBeNull();
+    expect(unstarted.querySelector('[data-item="1"] .title .priority')).toBeNull();
+    expect(titles(unstarted, '[data-item="1"] .actions > button.control')).toEqual(['Start']);
+    expect(JSON.parse(unstarted.querySelector<HTMLElement>('[data-item="1"] button.control[title="Start"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'start', workItemId: 1 } });
+    expect(titles(root, '[data-group="needs"] .actions > button.control')).toEqual(['Approve']);
+    expect(labels(item(4, { status: 'unstarted' }))).not.toContain('Approve');
   });
 
   it('moves iceboxed work items and pool tickets into a collapsed Icebox group with their own marks, and shows an approval summary', () => {
-    const icy = item(2, { status: 'awaiting-approval', ticket: { ...item(2).ticket, iceboxed: true } });
+    const icy = item(2, { status: 'unstarted', ticket: { ...item(2).ticket, iceboxed: true } });
     const ready = item(3, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.' });
     const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, lastPolledAt: NOW, repoRoot: '' };
     const data = snapshot([icy, ready], { pool: [{ ticket: poolTicket, triage: null, returned: 0 }] });
     const root = render(data, { menu: 'item:2' });
     const icebox = root.querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!;
 
-    expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (0)', 'Done (0)', 'Icebox (2)']);
+    expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (0)', 'Unstarted (0)', 'Done (0)', 'Icebox (2)']);
     expect(icebox.open).toBe(false);
     expect([...icebox.querySelectorAll('.title')].map((t) => t.textContent)).toEqual(['Issue <2>', 'Cold case']);
-    expect(titles(icebox, '.mark.codicon')).toEqual(['Approve the start']);
-    expect(icebox.querySelector('.pool-item .mark .priority.unrated')).not.toBeNull();
+    expect(icebox.querySelectorAll('.mark .priority.unrated')).toHaveLength(2);
+    expect(icebox.querySelector('.mark.codicon')).toBeNull();
     expect(titles(root, '[data-item="3"] .mark')).toEqual(['Approve the publish']);
     expect(JSON.parse(icebox.querySelector<HTMLElement>('.menu button.control[title="Restore"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'restore', ticketId: 2 } });
     expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');

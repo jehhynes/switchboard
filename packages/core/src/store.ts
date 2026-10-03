@@ -107,6 +107,8 @@ export const MIGRATIONS = [
     reportedAt INTEGER NOT NULL,
     UNIQUE (ticketId, target)
   );`,
+  // `awaiting-approval` now means only an approval report; a work item waiting to be started is `unstarted` (PRD R34).
+  `UPDATE workItems SET status = 'unstarted' WHERE status = 'awaiting-approval' AND approvalPrompt IS NULL;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'iceboxed', 'needsPick', 'released']);

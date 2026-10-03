@@ -1,6 +1,6 @@
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
-import { ADHOC_SOURCE, handle, importanceRank, switchboardHome } from '@switchboard/core';
+import { ADHOC_SOURCE, handle, switchboardHome } from '@switchboard/core';
 import type { FlowAction, FlowEvent, FlowResult, Link, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -49,7 +49,7 @@ export interface PoolView {
 /** Everything the panel shows, sent whole on each change. */
 export interface Snapshot {
   workItems: WorkItemView[];
-  /** By importance, then oldest first by the source's sort time (PRD R50). */
+  /** Oldest first by the source's sort time; the panel orders it with the unstarted work items (PRD R27). */
   pool: PoolView[];
   playbooks: { name: string; description: string }[];
   /** Repos an ad-hoc prompt can run in: each source's repo root, the first being the default. */
@@ -70,13 +70,6 @@ export type ReportBody =
   | { sessionId: string; kind: 'blocked'; reason: string }
   | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null }
   | { sessionId: string; kind: 'link'; label: string; target: string };
-
-/** Orders the pool by importance rank, unrated last, keeping the store's sort-time order within a rank (PRD R50). */
-export function sortPool(pool: PoolView[]): PoolView[] {
-  const rank = (entry: PoolView) => importanceRank(entry.triage?.immediacy ?? null, entry.triage?.severity ?? null) ?? Infinity;
-
-  return pool.map((entry, index) => ({ entry, index })).sort((a, b) => rank(a.entry) - rank(b.entry) || a.index - b.index).map(({ entry }) => entry);
-}
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -318,14 +311,12 @@ export class Runtime {
         links: store.linksFor(item.ticketId),
         returned: store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id).length,
       })),
-      pool: sortPool(
-        store
-          .poolTickets()
-          .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
-          // A disabled source's pool is not read, so its tickets are not shown.
-          .filter(({ ticket, items }) => this.sources.has(ticket.source) && items.every((item) => item.status === 'done'))
-          .map(({ ticket, items }) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null, returned: items.length })),
-      ),
+      pool: store
+        .poolTickets()
+        .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
+        // A disabled source's pool is not read, so its tickets are not shown.
+        .filter(({ ticket, items }) => this.sources.has(ticket.source) && items.every((item) => item.status === 'done'))
+        .map(({ ticket, items }) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null, returned: items.length })),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
       sources: [...this.sources.keys()],

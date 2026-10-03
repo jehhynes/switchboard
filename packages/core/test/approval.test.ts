@@ -11,7 +11,7 @@ function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Ext
 function running(h: Harness): { item: number; session: string } {
   const [triage] = h.poll(issue('1'));
   h.triaged(triage, 'dev:question');
-  const session = h.started(h.act({ type: 'approve', workItemId: 1 })[0]);
+  const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
   return { item: 1, session };
 }
@@ -107,7 +107,7 @@ describe('Icebox (PRD R49)', () => {
     h.triaged(triage, 'dev:question');
     h.act({ type: 'icebox', ticketId: 1 });
 
-    expect(h.act({ type: 'approve', workItemId: 1 })).toEqual([]);
+    expect(h.act({ type: 'start', workItemId: 1 })).toEqual([]);
     expect(h.item(1).status).toBe('queued');
     expect(only(h.act({ type: 'restore', ticketId: 1 }), 'start-session').workItemId).toBe(1);
   });

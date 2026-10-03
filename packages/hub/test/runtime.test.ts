@@ -391,7 +391,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'setup', needsPick: true, triage: { playbook: 'dev:develop' } }]);
   });
 
-  it('sorts the pool by importance, then age, counts the done work items of a returned ticket, and hides a disabled source (PRD R50, R51)', async () => {
+  it('lists the pool oldest first with each rating, counts the done work items of a returned ticket, and hides a disabled source (PRD R50, R51)', async () => {
     const { store, cli, source, runtime } = setup();
     const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 's', immediacy, severity } }));
     cli.classifyByContext.set('Issue 2 text', rated('NON-BLOCKING', 'LOW'));
@@ -403,14 +403,19 @@ describe('Runtime', () => {
     await runtime.pollSource('github');
     await runtime.settled();
 
-    // 3 and 4 both rank 1, so 4, polled later but older, comes first; unrated 5 and 1 follow by age.
-    expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['4', '3', '2', '5', '1']);
-    expect(runtime.snapshot().pool[0]!.triage).toMatchObject({ immediacy: 'URGENT', severity: 'MED' });
+    // The panel orders by importance; the snapshot keeps the source's sort time.
+    expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.triage?.immediacy ?? null, entry.triage?.severity ?? null])).toEqual([
+      ['5', null, null],
+      ['1', null, null],
+      ['2', 'NON-BLOCKING', 'LOW'],
+      ['4', 'URGENT', 'MED'],
+      ['3', 'BLOCKING', 'HIGH'],
+    ]);
 
     const ticket = store.findTicket('github', '1')!;
     store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, createdAt: T0, doneAt: T0, doneReason: 'operator' });
 
-    expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['4', 0], ['3', 0], ['2', 0], ['5', 0], ['1', 1]]);
+    expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['5', 0], ['1', 1], ['2', 0], ['4', 0], ['3', 0]]);
 
     // A disabled source's pool is not read, so it is hidden; the filter lists it as off.
     const off = config();

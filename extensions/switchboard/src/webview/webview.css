@@ -26,7 +26,7 @@ a { color: var(--vscode-textLink-foreground); }
 .more-button { padding: 2px 4px; }
 .menu { position: absolute; right: 0; top: calc(100% + 2px); z-index: 10; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 160px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, transparent)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
 .menu button { justify-content: flex-start; width: 100%; }
-.pool-item .summary { flex: 1 1 auto; min-width: 0; color: var(--vscode-descriptionForeground); }
+.line .summary { flex: 1 1 auto; min-width: 0; color: var(--vscode-descriptionForeground); }
 .returned { white-space: nowrap; flex-shrink: 0; font-size: 11px; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .mark { width: 16px; flex-shrink: 0; display: inline-flex; justify-content: center; }
 .mark.error { color: var(--vscode-errorForeground); }

@@ -116,14 +116,15 @@ describe('assigned-state transitions', () => {
 });
 
 describe('triage', () => {
-  it('waits for approval when the playbook does not auto-start, then starts the task in the repo root', () => {
+  it('leaves the work item unstarted when the playbook does not auto-start, then Start runs the task in the repo root', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
 
     expect(h.triaged(triage, 'dev:question', 'Asks about fees.')).toEqual([]);
-    expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', playbook: 'dev:question' });
+    expect(h.item(1)).toMatchObject({ status: 'unstarted', playbook: 'dev:question' });
+    expect(h.send({ type: 'approve', workItemId: 1 }).refused).toBe('The work item is not awaiting approval.');
 
-    const start = only(h.act({ type: 'approve', workItemId: 1 }), 'start-session');
+    const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
 
     expect(start).toEqual({
       type: 'start-session',
@@ -194,7 +195,7 @@ describe('sessions', () => {
     const [triage] = h.poll(...[...h.store.tickets('github').filter((t) => t.assigned).map((t) => issue(t.sourceKey)), issue(key)]);
     const item = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId!;
     h.triaged(triage, playbook);
-    const session = h.started(h.act({ type: 'approve', workItemId: item })[0]);
+    const session = h.started(h.act({ type: 'start', workItemId: item })[0]);
 
     return { item, session };
   }
@@ -298,7 +299,7 @@ describe('sessions', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    const start = only(h.act({ type: 'approve', workItemId: 1 }), 'start-session');
+    const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
 
     h.act({ type: 'roster', sessions: [] });
     h.act({ type: 'marker', sessionId: start.sessionId, state: 'idle', detail: null });
@@ -310,7 +311,7 @@ describe('sessions', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    const first = only(h.act({ type: 'approve', workItemId: 1 }), 'start-session');
+    const first = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
 
     h.act({ type: 'session-start-failed', sessionId: first.sessionId, message: 'Workspace not trusted' });
 
@@ -376,7 +377,7 @@ describe('stop', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    const session = h.started(h.act({ type: 'approve', workItemId: 1 })[0]);
+    const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
     expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12345', reason: 'operator' }]);
     expect(h.status(1)).toBe('running');
@@ -396,7 +397,7 @@ describe('stop', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    const session = h.started(h.act({ type: 'approve', workItemId: 1 })[0]);
+    const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     h.act({ type: 'stop-failed', sessionId: session, reason: 'release', message: 'exit 1' });
@@ -600,9 +601,9 @@ describe('operator actions', () => {
 
     expect(h.send({ type: 'change-playbook', workItemId: 1, playbook: 'triage:github' }).refused).toBe('triage:github is not a loaded task playbook.');
     h.act({ type: 'change-playbook', workItemId: 1, playbook: 'support:defect' });
-    expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', playbook: 'support:defect' });
+    expect(h.item(1)).toMatchObject({ status: 'unstarted', playbook: 'support:defect' });
 
-    h.started(h.act({ type: 'approve', workItemId: 1 })[0]);
+    h.started(h.act({ type: 'start', workItemId: 1 })[0]);
     expect(h.send({ type: 'change-playbook', workItemId: 1, playbook: 'dev:question' }).refused).toBe('The work item has an active session.');
     expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('The work item has an active session.');
   });
@@ -625,6 +626,7 @@ describe('operator actions', () => {
     h.poll(issue('1'));
 
     expect(h.send({ type: 'approve', workItemId: 1 }).refused).toBe('The work item is not awaiting approval.');
+    expect(h.send({ type: 'start', workItemId: 1 }).refused).toBe('The work item is not unstarted.');
     expect(h.send({ type: 'retry', workItemId: 1 }).refused).toBe('Only a failed or blocked work item can be retried.');
     expect(h.send({ type: 'approve', workItemId: 7 }).refused).toBe('Unknown work item 7.');
   });
@@ -636,8 +638,8 @@ describe('operator actions', () => {
     h.triaged(triages[1], 'dev:bad');
 
     h.playbooks.delete('dev:question');
-    h.act({ type: 'approve', workItemId: 1 });
-    h.act({ type: 'approve', workItemId: 2 });
+    h.act({ type: 'start', workItemId: 1 });
+    h.act({ type: 'start', workItemId: 2 });
 
     expect(h.item(1)).toMatchObject({ status: 'failed', failedStep: 'task', error: 'Playbook dev:question is not loaded.' });
     expect(h.item(2)).toMatchObject({ status: 'failed', error: 'Playbook dev:bad: Unknown template variable: nope.' });

@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -46,8 +46,25 @@ describe('Store', () => {
     const store = Store.open(path);
 
     expect(store.ticket(7)).toMatchObject({ pool: false, iceboxed: false, sortAt: null });
-    expect(store.workItem(3)).toMatchObject({ needsPick: false, approvalPrompt: null, approvalSummary: null });
+    // A work item waiting to be started is unstarted from migration 4 on (PRD R34).
+    expect(store.workItem(3)).toMatchObject({ status: 'unstarted', needsPick: false, approvalPrompt: null, approvalSummary: null });
     expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, summary: 'A summary.', immediacy: null, severity: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
+    store.close();
+  });
+
+  it('moves a version 3 work item waiting to be started to unstarted, and keeps one with an approval report', () => {
+    const path = join(dir, 'v3.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 3).join(';'));
+    raw.exec('PRAGMA user_version = 3');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'One', 'u', 1, '')");
+    raw.exec("INSERT INTO workItems (id, ticketId, status, createdAt) VALUES (1, 1, 'awaiting-approval', 1), (2, 1, 'awaiting-approval', 1), (3, 1, 'running', 1)");
+    raw.exec("UPDATE workItems SET approvalPrompt = '/publish' WHERE id = 2");
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([1, 2, 3].map((id) => store.workItem(id)?.status)).toEqual(['unstarted', 'awaiting-approval', 'running']);
     store.close();
   });
 
@@ -57,7 +74,7 @@ describe('Store', () => {
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (3).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (4).');
   });
 
   it('rolls back a transaction that throws', () => {

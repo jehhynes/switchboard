@@ -1,5 +1,5 @@
 /** Work item statuses (PRD R34). */
-export type WorkItemStatus = 'triaging' | 'awaiting-approval' | 'queued' | 'setup' | 'running' | 'blocked' | 'failed' | 'done';
+export type WorkItemStatus = 'triaging' | 'unstarted' | 'queued' | 'setup' | 'running' | 'awaiting-approval' | 'blocked' | 'failed' | 'done';
 
 export type DoneReason = 'session' | 'operator' | 'unassigned';
 

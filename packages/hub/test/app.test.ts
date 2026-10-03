@@ -69,6 +69,7 @@ describe('parseReport and reportBody', () => {
     expect(parseReport({ kind: 'stage', stage: 'x' })).toBeNull();
     expect(parseReport('text')).toBeNull();
     expect(parseAction({ type: 'approve', workItemId: 1 })).toEqual({ type: 'approve', workItemId: 1 });
+    expect(parseAction({ type: 'start', workItemId: 1 })).toEqual({ type: 'start', workItemId: 1 });
     expect(parseAction({ type: 'poll', source: 'github', tickets: [] })).toBeNull();
   });
 });
