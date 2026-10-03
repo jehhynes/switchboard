@@ -37,17 +37,17 @@ The ad-hoc source is local and lives in `packages/hub`. State, playbooks and the
 ## Data model
 
 ```
-Ticket     id, source, sourceKey, sourceId, title, url, assigned, lastPolledAt, repoRoot
+Ticket     id, source, sourceKey, sourceId, title, url, assigned, pool, createdAt, lastPolledAt, repoRoot
 WorkItem   id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, failedStep, unassignedAt, queuedAt, createdAt, doneAt, doneReason
-Triage     id, workItemId, context, playbook, summary, model, startedAt, endedAt, error
+Triage     id, ticketId, workItemId, context, playbook, summary, model, startedAt, endedAt, error
 Worktree   id, ticketId, path, branch, linkedBy (report | convention)
-Session    id, workItemId, kind (setup | task), provider, nativeSessionId, shortId, cwd, state, stateAt, stateDetail, outcome, outcomeDetail, startedAt, endedAt, released
+Session    id, workItemId, kind (pick | setup | task), provider, nativeSessionId, shortId, cwd, state, stateAt, stateDetail, outcome, outcomeDetail, startedAt, endedAt, released
 ```
 
-- `Ticket.assigned` is the assigned state the last complete poll saw. `Ticket.repoRoot` is the repo an ad-hoc prompt chose; it is empty for other sources, which use their `repoRoot` setting.
+- `Ticket.assigned` is the assigned state the last complete poll saw, and `Ticket.pool` whether it saw the ticket in the pool. `Ticket.createdAt` is the source's creation time, which orders the pool. A pool triage has a `ticketId` and no `workItemId` until a pick creates the work item and attaches it. `Ticket.repoRoot` is the repo an ad-hoc prompt chose; it is empty for other sources, which use their `repoRoot` setting.
 - `Ticket.sourceKey` is the key people use, such as a GitHub issue number or a Zoho ticket number. `Ticket.sourceId` is the source's internal ID when API calls need a different one, such as Zoho's internal ticket ID.
 - `Triage.context` is the clipped text the classifier received. Keeping it shows why a playbook was chosen.
-- `WorkItem.status` takes the values in PRD R34. `WorkItem.error` holds the cause shown for `failed` or `blocked`, and `WorkItem.failedStep` (`triage`, `setup` or `task`) is the step Retry repeats (PRD R45).
+- `WorkItem.status` takes the values in PRD R34. `WorkItem.error` holds the cause shown for `failed` or `blocked`, and `WorkItem.failedStep` (`triage`, `pick`, `setup` or `task`) is the step Retry repeats (PRD R45).
 - `WorkItem.unassignedAt` records that the ticket left the assigned state while a session was active (PRD R10). `WorkItem.queuedAt` orders queued starts.
 - `WorkItem.taskPrompt` is the rendered prompt the task session ran, or the typed prompt for an ad-hoc work item.
 - `WorkItem.doneReason` is `session`, `operator` or `unassigned`.
@@ -129,6 +129,12 @@ A classifier error, an unparsable result, a timeout, or a playbook name outside 
 5. Render the playbook and start the task session (`running`). It reports stages, a worktree link if it creates one, and done or blocked.
 6. When the task session reports done, the work item is done with reason `session`. When it reports blocked, or its turn ends with no report, the work item is `blocked`. A turn that ends `failed` blocks it with the error kind, because the session can still be resumed.
 7. When a ticket leaves the assigned state with no active session, its work item is done with reason `unassigned` and a warning. With an active session, that is deferred until the session reports or ends (PRD R10).
+
+Pool tickets (PRD R47, R48):
+
+- When a poll shows a ticket newly in the pool, the core starts a pool triage for the ticket; its result or error stays on the ticket.
+- A pick creates the work item, attaches the pool triage, and starts a `pick` session (status `setup`) running the source's `pickPrompt` in its repo root, under the concurrency limit. When the pick session reports done, the work item continues at step 3; with no pool triage result, the existing work item is triaged first (`triaging`). When it reports blocked or ends without done, the work item is `blocked`.
+- A ticket that enters the assigned state while it has an open work item gets no second work item; the claim made by the pick session is seen this way.
 
 An ad-hoc prompt creates a ticket and work item and goes straight to step 5, with the typed prompt as the task prompt and the chosen repo root as the working directory (PRD R6).
 
@@ -220,7 +226,9 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
       "repoRoot": "D:/git/support",
       "triagePlaybook": "triage:zoho",
       "namespace": "support",
-      "credentialsPath": "~/.claude/secrets/zoho-selfclient.json",
+      "pickPrompt": "Use the support-bind skill to bind and claim Support case #{{ticket.sourceKey}}, then stop: do not investigate. Report blocked with the reason if the claim fails or someone else holds the case; otherwise report done.",
+      "tokenCommand": "bash ~/.claude/scripts/desk-token.sh",
+      "automationAgentIds": ["8000000000000000002", "8000000000000000003"],
       "orgId": "700000001",
       "agentId": "8000000000000000001",
       "escalationField": "cf_queue",
@@ -232,7 +240,8 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
       "repoRoot": "D:/git/support",
       "triagePlaybook": "triage:forum",
       "namespace": "support",
-      "databaseEnvPath": "~/.claude/secrets/read-database.env",
+      "queryCommand": "bash ~/.claude/scripts/run-forum-sql.sh",
+      "pickPrompt": "Use the support-bind skill to bind and claim Support case T{{ticket.sourceKey}}, then stop: do not investigate. Report blocked with the reason if the claim fails or someone else holds the case; otherwise report done.",
       "forumId": 1,
       "userId": 7
     }
@@ -242,19 +251,20 @@ node "<home>/hub.js" report blocked <sessionId> --reason <text>
 
 - The values shown are the operator's, taken from their Ground Control configuration. Defaults are empty for `repo`, `logins`, `project` and `assignedStatuses`, and the GitHub source refuses to poll until they are set.
 - Per playbook: `description`, `autoStart`, `requiresWorktree`, `permissionMode`, `model` and `kind`, in the playbook file's front matter.
-- A source implements core's `Source`: `poll()` returns a complete read or an error, `context(ticket)` returns the triage context or an error, and `keyOfBranch(branch)` reads a ticket key from a worktree branch.
+- A source implements core's `Source`: `poll()` returns a complete read or an error, `context(ticket)` returns the triage context or an error, and `keyOfBranch(branch)` reads a ticket key from a worktree branch. A source with a pool marks each polled ticket `assigned`, `pool` or neither.
+- Pick (PRD R48): the Support sources' `pickPrompt` asks for the `support-bind` skill on the case and an early stop, because `/support-bind` on its own continues into investigation and carries on after a failed claim. The skill binds the case journal and claims the case through the Support skills and their guards. The `support:case` task session then resumes the bound case with `/support-process`.
 - GitHub reads go through `gh api graphql`. The issue query is GC's: `repo:<repo> is:issue is:open assignee:<login>… project:<owner>/<number>`, then a filter on project status; an issue on another status is listed as not assigned (mechanics M2). A poll that needs more than `maxPages` pages of 100 fails. Triage context ports GC's card context: the issue body, the last 5 comments, the last 100 assignment and status events, and a linked pull request's author, review requests, state, checks, last 5 comments, reviews and last 5 review threads, with each text clipped to 2,000 characters keeping the start and end.
 - GitHub errors: offline, timeout and rate limits are temporary. The poll changes nothing and runs again at the next interval. Missing `gh` or failed authentication shows in the panel.
 - Zoho Desk and Forum port the operator's Support board, `D:\git\support\extensions\support-kanban\lib\zoho.js` and `forum.js`. Read those and the `support-*` skills before building either source.
-- Zoho reads go through the Desk REST API at `https://desk.zoho.com/api/v1`. They use an access token refreshed from the self-client credentials file, plus the `orgId` header. Keep 19-digit IDs as strings.
+- Zoho reads go through the Desk REST API at `https://desk.zoho.com/api/v1`. They use the access token that `tokenCommand` prints, cached for 50 minutes and fetched again on a 401, plus the `orgId` header. Switchboard reads no secrets file; the operator's runner scripts do. Keep 19-digit IDs as strings.
   - Each poll pages through every Open ticket with `GET /tickets/search?status=Open` and filters on the escalation field after the fetch, because only `/tickets/search` returns custom fields. A ticket missing from a complete read has left the assigned state.
-  - Assignee classes follow the board's `classifyAssignee`, with the team map from `GET /teams` cached for 6 hours. The operator is `mine`; a missing assignee is `none`; an automation or a team member is `support`; anyone else is `engineer`. Only `engineer` is outside the assigned state. A poll whose team map cannot be read is incomplete and changes nothing.
+  - Assignee classes follow the board's `classifyAssignee`, with the team map from `GET /teams` cached for 6 hours. The operator is `mine`; a missing assignee is `none`; an automation or a team member is `support`; anyone else is `engineer`. `mine` is the assigned state; `none` and `support` are the pool; `engineer` is neither. A poll whose team map cannot be read is incomplete and changes nothing.
   - Triage context: the subject, the custom fields `cf_queue`, `cf_user_id`, `cf_account_id` and `cf_page_url`, the thread bodies, the comments (internal notes), and the history of tier and assignee changes.
-- Forum reads run read-only SQL on the production forum database, with the connection from the database env file. They need the VPN, so a connection failure is temporary.
-  - Assigned state: `Thread.CommunityId = <forumId> AND DeletedUtc IS NULL AND IsLocked = 0 AND Status = 0` (`ThreadStatus.Open`), with `AssigneeId` equal to `userId` or null.
+- Forum reads run read-only SQL on the production forum database, through `queryCommand`, the operator's runner script, which holds the connection. They need the VPN, so a connection failure is temporary.
+  - Assigned state: `Thread.CommunityId = <forumId> AND DeletedUtc IS NULL AND IsLocked = 0 AND Status = 0` (`ThreadStatus.Open`), with `AssigneeId` equal to `userId` for the assigned state, or null for the pool.
   - Triage context: the topic title and posts in order. Deleted posts (`DeletedUtc` set), posts with `Status = 2` (private notes) and posts by `UserId = 2` (the automatic AI analysis) are left out. The source key is `Thread.Id`, and the URL is `https://forum.example.com/t/forum/<Thread.Key>`.
 - A Forum topic and a Zoho ticket about the same case are separate tickets (PRD R26).
 
-The operator's first playbooks mirror their Ground Control action table: `dev:develop` (`/gc-plan`), `dev:review-others` (`/review-pr`), `dev:review-followup` (`/review-pr-followup`), `dev:address-review` (`/address-pr-review`), `dev:qa-failure` and `dev:qa-question` (`/address-feedback`). Support has one playbook, `support:case`, because `/support-process` routes every case type itself. It runs `/support-process #<ticket number>` for Zoho or `/support-process T<topic id>` for Forum, with `autoStart: false`, `requiresWorktree: false` and `workdir: repoRoot`. Approve is the operator starting the case, which is what lets `/support-bind` claim it; an automatic start would claim tickets with no human start. Support sessions stop early, often at a request for a local reproduction, and end with a draft reply handed back to the operator.
+The operator's first playbooks mirror their Ground Control action table: `dev:develop` (`/gc-plan`), `dev:review-others` (`/review-pr`), `dev:review-followup` (`/review-pr-followup`), `dev:address-review` (`/address-pr-review`), `dev:qa-failure` and `dev:qa-question` (`/address-feedback`). Support has one playbook, `support:case`, because `/support-process` routes every case type itself. It runs `/support-process #<ticket number>` for Zoho or `/support-process T<topic id>` for Forum, with `autoStart: false`, `requiresWorktree: false` and `workdir: repoRoot`. The operator's pick starts the claim (PRD R48), so `autoStart: true` is safe for `support:case`: the task would start as soon as the pick session is done. Support sessions stop early, often at a request for a local reproduction, and end with a draft reply handed back to the operator.
 
 The operator's Support board (`support-kanban`) starts no sessions itself, but its hooks register any Claude session in `D:\git\support` on the case's card. Switchboard does not coordinate with it: the operator does not press Investigate on a card whose case Switchboard is running. The Support skills are project skills of `D:\git\support`, so Support sources use it as their repo root; `/support-fix` makes the widgets worktree when a case needs code. All playbooks live in the operator's home, not in this repository.

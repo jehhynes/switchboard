@@ -4,7 +4,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ## Scope
 
-- Switchboard runs on the operator's machine and handles only the operator's work: tickets assigned to them, and unclaimed tickets in a queue they own, such as support escalations. It has no shared state, accounts or server.
+- Switchboard runs on the operator's machine and handles only the operator's work: tickets assigned to them, and the pool of unclaimed tickets in a queue they work, such as support escalations, from which they pick. It has no shared state, accounts or server.
 - All Switchboard state is local. Switchboard reads sources and never writes to them; only the skills its sessions invoke change external state.
 - Switchboard manages only sessions it starts. It does not discover or adopt sessions started elsewhere.
 - Switchboard tracks worktrees but never creates or deletes them. Skills create worktrees; the operator removes them.
@@ -20,7 +20,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ## Non-goals
 
-- Writing to sources: no status moves, comments, assignments or labels. Only the skills that sessions run write.
+- Writing to sources: no status moves, comments, assignments or labels. Only the skills that sessions run write, including the claim when the operator picks a pool ticket (R48).
 - Other people's work, team views, reporting, accounts or shared state.
 - Remote, cloud or multi-machine operation. One hub runs per machine.
 - Changing git state: no commits, branches, or creating, cleaning up or removing worktrees. Read-only git queries that validate and link worktrees are allowed.
@@ -34,6 +34,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ## Design rules
 
+- **Skills drive the work; Switchboard is the harness.** Switchboard finds tickets, triages them, starts and observes sessions, and shows their state. Every change to a source, a repository or a worktree is made by a skill a session runs. When a feature needs a write, add a session that runs a skill, not Switchboard code that writes.
 - **Least authority.** An unattended session gets the least permission mode under which it can finish. The default is `auto`; a playbook can override it.
 - **Simple first.** Choose the simplest behavior that keeps common work correct. Handle a rare case by showing it, not with special machinery.
 - **Visible failure.** Every failure shows on its work item with the cause. Switchboard does not retry work automatically; Retry is the operator's. A failed source poll is tried again at the next interval.
@@ -51,9 +52,11 @@ Switchboard is a local software factory for one developer. It ingests work assig
 | Ticket | Switchboard's local copy of a source record, identified by source and source key. |
 | Assigned state | A source-defined condition meaning the ticket is the operator's to work, such as assignee plus status. |
 | Work item | One assignment of one ticket to the operator. The primitive Switchboard schedules and displays. |
+| Pool | A source's open, unclaimed tickets that the operator may pick, such as support cases assigned to no one or still held by the escalating General agent. Pool tickets are triaged but are not work items. |
+| Pick | The operator's choice of a pool ticket. It creates a work item and runs a pick session, whose skill assigns the ticket to the operator. |
 | Playbook | A named prompt template and its settings, such as `support:defect` or `dev:qa-failure`. A source's triage playbook holds the classifier's instructions. |
-| Triage | A one-shot classification of a new work item that chooses its playbook and writes a ticket summary. Triage is not a session. |
-| Session | One agent conversation for a work item. Kinds: `setup`, `task`. |
+| Triage | A one-shot classification of a new work item, or of a ticket entering the pool, that chooses its playbook and writes a ticket summary. Triage is not a session. |
+| Session | One agent conversation for a work item. Kinds: `pick`, `setup`, `task`. |
 | Active session | A session whose process is running, in the background or in a VS Code tab. |
 | Stage | A free-text label a session reports about its progress. Switchboard displays it and does not act on it. |
 
@@ -66,8 +69,10 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R3. Each source has its own settings: enabled, poll interval, repo root, and its triage playbook.
 - R4. GitHub is the first source. Zoho Desk and Forum follow.
 - R44. A GitHub ticket is in the assigned state when it is an open issue in the configured repository, it is assigned to one of the configured logins, and its project item's status is one of the configured statuses. All of these are settings. The operator's values for `acme/widgets` are in [architecture.md](architecture.md#settings). GitHub is read through the `gh` CLI with `gh`'s own authentication.
-- R5. The Forum source reads forum topics from the production forum database. A topic is in the assigned state when it is open in the Forum forum and is assigned to the operator or to no one. A topic another person has claimed is not the operator's. The operator works support, so an unclaimed case is theirs to work; claiming it is a skill's job (`/support-bind`), not Switchboard's.
-- R46. The Zoho Desk source reads tickets through the Desk API. A ticket is in the assigned state when its status type is Open, its escalation field is `Support`, and it is assigned to the operator, to no one, or to a support agent or team. A ticket assigned to another engineer is not the operator's. General escalations stay assigned to the escalating General agent, so a support assignee counts as unclaimed.
+- R5. The Forum source reads forum topics from the production forum database. A topic is in the assigned state when it is open in the Forum forum and assigned to the operator. An open topic assigned to no one is in the pool (R47). A topic another person has claimed is neither.
+- R46. The Zoho Desk source reads tickets through the Desk API. A ticket is in the assigned state when its status type is Open, its escalation field is `Support`, and it is assigned to the operator. Such a ticket assigned to no one, or to a support agent or team, is in the pool (R47): General escalations stay assigned to the escalating General agent, so a support assignee counts as unclaimed. A ticket assigned to another engineer is neither.
+- R47. A source can have a pool. Switchboard triages each ticket when it enters the pool, keeps the result with the ticket, and shows the pool with each ticket's summary and chosen playbook. A failed pool triage shows its error on the pool row with Triage again; Pick works with or without a triage result, and a work item picked without one is triaged as a new work item. A ticket that leaves the pool without a pick, because someone else claimed it or it closed, disappears from it. GitHub has no pool.
+- R48. The operator picks a pool ticket in the panel. Switchboard creates a work item that reuses the pool triage and starts a pick session running the source's `pickPrompt`, which has a skill claim the ticket for the operator and stop. While it runs, the work item is `setup`. When the pick session reports done, the work item follows its playbook: `awaiting-approval`, or a start when the playbook has `autoStart`; with no pool triage result, it is triaged first. A pick session that reports blocked, or ends without done, blocks the work item with its reason, such as the ticket having been claimed by someone else.
 - R6. The ad-hoc source creates a ticket and a work item from a prompt the operator types in the panel. The typed prompt replaces the playbook template: triage does not run, and the task session runs the typed prompt.
   - The operator picks the repository from the configured repo roots; the first one is the default. The session runs there with no worktree requirement and no playbook, using the `sessions` permission mode and model.
   - It starts at once, subject to the concurrency limit.
@@ -78,7 +83,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R7. Switchboard creates a work item each time a ticket enters the assigned state. A ticket assigned again later gets a new work item.
 - R8. On first run, every ticket already in the assigned state gets a work item.
 - R9. Work item status is local and never mirrored to the source.
-- R10. A work item is done when its session reports done, when the operator marks it done, or when its ticket leaves the assigned state while no session is active. If the ticket leaves while a session is active, the work item stays open until that session reports done or ends, because skills such as `/finalize-issue` unassign the operator before the session finishes.
+- R10. A work item is done when its task session reports done, when the operator marks it done, or when its ticket leaves the assigned state while no session is active. If the ticket leaves while a session is active, the work item stays open until that session reports done or ends, because skills such as `/finalize-issue` unassign the operator before the session finishes.
 - R11. A work item that ends because its ticket left the assigned state, without a done report, stays listed with a warning.
 - R34. Work item statuses are `triaging`, `awaiting-approval`, `queued`, `setup`, `running`, `blocked`, `failed` and `done`.
   - `queued` waits for a session slot (R38), or for an earlier work item of the same ticket to finish its active session (R17).
@@ -88,6 +93,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R45. Retry repeats the step that stopped:
   - After failed triage, triage runs again.
   - After a failed setup or setup start, a new setup session starts, unless a worktree is now linked; then the task starts.
+  - After a failed or blocked pick, a new pick session starts.
   - After a failed task start, or a blocked task, a new task session starts from the same playbook, ticket and triage result, rendered again with the new session's ID and report contract, in the directory its `workdir` names. It is a new conversation; Open in VS Code is how to continue the old one.
   - Only reports from a work item's latest session change the work item. Reports from earlier sessions are recorded on those sessions.
 
@@ -124,6 +130,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 ### Observation and control
 
 - R27. A VS Code panel lists work items with ticket, playbook, status, stage, worktree, active session and warnings.
+  - A **Pool** group, below the work items, lists pool tickets oldest first by the source's creation time, with the source and key, the title, the triage summary, the chosen playbook and a Pick control.
   - It groups work items, checking in this order: **Done** when the work item is `done` (the last 7 days, collapsed; an active session still shows its mark); **Needs you** when the status is `awaiting-approval`, `blocked` or `failed`, or the active session is `waiting`; **Working** otherwise.
   - Each row shows the source and key linked to the source, the title, the playbook, a status mark, the stage and its age, and any warning.
   - Expanding a row shows the triage summary, the triage context, the task prompt and the session history.
