@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { spawnExec } from '@switchboard/claude';
+import { homedir } from 'node:os';
+import { claudeSettingsPath, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -72,7 +73,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       now: Date.now,
       sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
       newSessionId: () => randomUUID().slice(0, 8),
-      env: process.env,
+      claudeSettings: claudeSettingsPath(homedir(), process.env),
       log: options.log,
       ...options.deps,
     },

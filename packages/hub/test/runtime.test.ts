@@ -128,7 +128,7 @@ function setup(cfg = config(), now = () => T0) {
       now,
       sleep: async () => {},
       newSessionId: () => `s${++ids}`,
-      env: {},
+      claudeSettings: join(home, '.claude', 'settings.json'),
       log: (line) => logs.push(line),
     },
     cfg,

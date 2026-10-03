@@ -1,4 +1,4 @@
-import { classify, claudeSettingsPath, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
+import { classify, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
 import { ADHOC_SOURCE, handle, switchboardHome } from '@switchboard/core';
 import type { FlowAction, FlowEvent, FlowResult, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
@@ -23,7 +23,8 @@ export interface RuntimeDeps {
   now(): number;
   sleep(ms: number): Promise<void>;
   newSessionId(): string;
-  env: NodeJS.ProcessEnv;
+  /** Claude's settings.json, from the operator's profile even when the Switchboard home is overridden. */
+  claudeSettings: string;
   log(line: string): void;
 }
 
@@ -121,7 +122,7 @@ export class Runtime {
   /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
   async startup(): Promise<void> {
     if (this.config.settings.sessions.installHooks) {
-      this.hookError = installHooks(this.home, claudeSettingsPath(this.deps.home, this.deps.env));
+      this.hookError = installHooks(this.home, this.deps.claudeSettings);
     }
 
     for (const triage of this.deps.store.runningTriages()) {
