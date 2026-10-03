@@ -1,0 +1,23 @@
+{
+  "name": "@switchboard/hub-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The hub entry point. The extension bundles it as one file; the build here serves spawn tests.",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -b -w",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@switchboard/core": "*",
+    "@switchboard/hub": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

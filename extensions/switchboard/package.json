@@ -1,0 +1,41 @@
+{
+  "name": "switchboard",
+  "displayName": "Switchboard",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "switchboard",
+  "description": "Triages tickets assigned to you into playbooks and runs them in Claude Code sessions.",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {},
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc -p tsconfig.json",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "test:integration": "node test-integration/run.mjs"
+  },
+  "dependencies": {
+    "@switchboard/core": "*",
+    "@switchboard/hub": "*"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.104.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "mocha": "^12.0.0",
+    "typescript": "^5.9.0"
+  }
+}

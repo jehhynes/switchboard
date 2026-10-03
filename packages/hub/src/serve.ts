@@ -1,0 +1,128 @@
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { HUB_NAME, PROTOCOL, hubRecordPath, switchboardHome } from '@switchboard/core';
+import type { HubRecord } from '@switchboard/core';
+import { findHub, readHubRecord } from './discover.js';
+import { holdLock, releaseLock } from './lock.js';
+import { listenHub } from './server.js';
+
+export interface ServeOptions {
+  home: string;
+  version: string;
+  build: string;
+  idleMs?: number;
+  /** How long a hub that lost the lock waits for the holder's record. */
+  waitMs?: number;
+  exit?: (code: number) => void;
+  log?: (line: string) => void;
+}
+
+export interface Served {
+  record: HubRecord;
+  stop(reason: string): Promise<void>;
+}
+
+export type ServeResult = { served: Served } | { existing: HubRecord } | { refused: string };
+
+export const DEFAULT_IDLE_MS = 30 * 60_000;
+export const DEFAULT_WAIT_MS = 5000;
+
+/** Write through a temporary file, so a reader never sees a partial record. */
+function writeRecord(path: string, record: HubRecord): void {
+  const temporary = `${path}.${process.pid}.tmp`;
+
+  writeFileSync(temporary, JSON.stringify(record, null, 2));
+  renameSync(temporary, path);
+}
+
+async function waitForHub(home: string, waitMs: number): Promise<HubRecord | null> {
+  for (const deadline = Date.now() + waitMs; ; ) {
+    const found = await findHub(home);
+
+    if (found !== null || Date.now() > deadline) {
+      return found;
+    }
+
+    await new Promise((done) => setTimeout(done, 100));
+  }
+}
+
+/**
+ * Serve the hub for a home, or report the hub already serving it. Only the holder of the hub lock writes or removes
+ * `hub.json`, so concurrent starts leave one hub. Exits after `idleMs` with no connected client.
+ */
+export async function serveHub(options: ServeOptions): Promise<ServeResult> {
+  const { home, version, build } = options;
+  const path = hubRecordPath(home);
+  const exit = options.exit ?? ((code: number) => process.exit(code));
+  const log = options.log ?? ((line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`));
+  const idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
+
+  mkdirSync(switchboardHome(home), { recursive: true });
+
+  const lock = await holdLock(home);
+
+  if (lock === null) {
+    const existing = await waitForHub(home, options.waitMs ?? DEFAULT_WAIT_MS);
+
+    return existing === null ? { refused: 'another process holds the hub lock but no hub answers' } : { existing };
+  }
+
+  let stopping: Promise<void> | undefined;
+
+  const server = await listenHub({
+    identity: { hub: HUB_NAME, protocol: PROTOCOL, version, pid: process.pid },
+    onShutdown: () => void stop('a client asked it to stop').then(() => exit(0)),
+  });
+
+  const record: HubRecord = {
+    protocol: PROTOCOL,
+    version,
+    build,
+    port: server.port,
+    token: server.token,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  };
+
+  // Any record already here belongs to a hub that died, since this process holds the lock.
+  writeRecord(path, record);
+
+  /** Remove the record only while it is still this hub's. */
+  const unclaim = (): void => {
+    if (readHubRecord(home)?.token === record.token) {
+      rmSync(path, { force: true });
+    }
+  };
+
+  process.on('exit', unclaim);
+
+  const idle = setInterval(
+    () => {
+      const since = server.emptySince();
+
+      if (since !== null && Date.now() - since >= idleMs) {
+        void stop('no client connected').then(() => exit(0));
+      }
+    },
+    Math.max(50, Math.min(60_000, Math.floor(idleMs / 4))),
+  );
+
+  idle.unref();
+
+  const stop = (reason: string): Promise<void> => {
+    stopping ??= (async () => {
+      log(`stopping: ${reason}`);
+      clearInterval(idle);
+      process.off('exit', unclaim);
+      await server.close();
+      unclaim();
+      await releaseLock(lock);
+    })();
+
+    return stopping;
+  };
+
+  log(`listening on 127.0.0.1:${server.port} as pid ${process.pid}, build ${build}`);
+
+  return { served: { record, stop } };
+}

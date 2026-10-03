@@ -8,7 +8,7 @@ Session and triage mechanics come from Ground Control (`D:\git\ground-control`).
 
 1. Read the relevant docs and implementation. Write a plan, including verification, before coding.
 2. Implement the change and update affected docs in the same task. Test new behavior according to [testing.md](docs/testing.md).
-3. Use subagents to review features before committing. Cover requirements, correctness, regressions, and UI behavior where applicable.
+3. Before each commit, review the change with the `cross-check` skill, so the other provider reviews it. Cover requirements, correctness, regressions, and UI behavior where applicable. Fix or answer each finding before committing.
 4. Complete the required checks. For executable changes to the extension or hub, [rebuild and reinstall](#reinstalling-after-a-change).
 5. Commit each self-contained story or task after review, verification, and user acceptance.
 

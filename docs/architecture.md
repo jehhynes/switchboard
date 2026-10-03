@@ -1,12 +1,12 @@
 # Switchboard architecture
 
-Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Nothing is implemented yet.
+Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Only the hub lifecycle is implemented; every other section is planned.
 
 Session and triage mechanics come from Ground Control (`D:\git\ground-control`), where they are verified. M IDs below refer to its [mechanics.md](../../ground-control/docs/mechanics.md). Re-verify them in Switchboard's own mechanics.md before relying on a version-fragile one.
 
 ## Packages
 
-npm workspaces, TypeScript strict, Node ≥ 20, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`.
+npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/hub`, `apps/hub` and `extensions/switchboard`, covering the hub lifecycle only.
 
 | Package | Contents | Depends on |
 |---|---|---|
@@ -49,6 +49,16 @@ Session    id, workItemId, kind (setup | task), provider, nativeSessionId, cwd, 
 - `WorkItem.doneReason` is `session`, `operator` or `unassigned`.
 - `WorkItem.warning` is set when the ticket leaves the assigned state before the session reports done.
 - A session's `cwd` is the ticket's worktree when one exists, otherwise the source's repo root.
+
+## Hub lifecycle
+
+Implemented. Follows Ground Control's hub (GC R35, M25).
+
+- **Start:** extension activation copies `dist/hub.js` to `~/.switchboard/hub.js` when it differs. It accepts a running hub only when the hub's `build`, a hash of its bundle, matches the bundle installed at that moment. It asks a hub of another build to stop and starts a new one only after the old one has gone; if the old hub refuses, the window reports it. Otherwise it starts one detached with VS Code's executable and `ELECTRON_RUN_AS_NODE=1`, with `ELECTRON_*`, `VSCODE_*` and `NODE_OPTIONS` removed from its environment. Output goes to `~/.switchboard/hub.log`.
+- **Record:** the hub listens on `127.0.0.1` on an ephemeral port and writes `~/.switchboard/hub.json` with `protocol`, `version`, `build`, `port`, `token`, `pid` and `startedAt`. The hub holds a lock for its lifetime: a named pipe `\\.\pipe\switchboard-<hash of home>` on Windows, `~/.switchboard/hub.sock` elsewhere. Only the lock holder writes or removes the record, so concurrent starts leave one hub, and the OS releases the pipe when the hub dies. A hub that cannot take the lock waits up to 5 seconds for the holder's record and otherwise exits. A forced exit on Windows leaves the record behind, so clients accept it only when `GET /status` with the token returns the recorded pid.
+- **Endpoints:** `GET /hub` returns identity without a token. `GET /status`, `GET /events` and `POST /shutdown` require `Authorization: Bearer <token>`.
+- **Clients:** each window holds one `/events` stream. The hub exits 30 minutes after its last stream closes. A stream that sends no response headers within 5 seconds counts as refused. When a stream ends, the window finds or starts a hub and reconnects. It gives up and shows an error after three consecutive failures; a connection that lasts under 10 seconds counts as a failure.
+- **Entry point:** `hub.js [--home=<dir>] [--idle-ms=<ms>]` serves; `hub.js --stop` stops the running hub.
 
 ## Store
 

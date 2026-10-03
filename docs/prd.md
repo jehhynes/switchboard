@@ -95,7 +95,9 @@ Steps 1–6 deliver GitHub end to end: R1–R4, R7–R25, R27–R33. Later steps
 
 ## Implementation gaps
 
-Nothing is implemented.
+Step 1 is done: R33 is implemented. Every other requirement is unimplemented.
+
+- Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 
 ## Open questions
 
