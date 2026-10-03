@@ -126,6 +126,7 @@ describe('roster', () => {
       'idle',
       'running',
     ]);
+    expect(['idle', 'busy', 'waiting'].map((status) => rosterState({ sessionId: 'x', kind: 'interactive', cwd: '', status }))).toEqual(['idle', 'running', 'waiting']);
   });
 
   it('observes sessions whose entry holds a process, preferring the hook marker', () => {
@@ -137,9 +138,10 @@ describe('roster', () => {
       { id: 's-missing', shortId: 'ffffffff' },
     ];
 
-    expect(observe(ENTRIES, sessions, new Map())).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null }]);
-    expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('Stop')]]))).toEqual([{ sessionId: 's-roster', state: 'idle', detail: null }]);
-    expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('SessionStart')]]))).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null }]);
+    expect(observe(ENTRIES, sessions, new Map())).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null, interactive: false }]);
+    expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('Stop')]]))).toEqual([{ sessionId: 's-roster', state: 'idle', detail: null, interactive: false }]);
+    expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('SessionStart')]]))).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null, interactive: false }]);
+    expect(observe(ENTRIES, [{ id: 's-tab', shortId: '3e065e9f' }], new Map())).toEqual([{ sessionId: 's-tab', state: 'running', detail: null, interactive: true }]);
   });
 });
 

@@ -40,7 +40,12 @@ try {
         error: failed ? text(payload.error) : null,
         errorMessage: failed && typeof payload.last_assistant_message === 'string' ? payload.last_assistant_message.slice(0, ${ERROR_MESSAGE_LIMIT}) : null,
       }));
-      renameSync(tmp, marker);
+      // Two hooks of one session can race; Windows then refuses the rename, so the newer marker wins and the file goes.
+      try {
+        renameSync(tmp, marker);
+      } catch {
+        rmSync(tmp, { force: true });
+      }
     }
   }
 } catch {}

@@ -1,4 +1,4 @@
-import { classify, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
+import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
 import { ADHOC_SOURCE, handle, switchboardHome } from '@switchboard/core';
 import type { FlowAction, FlowEvent, FlowResult, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
@@ -122,7 +122,11 @@ export class Runtime {
   /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
   async startup(): Promise<void> {
     if (this.config.settings.sessions.installHooks) {
-      this.hookError = installHooks(this.home, this.deps.claudeSettings);
+      try {
+        this.hookError = installHooks(this.home, this.deps.claudeSettings);
+      } catch (error) {
+        this.hookError = `Switchboard could not add its hooks to ${this.deps.claudeSettings}: ${(error as Error).message}`;
+      }
     }
 
     for (const triage of this.deps.store.runningTriages()) {
@@ -356,6 +360,13 @@ export class Runtime {
     }
   }
 
+  /** Whether the roster lists the session as Switchboard's background process. */
+  private async isBackground(shortId: string): Promise<boolean> {
+    const roster = await readRoster(this.deps.claudePath, this.deps.exec);
+
+    return 'entries' in roster && entryFor(roster.entries, shortId)?.kind === 'background';
+  }
+
   private async run(action: FlowAction): Promise<void> {
     switch (action.type) {
       case 'triage': {
@@ -396,6 +407,12 @@ export class Runtime {
         return;
       }
       case 'stop-session': {
+        if (action.reason === 'release' && action.shortId !== null && !(await this.isBackground(action.shortId))) {
+          // The operator resumed it, such as in a VS Code tab; a release never stops their session (PRD R39).
+          this.deps.log(`release skipped: session ${action.sessionId} is not a background process`);
+          return;
+        }
+
         const failure = action.shortId === null ? { error: 'The session has not started yet.' } : await stopSession(this.deps.claudePath, action.shortId, this.deps.exec);
 
         if (failure === null) {

@@ -210,6 +210,23 @@ describe('Runtime', () => {
     expect(runtime.hasActiveSessions()).toBe(false);
   });
 
+  it('never releases a session the roster lists as interactive', async () => {
+    const { store, cli, source, runtime, logs } = setup(config({ installHooks: true }));
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    (cli.roster[0] as { kind: string }).kind = 'interactive';
+    mkdirSync(join(home, '.switchboard', 'activity'), { recursive: true });
+    writeFileSync(join(home, '.switchboard', 'activity', '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'Stop', backgroundTasks: 0 }));
+    runtime.readMarkers();
+    await runtime.settled();
+
+    expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([]);
+    expect(logs).toEqual(['release skipped: session s1 is not a background process']);
+    expect(store.session('s1')).toMatchObject({ state: 'idle', released: true });
+  });
+
   it('ignores markers when hooks are off', async () => {
     const { store, source, runtime } = setup();
     source.result = { tickets: [issue('8')] };
@@ -308,6 +325,15 @@ describe('Runtime', () => {
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'The hub stopped while the session was starting.' });
     expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(11);
     expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
+  it('shows a failed hook install instead of failing startup', async () => {
+    const { runtime } = setup(config({ installHooks: true }));
+    mkdirSync(join(home, '.claude', 'settings.json'), { recursive: true });
+
+    await runtime.startup();
+
+    expect(runtime.snapshot().errors.hooks).toMatch(/^Switchboard could not add its hooks to .*settings\.json: EISDIR/);
   });
 
   it('builds the panel snapshot', async () => {

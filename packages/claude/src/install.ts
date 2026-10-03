@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HOOK_SOURCE, planHooks } from './hooks.js';
 import type { Marker } from './hooks.js';
@@ -20,11 +20,28 @@ function readText(path: string): string | null {
   }
 }
 
+/** Windows refuses a rename over a file another process has open, as Claude sessions often have settings.json (mechanics M8). */
+const RENAME_ATTEMPTS = 10;
+const RENAME_WAIT_MS = 100;
+
 function writeAtomically(path: string, text: string): void {
   const tmp = `${path}.${process.pid}.tmp`;
 
   writeFileSync(tmp, text);
-  renameSync(tmp, path);
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      renameSync(tmp, path);
+      return;
+    } catch (error) {
+      if (attempt === RENAME_ATTEMPTS || (error as NodeJS.ErrnoException).code !== 'EPERM') {
+        rmSync(tmp, { force: true });
+        throw error;
+      }
+
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, RENAME_WAIT_MS);
+    }
+  }
 }
 
 /** Writes `<switchboard home>/hook.mjs` and adds its entries to Claude's settings. Returns why settings were left alone, or null. */

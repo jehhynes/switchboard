@@ -13,6 +13,7 @@ export interface RosterEntry {
   pid?: number;
   kind: string;
   state?: string;
+  status?: string;
   cwd: string;
   name?: string;
 }
@@ -71,8 +72,15 @@ export function entryFor(entries: RosterEntry[], shortId: string): RosterEntry |
   return entries.find((entry) => entry.id === shortId || entry.sessionId.startsWith(shortId));
 }
 
-/** The roster's state for a session without a hook marker: `working` runs, `blocked` waits for the operator, `done` and `stopped` ended the turn. */
+/**
+ * The roster's state for a session without a hook marker: `working` runs, `blocked` waits for the operator, `done` and
+ * `stopped` ended the turn. An interactive entry, such as a VS Code tab, has only `status`: `idle`, `busy` or `waiting` (M7).
+ */
 export function rosterState(entry: RosterEntry): LiveState {
+  if (entry.state === undefined) {
+    return entry.status === 'idle' ? 'idle' : entry.status === 'waiting' ? 'waiting' : 'running';
+  }
+
   switch (entry.state) {
     case 'blocked':
       return 'waiting';
@@ -141,7 +149,7 @@ export function observe(entries: RosterEntry[], sessions: { id: string; shortId:
     const marker = markers.get(entry.sessionId);
     const fromMarker = marker === undefined ? null : markerState(marker);
 
-    observed.push({ sessionId: session.id, ...(fromMarker ?? { state: rosterState(entry), detail: null }) });
+    observed.push({ sessionId: session.id, ...(fromMarker ?? { state: rosterState(entry), detail: null }), interactive: entry.kind !== 'background' });
   }
 
   return observed;

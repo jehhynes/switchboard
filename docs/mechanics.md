@@ -68,8 +68,33 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - `claude attach` drew its terminal UI ("Attaching…") and exited 0 when stdin closed. The session stayed listed with its pid. Interactive use was not driven; live acceptance checks it.
 - **Current use:** the roster read covers every started session so a resume is seen (PRD R17); Attach and Open in VS Code (architecture.md § Claude Code runner).
 
+## M8. Writing Claude's settings.json on Windows
+
+- **Date:** 2026-10-03.
+- **Versions:** Windows 11, Node 24, Claude Code CLI 2.1.288.
+- **Observation:** during live acceptance, a hub's first start failed renaming its temporary file over `~/.claude/settings.json` with `EPERM`, because another process had the file open; the next start succeeded. Two hook processes of one session writing the same marker hit the same refusal and left a temporary file.
+- **Current use:** hook installation retries the rename 10 times, 100 ms apart, removes its temporary file when it gives up, and shows the error in the panel instead of stopping the hub. The hook writer removes its temporary file when the rename fails.
+
+## M9. Live acceptance, 2026-10-03
+
+- **Versions:** Claude Code CLI 2.1.288, VS Code 1.140.0, Claude Code extension 2.1.288, gh 2.100.0.
+- **Setup:** isolated home `.wip/acceptance-home` with the operator's GitHub settings and minimal playbooks, all `autoStart: false`. The panel ran in a separate VS Code instance (its own user-data-dir, `SWITCHBOARD_HOME`, the Switchboard extension under development), driven over its debugging port. The acceptance hub's hook entries were removed afterwards, leaving `~/.claude/settings.json` identical to its copy from before the run. Screenshots are in `.wip/acceptance/`.
+- **1. GitHub read: pass.** 9 work items, one for each issue assigned to `work-login` or `work-ai-login` in 🎁 Assigned, ⚒️ Dev or 🔍 Review. The 2 issues in 🆕 New were left out. Each was triaged with `claude-sonnet-5` into a `dev:*` playbook, and the issues with a branch-named worktree showed it. No work item was approved.
+- **2. Ad-hoc session: pass.** A prompt in the scratch repo wrote `hello2.txt`, reported the stage "Wrote hello2.txt", reported the worktree and reported done. The panel showed Running, then the stage, then Done. The session was released (`claude stop`) after its turn ended, and the worktree was linked by report.
+- **3. Controls: pass.**
+  - Attach opened a terminal on the running session; closing the terminal left the session running with its pid.
+  - Stop made the work item Blocked with "Stopped by you."; Retry started a new session.
+  - Open in VS Code resumed the ended session in a Claude tab with its history, and a second Open focused that tab without adding one.
+  - A prompt using AskUserQuestion showed "Waiting on you".
+  - An ad-hoc start in an untrusted repo failed with Claude's message: ``Workspace not trusted. Run `claude` in D:\git\switchboard\.wip\untrusted once and accept the trust prompt, then retry.``
+- **Defects found and fixed:**
+  - A session reopened in VS Code is listed as `kind: interactive` with only `status`, and was read as running. Its `status` now decides (`idle`, `busy`, `waiting`).
+  - A session that had ended without a release stop could be released after the operator reopened it, which would have run `claude stop` on the operator's tab. A session is now marked released whenever its process ends or the roster lists it as interactive, so a resumed session is never stopped by Switchboard.
+  - The settings.json and marker writes described in M8.
+- **Not covered:** Open in VS Code for a session from another folder (the pending open and claim). The instance had one folder, and that path opens another window.
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:
 
-- Interactive `claude attach` in a VS Code terminal, and `claude-vscode.primaryEditor.open` resuming a released session and focusing an open tab (GC M5–M7, M45): live acceptance step 3.
+- Open in VS Code for a session from another folder: the pending open, `vscode.openFolder` focusing an existing window, and the claim in that window.

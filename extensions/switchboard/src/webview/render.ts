@@ -150,7 +150,7 @@ function row(item: WorkItemView, snapshot: Snapshot, now: number, expanded: bool
   const status = statusOf(item);
   const main = mainControl(item);
   const key = `${item.ticket.source} ${item.ticket.sourceKey}`;
-  const ticket = item.ticket.url === '' ? escape(key) : `<a href="${escape(item.ticket.url)}">${escape(key)}</a>`;
+  const ticket = item.ticket.url === '' ? `<span class="key">${escape(key)}</span>` : `<a class="key" href="${escape(item.ticket.url)}">${escape(key)}</a>`;
   const stage = item.stage === null ? '' : `<span class="stage">${escape(item.stage)}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}</span>`;
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => `<span class="note">${escape(note)}</span>`).join('');
   const worktree = item.worktree === null ? '' : `<span class="worktree" title="${escape(item.worktree.path)}"><span class="codicon codicon-git-branch"></span> ${escape(item.worktree.branch ?? item.worktree.path)}</span>`;

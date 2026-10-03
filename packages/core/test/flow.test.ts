@@ -270,6 +270,27 @@ describe('sessions', () => {
     expect(h.store.session(session)).toMatchObject({ outcome: null, outcomeDetail: null });
   });
 
+  it('never releases a session resumed after its process ended, such as in a VS Code tab', () => {
+    const h = new Harness();
+    const { item, session } = running(h);
+
+    h.act({ type: 'stop', workItemId: item });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
+    expect(h.store.session(session)?.released).toBe(true);
+
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null }] });
+    expect(h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'idle', detail: null }] })).toEqual([]);
+    expect(h.store.session(session)?.state).toBe('idle');
+  });
+
+  it('never releases a session the roster lists as interactive, even if its end was not observed', () => {
+    const h = new Harness();
+    const { session } = running(h);
+
+    expect(h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'idle', detail: null, interactive: true }] })).toEqual([]);
+    expect(h.store.session(session)).toMatchObject({ state: 'idle', released: true });
+  });
+
   it('leaves a starting session alone until its start is confirmed', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));

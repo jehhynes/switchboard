@@ -39,6 +39,8 @@ export interface ObservedSession {
   sessionId: string;
   state: LiveState;
   detail: string | null;
+  /** Listed as an interactive session, such as a VS Code tab, rather than Switchboard's background process. */
+  interactive?: boolean;
 }
 
 export type FlowEvent =
@@ -420,7 +422,7 @@ class Flow {
   private sessionStartFailed(sessionId: string, message: string): void {
     const session = this.session(sessionId);
 
-    this.store.updateSession(sessionId, { state: 'ended', stateAt: this.now, endedAt: this.now, outcome: 'failed', outcomeDetail: message });
+    this.store.updateSession(sessionId, { state: 'ended', stateAt: this.now, endedAt: this.now, outcome: 'failed', outcomeDetail: message, released: true });
 
     const item = this.latest(session);
 
@@ -444,13 +446,19 @@ class Flow {
       const session = this.store.session(entry.sessionId);
 
       if (session !== null && session.state !== 'starting') {
-        this.setState(session, entry.state, entry.detail);
+        // An interactive session is the operator's; Switchboard never stops it (PRD R39).
+        if (entry.interactive === true && !session.released) {
+          this.store.updateSession(session.id, { released: true });
+        }
+
+        this.setState({ ...session, released: session.released || entry.interactive === true }, entry.state, entry.detail);
       }
     }
 
     for (const session of this.store.activeSessions()) {
       if (session.state !== 'starting' && !listed.has(session.id)) {
-        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now });
+        // Its background process is gone, so a later resume (such as in a VS Code tab) is never released (PRD R39).
+        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true });
         this.ended({ ...session, state: 'ended' });
       }
     }
@@ -606,6 +614,7 @@ class Flow {
 
     this.store.updateSession(sessionId, {
       state: 'ended',
+      released: true,
       stateAt: this.now,
       endedAt: this.now,
       ...(stopped && session.outcome === null ? { outcome: 'stopped' as const, outcomeDetail: MESSAGES.stopped } : {}),
