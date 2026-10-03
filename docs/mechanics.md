@@ -91,7 +91,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - A session reopened in VS Code is listed as `kind: interactive` with only `status`, and was read as running. Its `status` now decides (`idle`, `busy`, `waiting`).
   - A session that had ended without a release stop could be released after the operator reopened it, which would have run `claude stop` on the operator's tab. A session is now marked released whenever its process ends or the roster lists it as interactive, so a resumed session is never stopped by Switchboard.
   - The settings.json and marker writes described in M8.
-- **Not covered:** Open in VS Code for a session from another folder (the pending open and claim). The instance had one folder, and that path opens another window.
+- **Not covered:** Open in VS Code for a session from another folder, which M13 covers.
 
 ## M10. Zoho Desk reads and the Support pool
 
@@ -131,9 +131,19 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Lesson:** run live source checks the way the hub runs them, under Code.exe's environment, not from a shell.
 - **Current use:** `findBash` in the hub (architecture.md § Settings).
 
+## M13. Live acceptance round 2, 2026-10-03
+
+- **Versions:** Claude Code CLI 2.1.288, VS Code 1.140.0, hub build 9ecae83cf81bd0a3.
+- **Setup:** as M9, with a fresh database in `.wip/acceptance-home/.switchboard`, the GitHub source disabled, ad-hoc in `.wip/mech`, and the operator's Zoho and Forum settings, read-only. The instance's window had `.wip/mech/other` open, so sessions in `.wip/mech` came from another folder. The acceptance hook entries were removed afterwards, leaving `~/.claude/settings.json` byte-identical to its copy from before the run. Screenshots are in `.wip/acceptance2/`.
+- **Launch:** a shell inside VS Code carries `ELECTRON_RUN_AS_NODE` and `VSCODE_*` variables; `Code.exe` started with them runs as Node and exits. Clear them before starting the acceptance instance.
+- **Trust:** Claude trusts a folder only by its own entry, not a trusted parent. A session in the untrusted `.wip/mech/other` failed with the trust message, so the sessions ran in the trusted `.wip/mech`.
+- **1. Open in VS Code from another folder: pass.** Open on a done ad-hoc item opened a `.wip/mech` window in the acceptance instance; the operator's instance kept its own three windows. That window claimed the pending open and showed the item's last session in a Claude tab with its history. A second Open added no window and no tab.
+- **2. Approval report: pass.** The session wrote `approval.txt` (`draft`) and reported approval with a prompt and a summary. The item showed Awaiting approval with the summary and an Approve control. Approve started a second session with the stored prompt; it appended `approved` and reported done, and the item ended Done.
+- **3. Pool and icebox: pass.** The pool listed Zoho 6 and Forum 7, each triaged into `support:case` with a summary, oldest first by `sortAt`, in the same order as the hub's snapshot. Icebox moved a ticket to a collapsed Icebox group (Pool 12, Icebox 1); Restore returned it to its place by `sortAt` (Pool 13). No pick, approval or start ran on a pool ticket.
+- **Current use:** the open and claim path, approval reports, and the pool display (architecture.md § Flow, § Panel).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:
 
-- Open in VS Code for a session from another folder: the pending open, `vscode.openFolder` focusing an existing window, and the claim in that window.
 - A real pick session claiming a pool ticket through `support-bind`. By the operator's rule no test claims a case; the operator makes the first real pick.
