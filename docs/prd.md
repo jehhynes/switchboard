@@ -81,7 +81,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ### Work items
 
-- R7. Switchboard creates a work item each time a ticket enters the assigned state. A ticket assigned again later gets a new work item.
+- R7. Switchboard creates a work item each time a ticket enters the assigned state with no open work item. A ticket assigned again after its work item is done gets a new work item; one that returns while its work item is still open, such as during that item's active session, continues that work item.
 - R8. On first run, every ticket already in the assigned state gets a work item.
 - R9. Work item status is local and never mirrored to the source.
 - R10. A work item is done when its task session reports done, when the operator marks it done, or when its ticket leaves the assigned state while no session is active. If the ticket leaves while a session is active, the work item stays open until that session reports done or ends, because skills such as `/finalize-issue` unassign the operator before the session finishes.
@@ -104,11 +104,11 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R13. Namespaces and playbooks are not built into Switchboard. Any playbook defined in configuration is valid, and triage chooses among them.
 - R14. A playbook owns a prompt template. Switchboard renders it with the ticket's fields, the triage summary and the Switchboard session ID.
 - R15. Each playbook is configured to start its task session automatically after triage or to wait for operator approval.
-- R16. Each playbook states whether it requires a worktree to start. A playbook that does not, such as every `support` playbook, starts in the source's repo root and creates a worktree only if the work turns out to need code.
+- R16. Each playbook states whether it requires a worktree to start, and where its session runs (`workdir`): in the ticket's worktree when one exists, or always in the source's repo root. A playbook that requires no worktree and has no worktree yet starts in the repo root, and its skill creates a worktree only if the work turns out to need code. Every `support` playbook runs in the repo root.
 
 ### Sessions
 
-- R17. A ticket has at most one active session across all its work items, because its work items share one worktree. Switchboard refuses to start a session while the store shows another session for the same ticket as active. A work item of a reassigned ticket waits as `queued` while the earlier work item's session is still active. Ended sessions are kept as history.
+- R17. A ticket has at most one active session across all its work items, because its work items share one worktree. Switchboard refuses to start a session while the store shows another session for the same ticket as active. Ended sessions are kept as history.
 - R18. A new work item is triaged first. Triage is a one-shot classifier with no tools: it receives the source's triage context and triage playbook, and returns the playbook that handles the work item and a summary of the ticket.
 - R19. When the chosen playbook requires a worktree and the ticket has none, a setup session runs after triage to create one.
 - R20. The task session runs the rendered playbook prompt and handles the work item from start to finish.
@@ -119,7 +119,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R37. A triage or session start that fails makes the work item `failed`, with the error. Switchboard does not retry it automatically.
 - R38. At most `sessions.concurrency` sessions run at once (default 2, range 1–4). A start that has no free slot waits as `queued`. A setup session and the task session that follows it hold one slot.
 - R39. After a session reports done or blocked, or its turn ends, Switchboard stops its background process once the turn is no longer running, so that the session can resume in VS Code. This never deletes the session or its worktree.
-- R40. The operator can stop an active session. The work item becomes `blocked` with the reason "Stopped by you." once `claude stop` succeeds. A failed stop shows its error and leaves the session stoppable.
+- R40. The operator can stop an active background session; a session the operator resumed in VS Code is stopped there. The work item becomes `blocked` with the reason "Stopped by you." once `claude stop` succeeds. A failed stop shows its error and leaves the session stoppable.
 - R41. A failed start shows Claude's own message, which for an untrusted directory says how to trust it. Switchboard never writes Claude's trust settings.
 
 ### Worktrees
@@ -148,7 +148,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 ### Runtime
 
 - R33. Switchboard's core runs in a separate process from VS Code and keeps running when the window reloads or closes.
-- R42. Settings and playbooks are files in the Switchboard home. The hub reloads them when they change. An invalid settings file leaves the last valid settings in force; an invalid playbook is left out. Either error shows in the panel.
+- R42. Settings and playbooks are files in the Switchboard home. The hub reloads them when they change. An invalid settings file leaves the last valid settings in force; a source with invalid settings is disabled; an invalid playbook is left out. Either error shows in the panel.
 - R43. On startup the hub reconciles sessions recorded as active against the Claude roster. The hub stays running while any session is active, so sessions can always report.
 
 ## Delivery

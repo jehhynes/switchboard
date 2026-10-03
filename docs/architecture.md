@@ -66,7 +66,7 @@ Implemented. Follows Ground Control's hub (GC R35, M25).
 - **Entry point:** `hub.js [--home=<dir>] [--idle-ms=<ms>]` serves; `hub.js --stop` stops the running hub; `hub.js report …` sends a session report.
 - **Runtime:** the hub opens the store, loads settings and playbooks and reloads them on change, polls each enabled source every `pollIntervalSeconds`, then reads `git worktree list` in its repo root for the branch convention. While any session has started, it reads the roster every 30 seconds and hook markers every 5 seconds. Before a roster read or a release stop can end a setup session, it reads the convention again, so an unreported worktree still counts.
 - **Startup:** the hub installs hooks when `sessions.installHooks` is on, runs again any triage it abandoned, fails any session still `starting` with "The hub stopped while the session was starting.", and reads the roster (PRD R43).
-- **Home override:** when `SWITCHBOARD_HOME` is set in VS Code's environment, the extension uses it as the Switchboard home and passes it to the hub as `--home`. It does not change the user profile that Claude and `gh` see. Live acceptance depends on it.
+- **Home override:** when `SWITCHBOARD_HOME` is set in VS Code's environment, the extension passes it to the hub as `--home`. Both the variable and `--home` name the directory that holds `.switchboard`, in place of the user home, so the Switchboard home is `<override>/.switchboard`. It does not change the user profile that Claude and `gh` see. Live acceptance depends on it.
 
 ## Panel
 
@@ -103,7 +103,7 @@ Research Zoho ticket {{ticket.sourceKey}}.
 Report progress with `{{report}} stage {{session.id}} <stage>`.
 ```
 
-- Template variables: the ticket's fields, `{{ticket.context}}`, `{{triage.summary}}`, `{{session.id}}` and `{{report}}`. `{{report}}` is the report command prefix, `node "<home>/hub.js" report`. Rendering fails on an unknown variable.
+- Template variables: `{{ticket.source}}`, `{{ticket.sourceKey}}`, `{{ticket.title}}`, `{{ticket.url}}`, `{{ticket.context}}`, `{{triage.summary}}`, `{{session.id}}` and `{{report}}`. `{{report}}` is the report command prefix, `node "<home>/hub.js" report`. Rendering fails on an unknown variable.
 - Front matter: `description` (required), `autoStart` (default false), `requiresWorktree` (default false), `permissionMode` and `model` (defaults from `sessions` settings), `kind` (`task` by default, or `triage`), and `workdir` (`worktree` by default: the ticket's worktree when one exists, otherwise the repo root; or `repoRoot`: always the source's repo root, for playbooks whose skills belong to that repository).
 - `description` tells the classifier when to choose the playbook. Adding a playbook is adding its file: the hub reloads it, and the classifier sees its description. Edit the triage playbook only for a rule that must take precedence over the descriptions.
 - A source's triage playbook has `kind: triage`. Its body is the classifier's system prompt. Triage playbooks are never offered to the classifier as choices.
@@ -124,7 +124,7 @@ A classifier error, an unparsable result, a timeout, or a playbook name outside 
 
 ## Flow
 
-1. Poll a source. For each ticket, compare its assigned state with `lastSeenState`. A poll that fails or is incomplete, such as one that hits the page limit, updates nothing.
+1. Poll a source. For each ticket, compare its assigned state with `Ticket.assigned`. A poll that fails or is incomplete, such as one that hits the page limit, updates nothing.
 2. When a ticket enters the assigned state, create a work item (`triaging`) and run triage.
 3. Store the triage result. If the playbook's `autoStart` is false, the work item is `awaiting-approval`.
 4. If the playbook's `requiresWorktree` is true and the ticket has none, start a setup session (`setup`) running the source's `setupPrompt`. The setup session succeeds when a worktree is linked, by report or by the branch convention, and the session reports done or ends. If it ends with no worktree linked, the work item fails with "Setup ended without a worktree."
@@ -152,12 +152,12 @@ Steps 4 and 5 start a session only when no session for the ticket is active and 
 | `triage-succeeded`, `triage-failed`, `triage-cancelled` | The classifier. A cancelled triage runs again. |
 | `session-started`, `session-start-failed` | The runner's `start-session`. |
 | `roster`, `marker` | A successful roster read, with each listed session's state; a hook marker for a live session. |
-| `report` | The report command: `stage`, `worktree`, `done` or `blocked`. |
+| `report` | The report command: `stage`, `worktree`, `done`, `blocked` or `approval`. |
 | `stop-succeeded`, `stop-failed` | The runner's `stop-session`, for an operator stop or a release. |
 | `worktree-found` | The branch convention. It links a worktree only to a ticket that has none. |
-| `adhoc`, `approve`, `retry`, `mark-done`, `retriage`, `change-playbook`, `stop`, `tick` | The panel; `tick` re-runs scheduling after settings or playbooks change. |
+| `adhoc`, `approve`, `retry`, `mark-done`, `retriage`, `change-playbook`, `stop`, `pick`, `retriage-pool`, `icebox`, `restore`, `tick` | The panel; `tick` re-runs scheduling after settings or playbooks change. |
 
-Actions are `triage`, `start-session` and `stop-session`. After every event the core starts triage for `triaging` work items up to `triage.concurrency`, then starts `queued` work items in queue order while fewer than `sessions.concurrency` sessions are active, skipping a ticket that already has an active session. A task that follows a setup session starts when the setup session ends, without waiting for a slot.
+Actions are `triage`, `start-session` and `stop-session`. After every event the core starts triage for `triaging` work items, then pool triage for pool tickets without a result, up to `triage.concurrency` in all; then it starts `queued` work items in queue order while fewer than `sessions.concurrency` sessions are active, skipping a ticket that already has an active session. A task that follows a setup session starts when the setup session ends, without waiting for a slot.
 
 ## Claude Code runner
 
@@ -176,7 +176,7 @@ Actions are `triage`, `start-session` and `stop-session`. After every event the 
   - The hub installs async command hooks for those events plus `SessionEnd` in `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`. It preserves other entries, refuses to edit malformed JSON, and adds missing entries at startup. The `sessions.installHooks` setting is on by default; when it is off, the roster alone decides state.
   - The hook runs `node "<home>/hook.mjs"`. It skips subagent events, always exits 0 and prints nothing, and writes `<home>/activity/<nativeSessionId>.json` atomically: `{v, sessionId, event, at, notificationType, source, toolName, backgroundTasks, error, errorMessage}`, with `errorMessage` capped at 500 characters. `SessionEnd` deletes the marker.
   - Ground Control's hooks stay separate; the two do not share markers.
-- Release: after a done or blocked report, or an `idle` or `failed` turn, run `claude stop <id>` once when the session is no longer `running` (PRD R39). A session whose background process has ended, by release, stop, failed start or leaving the roster, is never released again, and neither is a session the roster lists as interactive, so a session the operator resumed in a VS Code tab is never stopped by Switchboard. Before a release stop, the hub also reads the roster and skips the stop unless the session is listed as a background process. An interactive roster entry, such as a VS Code tab, has no `state`; its `status` gives `idle`, `running` or `waiting`.
+- Release: after a done or blocked report, or an `idle` or `failed` turn, run `claude stop <id>` once when the session is no longer `running` (PRD R39). A session whose background process has ended, by release, stop, failed start or leaving the roster, is never released again, and neither is a session the roster lists as interactive, so a session the operator resumed in a VS Code tab is never stopped by Switchboard. Before a release stop, the hub also reads the roster and skips the stop unless the session is listed as a background process. An interactive roster entry, such as a VS Code tab, has no `state`; its `status` (`idle`, `busy` or `waiting`) gives `idle`, `running` or `waiting`.
 - Stop: `claude stop <id>`, 15-second timeout. A failed stop leaves the session stoppable. Never `claude rm`, which can delete the worktree.
 - Attach: a VS Code terminal running `claude attach <id>`. Leaving it keeps the session running (M33, M45).
 - Open in VS Code: `claude-vscode.primaryEditor.open(<native session ID>)`, which resumes the session or focuses its tab. Claude's tab lists only the sessions of its window's first folder, and opening another session there starts an empty one (GC M6, M7, M52). So when the session's directory is the window's first folder, the window opens it directly. Otherwise the window posts `{sessionId, cwd}` to the hub's `POST /open` and opens that folder with `vscode.openFolder` and `forceNewWindow`, which focuses a window already on it. A window claims a pending open for its folder with `POST /claim` when it connects to the hub and whenever it gains focus, and opens it. A pending open expires after 2 minutes and lives only in the hub's memory.
@@ -197,7 +197,7 @@ node "<home>/hub.js" report approval <sessionId> --prompt <prompt> [--summary <t
 - The CLI finds the hub through `hub.json` and never starts one. Timeout: 10 seconds. Repeating a report is safe, because each report sets a value.
 - When no hub answers, the CLI exits 2 and prints that the hub is not running. The hub stays up while sessions are active, so this is rare; the work item then ends `blocked`, and the operator marks it done.
 - Exit codes: 0 recorded, 2 no hub, 1 usage, 3 refused (unknown session, or a path that `git worktree list` run in that path does not show as a worktree). A worktree can belong to a different repository than the source's repo root, as when a Support session in `D:\git\support` reports an widgets worktree.
-- A report for a session of a work item that is already done is recorded on the session and does not reopen the work item.
+- A report for a work item that is already done does not reopen it: `done` and `blocked` set the session's outcome, `worktree` links the ticket's worktree, and `stage` and `approval` are ignored.
 
 ## Settings
 
