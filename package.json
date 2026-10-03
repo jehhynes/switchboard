@@ -10,6 +10,7 @@
     "packages/core",
     "packages/github",
     "packages/zoho",
+    "packages/forum",
     "packages/claude",
     "packages/hub",
     "apps/hub",

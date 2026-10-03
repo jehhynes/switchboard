@@ -22,7 +22,8 @@
     "@switchboard/claude": "*",
     "@switchboard/core": "*",
     "@switchboard/github": "*",
-    "@switchboard/zoho": "*"
+    "@switchboard/zoho": "*",
+    "@switchboard/forum": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

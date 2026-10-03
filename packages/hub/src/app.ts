@@ -8,6 +8,7 @@ import { Store, switchboardHome } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
+import { forumSource } from '@switchboard/forum';
 import { loadConfig, playbooksDir } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
@@ -21,7 +22,16 @@ const OPERATOR_EVENTS = new Set(['adhoc', 'approve', 'retry', 'mark-done', 'retr
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval']);
 
 function makeSource(name: string, settings: SourceSettings) {
-  return name === 'github' ? githubSource(settings) : name === 'zoho' ? zohoSource(settings) : null;
+  switch (name) {
+    case 'github':
+      return githubSource(settings);
+    case 'zoho':
+      return zohoSource(settings);
+    case 'forum':
+      return forumSource(settings);
+    default:
+      return null;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,12 +1,12 @@
 # Switchboard architecture
 
-Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, the core's store, settings, playbooks and [flow decisions](#core-decisions), the GitHub source, the Claude Code runner and classifier, the hub runtime, the report command, the panel with the ad-hoc prompt box, the Zoho Desk source and the pool with pick sessions. Forum is planned.
+Requirements live in [prd.md](prd.md). This document describes components, state and protocols. Implemented: the hub lifecycle, the core's store, settings, playbooks and [flow decisions](#core-decisions), the GitHub source, the Claude Code runner and classifier, the hub runtime, the report command, the panel with the ad-hoc prompt box, the Zoho Desk and Forum sources, and the pool with pick sessions.
 
 Session and triage mechanics come from Ground Control (`D:\git\ground-control`), where they are verified. M IDs below refer to its [mechanics.md](../../ground-control/docs/mechanics.md). Re-verify them in Switchboard's own mechanics.md before relying on a version-fragile one.
 
 ## Packages
 
-npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/github`, `packages/zoho`, `packages/claude`, `packages/hub`, `apps/hub`, and `extensions/switchboard`. `packages/forum` is planned.
+npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/github`, `packages/zoho`, `packages/forum`, `packages/claude`, `packages/hub`, `apps/hub`, and `extensions/switchboard`.
 
 | Package | Contents | Depends on |
 |---|---|---|
@@ -246,7 +246,7 @@ node "<home>/hub.js" report approval <sessionId> --prompt <prompt> [--summary <t
       "queryCommand": "bash ~/.claude/scripts/run-forum-sql.sh",
       "pickPrompt": "Use the support-bind skill to bind and claim Support case T{{ticket.sourceKey}}, then stop: do not investigate. Report blocked with the reason if the claim fails or someone else holds the case; otherwise report done.",
       "forumId": 1,
-      "userId": 7
+      "userId": "7"
     }
   }
 }
@@ -263,7 +263,8 @@ node "<home>/hub.js" report approval <sessionId> --prompt <prompt> [--summary <t
   - Each poll pages through every Open ticket with `GET /tickets/search?status=Open` and filters on the escalation field after the fetch, because only `/tickets/search` returns custom fields. A ticket missing from a complete read has left the assigned state.
   - Assignee classes follow the board's `classifyAssignee`, with the team map from `GET /teams` cached for 6 hours. The operator is `mine`; a missing assignee is `none`; an automation or a team member is `support`; anyone else is `engineer`. `mine` is the assigned state; `none` and `support` are the pool; `engineer` is neither. A poll whose team map cannot be read is incomplete and changes nothing.
   - Triage context: the subject, the custom fields `cf_queue`, `cf_user_id`, `cf_account_id` and `cf_page_url`, the thread bodies, the comments (internal notes), and the history of tier and assignee changes.
-- Forum reads run read-only SQL on the production forum database, through `queryCommand`, the operator's runner script, which holds the connection. They need the VPN, so a connection failure is temporary.
+- Forum reads run read-only SQL on the production forum database, through `queryCommand`, the operator's runner script, which holds the connection. The SQL goes to its stdin and rows come back one JSON object per line (`--result-format=json/raw`). Runner exit code 7 means the database is unreachable, usually the VPN, and the poll fails without changing anything. A line that looks like a row but does not parse, or `maxRows` (500) rows, makes the poll incomplete.
+  - A topic assigned to anyone else is left out. The pool sorts by the last public post (`Thread.LastPublicEntryId`), else the topic's creation; DATETIME values are UTC.
   - Assigned state: `Thread.CommunityId = <forumId> AND DeletedUtc IS NULL AND IsLocked = 0 AND Status = 0` (`ThreadStatus.Open`), with `AssigneeId` equal to `userId` for the assigned state, or null for the pool.
   - Triage context: the topic title and posts in order. Deleted posts (`DeletedUtc` set), posts with `Status = 2` (private notes) and posts by `UserId = 2` (the automatic AI analysis) are left out. The source key is `Thread.Id`, and the URL is `https://forum.example.com/t/forum/<Thread.Key>`.
 - A Forum topic and a Zoho ticket about the same case are separate tickets (PRD R26).

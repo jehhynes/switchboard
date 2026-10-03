@@ -107,6 +107,18 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Fixtures:** `packages/zoho/test/fixtures`, built from these responses by whitelist: synthetic IDs, ticket numbers, names and text (synthetic 19-digit IDs except the operator's own and the two automations, ticket numbers from 900001, "Customer N" and "Agent N", same-length filler for every text, and only cf_queue kept as recorded).
 - **Current use:** the Zoho source and the pool (architecture.md § Settings, § Flow).
 
+## M11. Forum reads and the Support pool
+
+- **Date:** 2026-10-03.
+- **Versions:** the operator's `run-forum-sql.sh` runner (mysqlsh) over the VPN, Claude Code CLI 2.1.288.
+- **Experiment:** read-only SELECTs: the open-topic count, then the Forum source's poll and one topic's posts. Then a hub in an isolated home with the draft `triage:forum` and `support:case` playbooks, which triaged the pool and started no session.
+- **Result:**
+  - The forum had 7 open, unlocked, undeleted topics, all unassigned, so all 7 were in the pool and none was assigned. A poll takes about 5 seconds, most of it the runner's mysqlsh start.
+  - `--result-format=json/raw` prints one JSON object per row, and the SQL reads from stdin with `-`.
+  - The pool listed the 7 topics oldest first by their last public post. Each was triaged into `support:case`: six defects and one data-fix-request, with immediacy and severity in the summary. No work item or session was created, and nothing was written.
+- **Fixtures:** `packages/forum/test/fixtures`: the recorded rows with topic IDs from 90001, titles "Topic <n>", keys "topic-<n>", authors "Person <k>" and same-length filler bodies; timestamps are kept. Two synthetic rows add a topic assigned to the operator and one assigned to someone else, because the live forum had neither.
+- **Current use:** the Forum source (architecture.md § Settings).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:
