@@ -42,11 +42,8 @@ a { color: var(--vscode-textLink-foreground); }
 .mark { width: 16px; flex-shrink: 0; display: inline-flex; justify-content: center; }
 .mark.error { color: var(--vscode-errorForeground); }
 .mark.warning { color: var(--vscode-editorWarning-foreground); }
-.priority { display: inline-block; width: 0.6rem; height: 0.6rem; margin-right: 0.35rem; border-radius: 50%; box-sizing: border-box; vertical-align: middle; flex-shrink: 0; }
+.priority { display: inline-block; width: 0.6rem; height: 0.6rem; margin-right: 0.35rem; border-radius: 50%; box-sizing: border-box; vertical-align: middle; flex-shrink: 0; background: var(--vscode-charts-orange, #e8820c); }
 .mark .priority { margin-right: 0; }
-.priority.high { background: var(--vscode-charts-red, #f14c4c); }
-.priority.medium { background: var(--vscode-charts-orange, #e8820c); }
-.priority.low { background: var(--vscode-disabledForeground, #8b8b8b); }
 .queue { white-space: nowrap; flex-shrink: 0; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
 .badge { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; padding: 0 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-textLink-foreground)); border-radius: 2px; }
 .approval { color: var(--vscode-descriptionForeground); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

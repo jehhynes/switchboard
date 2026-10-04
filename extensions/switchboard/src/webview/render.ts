@@ -206,17 +206,18 @@ export function rankOf(triage: Rating): number | null {
   return immediacy === undefined || severity === undefined ? null : immediacy + severity;
 }
 
-/** The priority dot: red for rank 0–1, orange for 2, grey for 3–4; nothing when unrated (PRD R27, R50). */
+/** Priority, as the Support board derives it: a customer blocked now, or high severity (PRD R50). */
+export function isPriority(triage: Rating): boolean {
+  return (triage?.immediacy != null && triage.immediacy !== 'NON-BLOCKING') || triage?.severity === 'HIGH';
+}
+
+/** The priority dot, with the rating in its tooltip; nothing when not priority (PRD R27, R50). */
 export function priorityDot(triage: Rating): string {
-  const rank = rankOf(triage);
-  if (rank === null) {
+  if (!isPriority(triage)) {
     return '';
   }
 
-  const level = rank <= 1 ? 'high' : rank === 2 ? 'medium' : 'low';
-  const title = `Priority ${level}: ${triage!.immediacy}/${triage!.severity}`;
-
-  return `<span class="priority ${level}" title="${escape(title)}"></span>`;
+  return `<span class="priority" title="${escape(`Immediacy: ${triage!.immediacy ?? '?'}   Severity: ${triage!.severity ?? '?'}`)}"></span>`;
 }
 
 export interface Mark {
@@ -322,7 +323,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   // A pool ticket has waited since the customer's last message; any other since its work item was created.
   const since = item.ticket.sortAt ?? item.createdAt;
   const others = controlsOf(item).filter((control) => control.label !== main?.label);
-  const dot = item.status === 'unstarted' || (rankOf(item.triage) ?? 3) > 2 ? '' : priorityDot(item.triage);
+  const dot = item.status === 'unstarted' ? '' : priorityDot(item.triage);
 
   return `<div class="item" data-item="${item.id}">
 <div class="line">${markHtml(item)} ${ticket} <span class="title" title="${escape(item.ticket.title)}">${dot}${escape(item.ticket.title)}</span>${queued(since, item.doneAt ?? now)}</div>

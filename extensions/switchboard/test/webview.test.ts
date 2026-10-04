@@ -333,9 +333,10 @@ describe('renderPanel', () => {
 
     expect(root.querySelector('[data-group="unstarted"] h3')?.textContent).toBe('Unstarted (5)');
     expect(rows.map((row) => row.getAttribute('data-ticket'))).toEqual(['1', '5', '4', '2', '3']);
-    expect([1, 2, 3, 4, 5].map((id) => byId(id).querySelector('.mark .priority')?.className)).toEqual(['priority high', 'priority medium', 'priority low', undefined, undefined]);
-    expect(byId(1).querySelector('.priority')?.getAttribute('title')).toBe('Priority high: URGENT/MED');
-    // An unrated row keeps the empty mark slot, so its key lines up.
+    expect([1, 2, 3, 4, 5].map((id) => byId(id).querySelector('.mark .priority')?.className)).toEqual(['priority', 'priority', undefined, undefined, undefined]);
+    expect(byId(1).querySelector('.priority')?.getAttribute('title')).toBe('Immediacy: URGENT   Severity: MED');
+    // A row that is not priority keeps the empty mark slot, so its key lines up.
+    expect(byId(3).querySelector('.mark')?.innerHTML).toBe('');
     expect(byId(4).querySelector('.mark')?.innerHTML).toBe('');
     expect(rows.map((row) => row.querySelector('.line.second .tag')?.textContent)).toEqual(['Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed']);
     expect(titles(byId(1), '.line.second .actions > button.control.icon-button')).toEqual(['Start']);
@@ -377,7 +378,7 @@ describe('renderPanel', () => {
     expect(unstarted.querySelector('[data-item="1"] .tag')).toBeNull();
     expect(unstarted.textContent).not.toContain('Assigned');
     expect(unstarted.textContent).not.toContain('Build it.');
-    expect(unstarted.querySelector('[data-item="1"] .mark .priority.high')).not.toBeNull();
+    expect(unstarted.querySelector('[data-item="1"] .mark .priority')).not.toBeNull();
     expect(unstarted.querySelector('[data-item="1"] .title .priority')).toBeNull();
     expect(titles(unstarted, '[data-item="1"] .actions > button.control')).toEqual(['Start']);
     expect(JSON.parse(unstarted.querySelector<HTMLElement>('[data-item="1"] button.control[title="Start"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'start', workItemId: 1 } });
@@ -405,7 +406,7 @@ describe('renderPanel', () => {
     expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, iceboxed: true } }))).toEqual(['Restore']);
   });
 
-  it('shows a red or orange priority dot, Returned and link badges on a work item (PRD R50–R52)', () => {
+  it('shows the priority dot only on a priority work item, Returned and link badges on a work item (PRD R50–R52)', () => {
     const rated = item(1, {
       returned: 1,
       triage: triage({ playbook: 'support:case', immediacy: 'URGENT', severity: 'HIGH' }),
@@ -414,12 +415,31 @@ describe('renderPanel', () => {
         { id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW },
       ],
     });
-    const root = render(snapshot([rated, item(2, { triage: triage({ immediacy: 'NON-BLOCKING', severity: 'HIGH' }) }), item(3, { triage: triage({ immediacy: 'NON-BLOCKING', severity: 'LOW' }) })]));
+    const rating = (id: number, immediacy: Triage['immediacy'], severity: Triage['severity']) => item(id, { triage: triage({ immediacy, severity }) });
+    const root = render(
+      snapshot([
+        rated,
+        rating(2, 'NON-BLOCKING', 'HIGH'),
+        rating(3, 'NON-BLOCKING', 'LOW'),
+        rating(4, 'BLOCKING', 'LOW'),
+        rating(5, null, 'HIGH'),
+        rating(6, 'BLOCKING', null),
+        rating(7, 'NON-BLOCKING', null),
+        rating(8, null, 'MED'),
+      ]),
+    );
     const row = root.querySelector('[data-item="1"]')!;
 
-    expect(row.querySelector('.title .priority.high')?.getAttribute('title')).toBe('Priority high: URGENT/HIGH');
-    expect(root.querySelector('[data-item="2"] .title .priority.medium')).not.toBeNull();
-    expect(root.querySelector('[data-item="3"] .priority')).toBeNull();
+    expect(row.querySelector('.title .priority')?.getAttribute('title')).toBe('Immediacy: URGENT   Severity: HIGH');
+    expect(root.querySelector('[data-item="2"] .title .priority')).not.toBeNull();
+    expect([3, 4, 5, 6, 7, 8].map((id) => root.querySelector(`[data-item="${id}"] .title .priority`)?.getAttribute('title') ?? null)).toEqual([
+      null,
+      'Immediacy: BLOCKING   Severity: LOW',
+      'Immediacy: ?   Severity: HIGH',
+      'Immediacy: BLOCKING   Severity: ?',
+      null,
+      null,
+    ]);
     expect(row.querySelector('.returned')?.textContent).toBe('Returned ×1');
     expect([...row.querySelectorAll('a.badge')].map((a) => [a.textContent?.trim(), a.getAttribute('href')])).toEqual([
       ['PR #12', 'https://github.com/o/r/pull/12'],
