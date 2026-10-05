@@ -147,6 +147,11 @@ function iceboxControl(ticketId: number, iceboxed: boolean): Control {
     : { label: 'Icebox', icon: 'archive', message: { type: 'action', action: { type: 'icebox', ticketId } } };
 }
 
+/** The last segment of a file path, with either separator. */
+function fileName(path: string): string {
+  return path.split(/[\\/]/).filter((segment) => segment !== '').at(-1) ?? path;
+}
+
 /**
  * A primary action: a large button with its icon and verb; a narrow panel hides the verb, which stays in the tooltip (PRD R27).
  * The tone colours it: `primary` for Approve, `error` or `warning` for Retry, none for the rest; `iconOnly` drops the verb.
@@ -199,11 +204,11 @@ function actionsColumn(parts: string): string {
 }
 
 /**
- * The report to read before approving: the newest local-file link on an `awaiting-approval` row. Approval reports do not
+ * The report to read: the newest local-file link on an `awaiting-approval` or `done` row. Approval and done reports do not
  * name their report yet, so this is the best guess for skills such as review-pr and address-feedback.
  */
 export function reportLink(item: WorkItemView): WorkItemView['links'][number] | null {
-  if (item.status !== 'awaiting-approval') {
+  if (item.status !== 'awaiting-approval' && item.status !== 'done') {
     return null;
   }
 
@@ -413,7 +418,7 @@ const ISSUE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/(\d+)/;
 
 /** A link's kind by its target: a GitHub pull request or issue, a local file, or another URL (PRD R52). */
 export function linkKind(target: string): 'pr' | 'issue' | 'file' | 'url' {
-  return PULL_REQUEST.test(target) ? 'pr' : ISSUE.test(target) ? 'issue' : /^https?:\/\//.test(target) ? 'url' : 'file';
+  return PULL_REQUEST.test(target) ? 'pr' : ISSUE.test(target) ? 'issue' : /^https?:\/\//i.test(target) ? 'url' : 'file';
 }
 
 const LINK_ICONS = { pr: 'git-pull-request', file: 'file', url: 'link' } as const;
@@ -451,7 +456,7 @@ function firstLine(triage: Rating, title: string, queue: string): string {
   return `<div class="line first"><span class="title">${priorityDot(triage)}${escape(title)}</span>${queue}</div>`;
 }
 
-/** Line 3, left out when empty: the status mark and the facts that lines 1 and 2 do not show. */
+/** Line 3, left out when empty: the status mark, the note that explains it, and the facts that lines 1 and 2 do not show. */
 function thirdLine(parts: string): string {
   return parts === '' ? '' : `\n<div class="line third"><span class="meta">${parts}</span></div>`;
 }
@@ -478,12 +483,12 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);
   const report = reportLink(item);
-  const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report.target } }, null, true);
+  const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report.target } }, null, true, fileName(report.target));
 
   return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(item)}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
-    `${statusMark(item)}${stage}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}${notes}`,
+    `${statusMark(item)}${notes}${stage}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }

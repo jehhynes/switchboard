@@ -340,20 +340,28 @@ describe('renderPanel', () => {
     const approval = root.querySelector('[data-item="1"]')!;
     const blocked = root.querySelector('[data-item="2"]')!;
 
-    // Report is an icon with its verb in the tooltip; Approve is primary, Retry takes the error colour on a failed row and the warning colour on a blocked one, and Start has no tone.
+    // Report is an icon with the report's filename in the tooltip; Approve is primary, Retry takes the error colour on a failed row and the warning colour on a blocked one, and Start has no tone.
     expect([...approval.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => [button.title, button.textContent, button.className])).toEqual([
-      ['Report', '', 'control action-button icon-only'],
+      ['review.md', '', 'control action-button icon-only'],
       ['Approve', 'Approve', 'control action-button primary'],
     ]);
     expect(root.querySelector('[data-item="2"] .action-button')?.className).toBe('control action-button warning');
     expect(render(snapshot([item(3, { status: 'failed' })])).querySelector('[data-item="3"] .action-button')?.className).toBe('control action-button error');
     expect(render(snapshot([item(4, { status: 'unstarted' })])).querySelector('[data-item="4"] .action-button')?.className).toBe('control action-button');
     expect(approval.querySelector('.line .actions, .line button')).toBeNull();
-    expect(JSON.parse(controlNamed(approval, 'Report').dataset['message']!)).toEqual({ type: 'openUrl', url: 'D:\\wt\\round-2\\review.md' });
+    expect(JSON.parse(controlNamed(approval, 'review.md').dataset['message']!)).toEqual({ type: 'openUrl', url: 'D:\\wt\\round-2\\review.md' });
     // The report's badge is not repeated; older files and other links keep theirs.
     expect([...approval.querySelectorAll('.line.third a.badge')].map((badge) => badge.textContent?.trim())).toEqual(['round-1.md', 'Docs']);
     expect([...blocked.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => button.title)).toEqual(['Retry']);
     expect([...blocked.querySelectorAll('.line.third a.badge')]).toHaveLength(3);
+
+    // A done row shows the Report button alone, hover-only like Needs you, with the report's filename in the tooltip and no badge for it.
+    const done = render(snapshot([item(5, { status: 'done', doneAt: NOW, doneReason: 'unassigned', warning: 'The ticket left the assigned state without a done report.', stage: 'review', stageAt: NOW - 60_000, links })])).querySelector('[data-item="5"]')!;
+    expect([...done.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => [button.title, button.className])).toEqual([['review.md', 'control action-button icon-only']]);
+    expect(JSON.parse(controlNamed(done, 'review.md').dataset['message']!)).toEqual({ type: 'openUrl', url: 'D:\\wt\\round-2\\review.md' });
+    expect([...done.querySelectorAll('.line.third a.badge')].map((badge) => badge.textContent?.trim())).toEqual(['round-1.md', 'Docs']);
+    // The warning note follows its mark, before the stage and the badges.
+    expect([...done.querySelector('.line.third .meta')!.children].map((child) => child.className)).toEqual(['mark codicon codicon-warning warning', 'note', 'stage', 'badge file', 'badge url']);
   });
 
   it('shows no triage summary, triage context, task prompt or session history', () => {
@@ -552,7 +560,8 @@ describe('renderPanel', () => {
       ['key github', 'gh 7', 'https://github.com/o/r/issues/7', null],
       ['key github', 'gh 8', 'https://github.com/o/r/issues/8', null],
     ]);
-    expect(['https://example.test/x', 'http://github.com/o/r/pull/1', 'https://github.com/o/r/pull/1/files', 'https://github.com/o/r/issues/2', '/home/me/case.md'].map(linkKind)).toEqual([
+    expect(['https://example.test/x', 'http://github.com/o/r/pull/1', 'HTTPS://example.test/x', 'https://github.com/o/r/pull/1/files', 'https://github.com/o/r/issues/2', '/home/me/case.md'].map(linkKind)).toEqual([
+      'url',
       'url',
       'url',
       'pr',
@@ -625,7 +634,7 @@ describe('startPanel', () => {
     send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], links: [{ id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW }] })]));
     controlNamed(root, 'Approve').click();
     root.querySelector<HTMLAnchorElement>('a.key')!.click();
-    controlNamed(root, 'Report').click();
+    controlNamed(root, 'case.md').click();
     root.querySelector<HTMLElement>('[data-item="1"] .title')!.click();
     root.querySelector<HTMLElement>('[data-item="1"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     root.querySelector<HTMLElement>('details[data-group="needs"] > summary')!.click();
