@@ -178,6 +178,11 @@ export function playbookDirty(state: EditorState, name: string): boolean {
   return draft !== undefined && !samePlaybook(draft.playbook, playbookFile(state, name)?.playbook ?? null);
 }
 
+/** Whether settings.json or any playbook has unsaved changes. */
+export function anyDirty(state: EditorState): boolean {
+  return settingsDirty(state) || [...state.playbookDrafts.keys()].some((name) => playbookDirty(state, name));
+}
+
 export function newPlaybookName(draft: NewPlaybook): string {
   return `${draft.namespace.trim()}:${draft.name.trim()}`;
 }
@@ -459,10 +464,11 @@ function pageHasErrors(state: EditorState, page: PageId): boolean {
   if (page.startsWith('playbook:')) {
     const name = page.slice('playbook:'.length);
 
-    return (state.playbookErrors.get(name)?.length ?? 0) > 0 || playbookFile(state, name)?.error != null;
+    return (state.playbookErrors.get(name)?.length ?? 0) > 0 || (state.refusals.get(name)?.length ?? 0) > 0 || playbookFile(state, name)?.error != null;
   }
 
-  return [...settingsErrorPages(state).values()].includes(page);
+  // A refused settings save names no field, so the mark goes on Sessions and triage.
+  return [...settingsErrorPages(state).values()].includes(page) || (page === 'general' && (state.refusals.get('settings')?.length ?? 0) > 0);
 }
 
 function pageDirty(state: EditorState, page: PageId): boolean {
@@ -523,8 +529,12 @@ function header(title: string, path: string | null, buttons: string): string {
   return `<header><div><h2>${title}</h2>${file}</div><div class="buttons">${buttons}</div></header>`;
 }
 
-function saveButtons(dirty: boolean, extra = ''): string {
-  return `${extra}<button data-command="revert"${dirty ? '' : ' disabled'}>Revert</button><button class="primary" data-command="save"${dirty ? '' : ' disabled'}>Save</button>`;
+function saveAllButton(state: EditorState): string {
+  return `<button data-command="save-all" title="Save settings.json and every changed playbook"${anyDirty(state) ? '' : ' disabled'}>Save all</button>`;
+}
+
+function saveButtons(state: EditorState, dirty: boolean, extra = ''): string {
+  return `${extra}<button data-command="revert"${dirty ? '' : ' disabled'}>Revert</button>${saveAllButton(state)}<button class="primary" data-command="save"${dirty ? '' : ' disabled'}>Save</button>`;
 }
 
 function errorBlock(errors: string[]): string {
@@ -558,7 +568,7 @@ function renderSettingsPage(state: EditorState, title: string, sections: { headi
     .join('');
   const changed = state.settingsDraft !== null && state.settingsDraft.version !== settings.version;
 
-  return `${header(title, settings.path, saveButtons(settingsDirty(state), extraButtons))}${changedNote(changed, 'settings.json')}${errorBlock(loose)}${body}`;
+  return `${header(title, settings.path, saveButtons(state, settingsDirty(state), extraButtons))}${changedNote(changed, 'settings.json')}${errorBlock(loose)}${body}`;
 }
 
 /** `extra` errors show at the top of the page with the errors that name no field. */
@@ -594,7 +604,7 @@ export function renderPage(state: EditorState): string {
 <div class="field"><label class="label" for="new-name">Name</label><input type="text" id="new-name" data-new="name" value="${escape(draft.name)}" placeholder="develop"></div>
 </div><p class="help">The file is playbooks/&lt;namespace&gt;/&lt;name&gt;.md. Lowercase letters, digits and hyphens.</p><div class="field-errors" data-errors-for="name">${nameError === null ? '' : `<p class="error">${escape(nameError)}</p>`}</div></section>`;
 
-    return `${header('New playbook', null, '<button class="primary" data-command="create">Create</button>')}${names}${renderPlaybookFields(state, draft.playbook, state.playbookErrors.get('new') ?? [], state.refusals.get('new') ?? [])}`;
+    return `${header('New playbook', null, `${saveAllButton(state)}<button class="primary" data-command="create">Create</button>`)}${names}${renderPlaybookFields(state, draft.playbook, state.playbookErrors.get('new') ?? [], state.refusals.get('new') ?? [])}`;
   }
 
   const name = page.slice('playbook:'.length);
@@ -617,7 +627,7 @@ export function renderPage(state: EditorState): string {
   const changed = draft !== undefined && (file === null || draft.version !== file.version);
   const broken = draft !== undefined && file?.playbook === null ? [`On disk: ${file.error ?? 'The file is invalid.'}`] : [];
 
-  return `${header(escape(name), file?.path ?? null, saveButtons(playbookDirty(state, name), deleteButton))}${changedNote(changed, name, file === null)}${renderPlaybookFields(state, playbookValue(state, name)!, errors, [...refused, ...broken])}`;
+  return `${header(escape(name), file?.path ?? null, saveButtons(state, playbookDirty(state, name), deleteButton))}${changedNote(changed, name, file === null)}${renderPlaybookFields(state, playbookValue(state, name)!, errors, [...refused, ...broken])}`;
 }
 
 export function renderEditor(state: EditorState): string {

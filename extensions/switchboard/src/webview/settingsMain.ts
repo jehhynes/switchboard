@@ -4,6 +4,7 @@ import {
   applyPlaybookField,
   newNameError,
   newPlaybookName,
+  playbookDirty,
   playbookFile,
   playbookValue,
   readField,
@@ -12,6 +13,7 @@ import {
   renderNav,
   renderPage,
   setAt,
+  settingsDirty,
   settingsValue,
 } from './settings.js';
 import type { EditorConfig, EditorState, FieldKind, PageId } from './settings.js';
@@ -70,6 +72,21 @@ export function startSettings(root: HTMLElement, vscode: VsCodeApi, delay = CHEC
 
   // A draft keeps the version it started from, even null for a missing file, so a save never overwrites a later change.
   const draftVersion = (s: EditorState) => (s.settingsDraft === null ? s.config.settings.version : s.settingsDraft.version);
+
+  const saveSettings = (s: EditorState) => {
+    if (s.settingsDraft !== null) {
+      vscode.postMessage({ type: 'save-settings', value: s.settingsDraft.value, version: s.settingsDraft.version });
+    }
+  };
+
+  const savePlaybook = (s: EditorState, name: string) => {
+    const draft = s.playbookDrafts.get(name);
+
+    if (draft !== undefined) {
+      // A file deleted on disk is created again.
+      vscode.postMessage({ type: 'save-playbook', name, playbook: draft.playbook, version: playbookFile(s, name) === null ? null : draft.version });
+    }
+  };
 
   const checkSoon = (s: EditorState) => {
     clearTimeout(timer);
@@ -288,7 +305,7 @@ export function startSettings(root: HTMLElement, vscode: VsCodeApi, delay = CHEC
     const what = target(s);
 
     // A save, create or delete answers with its own result; a check still pending must not replace a refusal.
-    if (['save', 'create', 'delete'].includes(button.dataset['command'] ?? '')) {
+    if (['save', 'save-all', 'create', 'delete'].includes(button.dataset['command'] ?? '')) {
       clearTimeout(timer);
     }
 
@@ -327,15 +344,19 @@ export function startSettings(root: HTMLElement, vscode: VsCodeApi, delay = CHEC
         check(s);
         return;
       case 'save':
-        if (what === 'settings' && s.settingsDraft !== null) {
-          vscode.postMessage({ type: 'save-settings', value: s.settingsDraft.value, version: s.settingsDraft.version });
+        if (what === 'settings') {
+          saveSettings(s);
         } else if (what !== null && what !== 'new') {
-          const draft = s.playbookDrafts.get(what);
+          savePlaybook(s, what);
+        }
+        return;
+      case 'save-all':
+        if (settingsDirty(s)) {
+          saveSettings(s);
+        }
 
-          if (draft !== undefined) {
-            // A file deleted on disk is created again.
-            vscode.postMessage({ type: 'save-playbook', name: what, playbook: draft.playbook, version: playbookFile(s, what) === null ? null : draft.version });
-          }
+        for (const name of [...s.playbookDrafts.keys()].filter((name) => playbookDirty(s, name))) {
+          savePlaybook(s, name);
         }
         return;
       case 'create': {

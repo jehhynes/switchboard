@@ -355,6 +355,41 @@ describe('startSettings', () => {
     expect(last('save-settings')!['value']).toMatchObject({ sources: { zoho: { enabled: false, automationAgentIds: [] } } });
   });
 
+  it('saves settings and every changed playbook with Save all, and marks the pages it refused', () => {
+    send({ type: 'config', config: config() });
+
+    expect(root.querySelector<HTMLButtonElement>('[data-command="save-all"]')!.disabled).toBe(true);
+
+    type(field('sessions.model'), 'opus');
+    click('[data-arg="playbook:dev:develop"]');
+    type(field('template'), '/gc-plan --fast');
+    click('[data-arg="playbook:triage:github"]');
+    // A draft that matches its file is not saved.
+    type(field('template'), 'Classify.');
+
+    expect(root.querySelector<HTMLButtonElement>('[data-command="save"]')!.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-command="save-all"]')!.disabled).toBe(false);
+
+    click('[data-arg="new-playbook"]');
+    expect(root.querySelector<HTMLButtonElement>('[data-command="save-all"]')!.disabled).toBe(false);
+
+    const before = posted.length;
+
+    click('[data-command="save-all"]');
+
+    expect(posted.slice(before)).toEqual([
+      { type: 'save-settings', value: { sessions: { concurrency: 2, model: 'opus' }, sources: { github: GITHUB, zoho: { enabled: false } } }, version: 'v1' },
+      { type: 'save-playbook', name: 'dev:develop', playbook: { ...TASK, template: '/gc-plan --fast' }, version: 'p1' },
+    ]);
+
+    send({ type: 'refused', target: 'dev:develop', errors: ['dev:develop changed on disk after the editor read it.'] });
+    send({ type: 'refused', target: 'settings', errors: ['EACCES: permission denied'] });
+
+    expect(root.querySelector('[data-arg="playbook:dev:develop"] .codicon-error')).not.toBeNull();
+    expect(root.querySelector('[data-arg="general"] .codicon-error')).not.toBeNull();
+    expect(root.querySelector('[data-arg="playbook:triage:github"] .codicon-error')).toBeNull();
+  });
+
   it('keeps a save refusal when a check was still pending', () => {
     send({ type: 'config', config: config() });
     type(field('sessions.model'), 'opus');
