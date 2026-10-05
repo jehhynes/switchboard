@@ -110,13 +110,14 @@ describe('openAction', () => {
   const worktree = { id: 1, ticketId: 7, path: 'D:/git/widgets-wt/107-fix', branch: '107-fix', linkedBy: 'report' as const };
   const action = (sessions: ReturnType<typeof session>[], patch: Partial<WorkItemView> = {}) => openAction(item(7, { sessions, ...patch }));
 
-  it('attaches to a background session, resumes any other latest session in a terminal, and otherwise opens the worktree', () => {
+  it('attaches to a background session, resumes any other latest session in a terminal, then opens the worktree, then the ticket', () => {
     expect(action([session()], { worktree })).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 107' });
     expect(action([session({ state: 'idle', released: true })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: true });
     expect(action([session({ state: 'ended' })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: false });
     expect(action([], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
     expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
-    expect(action([])).toBeNull();
+    expect(action([])).toEqual({ type: 'openUrl', url: 'https://github.com/o/r/issues/107' });
+    expect(action([], { ticket: { ...item(7).ticket, source: 'adhoc', url: '' } })).toBeNull();
     expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toBeNull();
   });
 
@@ -323,7 +324,8 @@ describe('renderPanel', () => {
     expect(titles(running, '[data-item="4"] .actions > *')).toEqual(['Retry']);
     expect(JSON.parse(running.querySelector<HTMLElement>('[data-item="4"]')!.dataset['open']!)).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 104' });
     expect(running.querySelector('.session-button')).toBeNull();
-    expect(render(snapshot([item(6, { status: 'triaging' })])).querySelector('[data-item="6"]')!.hasAttribute('data-open')).toBe(false);
+    expect(JSON.parse(render(snapshot([item(6, { status: 'unstarted' })])).querySelector<HTMLElement>('[data-item="6"]')!.dataset['open']!)).toEqual({ type: 'openUrl', url: 'https://github.com/o/r/issues/106' });
+    expect(render(snapshot([item(6, { sessions: [session({ state: 'starting', shortId: null, nativeSessionId: null })] })])).querySelector('[data-item="6"]')!.hasAttribute('data-open')).toBe(false);
     expect(render(snapshot([item(7, { sessions: [session({ state: 'starting', shortId: null, nativeSessionId: null })] })])).querySelector('[data-item="7"] .actions')).toBeNull();
 
     expect(rowMenu(closed.querySelector('[data-item="1"]')!)).toEqual({
@@ -438,6 +440,7 @@ describe('renderPanel', () => {
     expect(root.querySelector('.tag')).toBeNull();
     expect(root.textContent).not.toContain('Unclaimed');
     expect(byId(1).querySelector('.line.second a.key')?.textContent).toBe('zoho 501');
+    expect(JSON.parse(byId(1).getAttribute('data-open')!)).toEqual({ type: 'openUrl', url: 'https://desk.example.test/1' });
     expect(byId(1).querySelector('.line.second a.key')?.getAttribute('href')).toBe('https://desk.example.test/1');
     expect(titles(byId(1), ':scope > .actions > button.control.action-button')).toEqual(['Start']);
     expect(byId(1).querySelector('.line:first-child .actions')).toBeNull();
@@ -477,6 +480,7 @@ describe('renderPanel', () => {
     const unstarted = root.querySelector('[data-group="unstarted"]')!;
 
     expect(unstartedOrder([assigned, unrated], pool).map((entry) => entry.ticket.id)).toEqual([1, 2, 9]);
+    expect(unstarted.querySelector('[data-ticket="9"]')!.hasAttribute('data-open')).toBe(false);
     expect([...unstarted.querySelectorAll('.item')].map((row) => row.getAttribute('data-item') ?? `ticket ${row.getAttribute('data-ticket')}`)).toEqual(['1', '2', 'ticket 9']);
     expect(headings(unstarted)).toEqual(['Unstarted 3']);
     expect(unstarted.querySelector('[data-item="1"] .tag')).toBeNull();

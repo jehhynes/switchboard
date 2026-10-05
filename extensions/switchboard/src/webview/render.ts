@@ -117,8 +117,8 @@ function isBackground(session: SessionView | null): session is SessionView & { s
 
 /**
  * What a click on the row opens (PRD R27): the latest session in a terminal, attached while its background process runs and
- * resumed otherwise, else the worktree in VS Code. `active` marks a session resumed elsewhere, such as in a VS Code tab.
- * Null when there is nothing to open, as for a session still starting.
+ * resumed otherwise, else the worktree in VS Code, else, with no session, the ticket. `active` marks a session resumed elsewhere,
+ * such as in a VS Code tab. Null when there is nothing to open, as for a session still starting.
  */
 export function openAction(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
@@ -133,7 +133,16 @@ export function openAction(item: WorkItemView): Record<string, unknown> | null {
     return { type: 'resume', sessionId: latest.nativeSessionId, cwd: latest.cwd, name, active: session !== null };
   }
 
-  return item.worktree === null ? null : { type: 'openFolder', path: item.worktree.path };
+  if (item.worktree !== null) {
+    return { type: 'openFolder', path: item.worktree.path };
+  }
+
+  return item.sessions.length === 0 ? ticketOpen(item.ticket) : null;
+}
+
+/** The ticket in the browser; null for a ticket with no URL, such as an ad-hoc one. */
+function ticketOpen(ticket: { url: string }): Record<string, unknown> | null {
+  return ticket.url === '' ? null : { type: 'openUrl', url: ticket.url };
 }
 
 /** What a Ctrl+click on the row opens: the session in VS Code, when it is not running in its background process; otherwise null. */
@@ -143,10 +152,7 @@ export function editorAction(item: WorkItemView): Record<string, unknown> | null
   return action?.['type'] === 'resume' ? { type: 'open', sessionId: action['sessionId'], cwd: action['cwd'] } : null;
 }
 
-function openAttribute(item: WorkItemView): string {
-  const action = openAction(item);
-  const editor = editorAction(item);
-
+function openAttribute(action: Record<string, unknown> | null, editor: Record<string, unknown> | null = null): string {
   return `${action === null ? '' : ` data-open="${escape(JSON.stringify(action))}"`}${editor === null ? '' : ` data-open-editor="${escape(JSON.stringify(editor))}"`}`;
 }
 
@@ -492,7 +498,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
   const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report } }, null, true, fileName(report));
 
-  return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(item)}${rowContext(controlsOf(item))}>
+  return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
     `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}${returned(item.returned)}`,
@@ -531,7 +537,10 @@ function setup(snapshot: Snapshot): string {
 }
 
 
-/** A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Start; Returned on line 3; Snooze in the right-click menu (PRD R27, R47, R48). */
+/**
+ * A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Start; Returned on line 3; Snooze in the right-click menu.
+ * A click opens the ticket (PRD R27, R47, R48).
+ */
 function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   const { ticket, triage } = entry;
   const rowKey = `ticket:${ticket.id}`;
@@ -543,7 +552,7 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   const controls = failed ? [again, pick, ...snoozeControls(ticket)] : [pick, ...snoozeControls(ticket)];
   const main = controls[0]!;
 
-  return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${rowContext(controls)}>
+  return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
 <div class="line second"><span class="meta">${playbookLabel(triage?.playbook ?? '')}${ticketLink(ticket)}</span></div>${thirdLine(
     `${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : ''}${wake(ticket)}${returned(entry.returned)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
