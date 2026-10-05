@@ -52,7 +52,10 @@ export class SettingsEditor {
     const csp = `default-src 'none'; style-src ${panel.webview.cspSource} 'unsafe-inline'; font-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';`;
     const uri = (file: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(dist, file)).toString();
 
-    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'switchboard.svg');
+    panel.iconPath = {
+      light: vscode.Uri.joinPath(this.extensionUri, 'media', 'switchboard-light.svg'),
+      dark: vscode.Uri.joinPath(this.extensionUri, 'media', 'switchboard-dark.svg'),
+    };
     panel.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">
 <link rel="stylesheet" href="${uri('codicons/codicon.css')}"><link rel="stylesheet" href="${uri('settings.css')}">
 </head><body><div id="root"></div><script nonce="${nonce}" src="${uri('settings.js')}"></script></body></html>`;
