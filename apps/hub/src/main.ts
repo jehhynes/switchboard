@@ -13,9 +13,8 @@ const REPORT_USAGE = `Usage:
   report stage <sessionId> <stage>
   report worktree <sessionId> <path>
   report done <sessionId>
-  report blocked <sessionId> --reason <text>
-  report approval <sessionId> --prompt <prompt> [--summary <text>]
-  report link <sessionId> --label <text> --target <url or absolute path>
+  report approval <sessionId> --prompt <prompt> [--summary <text>] [--report <path>]
+  report link <sessionId> --label <text> --target <http(s) url>
 `;
 
 function flag(argv: readonly string[], name: string): string | null {
