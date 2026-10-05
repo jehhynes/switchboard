@@ -449,8 +449,6 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const stage = item.stage === null ? '' : `<span class="stage">${escape(item.stage)}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}</span>`;
   const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : `<span class="approval">${escape(item.approvalSummary)}</span>`;
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => `<span class="note">${escape(note)}</span>`).join('');
-  const worktree =
-    item.worktree === null ? '' : `<span class="worktree codicon codicon-git-branch" title="${escape([item.worktree.branch, item.worktree.path].filter((part) => part !== null).join('\n'))}"></span>`;
   const { primary, rest } = splitLinks(item);
   const report = reportLink(item);
   const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report.target } }, null, true);
@@ -458,7 +456,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(item)}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
-    `${statusMark(item)}${stage}${worktree}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}${notes}`,
+    `${statusMark(item)}${stage}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}${notes}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main))}`)}
 </div>`;
 }

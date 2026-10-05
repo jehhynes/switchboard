@@ -364,15 +364,14 @@ describe('renderPanel', () => {
     }
   });
 
-  it('shows the worktree as an icon, the time in queue, and no actions on a done work item with a running session', () => {
+  it('shows no worktree symbol, the time in queue, and no actions on a done work item with a running session', () => {
     const root = render(
       snapshot([item(1, { status: 'done', createdAt: NOW - 3 * 86_400_000, doneAt: NOW - 86_400_000, sessions: [session()], worktree: { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' } })]),
       { groups: new Map([['done', true]]) },
     );
 
-    expect(root.querySelector('.worktree.codicon-git-branch')?.textContent).toBe('');
-    expect(root.querySelector('.worktree')?.getAttribute('title')).toBe('101-fix\nD:/git/widgets-wt/101-fix');
-    expect(root.querySelector('[data-item="1"] .line.third .worktree')).not.toBeNull();
+    expect(root.querySelector('.codicon-git-branch')).toBeNull();
+    expect(root.textContent).not.toContain('101-fix');
     expect(titles(root, '[data-item="1"] .line.third .mark')).toEqual(['Finished by the session']);
     // A done item with a running session has no control, so no actions column.
     expect(root.querySelector('[data-item="1"] .actions')).toBeNull();
