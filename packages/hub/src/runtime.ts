@@ -38,7 +38,7 @@ export interface WorkItemView extends WorkItem {
   sessions: Session[];
   worktree: Worktree | null;
   links: Link[];
-  /** Earlier work items for the same ticket; above 0 the panel marks the work item Returned (PRD R51). */
+  /** Earlier started work items for the same ticket; above 0 the panel marks the work item Returned (PRD R51). */
   returned: number;
 }
 
@@ -46,7 +46,7 @@ export interface WorkItemView extends WorkItem {
 export interface PoolView {
   ticket: Ticket;
   triage: Triage | null;
-  /** Done work items for the ticket; above 0 the panel marks it Returned (PRD R51). */
+  /** Started done work items for the ticket; above 0 the panel marks it Returned (PRD R51). */
   returned: number;
 }
 
@@ -302,6 +302,8 @@ export class Runtime {
   snapshot(): Snapshot {
     const store = this.deps.store;
     const { settings, playbooks, settingsError, playbookErrors } = this.config;
+    // Only a work item that started a session counts toward Returned; a session row whose launch failed has no shortId.
+    const started = (item: WorkItem) => store.sessionsFor(item.id).some((session) => session.shortId !== null);
 
     return {
       workItems: store.workItems(this.deps.now() - DONE_DAYS * 24 * 60 * 60 * 1000).map((item) => ({
@@ -311,14 +313,14 @@ export class Runtime {
         sessions: store.sessionsFor(item.id),
         worktree: store.worktreeFor(item.ticketId),
         links: store.linksFor(item.ticketId),
-        returned: store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id).length,
+        returned: store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id && started(other)).length,
       })),
       pool: store
         .poolTickets()
         .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
         // A disabled source's pool is not read, so its tickets are not shown.
         .filter(({ ticket, items }) => this.sources.has(ticket.source) && items.every((item) => item.status === 'done'))
-        .map(({ ticket, items }) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null, returned: items.length })),
+        .map(({ ticket, items }) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null, returned: items.filter(started).length })),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
       sources: [...this.sources.keys()],
