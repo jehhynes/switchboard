@@ -82,9 +82,10 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
     }
   };
 
-  // A click elsewhere in a row, or Enter on it, runs the row's open action.
-  const open = (target: HTMLElement) => {
-    const action = target.closest<HTMLElement>('[data-row]')?.dataset['open'];
+  // A click elsewhere in a row, or Enter on it, runs the row's open action; with Ctrl (Cmd on macOS), its editor action when it has one.
+  const open = (target: HTMLElement, editor: boolean) => {
+    const row = target.closest<HTMLElement>('[data-row]');
+    const action = (editor ? row?.dataset['openEditor'] : undefined) ?? row?.dataset['open'];
 
     if (action !== undefined) {
       vscode.postMessage(JSON.parse(action));
@@ -110,14 +111,14 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
       event.stopPropagation();
       vscode.postMessage({ type: 'openUrl', url: link.getAttribute('href') });
     } else if (target.closest('button') === null) {
-      open(target);
+      open(target, event.ctrlKey || event.metaKey);
     }
   });
 
   root.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.target as HTMLElement).matches('[data-row]')) {
       event.preventDefault();
-      open(event.target as HTMLElement);
+      open(event.target as HTMLElement, event.ctrlKey || event.metaKey);
     }
   });
 

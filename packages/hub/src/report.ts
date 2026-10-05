@@ -14,6 +14,10 @@ function valueOf(argv: readonly string[], name: string): string | null {
   return inline === undefined ? null : inline.slice(name.length + 3);
 }
 
+function hasFlag(argv: readonly string[], name: string): boolean {
+  return argv.some((argument) => argument === `--${name}` || argument.startsWith(`--${name}=`));
+}
+
 /** A report body from `report <kind> <sessionId> …`, or null for bad usage. */
 export function reportBody(argv: readonly string[]): Record<string, unknown> | null {
   const [kind, sessionId, text] = argv;
@@ -29,26 +33,19 @@ export function reportBody(argv: readonly string[]): Record<string, unknown> | n
       return text === undefined ? null : { sessionId, kind, path: resolve(text) };
     case 'done':
       return { sessionId, kind };
-    case 'blocked': {
-      const reason = valueOf(argv, 'reason');
-
-      return reason === null || reason === '' ? null : { sessionId, kind, reason };
-    }
     case 'approval': {
       const prompt = valueOf(argv, 'prompt');
 
-      return prompt === null || prompt === '' ? null : { sessionId, kind, prompt, summary: valueOf(argv, 'summary') };
+      const report = valueOf(argv, 'report');
+
+      // A --report flag without a value is bad usage, not an approval without a draft.
+      return prompt === null || prompt === '' || ((report === null || report === '') && hasFlag(argv, 'report')) ? null : { sessionId, kind, prompt, summary: valueOf(argv, 'summary'), report: report === null ? null : resolve(report) };
     }
     case 'link': {
       const label = valueOf(argv, 'label');
       const target = valueOf(argv, 'target');
 
-      // Any other URL scheme is refused rather than read as a relative path.
-      if (label === null || label === '' || target === null || target === '' || (/^[a-z][a-z0-9+.-]*:\/\//i.test(target) && !/^https?:\/\//i.test(target))) {
-        return null;
-      }
-
-      return { sessionId, kind, label, target: /^https?:\/\//i.test(target) ? target : resolve(target) };
+      return label === null || label === '' || target === null || !/^https?:\/\//i.test(target) ? null : { sessionId, kind, label, target };
     }
     default:
       return null;

@@ -81,13 +81,13 @@ Report to Switchboard with these commands:
   - The stage is one or two words, such as Reviewing or Fixing tests.
 - {{report}} worktree {{session.id}} <path>, when you create a worktree.
 - {{report}} done {{session.id}}, when the work is finished.
-- {{report}} blocked {{session.id}} --reason <text>, when you cannot continue or need the operator's answer or choice, then end your turn instead of waiting.
-  - The reason is one phrase of at most 10 words; the detail stays in this session.
-  - A question ends with a question mark.
-- {{report}} approval {{session.id}} --prompt <prompt> --summary <text>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.
+- {{report}} approval {{session.id}} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.
   - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.
   - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.
-- {{report}} link {{session.id}} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md.`;
+  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.
+- {{report}} link {{session.id}} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.
+
+When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`;
 
 /** The prompt one session runs: the task prompt with its session ID filled in, plus the report contract. */
 export function sessionPrompt(taskPrompt: string, sessionId: string, report: string): string {

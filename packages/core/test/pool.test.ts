@@ -154,8 +154,8 @@ describe('pick (PRD R48)', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const pick = h.started(only(h.act({ type: 'pick', ticketId: pooled(h) }), 'start-session'));
 
-    h.report(pick, { kind: 'blocked', reason: 'Needs a hand.' });
-    h.act({ type: 'roster', sessions: [{ sessionId: pick, state: 'idle', detail: null }] });
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', failedStep: 'pick' });
     h.act({ type: 'roster', sessions: [{ sessionId: pick, state: 'running', detail: null }] });
     expect(h.item(1)).toMatchObject({ status: 'setup', error: null });
 
@@ -174,14 +174,12 @@ describe('pick (PRD R48)', () => {
     expect(h.item(1)).toMatchObject({ status: 'triaging', playbook: null });
   });
 
-  it('blocks on a blocked report or an end without done, and Retry starts a new pick session', () => {
+  it('blocks on an end without done, and Retry starts a new pick session', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
-    const first = h.started(only(h.act({ type: 'pick', ticketId: pooled(h) }), 'start-session'));
-
-    h.report(first, { kind: 'blocked', reason: 'Someone else holds the case.' });
-    expect(h.item(1)).toMatchObject({ status: 'blocked', failedStep: 'pick', error: 'Someone else holds the case.' });
+    h.started(only(h.act({ type: 'pick', ticketId: pooled(h) }), 'start-session'));
 
     h.act({ type: 'roster', sessions: [] });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', failedStep: 'pick', error: 'The pick session ended without a done report.' });
     const second = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
     expect(second).toMatchObject({ kind: 'pick', sessionId: 's2' });
 

@@ -4,7 +4,7 @@ import { hubBundlePath, hubLogPath } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { startHub } from './hubProcess.js';
-import { WorkItemsView, attach, claimOpen, dispatch, openLink, openSession, openWorktree, setSource, startAdhoc } from './panel.js';
+import { WorkItemsView, attach, claimOpen, dispatch, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
 import { SettingsEditor } from './settingsEditor.js';
 import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
 import { ROW_COMMANDS } from './webview/render.js';
@@ -74,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     ),
     vscode.commands.registerCommand('switchboard.attach', (shortId: string, name: string) => attach(shortId, name)),
     vscode.commands.registerCommand('switchboard.open', (sessionId: string, cwd: string) => openSession(keeper.current(), sessionId, cwd)),
+    vscode.commands.registerCommand('switchboard.resume', (sessionId: string, cwd: string, name: string, active: boolean) => resume(keeper.current(), sessionId, cwd, name, active === true)),
     vscode.commands.registerCommand('switchboard.openLink', (target: string) => openLink(target)),
     vscode.commands.registerCommand('switchboard.openWorktree', (path: string) => openWorktree(path)),
     vscode.commands.registerCommand('switchboard.openSettings', () => void settings.show()),

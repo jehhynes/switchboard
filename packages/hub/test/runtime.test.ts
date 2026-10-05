@@ -316,10 +316,8 @@ describe('Runtime', () => {
 
     expect(await runtime.report({ sessionId: 's1', kind: 'worktree', path: 'D:/elsewhere' })).toEqual({ refused: 'D:/elsewhere is not a git worktree.' });
     expect(await runtime.report({ sessionId: 's9', kind: 'done' })).toEqual({ refused: 'Unknown session s9.' });
-    expect(await runtime.report({ sessionId: 's1', kind: 'blocked', reason: 'Stuck.' })).toEqual({ refused: null });
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stuck.' });
-    expect(await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/publish', summary: 'Ready.' })).toEqual({ refused: null });
-    expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: 'Ready.' });
+    expect(await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:/wt/review.md' })).toEqual({ refused: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: 'Ready.', approvalReport: 'D:/wt/review.md' });
     expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
     expect(store.workItem(1)?.status).toBe('done');
   });
@@ -438,7 +436,7 @@ describe('Runtime', () => {
     ]);
 
     const ticket = store.findTicket('github', '1')!;
-    store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' });
+    store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' });
 
     expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['5', 0], ['1', 1], ['2', 0], ['4', 0], ['3', 0]]);
 

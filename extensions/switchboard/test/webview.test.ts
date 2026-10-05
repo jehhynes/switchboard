@@ -1,7 +1,7 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { startPanel } from '../src/webview/main.js';
-import { age, CAPS, clip, clockOf, controlsOf, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, unstartedOrder } from '../src/webview/render.js';
+import { age, CAPS, clip, clockOf, controlsOf, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -46,6 +46,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     needsPick: false,
     approvalPrompt: null,
     approvalSummary: null,
+    approvalReport: null,
     createdAt: NOW,
     statusAt: NOW,
     runStartedAt: NOW,
@@ -109,14 +110,21 @@ describe('openAction', () => {
   const worktree = { id: 1, ticketId: 7, path: 'D:/git/widgets-wt/107-fix', branch: '107-fix', linkedBy: 'report' as const };
   const action = (sessions: ReturnType<typeof session>[], patch: Partial<WorkItemView> = {}) => openAction(item(7, { sessions, ...patch }));
 
-  it('attaches to a background session, opens any other latest session in VS Code, and otherwise opens the worktree', () => {
+  it('attaches to a background session, resumes any other latest session in a terminal, and otherwise opens the worktree', () => {
     expect(action([session()], { worktree })).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 107' });
-    expect(action([session({ state: 'idle', released: true })], { worktree })).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
-    expect(action([session({ state: 'ended' })], { worktree })).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+    expect(action([session({ state: 'idle', released: true })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: true });
+    expect(action([session({ state: 'ended' })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: false });
     expect(action([], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
     expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
     expect(action([])).toBeNull();
     expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toBeNull();
+  });
+
+  it('opens the session in VS Code on Ctrl+click unless it runs in its background process', () => {
+    expect(editorAction(item(7, { sessions: [session({ state: 'ended' })] }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+    expect(editorAction(item(7, { sessions: [session({ state: 'waiting', released: true })] }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+    expect(editorAction(item(7, { sessions: [session()] }))).toBeNull();
+    expect(editorAction(item(7))).toBeNull();
   });
 });
 
@@ -181,7 +189,7 @@ describe('markOf', () => {
     expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish' })).toEqual(['cloud-upload', 'Approve the publish', null]);
     expect(mark({ status: 'unstarted' })).toBe('priority');
     expect(mark({ sessions: [session({ state: 'waiting' })] })).toEqual(['comment-discussion', 'Answer a question', null]);
-    expect(mark({ status: 'blocked', error: 'Which account should I use?' })).toEqual(['comment-discussion', 'Answer a question', null]);
+    expect(mark({ status: 'blocked', error: 'Which account should I use?' })).toEqual(['debug-pause', 'Blocked', null]);
     expect(mark({ status: 'blocked', error: 'Needs VPN access.' })).toEqual(['debug-pause', 'Blocked', null]);
     expect(mark({ status: 'failed', error: 'exit 1' })).toEqual(['error', 'Failed', 'error']);
   });
@@ -334,9 +342,9 @@ describe('renderPanel', () => {
   });
 
   it('puts the primary actions as text buttons in a column beside lines 2 and 3, with Report before Approve on an approval row', () => {
-    const file = (id: number, label: string, target: string, reportedAt: number) => ({ id, ticketId: 1, label, target, reportedAt });
-    const links = [file(1, 'round-2.md', 'D:\\wt\\round-2\\review.md', NOW), file(2, 'round-1.md', 'D:\\wt\\round-1\\review.md', NOW - 60_000), { ...file(3, 'Docs', 'https://example.test/docs', NOW + 1) }];
-    const root = render(snapshot([item(1, { status: 'awaiting-approval', links }), item(2, { status: 'blocked', links })]));
+    const links = [{ id: 3, ticketId: 1, label: 'Docs', target: 'https://example.test/docs', reportedAt: NOW }];
+    const report = 'D:\\wt\\round-2\\review.md';
+    const root = render(snapshot([item(1, { status: 'awaiting-approval', approvalReport: report, links }), item(2, { status: 'blocked', approvalReport: report, links })]));
     const approval = root.querySelector('[data-item="1"]')!;
     const blocked = root.querySelector('[data-item="2"]')!;
 
@@ -349,19 +357,23 @@ describe('renderPanel', () => {
     expect(render(snapshot([item(3, { status: 'failed' })])).querySelector('[data-item="3"] .action-button')?.className).toBe('control action-button error');
     expect(render(snapshot([item(4, { status: 'unstarted' })])).querySelector('[data-item="4"] .action-button')?.className).toBe('control action-button');
     expect(approval.querySelector('.line .actions, .line button')).toBeNull();
-    expect(JSON.parse(controlNamed(approval, 'review.md').dataset['message']!)).toEqual({ type: 'openUrl', url: 'D:\\wt\\round-2\\review.md' });
-    // The report's badge is not repeated; older files and other links keep theirs.
-    expect([...approval.querySelectorAll('.line.third a.badge')].map((badge) => badge.textContent?.trim())).toEqual(['round-1.md', 'Docs']);
+    expect(JSON.parse(controlNamed(approval, 'review.md').dataset['message']!)).toEqual({ type: 'openUrl', url: report });
+    expect([...approval.querySelectorAll('.line.third a.badge')].map((badge) => badge.textContent?.trim())).toEqual(['Docs']);
+    // Only an approval row shows Report: not a blocked, done, waiting or approval row without a report.
     expect([...blocked.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => button.title)).toEqual(['Retry']);
-    expect([...blocked.querySelectorAll('.line.third a.badge')]).toHaveLength(3);
+    const others = render(
+      snapshot([
+        item(5, { status: 'done', doneAt: NOW, approvalReport: report }),
+        item(6, { status: 'running', sessions: [session({ state: 'waiting' })], approvalReport: report }),
+        item(7, { status: 'awaiting-approval', approvalPrompt: '/push' }),
+      ]),
+      { groups: new Map([['done', true]]) },
+    );
+    expect([5, 6, 7].map((id) => [...others.querySelectorAll<HTMLButtonElement>(`[data-item="${id}"] > .actions > button`)].map((button) => button.title))).toEqual([[], [], ['Approve: runs /push']]);
 
-    // A done row shows the Report button alone, hover-only like Needs you, with the report's filename in the tooltip and no badge for it.
     const done = render(snapshot([item(5, { status: 'done', doneAt: NOW, doneReason: 'unassigned', warning: 'The ticket left the assigned state without a done report.', stage: 'review', stageAt: NOW - 60_000, links })])).querySelector('[data-item="5"]')!;
-    expect([...done.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => [button.title, button.className])).toEqual([['review.md', 'control action-button icon-only']]);
-    expect(JSON.parse(controlNamed(done, 'review.md').dataset['message']!)).toEqual({ type: 'openUrl', url: 'D:\\wt\\round-2\\review.md' });
-    expect([...done.querySelectorAll('.line.third a.badge')].map((badge) => badge.textContent?.trim())).toEqual(['round-1.md', 'Docs']);
     // The warning note follows its mark, before the stage and the badges.
-    expect([...done.querySelector('.line.third .meta')!.children].map((child) => child.className)).toEqual(['mark codicon codicon-warning warning', 'note', 'stage', 'badge file', 'badge url']);
+    expect([...done.querySelector('.line.third .meta')!.children].map((child) => child.className)).toEqual(['mark codicon codicon-warning warning', 'note', 'stage', 'badge url']);
   });
 
   it('shows no triage summary, triage context, task prompt or session history', () => {
@@ -515,7 +527,7 @@ describe('renderPanel', () => {
       ticket: zoho,
       triage: triage({ playbook: 'support:case', immediacy: 'URGENT', severity: 'HIGH' }),
       links: [
-        link(1, 'case.md', 'D:\\cases\\1\\case.md'),
+        link(1, 'Docs', 'https://example.test/docs'),
         link(2, 'Issue #7', 'https://github.com/o/r/issues/7'),
         link(3, 'Fix the sync', 'https://github.com/o/r/pull/12'),
         link(4, 'Case', 'https://desk.example.test/501'),
@@ -553,26 +565,25 @@ describe('renderPanel', () => {
       null,
     ]);
     expect([...row.querySelector('.line.second .meta')!.children].map((child) => child.textContent?.trim())).toEqual(['dev:develop', 'zoho 501', '12', 'gh 7']);
-    expect(badges('[data-item="1"] .line.third')).toEqual([['case.md', 'D:\\cases\\1\\case.md']]);
+    expect(badges('[data-item="1"] .line.third')).toEqual([['Docs', 'https://example.test/docs']]);
     expect(row.querySelector('.line.third .returned')?.textContent).toBe('Returned ×1');
     expect(badges('[data-item="9"] .line.second')).toEqual([['13', 'https://github.com/o/r/pull/13']]);
     // Each kind has its own class and icon; a GitHub issue looks like a GitHub ticket's key, with no icon.
     expect([...row.querySelectorAll('a.badge')].map((a) => [a.className, a.querySelector('.codicon')?.className])).toEqual([
       ['badge pr', 'codicon codicon-git-pull-request'],
-      ['badge file', 'codicon codicon-file'],
+      ['badge url', 'codicon codicon-link'],
     ]);
     expect([...root.querySelectorAll('[data-item="1"] .line.second a.key, [data-item="9"] .line.third a.key')].map((a) => [a.className, a.textContent, a.getAttribute('href'), a.querySelector('.codicon')])).toEqual([
       ['key zoho', 'zoho 501', 'https://desk.example.test/501', null],
       ['key github', 'gh 7', 'https://github.com/o/r/issues/7', null],
       ['key github', 'gh 8', 'https://github.com/o/r/issues/8', null],
     ]);
-    expect(['https://example.test/x', 'http://github.com/o/r/pull/1', 'HTTPS://example.test/x', 'https://github.com/o/r/pull/1/files', 'https://github.com/o/r/issues/2', '/home/me/case.md'].map(linkKind)).toEqual([
+    expect(['https://example.test/x', 'http://github.com/o/r/pull/1', 'HTTPS://example.test/x', 'https://github.com/o/r/pull/1/files', 'https://github.com/o/r/issues/2'].map(linkKind)).toEqual([
       'url',
       'url',
       'url',
       'pr',
       'issue',
-      'file',
     ]);
     expect(badges('[data-item="9"] .line.third')).toEqual([]);
     expect(root.querySelector('[data-item="2"] a.badge')).toBeNull();
@@ -610,7 +621,6 @@ describe('renderPanel', () => {
     expect(stage.title).toBe('Waiting for the operator to approve');
     expect(note.textContent).toBe('Which of the two migration strategies in the plan should the fix use, the…');
     expect(note.title).toBe(reason);
-    expect(root.querySelector<HTMLElement>('[data-item="2"] .mark')?.title).toBe('Answer a question');
   });
 
   it('formats ages', () => {
@@ -637,19 +647,23 @@ describe('startPanel', () => {
     const reachedWindow: string[] = [];
     window.addEventListener('click', (event) => reachedWindow.push((event.target as HTMLElement).className));
 
-    send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], links: [{ id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW }] })]));
+    send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], approvalReport: 'D:\\wt\\review.md' })]));
     controlNamed(root, 'Approve').click();
     root.querySelector<HTMLAnchorElement>('a.key')!.click();
-    controlNamed(root, 'case.md').click();
+    controlNamed(root, 'review.md').click();
     root.querySelector<HTMLElement>('[data-item="1"] .title')!.click();
     root.querySelector<HTMLElement>('[data-item="1"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    root.querySelector<HTMLElement>('[data-item="1"] .title')!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    root.querySelector<HTMLElement>('[data-item="1"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
     root.querySelector<HTMLElement>('details[data-group="needs"] > summary')!.click();
 
     // A control or a link runs only its own action, not the row's.
     expect(posted.slice(1)).toEqual([
       { type: 'action', action: { type: 'approve', workItemId: 1 } },
       { type: 'openUrl', url: 'https://github.com/o/r/issues/101' },
-      { type: 'openUrl', url: 'D:\\cases\\1\\case.md' },
+      { type: 'openUrl', url: 'D:\\wt\\review.md' },
+      { type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 101', active: false },
+      { type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 101', active: false },
       { type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' },
       { type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' },
     ]);
@@ -675,7 +689,7 @@ describe('startPanel', () => {
   });
 
   it('keeps focus on the same button or link across a redraw, so Enter still acts on it, and falls back to the row when the button is gone', () => {
-    const links = [{ id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW }];
+    const links = [{ id: 2, ticketId: 1, label: 'PR', target: 'https://github.com/o/r/pull/2', reportedAt: NOW }];
     const report = { id: 3, ticketId: 1, label: 'Docs', target: 'https://example.test/docs', reportedAt: NOW };
     send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], links: [...links, report] })]));
     const row = () => root.querySelector<HTMLElement>('[data-item="1"]')!;

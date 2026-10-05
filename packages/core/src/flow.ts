@@ -43,8 +43,7 @@ export type Report =
   | { kind: 'stage'; stage: string }
   | { kind: 'worktree'; path: string; branch: string | null }
   | { kind: 'done' }
-  | { kind: 'blocked'; reason: string }
-  | { kind: 'approval'; prompt: string; summary: string | null }
+  | { kind: 'approval'; prompt: string; summary: string | null; report: string | null }
   | { kind: 'link'; label: string; target: string };
 
 export type StopReason = 'operator' | 'release';
@@ -329,6 +328,7 @@ class Flow {
       needsPick: false,
       approvalPrompt: null,
       approvalSummary: null,
+      approvalReport: null,
       createdAt: this.now,
       statusAt: this.now,
       runStartedAt: this.now,
@@ -397,6 +397,7 @@ class Flow {
       needsPick: false,
       approvalPrompt: null,
       approvalSummary: null,
+      approvalReport: null,
       createdAt: this.now,
       statusAt: this.now,
       runStartedAt: this.now,
@@ -671,8 +672,6 @@ class Flow {
 
       if (item.unassignedAt !== null) {
         this.done(item, 'unassigned', MESSAGES.unassigned);
-      } else if (session.outcome === 'blocked') {
-        this.fail(item, 'setup', `Setup blocked: ${session.outcomeDetail ?? ''}`);
       } else if (this.store.worktreeFor(item.ticketId) === null) {
         this.fail(item, 'setup', MESSAGES.setupWithoutWorktree);
       } else {
@@ -733,24 +732,10 @@ class Flow {
         }
 
         return;
-      case 'blocked':
-        this.store.updateSession(sessionId, { outcome: 'blocked', outcomeDetail: report.reason });
-
-        if (item !== null && session.kind === 'task') {
-          if (item.unassignedAt !== null) {
-            this.done(item, 'unassigned', MESSAGES.unassigned);
-          } else {
-            this.block(item, report.reason);
-          }
-        } else if (item !== null && session.kind === 'pick') {
-          this.block(item, report.reason, 'pick');
-        }
-
-        return;
       case 'approval':
         // The work is ready; Approve starts a new task session with the prompt that publishes it (PRD R23, R31).
         if (item !== null && session.kind === 'task') {
-          this.setStatus(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, error: null, failedStep: null });
+          this.setStatus(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, approvalReport: report.report, error: null, failedStep: null });
         }
 
         return;
@@ -895,6 +880,7 @@ class Flow {
       needsPick: true,
       approvalPrompt: null,
       approvalSummary: null,
+      approvalReport: null,
       createdAt: this.now,
       statusAt: this.now,
       runStartedAt: this.now,
@@ -978,7 +964,7 @@ class Flow {
       throw new Refusal('Triage is already running.');
     }
 
-    this.setStatus(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
+    this.setStatus(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null });
   }
 
   private requireNoSession(item: WorkItem): void {
@@ -1072,12 +1058,15 @@ class Flow {
     return this.store.workItemsForTicket(ticketId).some((item) => item.status !== 'done');
   }
 
-  /** Starts queued work items in order while slots are free, skipping a ticket that already has an active session (PRD R17, R38). */
+  /**
+   * Starts queued work items in order while slots are free, skipping a ticket that already has an active session (PRD R17, R38).
+   * A `waiting` session holds no slot, so open questions do not stall the queue.
+   */
   private scheduleStarts(): void {
     const queued = this.store.workItemsWithStatus('queued').sort((a, b) => a.queuedAt! - b.queuedAt! || a.id - b.id);
 
     for (const item of queued) {
-      if (this.store.activeSessions().length >= this.context.settings.sessions.concurrency) {
+      if (this.store.activeSessions().filter((session) => session.state !== 'waiting').length >= this.context.settings.sessions.concurrency) {
         return;
       }
 

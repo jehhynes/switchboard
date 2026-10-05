@@ -10,13 +10,13 @@ describe('link reports (PRD R52)', () => {
     const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
     h.report(session, { kind: 'link', label: 'Issue', target: 'https://github.com/o/r/issues/1' });
-    h.report(session, { kind: 'link', label: 'Case file', target: 'D:\\cases\\1\\case.md' });
+    h.report(session, { kind: 'link', label: 'PR 2', target: 'https://github.com/o/r/pull/2' });
     h.report(session, { kind: 'link', label: 'Issue #1', target: 'https://github.com/o/r/issues/1' });
     h.report(session, { kind: 'done' });
 
     expect(h.store.linksFor(1)).toMatchObject([
       { ticketId: 1, label: 'Issue #1', target: 'https://github.com/o/r/issues/1' },
-      { ticketId: 1, label: 'Case file', target: 'D:\\cases\\1\\case.md' },
+      { ticketId: 1, label: 'PR 2', target: 'https://github.com/o/r/pull/2' },
     ]);
 
     h.poll();

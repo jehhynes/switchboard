@@ -15,7 +15,7 @@ const ACTION: StartAction = {
   workItemId: 1,
   kind: 'task',
   cwd: 'D:/git/widgets',
-  prompt: '/gc-plan 15619\n\nSwitchboard session s1 tracks this work.',
+  prompt: '/gc-plan 15619\n\nReport to Switchboard with these commands:',
   name: 'switchboard · dev:develop · github 15619',
   permissionMode: 'auto',
   model: 'opus',
@@ -57,7 +57,7 @@ describe('startArgs and shortIdFrom', () => {
       'switchboard · dev:develop · github 15619',
       '--model',
       'opus',
-      '/gc-plan 15619\n\nSwitchboard session s1 tracks this work.',
+      '/gc-plan 15619\n\nReport to Switchboard with these commands:',
     ]);
     expect(startArgs({ ...ACTION, model: null })).not.toContain('--model');
   });

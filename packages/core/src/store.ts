@@ -134,6 +134,12 @@ export const MIGRATIONS = [
   // The Icebox becomes Snoozed with a wake time (PRD R49); an iceboxed ticket stays snoozed indefinitely.
   `ALTER TABLE tickets RENAME COLUMN iceboxed TO snoozed;
   ALTER TABLE tickets ADD COLUMN snoozedUntil INTEGER;`,
+  // An approval report names its draft, and links are URLs only (PRD R23, R52); an open approval keeps its newest linked file as its draft.
+  `ALTER TABLE workItems ADD COLUMN approvalReport TEXT;
+  UPDATE workItems SET approvalReport = (
+    SELECT l.target FROM links l WHERE l.ticketId = workItems.ticketId AND l.target NOT LIKE 'http://%' AND l.target NOT LIKE 'https://%' ORDER BY l.reportedAt DESC, l.id DESC LIMIT 1
+  ) WHERE status = 'awaiting-approval';
+  DELETE FROM links WHERE target NOT LIKE 'http://%' AND target NOT LIKE 'https://%';`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'needsPick', 'released']);

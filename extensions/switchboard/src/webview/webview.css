@@ -88,7 +88,6 @@ a.badge:hover, a.key:hover { text-decoration: none; background: var(--vscode-too
 body.vscode-light .badge.pr { --hue: #8250df; }
 body.vscode-light .key.github { --hue: #1f2328; }
 a.badge.pr:hover, a.key.github:hover, a.key.zoho:hover, a.key.forum:hover { background: color-mix(in srgb, var(--hue) 32%, transparent); }
-.badge.file { color: var(--vscode-descriptionForeground); }
 .approval { color: var(--vscode-descriptionForeground); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Scrollbars like VS Code's own: thin, theme-coloured, and shown only while the scrollable area is hovered. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

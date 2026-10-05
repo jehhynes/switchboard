@@ -57,6 +57,9 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
       case 'attach':
         await vscode.commands.executeCommand('switchboard.attach', message['shortId'], message['name']);
         return;
+      case 'resume':
+        await vscode.commands.executeCommand('switchboard.resume', message['sessionId'], message['cwd'], message['name'], message['active']);
+        return;
       case 'open':
         await vscode.commands.executeCommand('switchboard.open', message['sessionId'], message['cwd']);
         return;
@@ -120,6 +123,32 @@ export function attach(shortId: string, name: string): vscode.Terminal {
   terminal.show();
 
   return terminal;
+}
+
+/** Terminals this window resumed sessions in, by session ID. */
+const resumed = new Map<string, vscode.Terminal>();
+
+/**
+ * Shows a session in a terminal: the terminal this window already resumed it in, else a new `claude --resume` in its directory.
+ * A session active elsewhere, such as in a VS Code tab, opens there instead, because a second resume of a live session is refused.
+ */
+export async function resume(record: HubRecord | null, sessionId: string, cwd: string, name: string, active: boolean): Promise<void> {
+  const existing = resumed.get(sessionId);
+
+  if (existing !== undefined && existing.exitStatus === undefined && vscode.window.terminals.includes(existing)) {
+    existing.show();
+    return;
+  }
+
+  if (active) {
+    await openSession(record, sessionId, cwd);
+    return;
+  }
+
+  const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: 'claude', shellArgs: ['--resume', sessionId], cwd });
+
+  resumed.set(sessionId, terminal);
+  terminal.show();
 }
 
 function samePath(a: string, b: string): boolean {

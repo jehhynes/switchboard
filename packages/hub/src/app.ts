@@ -20,11 +20,16 @@ const RELOAD_DEBOUNCE_MS = 300;
 /** Operator events the panel may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'snooze', 'restore']);
 
-const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval', 'link']);
+const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link']);
 
-/** A link target the panel can open: an http(s) URL, or an absolute path, which opens in VS Code (PRD R52). */
+/** A link target: an http(s) URL (PRD R52). */
 export function isLinkTarget(target: unknown): target is string {
-  return typeof target === 'string' && (/^https?:\/\/\S+$/i.test(target) || win32.isAbsolute(target) || posix.isAbsolute(target));
+  return typeof target === 'string' && /^https?:\/\/\S+$/i.test(target);
+}
+
+/** An approval's draft: an absolute path, which opens in VS Code (PRD R23). */
+function isReportPath(path: unknown): path is string {
+  return typeof path === 'string' && (win32.isAbsolute(path) || posix.isAbsolute(path));
 }
 
 const BASH = findBash(process.platform, process.env);
@@ -64,10 +69,12 @@ export function parseReport(body: unknown): ReportBody | null {
     return { sessionId: body['sessionId'], kind: 'done' };
   }
 
-  const text = { stage: 'stage', worktree: 'path', blocked: 'reason', approval: 'prompt' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done'>];
+  const text = { stage: 'stage', worktree: 'path', approval: 'prompt' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done'>];
   const value = body[text];
 
-  if (body['kind'] === 'approval' && body['summary'] !== undefined && body['summary'] !== null && typeof body['summary'] !== 'string') {
+  const optional = (field: string, valid: (value: unknown) => boolean) => body[field] === undefined || body[field] === null || valid(body[field]);
+
+  if (body['kind'] === 'approval' && !(optional('summary', (value) => typeof value === 'string') && optional('report', isReportPath))) {
     return null;
   }
 
@@ -75,7 +82,7 @@ export function parseReport(body: unknown): ReportBody | null {
     return null;
   }
 
-  return { ...body, [text]: value, ...(body['kind'] === 'approval' ? { summary: body['summary'] ?? null } : {}) } as ReportBody;
+  return { ...body, [text]: value, ...(body['kind'] === 'approval' ? { summary: body['summary'] ?? null, report: body['report'] ?? null } : {}) } as ReportBody;
 }
 
 /** An operator event from the panel. The core validates its target and refuses what does not apply; a snooze names its wake time or null. */

@@ -257,7 +257,60 @@ describe('the hub process', () => {
     await vscode.window.tabGroups.close(settingsTabs());
   });
 
-  it('opens a reported file link in an editor', async () => {
+  it('resumes a session in a terminal, shows that terminal again while it runs, and opens a session active elsewhere in its Claude tab', async () => {
+    await api();
+    const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const realCreate = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
+    const realTerminals = Object.getOwnPropertyDescriptor(vscode.window, 'terminals');
+    // Stand-ins, so no Claude process starts: each terminal records its options and stays listed until a step removes it.
+    let listed = [];
+    const created = [];
+    const shown = [];
+    const opened = [];
+    const fake = vscode.commands.registerCommand('claude-vscode.primaryEditor.open', (sessionId) => opened.push(sessionId));
+    const resume = (sessionId, name, active) => vscode.commands.executeCommand('switchboard.resume', sessionId, folder, name, active);
+
+    try {
+      Object.defineProperty(vscode.window, 'createTerminal', {
+        configurable: true,
+        value: (options) => {
+          const terminal = { options, exitStatus: undefined, show: () => shown.push(options.shellArgs[1]) };
+          created.push(terminal);
+          listed.push(terminal);
+          return terminal;
+        },
+      });
+      Object.defineProperty(vscode.window, 'terminals', { configurable: true, get: () => listed });
+
+      await resume('a-native', 'github 1', false);
+      await resume('a-native', 'github 1', false);
+      // This window's open terminal is shown again even when the roster sees the session as active.
+      await resume('a-native', 'github 1', true);
+      assert.deepStrictEqual(created.map((terminal) => terminal.options), [{ name: 'Switchboard · github 1', shellPath: 'claude', shellArgs: ['--resume', 'a-native'], cwd: folder }]);
+
+      // A terminal whose process exited, or that was closed, is not reused.
+      created[0].exitStatus = { code: 0 };
+      await resume('a-native', 'github 1', false);
+      listed = listed.filter((terminal) => terminal !== created[1]);
+      await resume('a-native', 'github 1', false);
+      assert.strictEqual(created.length, 3);
+
+      await resume('b-native', 'github 2', true);
+      assert.deepStrictEqual(shown, ['a-native', 'a-native', 'a-native', 'a-native', 'a-native']);
+      assert.deepStrictEqual(opened, ['b-native']);
+    } finally {
+      for (const [name, descriptor] of [['createTerminal', realCreate], ['terminals', realTerminals]]) {
+        if (descriptor === undefined) {
+          delete vscode.window[name];
+        } else {
+          Object.defineProperty(vscode.window, name, descriptor);
+        }
+      }
+      fake.dispose();
+    }
+  });
+
+  it("opens an approval's report file in an editor", async () => {
     await api();
     const file = join(process.env.SWITCHBOARD_TEST_HOME, 'case.md');
     require('node:fs').writeFileSync(file, '# Case\n');

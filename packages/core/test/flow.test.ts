@@ -11,13 +11,13 @@ const CONTRACT = (id: string) =>
     `  - The stage is one or two words, such as Reviewing or Fixing tests.`,
     `- ${REPORT} worktree ${id} <path>, when you create a worktree.`,
     `- ${REPORT} done ${id}, when the work is finished.`,
-    `- ${REPORT} blocked ${id} --reason <text>, when you cannot continue or need the operator's answer or choice, then end your turn instead of waiting.`,
-    `  - The reason is one phrase of at most 10 words; the detail stays in this session.`,
-    `  - A question ends with a question mark.`,
-    `- ${REPORT} approval ${id} --prompt <prompt> --summary <text>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
+    `- ${REPORT} approval ${id} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
     `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,
     `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
-    `- ${REPORT} link ${id} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md.`,
+    `  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
+    `- ${REPORT} link ${id} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.`,
+    ``,
+    `When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`,
   ].join('\n');
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
@@ -219,9 +219,6 @@ describe('sessions', () => {
     const h = new Harness();
     const { item, session } = running(h);
 
-    // A done report after a blocked one clears the blocked reason from the session.
-    h.report(session, { kind: 'blocked', reason: 'Needs access.' });
-    expect(h.store.session(session)).toMatchObject({ outcome: 'blocked', outcomeDetail: 'Needs access.' });
     expect(h.report(session, { kind: 'done' }).actions).toEqual([]);
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session', warning: null });
 
@@ -235,11 +232,11 @@ describe('sessions', () => {
     expect(h.item(item).status).toBe('done');
   });
 
-  it('blocks on a blocked report, a turn that ends without a report, a failed turn, or a session that ends', () => {
+  it('blocks on a turn that ends without a report, a failed turn, or a session that ends, but not while it waits on the operator', () => {
     const h = new Harness();
     const a = running(h, '1');
-    h.report(a.session, { kind: 'blocked', reason: 'Needs a decision.' });
-    expect(h.item(a.item)).toMatchObject({ status: 'blocked', failedStep: 'task', error: 'Needs a decision.' });
+    h.act({ type: 'marker', sessionId: a.session, state: 'waiting', detail: null });
+    expect(h.item(a.item)).toMatchObject({ status: 'running', error: null });
 
     const b = running(h, '2');
     h.act({ type: 'marker', sessionId: b.session, state: 'idle', detail: null });
@@ -276,15 +273,12 @@ describe('sessions', () => {
     expect(h.item(item).status).toBe('running');
   });
 
-  it('returns a blocked work item to running when its session starts a new turn, but not while the blocked turn continues', () => {
+  it('returns a blocked work item to running when its session is resumed after release', () => {
     const h = new Harness();
     const { item, session } = running(h);
 
-    h.report(session, { kind: 'blocked', reason: 'Needs a decision.' });
-    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
-    expect(h.item(item).status).toBe('blocked');
-
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item).status).toBe('blocked');
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null }] });
 
@@ -351,7 +345,7 @@ describe('sessions', () => {
     h.report(session, { kind: 'stage', stage: 'Planning' });
     expect(h.item(item)).toMatchObject({ stage: 'Planning', stageAt: T0 + 10 });
 
-    h.report(session, { kind: 'blocked', reason: 'Stuck.' });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.act({ type: 'retry', workItemId: item })).toEqual([]);
     expect(h.status(item)).toBe('queued');
     const retry = h.started(h.act({ type: 'roster', sessions: [] })[0]);
@@ -378,7 +372,7 @@ describe('sessions', () => {
     const { item, session } = running(h);
 
     h.act({ type: 'mark-done', workItemId: item });
-    h.report(session, { kind: 'blocked', reason: 'late' });
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: null, report: null });
 
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'operator' });
     expect(h.send({ type: 'mark-done', workItemId: item }).refused).toBe('The work item is done.');
@@ -467,7 +461,7 @@ describe('setup', () => {
     expect(task.cwd).toBe('D:/wt/new');
   });
 
-  it('fails when the setup session ends without a worktree or reports blocked, and Retry starts a new setup', () => {
+  it('fails when the setup session ends without a worktree, and Retry starts a new setup', () => {
     const h = new Harness();
     const setup = toSetup(h);
 
@@ -476,10 +470,6 @@ describe('setup', () => {
 
     const again = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
     expect(again.kind).toBe('setup');
-    h.started(again);
-    h.report(again.sessionId, { kind: 'blocked', reason: 'No branch name.' });
-    h.act({ type: 'stop-succeeded', sessionId: again.sessionId, reason: 'release' });
-    expect(h.item(1)).toMatchObject({ status: 'failed', failedStep: 'setup', error: 'Setup blocked: No branch name.' });
     expect(setup).toBe('s1');
   });
 
@@ -542,6 +532,27 @@ describe('limits and the one-active-session rule', () => {
     expect(h.status(3)).toBe('queued');
   });
 
+  it('frees the slot of a session waiting on the operator, and takes it back only for new starts once it runs again', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
+    const triages = h.poll(issue('1'), issue('2'), issue('3'));
+    const first = h.started(only(h.triaged(triages[0], 'support:defect'), 'start-session'));
+    h.triaged(triages[1], 'support:defect');
+    h.triaged(triages[2], 'support:defect');
+
+    expect(h.act({ type: 'marker', sessionId: first, state: 'running', detail: null })).toEqual([]);
+
+    const second = only(h.act({ type: 'marker', sessionId: first, state: 'waiting', detail: null }), 'start-session');
+    expect(second.workItemId).toBe(2);
+    h.started(second);
+
+    expect(h.act({ type: 'marker', sessionId: first, state: 'running', detail: null })).toEqual([]);
+    expect(h.act({ type: 'roster', sessions: [{ sessionId: first, state: 'running', detail: null }] })).toEqual([]);
+    expect([1, 2, 3].map((id) => h.status(id))).toEqual(['running', 'blocked', 'queued']);
+
+    const third = only(h.act({ type: 'roster', sessions: [] }), 'start-session');
+    expect(third.workItemId).toBe(3);
+  });
+
   it('keeps one work item when its ticket is assigned again while the work item is open', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
@@ -574,10 +585,9 @@ describe('limits and the one-active-session rule', () => {
     expect(next.workItemId).toBe(2);
   });
 
-  it('finishes a deferred unassignment with a warning when the session ends its turn, reports blocked, fails to start, or is stopped', () => {
+  it('finishes a deferred unassignment with a warning when the session ends its turn, fails to start, or is stopped', () => {
     const cases: [string, (h: Harness, session: string) => void][] = [
       ['idle', (h, s) => h.act({ type: 'marker', sessionId: s, state: 'idle', detail: null })],
-      ['blocked', (h, s) => h.report(s, { kind: 'blocked', reason: 'x' })],
       ['ended', (h) => h.act({ type: 'roster', sessions: [] })],
       ['start failed', (h, s) => h.act({ type: 'session-start-failed', sessionId: s, message: 'x' })],
       ['stopped', (h, s) => h.act({ type: 'stop-succeeded', sessionId: s, reason: 'operator' })],
@@ -777,7 +787,7 @@ describe('in-queue times (PRD R27)', () => {
     expect(h.item(1)).toMatchObject({ statusAt: T0 + 2_000, runStartedAt: T0 + 2_000 });
 
     h.now = T0 + 4_000;
-    h.report(session, { kind: 'blocked', reason: 'Needs a decision.' });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.item(1)).toMatchObject({ status: 'blocked', statusAt: T0 + 4_000, runStartedAt: T0 + 2_000 });
 
     h.now = T0 + 5_000;

@@ -12,7 +12,7 @@ export type SessionKind = 'pick' | 'setup' | 'task';
 /** Observed session state (PRD R36). */
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed' | 'ended';
 
-export type SessionOutcome = 'done' | 'blocked' | 'failed' | 'stopped';
+export type SessionOutcome = 'done' | 'failed' | 'stopped';
 
 /** Triage's importance rating (PRD R50). Earlier values rank first. */
 export const IMMEDIACIES = ['URGENT', 'BLOCKING', 'NON-BLOCKING'] as const;
@@ -77,6 +77,8 @@ export interface WorkItem {
   /** The prompt an approval report named; Approve starts a task session with it (PRD R23, R31). */
   approvalPrompt: string | null;
   approvalSummary: string | null;
+  /** The draft Approve publishes, which the Report button opens (PRD R27). */
+  approvalReport: string | null;
   createdAt: number;
   /** When the status last changed; Needs you counts from it (PRD R27). */
   statusAt: number;

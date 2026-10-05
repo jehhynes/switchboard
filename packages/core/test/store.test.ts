@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 7 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 8 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -131,13 +131,32 @@ describe('Store', () => {
     store.close();
   });
 
+  it('gives a version 7 approval its newest linked file as its report, and drops every local-file link', () => {
+    const path = join(dir, 'v7.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 7).join(';'));
+    raw.exec('PRAGMA user_version = 7');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, ''), (2, 'github', '2', 'b', 'u', 1, '')");
+    raw.exec("INSERT INTO workItems (id, ticketId, status, createdAt, approvalPrompt) VALUES (1, 1, 'awaiting-approval', 1, '/publish'), (2, 2, 'running', 1, NULL)");
+    raw.exec(
+      "INSERT INTO links (ticketId, label, target, reportedAt) VALUES (1, 'Old', 'D:\\wt\\round-1.md', 1), (1, 'New', 'D:\\wt\\round-2.md', 2), (1, 'PR', 'https://github.com/o/r/pull/3', 3), (2, 'Decisions', 'D:\\wt\\decisions.md', 1)",
+    );
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([store.workItem(1)?.approvalReport, store.workItem(2)?.approvalReport]).toEqual(['D:\\wt\\round-2.md', null]);
+    expect([...store.linksFor(1), ...store.linksFor(2)].map((link) => link.target)).toEqual(['https://github.com/o/r/pull/3']);
+    store.close();
+  });
+
   it('refuses a database from a newer schema', () => {
     const path = join(dir, 'newer.db');
     const raw = new DatabaseSync(path);
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (7).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (8).');
   });
 
   it('rolls back a transaction that throws', () => {

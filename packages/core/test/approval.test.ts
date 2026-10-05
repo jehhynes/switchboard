@@ -17,12 +17,12 @@ function running(h: Harness): { item: number; session: string } {
 }
 
 describe('approval reports (PRD R23, R31)', () => {
-  it('waits for approval with the prompt and summary, and Approve runs that prompt in a new task session', () => {
+  it('waits for approval with the prompt, summary and report, and Approve runs that prompt in a new task session', () => {
     const h = new Harness();
     const { item, session } = running(h);
 
-    h.report(session, { kind: 'approval', prompt: '/review-pr pr:123 publish', summary: 'Review ready to post.' });
-    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.' });
+    h.report(session, { kind: 'approval', prompt: '/review-pr pr:123 publish', summary: 'Review ready to post.', report: 'D:\\wt\\review.md' });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.', approvalReport: 'D:\\wt\\review.md' });
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.item(item).status).toBe('awaiting-approval');
@@ -42,10 +42,10 @@ describe('approval reports (PRD R23, R31)', () => {
     const h = new Harness();
     const { item, session } = running(h);
 
-    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.' });
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
     h.act({ type: 'roster', sessions: [] });
     h.act({ type: 'retriage', workItemId: item });
-    expect(h.item(item)).toMatchObject({ status: 'triaging', approvalPrompt: null, approvalSummary: null });
+    expect(h.item(item)).toMatchObject({ status: 'triaging', approvalPrompt: null, approvalSummary: null, approvalReport: null });
   });
 });
 

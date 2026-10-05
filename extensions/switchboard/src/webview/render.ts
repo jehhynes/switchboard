@@ -116,29 +116,38 @@ function isBackground(session: SessionView | null): session is SessionView & { s
 
 
 /**
- * What a click on the row opens (PRD R27): the background session in a terminal while its process runs, otherwise the latest
- * session in VS Code, otherwise the worktree in VS Code. Null when there is nothing to open, as for a session still starting.
+ * What a click on the row opens (PRD R27): the latest session in a terminal, attached while its background process runs and
+ * resumed otherwise, else the worktree in VS Code. `active` marks a session resumed elsewhere, such as in a VS Code tab.
+ * Null when there is nothing to open, as for a session still starting.
  */
 export function openAction(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
   const session = activeSession(item);
+  const name = `${item.ticket.source} ${item.ticket.sourceKey}`;
 
   if (isBackground(session)) {
-    return { type: 'attach', shortId: session.shortId, name: `${item.ticket.source} ${item.ticket.sourceKey}` };
+    return { type: 'attach', shortId: session.shortId, name };
   }
 
   if (latest?.nativeSessionId != null && (session === null || session.released)) {
-    return { type: 'open', sessionId: latest.nativeSessionId, cwd: latest.cwd };
+    return { type: 'resume', sessionId: latest.nativeSessionId, cwd: latest.cwd, name, active: session !== null };
   }
 
   return item.worktree === null ? null : { type: 'openFolder', path: item.worktree.path };
 }
 
+/** What a Ctrl+click on the row opens: the session in VS Code, when it is not running in its background process; otherwise null. */
+export function editorAction(item: WorkItemView): Record<string, unknown> | null {
+  const action = openAction(item);
+
+  return action?.['type'] === 'resume' ? { type: 'open', sessionId: action['sessionId'], cwd: action['cwd'] } : null;
+}
 
 function openAttribute(item: WorkItemView): string {
   const action = openAction(item);
+  const editor = editorAction(item);
 
-  return action === null ? '' : ` data-open="${escape(JSON.stringify(action))}"`;
+  return `${action === null ? '' : ` data-open="${escape(JSON.stringify(action))}"`}${editor === null ? '' : ` data-open-editor="${escape(JSON.stringify(editor))}"`}`;
 }
 
 /**
@@ -216,18 +225,6 @@ function clipped(className: string, text: string, max: number, suffix = ''): str
 /** The actions column at the right of lines 2 and 3, left out when empty. */
 function actionsColumn(parts: string): string {
   return parts === '' ? '' : `\n<div class="actions">${parts}</div>`;
-}
-
-/**
- * The report to read: the newest local-file link on an `awaiting-approval` or `done` row. Approval and done reports do not
- * name their report yet, so this is the best guess for skills such as review-pr and address-feedback.
- */
-export function reportLink(item: WorkItemView): WorkItemView['links'][number] | null {
-  if (item.status !== 'awaiting-approval' && item.status !== 'done') {
-    return null;
-  }
-
-  return item.links.filter((link) => linkKind(link.target) === 'file').reduce<WorkItemView['links'][number] | null>((newest, link) => (newest === null || link.reportedAt >= newest.reportedAt ? link : newest), null);
 }
 
 /** Each control's `switchboard.row.<key>` command in the row's right-click menu. */
@@ -359,18 +356,13 @@ export interface Mark {
   tone?: 'error' | 'warning';
 }
 
-/** A blocked report that asks the operator something. */
-function asksQuestion(item: WorkItemView): boolean {
-  return item.status === 'blocked' && (item.error ?? '').trim().endsWith('?');
-}
-
 /** The row mark shows what differs between rows of the same group; a snoozed item shows its group's mark (PRD R27). Unstarted rows show the priority dot. */
 export function markOf(item: WorkItemView): Mark | 'priority' {
   const session = activeSession(item);
 
   switch (groupOf(item)) {
     case 'needs':
-      if (session?.state === 'waiting' || asksQuestion(item)) {
+      if (session?.state === 'waiting') {
         return { icon: 'comment-discussion', title: 'Answer a question' };
       }
 
@@ -431,12 +423,12 @@ function returned(count: number): string {
 const PULL_REQUEST = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/;
 const ISSUE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/(\d+)/;
 
-/** A link's kind by its target: a GitHub pull request or issue, a local file, or another URL (PRD R52). */
-export function linkKind(target: string): 'pr' | 'issue' | 'file' | 'url' {
-  return PULL_REQUEST.test(target) ? 'pr' : ISSUE.test(target) ? 'issue' : /^https?:\/\//i.test(target) ? 'url' : 'file';
+/** A link's kind by its URL: a GitHub pull request or issue, or another URL (PRD R52). */
+export function linkKind(target: string): 'pr' | 'issue' | 'url' {
+  return PULL_REQUEST.test(target) ? 'pr' : ISSUE.test(target) ? 'issue' : 'url';
 }
 
-const LINK_ICONS = { pr: 'git-pull-request', file: 'file', url: 'link' } as const;
+const LINK_ICONS = { pr: 'git-pull-request', url: 'link' } as const;
 
 function linkBadge(link: { label: string; target: string }): string {
   const kind = linkKind(link.target);
@@ -497,13 +489,13 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : clipped('approval', item.approvalSummary, CAPS.approval);
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);
-  const report = reportLink(item);
-  const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report.target } }, null, true, fileName(report.target));
+  const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
+  const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report } }, null, true, fileName(report));
 
   return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(item)}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
-    `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}`,
+    `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}${returned(item.returned)}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }
