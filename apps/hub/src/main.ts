@@ -12,7 +12,7 @@ const REPORT_TIMEOUT_MS = 10_000;
 const REPORT_USAGE = `Usage:
   report stage <sessionId> <stage>
   report worktree <sessionId> <path>
-  report done <sessionId> [--summary <text>]
+  report done <sessionId>
   report blocked <sessionId> --reason <text>
   report approval <sessionId> --prompt <prompt> [--summary <text>]
   report link <sessionId> --label <text> --target <url or absolute path>

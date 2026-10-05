@@ -60,18 +60,22 @@ export function parseReport(body: unknown): ReportBody | null {
       : null;
   }
 
-  const text = { stage: 'stage', worktree: 'path', done: 'summary', blocked: 'reason', approval: 'prompt' }[body['kind'] as Exclude<ReportBody['kind'], 'link'>];
+  if (body['kind'] === 'done') {
+    return { sessionId: body['sessionId'], kind: 'done' };
+  }
+
+  const text = { stage: 'stage', worktree: 'path', blocked: 'reason', approval: 'prompt' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done'>];
   const value = body[text];
 
   if (body['kind'] === 'approval' && body['summary'] !== undefined && body['summary'] !== null && typeof body['summary'] !== 'string') {
     return null;
   }
 
-  if (body['kind'] === 'done' ? value !== null && value !== undefined && typeof value !== 'string' : typeof value !== 'string' || value === '') {
+  if (typeof value !== 'string' || value === '') {
     return null;
   }
 
-  return { ...body, [text]: value ?? null, ...(body['kind'] === 'approval' ? { summary: body['summary'] ?? null } : {}) } as ReportBody;
+  return { ...body, [text]: value, ...(body['kind'] === 'approval' ? { summary: body['summary'] ?? null } : {}) } as ReportBody;
 }
 
 /** An operator event from the panel. The core validates its target and refuses what does not apply. */
@@ -135,7 +139,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         const report = parseReport(body);
 
         if (report === null) {
-          return { status: 400, body: { error: 'Expected {sessionId, kind, stage|path|summary|reason|prompt|label and target}.' } };
+          return { status: 400, body: { error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' } };
         }
 
         const { refused } = await runtime.report(report);

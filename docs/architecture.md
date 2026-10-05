@@ -128,7 +128,7 @@ Report progress with `{{report}} stage {{session.id}} <stage>`.
 - A triage playbook's body may use only `{{playbooks}}`, which renders the task playbooks in the source's namespace as `- name: description` lines where the instructions need them. A body without it gets the same list appended under "Choose one playbook:". Any other variable fails the triage, and the settings editor refuses to save it.
 - A source's triage playbook has `kind: triage`. Its body is the classifier's system prompt. Triage playbooks are never offered to the classifier as choices.
 - Each source's `namespace` setting limits the classifier's choices to that namespace's task playbooks, such as `dev` for GitHub and `support` for Zoho Desk and Forum. With one playbook in the namespace, triage still writes the summary.
-- Every session prompt ends with the report contract: the session ID and the `stage`, `worktree`, `done`, `blocked`, `approval` and `link` commands, and three rules. It reports a `link` for each GitHub issue or pull request it creates or finds for the work, and for a case file such as Support's `case.md`. When the session needs the operator for a question or a choice, it reports `blocked` with the question and ends its turn instead of waiting, so it does not hold a session slot. When its work is ready but posting or publishing it needs the operator's approval, it reports `approval` with the prompt that would do it, such as `/review-pr pr:123 publish`, and ends its turn. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
+- Every session prompt ends with the report contract, which opens with the line `Report to Switchboard with these commands:`, the line the Support `support-process` skill looks for: the `stage`, `worktree`, `done`, `blocked`, `approval` and `link` commands with the session ID, each with its condition and the cap on its text (PRD R23). It reports a `link` for each GitHub issue or pull request it creates or finds for the work, and for a case file such as Support's `case.md`. When the session needs the operator for a question or a choice, it reports `blocked` with the question, ending in a question mark, and ends its turn instead of waiting, so it does not hold a session slot; a question mark gives the row the question mark. When its work is ready but posting or publishing it needs the operator's approval, it reports `approval` with the prompt that would do it, such as `/review-pr pr:123 publish`, and a summary of what the prompt publishes, and ends its turn; Approve runs the prompt in a new session with no memory of this one, so the prompt names what it acts on. Skills written for Ground Control do not know Switchboard. `{{report}}` lets a template add its own report calls.
 
 ## Triage
 
@@ -208,12 +208,13 @@ Sessions report through the hub bundle, which posts to the hub's loopback HTTP s
 ```
 node "<home>/hub.js" report stage <sessionId> <stage>
 node "<home>/hub.js" report worktree <sessionId> <path>
-node "<home>/hub.js" report done <sessionId> [--summary <text>]
+node "<home>/hub.js" report done <sessionId>
 node "<home>/hub.js" report blocked <sessionId> --reason <text>
 node "<home>/hub.js" report approval <sessionId> --prompt <prompt> [--summary <text>]
 node "<home>/hub.js" report link <sessionId> --label <text> --target <url or absolute path>
 ```
 
+- The contract asks for the approval summary; the CLI and the hub accept its omission, and `done` takes no text.
 - The CLI's home is the directory that holds the `hub.js` it runs from, so a session started by a hub with `--home` reports to that home.
 - The CLI finds the hub through `hub.json` and never starts one. Timeout: 10 seconds. Repeating a report is safe, because each report sets a value.
 - When no hub answers, the CLI exits 2 and prints that the hub is not running. The hub stays up while sessions are active, so this is rare; the work item then ends `blocked`, and the operator marks it done.
@@ -251,7 +252,7 @@ node "<home>/hub.js" report link <sessionId> --label <text> --target <url or abs
       "repoRoot": "D:/git/support",
       "triagePlaybook": "triage:zoho",
       "namespace": "support",
-      "pickPrompt": "Use the support-bind skill to bind and claim Support case #{{ticket.sourceKey}}, then stop: do not investigate. Report blocked with the reason if the claim fails or someone else holds the case; otherwise report done.",
+      "pickPrompt": "Invoke the support-bind skill for Support case {{ticket.ref}} and stop after its Claim the case step. Report done when the operator holds the case. Report blocked, instead of continuing, when the claim fails or anyone else holds the case.",
       "tokenCommand": "bash ~/.claude/scripts/desk-token.sh",
       "automationAgentIds": ["8000000000000000002", "8000000000000000003"],
       "orgId": "700000001",
@@ -266,7 +267,7 @@ node "<home>/hub.js" report link <sessionId> --label <text> --target <url or abs
       "triagePlaybook": "triage:forum",
       "namespace": "support",
       "queryCommand": "bash ~/.claude/scripts/run-forum-sql.sh",
-      "pickPrompt": "Use the support-bind skill to bind and claim Support case T{{ticket.sourceKey}}, then stop: do not investigate. Report blocked with the reason if the claim fails or someone else holds the case; otherwise report done.",
+      "pickPrompt": "Invoke the support-bind skill for Support case {{ticket.ref}} and stop after its Claim the case step. Report done when the operator holds the case. Report blocked, instead of continuing, when the claim fails or anyone else holds the case.",
       "forumId": 1,
       "userId": "7"
     }
@@ -277,7 +278,7 @@ node "<home>/hub.js" report link <sessionId> --label <text> --target <url or abs
 - The values shown are the operator's, taken from their Ground Control configuration. Defaults are empty for `repo`, `logins`, `project` and `assignedStatuses`, and the GitHub source refuses to poll until they are set.
 - Per playbook: `description`, `autoStart`, `requiresWorktree`, `permissionMode`, `model` and `kind`, in the playbook file's front matter.
 - A source implements core's `Source`: `poll()` returns a complete read or an error, `context(ticket)` returns the triage context or an error, and `keyOfBranch(branch)` reads a ticket key from a worktree branch. A source with a pool marks each polled ticket `assigned`, `pool` or neither.
-- Pick (PRD R48): the Support sources' `pickPrompt` asks for the `support-bind` skill on the case and an early stop, because `/support-bind` on its own continues into investigation and carries on after a failed claim. The skill binds the case journal and claims the case through the Support skills and their guards. The `support:case` task session then resumes the bound case with `/support-process`.
+- Pick (PRD R48): the Support sources' `pickPrompt` asks for the `support-bind` skill on the case and a stop after its claim step, because `/support-bind` on its own goes on to search GitHub and read the case's threads and attachments, continues into investigation, and carries on after a failed claim. The skill binds the case journal and claims the case through the Support skills and their guards. The task session then resumes the bound case with `/support-process`, which redoes the rest of Bind from the journal.
 - GitHub reads go through `gh api graphql`. The issue query is GC's: `repo:<repo> is:issue is:open assignee:<login>… project:<owner>/<number>`, then a filter on project status; an issue on another status is listed as not assigned (mechanics M2). The same query reads the Status field's `updatedAt`, the current assignees and the last 100 assignment and unassignment events. The scope entry ports GC's `assignedSince`: undo the events newest first, matching logins case-insensitively, until none of the operator's logins is assigned; that assignment's time is the entry, or null when no login is assigned or the events start mid-assignment. The sort time is the later of the last assignment and the Status field's `updatedAt`; status-change events have been missing from the issue timeline since about 2026-09-25, so the field's `updatedAt` stands in for them. A poll that needs more than `maxPages` pages of 100 fails. Triage context ports GC's card context: the issue body, the last 5 comments, the last 100 assignment and status events, and a linked pull request's author, review requests, state, checks, last 5 comments, reviews and last 5 review threads, with each text clipped to 2,000 characters keeping the start and end.
 - GitHub errors: offline, timeout and rate limits are temporary. The poll changes nothing and runs again at the next interval. Missing `gh` or failed authentication shows in the panel.
 - Zoho Desk and Forum port the operator's Support board, `D:\git\support\extensions\support-kanban\lib\zoho.js` and `forum.js`. Read those and the `support-*` skills before building either source.

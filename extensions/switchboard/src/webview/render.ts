@@ -151,10 +151,10 @@ function iceboxControl(ticketId: number, iceboxed: boolean): Control {
  * A primary action: a large button with its icon and verb; a narrow panel hides the verb, which stays in the tooltip (PRD R27).
  * The tone colours it: `primary` for Approve, `error` or `warning` for Retry, none for the rest; `iconOnly` drops the verb.
  */
-function actionButton(control: Control, tone: 'primary' | 'error' | 'warning' | null = null, iconOnly = false): string {
+function actionButton(control: Control, tone: 'primary' | 'error' | 'warning' | null = null, iconOnly = false, title = control.label): string {
   const label = iconOnly ? '' : `<span class="label">${escape(control.label)}</span>`;
 
-  return `<button class="control action-button${tone === null ? '' : ` ${tone}`}${iconOnly ? ' icon-only' : ''}" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span>${label}</button>`;
+  return `<button class="control action-button${tone === null ? '' : ` ${tone}`}${iconOnly ? ' icon-only' : ''}" title="${escape(title)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span>${label}</button>`;
 }
 
 /** Approve takes the primary colour, and Retry the error colour on a failed row or the warning colour on a blocked one. */
@@ -164,6 +164,33 @@ function toneOf(item: WorkItemView, control: Control): 'primary' | 'error' | 'wa
   }
 
   return control.label === 'Retry' ? (item.status === 'failed' ? 'error' : 'warning') : null;
+}
+
+/** Character caps for the texts sessions report; the contract asks for less, and a longer text is cut here with its whole in the tooltip. */
+export const CAPS = { stage: 24, approval: 60, note: 80 } as const;
+
+/** The text cut at `max` characters on a word boundary with an ellipsis, and the whole text for the tooltip when it was cut. */
+export function clip(text: string, max: number): { text: string; full: string | null } {
+  // Graphemes, not UTF-16 units, so an emoji or an accented letter at the cap is kept whole.
+  const graphemes = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((segment) => segment.segment);
+
+  if (graphemes.length <= max) {
+    return { text, full: null };
+  }
+
+  const cut = graphemes.slice(0, max).join('');
+  // A cap that falls on a word boundary keeps the whole word before it.
+  const space = graphemes[max] === ' ' ? cut.length : cut.lastIndexOf(' ');
+
+  return { text: `${(space > cut.length / 2 ? cut.slice(0, space) : cut).trimEnd()}…`, full: text };
+}
+
+/** A span of reported text, cut at its cap; a cut span carries the whole text as its tooltip and `data-full`, so the hover handler leaves it. */
+function clipped(className: string, text: string, max: number, suffix = ''): string {
+  const { text: shown, full } = clip(text, max);
+  const attributes = full === null ? '' : ` title="${escape(full)}" data-full`;
+
+  return `<span class="${className}"${attributes}>${escape(shown)}${suffix}</span>`;
 }
 
 /** The actions column at the right of lines 2 and 3, left out when empty. */
@@ -446,9 +473,9 @@ export function splitLinks(item: WorkItemView): { primary: WorkItemView['links']
 function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const main = mainControl(item);
   const rowKey = `item:${item.id}`;
-  const stage = item.stage === null ? '' : `<span class="stage">${escape(item.stage)}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}</span>`;
-  const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : `<span class="approval">${escape(item.approvalSummary)}</span>`;
-  const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => `<span class="note">${escape(note)}</span>`).join('');
+  const stage = item.stage === null ? '' : clipped('stage', item.stage, CAPS.stage, item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`);
+  const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : clipped('approval', item.approvalSummary, CAPS.approval);
+  const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);
   const report = reportLink(item);
   const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report.target } }, null, true);
@@ -457,8 +484,13 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
     `${statusMark(item)}${stage}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}${notes}`,
-  )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main))}`)}
+  )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
+}
+
+/** Approve's tooltip names the prompt it runs, so the operator can read the exact command before approving. */
+function mainTitle(item: WorkItemView, control: Control): string {
+  return control.label === 'Approve' && item.approvalPrompt !== null ? `Approve: runs ${item.approvalPrompt}` : control.label;
 }
 
 function errors(snapshot: Snapshot): string {
@@ -502,7 +534,7 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
 <div class="line second"><span class="meta">${playbookLabel(triage?.playbook ?? '')}${ticketLink(ticket)}</span></div>${thirdLine(
-    `${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : ''}${returned(entry.returned)}${failed ? `<span class="note">${escape(triage!.error!)}</span>` : ''}`,
+    `${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : ''}${returned(entry.returned)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
   )}${actionsColumn(actionButton(main))}
 </div>`;
 }

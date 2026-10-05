@@ -30,7 +30,7 @@ describe('approval reports (PRD R23, R31)', () => {
 
     const start = only(h.act({ type: 'approve', workItemId: item }), 'start-session');
     expect(start).toMatchObject({ kind: 'task', sessionId: 's2' });
-    expect(start.prompt.startsWith('/review-pr pr:123 publish\n\nSwitchboard session s2 tracks this work.')).toBe(true);
+    expect(start.prompt).toMatch(/^\/review-pr pr:123 publish\n\nReport to Switchboard with these commands:\n- .* stage s2 </);
     expect(h.item(item)).toMatchObject({ status: 'running', approvalPrompt: '/review-pr pr:123 publish' });
 
     h.act({ type: 'session-start-failed', sessionId: 's2', message: 'exit 1' });

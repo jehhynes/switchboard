@@ -1,7 +1,7 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { startPanel } from '../src/webview/main.js';
-import { age, clockOf, controlsOf, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, unstartedOrder } from '../src/webview/render.js';
+import { age, CAPS, clip, clockOf, controlsOf, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -467,7 +467,7 @@ describe('renderPanel', () => {
     expect(unstarted.querySelector('[data-item="2"] .line.third')).toBeNull();
     expect(titles(unstarted, '[data-item="1"] .actions > button.control')).toEqual(['Start']);
     expect(JSON.parse(controlNamed(unstarted.querySelector('[data-item="1"]')!, 'Start').dataset['message']!)).toEqual({ type: 'action', action: { type: 'start', workItemId: 1 } });
-    expect(titles(root, '[data-group="needs"] .actions > button.control')).toEqual(['Approve']);
+    expect(titles(root, '[data-group="needs"] .actions > button.control')).toEqual(['Approve: runs /publish']);
     expect(labels(item(4, { status: 'unstarted' }))).not.toContain('Approve');
   });
 
@@ -487,6 +487,8 @@ describe('renderPanel', () => {
     expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Approve the publish']);
     expect(rowMenu(icebox.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'restore'], actions: { restore: { type: 'restore', ticketId: 2 } } });
     expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
+    expect(root.querySelector('[data-item="3"] .approval')?.hasAttribute('title')).toBe(false);
+    expect(root.querySelector<HTMLButtonElement>('[data-item="3"] .actions > button.control')?.title).toBe('Approve: runs /review-pr pr:123 publish');
     expect(render(data, { groups: new Map([['icebox', true]]) }).querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!.open).toBe(true);
     expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, iceboxed: true } }))).toEqual(['Restore']);
   });
@@ -559,6 +561,41 @@ describe('renderPanel', () => {
     ]);
     expect(badges('[data-item="9"] .line.third')).toEqual([]);
     expect(root.querySelector('[data-item="2"] a.badge')).toBeNull();
+  });
+
+  it('cuts a reported text at its cap on a word boundary, with the whole text in the tooltip (PRD R23)', () => {
+    expect(clip('Review ready', 60)).toEqual({ text: 'Review ready', full: null });
+    expect(clip('Round 2 (Scoped): 4 of 5 prior findings fixed; history-2 still present at Plausible.', 60)).toEqual({
+      text: 'Round 2 (Scoped): 4 of 5 prior findings fixed; history-2…',
+      full: 'Round 2 (Scoped): 4 of 5 prior findings fixed; history-2 still present at Plausible.',
+    });
+    // No space in the second half of the cut: the cut falls at the cap itself.
+    const run = `a ${'b'.repeat(60)}`;
+    expect(clip(run, 30)).toEqual({ text: `a ${'b'.repeat(28)}…`, full: run });
+    // Graphemes count, so an emoji or an accented letter at the cap stays whole and a 24-grapheme text is not cut.
+    expect(clip(`${'x'.repeat(23)}😀abc`, 24)).toEqual({ text: `${'x'.repeat(23)}😀…`, full: `${'x'.repeat(23)}😀abc` });
+    expect(clip(`${'x'.repeat(23)}e\u0301`, 24)).toEqual({ text: `${'x'.repeat(23)}e\u0301`, full: null });
+
+    const summary = 'Round 2 (Fix and sweep): 7 of 8 prior findings fixed, 1 withdrawn, 0 new findings, 1 Bonus Point. Posting also returns #19516 to devlead at Dev.';
+    const reason = 'Which of the two migration strategies in the plan should the fix use, the backfill or the lazy rewrite on read?';
+    const root = render(
+      snapshot([
+        item(1, { status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: summary, stage: 'Waiting for the operator to approve', stageAt: NOW }),
+        item(2, { status: 'blocked', error: reason }),
+      ]),
+    );
+    const approval = root.querySelector<HTMLElement>('[data-item="1"] .approval')!;
+    const stage = root.querySelector<HTMLElement>('[data-item="1"] .stage')!;
+    const note = root.querySelector<HTMLElement>('[data-item="2"] .note')!;
+
+    expect(approval.textContent).toBe('Round 2 (Fix and sweep): 7 of 8 prior findings fixed, 1…');
+    expect(approval.textContent!.length).toBeLessThanOrEqual(CAPS.approval + 1);
+    expect([approval.title, approval.hasAttribute('data-full')]).toEqual([summary, true]);
+    expect(stage.textContent).toBe('Waiting for the operator… · 0s');
+    expect(stage.title).toBe('Waiting for the operator to approve');
+    expect(note.textContent).toBe('Which of the two migration strategies in the plan should the fix use, the…');
+    expect(note.title).toBe(reason);
+    expect(root.querySelector<HTMLElement>('[data-item="2"] .mark')?.title).toBe('Answer a question');
   });
 
   it('formats ages', () => {
@@ -653,6 +690,15 @@ describe('startPanel', () => {
     Object.defineProperty(title, 'scrollWidth', { configurable: true, value: 50 });
     hover();
     expect(title.hasAttribute('title')).toBe(false);
+
+    // A text cut at its cap keeps the whole text as its tooltip, whatever its width.
+    send(snapshot([item(1, { status: 'awaiting-approval', approvalSummary: 'x'.repeat(CAPS.approval + 5) })]));
+    const approval = root.querySelector<HTMLElement>('[data-item="1"] .approval')!;
+
+    Object.defineProperty(approval, 'clientWidth', { configurable: true, value: 500 });
+    Object.defineProperty(approval, 'scrollWidth', { configurable: true, value: 500 });
+    approval.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(approval.title).toBe('x'.repeat(CAPS.approval + 5));
   });
 
   it('selects a row on right-click, so its menu acts on the highlighted row', () => {

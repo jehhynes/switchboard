@@ -7,7 +7,7 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-const CLIPPED = '.title, .playbook-name, .key, .approval, .note';
+const CLIPPED = '.title, .playbook-name, .key, .stage, .approval, .note';
 const FOCUSABLE = 'button, a[href]';
 
 /** A button by its tooltip, which names its verb, or a link by its target. */
@@ -58,11 +58,11 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
     true,
   );
 
-  // Clipped text shows in full in a tooltip; text that fits has none, because it would repeat what is shown.
+  // Clipped text shows in full in a tooltip; text that fits has none, because it would repeat what is shown. A span cut at its cap already carries the whole text.
   root.addEventListener('mouseover', (event) => {
     const text = (event.target as HTMLElement).closest<HTMLElement>(CLIPPED);
 
-    if (text !== null) {
+    if (text !== null && !text.hasAttribute('data-full')) {
       if (text.scrollWidth > text.clientWidth) {
         text.title = text.textContent ?? '';
       } else {

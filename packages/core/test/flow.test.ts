@@ -6,14 +6,18 @@ const CONTRACT = (id: string) =>
   [
     '',
     '',
-    `Switchboard session ${id} tracks this work. Report progress with these commands:`,
-    `- ${REPORT} stage ${id} <stage>`,
-    `- ${REPORT} worktree ${id} <path>, when you create a worktree`,
-    `- ${REPORT} done ${id} [--summary <text>], when the work is finished`,
-    `- ${REPORT} blocked ${id} --reason <text>, when you cannot continue`,
-    `- ${REPORT} approval ${id} --prompt <prompt> [--summary <text>], when the work is ready but posting or publishing it needs the operator's approval`,
-    `- ${REPORT} link ${id} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md`,
-    'When you need the operator for a question or a choice, report blocked with the question and end your turn instead of waiting. When the work is ready but posting or publishing it needs approval, report approval with the prompt that would do it, such as /review-pr pr:123 publish, and end your turn.',
+    `Report to Switchboard with these commands:`,
+    `- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`,
+    `  - The stage is one or two words, such as Reviewing or Fixing tests.`,
+    `- ${REPORT} worktree ${id} <path>, when you create a worktree.`,
+    `- ${REPORT} done ${id}, when the work is finished.`,
+    `- ${REPORT} blocked ${id} --reason <text>, when you cannot continue or need the operator's answer or choice, then end your turn instead of waiting.`,
+    `  - The reason is one phrase of at most 10 words; the detail stays in this session.`,
+    `  - A question ends with a question mark.`,
+    `- ${REPORT} approval ${id} --prompt <prompt> --summary <text>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
+    `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,
+    `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
+    `- ${REPORT} link ${id} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md.`,
   ].join('\n');
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
@@ -215,7 +219,10 @@ describe('sessions', () => {
     const h = new Harness();
     const { item, session } = running(h);
 
-    expect(h.report(session, { kind: 'done', summary: 'Answered.' }).actions).toEqual([]);
+    // A done report after a blocked one clears the blocked reason from the session.
+    h.report(session, { kind: 'blocked', reason: 'Needs access.' });
+    expect(h.store.session(session)).toMatchObject({ outcome: 'blocked', outcomeDetail: 'Needs access.' });
+    expect(h.report(session, { kind: 'done' }).actions).toEqual([]);
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session', warning: null });
 
     expect(h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null })).toEqual([]);
@@ -224,7 +231,7 @@ describe('sessions', () => {
     expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([]);
 
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
-    expect(h.store.session(session)).toMatchObject({ state: 'ended', outcome: 'done', outcomeDetail: 'Answered.', endedAt: T0 });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', outcome: 'done', outcomeDetail: null, endedAt: T0 });
     expect(h.item(item).status).toBe('done');
   });
 
@@ -349,14 +356,14 @@ describe('sessions', () => {
     expect(h.status(item)).toBe('queued');
     const retry = h.started(h.act({ type: 'roster', sessions: [] })[0]);
 
-    h.report(session, { kind: 'done', summary: null });
+    h.report(session, { kind: 'done' });
     expect(h.item(item).status).toBe('running');
     expect(h.store.session(session)?.outcome).toBe('done');
 
     h.report(session, { kind: 'stage', stage: 'Old session' });
     expect(h.item(item).stage).toBe('Planning');
 
-    h.report(retry, { kind: 'done', summary: null });
+    h.report(retry, { kind: 'done' });
     expect(h.item(item).status).toBe('done');
   });
 
@@ -434,7 +441,7 @@ describe('setup', () => {
     const setup = toSetup(h);
 
     h.report(setup, { kind: 'worktree', path: 'D:/git/widgets-wt/15619', branch: '15619-fix' });
-    h.report(setup, { kind: 'done', summary: null });
+    h.report(setup, { kind: 'done' });
     expect(h.status(1)).toBe('setup');
 
     expect(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: setup, shortId: 'abc12345', reason: 'release' }]);
@@ -485,7 +492,7 @@ describe('setup', () => {
 
     const again = h.started(only(h.act({ type: 'retry', workItemId: 1 }), 'start-session'));
     h.report(again, { kind: 'worktree', path: 'D:/wt/1', branch: null });
-    h.report(again, { kind: 'done', summary: null });
+    h.report(again, { kind: 'done' });
     const task = only(h.act({ type: 'stop-succeeded', sessionId: again, reason: 'operator' }), 'start-session');
     expect(task).toMatchObject({ kind: 'task', cwd: 'D:/wt/1' });
   });
@@ -556,7 +563,7 @@ describe('limits and the one-active-session rule', () => {
     const [triage] = h.poll(issue('1'));
     const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
 
-    h.report(session, { kind: 'done', summary: null });
+    h.report(session, { kind: 'done' });
     h.poll();
     const [again] = h.poll(issue('1'));
     expect(h.triaged(again, 'support:defect')).toEqual([]);

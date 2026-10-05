@@ -76,14 +76,18 @@ export function triagePrompt(template: string, choices: readonly PlaybookChoice[
 /** Appended to every session prompt, because skills written for Ground Control do not know Switchboard. */
 export const REPORT_CONTRACT = `
 
-Switchboard session {{session.id}} tracks this work. Report progress with these commands:
-- {{report}} stage {{session.id}} <stage>
-- {{report}} worktree {{session.id}} <path>, when you create a worktree
-- {{report}} done {{session.id}} [--summary <text>], when the work is finished
-- {{report}} blocked {{session.id}} --reason <text>, when you cannot continue
-- {{report}} approval {{session.id}} --prompt <prompt> [--summary <text>], when the work is ready but posting or publishing it needs the operator's approval
-- {{report}} link {{session.id}} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md
-When you need the operator for a question or a choice, report blocked with the question and end your turn instead of waiting. When the work is ready but posting or publishing it needs approval, report approval with the prompt that would do it, such as /review-pr pr:123 publish, and end your turn.`;
+Report to Switchboard with these commands:
+- {{report}} stage {{session.id}} <stage>, when you start a new phase of the work.
+  - The stage is one or two words, such as Reviewing or Fixing tests.
+- {{report}} worktree {{session.id}} <path>, when you create a worktree.
+- {{report}} done {{session.id}}, when the work is finished.
+- {{report}} blocked {{session.id}} --reason <text>, when you cannot continue or need the operator's answer or choice, then end your turn instead of waiting.
+  - The reason is one phrase of at most 10 words; the detail stays in this session.
+  - A question ends with a question mark.
+- {{report}} approval {{session.id}} --prompt <prompt> --summary <text>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.
+  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.
+  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.
+- {{report}} link {{session.id}} --label <text> --target <url or absolute path>, for each GitHub issue or pull request you create or find for this work, and for a case file such as case.md.`;
 
 /** The prompt one session runs: the task prompt with its session ID filled in, plus the report contract. */
 export function sessionPrompt(taskPrompt: string, sessionId: string, report: string): string {

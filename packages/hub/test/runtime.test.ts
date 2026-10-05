@@ -290,12 +290,12 @@ describe('Runtime', () => {
     expect(cli.calls.at(-1)).toEqual(['git', 'worktree', 'list', '--porcelain']);
 
     expect(await runtime.report({ sessionId: 's1', kind: 'worktree', path: 'D:/elsewhere' })).toEqual({ refused: 'D:/elsewhere is not a git worktree.' });
-    expect(await runtime.report({ sessionId: 's9', kind: 'done', summary: null })).toEqual({ refused: 'Unknown session s9.' });
+    expect(await runtime.report({ sessionId: 's9', kind: 'done' })).toEqual({ refused: 'Unknown session s9.' });
     expect(await runtime.report({ sessionId: 's1', kind: 'blocked', reason: 'Stuck.' })).toEqual({ refused: null });
     expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stuck.' });
     expect(await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/publish', summary: 'Ready.' })).toEqual({ refused: null });
     expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: 'Ready.' });
-    expect(await runtime.report({ sessionId: 's1', kind: 'done', summary: 'Done.' })).toEqual({ refused: null });
+    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
     expect(store.workItem(1)?.status).toBe('done');
   });
 
@@ -385,7 +385,7 @@ describe('Runtime', () => {
     await runtime.settled();
 
     const start = cli.calls.find((call) => call[1] === '--bg');
-    expect(start?.at(-1)).toMatch(/^Claim 8, then stop\.\n\nSwitchboard session s1 tracks this work\./);
+    expect(start?.at(-1)).toMatch(/^Claim 8, then stop\.\n\nReport to Switchboard with these commands:/);
     expect(store.session('s1')).toMatchObject({ kind: 'pick', state: 'running' });
     expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['9']);
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'setup', needsPick: true, triage: { playbook: 'dev:develop' } }]);

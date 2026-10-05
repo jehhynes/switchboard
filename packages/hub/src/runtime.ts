@@ -66,7 +66,7 @@ export interface Snapshot {
 export type ReportBody =
   | { sessionId: string; kind: 'stage'; stage: string }
   | { sessionId: string; kind: 'worktree'; path: string }
-  | { sessionId: string; kind: 'done'; summary: string | null }
+  | { sessionId: string; kind: 'done' }
   | { sessionId: string; kind: 'blocked'; reason: string }
   | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null }
   | { sessionId: string; kind: 'link'; label: string; target: string };
@@ -272,7 +272,7 @@ export class Runtime {
       body.kind === 'stage'
         ? { kind: body.kind, stage: body.stage }
         : body.kind === 'done'
-          ? { kind: body.kind, summary: body.summary }
+          ? { kind: body.kind }
           : body.kind === 'approval'
             ? { kind: body.kind, prompt: body.prompt, summary: body.summary }
             : body.kind === 'link'

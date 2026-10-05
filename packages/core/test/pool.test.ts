@@ -100,7 +100,7 @@ describe('pick (PRD R48)', () => {
     const start = only(h.act({ type: 'pick', ticketId }), 'start-session');
 
     expect(start).toMatchObject({ kind: 'pick', cwd: 'D:/git/support', name: 'switchboard · pick · zoho 500', permissionMode: 'auto', model: null });
-    expect(start.prompt.startsWith('Claim case #500, then stop.\n\nSwitchboard session s1 tracks this work.')).toBe(true);
+    expect(start.prompt).toMatch(/^Claim case #500, then stop\.\n\nReport to Switchboard with these commands:\n- .* stage s1 </);
     expect(h.item(1)).toMatchObject({ ticketId, status: 'setup', playbook: 'support:case', needsPick: true });
     expect(h.store.triagesFor(1)).toMatchObject([{ ticketId, workItemId: 1, summary: 'A summary.' }]);
     expect(h.send({ type: 'pick', ticketId }).refused).toBe('The ticket already has a work item.');
@@ -111,7 +111,7 @@ describe('pick (PRD R48)', () => {
     const ticketId = pooled(h);
     const pick = h.started(only(h.act({ type: 'pick', ticketId }), 'start-session'));
 
-    h.report(pick, { kind: 'done', summary: 'Claimed.' });
+    h.report(pick, { kind: 'done' });
     expect(h.item(1).status).toBe('setup');
     expect(pollZoho(h, zoho('500', 'assigned'))).toEqual([]);
     expect(h.store.workItem(2)).toBeNull();
@@ -128,7 +128,7 @@ describe('pick (PRD R48)', () => {
     const h = new Harness({ playbooks: playbooks(undefined, { 'support:case': '---\ndescription: A Support case\nworkdir: repoRoot\n---\n/support-process #{{ticket.sourceKey}}' }) });
     const pick = h.started(only(h.act({ type: 'pick', ticketId: pooled(h) }), 'start-session'));
 
-    h.report(pick, { kind: 'done', summary: null });
+    h.report(pick, { kind: 'done' });
     const task = only(h.act({ type: 'roster', sessions: [] }), 'start-session');
 
     expect(task).toMatchObject({ kind: 'task', name: 'switchboard · support:case · zoho 500' });
@@ -140,7 +140,7 @@ describe('pick (PRD R48)', () => {
     const h = new Harness({ playbooks: manual });
     const pick = h.started(only(h.act({ type: 'pick', ticketId: pooled(h, '500', null) }), 'start-session'));
 
-    h.report(pick, { kind: 'done', summary: null });
+    h.report(pick, { kind: 'done' });
     const triage = only(h.act({ type: 'roster', sessions: [] }), 'triage');
     const task = only(h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'support:case', summary: 's', immediacy: null, severity: null, model: null }), 'start-session');
     expect(task.kind).toBe('task');
@@ -159,7 +159,7 @@ describe('pick (PRD R48)', () => {
     h.act({ type: 'roster', sessions: [{ sessionId: pick, state: 'running', detail: null }] });
     expect(h.item(1)).toMatchObject({ status: 'setup', error: null });
 
-    h.report(pick, { kind: 'done', summary: null });
+    h.report(pick, { kind: 'done' });
     expect(only(h.act({ type: 'roster', sessions: [] }), 'start-session').kind).toBe('task');
   });
 
@@ -167,7 +167,7 @@ describe('pick (PRD R48)', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const pick = h.started(only(h.act({ type: 'pick', ticketId: pooled(h, '500', null) }), 'start-session'));
 
-    h.report(pick, { kind: 'done', summary: null });
+    h.report(pick, { kind: 'done' });
     const triage = only(h.act({ type: 'roster', sessions: [] }), 'triage');
 
     expect(triage).toMatchObject({ workItemId: 1 });

@@ -28,7 +28,7 @@ export function reportBody(argv: readonly string[]): Record<string, unknown> | n
     case 'worktree':
       return text === undefined ? null : { sessionId, kind, path: resolve(text) };
     case 'done':
-      return { sessionId, kind, summary: valueOf(argv, 'summary') };
+      return { sessionId, kind };
     case 'blocked': {
       const reason = valueOf(argv, 'reason');
 

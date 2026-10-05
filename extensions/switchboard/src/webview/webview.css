@@ -54,7 +54,8 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
   .action-button .label { display: none; }
 }
 a { color: var(--vscode-textLink-foreground); }
-.key, .stage { white-space: nowrap; flex-shrink: 0; }
+.key { white-space: nowrap; flex-shrink: 0; }
+.stage { white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* On a narrow panel the playbook name clips after the title has kept a few characters. */
 .playbook-name { white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The metadata shrinks and clips so the controls stay visible on a narrow panel; clipped text is in tooltips. */

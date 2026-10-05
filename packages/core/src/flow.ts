@@ -42,7 +42,7 @@ export interface PolledTicket {
 export type Report =
   | { kind: 'stage'; stage: string }
   | { kind: 'worktree'; path: string; branch: string | null }
-  | { kind: 'done'; summary: string | null }
+  | { kind: 'done' }
   | { kind: 'blocked'; reason: string }
   | { kind: 'approval'; prompt: string; summary: string | null }
   | { kind: 'link'; label: string; target: string };
@@ -714,7 +714,7 @@ class Flow {
         return;
       }
       case 'done':
-        this.store.updateSession(sessionId, { outcome: 'done', outcomeDetail: report.summary });
+        this.store.updateSession(sessionId, { outcome: 'done', outcomeDetail: null });
 
         if (item !== null && session.kind === 'task') {
           this.done(item, 'session', null);
