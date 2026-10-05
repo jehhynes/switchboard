@@ -36,6 +36,14 @@ describe('approval reports (PRD R23, R31)', () => {
     h.act({ type: 'session-start-failed', sessionId: 's2', message: 'exit 1' });
     const retry = only(h.act({ type: 'retry', workItemId: item }), 'start-session');
     expect(retry.prompt.startsWith('/review-pr pr:123 publish\n\n')).toBe(true);
+
+    // The playbook offers no done report, but the approved prompt's session finishes the work item with one.
+    expect(retry.prompt).toContain(` done ${retry.sessionId}, when the work is finished.`);
+    expect(retry.prompt).not.toContain(' approval ');
+    h.started(retry);
+    expect(h.report(retry.sessionId, { kind: 'approval', prompt: '/again', summary: null, report: null }).refused).toBe("This session's prompt does not offer the approval report.");
+    expect(h.report(retry.sessionId, { kind: 'done' }).refused).toBeNull();
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
   });
 
   it('drops the pending approval when the work item is triaged again', () => {

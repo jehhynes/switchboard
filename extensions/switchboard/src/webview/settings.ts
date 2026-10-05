@@ -1,4 +1,4 @@
-import type { PlaybookFields } from '@switchboard/core';
+import type { PlaybookFields, PlaybookReport } from '@switchboard/core';
 import type { ConfigFiles } from '@switchboard/hub';
 import { escape } from './render.js';
 
@@ -68,8 +68,21 @@ export const EMPTY_PLAYBOOK: PlaybookFields = {
   permissionMode: null,
   model: null,
   workdir: 'worktree',
+  reports: [],
   template: '',
 };
+
+/** The playbook's report checkboxes, as `reports.<kind>` fields, in front matter order. */
+const REPORT_FIELDS: { kind: PlaybookReport; label: string; help: string }[] = [
+  { kind: 'done', label: 'Session can report done', help: 'The session closes the work item. Off, its turn ends in Needs you for you to review.' },
+  { kind: 'approval', label: 'Session can report approval', help: 'The session can leave a prompt for you to approve, such as one that posts its draft.' },
+  { kind: 'worktree', label: 'Session can report a worktree', help: 'The session can link a worktree it creates. Branch names link worktrees without it.' },
+];
+
+/** A playbook field's value; a `reports.<kind>` field is whether the playbook lists that report. */
+function playbookFieldValue(playbook: PlaybookFields, path: string): unknown {
+  return path.startsWith('reports.') ? playbook.reports.includes(path.slice('reports.'.length) as PlaybookReport) : playbook[path as keyof PlaybookFields];
+}
 
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -123,6 +136,15 @@ export function readField(kind: FieldKind, input: { value: string; checked?: boo
 
 /** A playbook with one field changed from its input. */
 export function applyPlaybookField(playbook: PlaybookFields, key: string, input: { value: string; checked?: boolean }): PlaybookFields {
+  const report = REPORT_FIELDS.find((field) => key === `reports.${field.kind}`);
+
+  if (report !== undefined) {
+    const others = playbook.reports.filter((kind) => kind !== report.kind);
+    const listed = input.checked === true ? [...others, report.kind] : others;
+
+    return { ...playbook, reports: REPORT_FIELDS.map((field) => field.kind).filter((kind) => listed.includes(kind)) };
+  }
+
   switch (key) {
     case 'autoStart':
     case 'requiresWorktree':
@@ -330,6 +352,7 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
     fields.push(
       { path: 'autoStart', label: 'Start automatically', kind: 'boolean', help: 'Start the session after triage. Off, the work item waits in Unstarted for you to start it.' },
       { path: 'requiresWorktree', label: 'Requires a worktree', kind: 'boolean', help: 'Run the source’s setup prompt first when the ticket has no worktree.' },
+      ...REPORT_FIELDS.map(({ kind, label, help }): Field => ({ path: `reports.${kind}`, label, kind: 'boolean', help })),
       {
         path: 'workdir',
         label: 'Working directory',
@@ -364,7 +387,7 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
     help:
       playbook.kind === 'triage'
         ? 'The classifier’s system prompt. {{playbooks}} inserts the task playbooks as “- name: description” lines; without it, triage appends them.'
-        : `Variables: ${state.config.templateVariables.map((name) => `{{${name}}}`).join(' ')}. Switchboard adds the report commands after it.`,
+        : `Variables: ${state.config.templateVariables.map((name) => `{{${name}}}`).join(' ')}. Switchboard adds the commands for the reports checked above, with stage and link.`,
   });
 
   return fields;
@@ -578,7 +601,7 @@ function renderPlaybookFields(state: EditorState, playbook: PlaybookFields, erro
   const loose = [...extra, ...errors.filter((error) => playbookFieldOfError(error, paths) === null)];
 
   return `${errorBlock(loose)}<section>${fields
-    .map((field, index) => fieldHtml(field, playbook[field.path as keyof PlaybookFields], errorsFor(errors, field.path, (error) => playbookFieldOfError(error, paths)), `p-${index}`))
+    .map((field, index) => fieldHtml(field, playbookFieldValue(playbook, field.path), errorsFor(errors, field.path, (error) => playbookFieldOfError(error, paths)), `p-${index}`))
     .join('')}</section>`;
 }
 

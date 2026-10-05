@@ -17,7 +17,7 @@ describe('renderTaskPrompt and sessionPrompt', () => {
 
     expect(task).toEqual({ text: 'Work on 7 as {{session.id}}.\n\n' });
 
-    expect(sessionPrompt((task as { text: string }).text, 's-1', 'node "C:/h/hub.js" report')).toBe(
+    expect(sessionPrompt((task as { text: string }).text, 's-1', 'node "C:/h/hub.js" report', ['link', 'approval', 'done', 'worktree', 'stage'])).toBe(
       [
         'Work on 7 as s-1.',
         '',
@@ -35,6 +35,30 @@ describe('renderTaskPrompt and sessionPrompt', () => {
     `When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`,
       ].join('\n'),
     );
+  });
+
+  it('lists only the offered reports, and tells a session with neither done nor approval to end its turn', () => {
+    expect(sessionPrompt('Answer it.', 's-2', 'R', ['stage', 'link'])).toBe(
+      [
+        'Answer it.',
+        '',
+        'Report to Switchboard with these commands:',
+        '- R stage s-2 <stage>, when you start a new phase of the work.',
+        '  - The stage is one or two words, such as Reviewing or Fixing tests.',
+        '- R link s-2 --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.',
+        '',
+        'When the work is finished, end your turn; the operator reviews it.',
+        '',
+        "When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.",
+      ].join('\n'),
+    );
+
+    const approval = sessionPrompt('Draft it.', 's-3', 'R', ['stage', 'approval', 'link']);
+
+    expect(approval).toContain('- R approval s-3 --prompt');
+    expect(approval).not.toContain(' done ');
+    expect(approval).not.toContain('worktree');
+    expect(approval).not.toContain('end your turn; the operator reviews it');
   });
 });
 

@@ -32,7 +32,7 @@ function playbook(name: string, text: string): [string, Playbook] {
 
 const PLAYBOOKS = new Map([
   playbook('triage:github', '---\ndescription: Triage\nkind: triage\n---\nClassify.'),
-  playbook('dev:develop', '---\ndescription: Build it\nautoStart: true\n---\nBuild {{ticket.sourceKey}}.'),
+  playbook('dev:develop', '---\ndescription: Build it\nautoStart: true\nreports: done, approval, worktree\n---\nBuild {{ticket.sourceKey}}.'),
 ]);
 
 function config(patch: Partial<Settings['sessions']> = {}): Config {
@@ -320,6 +320,13 @@ describe('Runtime', () => {
     expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: 'Ready.', approvalReport: 'D:/wt/review.md' });
     expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
     expect(store.workItem(1)?.status).toBe('done');
+
+    source.result = { tickets: [issue('9')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    store.updateSession('s2', { reports: ['stage', 'link'] });
+    expect(await runtime.report({ sessionId: 's2', kind: 'done' })).toEqual({ refused: "This session's prompt does not offer the done report." });
+    expect(store.workItem(2)?.status).toBe('running');
   });
 
   it('stops a session and reports a failed stop', async () => {
@@ -442,8 +449,8 @@ describe('Runtime', () => {
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);
     const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false } as const;
-    store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123' });
-    store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null });
+    store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123', reports: [] });
+    store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null, reports: [] });
 
     expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['5', 0], ['1', 1], ['2', 0], ['4', 0], ['3', 0]]);
 

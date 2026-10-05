@@ -3,6 +3,10 @@ import { join } from 'node:path';
 import { PERMISSION_MODES } from './settings.js';
 import type { PermissionMode } from './settings.js';
 
+/** The reports a task playbook can offer its session; stage and link are always offered (PRD R23). */
+export const PLAYBOOK_REPORTS = ['done', 'approval', 'worktree'] as const;
+export type PlaybookReport = (typeof PLAYBOOK_REPORTS)[number];
+
 export interface Playbook {
   /** `<namespace>:<name>`, from the file's path. */
   name: string;
@@ -15,6 +19,8 @@ export interface Playbook {
   model: string | null;
   /** `worktree`: the ticket's worktree when one exists, else the repo root. `repoRoot`: always the source's repo root. */
   workdir: 'worktree' | 'repoRoot';
+  /** Empty by default: the session's turn then ends in Needs you. */
+  reports: PlaybookReport[];
   template: string;
 }
 
@@ -27,7 +33,7 @@ export interface PlaybookError {
 export type PlaybookResult = { playbook: Playbook } | { error: string };
 
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir'];
+const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports'];
 
 function parseFrontMatter(text: string): { fields: Map<string, string>; body: string } | { error: string } {
   const normalized = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
@@ -128,6 +134,17 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
     return { error: 'workdir must be worktree or repoRoot.' };
   }
 
+  const reports = (fields.get('reports') ?? '').split(',').map((entry) => entry.trim()).filter((entry) => entry !== '');
+  const unknownReports = reports.filter((entry) => !(PLAYBOOK_REPORTS as readonly string[]).includes(entry));
+
+  if (unknownReports.length > 0) {
+    return { error: `reports can list ${PLAYBOOK_REPORTS.join(', ')}, not ${unknownReports.join(', ')}.` };
+  }
+
+  if (kind === 'triage' && reports.length > 0) {
+    return { error: 'reports applies only to a task playbook.' };
+  }
+
   if (body.trim() === '') {
     return { error: 'The prompt template is empty.' };
   }
@@ -142,6 +159,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
       permissionMode: permissionMode as PermissionMode | null,
       model: fields.get('model') || null,
       workdir,
+      reports: PLAYBOOK_REPORTS.filter((entry) => reports.includes(entry)),
       template: body,
     },
   };
@@ -179,6 +197,10 @@ export function formatPlaybook(playbook: PlaybookFields): { text: string } | { e
 
   if (playbook.workdir !== 'worktree') {
     lines.push(`workdir: ${playbook.workdir}`);
+  }
+
+  if (playbook.kind === 'task' && playbook.reports.length > 0) {
+    lines.push(`reports: ${playbook.reports.join(', ')}`);
   }
 
   if (playbook.permissionMode !== null) {

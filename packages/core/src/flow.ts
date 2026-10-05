@@ -1,6 +1,7 @@
 import type { Playbook } from './playbook.js';
 import type { PermissionMode, Settings } from './settings.js';
-import type { FailedStep, Immediacy, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
+import { REPORT_KINDS } from './model.js';
+import type { FailedStep, Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import type { NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt, triagePrompt } from './template.js';
 import type { TemplateVariable } from './template.js';
@@ -18,6 +19,10 @@ export const MESSAGES = {
   setupWithoutWorktree: 'Setup ended without a worktree.',
   turnEnded: 'The turn ended without a done report.',
   sessionEnded: 'The session ended without a done report.',
+  turnEndedWithoutApproval: 'The turn ended without an approval report.',
+  sessionEndedWithoutApproval: 'The session ended without an approval report.',
+  turnFinished: 'The session finished its turn.',
+  sessionFinished: 'The session ended.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
   pickEnded: 'The pick session ended without a done report.',
 } as const;
@@ -136,6 +141,31 @@ export interface FlowResult {
 }
 
 class Refusal extends Error {}
+
+/**
+ * The reports a session's prompt offers (PRD R23). A playbook's task session gets stage, link and the playbook's own; a pick, setup or approved
+ * session finishes with done, and an ad-hoc prompt has no playbook to narrow them.
+ */
+function sessionReports(kind: SessionKind, approved: boolean, playbook: Playbook | null): ReportKind[] {
+  if (kind !== 'task' || approved) {
+    return ['stage', 'worktree', 'done', 'link'];
+  }
+
+  return playbook === null ? [...REPORT_KINDS] : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || (playbook.reports as readonly string[]).includes(entry));
+}
+
+/** Why a task session's turn or process ended without finishing, naming only a report its prompt offered. */
+function endedMessage(session: Session, turn: boolean): string {
+  if (session.reports.includes('done')) {
+    return turn ? MESSAGES.turnEnded : MESSAGES.sessionEnded;
+  }
+
+  if (session.reports.includes('approval')) {
+    return turn ? MESSAGES.turnEndedWithoutApproval : MESSAGES.sessionEndedWithoutApproval;
+  }
+
+  return turn ? MESSAGES.turnFinished : MESSAGES.sessionFinished;
+}
 
 const TURN_ENDED: readonly SessionState[] = ['idle', 'failed'];
 
@@ -635,7 +665,7 @@ class Flow {
       if (item.unassignedAt !== null) {
         this.done(item, 'unassigned', MESSAGES.unassigned);
       } else {
-        this.block(item, state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : MESSAGES.turnEnded);
+        this.block(item, state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : endedMessage(current, true));
       }
     } else if (resumed && item.status === 'blocked') {
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
@@ -695,7 +725,7 @@ class Flow {
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', MESSAGES.unassigned);
     } else if (item.status === 'running') {
-      this.block(item, MESSAGES.sessionEnded);
+      this.block(item, endedMessage(session, false));
     }
   }
 
@@ -711,6 +741,11 @@ class Flow {
 
   private report(sessionId: string, report: Report): void {
     const session = this.session(sessionId);
+
+    if (!session.reports.includes(report.kind)) {
+      throw new Refusal(`This session's prompt does not offer the ${report.kind} report.`);
+    }
+
     const item = this.latest(session);
 
     switch (report.kind) {
@@ -1136,7 +1171,8 @@ class Flow {
       prompt = rendered.text;
     }
 
-    const full = sessionPrompt(prompt, id, this.context.report);
+    const reports = sessionReports(kind, approved, playbook);
+    const full = sessionPrompt(prompt, id, this.context.report, reports);
 
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
@@ -1160,6 +1196,7 @@ class Flow {
       startedAt: this.now,
       endedAt: null,
       released: false,
+      reports,
     });
     // An approved prompt is kept, so a Retry of a failed or blocked approval session runs it again.
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null, failedStep: null });

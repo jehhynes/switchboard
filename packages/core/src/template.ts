@@ -1,3 +1,6 @@
+import { REPORT_KINDS } from './model.js';
+import type { ReportKind } from './model.js';
+
 export type TemplateResult = { text: string } | { error: string };
 
 /** The variables a playbook template, `setupPrompt` or `pickPrompt` can use. */
@@ -73,25 +76,38 @@ export function triagePrompt(template: string, choices: readonly PlaybookChoice[
   return PLAYBOOKS.test(template) ? render(template, { playbooks: list }) : { text: `${template.trimEnd()}\n\nChoose one playbook:\n${list}` };
 }
 
-/** Appended to every session prompt, because skills written for Ground Control do not know Switchboard. */
-export const REPORT_CONTRACT = `
-
-Report to Switchboard with these commands:
-- {{report}} stage {{session.id}} <stage>, when you start a new phase of the work.
-  - The stage is one or two words, such as Reviewing or Fixing tests.
-- {{report}} worktree {{session.id}} <path>, when you create a worktree.
-- {{report}} done {{session.id}}, when the work is finished.
-- {{report}} approval {{session.id}} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.
+/** Each report's lines in the contract, in contract order. */
+const REPORT_LINES: Record<ReportKind, string> = {
+  stage: `- {{report}} stage {{session.id}} <stage>, when you start a new phase of the work.
+  - The stage is one or two words, such as Reviewing or Fixing tests.`,
+  worktree: '- {{report}} worktree {{session.id}} <path>, when you create a worktree.',
+  done: '- {{report}} done {{session.id}}, when the work is finished.',
+  approval: `- {{report}} approval {{session.id}} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.
   - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.
   - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.
-  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.
-- {{report}} link {{session.id}} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.
+  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
+  link: '- {{report}} link {{session.id}} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.',
+};
+
+/**
+ * Appended to every session prompt, because skills written for Ground Control do not know Switchboard. It lists only the reports the
+ * session may send (PRD R23).
+ */
+export function reportContract(reports: readonly ReportKind[]): string {
+  const lines = REPORT_KINDS.filter((kind) => reports.includes(kind)).map((kind) => REPORT_LINES[kind]);
+  const finish = reports.includes('done') || reports.includes('approval') ? '' : '\n\nWhen the work is finished, end your turn; the operator reviews it.';
+
+  return `
+
+Report to Switchboard with these commands:
+${lines.join('\n')}${finish}
 
 When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`;
+}
 
-/** The prompt one session runs: the task prompt with its session ID filled in, plus the report contract. */
-export function sessionPrompt(taskPrompt: string, sessionId: string, report: string): string {
-  const contract = REPORT_CONTRACT.replaceAll('{{report}}', report);
+/** The prompt one session runs: the task prompt with its session ID filled in, plus the contract for its reports. */
+export function sessionPrompt(taskPrompt: string, sessionId: string, report: string, reports: readonly ReportKind[]): string {
+  const contract = reportContract(reports).replaceAll('{{report}}', report);
 
   return (taskPrompt.trimEnd() + contract).replace(SESSION_ID, sessionId);
 }

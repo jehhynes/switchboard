@@ -5,7 +5,7 @@ import type { EditorConfig, EditorState } from '../src/webview/settings.js';
 import { startSettings } from '../src/webview/settingsMain.js';
 import type { EditorMessage } from '../src/webview/settingsMain.js';
 
-const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', template: '/gc-plan {{ticket.sourceKey}}\n' };
+const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', reports: [], template: '/gc-plan {{ticket.sourceKey}}\n' };
 
 const GITHUB = { enabled: true, repo: 'o/r', logins: ['me', 'me-ai'], project: { owner: 'o', number: 3 }, assignedStatuses: ['Dev'] };
 
@@ -269,9 +269,18 @@ describe('startSettings', () => {
     type(field('permissionMode'), 'plan', 'change');
     field<HTMLInputElement>('autoStart').checked = true;
     field('autoStart').dispatchEvent(new Event('change', { bubbles: true }));
+    expect([field<HTMLInputElement>('reports.done').checked, field<HTMLInputElement>('reports.approval').checked]).toEqual([false, false]);
+
+    for (const kind of ['worktree', 'done']) {
+      field<HTMLInputElement>(`reports.${kind}`).checked = true;
+      field(`reports.${kind}`).dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    expect(field<HTMLInputElement>('reports.done').checked).toBe(true);
     type(field('kind'), 'triage', 'change');
 
     expect(field('autoStart')).toBeNull();
+    expect(field('reports.done')).toBeNull();
     expect(root.querySelector('label[for]')).not.toBeNull();
 
     type(field('kind'), 'task', 'change');
@@ -280,7 +289,7 @@ describe('startSettings', () => {
     expect(last('save-playbook')).toEqual({
       type: 'save-playbook',
       name: 'dev:develop',
-      playbook: { ...TASK, description: 'Plan and build it', permissionMode: 'plan', autoStart: true },
+      playbook: { ...TASK, description: 'Plan and build it', permissionMode: 'plan', autoStart: true, reports: ['done', 'worktree'] },
       version: 'p1',
     });
 

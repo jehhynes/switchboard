@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 8 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -150,13 +150,33 @@ describe('Store', () => {
     store.close();
   });
 
+  it('offers a version 8 session every report, as its prompt did', () => {
+    const path = join(dir, 'v8.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 8).join(';'));
+    raw.exec('PRAGMA user_version = 8');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
+    raw.exec("INSERT INTO workItems (id, ticketId, status, createdAt) VALUES (1, 1, 'running', 1)");
+    raw.exec("INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, startedAt, released) VALUES ('s1', 1, 'task', 'claude', 'C:/r', 'running', 1, 1, 0)");
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect(store.session('s1')?.reports).toEqual(['stage', 'worktree', 'done', 'approval', 'link']);
+    store.updateSession('s1', { reports: ['stage', 'link'] });
+    expect(store.session('s1')?.reports).toEqual(['stage', 'link']);
+    store.updateSession('s1', { reports: [] });
+    expect(store.session('s1')?.reports).toEqual([]);
+    store.close();
+  });
+
   it('refuses a database from a newer schema', () => {
     const path = join(dir, 'newer.db');
     const raw = new DatabaseSync(path);
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (8).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (9).');
   });
 
   it('rolls back a transaction that throws', () => {

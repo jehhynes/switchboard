@@ -2,23 +2,37 @@ import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
 import { Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 
-const CONTRACT = (id: string) =>
-  [
+/** The report contract offering `reports`, written out so a change to the contract shows here. */
+const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 'approval', 'link']) => {
+  const lines: Record<string, string[]> = {
+    stage: [`- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`, `  - The stage is one or two words, such as Reviewing or Fixing tests.`],
+    worktree: [`- ${REPORT} worktree ${id} <path>, when you create a worktree.`],
+    done: [`- ${REPORT} done ${id}, when the work is finished.`],
+    approval: [
+      `- ${REPORT} approval ${id} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
+      `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,
+      `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
+      `  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
+    ],
+    link: [`- ${REPORT} link ${id} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.`],
+  };
+  const finish = reports.includes('done') || reports.includes('approval') ? [] : ['', 'When the work is finished, end your turn; the operator reviews it.'];
+
+  return [
     '',
     '',
     `Report to Switchboard with these commands:`,
-    `- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`,
-    `  - The stage is one or two words, such as Reviewing or Fixing tests.`,
-    `- ${REPORT} worktree ${id} <path>, when you create a worktree.`,
-    `- ${REPORT} done ${id}, when the work is finished.`,
-    `- ${REPORT} approval ${id} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
-    `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,
-    `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
-    `  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
-    `- ${REPORT} link ${id} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.`,
+    ...Object.keys(lines).filter((kind) => reports.includes(kind)).flatMap((kind) => lines[kind]!),
+    ...finish,
     ``,
     `When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`,
   ].join('\n');
+};
+
+const QUESTION_REPORTS = ['stage', 'approval', 'link'];
+/** A playbook whose session may report done. */
+const FINISH = { 'dev:finish': '---\ndescription: Finish it\nreports: done\n---\nFinish {{ticket.sourceKey}}.' };
+const FINISHING_REPORTS = ['stage', 'worktree', 'done', 'link'];
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
   expect(actions).toHaveLength(1);
@@ -136,7 +150,7 @@ describe('triage', () => {
       workItemId: 1,
       kind: 'task',
       cwd: 'D:/git/widgets',
-      prompt: 'Answer Issue 1.\nAsks about fees.' + CONTRACT('s1'),
+      prompt: 'Answer Issue 1.\nAsks about fees.' + CONTRACT('s1', QUESTION_REPORTS),
       name: 'switchboard · dev:question · github 1',
       permissionMode: 'plan',
       model: 'opus',
@@ -216,8 +230,8 @@ describe('sessions', () => {
   }
 
   it('finishes the work item on a done report and releases the session once its turn ends', () => {
-    const h = new Harness();
-    const { item, session } = running(h);
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
 
     expect(h.report(session, { kind: 'done' }).actions).toEqual([]);
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session', warning: null });
@@ -233,12 +247,12 @@ describe('sessions', () => {
   });
 
   it('blocks on a turn that ends without a report, a failed turn, or a session that ends, but not while it waits on the operator', () => {
-    const h = new Harness();
-    const a = running(h, '1');
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const a = running(h, '1', 'dev:finish');
     h.act({ type: 'marker', sessionId: a.session, state: 'waiting', detail: null });
     expect(h.item(a.item)).toMatchObject({ status: 'running', error: null });
 
-    const b = running(h, '2');
+    const b = running(h, '2', 'dev:finish');
     h.act({ type: 'marker', sessionId: b.session, state: 'idle', detail: null });
     expect(h.item(b.item)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
 
@@ -248,8 +262,8 @@ describe('sessions', () => {
     h.act({ type: 'marker', sessionId: b.session, state: 'failed', detail: 'rate_limit' });
     expect(h.item(b.item)).toMatchObject({ status: 'blocked', error: 'The turn failed: rate_limit.' });
 
-    const c = new Harness();
-    const d = running(c, '3');
+    const c = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const d = running(c, '3', 'dev:finish');
     c.act({ type: 'roster', sessions: [] });
     expect(c.item(d.item)).toMatchObject({ status: 'blocked', error: 'The session ended without a done report.' });
     expect(c.store.session(d.session)).toMatchObject({ state: 'ended', endedAt: T0 });
@@ -333,13 +347,13 @@ describe('sessions', () => {
     const second = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
 
     expect(second.sessionId).toBe('s2');
-    expect(second.prompt).toBe('Answer Issue 1.\nA summary.' + CONTRACT('s2'));
+    expect(second.prompt).toBe('Answer Issue 1.\nA summary.' + CONTRACT('s2', QUESTION_REPORTS));
 
   });
 
   it('applies only reports from the latest session', () => {
-    const h = new Harness();
-    const { item, session } = running(h);
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
 
     h.now += 10;
     h.report(session, { kind: 'stage', stage: 'Planning' });
@@ -359,6 +373,35 @@ describe('sessions', () => {
 
     h.report(retry, { kind: 'done' });
     expect(h.item(item).status).toBe('done');
+  });
+
+  it('refuses a report the session was not offered, and ends a session that cannot finish in Needs you without a done fault', () => {
+    const h = new Harness();
+    const a = running(h, '1');
+
+    expect(h.store.session(a.session)?.reports).toEqual(QUESTION_REPORTS);
+    expect(h.report(a.session, { kind: 'done' })).toEqual({ actions: [], refused: "This session's prompt does not offer the done report." });
+    expect(h.report(a.session, { kind: 'worktree', path: 'D:/wt/1', branch: null }).refused).toBe("This session's prompt does not offer the worktree report.");
+    expect(h.item(a.item)).toMatchObject({ status: 'running', doneAt: null });
+    expect(h.store.session(a.session)?.outcome).toBeNull();
+    expect(h.store.worktreeFor(h.item(a.item).ticketId)).toBeNull();
+
+    h.act({ type: 'marker', sessionId: a.session, state: 'idle', detail: null });
+    expect(h.item(a.item)).toMatchObject({ status: 'blocked', error: 'The turn ended without an approval report.' });
+
+    // A playbook with no reports: its turn ending is the normal finish.
+    const read = () => new Harness({ playbooks: playbooks(undefined, { 'dev:read': '---\ndescription: Read it\n---\nRead {{ticket.sourceKey}}.' }) });
+    const g = read();
+    const b = running(g, '2', 'dev:read');
+
+    expect(g.store.session(b.session)?.reports).toEqual(['stage', 'link']);
+    g.act({ type: 'marker', sessionId: b.session, state: 'idle', detail: null });
+    expect(g.item(b.item)).toMatchObject({ status: 'blocked', error: 'The session finished its turn.' });
+
+    const k = read();
+    const c = running(k, '3', 'dev:read');
+    k.act({ type: 'roster', sessions: [] });
+    expect(k.item(c.item)).toMatchObject({ status: 'blocked', error: 'The session ended.' });
   });
 
   it('refuses a report for an unknown session', () => {
@@ -424,7 +467,7 @@ describe('setup', () => {
     const start = only(h.triaged(triage, 'dev:develop'), 'start-session');
 
     expect(start).toMatchObject({ kind: 'setup', cwd: 'D:/git/widgets', name: 'switchboard · setup · github 15619', permissionMode: 'auto', model: null });
-    expect(start.prompt).toBe('/init-worktree 15619' + CONTRACT(start.sessionId));
+    expect(start.prompt).toBe('/init-worktree 15619' + CONTRACT(start.sessionId, FINISHING_REPORTS));
     expect(h.item(1)).toMatchObject({ status: 'setup', taskPrompt: null });
 
     return h.started(start);
@@ -442,7 +485,7 @@ describe('setup', () => {
 
     const task = only(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release' }), 'start-session');
 
-    expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/15619', prompt: '/gc-plan 15619' + CONTRACT(task.sessionId), name: 'switchboard · dev:develop · github 15619' });
+    expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/15619', prompt: '/gc-plan 15619' + CONTRACT(task.sessionId, FINISHING_REPORTS), name: 'switchboard · dev:develop · github 15619' });
     expect(h.status(1)).toBe('running');
   });
 
@@ -511,7 +554,7 @@ describe('setup', () => {
     const defect = only(h.triaged({ type: 'triage', triageId: 2, workItemId: 2, ticket: h.store.ticket(2)! } as FlowAction, 'support:defect'), 'start-session');
 
     expect(develop).toMatchObject({ kind: 'task', cwd: 'D:/wt/1' });
-    expect(defect).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets', prompt: 'Research 2 in https://github.com/acme/widgets/issues/2.' + CONTRACT(defect.sessionId) });
+    expect(defect).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets', prompt: 'Research 2 in https://github.com/acme/widgets/issues/2.' + CONTRACT(defect.sessionId, ['stage', 'done', 'link']) });
   });
 });
 

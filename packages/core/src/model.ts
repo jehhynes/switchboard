@@ -14,6 +14,10 @@ export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed
 
 export type SessionOutcome = 'done' | 'failed' | 'stopped';
 
+/** The reports a session can send (PRD R23). */
+export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link'] as const;
+export type ReportKind = (typeof REPORT_KINDS)[number];
+
 /** Triage's importance rating (PRD R50). Earlier values rank first. */
 export const IMMEDIACIES = ['URGENT', 'BLOCKING', 'NON-BLOCKING'] as const;
 export const SEVERITIES = ['HIGH', 'MED', 'LOW'] as const;
@@ -142,4 +146,6 @@ export interface Session {
   endedAt: number | null;
   /** `claude stop` was sent to release the finished turn (PRD R39). */
   released: boolean;
+  /** The reports its prompt offers; the hub refuses the rest (PRD R23). */
+  reports: ReportKind[];
 }

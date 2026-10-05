@@ -140,9 +140,13 @@ export const MIGRATIONS = [
     SELECT l.target FROM links l WHERE l.ticketId = workItems.ticketId AND l.target NOT LIKE 'http://%' AND l.target NOT LIKE 'https://%' ORDER BY l.reportedAt DESC, l.id DESC LIMIT 1
   ) WHERE status = 'awaiting-approval';
   DELETE FROM links WHERE target NOT LIKE 'http://%' AND target NOT LIKE 'https://%';`,
+  // Each session keeps the reports its prompt offered (PRD R23); earlier sessions were offered all of them.
+  `ALTER TABLE sessions ADD COLUMN reports TEXT NOT NULL DEFAULT 'stage,worktree,done,approval,link';`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'needsPick', 'released']);
+/** Stored as comma-separated text. */
+const LISTS = new Set(['reports']);
 
 type Row = Record<string, unknown>;
 
@@ -154,7 +158,7 @@ function fromRow<T>(row: Row | undefined): T | null {
   const result: Row = {};
 
   for (const [key, value] of Object.entries(row)) {
-    result[key] = BOOLEANS.has(key) ? value === 1 : value;
+    result[key] = BOOLEANS.has(key) ? value === 1 : LISTS.has(key) ? String(value).split(',').filter((entry) => entry !== '') : value;
   }
 
   return result as T;
@@ -164,7 +168,7 @@ function toParams(values: Row): Record<string, SQLInputValue> {
   const result: Record<string, SQLInputValue> = {};
 
   for (const [key, value] of Object.entries(values)) {
-    result[key] = typeof value === 'boolean' ? (value ? 1 : 0) : (value as SQLInputValue);
+    result[key] = typeof value === 'boolean' ? (value ? 1 : 0) : Array.isArray(value) ? value.join(',') : (value as SQLInputValue);
   }
 
   return result;

@@ -7,7 +7,7 @@ import type { PlaybookFields } from '../src/playbook.js';
 
 describe('parsePlaybook', () => {
   it('reads front matter and the body, with CRLF and a BOM', () => {
-    const text = '﻿---\r\ndescription: "Defect: research it"\r\nautoStart: true\r\nrequiresWorktree: true\r\npermissionMode: plan\r\nmodel: opus\r\nworkdir: repoRoot\r\n# a comment\r\n---\r\nResearch {{ticket.sourceKey}}.\r\n';
+    const text = '﻿---\r\ndescription: "Defect: research it"\r\nautoStart: true\r\nrequiresWorktree: true\r\npermissionMode: plan\r\nmodel: opus\r\nworkdir: repoRoot\r\nreports: worktree,  done\r\n# a comment\r\n---\r\nResearch {{ticket.sourceKey}}.\r\n';
 
     expect(parsePlaybook('support:defect', text)).toEqual({
       playbook: {
@@ -19,6 +19,7 @@ describe('parsePlaybook', () => {
         permissionMode: 'plan',
         model: 'opus',
         workdir: 'repoRoot',
+        reports: ['done', 'worktree'],
         template: 'Research {{ticket.sourceKey}}.\n',
       },
     });
@@ -35,6 +36,7 @@ describe('parsePlaybook', () => {
         permissionMode: null,
         model: null,
         workdir: 'worktree',
+        reports: [],
         template: 'Classify.',
       },
     });
@@ -53,6 +55,8 @@ describe('parsePlaybook', () => {
     ['a bad requiresWorktree', '---\ndescription: x\nrequiresWorktree: 1\n---\nbody', 'requiresWorktree must be true or false.'],
     ['a bad permissionMode', '---\ndescription: x\npermissionMode: yolo\n---\nbody', 'permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.'],
     ['a bad workdir', '---\ndescription: x\nworkdir: home\n---\nbody', 'workdir must be worktree or repoRoot.'],
+    ['an unknown report', '---\ndescription: x\nreports: done, stage, blocked\n---\nbody', 'reports can list done, approval, worktree, not stage, blocked.'],
+    ['reports on a triage playbook', '---\ndescription: x\nkind: triage\nreports: done\n---\nbody', 'reports applies only to a task playbook.'],
     ['an empty body', '---\ndescription: x\n---\n  \n', 'The prompt template is empty.'],
   ])('rejects %s', (_case, text, error) => {
     expect(parsePlaybook('dev:x', text)).toEqual({ error });
@@ -113,16 +117,18 @@ describe('formatPlaybook', () => {
     permissionMode: null,
     model: null,
     workdir: 'worktree',
+    reports: [],
     template: '/review-pr {{ticket.sourceKey}}\n',
   };
 
   it('writes only the non-default keys, keeping a task playbook\'s autoStart and requiresWorktree', () => {
     expect(formatPlaybook(task)).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
-    expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
+    expect(formatPlaybook({ ...task, reports: ['approval'] })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreports: approval\n---\n/review-pr {{ticket.sourceKey}}\n' });
+    expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, reports: ['done'], template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
   });
 
   it.each<[string, Partial<PlaybookFields>]>([
-    ['every key set', { workdir: 'repoRoot', permissionMode: 'plan', model: 'opus', requiresWorktree: true }],
+    ['every key set', { workdir: 'repoRoot', permissionMode: 'plan', model: 'opus', requiresWorktree: true, reports: ['done', 'approval', 'worktree'] }],
     ['a description with a colon and quotes', { description: '"Defect": research it' }],
     ['a description with outer spaces', { description: ' padded ' }],
     ['a quoted model', { model: "'x'" }],

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { importanceRank } from '../src/model.js';
-import { Harness, issue } from './flowHarness.js';
+import { Harness, issue, playbooks } from './flowHarness.js';
 
 describe('link reports (PRD R52)', () => {
   it('stores links on the ticket, replaces the label of a repeated target, and keeps them for a returned ticket', () => {
-    const h = new Harness();
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:finish': '---\ndescription: Finish it\nreports: done\n---\nFinish it.' }) });
     const [triage] = h.poll(issue('1'));
-    h.triaged(triage, 'dev:question');
+    h.triaged(triage, 'dev:finish');
     const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
     h.report(session, { kind: 'link', label: 'Issue', target: 'https://github.com/o/r/issues/1' });
