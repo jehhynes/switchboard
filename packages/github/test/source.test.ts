@@ -156,7 +156,7 @@ describe('GithubSource.context', () => {
     const gh = fakeGh({ json: fixture('context-with-pr') });
     const result = await new GithubSource(config(), gh).context(ticket('19504'));
 
-    expect(gh).toHaveBeenCalledWith(CONTEXT_QUERY, { owner: 'acme', name: 'widgets', number: 19504 });
+    expect(gh).toHaveBeenCalledWith(CONTEXT_QUERY, { owner: 'acme', name: 'widgets', number: 19504, status: 'Status' });
 
     const text = (result as { context: string }).context;
     const lines = text.split('\n');
@@ -179,6 +179,45 @@ describe('GithubSource.context', () => {
     expect(text.startsWith('GitHub issue #18111: Issue 18111\n')).toBe(true);
     expect(text).not.toContain('## Pull request');
     expect(text).toContain('## Last 5 comments');
+  });
+
+  it('takes the board status from the Status field and adds a field change the timeline did not log', async () => {
+    const unlogged = (await new GithubSource(config(), fakeGh({ json: fixture('context-without-pr') })).context(ticket('18111'))) as { context: string };
+
+    expect(unlogged.context).toContain('\nBoard status: 🎁 Assigned\n');
+    expect(unlogged.context).toContain(
+      '\n2026-10-02 22:57 work-login: assigned user-i\n2026-10-02 23:00 someone: status → 🎁 Assigned (no timeline event)\n2026-10-02 23:07 user-h: unassigned user-h\n',
+    );
+
+    const logged = (await new GithubSource(config(), fakeGh({ json: fixture('context-with-pr') })).context(ticket('19504'))) as { context: string };
+
+    expect(logged.context).not.toContain('(no timeline event)');
+
+    const json = fixture('context-without-pr') as { data: { repository: { issue: { projectItems: { nodes: unknown[] } } } } };
+    json.data.repository.issue.projectItems.nodes = [];
+    const offProject = (await new GithubSource(config(), fakeGh({ json })).context(ticket('18111'))) as { context: string };
+
+    expect(offProject.context).toContain('\nBoard status: unknown\n');
+    expect(offProject.context).not.toContain('(no timeline event)');
+  });
+
+  it('adds the field change only when it is more than a minute after the last status event, or no status event exists', async () => {
+    type Issue = { projectItems: { nodes: { fieldValueByName: { updatedAt: string } }[] }; timelineItems: { nodes: { __typename: string }[] } };
+    const contextAt = async (updatedAt: string, dropStatusEvents = false) => {
+      const json = fixture('context-with-pr') as { data: { repository: { issue: Issue } } };
+      const issue = json.data.repository.issue;
+      issue.projectItems.nodes[1]!.fieldValueByName.updatedAt = updatedAt;
+
+      if (dropStatusEvents) {
+        issue.timelineItems.nodes = issue.timelineItems.nodes.filter((event) => event.__typename !== 'ProjectV2ItemStatusChangedEvent');
+      }
+
+      return ((await new GithubSource(config(), fakeGh({ json })).context(ticket('19504'))) as { context: string }).context;
+    };
+
+    expect(await contextAt('2026-09-22T14:56:13Z')).not.toContain('(no timeline event)');
+    expect(await contextAt('2026-09-22T14:56:14Z')).toContain('\n2026-09-22 14:56 someone: status → ⚒️ Dev (no timeline event)');
+    expect(await contextAt('2026-09-07T12:18:00Z', true)).toContain('\n2026-09-07 12:18 someone: status → ⚒️ Dev (no timeline event)\n');
   });
 
   it('fails when the issue is missing, gh fails, or the response is malformed', async () => {

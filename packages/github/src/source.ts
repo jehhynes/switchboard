@@ -9,6 +9,9 @@ export const TEXT_LIMIT = 2_000;
 
 const UNEXPECTED = 'GitHub returned an unexpected response.';
 
+/** A Status field change this long after the last status event has no timeline event of its own. */
+const UNLOGGED_STATUS_MS = 60_000;
+
 interface Actor {
   login: string;
 }
@@ -18,11 +21,15 @@ interface ProjectRef {
   owner: { login?: string } | null;
 }
 
+interface ProjectItems {
+  nodes: { project: ProjectRef; fieldValueByName: { name?: string; updatedAt?: string } | null }[];
+}
+
 interface IssueNode {
   number: number;
   title: string;
   url: string;
-  projectItems: { nodes: { project: ProjectRef; fieldValueByName: { name?: string; updatedAt?: string } | null }[] };
+  projectItems: ProjectItems;
   assignees?: { nodes: { login: string }[] };
   timelineItems?: { nodes: { __typename?: string; createdAt?: string; assignee?: { login?: string } | null }[] };
 }
@@ -68,6 +75,7 @@ interface ContextIssue {
   title: string;
   url: string;
   body: string;
+  projectItems: ProjectItems;
   assignees: { nodes: Actor[] };
   comments: { nodes: Comment[] };
   timelineItems: { nodes: TimelineNode[] };
@@ -198,7 +206,7 @@ export class GithubSource implements Source {
 
   private async readContext(ticket: Ticket): Promise<ContextResult> {
     const [owner = '', name = ''] = this.config.repo.split('/');
-    const result = await this.gh(CONTEXT_QUERY, { owner, name, number: Number(ticket.sourceKey) });
+    const result = await this.gh(CONTEXT_QUERY, { owner, name, number: Number(ticket.sourceKey), status: this.config.project.statusField });
 
     if ('error' in result) {
       return result;
@@ -218,17 +226,18 @@ export class GithubSource implements Source {
   }
 
   private format(issue: ContextIssue): string {
-    const status = issue.timelineItems.nodes.filter((event) => event.__typename === 'ProjectV2ItemStatusChangedEvent' && event.status && this.onProject(event.project)).at(-1)?.status;
+    // GitHub stopped logging status events around 2026-09-25, so the Status field is the current status.
+    const field = issue.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName;
     const lines = [
       `GitHub issue #${issue.number}: ${issue.title}`,
       issue.url,
-      `Board status: ${status ?? 'unknown'}`,
+      `Board status: ${field?.name ?? 'unknown'}`,
       `Assignees: ${issue.assignees.nodes.map((assignee) => assignee.login).join(', ') || 'none'}`,
       '',
       '## Issue body',
       clip(issue.body, TEXT_LIMIT) || '(empty)',
     ];
-    const history = issue.timelineItems.nodes.map((event) => this.historyLine(event)).filter((line) => line !== null);
+    const history = this.history(issue.timelineItems.nodes, field?.name, field?.updatedAt);
 
     if (history.length > 0) {
       lines.push('', '## Status and assignment history', ...history);
@@ -251,11 +260,30 @@ export class GithubSource implements Source {
     return lines.join('\n');
   }
 
+  /** Adds the Status field's last change when the timeline has no event for it. */
+  private history(events: TimelineNode[], status: string | undefined, updatedAt: string | undefined): string[] {
+    const lines = events.map((event) => ({ at: event.createdAt ?? '', line: this.historyLine(event) }));
+    const lastEvent = events.filter((event) => this.isStatusEvent(event)).at(-1)?.createdAt;
+
+    if (status !== undefined && updatedAt !== undefined && (lastEvent === undefined || Date.parse(updatedAt) - Date.parse(lastEvent) > UNLOGGED_STATUS_MS)) {
+      const index = lines.findIndex((entry) => entry.at > updatedAt);
+      const line = `${updatedAt.slice(0, 16).replace('T', ' ')} someone: status → ${status} (no timeline event)`;
+
+      lines.splice(index === -1 ? lines.length : index, 0, { at: updatedAt, line });
+    }
+
+    return lines.map((entry) => entry.line).filter((line) => line !== null);
+  }
+
+  private isStatusEvent(event: TimelineNode): boolean {
+    return event.__typename === 'ProjectV2ItemStatusChangedEvent' && !!event.status && this.onProject(event.project);
+  }
+
   private historyLine(event: TimelineNode): string | null {
     const who = event.actor?.login ?? 'someone';
     const at = event.createdAt?.slice(0, 16).replace('T', ' ') ?? '';
 
-    if (event.__typename === 'ProjectV2ItemStatusChangedEvent' && event.status && this.onProject(event.project)) {
+    if (this.isStatusEvent(event)) {
       return `${at} ${who}: status ${event.previousStatus || '(none)'} → ${event.status}`;
     }
 

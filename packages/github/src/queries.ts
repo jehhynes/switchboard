@@ -21,10 +21,14 @@ query($q:String!, $status:String!, $after:String){
 
 /** Ground Control's card context (GC CARD_CONTEXT_QUERY), with the closing pull requests read in the same request. */
 export const CONTEXT_QUERY = `
-query($owner:String!, $name:String!, $number:Int!){
+query($owner:String!, $name:String!, $number:Int!, $status:String!){
   repository(owner:$owner, name:$name){
     issue(number:$number){
       number title url body
+      projectItems(first:20){ nodes{
+        project{ number owner{ ... on Organization{ login } ... on User{ login } } }
+        fieldValueByName(name:$status){ ... on ProjectV2ItemFieldSingleSelectValue{ name updatedAt } }
+      }}
       assignees(first:10){ nodes{ login } }
       comments(last:5){ nodes{ body createdAt author{ login } } }
       timelineItems(last:100, itemTypes:[ASSIGNED_EVENT, UNASSIGNED_EVENT, PROJECT_V2_ITEM_STATUS_CHANGED_EVENT]){ nodes{
