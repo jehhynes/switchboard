@@ -218,14 +218,16 @@ export class GithubSource implements Source {
       return { error: `Issue ${ticket.sourceKey} was not found in ${this.config.repo}.` };
     }
 
-    return { context: this.format(issue) };
+    const pr = pullRequestOf(issue.closedByPullRequestsReferences.nodes);
+
+    return { context: this.format(issue, pr), links: pr === null ? [] : [{ label: `Pull request #${pr.number}`, target: pr.url }] };
   }
 
   private onProject(project: ProjectRef | null | undefined): boolean {
     return project?.number === this.config.project.number && project.owner?.login === this.config.project.owner;
   }
 
-  private format(issue: ContextIssue): string {
+  private format(issue: ContextIssue, pr: PullRequest | null): string {
     // GitHub stopped logging status events around 2026-09-25, so the Status field is the current status.
     const field = issue.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName;
     const lines = [
@@ -250,8 +252,6 @@ export class GithubSource implements Source {
         lines.push('', commentHeading(comment), clip(comment.body, TEXT_LIMIT));
       }
     }
-
-    const pr = pullRequestOf(issue.closedByPullRequestsReferences.nodes);
 
     if (pr !== null) {
       lines.push('', ...pullRequestLines(pr));

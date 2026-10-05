@@ -26,6 +26,23 @@ describe('link reports (PRD R52)', () => {
     expect(h.store.linksFor(1)).toHaveLength(2);
   });
 
+  it('stores the links a source found when triage succeeds, and none from a late result', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    const pr = { label: 'Pull request #2', target: 'https://github.com/o/r/pull/2' };
+
+    if (triage?.type !== 'triage') {
+      throw new Error('Expected a triage action.');
+    }
+
+    const succeeded = { type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'dev:develop', summary: 's', immediacy: null, severity: null, model: null } as const;
+
+    h.act({ ...succeeded, links: [pr] });
+    h.act({ ...succeeded, links: [{ label: 'Late', target: 'https://github.com/o/r/pull/3' }] });
+
+    expect(h.store.linksFor(1)).toMatchObject([{ ticketId: 1, ...pr }]);
+  });
+
   it('refuses a link from an unknown session', () => {
     expect(new Harness().send({ type: 'report', sessionId: 'nope', report: { kind: 'link', label: 'x', target: 'https://x' } }).refused).toBe('Unknown session nope.');
   });

@@ -442,6 +442,7 @@ export class Runtime {
                 immediacy: result.immediacy,
                 severity: result.severity,
                 model: action.model,
+                links: context.links ?? [],
               },
         );
         return;

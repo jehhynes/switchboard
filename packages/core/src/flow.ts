@@ -2,6 +2,7 @@ import type { Playbook } from './playbook.js';
 import type { PermissionMode, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { FailedStep, Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
+import type { SourceLink } from './source.js';
 import type { NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt, triagePrompt } from './template.js';
 import type { TemplateVariable } from './template.js';
@@ -76,6 +77,7 @@ export type FlowEvent =
       immediacy: Immediacy | null;
       severity: Severity | null;
       model: string | null;
+      links?: SourceLink[];
     }
   | { type: 'triage-failed'; triageId: number; error: string; context: string | null }
   /** The hub stopped during triage. Nothing failed, so the work item is triaged again. */
@@ -462,6 +464,10 @@ class Flow {
       severity: event.severity,
       model: event.model,
     });
+
+    for (const link of event.links ?? []) {
+      this.store.addLink({ ticketId: triage.ticketId, label: link.label, target: link.target, reportedAt: this.now });
+    }
 
     const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
 

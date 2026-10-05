@@ -4,7 +4,13 @@ import type { Ticket } from './model.js';
 /** A complete read of the source's tickets, or why the read failed or was incomplete. A failed read changes nothing. */
 export type PollResult = { tickets: PolledTicket[] } | { error: string };
 
-export type ContextResult = { context: string } | { error: string };
+/** A link the source found for the ticket, such as the pull request that closes a GitHub issue (PRD R52). */
+export interface SourceLink {
+  label: string;
+  target: string;
+}
+
+export type ContextResult = { context: string; links?: SourceLink[] } | { error: string };
 
 /** A source plugin (PRD R1). It reads and never writes. */
 export interface Source {

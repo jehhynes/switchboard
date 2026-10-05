@@ -161,6 +161,8 @@ describe('GithubSource.context', () => {
     const text = (result as { context: string }).context;
     const lines = text.split('\n');
 
+    expect(result).toMatchObject({ links: [{ label: 'Pull request #19515', target: 'https://github.com/acme/widgets/pull/19515' }] });
+
     expect(lines.slice(0, 6)).toEqual(['GitHub issue #19504: Issue 19504', 'https://github.com/acme/widgets/issues/19504', 'Board status: ⚒️ Dev', 'Assignees: work-login', '', '## Issue body']);
     expect(lines[6]).toBe("Issue body starts here.");
     expect(text).toContain('Issue body ends here.\n\n## Status and assignment history\n2026-09-07 12:18 user-b: status (none) → 🆕 New\n2026-09-07 12:18 user-a: status 🆕 New → 🔖 Planned\n2026-09-07 12:18 user-a: assigned user-a\n');
@@ -178,6 +180,7 @@ describe('GithubSource.context', () => {
 
     expect(text.startsWith('GitHub issue #18111: Issue 18111\n')).toBe(true);
     expect(text).not.toContain('## Pull request');
+    expect(result).toMatchObject({ links: [] });
     expect(text).toContain('## Last 5 comments');
   });
 

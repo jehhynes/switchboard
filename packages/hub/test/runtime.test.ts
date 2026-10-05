@@ -170,10 +170,12 @@ describe('Runtime', () => {
     let changes = 0;
     runtime.onChange(() => changes++);
     source.result = { tickets: [issue('7')] };
+    source.context = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text`, links: [{ label: 'Pull request #70', target: 'https://github.com/o/r/pull/70' }] });
 
     await runtime.pollSource('github');
     await runtime.settled();
 
+    expect(store.linksFor(1)).toMatchObject([{ label: 'Pull request #70', target: 'https://github.com/o/r/pull/70' }]);
     const classifyCall = cli.calls.find((call) => call[1] === '-p');
     expect(classifyCall?.at(-1)).toContain('Classify.');
     expect(store.triage(1)).toMatchObject({ context: 'Issue 7 text', playbook: 'dev:develop', summary: 'Build the thing.' });
@@ -192,12 +194,14 @@ describe('Runtime', () => {
     expect(runtime.snapshot().errors.sources).toEqual({ github: 'The GitHub CLI is not signed in. Run gh auth login.' });
 
     source.result = { tickets: [issue('7')] };
+    source.context = async () => ({ context: 'Issue 7 text', links: [{ label: 'Pull request #70', target: 'https://github.com/o/r/pull/70' }] });
     cli.classifyResult = fail('API Error: 529');
     await runtime.pollSource('github');
     await runtime.settled();
 
     expect(runtime.snapshot().errors.sources).toEqual({});
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'API Error: 529' });
+    expect(store.linksFor(1)).toEqual([]);
 
     source.context = async () => ({ error: 'Issue 7 was not found in acme/widgets.' });
     runtime.send({ type: 'retry', workItemId: 1 });
