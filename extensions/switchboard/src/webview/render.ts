@@ -599,15 +599,32 @@ function group(key: string, title: string, count: number, body: string, ui: Pane
   return `<details class="group" data-group="${key}"${open ? ' open' : ''}><summary><h3>${escape(title)}</h3><span class="count">${count}</span></summary>${body}</details>`;
 }
 
+/** A snoozed ticket shows as one row: its pool entry, else its open work item, else its latest one (PRD R49). */
+function snoozedRows(items: WorkItemView[]): WorkItemView[] {
+  const rows = new Map<number, WorkItemView>();
+
+  for (const item of items) {
+    const shown = rows.get(item.ticketId);
+
+    if (shown === undefined || (shown.status === 'done' && (item.status !== 'done' || item.id > shown.id))) {
+      rows.set(item.ticketId, item);
+    }
+  }
+
+  return items.filter((item) => rows.get(item.ticketId) === item);
+}
+
 /** The whole panel. */
 export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): string {
   const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], unstarted: [], done: [] };
-  const snoozedItems = snapshot.workItems.filter((item) => item.ticket.snoozed);
   const snoozedPool = snapshot.pool.filter((entry) => entry.ticket.snoozed);
+  // A pool row stands for its ticket, whose work items are all done.
+  const pooledTickets = new Set(snoozedPool.map((entry) => entry.ticket.id));
+  const snoozedItems = snoozedRows(snapshot.workItems.filter((item) => item.ticket.snoozed && !pooledTickets.has(item.ticketId)));
   const pool = snapshot.pool.filter((entry) => !entry.ticket.snoozed);
 
   for (const item of snapshot.workItems) {
-    if (!snoozedItems.includes(item)) {
+    if (!item.ticket.snoozed) {
       groups[groupOf(item)].push(item);
     }
   }

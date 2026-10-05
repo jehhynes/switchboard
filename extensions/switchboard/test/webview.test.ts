@@ -523,6 +523,24 @@ describe('renderPanel', () => {
     expect(render(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: false, snoozedUntil: wakeAt } })])).querySelector('.wake')).toBeNull();
   });
 
+  it('shows one Snoozed row per ticket: its pool entry, else its open work item, else its latest, and no row elsewhere', () => {
+    const asleep = (id: number, ticketId: number, status: WorkItemView['status']) =>
+      item(id, { ticketId, status, ticket: { ...item(ticketId).ticket, snoozed: true, snoozedUntil: null } });
+    const root = render(snapshot([asleep(1, 7, 'done'), asleep(2, 7, 'unstarted'), asleep(3, 8, 'done'), asleep(4, 8, 'done'), asleep(5, 9, 'done')]));
+    const snoozed = root.querySelector('details[data-group="snoozed"]')!;
+
+    expect(headings(root)).toEqual(['Needs you 0', 'Working 0', 'Unstarted 0', 'Done 0', 'Snoozed 3']);
+    expect([...snoozed.querySelectorAll('[data-item]')].map((row) => row.getAttribute('data-item'))).toEqual(['2', '4', '5']);
+
+    // A ticket back in the pool shows as its pool row only.
+    const pooled = { ...item(9).ticket, assigned: false, pool: true, snoozed: true };
+    const back = render(snapshot([asleep(6, 9, 'done')], { pool: [{ ticket: pooled, triage: null, returned: 1 }] }));
+
+    expect(headings(back).at(-1)).toBe('Snoozed 1');
+    expect(back.querySelector('[data-item="6"]')).toBeNull();
+    expect(back.querySelector('details[data-group="snoozed"] [data-ticket="9"]')).not.toBeNull();
+  });
+
   it('shows the priority dot first, pull requests and other-repo issues on line 2, and other links and Returned on line 3 (PRD R50–R52)', () => {
     const link = (id: number, label: string, target: string) => ({ id, ticketId: 1, label, target, reportedAt: NOW });
     const zoho = { ...item(1).ticket, source: 'zoho', sourceKey: '501', url: 'https://desk.example.test/501' };
