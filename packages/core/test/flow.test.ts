@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FlowAction } from '../src/flow.js';
+import type { FlowAction, PolledTicket } from '../src/flow.js';
 import { Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 
 const CONTRACT = (id: string) =>
@@ -32,7 +32,7 @@ describe('assigned-state transitions', () => {
       type: 'triage',
       triageId: 1,
       workItemId: 1,
-      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: T0, repoRoot: '' },
+      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '' },
       systemPrompt: 'Classify the GitHub issue.',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change' },
@@ -683,5 +683,88 @@ describe('ad-hoc', () => {
     h.triaged(triage, 'support:defect');
 
     expect(h.item(1)).toMatchObject({ status: 'failed', failedStep: 'task', error: 'sources.github.repoRoot is not set.' });
+  });
+});
+
+describe('in-queue times (PRD R27)', () => {
+  const entered = (key: string, enteredAt: number | null, assigned = true): PolledTicket => ({ ...issue(key, assigned), enteredAt });
+
+  it("takes the source's scope entry whenever it has one, even across a status outside the assigned ones", () => {
+    const h = new Harness();
+    h.poll(entered('1', T0 - 5_000), entered('2', T0 - 1_000, false));
+    expect(['1', '2'].map((key) => h.store.findTicket('github', key)?.scopeAt)).toEqual([T0 - 5_000, T0 - 1_000]);
+
+    // Out of the assigned statuses and back with the same assignment: the clock does not restart.
+    h.now = T0 + 1_000;
+    h.poll(entered('1', T0 - 5_000, false), entered('2', T0 - 1_000));
+    h.now = T0 + 2_000;
+    h.poll(entered('1', T0 - 5_000), entered('2', T0 - 1_000));
+    expect(['1', '2'].map((key) => h.store.findTicket('github', key)?.scopeAt)).toEqual([T0 - 5_000, T0 - 1_000]);
+
+    // A new assignment moves it.
+    h.now = T0 + 3_000;
+    h.poll(entered('1', T0 + 2_500), entered('2', T0 - 1_000));
+    expect(h.store.findTicket('github', '1')?.scopeAt).toBe(T0 + 2_500);
+  });
+
+  it("without a source time, takes the poll's time once and keeps it, also across a status outside the assigned ones", () => {
+    const h = new Harness();
+    h.poll(entered('1', null), entered('2', null, false));
+    expect(['1', '2'].map((key) => h.store.findTicket('github', key)?.scopeAt)).toEqual([T0, null]);
+
+    h.now = T0 + 1_000;
+    h.poll(entered('1', null, false), entered('2', null));
+    h.now = T0 + 2_000;
+    h.poll(entered('1', null), entered('2', null));
+    expect(['1', '2'].map((key) => h.store.findTicket('github', key)?.scopeAt)).toEqual([T0, T0 + 1_000]);
+  });
+
+  it('keeps the scope entry on a work item when it is done, so a later return does not move it', () => {
+    const h = new Harness();
+    h.poll(entered('1', T0 - 5_000));
+    h.now = T0 + 1_000;
+    h.poll();
+    expect(h.item(1)).toMatchObject({ status: 'done', scopeAt: T0 - 5_000, doneAt: T0 + 1_000 });
+
+    h.now = T0 + 2_000;
+    h.poll(entered('1', T0 + 1_500));
+    expect(h.store.findTicket('github', '1')?.scopeAt).toBe(T0 + 1_500);
+    expect(h.item(1).scopeAt).toBe(T0 - 5_000);
+
+    // A ticket with no scope entry, such as one done before migration 6 polled it, keeps the work item's creation.
+    const g = new Harness();
+    g.store.insertTicket({ source: 'github', sourceKey: '9', ref: '#9', sourceId: null, title: 't', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    g.store.insertWorkItem({ ...h.item(1), ticketId: 1, status: 'unstarted', createdAt: T0 - 7_000, scopeAt: null, doneAt: null, doneReason: null });
+    g.now = T0 + 9_000;
+    g.act({ type: 'mark-done', workItemId: 1 });
+    expect(g.item(1)).toMatchObject({ status: 'done', scopeAt: T0 - 7_000 });
+  });
+
+  it('moves statusAt on each status change, and runStartedAt only when a run starts from another status', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    expect(h.item(1)).toMatchObject({ status: 'triaging', statusAt: T0, runStartedAt: T0 });
+
+    h.now = T0 + 1_000;
+    h.triaged(triage, 'dev:question');
+    expect(h.item(1)).toMatchObject({ status: 'unstarted', statusAt: T0 + 1_000, runStartedAt: T0 });
+
+    h.now = T0 + 2_000;
+    const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+    expect(h.item(1)).toMatchObject({ status: 'running', statusAt: T0 + 2_000, runStartedAt: T0 + 2_000 });
+
+    // A status that stays the same keeps its time.
+    h.now = T0 + 3_000;
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(1)).toMatchObject({ statusAt: T0 + 2_000, runStartedAt: T0 + 2_000 });
+
+    h.now = T0 + 4_000;
+    h.report(session, { kind: 'blocked', reason: 'Needs a decision.' });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', statusAt: T0 + 4_000, runStartedAt: T0 + 2_000 });
+
+    h.now = T0 + 5_000;
+    h.act({ type: 'roster', sessions: [] });
+    h.act({ type: 'retry', workItemId: 1 });
+    expect(h.item(1)).toMatchObject({ statusAt: T0 + 5_000, runStartedAt: T0 + 5_000 });
   });
 });

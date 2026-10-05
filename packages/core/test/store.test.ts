@@ -20,16 +20,16 @@ describe('Store', () => {
     const path = join(dir, 'switchboard.db');
     const store = Store.open(path);
 
-    store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: 5, repoRoot: '' });
+    store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '' });
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
     const reopened = Store.open(path);
-    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: 5, repoRoot: '' });
+    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '' });
     reopened.close();
   });
 
@@ -45,7 +45,7 @@ describe('Store', () => {
 
     const store = Store.open(path);
 
-    expect(store.ticket(7)).toMatchObject({ pool: false, iceboxed: false, sortAt: null });
+    expect(store.ticket(7)).toMatchObject({ pool: false, iceboxed: false, sortAt: null, scopeAt: null });
     // A work item waiting to be started is unstarted from migration 4 on (PRD R34).
     expect(store.workItem(3)).toMatchObject({ status: 'unstarted', needsPick: false, approvalPrompt: null, approvalSummary: null });
     expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, summary: 'A summary.', immediacy: null, severity: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
@@ -82,13 +82,41 @@ describe('Store', () => {
     store.close();
   });
 
+  it('estimates version 5 in-queue times from the times already stored', () => {
+    const path = join(dir, 'v5.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 5).join(';'));
+    raw.exec('PRAGMA user_version = 5');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'adhoc', '1', 'a', '', 1, ''), (2, 'github', '2', 'b', 'u', 1, '')");
+    raw.exec(
+      "INSERT INTO workItems (id, ticketId, status, queuedAt, createdAt, doneAt) VALUES (1, 1, 'running', NULL, 10, NULL), (2, 2, 'blocked', NULL, 20, NULL), (3, 2, 'done', NULL, 5, 9), (4, 2, 'queued', 40, 30, NULL)",
+    );
+    raw.exec(
+      "INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, startedAt, endedAt, released) VALUES ('a', 1, 'task', 'claude', '', 'running', 12, 12, NULL, 0), ('b', 2, 'task', 'claude', '', 'ended', 25, 21, 25, 1), ('c', 4, 'task', 'claude', '', 'ended', 35, 31, 35, 1)",
+    );
+    raw.close();
+
+    const store = Store.open(path);
+
+    // An ad-hoc ticket entered scope with its first work item; a polled ticket waits for the next poll. A done item counts from its creation,
+    // and a queued retry from its queue time, not from its earlier session.
+    expect([store.ticket(1)?.scopeAt, store.ticket(2)?.scopeAt]).toEqual([10, null]);
+    expect([1, 2, 3, 4].map((id) => [store.workItem(id)?.statusAt, store.workItem(id)?.runStartedAt, store.workItem(id)?.scopeAt])).toEqual([
+      [12, 12, null],
+      [25, 21, null],
+      [9, 5, 5],
+      [40, 40, null],
+    ]);
+    store.close();
+  });
+
   it('refuses a database from a newer schema', () => {
     const path = join(dir, 'newer.db');
     const raw = new DatabaseSync(path);
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (5).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (6).');
   });
 
   it('rolls back a transaction that throws', () => {
@@ -96,13 +124,13 @@ describe('Store', () => {
 
     expect(() =>
       store.transaction(() => {
-        store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+        store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
         throw new Error('boom');
       }),
     ).toThrow('boom');
     expect(store.tickets('github')).toEqual([]);
 
-    expect(store.transaction(() => store.insertTicket({ source: 'github', sourceKey: '2', ref: '#2', sourceId: null, title: 'Two', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' }).id)).toBe(1);
+    expect(store.transaction(() => store.insertTicket({ source: 'github', sourceKey: '2', ref: '#2', sourceId: null, title: 'Two', url: '', assigned: false, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' }).id)).toBe(1);
     expect(store.tickets('github')).toHaveLength(1);
   });
 
@@ -115,7 +143,7 @@ describe('Store', () => {
 
   it('replaces a ticket worktree link', () => {
     const store = Store.open(':memory:');
-    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
     store.linkWorktree({ ticketId: ticket.id, path: 'D:/wt/a', branch: '1-a', linkedBy: 'convention' });
     store.linkWorktree({ ticketId: ticket.id, path: 'D:/wt/b', branch: null, linkedBy: 'report' });

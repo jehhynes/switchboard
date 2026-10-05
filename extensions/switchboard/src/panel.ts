@@ -59,6 +59,9 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
       case 'open':
         await vscode.commands.executeCommand('switchboard.open', message['sessionId'], message['cwd']);
         return;
+      case 'openFolder':
+        await vscode.commands.executeCommand('switchboard.openWorktree', String(message['path']));
+        return;
       case 'openUrl':
         await vscode.commands.executeCommand('switchboard.openLink', String(message['url']));
         return;
@@ -73,6 +76,11 @@ export async function openLink(target: string): Promise<void> {
   } else {
     await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
   }
+}
+
+/** Opens a worktree in its own window; VS Code focuses a window that already has it. */
+export async function openWorktree(path: string): Promise<void> {
+  await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path), { forceNewWindow: true });
 }
 
 /** Sends an operator event to the hub and shows a refusal. Returns the hub's answer, or null when it did not answer. */
@@ -163,33 +171,13 @@ export async function startAdhoc(record: HubRecord | null, snapshot: Snapshot | 
   }
 }
 
-/** Lets the operator turn sources on and off, such as the Support sources outside a Support week. */
-export async function chooseSources(record: HubRecord | null, snapshot: Snapshot | null): Promise<void> {
-  const states = snapshot?.sourceStates ?? [];
+/** Turns a source on or off, such as the Support sources outside a Support week, and shows a refusal (PRD R3). Returns the hub's answer. */
+export async function setSource(record: HubRecord | null, name: string, enabled: boolean): Promise<{ status: number; error: string | null } | null> {
+  const reply = record === null ? null : await postToHub(record, '/sources', { name, enabled }, ACTION_TIMEOUT_MS);
 
-  if (record === null || states.length === 0) {
-    void vscode.window.showWarningMessage('Switchboard: no sources are configured.');
-    return;
+  if (reply?.status !== 200) {
+    void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
   }
 
-  const picked = await vscode.window.showQuickPick(
-    states.map((state) => ({ label: state.name, picked: state.enabled })),
-    { title: 'Switchboard: sources to poll', canPickMany: true },
-  );
-
-  if (picked === undefined) {
-    return;
-  }
-
-  for (const state of states) {
-    const enabled = picked.some((item) => item.label === state.name);
-
-    if (enabled !== state.enabled) {
-      const reply = await postToHub(record, '/sources', { name: state.name, enabled }, ACTION_TIMEOUT_MS);
-
-      if (reply?.status !== 200) {
-        void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
-      }
-    }
-  }
+  return reply;
 }

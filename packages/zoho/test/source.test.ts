@@ -25,13 +25,23 @@ function desk(overrides: Record<string, DeskResult> = {}) {
 
   return vi.fn<DeskGet>(async (path) => {
     const id = (fixture('ticket') as { id: string }).id;
+    const override = overrides[path];
+
+    if (override !== undefined) {
+      return override;
+    }
 
     if (path === `/tickets/${id}/conversations?limit=100`) {
       return { json: fixture('conversations') };
     }
 
-    if (path === `/tickets/${id}/history?limit=100`) {
+    if (path === `/tickets/${id}/history?limit=100` || path === `/tickets/${id}/history?from=1&limit=100`) {
       return { json: fixture('history') };
+    }
+
+    // Other tickets' histories default to none, so their scope entry falls back to creation.
+    if (/^\/tickets\/\d+\/history\?from=\d+&limit=100$/.test(path) && answers[path] === undefined) {
+      return { json: [] };
     }
 
     const thread = /\/threads\/(\d+)$/.exec(path)?.[1];
@@ -58,7 +68,7 @@ describe('ZohoSource.poll', () => {
     const get = desk();
     const result = await new ZohoSource(CONFIG, get).poll();
 
-    expect(get.mock.calls.map(([path]) => path)).toEqual(['/teams', '/tickets/search?status=Open&limit=100&from=1']);
+    expect(get.mock.calls.map(([path]) => path)).toEqual(['/teams', '/tickets/search?status=Open&limit=100&from=1', ...support.slice(0, 3).map((row) => `/tickets/${row.id}/history?from=1&limit=100`)]);
     expect(search.data).toHaveLength(17);
     // Recorded live: three Support tickets held by support agents, so in the pool, and two by an engineer, so left out.
     expect(result).toEqual({
@@ -71,6 +81,8 @@ describe('ZohoSource.poll', () => {
         assigned: false,
         pool: true,
         sortAt: Date.parse(row.customerResponseTime ?? row.createdTime),
+        // The recorded ticket's history returns it to Open at 00:53; the others have none, so they count from creation.
+        enteredAt: row.id === (fixture('ticket') as { id: string }).id ? Date.parse('2026-10-03T00:53:39.000Z') : Date.parse(row.createdTime),
       })),
     });
     expect(support).toHaveLength(5);
@@ -100,8 +112,104 @@ describe('ZohoSource.poll', () => {
     const mine = { json: { data: [{ id: '1', ticketNumber: '9', subject: 's', webUrl: 'u', assigneeId: SELF, cf: { cf_queue: 'Support' } }] } };
 
     expect(await new ZohoSource(CONFIG, desk({ '/tickets/search?status=Open&limit=100&from=1': mine })).poll()).toEqual({
-      tickets: [{ sourceKey: '9', ref: '#9', sourceId: '1', title: 's', url: 'u', assigned: true, pool: false, sortAt: null }],
+      tickets: [{ sourceKey: '9', ref: '#9', sourceId: '1', title: 's', url: 'u', assigned: true, pool: false, sortAt: null, enteredAt: null }],
     });
+  });
+
+  it('enters scope at the later of the last escalation to Support and the last change to Open, reading the history again only when the ticket changes', async () => {
+    const id = (fixture('ticket') as { id: string }).id;
+    const row = (modifiedTime?: string) => ({
+      id,
+      ticketNumber: '7',
+      subject: 's',
+      webUrl: 'u',
+      status: 'Open',
+      createdTime: '2026-09-01T00:00:00Z',
+      ...(modifiedTime === undefined ? {} : { modifiedTime }),
+      assigneeId: null,
+      cf: { cf_queue: 'Support' },
+    });
+    const page = (modifiedTime?: string) => ({ '/tickets/search?status=Open&limit=100&from=1': { json: { data: [row(modifiedTime)] } } });
+    const entered = async (source: ZohoSource) => ((await source.poll()) as { tickets: { enteredAt: number | null }[] }).tickets[0]?.enteredAt;
+
+    // The fixture: escalated to Support at 18:52, then Open → Deferred → Open, which is out of scope and back.
+    const get = desk(page('2026-10-03T01:00:00Z'));
+    const source = new ZohoSource(CONFIG, get);
+    expect(await entered(source)).toBe(Date.parse('2026-10-03T00:53:39.000Z'));
+    expect(await entered(source)).toBe(Date.parse('2026-10-03T00:53:39.000Z'));
+    expect(get.mock.calls.filter(([path]) => path.includes('/history?'))).toHaveLength(1);
+
+    // A re-escalation after a de-escalation counts; an escalation to another tier and another field do not.
+    const history = [
+      { eventTime: '2026-10-04T12:00:00Z', changes: [{ field: 'Team', newValue: 'Support' }] },
+      { eventTime: '2026-10-04T00:00:00Z', changes: [{ field: 'Escalation', oldValue: 'General', newValue: 'Support' }] },
+      { eventTime: '2026-10-03T00:00:00Z', changes: [{ field: 'Escalation', oldValue: 'Support', newValue: 'General' }] },
+      { eventTime: '2026-10-02T00:00:00Z', changes: [{ field: 'Status', oldValue: 'On Hold', newValue: 'Open' }] },
+    ];
+    const changed = desk({ ...page(), [`/tickets/${id}/history?from=1&limit=100`]: { json: history } });
+    const again = new ZohoSource(CONFIG, changed);
+    expect(await entered(again)).toBe(Date.parse('2026-10-04T00:00:00Z'));
+    // Without a modifiedTime the history is read on every poll.
+    await again.poll();
+    expect(changed.mock.calls.filter(([path]) => path.includes('/history?'))).toHaveLength(2);
+
+    // No scope change in the history: the ticket's creation.
+    expect(await entered(new ZohoSource(CONFIG, desk({ ...page(), [`/tickets/${id}/history?from=1&limit=100`]: { json: [history[0]] } })))).toBe(Date.parse('2026-09-01T00:00:00Z'));
+    expect(await new ZohoSource(CONFIG, desk({ ...page(), [`/tickets/${id}/history?from=1&limit=100`]: { error: 'Zoho Desk rate-limited the read.' } })).poll()).toEqual({
+      error: 'Zoho Desk rate-limited the read.',
+    });
+  });
+
+  it('reads older history pages until a scope change, falling back to creation when the history ends without one and to null past ten pages', async () => {
+    const id = (fixture('ticket') as { id: string }).id;
+    const data = [{ id, ticketNumber: '7', subject: 's', webUrl: 'u', status: 'Open', createdTime: '2026-09-01T00:00:00Z', assigneeId: null, cf: { cf_queue: 'Support' } }];
+    const noise = (n: number) => Array.from({ length: n }, () => ({ eventTime: '2026-10-04T00:00:00Z', changes: [{ field: 'Priority', newValue: 'High' }] }));
+    const escalated = { eventTime: '2026-09-10T00:00:00Z', changes: [{ field: 'Escalation', oldValue: 'General', newValue: 'Support' }] };
+    const pages = (second: unknown[]) =>
+      desk({
+        '/tickets/search?status=Open&limit=100&from=1': { json: { data } },
+        [`/tickets/${id}/history?from=1&limit=100`]: { json: noise(100) },
+        [`/tickets/${id}/history?from=101&limit=100`]: { json: second },
+      });
+    const entered = async (get: ReturnType<typeof desk>) => ((await new ZohoSource(CONFIG, get).poll()) as { tickets: { enteredAt: number | null }[] }).tickets[0]?.enteredAt;
+
+    expect(await entered(pages([...noise(3), escalated]))).toBe(Date.parse('2026-09-10T00:00:00Z'));
+    expect(await entered(pages(noise(3)))).toBe(Date.parse('2026-09-01T00:00:00Z'));
+
+    // Ten full pages without a scope change: unknown rather than the creation, so Switchboard keeps the time it has.
+    const long = vi.fn<DeskGet>(async (path) =>
+      path === '/teams' ? { json: fixture('teams') } : path.startsWith('/tickets/search') ? { json: { data } } : { json: noise(100) },
+    );
+    expect(await entered(long)).toBeNull();
+    expect(long.mock.calls.filter(([path]) => path.includes('/history?'))).toHaveLength(10);
+  });
+
+  it('reads the history again when modifiedTime changes, and forgets tickets that left', async () => {
+    const id = (fixture('ticket') as { id: string }).id;
+    let rows: object[] = [];
+    const get = vi.fn<DeskGet>(async (path) => {
+      if (path === '/teams') {
+        return { json: fixture('teams') };
+      }
+
+      return path.startsWith('/tickets/search') ? { json: { data: rows } } : { json: [] };
+    });
+    const row = (modifiedTime: string) => ({ id, ticketNumber: '7', subject: 's', webUrl: 'u', status: 'Open', createdTime: '2026-09-01T00:00:00Z', modifiedTime, assigneeId: null, cf: { cf_queue: 'Support' } });
+    const source = new ZohoSource(CONFIG, get);
+    const reads = () => get.mock.calls.filter(([path]) => path.includes('/history?')).length;
+
+    rows = [row('a')];
+    await source.poll();
+    await source.poll();
+    expect(reads()).toBe(1);
+    rows = [row('b')];
+    await source.poll();
+    expect(reads()).toBe(2);
+    rows = [];
+    await source.poll();
+    rows = [row('b')];
+    await source.poll();
+    expect(reads()).toBe(3);
   });
 
   it('reads the teams once per six hours', async () => {
@@ -129,7 +237,7 @@ describe('ZohoSource.classify', () => {
 });
 
 describe('ZohoSource.context', () => {
-  const ticket = (sourceId: string | null): Ticket => ({ id: 1, source: 'zoho', sourceKey: '900007', ref: '#900007', sourceId, title: 'Ticket 900007', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+  const ticket = (sourceId: string | null): Ticket => ({ id: 1, source: 'zoho', sourceKey: '900007', ref: '#900007', sourceId, title: 'Ticket 900007', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
   it('formats the subject, fields, tier and owner history, and the conversation oldest first, clipping each text', async () => {
     const detail = fixture('ticket') as { id: string; ticketNumber: string; status: string };

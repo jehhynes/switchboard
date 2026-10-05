@@ -146,14 +146,61 @@ describe('the hub process', () => {
     }
   });
 
-  it('puts New Ad-hoc Session and Choose Sources in the view menu', async () => {
+  it('puts New Ad-hoc Session and an on or off toggle per source in the title bar, and refuses to toggle an unknown source', async () => {
     await api();
     const commands = await vscode.commands.getCommands(true);
     const menu = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes.menus['view/title'];
+    const shown = (command) => menu.find((entry) => entry.command === command)?.when;
 
-    for (const command of ['switchboard.newAdhoc', 'switchboard.chooseSources']) {
-      assert.ok(commands.includes(command), `${command} is not registered`);
-      assert.ok(menu.some((entry) => entry.command === command && entry.when === 'view == switchboard.workItems'), `${command} is not in the view menu`);
+    assert.strictEqual(shown('switchboard.newAdhoc'), 'view == switchboard.workItems');
+    assert.deepStrictEqual(menu.map((entry) => entry.group).slice(-2), ['navigation@8', 'navigation@9'], 'the separator sits before New Ad-hoc Session');
+    for (const name of ['github', 'zoho', 'forum']) {
+      for (const state of ['on', 'off']) {
+        assert.ok(commands.includes(`switchboard.source.${name}.${state}`), `switchboard.source.${name}.${state} is not registered`);
+        assert.strictEqual(shown(`switchboard.source.${name}.${state}`), `view == switchboard.workItems && switchboard.source.${name} == ${state}`);
+      }
+    }
+    assert.ok(!commands.includes('switchboard.chooseSources'));
+
+    const reply = await vscode.commands.executeCommand('switchboard.setSource', 'nosuch', true);
+    assert.strictEqual(reply.status, 409);
+  });
+
+  it('shows each row command in the row right-click menu only when the row sets its key, and sends the row action', async () => {
+    await api();
+    const commands = await vscode.commands.getCommands(true);
+    const menu = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes.menus['webview/context'];
+
+    assert.strictEqual(menu.length, 8);
+    for (const entry of menu) {
+      assert.ok(commands.includes(entry.command), `${entry.command} is not registered`);
+      assert.strictEqual(entry.when, `webviewId == 'switchboard.workItems' && webviewSection == 'row' && ${entry.command}`);
+    }
+
+    // Each command sends the action under its own key in the row's context.
+    const actions = { markDone: { type: 'mark-done', workItemId: 41 }, retry: { type: 'retry', workItemId: 42 } };
+    const markDone = await vscode.commands.executeCommand('switchboard.row.markDone', { actions });
+    const retry = await vscode.commands.executeCommand('switchboard.row.retry', { actions });
+
+    assert.deepStrictEqual([markDone.status, markDone.error], [409, 'Unknown work item 41.']);
+    assert.deepStrictEqual([retry.status, retry.error], [409, 'Unknown work item 42.']);
+  });
+
+  it('turns a source off with its on toggle and on with its off toggle, in settings.json', async () => {
+    await api();
+    const settings = join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'settings.json');
+    const fs = require('node:fs');
+    const enabled = () => JSON.parse(fs.readFileSync(settings, 'utf8')).sources.github.enabled;
+
+    // The unknown key makes the settings invalid, so the hub keeps its defaults and never polls GitHub.
+    fs.writeFileSync(settings, JSON.stringify({ unknownKey: true, sources: { github: { enabled: false } } }));
+    try {
+      assert.strictEqual((await vscode.commands.executeCommand('switchboard.source.github.off')).status, 200);
+      assert.strictEqual(enabled(), true);
+      assert.strictEqual((await vscode.commands.executeCommand('switchboard.source.github.on')).status, 200);
+      assert.strictEqual(enabled(), false);
+    } finally {
+      fs.rmSync(settings, { force: true });
     }
   });
 

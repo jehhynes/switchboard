@@ -4,7 +4,9 @@ import { hubBundlePath, hubLogPath } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { startHub } from './hubProcess.js';
-import { WorkItemsView, act, attach, chooseSources, claimOpen, openLink, openSession, startAdhoc } from './panel.js';
+import { WorkItemsView, act, attach, claimOpen, openLink, openSession, openWorktree, setSource, startAdhoc } from './panel.js';
+import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
+import { ROW_COMMANDS } from './webview/render.js';
 import type { Snapshot } from '@switchboard/hub';
 
 export interface SwitchboardApi {
@@ -15,6 +17,18 @@ export interface SwitchboardApi {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
+const shownToggles = new Map<string, string | undefined>();
+
+/** Sets the context keys that pick each title-bar source toggle's on or off command, when they change. */
+function showSourceToggles(snapshot: Snapshot): void {
+  for (const [name, value] of Object.entries(sourceContexts(snapshot))) {
+    if (!shownToggles.has(name) || shownToggles.get(name) !== value) {
+      shownToggles.set(name, value);
+      void vscode.commands.executeCommand('setContext', `switchboard.source.${name}`, value);
+    }
+  }
+}
 
 export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   // SWITCHBOARD_HOME points a window at another home, such as live acceptance's; the hub gets it as --home.
@@ -39,11 +53,20 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WorkItemsView.id, view, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('switchboard.action', (action: unknown) => act(keeper.current(), action)),
+    // A row's right-click menu passes the row's `data-vscode-context`, which holds the hub action for each command.
+    ...Object.values(ROW_COMMANDS).map((key) =>
+      vscode.commands.registerCommand(`switchboard.row.${key}`, (row: { actions: Record<string, unknown> }) => act(keeper.current(), row.actions[key])),
+    ),
     vscode.commands.registerCommand('switchboard.attach', (shortId: string, name: string) => attach(shortId, name)),
     vscode.commands.registerCommand('switchboard.open', (sessionId: string, cwd: string) => openSession(keeper.current(), sessionId, cwd)),
     vscode.commands.registerCommand('switchboard.openLink', (target: string) => openLink(target)),
+    vscode.commands.registerCommand('switchboard.openWorktree', (path: string) => openWorktree(path)),
     vscode.commands.registerCommand('switchboard.newAdhoc', () => startAdhoc(keeper.current(), view.state() as Snapshot | null)),
-    vscode.commands.registerCommand('switchboard.chooseSources', () => chooseSources(keeper.current(), view.state() as Snapshot | null)),
+    vscode.commands.registerCommand('switchboard.setSource', (name: string, enabled: boolean) => setSource(keeper.current(), name, enabled)),
+    ...TOGGLED_SOURCES.flatMap((name) => [
+      vscode.commands.registerCommand(`switchboard.source.${name}.on`, () => setSource(keeper.current(), name, false)),
+      vscode.commands.registerCommand(`switchboard.source.${name}.off`, () => setSource(keeper.current(), name, true)),
+    ]),
     vscode.commands.registerCommand('switchboard.claim', () => {
       const record = keeper.current();
 
@@ -58,6 +81,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       openEvents(record, onEnd, undefined, (event, data) => {
         if (event === 'state') {
           view.update(data);
+          showSourceToggles(JSON.parse(data) as Snapshot);
         } else if (event === 'hello') {
           void claimOpen(record).catch(() => {});
         }

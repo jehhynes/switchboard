@@ -23,7 +23,8 @@ interface IssueNode {
   title: string;
   url: string;
   projectItems: { nodes: { project: ProjectRef; fieldValueByName: { name?: string; updatedAt?: string } | null }[] };
-  timelineItems?: { nodes: { createdAt?: string; assignee?: { login?: string } | null }[] };
+  assignees?: { nodes: { login: string }[] };
+  timelineItems?: { nodes: { __typename?: string; createdAt?: string; assignee?: { login?: string } | null }[] };
 }
 
 interface SearchPage {
@@ -107,10 +108,46 @@ export class GithubSource implements Source {
    * field's updatedAt is read because status-change events have been missing from the issue timeline since about 2026-09-25.
    */
   private waitingSince(timeline: IssueNode['timelineItems'], statusUpdatedAt: string | undefined): number | null {
-    const assigned = (timeline?.nodes ?? []).filter((event) => event.assignee?.login !== undefined && this.config.logins.includes(event.assignee.login));
+    const assigned = (timeline?.nodes ?? []).filter((event) => event.__typename !== 'UnassignedEvent' && event.assignee?.login !== undefined && this.config.logins.includes(event.assignee.login));
     const times = [statusUpdatedAt, assigned.at(-1)?.createdAt].map((time) => (time === undefined ? NaN : Date.parse(time))).filter((time) => !Number.isNaN(time));
 
     return times.length === 0 ? null : Math.max(...times);
+  }
+
+  /**
+   * When the operator's current assignment began (GC `assignedSince`): undo the events newest first until none of their logins is
+   * assigned. Null when none is assigned or the events start mid-assignment. A status change does not count (PRD R27).
+   */
+  private assignedSince(node: IssueNode): number | null {
+    const own = new Set(this.config.logins.map((login) => login.toLowerCase()));
+    const held = new Set((node.assignees?.nodes ?? []).map((actor) => actor.login.toLowerCase()).filter((login) => own.has(login)));
+
+    if (held.size === 0) {
+      return null;
+    }
+
+    // The timeline is in event order, which also orders events within one second.
+    for (const event of [...(node.timelineItems?.nodes ?? [])].reverse()) {
+      const login = event.assignee?.login?.toLowerCase();
+
+      if (login === undefined || !own.has(login)) {
+        continue;
+      }
+
+      if (event.__typename === 'AssignedEvent') {
+        held.delete(login);
+
+        if (held.size === 0) {
+          const at = Date.parse(event.createdAt ?? '');
+
+          return Number.isNaN(at) ? null : at;
+        }
+      } else if (event.__typename === 'UnassignedEvent') {
+        held.add(login);
+      }
+    }
+
+    return null;
   }
 
   private async readIssues(): Promise<PollResult> {
@@ -145,6 +182,7 @@ export class GithubSource implements Source {
           assigned: status !== undefined && assignedStatuses.includes(status),
           pool: false,
           sortAt: this.waitingSince(node.timelineItems, field?.updatedAt),
+          enteredAt: this.assignedSince(node as IssueNode),
         });
       }
 

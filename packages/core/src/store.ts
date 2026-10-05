@@ -112,6 +112,25 @@ export const MIGRATIONS = [
   // The source's reference for a ticket (`{{ticket.ref}}`); the next poll fills polled tickets, and ad-hoc ones are `#<n>`.
   `ALTER TABLE tickets ADD COLUMN ref TEXT NOT NULL DEFAULT '';
   UPDATE tickets SET ref = '#' || sourceKey WHERE source = 'adhoc';`,
+  // In-queue times (PRD R27). Polls fill a polled ticket's scopeAt; the rest are estimated from the times already stored.
+  `ALTER TABLE tickets ADD COLUMN scopeAt INTEGER;
+  UPDATE tickets SET scopeAt = (SELECT MIN(w.createdAt) FROM workItems w WHERE w.ticketId = tickets.id) WHERE source = 'adhoc';
+  ALTER TABLE workItems ADD COLUMN statusAt INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE workItems ADD COLUMN runStartedAt INTEGER;
+  ALTER TABLE workItems ADD COLUMN scopeAt INTEGER;
+  UPDATE workItems SET
+    statusAt = CASE
+      WHEN status = 'done' THEN COALESCE(doneAt, createdAt)
+      WHEN status = 'queued' THEN COALESCE(queuedAt, createdAt)
+      WHEN status IN ('blocked', 'failed', 'awaiting-approval') THEN COALESCE((SELECT MAX(COALESCE(s.endedAt, s.stateAt)) FROM sessions s WHERE s.workItemId = workItems.id), createdAt)
+      WHEN status IN ('setup', 'running') THEN COALESCE((SELECT MAX(s.startedAt) FROM sessions s WHERE s.workItemId = workItems.id), createdAt)
+      ELSE createdAt
+    END,
+    runStartedAt = CASE
+      WHEN status = 'queued' THEN COALESCE(queuedAt, createdAt)
+      ELSE COALESCE((SELECT MAX(s.startedAt) FROM sessions s WHERE s.workItemId = workItems.id), createdAt)
+    END,
+    scopeAt = CASE WHEN status = 'done' THEN createdAt END;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'iceboxed', 'needsPick', 'released']);

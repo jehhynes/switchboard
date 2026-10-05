@@ -142,6 +142,39 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **3. Pool and icebox: pass.** The pool listed Zoho 6 and Forum 7, each triaged into `support:case` with a summary, oldest first by `sortAt`, in the same order as the hub's snapshot. Icebox moved a ticket to a collapsed Icebox group (Pool 12, Icebox 1); Restore returned it to its place by `sortAt` (Pool 13). No pick, approval or start ran on a pool ticket.
 - **Current use:** the open and claim path, approval reports, and the pool display (architecture.md § Flow, § Panel).
 
+## M14. Zoho scope entry from ticket history
+
+- **Date:** 2026-10-04.
+- **Versions:** Zoho Desk REST API v1, the operator's `desk-token.sh` runner.
+- **Experiment:** read-only GETs: one page of `/tickets/search?status=Open`, then `/tickets/{id}/history?limit=100` for its 3 Support tickets.
+- **Result:**
+  - Search rows carry `modifiedTime` and `status`; every row on the page had status and status type `Open`.
+  - History changes name the field `Escalation` (not `cf_queue`) and `Status`, with `oldValue` and `newValue` as labels, such as `General -> Support` and `Deferred -> Open`.
+  - Deferred returns to Open on its own at 08:00 UTC. One ticket moved Open → Deferred → Open 3 minutes apart, 6 hours after its escalation, so its scope entry is the return to Open.
+  - History pages with `from`, counting from 1: `from=1` returns the same page as no `from`, and `from=101` the next 100. One ticket had 121 events.
+- **Current use:** the Zoho source's scope entry (architecture.md § Settings).
+
+## M15. Forum scope entry from the change-history store
+
+- **Date:** 2026-10-04.
+- **Versions:** the production forum database through the operator's `run-forum-sql.sh`, database `audit`.
+- **Experiment:** read-only queries on the 9 open Forum topics: each topic's `AuditEntity` rows (`EntityType = 1`) joined to `AuditScope`, then the source's scope-entry query and its `EXPLAIN`.
+- **Result:**
+  - The database connection reads `audit` by qualified name, so no second connection is needed.
+  - `FieldNames` is comma-separated with no spaces. The insert row (`ChangeType = 1`) lists every field, `Status` included. Later rows name only the fields that changed: `Status` when a topic was resolved (`/setstatus?status=Resolved`) or reopened by a post, and `DevStatus` and `Milestone` from the GitHub webhook.
+  - One topic created on 2026-09-28 was resolved on 2026-10-01 and reopened by a post on 2026-10-02 17:27; its scope entry is the reopening. One created on 2026-09-18 reached its current status on 2026-10-01.
+  - The query in the source matches `Status` only, by the operator's definition of Forum scope.
+  - `EXPLAIN`: a range scan on `an index on EntityType` (23 rows) and an `eq_ref` join on `AuditScope`'s primary key. The query took about 5 seconds, mostly the runner's start.
+- **Current use:** the Forum source's scope entry (architecture.md § Settings).
+
+## M16. Webview anchor clicks open twice
+
+- **Date:** 2026-10-04.
+- **Versions:** VS Code 1.140.0 (`07f806f9`), `resources/app/out/vs/workbench/contrib/webview/browser/pre/index.html`.
+- **Inspection:** the webview host adds a `click` listener on the webview's window (`handleInnerClick`). For any trusted click whose composed path holds an `<a>` with an `href` that is not a fragment, it posts `did-click-link` with the resolved `href` and VS Code opens it. It does not check `event.defaultPrevented`, so a panel handler that calls `preventDefault` and opens the link itself opens it twice: two identical browser tabs.
+- **Result:** `event.stopPropagation()` in the panel's root `click` handler keeps the event from the window, so only the panel's `openUrl` message opens the link. The panel keeps its own handler because a local file path in `href` resolves against the webview origin, which the host's open would get wrong.
+- **Current use:** the webview's link click handler in `main.ts` (architecture.md § Panel).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

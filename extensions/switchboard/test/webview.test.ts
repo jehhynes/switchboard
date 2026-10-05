@@ -1,7 +1,7 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { startPanel } from '../src/webview/main.js';
-import { age, controlsOf, groupOf, mainControl, markOf, queueTime, rankOf, renderPanel, sessionControl, unstartedOrder } from '../src/webview/render.js';
+import { age, clockOf, controlsOf, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -47,9 +47,12 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     approvalPrompt: null,
     approvalSummary: null,
     createdAt: NOW,
+    statusAt: NOW,
+    runStartedAt: NOW,
+    scopeAt: null,
     doneAt: null,
     doneReason: null,
-    ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: NOW, repoRoot: '' },
+    ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
     sessions: [],
     worktree: null,
@@ -102,22 +105,23 @@ describe('controlsOf', () => {
   });
 });
 
-describe('sessionControl', () => {
-  const control = (sessions: ReturnType<typeof session>[]) => sessionControl(item(7, { sessions }));
+describe('openAction', () => {
+  const worktree = { id: 1, ticketId: 7, path: 'D:/git/widgets-wt/107-fix', branch: '107-fix', linkedBy: 'report' as const };
+  const action = (sessions: ReturnType<typeof session>[], patch: Partial<WorkItemView> = {}) => openAction(item(7, { sessions, ...patch }));
 
-  it('attaches to a background session, opens any other latest session in VS Code, and names the state', () => {
-    expect(control([])).toBeNull();
-    expect(control([session()])).toEqual({ state: 'running', title: 'Session running. Attach', message: { type: 'attach', shortId: 'aaaa1111', name: 'github 107' } });
-    expect(control([session({ state: 'waiting' })])?.state).toBe('waiting');
-    expect(control([session({ state: 'idle', released: true })])).toEqual({ state: 'idle', title: 'Session idle. Open in VS Code', message: { type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' } });
-    expect(control([session({ state: 'failed' })])?.state).toBe('failed');
-    expect(control([session({ state: 'ended' })])).toEqual({ state: null, title: 'No active session. Open in VS Code', message: { type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' } });
-    expect(control([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual({ state: 'running', title: 'Session running', message: null });
+  it('attaches to a background session, opens any other latest session in VS Code, and otherwise opens the worktree', () => {
+    expect(action([session()], { worktree })).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 107' });
+    expect(action([session({ state: 'idle', released: true })], { worktree })).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+    expect(action([session({ state: 'ended' })], { worktree })).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+    expect(action([], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
+    expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
+    expect(action([])).toBeNull();
+    expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toBeNull();
   });
 });
 
 
-const ui = (patch: Partial<PanelUi> = {}): PanelUi => ({ groups: new Map(), menu: null, ...patch });
+const ui = (patch: Partial<PanelUi> = {}): PanelUi => ({ groups: new Map(), selected: null, ...patch });
 
 const render = (data: Snapshot, patch: Partial<PanelUi> = {}) => {
   const root = document.createElement('div');
@@ -126,6 +130,17 @@ const render = (data: Snapshot, patch: Partial<PanelUi> = {}) => {
 };
 
 const titles = (scope: Element, selector: string) => [...scope.querySelectorAll(selector)].map((element) => element.getAttribute('title'));
+/** The commands a row's right-click menu shows, by key, with the hub action each passes. */
+const rowMenu = (row: Element) => {
+  const context = JSON.parse(row.getAttribute('data-vscode-context')!) as Record<string, unknown> & { actions: Record<string, unknown> };
+  const shown = Object.keys(context).filter((key) => key.startsWith('switchboard.row.') && context[key] === true).map((key) => key.slice('switchboard.row.'.length));
+
+  return { section: context['webviewSection'], defaults: context['preventDefaultContextMenuItems'], shown, actions: context.actions };
+};
+const headings = (scope: Element) => [...scope.querySelectorAll('details.group > summary')].map((summary) => `${summary.querySelector('h3')!.textContent} ${summary.querySelector('.count')!.textContent}`);
+/** A control's name: the tooltip of an icon button, or the text of a labelled one. */
+const controlLabels = (scope: Element, selector: string) => [...scope.querySelectorAll(selector)].map((element) => element.getAttribute('title') ?? element.textContent);
+const controlNamed = (scope: Element, label: string) => [...scope.querySelectorAll<HTMLButtonElement>('button.control')].find((button) => (button.getAttribute('title') ?? button.textContent) === label)!;
 
 type Triage = NonNullable<WorkItemView['triage']>;
 
@@ -183,6 +198,34 @@ describe('markOf', () => {
   });
 });
 
+describe('clockOf', () => {
+  it('counts Needs you from the status or the wait, Working from the run start, and the rest from scope entry, stopping at done (PRD R27)', () => {
+    const scoped = (patch: Partial<WorkItemView>, scopeAt: number | null = 5, iceboxed = false) =>
+      item(1, { createdAt: 1, statusAt: 2, runStartedAt: 3, ...patch, ticket: { ...item(1).ticket, scopeAt, iceboxed } });
+
+    expect(clockOf(scoped({ status: 'blocked' }))).toEqual({ since: 2, label: 'In this status since' });
+    expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
+    expect(clockOf(scoped({ status: 'setup', sessions: [session({ kind: 'pick', state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
+    // A blocked item whose session still waits counts from the block.
+    expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
+    expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Working since' });
+    expect(clockOf(scoped({ status: 'queued', runStartedAt: null }))).toEqual({ since: 2, label: 'Working since' });
+    expect(clockOf(scoped({ status: 'unstarted' }))).toEqual({ since: 5, label: 'In scope since' });
+    expect(clockOf(scoped({ status: 'unstarted' }, null))).toEqual({ since: 1, label: 'In scope since' });
+    expect(clockOf(scoped({ status: 'blocked' }, 5, true))).toEqual({ since: 5, label: 'In scope since' });
+    // Done keeps the scope entry the work item had, not the ticket's later one.
+    expect(clockOf(scoped({ status: 'done', doneAt: 9, scopeAt: 4 }, 8))).toEqual({ since: 4, label: 'In scope from' });
+    expect(clockOf(scoped({ status: 'done', doneAt: 9 }, 8))).toEqual({ since: 1, label: 'In scope from' });
+  });
+
+  it('shows the span from scope entry to done in a done row', () => {
+    const root = render(snapshot([item(1, { status: 'done', scopeAt: NOW - 3 * 86_400_000, doneAt: NOW - 86_400_000 })]), { groups: new Map([['done', true]]) });
+
+    expect(root.querySelector('[data-item="1"] .queue')?.textContent).toBe('2d');
+    expect(root.querySelector('[data-item="1"] .queue')?.getAttribute('title')).toMatch(/^In scope from .+ UTC to .+ UTC$/);
+  });
+});
+
 describe('rankOf and queueTime', () => {
   it('ranks only a full rating', () => {
     expect(rankOf(triage({ immediacy: 'URGENT', severity: 'HIGH' }))).toBe(0);
@@ -219,7 +262,7 @@ describe('renderPanel', () => {
       ),
     );
 
-    expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (1)', 'Unstarted (0)', 'Done (1)']);
+    expect(headings(root)).toEqual(['Needs you 1', 'Working 1', 'Unstarted 0', 'Done 1']);
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.group')].map((group) => [group.dataset['group'], group.open])).toEqual([
       ['needs', true],
       ['working', true],
@@ -229,17 +272,22 @@ describe('renderPanel', () => {
     expect(root.querySelector('[data-group="unstarted"] p.empty')?.textContent).toBe('Nothing waits to be started.');
     expect(root.querySelector('details.item, details:not(.group), .detail')).toBeNull();
     expect(root.querySelector('[data-item="2"] .title')?.textContent).toBe('Issue <2>');
-    expect(root.querySelector('[data-item="2"] .line.second .note')?.textContent).toBe('Workspace not trusted.');
-    expect(root.querySelector('[data-item="2"] .line.second .note')?.getAttribute('title')).toBe('Workspace not trusted.');
-    expect(root.querySelectorAll('[data-item="3"] .line')).toHaveLength(2);
+    expect(root.querySelector('[data-item="2"] .line.third .note')?.textContent).toBe('Workspace not trusted.');
+    expect(root.querySelector('[data-item="2"] .line.third .note')?.hasAttribute('title')).toBe(false);
+    expect([...root.querySelectorAll('[data-item="3"] .line')].map((line) => line.className)).toEqual(['line first', 'line second', 'line third']);
+    // Line 1 is the title and the time; line 2 the playbook, the ticket and the actions.
+    expect([...root.querySelector('[data-item="3"] .line')!.children].map((child) => child.className)).toEqual(['title', 'queue']);
+    expect(root.querySelector('[data-item="3"] .line.second .meta')?.textContent).toBe('dev:developgh 103');
+    expect(root.querySelector('[data-item="3"] .line.second a.key')?.getAttribute('href')).toBe('https://github.com/o/r/issues/103');
+    expect(root.querySelectorAll('.title[title], .playbook-name[title], .key[title], .approval[title], .note[title], .returned[title]')).toHaveLength(0);
+    // The source names the key's colour class; only github is shortened.
+    expect(root.querySelector('[data-item="3"] .line.second a.key')?.className).toBe('key github');
     // No status text: the group and the mark say it, and the mark's tooltip names it.
     expect(root.querySelector('.status')).toBeNull();
     expect([...root.querySelectorAll('.item')].map((row) => row.textContent).join(' ')).not.toMatch(/Failed|Running|Finished/);
-    expect(titles(root, '[data-item="3"] .mark')).toEqual(['Running']);
-    // A row with nothing more to say keeps its second line, holding only the playbook.
-    expect(root.querySelector('[data-item="1"] .line.second')?.textContent).toBe('dev:develop');
-    expect(root.querySelector('[data-item="2"] .mark.codicon-error.error')?.getAttribute('title')).toBe('Failed');
-    expect(root.querySelector('[data-item="3"] .stage')?.textContent).toBe('Planning · 3m');
+    expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Running']);
+    expect(root.querySelector('[data-item="2"] .line.third .mark.codicon-error.error')?.getAttribute('title')).toBe('Failed');
+    expect(root.querySelector('[data-item="3"] .line.third .stage')?.textContent).toBe('Planning · 3m');
     expect([...root.querySelectorAll('.errors .note')].map((note) => note.textContent?.trim())).toEqual([
       'Settings: sessions.concurrency must be a whole number from 1 to 4.',
       'Playbook dev/bad.md: description is required.',
@@ -254,30 +302,58 @@ describe('renderPanel', () => {
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.group')].map((group) => group.open)).toEqual([false, true, true, true]);
   });
 
-  it('shows only the primary control and the session button, with the other controls behind the ... menu', () => {
+  it('shows only the primary control and no session state, with every control in the right-click menu', () => {
     const closed = render(snapshot([item(1, { status: 'awaiting-approval' }), item(2)]));
 
-    expect(titles(closed, '[data-item="1"] button.control')).toEqual(['Approve']);
+    expect(controlLabels(closed, '[data-item="1"] button.control')).toEqual(['Approve']);
     expect(titles(closed, '[data-item="1"] .actions > button.control')).toEqual(['Approve']);
-    expect(titles(closed, '[data-item="1"] button.more-button')).toEqual(['More actions']);
-    expect(closed.querySelector('.menu')).toBeNull();
+    expect(closed.querySelector('.more-button, .menu')).toBeNull();
     expect(titles(closed, '[data-item="2"] button.control')).toEqual([]);
 
     const running = render(snapshot([item(4, { status: 'blocked', sessions: [session({ state: 'waiting' })] })]));
-    const sessionButton = running.querySelector<HTMLElement>('[data-item="4"] button.session-button')!;
 
-    expect(titles(running, '[data-item="4"] .actions > button.control')).toEqual(['Retry', 'Session waiting. Attach']);
-    expect(sessionButton.querySelector('.state-dot.waiting')).not.toBeNull();
-    expect(JSON.parse(sessionButton.dataset['message']!)).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 104' });
-    expect(render(snapshot([item(5, { status: 'blocked', sessions: [session({ state: 'ended' })] })])).querySelector('[data-item="5"] button.session-button .state-dot')).toBeNull();
-    expect(render(snapshot([item(6, { status: 'triaging' })])).querySelector('[data-item="6"] button.session-button')).toBeNull();
-    expect(render(snapshot([item(7, { sessions: [session({ state: 'starting', shortId: null, nativeSessionId: null })] })])).querySelector<HTMLButtonElement>('[data-item="7"] button.session-button')!.disabled).toBe(true);
+    expect(titles(running, '[data-item="4"] .actions > *')).toEqual(['Retry']);
+    expect(JSON.parse(running.querySelector<HTMLElement>('[data-item="4"]')!.dataset['open']!)).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 104' });
+    expect(running.querySelector('.session-button')).toBeNull();
+    expect(render(snapshot([item(6, { status: 'triaging' })])).querySelector('[data-item="6"]')!.hasAttribute('data-open')).toBe(false);
+    expect(render(snapshot([item(7, { sessions: [session({ state: 'starting', shortId: null, nativeSessionId: null })] })])).querySelector('[data-item="7"] .actions')).toBeNull();
 
-    const open = render(snapshot([item(1, { status: 'awaiting-approval' })]), { menu: 'item:1' });
+    expect(rowMenu(closed.querySelector('[data-item="1"]')!)).toEqual({
+      section: 'row',
+      defaults: true,
+      shown: ['approve', 'triageAgain', 'markDone', 'icebox'],
+      actions: {
+        approve: { type: 'approve', workItemId: 1 },
+        triageAgain: { type: 'retriage', workItemId: 1 },
+        markDone: { type: 'mark-done', workItemId: 1 },
+        icebox: { type: 'icebox', ticketId: 1 },
+      },
+    });
+    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['retry', 'stop', 'markDone', 'icebox']);
+    expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual([]);
+  });
 
-    expect(titles(open, '.menu button.control')).toEqual(['Triage again', 'Mark done', 'Icebox']);
-    expect(open.querySelector('.menu select')).toBeNull();
-    expect(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"] .more')).toBeNull();
+  it('puts the primary actions as text buttons in a column beside lines 2 and 3, with Report before Approve on an approval row', () => {
+    const file = (id: number, label: string, target: string, reportedAt: number) => ({ id, ticketId: 1, label, target, reportedAt });
+    const links = [file(1, 'round-2.md', 'D:\\wt\\round-2\\review.md', NOW), file(2, 'round-1.md', 'D:\\wt\\round-1\\review.md', NOW - 60_000), { ...file(3, 'Docs', 'https://example.test/docs', NOW + 1) }];
+    const root = render(snapshot([item(1, { status: 'awaiting-approval', links }), item(2, { status: 'blocked', links })]));
+    const approval = root.querySelector('[data-item="1"]')!;
+    const blocked = root.querySelector('[data-item="2"]')!;
+
+    // Report is an icon with its verb in the tooltip; Approve is primary, Retry takes the error colour on a failed row and the warning colour on a blocked one, and Start has no tone.
+    expect([...approval.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => [button.title, button.textContent, button.className])).toEqual([
+      ['Report', '', 'control action-button icon-only'],
+      ['Approve', 'Approve', 'control action-button primary'],
+    ]);
+    expect(root.querySelector('[data-item="2"] .action-button')?.className).toBe('control action-button warning');
+    expect(render(snapshot([item(3, { status: 'failed' })])).querySelector('[data-item="3"] .action-button')?.className).toBe('control action-button error');
+    expect(render(snapshot([item(4, { status: 'unstarted' })])).querySelector('[data-item="4"] .action-button')?.className).toBe('control action-button');
+    expect(approval.querySelector('.line .actions, .line button')).toBeNull();
+    expect(JSON.parse(controlNamed(approval, 'Report').dataset['message']!)).toEqual({ type: 'openUrl', url: 'D:\\wt\\round-2\\review.md' });
+    // The report's badge is not repeated; older files and other links keep theirs.
+    expect([...approval.querySelectorAll('.line.third a.badge')].map((badge) => badge.textContent?.trim())).toEqual(['round-1.md', 'Docs']);
+    expect([...blocked.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => button.title)).toEqual(['Retry']);
+    expect([...blocked.querySelectorAll('.line.third a.badge')]).toHaveLength(3);
   });
 
   it('shows no triage summary, triage context, task prompt or session history', () => {
@@ -288,7 +364,7 @@ describe('renderPanel', () => {
     }
   });
 
-  it('shows the worktree as an icon, the time in queue, and an active session on a done work item', () => {
+  it('shows the worktree as an icon, the time in queue, and no actions on a done work item with a running session', () => {
     const root = render(
       snapshot([item(1, { status: 'done', createdAt: NOW - 3 * 86_400_000, doneAt: NOW - 86_400_000, sessions: [session()], worktree: { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' } })]),
       { groups: new Map([['done', true]]) },
@@ -296,24 +372,27 @@ describe('renderPanel', () => {
 
     expect(root.querySelector('.worktree.codicon-git-branch')?.textContent).toBe('');
     expect(root.querySelector('.worktree')?.getAttribute('title')).toBe('101-fix\nD:/git/widgets-wt/101-fix');
-    expect(titles(root, '[data-item="1"] .mark')).toEqual(['Finished by the session']);
-    expect(root.querySelector('[data-item="1"] .session-button .state-dot.running')).not.toBeNull();
+    expect(root.querySelector('[data-item="1"] .line.third .worktree')).not.toBeNull();
+    expect(titles(root, '[data-item="1"] .line.third .mark')).toEqual(['Finished by the session']);
+    // A done item with a running session has no control, so no actions column.
+    expect(root.querySelector('[data-item="1"] .actions')).toBeNull();
     // A done item stops its clock when it ends.
     expect(root.querySelector('[data-item="1"] .queue')?.textContent).toBe('2d');
   });
 
   it('says what an unconfigured home is missing', () => {
-    const root = render(snapshot([], { sources: [], playbooks: [], repoRoots: [] }));
+    const root = render(snapshot([], { sources: [], sourceStates: [], playbooks: [], repoRoots: [] }));
 
+    expect(render(snapshot([], { sources: [], sourceStates: [{ name: 'zoho', enabled: false }] })).querySelector('p.empty')?.textContent?.trim()).toBe('No source is polled. Turn one on in the title bar.');
     expect([...root.querySelectorAll('p.empty')].slice(0, 2).map((p) => p.textContent?.trim())).toEqual([
-      'No source is polled. Enable a source in C:\\Users\\me\\.switchboard\\settings.json.',
+      'No source is configured. Add one in C:\\Users\\me\\.switchboard\\settings.json.',
       'No task playbooks are loaded. Add them under C:\\Users\\me\\.switchboard\\playbooks.',
     ]);
     expect(renderPanel(snapshot([]), NOW, ui())).not.toContain('No source is polled');
   });
 
-  it('lists pool tickets in Unstarted as Unclaimed with a priority dot, time in queue, Returned mark and Start, with Icebox in the menu and no summary', () => {
-    const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), ref: `#${500 + id}`, sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, iceboxed: false, sortAt: NOW - id * 3_600_000, lastPolledAt: NOW, repoRoot: '' });
+  it('lists pool tickets in Unstarted with no Unclaimed tag, a priority dot, time in queue, Returned mark and Start, with Icebox in the right-click menu and no summary', () => {
+    const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), ref: `#${500 + id}`, sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, iceboxed: false, sortAt: NOW - id * 3_600_000, scopeAt: NOW - id * 1_800_000, lastPolledAt: NOW, repoRoot: '' });
     const rated = (id: number, patch: Partial<Triage> = {}) => triage({ id, ticketId: id, workItemId: null, playbook: 'support:case', summary: 'Fix sync — defect', immediacy: 'BLOCKING', severity: 'MED', ...patch });
     const root = render(
       snapshot([], {
@@ -325,41 +404,47 @@ describe('renderPanel', () => {
           { ticket: ticket(5), triage: rated(5, { playbook: null, summary: null, immediacy: null, severity: null, endedAt: null }), returned: 0 },
         ],
       }),
-      { menu: 'ticket:4' },
     );
     // Rank 1, then rank 2 with the unrated ones counted as 2, oldest first, then rank 3.
     const rows = [...root.querySelectorAll('.pool-item')];
     const byId = (id: number) => root.querySelector(`.pool-item[data-ticket="${id}"]`)!;
 
-    expect(root.querySelector('[data-group="unstarted"] h3')?.textContent).toBe('Unstarted (5)');
+    expect(headings(root)).toContain('Unstarted 5');
     expect(rows.map((row) => row.getAttribute('data-ticket'))).toEqual(['1', '5', '4', '2', '3']);
-    expect([1, 2, 3, 4, 5].map((id) => byId(id).querySelector('.mark .priority')?.className)).toEqual(['priority', 'priority', undefined, undefined, undefined]);
+    expect([1, 2, 3, 4, 5].map((id) => byId(id).querySelector('.title > .priority:first-child') !== null)).toEqual([true, true, false, false, false]);
     expect(byId(1).querySelector('.priority')?.getAttribute('title')).toBe('Immediacy: URGENT   Severity: MED');
-    // A row that is not priority keeps the empty mark slot, so its key lines up.
-    expect(byId(3).querySelector('.mark')?.innerHTML).toBe('');
-    expect(byId(4).querySelector('.mark')?.innerHTML).toBe('');
-    expect(rows.map((row) => row.querySelector('.line.second .tag')?.textContent)).toEqual(['Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed', 'Unclaimed']);
-    expect(titles(byId(1), '.line.second .actions > button.control.icon-button')).toEqual(['Start']);
+    // A row that is not priority reserves no space for the dot.
+    expect(byId(3).querySelector('.line:first-child .mark')).toBeNull();
+    expect(byId(3).querySelector('.title')?.innerHTML).toBe('Case &lt;3&gt;');
+    expect(root.querySelector('.tag')).toBeNull();
+    expect(root.textContent).not.toContain('Unclaimed');
+    expect(byId(1).querySelector('.line.second a.key')?.textContent).toBe('zoho 501');
+    expect(byId(1).querySelector('.line.second a.key')?.getAttribute('href')).toBe('https://desk.example.test/1');
+    expect(titles(byId(1), ':scope > .actions > button.control.action-button')).toEqual(['Start']);
     expect(byId(1).querySelector('.line:first-child .actions')).toBeNull();
+    expect(rowMenu(byId(1))).toMatchObject({ shown: ['start', 'icebox'], actions: { start: { type: 'pick', ticketId: 1 }, icebox: { type: 'icebox', ticketId: 1 } } });
     expect(byId(1).querySelector('.line.second .meta > .playbook-name:first-child')?.textContent).toBe('support:case');
     expect(byId(1).querySelector('.line:first-child .playbook-name')).toBeNull();
-    expect(byId(1).querySelector('button.icon-button')?.textContent).toBe('');
+    expect(byId(1).querySelector('button.action-button')?.textContent).toBe('Start');
     expect(root.textContent).not.toContain('URGENT/MED');
-    expect(byId(1).querySelector('.queue')?.textContent).toBe('1h');
+    // A pool ticket counts from entering scope, not from the customer's last message, which orders the group.
+    expect(byId(1).querySelector('.queue')?.textContent).toBe('30m');
+    expect(byId(1).querySelector('.queue')?.getAttribute('title')).toMatch(/^In scope since \d{4}-\d\d-\d\d \d\d:\d\d UTC$/);
     expect(root.textContent).not.toContain('Fix sync — defect');
     expect(byId(1).querySelector('.returned')?.textContent).toBe('Returned ×2');
-    expect(byId(1).querySelector('.returned')?.getAttribute('title')).toBe('2 earlier work items');
     expect(byId(2).querySelector('.returned')).toBeNull();
     expect(byId(1).querySelector('.playbook-name')?.textContent).toBe('support:case');
     expect([byId(1).querySelector('.playbook-name .namespace')?.textContent, byId(1).querySelector('.playbook-name .name')?.textContent]).toEqual(['support:', 'case']);
-    expect(titles(byId(1), 'button.control')).toEqual(['Start']);
-    expect(JSON.parse(byId(1).querySelector<HTMLElement>('button.control[title="Start"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
+    expect(controlLabels(byId(1), 'button.control')).toEqual(['Start']);
+    expect(JSON.parse(controlNamed(byId(1), 'Start').dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
     expect(byId(4).querySelector('.note')?.textContent).toBe('Timed out.');
     expect(titles(byId(4), '.actions > button.control')).toEqual(['Triage again']);
-    expect(titles(byId(4), '.menu button.control')).toEqual(['Start', 'Icebox']);
-    expect(titles(byId(5), '.mark.codicon-search')).toEqual(['Triaging']);
+    expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'start', 'icebox'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
+    expect(titles(byId(5), '.line.third .mark.codicon-search')).toEqual(['Triaging']);
+    const adhoc = render(snapshot([item(6, { ticket: { ...item(6).ticket, source: 'adhoc', sourceKey: '6', url: '' } })]));
+    expect(adhoc.querySelector('.line.second span.key')?.textContent).toBe('adhoc 6');
+    expect(byId(1).querySelector('.line.second a.key')?.className).toBe('key zoho');
     expect(byId(5).textContent).not.toContain('Triaging');
-    expect(byId(1).querySelector('.playbook-name')?.getAttribute('title')).toBe('support:case');
     expect(root.textContent).not.toContain('Pick');
   });
 
@@ -367,21 +452,22 @@ describe('renderPanel', () => {
     const rated = (immediacy: Triage['immediacy'], severity: Triage['severity']) => triage({ immediacy, severity, summary: 'Build it.' });
     const assigned = item(1, { status: 'unstarted', createdAt: NOW - 5 * 3_600_000, triage: rated('BLOCKING', 'HIGH') });
     const unrated = item(2, { status: 'unstarted', createdAt: NOW - 9 * 3_600_000 });
-    const ticket = { id: 9, source: 'forum', sourceKey: '509', ref: 'T509', sourceId: null, title: 'Topic', url: '', assigned: false, pool: true, iceboxed: false, sortAt: NOW - 3_600_000, lastPolledAt: NOW, repoRoot: '' };
+    const ticket = { id: 9, source: 'forum', sourceKey: '509', ref: 'T509', sourceId: null, title: 'Topic', url: '', assigned: false, pool: true, iceboxed: false, sortAt: NOW - 3_600_000, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
     const pool = [{ ticket, triage: rated('NON-BLOCKING', 'HIGH'), returned: 0 }];
     const root = render(snapshot([assigned, unrated, item(3, { status: 'awaiting-approval', approvalPrompt: '/publish' })], { pool }));
     const unstarted = root.querySelector('[data-group="unstarted"]')!;
 
     expect(unstartedOrder([assigned, unrated], pool).map((entry) => entry.ticket.id)).toEqual([1, 2, 9]);
     expect([...unstarted.querySelectorAll('.item')].map((row) => row.getAttribute('data-item') ?? `ticket ${row.getAttribute('data-ticket')}`)).toEqual(['1', '2', 'ticket 9']);
-    expect(unstarted.querySelector('h3')?.textContent).toBe('Unstarted (3)');
+    expect(headings(unstarted)).toEqual(['Unstarted 3']);
     expect(unstarted.querySelector('[data-item="1"] .tag')).toBeNull();
     expect(unstarted.textContent).not.toContain('Assigned');
     expect(unstarted.textContent).not.toContain('Build it.');
-    expect(unstarted.querySelector('[data-item="1"] .mark .priority')).not.toBeNull();
-    expect(unstarted.querySelector('[data-item="1"] .title .priority')).toBeNull();
+    expect(unstarted.querySelector('[data-item="1"] .title > .priority')).not.toBeNull();
+    // An unstarted work item has no status mark, so with nothing else to show it has no third line.
+    expect(unstarted.querySelector('[data-item="2"] .line.third')).toBeNull();
     expect(titles(unstarted, '[data-item="1"] .actions > button.control')).toEqual(['Start']);
-    expect(JSON.parse(unstarted.querySelector<HTMLElement>('[data-item="1"] button.control[title="Start"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'start', workItemId: 1 } });
+    expect(JSON.parse(controlNamed(unstarted.querySelector('[data-item="1"]')!, 'Start').dataset['message']!)).toEqual({ type: 'action', action: { type: 'start', workItemId: 1 } });
     expect(titles(root, '[data-group="needs"] .actions > button.control')).toEqual(['Approve']);
     expect(labels(item(4, { status: 'unstarted' }))).not.toContain('Approve');
   });
@@ -389,31 +475,40 @@ describe('renderPanel', () => {
   it('moves iceboxed work items and pool tickets into a collapsed Icebox group with their own marks, and shows an approval summary', () => {
     const icy = item(2, { status: 'unstarted', ticket: { ...item(2).ticket, iceboxed: true } });
     const ready = item(3, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.' });
-    const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', ref: '#509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, lastPolledAt: NOW, repoRoot: '' };
+    const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', ref: '#509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
     const data = snapshot([icy, ready], { pool: [{ ticket: poolTicket, triage: null, returned: 0 }] });
-    const root = render(data, { menu: 'item:2' });
+    const root = render(data);
     const icebox = root.querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!;
 
-    expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Needs you (1)', 'Working (0)', 'Unstarted (0)', 'Done (0)', 'Icebox (2)']);
+    expect(headings(root)).toEqual(['Needs you 1', 'Working 0', 'Unstarted 0', 'Done 0', 'Icebox 2']);
     expect(icebox.open).toBe(false);
     expect([...icebox.querySelectorAll('.title')].map((t) => t.textContent)).toEqual(['Issue <2>', 'Cold case']);
-    expect(icebox.querySelectorAll('.mark .priority')).toHaveLength(0);
+    expect(icebox.querySelectorAll('.priority')).toHaveLength(0);
     expect(icebox.querySelector('.mark.codicon')).toBeNull();
-    expect(titles(root, '[data-item="3"] .mark')).toEqual(['Approve the publish']);
-    expect(JSON.parse(icebox.querySelector<HTMLElement>('.menu button.control[title="Restore"]')!.dataset['message']!)).toEqual({ type: 'action', action: { type: 'restore', ticketId: 2 } });
+    expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Approve the publish']);
+    expect(rowMenu(icebox.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'restore'], actions: { restore: { type: 'restore', ticketId: 2 } } });
     expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
     expect(render(data, { groups: new Map([['icebox', true]]) }).querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!.open).toBe(true);
     expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, iceboxed: true } }))).toEqual(['Restore']);
   });
 
-  it('shows the priority dot only on a priority work item, Returned and link badges on a work item (PRD R50–R52)', () => {
+  it('shows the priority dot first, pull requests and other-repo issues on line 2, and other links and Returned on line 3 (PRD R50–R52)', () => {
+    const link = (id: number, label: string, target: string) => ({ id, ticketId: 1, label, target, reportedAt: NOW });
+    const zoho = { ...item(1).ticket, source: 'zoho', sourceKey: '501', url: 'https://desk.example.test/501' };
     const rated = item(1, {
       returned: 1,
+      ticket: zoho,
       triage: triage({ playbook: 'support:case', immediacy: 'URGENT', severity: 'HIGH' }),
       links: [
-        { id: 1, ticketId: 1, label: 'PR #12', target: 'https://github.com/o/r/pull/12', reportedAt: NOW },
-        { id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW },
+        link(1, 'case.md', 'D:\\cases\\1\\case.md'),
+        link(2, 'Issue #7', 'https://github.com/o/r/issues/7'),
+        link(3, 'Fix the sync', 'https://github.com/o/r/pull/12'),
+        link(4, 'Case', 'https://desk.example.test/501'),
       ],
+    });
+    // A GitHub ticket's issue links stay on line 3, and a link to the ticket itself is not repeated.
+    const github = item(9, {
+      links: [link(5, 'Issue #8', 'https://github.com/o/r/issues/8'), link(6, 'PR 13', 'https://github.com/o/r/pull/13'), link(7, 'Self', 'https://github.com/o/r/issues/109')],
     });
     const rating = (id: number, immediacy: Triage['immediacy'], severity: Triage['severity']) => item(id, { triage: triage({ immediacy, severity }) });
     const root = render(
@@ -426,13 +521,15 @@ describe('renderPanel', () => {
         rating(6, 'BLOCKING', null),
         rating(7, 'NON-BLOCKING', null),
         rating(8, null, 'MED'),
+        github,
       ]),
     );
     const row = root.querySelector('[data-item="1"]')!;
+    const badges = (selector: string) => [...root.querySelectorAll(`${selector} a.badge`)].map((a) => [a.textContent?.trim(), a.getAttribute('href')]);
 
-    expect(row.querySelector('.title .priority')?.getAttribute('title')).toBe('Immediacy: URGENT   Severity: HIGH');
-    expect(root.querySelector('[data-item="2"] .title .priority')).not.toBeNull();
-    expect([3, 4, 5, 6, 7, 8].map((id) => root.querySelector(`[data-item="${id}"] .title .priority`)?.getAttribute('title') ?? null)).toEqual([
+    expect(row.querySelector('.line:first-child > .title > .priority:first-child')?.getAttribute('title')).toBe('Immediacy: URGENT   Severity: HIGH');
+    expect(root.querySelector('[data-item="2"] .line:first-child .title > .priority')).not.toBeNull();
+    expect([3, 4, 5, 6, 7, 8].map((id) => root.querySelector(`[data-item="${id}"] .priority`)?.getAttribute('title') ?? null)).toEqual([
       null,
       'Immediacy: BLOCKING   Severity: LOW',
       'Immediacy: ?   Severity: HIGH',
@@ -440,11 +537,28 @@ describe('renderPanel', () => {
       null,
       null,
     ]);
-    expect(row.querySelector('.returned')?.textContent).toBe('Returned ×1');
-    expect([...row.querySelectorAll('a.badge')].map((a) => [a.textContent?.trim(), a.getAttribute('href')])).toEqual([
-      ['PR #12', 'https://github.com/o/r/pull/12'],
-      ['case.md', 'D:\\cases\\1\\case.md'],
+    expect([...row.querySelector('.line.second .meta')!.children].map((child) => child.textContent?.trim())).toEqual(['dev:develop', 'zoho 501', '12', 'gh 7']);
+    expect(badges('[data-item="1"] .line.third')).toEqual([['case.md', 'D:\\cases\\1\\case.md']]);
+    expect(row.querySelector('.line.third .returned')?.textContent).toBe('Returned ×1');
+    expect(badges('[data-item="9"] .line.second')).toEqual([['13', 'https://github.com/o/r/pull/13']]);
+    // Each kind has its own class and icon; a GitHub issue looks like a GitHub ticket's key, with no icon.
+    expect([...row.querySelectorAll('a.badge')].map((a) => [a.className, a.querySelector('.codicon')?.className])).toEqual([
+      ['badge pr', 'codicon codicon-git-pull-request'],
+      ['badge file', 'codicon codicon-file'],
     ]);
+    expect([...root.querySelectorAll('[data-item="1"] .line.second a.key, [data-item="9"] .line.third a.key')].map((a) => [a.className, a.textContent, a.getAttribute('href'), a.querySelector('.codicon')])).toEqual([
+      ['key zoho', 'zoho 501', 'https://desk.example.test/501', null],
+      ['key github', 'gh 7', 'https://github.com/o/r/issues/7', null],
+      ['key github', 'gh 8', 'https://github.com/o/r/issues/8', null],
+    ]);
+    expect(['https://example.test/x', 'http://github.com/o/r/pull/1', 'https://github.com/o/r/pull/1/files', 'https://github.com/o/r/issues/2', '/home/me/case.md'].map(linkKind)).toEqual([
+      'url',
+      'url',
+      'pr',
+      'issue',
+      'file',
+    ]);
+    expect(badges('[data-item="9"] .line.third')).toEqual([]);
     expect(root.querySelector('[data-item="2"] a.badge')).toBeNull();
   });
 
@@ -466,48 +580,88 @@ describe('startPanel', () => {
 
   const send = (data: Snapshot) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', snapshot: data } }));
 
-  it('announces itself, renders each state, and posts clicks, link opens and the session button', () => {
+  it('announces itself, renders each state, and posts clicks, link opens and the row open action on a click or Enter', () => {
     expect(posted).toEqual([{ type: 'ready' }]);
+    // VS Code's webview host listens for clicks on the window and opens every anchor it sees (mechanics M16).
+    const reachedWindow: string[] = [];
+    window.addEventListener('click', (event) => reachedWindow.push((event.target as HTMLElement).className));
 
     send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], links: [{ id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW }] })]));
-    root.querySelector<HTMLButtonElement>('button.control[title="Approve"]')!.click();
+    controlNamed(root, 'Approve').click();
     root.querySelector<HTMLAnchorElement>('a.key')!.click();
-    root.querySelector<HTMLAnchorElement>('a.badge')!.click();
-    root.querySelector<HTMLButtonElement>('button.session-button')!.click();
+    controlNamed(root, 'Report').click();
+    root.querySelector<HTMLElement>('[data-item="1"] .title')!.click();
+    root.querySelector<HTMLElement>('[data-item="1"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    root.querySelector<HTMLElement>('details[data-group="needs"] > summary')!.click();
 
+    // A control or a link runs only its own action, not the row's.
     expect(posted.slice(1)).toEqual([
       { type: 'action', action: { type: 'approve', workItemId: 1 } },
       { type: 'openUrl', url: 'https://github.com/o/r/issues/101' },
       { type: 'openUrl', url: 'D:\\cases\\1\\case.md' },
       { type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' },
+      { type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' },
     ]);
+    // A link click stops at the panel, so the host does not open the link a second time; other clicks still reach the window.
+    expect(reachedWindow).not.toContain('key github');
+    expect(reachedWindow).toContain('title');
   });
 
-  it('opens and closes the ... menu, keeps it across redraws, and closes it after an action or a click elsewhere', () => {
+  it('selects a row on focus, keeps the selection and focus across redraws, and moves the selection on a click in another row', () => {
+    send(snapshot([item(1, { status: 'awaiting-approval' }), item(2, { status: 'awaiting-approval' })]));
+    const row = (id: number) => root.querySelector<HTMLElement>(`[data-item="${id}"]`)!;
+
+    expect(root.querySelectorAll('.item.selected')).toHaveLength(0);
+    expect(row(1).tabIndex).toBe(0);
+    row(1).focus();
+    expect(row(1).classList.contains('selected')).toBe(true);
+    send(snapshot([item(1, { status: 'awaiting-approval' }), item(2, { status: 'awaiting-approval' })]));
+    expect(row(1).classList.contains('selected')).toBe(true);
+    expect(document.activeElement).toBe(row(1));
+
+    row(2).querySelector<HTMLElement>('.title')!.click();
+    expect([...root.querySelectorAll('.item.selected')].map((element) => element.getAttribute('data-item'))).toEqual(['2']);
+  });
+
+  it('keeps focus on the same button or link across a redraw, so Enter still acts on it, and falls back to the row when the button is gone', () => {
+    const links = [{ id: 2, ticketId: 1, label: 'case.md', target: 'D:\\cases\\1\\case.md', reportedAt: NOW }];
+    const report = { id: 3, ticketId: 1, label: 'Docs', target: 'https://example.test/docs', reportedAt: NOW };
+    send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], links: [...links, report] })]));
+    const row = () => root.querySelector<HTMLElement>('[data-item="1"]')!;
+
+    controlNamed(row(), 'Approve').focus();
+    send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], links: [...links, report] })]));
+    expect(document.activeElement).toBe(controlNamed(row(), 'Approve'));
+
+    row().querySelector<HTMLElement>('a[href="https://example.test/docs"]')!.focus();
+    send(snapshot([item(1, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })], links: [...links, report] })]));
+    expect(document.activeElement).toBe(row().querySelector('a[href="https://example.test/docs"]'));
+
+    controlNamed(row(), 'Approve').focus();
+    send(snapshot([item(1, { status: 'blocked', sessions: [session({ state: 'ended' })], links })]));
+    expect(document.activeElement).toBe(row());
+  });
+
+  it('shows clipped text in full in a tooltip on hover, and no tooltip on text that fits', () => {
     send(snapshot([item(1, { status: 'awaiting-approval' })]));
-    const more = () => root.querySelector<HTMLButtonElement>('button.more-button')!;
+    const title = root.querySelector<HTMLElement>('[data-item="1"] .title')!;
+    const hover = () => title.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 
-    more().click();
-    expect(root.querySelector('.menu')).not.toBeNull();
-    send(snapshot([item(1, { status: 'awaiting-approval' })]));
-    expect(root.querySelector('.menu')).not.toBeNull();
+    Object.defineProperty(title, 'clientWidth', { configurable: true, value: 50 });
+    Object.defineProperty(title, 'scrollWidth', { configurable: true, value: 120 });
+    hover();
+    expect(title.getAttribute('title')).toBe('Issue <1>');
+    Object.defineProperty(title, 'scrollWidth', { configurable: true, value: 50 });
+    hover();
+    expect(title.hasAttribute('title')).toBe(false);
+  });
 
-    root.querySelector<HTMLButtonElement>('.menu button.control[title="Mark done"]')!.click();
-    expect(root.querySelector('.menu')).toBeNull();
+  it('selects a row on right-click, so its menu acts on the highlighted row', () => {
+    send(snapshot([item(1, { status: 'awaiting-approval' }), item(2, { status: 'awaiting-approval' })]));
 
-    more().click();
-    more().click();
-    expect(root.querySelector('.menu')).toBeNull();
-
-    // A click on a group heading closes the menu and still toggles the group.
-    more().click();
-    root.querySelector<HTMLElement>('details[data-group="working"] > summary')!.click();
-    expect(root.querySelector('.menu')).toBeNull();
-    expect(root.querySelector<HTMLDetailsElement>('details[data-group="working"]')!.open).toBe(false);
-
-    expect(posted.slice(1)).toEqual([
-      { type: 'action', action: { type: 'mark-done', workItemId: 1 } },
-    ]);
+    root.querySelector('[data-item="2"] .title')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    expect([...root.querySelectorAll('.item.selected')].map((element) => element.getAttribute('data-item'))).toEqual(['2']);
+    expect(root.querySelector('.more-button, .menu')).toBeNull();
   });
 
   it('keeps the groups the operator opened or closed across redraws', () => {

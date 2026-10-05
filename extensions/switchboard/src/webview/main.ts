@@ -7,15 +7,34 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
+const CLIPPED = '.title, .playbook-name, .key, .approval, .note';
+const FOCUSABLE = 'button, a[href]';
+
+/** A button by its tooltip, which names its verb, or a link by its target. */
+function controlKey(element: HTMLElement): string {
+  return element.matches('a') ? `a ${element.getAttribute('href')}` : `button ${element.title}`;
+}
+
 /** Wires the panel: renders each state the extension sends, and posts the operator's clicks back. */
 export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => number = Date.now): void {
   let snapshot: Snapshot | null = null;
   const groups = new Map<string, boolean>();
-  let menu: string | null = null;
+  let selected: string | null = null;
 
+  // A redraw replaces the rows, so the focused row, or the same button or link in it, gets focus back; a control that is gone leaves focus on its row.
   const draw = () => {
     if (snapshot !== null) {
-      root.innerHTML = renderPanel(snapshot, now(), { groups, menu });
+      const active = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
+      const row = active?.closest<HTMLElement>('[data-row]')?.dataset['row'];
+      const control = active?.matches(FOCUSABLE) ? controlKey(active) : null;
+
+      root.innerHTML = renderPanel(snapshot, now(), { groups, selected });
+      if (row !== undefined) {
+        const next = root.querySelector<HTMLElement>(`[data-row="${row}"]`);
+        const same = control === null ? undefined : [...(next?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].find((element) => controlKey(element) === control);
+
+        (same ?? next)?.focus();
+      }
     }
   };
 
@@ -39,31 +58,66 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
     true,
   );
 
+  // Clipped text shows in full in a tooltip; text that fits has none, because it would repeat what is shown.
+  root.addEventListener('mouseover', (event) => {
+    const text = (event.target as HTMLElement).closest<HTMLElement>(CLIPPED);
+
+    if (text !== null) {
+      if (text.scrollWidth > text.clientWidth) {
+        text.title = text.textContent ?? '';
+      } else {
+        text.removeAttribute('title');
+      }
+    }
+  });
+
+  // A click, a right-click or keyboard focus selects the row, so focus and selection look the same.
+  const select = (target: HTMLElement) => {
+    const row = target.closest<HTMLElement>('[data-row]');
+
+    if (row !== null && row.dataset['row'] !== selected) {
+      selected = row.dataset['row']!;
+      root.querySelector('.item.selected')?.classList.remove('selected');
+      row.classList.add('selected');
+    }
+  };
+
+  // A click elsewhere in a row, or Enter on it, runs the row's open action.
+  const open = (target: HTMLElement) => {
+    const action = target.closest<HTMLElement>('[data-row]')?.dataset['open'];
+
+    if (action !== undefined) {
+      vscode.postMessage(JSON.parse(action));
+    }
+  };
+
+  root.addEventListener('focusin', (event) => select(event.target as HTMLElement));
+  root.addEventListener('contextmenu', (event) => select(event.target as HTMLElement));
+
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    const more = target.closest<HTMLElement>('button.more-button');
     const control = target.closest<HTMLElement>('button.control');
     const link = target.closest<HTMLAnchorElement>('a[href]');
 
-    if (more !== null) {
-      event.preventDefault();
-      menu = menu === more.dataset['menu'] ? null : more.dataset['menu']!;
-      draw();
-      return;
-    }
+    select(target);
 
     if (control?.dataset['message'] !== undefined) {
       event.preventDefault();
       vscode.postMessage(JSON.parse(control.dataset['message']));
     } else if (link !== null) {
+      // VS Code's webview host also opens every clicked anchor (mechanics M16); stopping the event here keeps it to one open.
       event.preventDefault();
+      event.stopPropagation();
       vscode.postMessage({ type: 'openUrl', url: link.getAttribute('href') });
+    } else if (target.closest('button') === null) {
+      open(target);
     }
+  });
 
-    // Removing the menu instead of redrawing keeps the clicked group heading, so its own toggle still applies.
-    if (menu !== null) {
-      menu = null;
-      root.querySelector('.menu')?.remove();
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.target as HTMLElement).matches('[data-row]')) {
+      event.preventDefault();
+      open(event.target as HTMLElement);
     }
   });
 

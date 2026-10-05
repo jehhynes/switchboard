@@ -10,6 +10,8 @@ export const TEXT_LIMIT = 2_000;
 export const TEAMS_TTL_MS = 6 * 60 * 60 * 1000;
 
 const PAGE = 100;
+/** History pages read for a scope change before falling back to the ticket's creation. */
+const HISTORY_PAGES = 10;
 
 /** Who holds a ticket, from Support's side (Support board `classifyAssignee`). Only `engineer` is a claim by somebody else. */
 export type AssigneeClass = 'mine' | 'none' | 'support' | 'engineer';
@@ -20,6 +22,9 @@ interface SearchTicket {
   subject: string;
   webUrl: string;
   createdTime?: string;
+  /** Changes on any edit, so a ticket's scope entry is read again only when it changes. */
+  modifiedTime?: string;
+  status?: string;
   /** When the customer last wrote, or null after an agent replied. */
   customerResponseTime?: string | null;
   assigneeId: string | null;
@@ -94,6 +99,8 @@ class DeskError extends Error {}
 export class ZohoSource implements Source {
   readonly name = 'zoho';
   private teams: { teamOf: Map<string, string[]>; names: Map<string, string>; until: number } | null = null;
+  /** Each Support ticket's scope entry, by ticket ID, with the modifiedTime it was read at. */
+  private entered = new Map<string, { modifiedTime: string; at: number | null }>();
 
   constructor(
     private readonly config: ZohoConfig,
@@ -132,11 +139,20 @@ export class ZohoSource implements Source {
               assigned: holder === 'mine',
               pool: holder !== 'mine',
               sortAt: Number.isNaN(waiting) ? null : waiting,
+              enteredAt: await this.enteredScope(ticket),
             });
           }
         }
 
         if (rows.length < PAGE) {
+          const kept = new Set(tickets.map((ticket) => ticket.sourceId));
+
+          for (const id of this.entered.keys()) {
+            if (!kept.has(id)) {
+              this.entered.delete(id);
+            }
+          }
+
           return { tickets };
         }
       }
@@ -145,6 +161,47 @@ export class ZohoSource implements Source {
     } catch (error) {
       return { error: error instanceof DeskError ? error.message : 'Zoho Desk returned an unexpected response.' };
     }
+  }
+
+  /**
+   * When the ticket last entered Support scope (PRD R27): the later of its last escalation to Support and its last change to its current Open
+   * status, such as back from Deferred. A history that ends without either gives its creation; one longer than 1,000 events gives null, so
+   * Switchboard keeps the time it has.
+   */
+  private async enteredScope(ticket: SearchTicket): Promise<number | null> {
+    const cached = this.entered.get(ticket.id);
+
+    if (cached !== undefined && ticket.modifiedTime !== undefined && cached.modifiedTime === ticket.modifiedTime) {
+      return cached.at;
+    }
+
+    const status = ticket.status ?? 'Open';
+    const entersScope = (event: HistoryEvent) =>
+      (event.changes ?? []).some((change) => (change.field === 'Escalation' && change.newValue === this.config.escalationValue) || (change.field === 'Status' && change.newValue === status));
+    const created = Date.parse(ticket.createdTime ?? '');
+    let at: number | null = null;
+
+    // History comes newest first, so the first page with a scope change holds the latest one.
+    for (let page = 0; page < HISTORY_PAGES; page++) {
+      const events = (json(await this.get(`/tickets/${encodeURIComponent(ticket.id)}/history?from=${page * PAGE + 1}&limit=${PAGE}`)) as HistoryEvent[] | null) ?? [];
+      const times = events.filter(entersScope).map((event) => Date.parse(event.eventTime)).filter((time) => !Number.isNaN(time));
+
+      if (times.length > 0) {
+        at = Math.max(...times);
+        break;
+      }
+
+      if (events.length < PAGE) {
+        at = Number.isNaN(created) ? null : created;
+        break;
+      }
+    }
+
+    if (ticket.modifiedTime !== undefined) {
+      this.entered.set(ticket.id, { modifiedTime: ticket.modifiedTime, at });
+    }
+
+    return at;
   }
 
   async context(ticket: Ticket): Promise<ContextResult> {

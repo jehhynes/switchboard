@@ -1,51 +1,93 @@
 body { padding: 0 8px; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 4px; color: var(--vscode-descriptionForeground); }
-details.group > summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
-details.group > summary h3 { display: inline; }
-.item { border-bottom: 1px solid var(--vscode-widget-border, transparent); padding: 6px 0; }
-.item { display: flex; flex-direction: column; row-gap: 2px; }
+h3 { font-size: 13px; font-weight: 600; text-transform: capitalize; margin: 14px 0 4px; color: var(--vscode-descriptionForeground); }
+/* Group headings are a tinted bar of the theme's focus blue, so they stand apart from the rows. */
+details.group > summary { cursor: pointer; margin: 12px -8px 4px; padding: 6px 8px; color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent); }
+details.group > summary:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent); }
+details.group > summary h3 { display: inline; margin: 0; color: inherit; }
+/* The count is a badge at the right of the heading, as in Claude Code's session groups. */
+details.group > summary .count { float: right; margin-top: 1px; padding: 1px 6px; border-radius: 10px; font-size: 0.8em; line-height: normal; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+/* Rows touch, with a rule across the top of each row after the first; a hovered or selected row hides the rules above and below it. */
+.item { position: relative; padding: 6px 8px; margin: 0 -8px; border-radius: var(--vscode-cornerRadius-medium, 6px); outline: none; }
+/* A click on a row opens its background session, latest session or worktree. */
+.item[data-open] { cursor: pointer; }
+.item + .item::before { content: ''; position: absolute; left: 0; right: 0; top: 0; border-top: 1px solid var(--vscode-widget-border, transparent); }
+.item:is(:hover, .selected)::before, .item:is(:hover, .selected) + .item::before { visibility: hidden; }
+/* One selected style: focusing a row selects it, and the selection keeps the row's text colours. */
+.item:hover:not(.selected) { background: var(--vscode-list-hoverBackground); }
+.item.selected { background: var(--vscode-list-activeSelectionBackground); }
+/* Line 1 spans the row; the actions column sits at the right of lines 2 and 3, centred across them. */
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; container-type: inline-size; }
+.item > .line.first { grid-column: 1 / -1; }
+.item > .line.second, .item > .line.third { grid-column: 1; }
+.item > .actions { grid-column: 2; grid-row: 2 / span 2; align-self: center; }
+/* The 26px buttons reach into the row padding, so showing them does not make a one-line row taller. */
+.item > .actions { margin-block: -3px; }
 .line { display: flex; flex-basis: 100%; gap: 6px; align-items: center; min-width: 0; }
-/* Every row keeps two lines, with room between rows, even when the second line is empty (PRD R27). */
-.line.second { padding-left: 22px; min-height: 18px; }
-.title { flex: 1 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Line 2 keeps its height when empty (PRD R27). */
+.line.second { min-height: 18px; }
+.title { font-weight: 600; flex: 1 1 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stage, .empty, .playbook-name .namespace { color: var(--vscode-descriptionForeground); }
-.playbook-name .name { color: var(--vscode-foreground); font-weight: 600; }
+.playbook-name .name { color: var(--vscode-foreground); }
 .note { color: var(--vscode-editorWarning-foreground); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .errors .note { display: block; margin: 4px 0; white-space: normal; }
-button { display: inline-flex; align-items: center; gap: 4px; line-height: 16px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 2px 8px; cursor: pointer; }
+/* Error and setup lines: the icon shares the text's line box, so it centres on the first line when the text wraps. */
+.errors .note, p.empty { display: flex; gap: 4px; align-items: flex-start; line-height: 18px; }
+.errors .note > .codicon, p.empty > .codicon { flex-shrink: 0; font-size: 14px; line-height: 18px; }
+button { display: inline-flex; align-items: center; gap: 4px; line-height: 16px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border, transparent); border-radius: var(--vscode-cornerRadius-small, 4px); padding: 1px 8px; cursor: pointer; }
 button .codicon { font-size: 14px; line-height: 16px; }
 button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* Primary actions are VS Code-sized text buttons, 26px tall; a narrow row keeps only the icon. */
+.action-button { min-height: 26px; padding: 4px 8px; border-color: transparent; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-foreground); }
+.action-button:hover { background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
+/* Action buttons show only on a hovered, selected or focused row, so other rows give their text the full width. */
+.item:not(:hover, .selected, :focus-within) > .actions > .action-button { display: none; }
+.action-button .codicon { font-size: 16px; }
+.action-button.icon-only { padding: 4px 5px; }
+.action-button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.action-button.primary:hover { background: var(--vscode-button-hoverBackground); }
+.action-button.error { background: var(--vscode-statusBarItem-errorBackground, #c72e0f); color: var(--vscode-statusBarItem-errorForeground, #fff); }
+.action-button.warning { background: var(--vscode-statusBarItem-warningBackground, #7a6400); color: var(--vscode-statusBarItem-warningForeground, #fff); }
+.action-button:is(.error, .warning):hover { filter: brightness(1.15); }
+@container (max-width: 360px) {
+  .action-button { padding: 4px 5px; }
+  .action-button .label { display: none; }
+}
 a { color: var(--vscode-textLink-foreground); }
 .key, .stage { white-space: nowrap; flex-shrink: 0; }
 /* On a narrow panel the playbook name clips after the title has kept a few characters. */
 .playbook-name { white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .worktree { flex-shrink: 0; color: var(--vscode-descriptionForeground); }
-.session-button { position: relative; padding: 2px 6px; }
-.session-button:disabled { opacity: 0.6; cursor: default; }
-.state-dot { position: absolute; right: 2px; top: 2px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--vscode-button-secondaryBackground); }
-.state-dot.running { background: var(--vscode-charts-green, #89d185); }
-.state-dot.waiting { background: var(--vscode-charts-orange, #d18616); }
-.state-dot.idle { background: var(--vscode-disabledForeground, #8b8b8b); }
-.state-dot.failed { background: var(--vscode-charts-red, #f14c4c); }
 /* The metadata shrinks and clips so the controls stay visible on a narrow panel; clipped text is in tooltips. */
 .meta { display: flex; gap: 6px; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .meta > * { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The approval summary says what Approve publishes, so part of it stays visible to hover. */
 .meta > .approval { flex: 1 0 3em; }
-.actions { margin-left: auto; display: flex; gap: 4px; align-items: center; flex-shrink: 0; white-space: nowrap; }
-.more { position: relative; }
-.more-button, .icon-button { padding: 2px 4px; }
-.tag { flex-shrink: 0; font-size: 11px; padding: 0 4px; border-radius: 2px; border: 1px solid var(--vscode-descriptionForeground); color: var(--vscode-descriptionForeground); }
-.menu { position: absolute; right: 0; top: calc(100% + 2px); z-index: 10; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 160px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, transparent)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
-.menu button { justify-content: flex-start; width: 100%; }
-.returned { white-space: nowrap; flex-shrink: 0; font-size: 11px; padding: 0 4px; border-radius: 2px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.actions { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
+/* Returned asks for attention, so it takes the warning colour. */
+.returned { white-space: nowrap; flex-shrink: 0; font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--vscode-editorWarning-foreground); color: var(--vscode-editorWarning-foreground); }
 .mark { width: 16px; flex-shrink: 0; display: inline-flex; justify-content: center; }
 .mark.error { color: var(--vscode-errorForeground); }
 .mark.warning { color: var(--vscode-editorWarning-foreground); }
-.priority { display: inline-block; width: 0.6rem; height: 0.6rem; margin-right: 0.35rem; border-radius: 50%; box-sizing: border-box; vertical-align: middle; flex-shrink: 0; background: var(--vscode-charts-orange, #e8820c); }
-.mark .priority { margin-right: 0; }
+/* 8px, as Claude Code's status dots; set on the baseline, so it sits near the middle of the capitals. */
+.priority { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; box-sizing: border-box; vertical-align: baseline; flex-shrink: 0; background: var(--vscode-charts-orange, #e8820c); }
 .queue { white-space: nowrap; flex-shrink: 0; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
-.badge { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; padding: 0 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-textLink-foreground)); border-radius: 2px; }
+/* Links in rows are pills, not underlined link text. Pills keep their width; the playbook name clips first. */
+.badge, .key { font-size: 12px; line-height: 18px; flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; padding: 0 6px; border: 1px solid var(--vscode-widget-border, var(--vscode-descriptionForeground)); border-radius: 9px; color: var(--vscode-foreground); }
+/* The icon fits the text's line box, so a badge with an icon is no taller than one without. */
+.badge .codicon { font-size: 14px; line-height: 18px; vertical-align: top; }
+a.badge:hover, a.key:hover { text-decoration: none; background: var(--vscode-toolbar-hoverBackground); }
+/* Pull requests, issues and each ticket source take their brand colour: a bright outline over a muted fill. A GitHub ticket is an issue.
+   GitHub's mark is black or white by theme, and its pull requests are purple; light themes take the darker shades. */
+.badge.pr, .key.github, .key.zoho, .key.forum { color: var(--vscode-foreground); border-color: var(--hue); background: color-mix(in srgb, var(--hue) 18%, transparent); }
+.badge.pr { --hue: #a371f7; }
+.key.github { --hue: #f0f6fc; }
+.key.zoho { --hue: #089949; }
+.key.forum { --hue: #57ae57; }
+body.vscode-light .badge.pr { --hue: #8250df; }
+body.vscode-light .key.github { --hue: #1f2328; }
+a.badge.pr:hover, a.key.github:hover, a.key.zoho:hover, a.key.forum:hover { background: color-mix(in srgb, var(--hue) 32%, transparent); }
+.badge.file { color: var(--vscode-descriptionForeground); }
 .approval { color: var(--vscode-descriptionForeground); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Scrollbars like VS Code's own: thin, theme-coloured, and shown only while the scrollable area is hovered. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

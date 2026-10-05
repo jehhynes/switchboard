@@ -1,10 +1,13 @@
 import type { Playbook } from './playbook.js';
 import type { PermissionMode, Settings } from './settings.js';
-import type { FailedStep, Immediacy, Session, SessionKind, SessionState, Severity, Ticket, WorkItem } from './model.js';
-import type { Store } from './store.js';
+import type { FailedStep, Immediacy, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
+import type { NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
+
+/** The statuses of a run; entering one from another status starts the Working clock (PRD R27). */
+const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['triaging', 'queued', 'setup', 'running']);
 
 const EMPTY_TRIAGE = { context: null, playbook: null, summary: null, immediacy: null, severity: null, model: null } as const;
 
@@ -31,6 +34,8 @@ export interface PolledTicket {
   pool: boolean;
   /** When the customer has waited since, such as Zoho's `customerResponseTime`; it orders the pool (PRD R27). */
   sortAt: number | null;
+  /** When the ticket last entered the source's scope, as the source records it, such as Zoho's escalation to Support; null when unknown (PRD R27). */
+  enteredAt: number | null;
 }
 
 export type Report =
@@ -225,7 +230,17 @@ class Flow {
       seen.add(entry.sourceKey);
 
       const known = this.store.findTicket(source, entry.sourceKey);
-      const fields = { ref: entry.ref, sourceId: entry.sourceId, title: entry.title, url: entry.url, assigned: entry.assigned, pool: entry.pool, sortAt: entry.sortAt, lastPolledAt: this.now };
+      const fields = {
+        ref: entry.ref,
+        sourceId: entry.sourceId,
+        title: entry.title,
+        url: entry.url,
+        assigned: entry.assigned,
+        pool: entry.pool,
+        sortAt: entry.sortAt,
+        scopeAt: this.scopeAt(known, entry),
+        lastPolledAt: this.now,
+      };
 
       if (known === null) {
         const ticket = this.store.insertTicket({ source, sourceKey: entry.sourceKey, repoRoot: '', iceboxed: false, ...fields });
@@ -265,6 +280,14 @@ class Flow {
     }
   }
 
+  /**
+   * When the ticket entered the source's scope (PRD R53). The source's time wins, because its scope can be wider than the assigned state and
+   * the pool, such as a GitHub issue on another status. Without one, the ticket keeps its time, or takes this poll's when it has none.
+   */
+  private scopeAt(known: Ticket | null, entry: PolledTicket): number | null {
+    return entry.enteredAt ?? known?.scopeAt ?? (entry.assigned || entry.pool ? this.now : null);
+  }
+
   /** A ticket that entered the assigned state gets a work item, unless it already has an open one, such as a pick's (PRD R48). */
   private createWorkItem(ticketId: number): void {
     const open = this.store.workItemsForTicket(ticketId).filter((item) => item.status !== 'done');
@@ -294,6 +317,9 @@ class Flow {
       approvalPrompt: null,
       approvalSummary: null,
       createdAt: this.now,
+      statusAt: this.now,
+      runStartedAt: this.now,
+      scopeAt: null,
       doneAt: null,
       doneReason: null,
     });
@@ -342,7 +368,7 @@ class Flow {
 
     const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
     const sourceKey = String(Math.max(0, ...keys) + 1);
-    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot });
+    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
     const item = this.store.insertWorkItem({
       ticketId: ticket.id,
       playbook: null,
@@ -359,6 +385,9 @@ class Flow {
       approvalPrompt: null,
       approvalSummary: null,
       createdAt: this.now,
+      statusAt: this.now,
+      runStartedAt: this.now,
+      scopeAt: null,
       doneAt: null,
       doneReason: null,
     });
@@ -401,7 +430,7 @@ class Flow {
     if (playbook.autoStart || this.picked(item)) {
       this.queue(item);
     } else {
-      this.store.updateWorkItem(item.id, { status: 'unstarted' });
+      this.setStatus(item.id, { status: 'unstarted' });
     }
   }
 
@@ -573,7 +602,7 @@ class Flow {
     if (item !== null && current.kind === 'pick' && resumed && item.status === 'blocked') {
       // The operator resumed a blocked pick; its done report and end can still advance the work item.
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
-      this.store.updateWorkItem(item.id, { status: 'setup', error: null, failedStep: null });
+      this.setStatus(item.id, { status: 'setup', error: null, failedStep: null });
       return;
     }
 
@@ -589,7 +618,7 @@ class Flow {
       }
     } else if (resumed && item.status === 'blocked') {
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
-      this.store.updateWorkItem(item.id, { status: 'running', error: null, failedStep: null });
+      this.setStatus(item.id, { status: 'running', error: null, failedStep: null });
     }
   }
 
@@ -701,7 +730,7 @@ class Flow {
       case 'approval':
         // The work is ready; Approve starts a new task session with the prompt that publishes it (PRD R23, R31).
         if (item !== null && session.kind === 'task') {
-          this.store.updateWorkItem(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, error: null, failedStep: null });
+          this.setStatus(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, error: null, failedStep: null });
         }
 
         return;
@@ -835,6 +864,9 @@ class Flow {
       approvalPrompt: null,
       approvalSummary: null,
       createdAt: this.now,
+      statusAt: this.now,
+      runStartedAt: this.now,
+      scopeAt: null,
       doneAt: null,
       doneReason: null,
     });
@@ -863,7 +895,7 @@ class Flow {
     this.store.updateWorkItem(item.id, { needsPick: false });
 
     if (playbook === undefined) {
-      this.store.updateWorkItem(item.id, { status: 'triaging', error: null, failedStep: null });
+      this.setStatus(item.id, { status: 'triaging', error: null, failedStep: null });
     } else {
       this.queue(item);
     }
@@ -896,7 +928,7 @@ class Flow {
     }
 
     if (item.failedStep === 'triage') {
-      this.store.updateWorkItem(item.id, { status: 'triaging', error: null, failedStep: null });
+      this.setStatus(item.id, { status: 'triaging', error: null, failedStep: null });
       return;
     }
 
@@ -914,7 +946,7 @@ class Flow {
       throw new Refusal('Triage is already running.');
     }
 
-    this.store.updateWorkItem(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
+    this.setStatus(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null });
   }
 
   private requireNoSession(item: WorkItem): void {
@@ -925,20 +957,30 @@ class Flow {
 
   // Status changes
 
+  /** Every status change comes here, so statusAt and runStartedAt stay true (PRD R27). */
+  private setStatus(id: number, patch: Partial<NewWorkItem> & { status: WorkItemStatus }): void {
+    const before = this.store.workItem(id)!.status;
+    const run = RUN_STATUSES.has(patch.status) && !RUN_STATUSES.has(before) ? { runStartedAt: this.now } : {};
+
+    this.store.updateWorkItem(id, before === patch.status ? patch : { ...patch, statusAt: this.now, ...run });
+  }
+
   private queue(item: WorkItem): void {
-    this.store.updateWorkItem(item.id, { status: 'queued', queuedAt: this.now, error: null, failedStep: null });
+    this.setStatus(item.id, { status: 'queued', queuedAt: this.now, error: null, failedStep: null });
   }
 
   private done(item: WorkItem, reason: 'session' | 'operator' | 'unassigned', warning: string | null): void {
-    this.store.updateWorkItem(item.id, { status: 'done', doneAt: this.now, doneReason: reason, warning, queuedAt: null });
+    const scopeAt = this.store.ticket(item.ticketId)!.scopeAt ?? item.createdAt;
+
+    this.setStatus(item.id, { status: 'done', doneAt: this.now, doneReason: reason, warning, queuedAt: null, scopeAt });
   }
 
   private fail(item: WorkItem, step: 'triage' | SessionKind, cause: string): void {
-    this.store.updateWorkItem(item.id, { status: 'failed', failedStep: step, error: cause, queuedAt: null });
+    this.setStatus(item.id, { status: 'failed', failedStep: step, error: cause, queuedAt: null });
   }
 
   private block(item: WorkItem, cause: string, step: FailedStep = 'task'): void {
-    this.store.updateWorkItem(item.id, { status: 'blocked', failedStep: step, error: cause });
+    this.setStatus(item.id, { status: 'blocked', failedStep: step, error: cause });
   }
 
   /** The session's work item when the session is its latest and it is not done (PRD R45). */
@@ -1099,7 +1141,7 @@ class Flow {
       released: false,
     });
     // An approved prompt is kept, so a Retry of a failed or blocked approval session runs it again.
-    this.store.updateWorkItem(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null, failedStep: null });
+    this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null, failedStep: null });
     this.actions.push({
       type: 'start-session',
       sessionId: id,

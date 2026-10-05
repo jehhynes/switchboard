@@ -34,7 +34,7 @@ function fakeGh(...answers: GhResult[]) {
   });
 }
 
-const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: '' });
+const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
 describe('GithubSource.poll', () => {
   it('lists every searched issue, assigned only when its project status is configured', async () => {
@@ -52,6 +52,7 @@ describe('GithubSource.poll', () => {
         assigned: number !== 19231 && number !== 19230,
         pool: false,
         sortAt: null,
+        enteredAt: null,
       })),
     });
   });
@@ -80,7 +81,41 @@ describe('GithubSource.poll', () => {
 
     expect('tickets' in result && result.tickets.map((t) => t.sortAt)).toEqual([Date.parse('2026-10-02T12:00:00Z'), Date.parse('2026-10-02T15:00:00Z'), null]);
     expect(ISSUES_QUERY).toContain('ProjectV2ItemFieldSingleSelectValue{ name updatedAt }');
-    expect(ISSUES_QUERY).toContain('itemTypes:[ASSIGNED_EVENT]');
+    expect(ISSUES_QUERY).toContain('itemTypes:[ASSIGNED_EVENT, UNASSIGNED_EVENT]');
+  });
+
+  it("enters scope when the operator's current assignment began, ignoring status changes, unassigned spells and a second login's assignment (GC assignedSince)", async () => {
+    type Event = [type: 'AssignedEvent' | 'UnassignedEvent', login: string, createdAt: string];
+    const node = (number: number, assignees: string[], events: Event[]) => ({
+      number,
+      title: 'T',
+      url: 'u',
+      projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev', updatedAt: '2026-10-04T00:00:00Z' } }] },
+      assignees: { nodes: assignees.map((login) => ({ login })) },
+      timelineItems: { nodes: events.map(([__typename, login, createdAt]) => ({ __typename, createdAt, assignee: { login } })) },
+    });
+    const json = {
+      data: {
+        search: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [
+            // Assigned, unassigned, assigned again: the last assignment.
+            node(1, ['work-login'], [['AssignedEvent', 'work-login', '2026-10-01T00:00:00Z'], ['UnassignedEvent', 'work-login', '2026-10-02T00:00:00Z'], ['AssignedEvent', 'Work-Login', '2026-10-03T00:00:00Z']]),
+            // A second login added later keeps the first assignment; another person's assignment does not count.
+            node(2, ['work-login', 'work-ai-login', 'someone'], [['AssignedEvent', 'work-login', '2026-10-01T00:00:00Z'], ['AssignedEvent', 'work-ai-login', '2026-10-02T00:00:00Z'], ['AssignedEvent', 'someone', '2026-10-03T00:00:00Z']]),
+            // Not assigned to the operator, or the events start mid-assignment.
+            node(3, ['someone'], [['AssignedEvent', 'someone', '2026-10-01T00:00:00Z']]),
+            node(4, ['work-login'], []),
+          ],
+        },
+      },
+    };
+    const result = await new GithubSource(config(), fakeGh({ json })).poll();
+
+    expect('tickets' in result && result.tickets.map((t) => t.enteredAt)).toEqual([Date.parse('2026-10-03T00:00:00Z'), Date.parse('2026-10-01T00:00:00Z'), null, null]);
+    // The sort time is unchanged: the later of the latest assignment and the status change.
+    expect('tickets' in result && result.tickets[0]?.sortAt).toBe(Date.parse('2026-10-04T00:00:00Z'));
+    expect(ISSUES_QUERY).toContain('assignees(first:10){ nodes{ login } }');
   });
 
   it('treats a status on another project as not assigned', async () => {

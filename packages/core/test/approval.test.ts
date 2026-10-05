@@ -50,7 +50,7 @@ describe('approval reports (PRD R23, R31)', () => {
 });
 
 describe('Icebox (PRD R49)', () => {
-  const pool = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: key, title: key, url: '', assigned: false, pool: true, sortAt: 1 });
+  const pool = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: key, title: key, url: '', assigned: false, pool: true, sortAt: 1, enteredAt: null });
 
   it('holds an iceboxed pool ticket from triage until restored', () => {
     const h = new Harness();
@@ -58,7 +58,7 @@ describe('Icebox (PRD R49)', () => {
     expect(h.act({ type: 'poll', source: 'zoho', tickets: [pool('500')] })).toHaveLength(1);
 
     const h2 = new Harness();
-    h2.store.insertTicket({ source: 'zoho', sourceKey: '501', ref: '#501', sourceId: '501', title: 't', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, lastPolledAt: null, repoRoot: '' });
+    h2.store.insertTicket({ source: 'zoho', sourceKey: '501', ref: '#501', sourceId: '501', title: 't', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
     expect(h2.act({ type: 'tick' })).toEqual([]);
     expect(only(h2.act({ type: 'restore', ticketId: 1 }), 'triage').ticket.sourceKey).toBe('501');
@@ -66,7 +66,7 @@ describe('Icebox (PRD R49)', () => {
 
   it('holds an iceboxed work item from triage and start until restored', () => {
     const h = new Harness();
-    h.store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'u', assigned: false, pool: false, iceboxed: true, sortAt: null, lastPolledAt: null, repoRoot: '' });
+    h.store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'u', assigned: false, pool: false, iceboxed: true, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
     expect(h.poll(issue('1'))).toEqual([]);
     expect(h.item(1).status).toBe('triaging');

@@ -9,7 +9,12 @@ query($q:String!, $status:String!, $after:String){
         project{ number owner{ ... on Organization{ login } ... on User{ login } } }
         fieldValueByName(name:$status){ ... on ProjectV2ItemFieldSingleSelectValue{ name updatedAt } }
       }}
-      timelineItems(last:100, itemTypes:[ASSIGNED_EVENT]){ nodes{ ... on AssignedEvent{ createdAt assignee{ ... on User{ login } ... on Bot{ login } } } } }
+      assignees(first:10){ nodes{ login } }
+      timelineItems(last:100, itemTypes:[ASSIGNED_EVENT, UNASSIGNED_EVENT]){ nodes{
+        __typename
+        ... on AssignedEvent{ createdAt assignee{ ... on User{ login } ... on Bot{ login } } }
+        ... on UnassignedEvent{ createdAt assignee{ ... on User{ login } ... on Bot{ login } } }
+      }}
     }}
   }
 }`;

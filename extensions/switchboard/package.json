@@ -30,7 +30,7 @@
         {
           "type": "webview",
           "id": "switchboard.workItems",
-          "name": "Work items"
+          "name": "Switchboard"
         }
       ]
     },
@@ -42,23 +42,251 @@
         "icon": "$(add)"
       },
       {
-        "command": "switchboard.chooseSources",
-        "title": "Choose Sources…",
+        "command": "switchboard.source.github.on",
+        "title": "Stop Polling GitHub",
         "category": "Switchboard",
-        "icon": "$(filter)"
+        "icon": {
+          "light": "media/sources/github-icon-on-light.svg",
+          "dark": "media/sources/github-icon-on-dark.svg"
+        }
+      },
+      {
+        "command": "switchboard.source.github.off",
+        "title": "Poll GitHub",
+        "category": "Switchboard",
+        "icon": {
+          "light": "media/sources/github-icon-off-light.svg",
+          "dark": "media/sources/github-icon-off-dark.svg"
+        }
+      },
+      {
+        "command": "switchboard.source.zoho.on",
+        "title": "Stop Polling Zoho Desk",
+        "category": "Switchboard",
+        "icon": {
+          "light": "media/sources/zoho-icon-on-light.svg",
+          "dark": "media/sources/zoho-icon-on-dark.svg"
+        }
+      },
+      {
+        "command": "switchboard.source.zoho.off",
+        "title": "Poll Zoho Desk",
+        "category": "Switchboard",
+        "icon": {
+          "light": "media/sources/zoho-icon-off-light.svg",
+          "dark": "media/sources/zoho-icon-off-dark.svg"
+        }
+      },
+      {
+        "command": "switchboard.source.forum.on",
+        "title": "Stop Polling Forum",
+        "category": "Switchboard",
+        "icon": {
+          "light": "media/sources/forum-icon-on-light.svg",
+          "dark": "media/sources/forum-icon-on-dark.svg"
+        }
+      },
+      {
+        "command": "switchboard.source.forum.off",
+        "title": "Poll Forum",
+        "category": "Switchboard",
+        "icon": {
+          "light": "media/sources/forum-icon-off-light.svg",
+          "dark": "media/sources/forum-icon-off-dark.svg"
+        }
+      },
+      {
+        "command": "switchboard.separator",
+        "title": "​",
+        "enablement": "false",
+        "icon": "media/sources/separator.svg"
+      },
+      {
+        "command": "switchboard.row.start",
+        "title": "Start",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.approve",
+        "title": "Approve",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.retry",
+        "title": "Retry",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.stop",
+        "title": "Stop",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.triageAgain",
+        "title": "Triage Again",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.markDone",
+        "title": "Mark Done",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.icebox",
+        "title": "Icebox",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.restore",
+        "title": "Restore",
+        "category": "Switchboard"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "switchboard.newAdhoc",
-          "when": "view == switchboard.workItems",
-          "group": "switchboard@1"
+          "command": "switchboard.source.github.on",
+          "when": "view == switchboard.workItems && switchboard.source.github == on",
+          "group": "navigation@1"
         },
         {
-          "command": "switchboard.chooseSources",
+          "command": "switchboard.source.github.off",
+          "when": "view == switchboard.workItems && switchboard.source.github == off",
+          "group": "navigation@1"
+        },
+        {
+          "command": "switchboard.source.zoho.on",
+          "when": "view == switchboard.workItems && switchboard.source.zoho == on",
+          "group": "navigation@2"
+        },
+        {
+          "command": "switchboard.source.zoho.off",
+          "when": "view == switchboard.workItems && switchboard.source.zoho == off",
+          "group": "navigation@2"
+        },
+        {
+          "command": "switchboard.source.forum.on",
+          "when": "view == switchboard.workItems && switchboard.source.forum == on",
+          "group": "navigation@3"
+        },
+        {
+          "command": "switchboard.source.forum.off",
+          "when": "view == switchboard.workItems && switchboard.source.forum == off",
+          "group": "navigation@3"
+        },
+        {
+          "command": "switchboard.separator",
           "when": "view == switchboard.workItems",
-          "group": "switchboard@2"
+          "group": "navigation@8"
+        },
+        {
+          "command": "switchboard.newAdhoc",
+          "when": "view == switchboard.workItems",
+          "group": "navigation@9"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "switchboard.source.github.on",
+          "when": "switchboard.source.github == on"
+        },
+        {
+          "command": "switchboard.source.github.off",
+          "when": "switchboard.source.github == off"
+        },
+        {
+          "command": "switchboard.source.zoho.on",
+          "when": "switchboard.source.zoho == on"
+        },
+        {
+          "command": "switchboard.source.zoho.off",
+          "when": "switchboard.source.zoho == off"
+        },
+        {
+          "command": "switchboard.source.forum.on",
+          "when": "switchboard.source.forum == on"
+        },
+        {
+          "command": "switchboard.source.forum.off",
+          "when": "switchboard.source.forum == off"
+        },
+        {
+          "command": "switchboard.separator",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.start",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.approve",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.retry",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.stop",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.triageAgain",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.markDone",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.icebox",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.restore",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "switchboard.row.start",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.start",
+          "group": "1_run@1"
+        },
+        {
+          "command": "switchboard.row.approve",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.approve",
+          "group": "1_run@2"
+        },
+        {
+          "command": "switchboard.row.retry",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.retry",
+          "group": "1_run@3"
+        },
+        {
+          "command": "switchboard.row.stop",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.stop",
+          "group": "1_run@4"
+        },
+        {
+          "command": "switchboard.row.triageAgain",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.triageAgain",
+          "group": "2_status@1"
+        },
+        {
+          "command": "switchboard.row.markDone",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.markDone",
+          "group": "2_status@2"
+        },
+        {
+          "command": "switchboard.row.icebox",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.icebox",
+          "group": "3_icebox@1"
+        },
+        {
+          "command": "switchboard.row.restore",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.restore",
+          "group": "3_icebox@1"
         }
       ]
     }

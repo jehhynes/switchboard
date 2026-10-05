@@ -45,6 +45,8 @@ export interface Ticket {
   iceboxed: boolean;
   /** The source's sort time, which orders the pool so the longest-waiting customer comes first (PRD R27). */
   sortAt: number | null;
+  /** When the ticket last entered the source's scope (assigned or pool); the in-queue time counts from it (PRD R27). */
+  scopeAt: number | null;
   lastPolledAt: number | null;
   /** The repo an ad-hoc prompt chose. Empty takes the source's `repoRoot` setting. */
   repoRoot: string;
@@ -74,6 +76,12 @@ export interface WorkItem {
   approvalPrompt: string | null;
   approvalSummary: string | null;
   createdAt: number;
+  /** When the status last changed; Needs you counts from it (PRD R27). */
+  statusAt: number;
+  /** When the work item last entered a working status from another; Working counts from it (PRD R27). */
+  runStartedAt: number | null;
+  /** The ticket's scopeAt, kept when the work item is done, so Done shows the time from entering scope to done (PRD R27). */
+  scopeAt: number | null;
   doneAt: number | null;
   doneReason: DoneReason | null;
 }

@@ -25,7 +25,7 @@ export function activeSession(item: WorkItemView): WorkItemView['sessions'][numb
 
 const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left without a done report' };
 
-/** The one control a Needs you or Unstarted row shows outside its menu, when one applies. */
+/** The one control a Needs you or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
 export function mainControl(item: WorkItemView): Control | null {
   const group = groupOf(item);
 
@@ -113,45 +113,31 @@ function isBackground(session: SessionView | null): session is SessionView & { s
   return session !== null && session.state !== 'starting' && session.shortId !== null && !session.released;
 }
 
-const SESSION_STATES: Record<string, string> = { starting: 'running', running: 'running', waiting: 'waiting', idle: 'idle', failed: 'failed' };
 
 /**
- * The one session control: an icon with a dot for the active session's state, which opens the latest session, attaching to
- * its background process or opening it in VS Code (PRD R27). Null when the work item has had no session.
+ * What a click on the row opens (PRD R27): the background session in a terminal while its process runs, otherwise the latest
+ * session in VS Code, otherwise the worktree in VS Code. Null when there is nothing to open, as for a session still starting.
  */
-export function sessionControl(item: WorkItemView): { state: string | null; title: string; message: Record<string, unknown> | null } | null {
+export function openAction(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
-
-  if (latest === null) {
-    return null;
-  }
-
   const session = activeSession(item);
-  const state = session === null ? null : (SESSION_STATES[session.state] ?? 'running');
-  const words = state === null ? 'No active session' : `Session ${state}`;
 
   if (isBackground(session)) {
-    return { state, title: `${words}. Attach`, message: { type: 'attach', shortId: session.shortId, name: `${item.ticket.source} ${item.ticket.sourceKey}` } };
+    return { type: 'attach', shortId: session.shortId, name: `${item.ticket.source} ${item.ticket.sourceKey}` };
   }
 
-  if (latest.nativeSessionId !== null && (session === null || session.released)) {
-    return { state, title: `${words}. Open in VS Code`, message: { type: 'open', sessionId: latest.nativeSessionId, cwd: latest.cwd } };
+  if (latest?.nativeSessionId != null && (session === null || session.released)) {
+    return { type: 'open', sessionId: latest.nativeSessionId, cwd: latest.cwd };
   }
 
-  return { state, title: words, message: null };
+  return item.worktree === null ? null : { type: 'openFolder', path: item.worktree.path };
 }
 
-function sessionButton(item: WorkItemView): string {
-  const control = sessionControl(item);
 
-  if (control === null) {
-    return '';
-  }
+function openAttribute(item: WorkItemView): string {
+  const action = openAction(item);
 
-  const dot = control.state === null ? '' : `<span class="state-dot ${control.state}"></span>`;
-  const attrs = control.message === null ? ' disabled' : ` data-message="${escape(JSON.stringify(control.message))}"`;
-
-  return `<button class="control session-button" title="${escape(control.title)}"${attrs}><span class="codicon codicon-sparkle"></span>${dot}</button>`;
+  return action === null ? '' : ` data-open="${escape(JSON.stringify(action))}"`;
 }
 
 /** Icebox or Restore for a ticket (PRD R49). */
@@ -161,14 +147,70 @@ function iceboxControl(ticketId: number, iceboxed: boolean): Control {
     : { label: 'Icebox', icon: 'archive', message: { type: 'action', action: { type: 'icebox', ticketId } } };
 }
 
-/** A main control: the icon, with the verb in the tooltip (PRD R27). */
-function iconButton(control: Control): string {
-  return `<button class="control icon-button" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span></button>`;
+/**
+ * A primary action: a large button with its icon and verb; a narrow panel hides the verb, which stays in the tooltip (PRD R27).
+ * The tone colours it: `primary` for Approve, `error` or `warning` for Retry, none for the rest; `iconOnly` drops the verb.
+ */
+function actionButton(control: Control, tone: 'primary' | 'error' | 'warning' | null = null, iconOnly = false): string {
+  const label = iconOnly ? '' : `<span class="label">${escape(control.label)}</span>`;
+
+  return `<button class="control action-button${tone === null ? '' : ` ${tone}`}${iconOnly ? ' icon-only' : ''}" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span>${label}</button>`;
 }
 
-/** A menu control, with its text. */
-function button(control: Control): string {
-  return `<button class="control" title="${escape(control.label)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span><span>${escape(control.label)}</span></button>`;
+/** Approve takes the primary colour, and Retry the error colour on a failed row or the warning colour on a blocked one. */
+function toneOf(item: WorkItemView, control: Control): 'primary' | 'error' | 'warning' | null {
+  if (control.label === 'Approve') {
+    return 'primary';
+  }
+
+  return control.label === 'Retry' ? (item.status === 'failed' ? 'error' : 'warning') : null;
+}
+
+/** The actions column at the right of lines 2 and 3, left out when empty. */
+function actionsColumn(parts: string): string {
+  return parts === '' ? '' : `\n<div class="actions">${parts}</div>`;
+}
+
+/**
+ * The report to read before approving: the newest local-file link on an `awaiting-approval` row. Approval reports do not
+ * name their report yet, so this is the best guess for skills such as review-pr and address-feedback.
+ */
+export function reportLink(item: WorkItemView): WorkItemView['links'][number] | null {
+  if (item.status !== 'awaiting-approval') {
+    return null;
+  }
+
+  return item.links.filter((link) => linkKind(link.target) === 'file').reduce<WorkItemView['links'][number] | null>((newest, link) => (newest === null || link.reportedAt >= newest.reportedAt ? link : newest), null);
+}
+
+/** Each control's `switchboard.row.<key>` command in the row's right-click menu. */
+export const ROW_COMMANDS: Record<string, string> = {
+  Start: 'start',
+  Approve: 'approve',
+  Retry: 'retry',
+  Stop: 'stop',
+  'Triage again': 'triageAgain',
+  'Mark done': 'markDone',
+  Icebox: 'icebox',
+  Restore: 'restore',
+};
+
+/**
+ * The row's right-click menu: VS Code shows each `webview/context` command whose context key is set here, and passes this
+ * object, with the hub action for each command, to the command it runs.
+ */
+export function rowContext(controls: Control[]): string {
+  const actions: Record<string, unknown> = {};
+  const context: Record<string, unknown> = { webviewSection: 'row', preventDefaultContextMenuItems: true, actions };
+
+  for (const control of controls) {
+    const key = ROW_COMMANDS[control.label]!;
+
+    context[`switchboard.row.${key}`] = true;
+    actions[key] = control.message['action'];
+  }
+
+  return ` data-vscode-context="${escape(JSON.stringify(context))}"`;
 }
 
 /** Time in queue as a whole number of minutes, hours, days or weeks, such as `40m`, `5h`, `3d` or `2w`. */
@@ -190,8 +232,50 @@ export function queueTime(since: number, now: number): string {
   return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
 }
 
-function queued(since: number | null, until: number): string {
-  return since === null ? '' : `<span class="queue" title="In queue since ${escape(new Date(since).toISOString().slice(0, 16).replace('T', ' '))} UTC">${queueTime(since, until)}</span>`;
+export interface Clock {
+  since: number;
+  /** What the time counts, for the tooltip. */
+  label: string;
+}
+
+/**
+ * The row's time, by group (PRD R27): Needs you since the work item entered its status or its session began to wait, Working since the run
+ * started, and Unstarted, Icebox and Done since the ticket entered the source's scope, stopping at done.
+ */
+export function clockOf(item: WorkItemView): Clock {
+  const group = groupOf(item);
+  const session = activeSession(item);
+
+  if (group === 'done') {
+    // Never the ticket's scopeAt: a ticket that returned after the work item was done has a later one.
+    return { since: item.scopeAt ?? item.createdAt, label: 'In scope from' };
+  }
+
+  if (item.ticket.iceboxed || group === 'unstarted') {
+    return { since: item.ticket.scopeAt ?? item.createdAt, label: 'In scope since' };
+  }
+
+  if (group === 'needs') {
+    const byStatus = item.status === 'awaiting-approval' || item.status === 'blocked' || item.status === 'failed';
+
+    return !byStatus && session?.state === 'waiting' ? { since: session.stateAt, label: 'Waiting since' } : { since: item.statusAt, label: 'In this status since' };
+  }
+
+  return { since: item.runStartedAt ?? item.statusAt, label: 'Working since' };
+}
+
+function utcText(time: number): string {
+  return `${new Date(time).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+function queued(clock: Clock | null, until: number | null, now: number): string {
+  if (clock === null) {
+    return '';
+  }
+
+  const title = until === null ? `${clock.label} ${utcText(clock.since)}` : `${clock.label} ${utcText(clock.since)} to ${utcText(until)}`;
+
+  return `<span class="queue" title="${escape(title)}">${queueTime(clock.since, until ?? now)}</span>`;
 }
 
 type Rating = { immediacy: string | null; severity: string | null } | null;
@@ -273,61 +357,109 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
   }
 }
 
-function markHtml(item: WorkItemView): string {
+/** The status mark for line 3; Unstarted rows have none, because their mark is the priority dot. */
+function statusMark(item: WorkItemView): string {
   const mark = markOf(item);
 
-  return mark === 'priority' ? `<span class="mark">${priorityDot(item.triage)}</span>` : markIcon(mark);
+  return mark === 'priority' ? '' : markIcon(mark);
 }
 
 function markIcon(mark: Mark): string {
   return `<span class="mark codicon codicon-${mark.icon}${mark.tone === undefined ? '' : ` ${mark.tone}`}" title="${escape(mark.title)}"></span>`;
 }
 
-/** The playbook name: the namespace and colon muted, the name in bold (PRD R27). */
+/** The playbook name: the namespace and colon muted, the name in the foreground colour (PRD R27). */
 function playbookLabel(name: string): string {
   const colon = name.indexOf(':');
   const namespace = colon === -1 ? '' : name.slice(0, colon + 1);
 
-  return `<span class="playbook-name" title="${escape(name)}"><span class="namespace">${escape(namespace)}</span><span class="name">${escape(name.slice(colon + 1))}</span></span>`;
+  return `<span class="playbook-name"><span class="namespace">${escape(namespace)}</span><span class="name">${escape(name.slice(colon + 1))}</span></span>`;
 }
 
 /** Marks a ticket that came back after earlier work items (PRD R51). */
 function returned(count: number): string {
-  return count === 0 ? '' : `<span class="returned" title="${count} earlier work item${count === 1 ? '' : 's'}">Returned ×${count}</span>`;
+  return count === 0 ? '' : `<span class="returned">Returned ×${count}</span>`;
 }
 
-/** The ... button and, when open, the menu with the row's other controls. */
-function moreMenu(key: string, controls: Control[], open: boolean): string {
-  if (controls.length === 0) {
-    return '';
+const PULL_REQUEST = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/;
+const ISSUE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/(\d+)/;
+
+/** A link's kind by its target: a GitHub pull request or issue, a local file, or another URL (PRD R52). */
+export function linkKind(target: string): 'pr' | 'issue' | 'file' | 'url' {
+  return PULL_REQUEST.test(target) ? 'pr' : ISSUE.test(target) ? 'issue' : /^https?:\/\//.test(target) ? 'url' : 'file';
+}
+
+const LINK_ICONS = { pr: 'git-pull-request', file: 'file', url: 'link' } as const;
+
+function linkBadge(link: { label: string; target: string }): string {
+  const kind = linkKind(link.target);
+
+  // A GitHub issue reads like a GitHub ticket's key, `gh <number>`, whatever label the session gave it.
+  if (kind === 'issue') {
+    return `<a class="key github" href="${escape(link.target)}" title="${escape(link.target)}">gh ${ISSUE.exec(link.target)![1]}</a>`;
   }
 
-  return `<span class="more"><button class="more-button" title="More actions" data-menu="${escape(key)}"><span class="codicon codicon-ellipsis"></span></button>${
-    open ? `<div class="menu">${controls.map(button).join('')}</div>` : ''
-  }</span>`;
+  // The pull request icon already says PR, so the badge shows only the number from the URL, whatever label the session gave it.
+  const label = kind === 'pr' ? PULL_REQUEST.exec(link.target)![1]! : link.label;
+
+  return `<a class="badge ${kind}" href="${escape(link.target)}" title="${escape(link.target)}"><span class="codicon codicon-${LINK_ICONS[kind]}"></span> ${escape(label)}</a>`;
+}
+
+const SOURCE_LABELS: Record<string, string> = { github: 'gh' };
+
+function sourceLabel(source: string): string {
+  return SOURCE_LABELS[source] ?? source;
+}
+
+/** The ticket's source and key, coloured by source, with github shortened to gh. */
+function ticketLink(ticket: WorkItemView['ticket']): string {
+  const label = `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
+  const attributes = `class="key ${escape(ticket.source)}"`;
+
+  return ticket.url === '' ? `<span ${attributes}>${escape(label)}</span>` : `<a ${attributes} href="${escape(ticket.url)}">${escape(label)}</a>`;
+}
+
+/** Line 1: the title, led by the priority dot on a priority ticket, and the time in queue (PRD R27). */
+function firstLine(triage: Rating, title: string, queue: string): string {
+  return `<div class="line first"><span class="title">${priorityDot(triage)}${escape(title)}</span>${queue}</div>`;
+}
+
+/** Line 3, left out when empty: the status mark and the facts that lines 1 and 2 do not show. */
+function thirdLine(parts: string): string {
+  return parts === '' ? '' : `\n<div class="line third"><span class="meta">${parts}</span></div>`;
+}
+
+/**
+ * Splits a work item's links: line 2 shows pull requests, and GitHub issues unless the ticket is a GitHub one; the rest go to line 3.
+ * A link to the ticket itself is dropped, because the ticket link already shows it (PRD R52).
+ */
+export function splitLinks(item: WorkItemView): { primary: WorkItemView['links']; rest: WorkItemView['links'] } {
+  const links = item.links.filter((link) => link.target !== item.ticket.url);
+  const primary = [
+    ...links.filter((link) => linkKind(link.target) === 'pr'),
+    ...(item.ticket.source === 'github' ? [] : links.filter((link) => linkKind(link.target) === 'issue')),
+  ];
+
+  return { primary, rest: links.filter((link) => !primary.includes(link)) };
 }
 
 function row(item: WorkItemView, now: number, ui: PanelUi): string {
   const main = mainControl(item);
-  const key = `${item.ticket.source} ${item.ticket.sourceKey}`;
-  const menuKey = `item:${item.id}`;
-  const ticket = item.ticket.url === '' ? `<span class="key">${escape(key)}</span>` : `<a class="key" href="${escape(item.ticket.url)}">${escape(key)}</a>`;
+  const rowKey = `item:${item.id}`;
   const stage = item.stage === null ? '' : `<span class="stage">${escape(item.stage)}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}</span>`;
-  const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : `<span class="approval" title="${escape(item.approvalSummary)}">${escape(item.approvalSummary)}</span>`;
-  const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => `<span class="note" title="${escape(note)}">${escape(note)}</span>`).join('');
+  const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : `<span class="approval">${escape(item.approvalSummary)}</span>`;
+  const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => `<span class="note">${escape(note)}</span>`).join('');
   const worktree =
     item.worktree === null ? '' : `<span class="worktree codicon codicon-git-branch" title="${escape([item.worktree.branch, item.worktree.path].filter((part) => part !== null).join('\n'))}"></span>`;
-  const links = item.links
-    .map((link) => `<a class="badge" href="${escape(link.target)}" title="${escape(link.target)}"><span class="codicon codicon-link"></span> ${escape(link.label)}</a>`)
-    .join('');
-  // A pool ticket has waited since the customer's last message; any other since its work item was created.
-  const since = item.ticket.sortAt ?? item.createdAt;
-  const others = controlsOf(item).filter((control) => control.label !== main?.label);
-  const dot = item.status === 'unstarted' ? '' : priorityDot(item.triage);
+  const { primary, rest } = splitLinks(item);
+  const report = reportLink(item);
+  const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report.target } }, null, true);
 
-  return `<div class="item" data-item="${item.id}">
-<div class="line">${markHtml(item)} ${ticket} <span class="title" title="${escape(item.ticket.title)}">${dot}${escape(item.ticket.title)}</span>${queued(since, item.doneAt ?? now)}</div>
-<div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${stage}${worktree}${approval}${links}${returned(item.returned)}${notes}</span><span class="actions">${main === null ? '' : iconButton(main)}${sessionButton(item)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
+  return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(item)}${rowContext(controlsOf(item))}>
+${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
+<div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
+    `${statusMark(item)}${stage}${worktree}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}${notes}`,
+  )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main))}`)}
 </div>`;
 }
 
@@ -345,7 +477,11 @@ function errors(snapshot: Snapshot): string {
 /** Says plainly what an unconfigured home is missing. */
 function setup(snapshot: Snapshot): string {
   const lines = [
-    snapshot.sources.length === 0 ? `No source is polled. Enable a source in ${snapshot.home}\\settings.json.` : null,
+    snapshot.sources.length > 0
+      ? null
+      : snapshot.sourceStates.length > 0
+        ? 'No source is polled. Turn one on in the title bar.'
+        : `No source is configured. Add one in ${snapshot.home}\\settings.json.`,
     snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under ${snapshot.home}\\playbooks.` : null,
   ].filter((line): line is string => line !== null);
 
@@ -353,22 +489,23 @@ function setup(snapshot: Snapshot): string {
 }
 
 
-/** A pool row in Unstarted: the ticket, priority, playbook, time in queue, Unclaimed, Start (a pick), and Icebox in the menu (PRD R27, R47, R48). */
+/** A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Start; Returned on line 3; Icebox in the right-click menu (PRD R27, R47, R48). */
 function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   const { ticket, triage } = entry;
-  const key = `${ticket.source} ${ticket.sourceKey}`;
-  const menuKey = `ticket:${ticket.id}`;
-  const link = ticket.url === '' ? `<span class="key">${escape(key)}</span>` : `<a class="key" href="${escape(ticket.url)}">${escape(key)}</a>`;
+  const rowKey = `ticket:${ticket.id}`;
   const pick: Control = { label: 'Start', icon: 'play', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const failed = triage?.error != null;
   // An iceboxed ticket is never triaged, so a missing triage is not shown as running.
   const triaging = triage !== null && triage.endedAt === null;
-  const [main, ...others] = failed ? [again, pick, iceboxControl(ticket.id, ticket.iceboxed)] : [pick, iceboxControl(ticket.id, ticket.iceboxed)];
+  const controls = failed ? [again, pick, iceboxControl(ticket.id, ticket.iceboxed)] : [pick, iceboxControl(ticket.id, ticket.iceboxed)];
+  const main = controls[0]!;
 
-  return `<div class="item pool-item" data-ticket="${ticket.id}">
-<div class="line">${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : `<span class="mark">${priorityDot(triage)}</span>`} ${link} <span class="title" title="${escape(ticket.title)}">${escape(ticket.title)}</span>${queued(ticket.sortAt, now)}</div>
-<div class="line second"><span class="meta">${playbookLabel(triage?.playbook ?? '')}<span class="tag" title="Start claims it">Unclaimed</span>${returned(entry.returned)}${failed ? `<span class="note" title="${escape(triage!.error!)}">${escape(triage!.error!)}</span>` : ''}</span><span class="actions">${iconButton(main!)}${moreMenu(menuKey, others, ui.menu === menuKey)}</span></div>
+  return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${rowContext(controls)}>
+${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
+<div class="line second"><span class="meta">${playbookLabel(triage?.playbook ?? '')}${ticketLink(ticket)}</span></div>${thirdLine(
+    `${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : ''}${returned(entry.returned)}${failed ? `<span class="note">${escape(triage!.error!)}</span>` : ''}`,
+  )}${actionsColumn(actionButton(main))}
 </div>`;
 }
 
@@ -391,11 +528,15 @@ export function unstartedOrder(items: WorkItemView[], pool: PoolView[]): (WorkIt
   });
 }
 
-/** What the operator changed in the panel: opened or closed groups, and the open ... menu. */
+/** What the operator changed in the panel: opened or closed groups, and the selected row. */
 export interface PanelUi {
   /** Groups the operator opened or closed; others take their default. */
   groups: ReadonlyMap<string, boolean>;
-  menu: string | null;
+  selected: string | null;
+}
+
+function selectedClass(key: string, ui: PanelUi): string {
+  return ui.selected === key ? ' selected' : '';
 }
 
 /** Needs you, Working and Unstarted start open; Done and Icebox start closed. */
@@ -404,7 +545,7 @@ const OPEN_BY_DEFAULT = new Set(['needs', 'working', 'unstarted']);
 function group(key: string, title: string, count: number, body: string, ui: PanelUi): string {
   const open = ui.groups.get(key) ?? OPEN_BY_DEFAULT.has(key);
 
-  return `<details class="group" data-group="${key}"${open ? ' open' : ''}><summary><h3>${escape(title)} (${count})</h3></summary>${body}</details>`;
+  return `<details class="group" data-group="${key}"${open ? ' open' : ''}><summary><h3>${escape(title)}</h3><span class="count">${count}</span></summary>${body}</details>`;
 }
 
 /** The whole panel. */

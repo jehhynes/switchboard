@@ -10,11 +10,13 @@ export interface ForumConfig {
   userId: string;
   /** A poll returning this many open topics is treated as incomplete. */
   maxRows: number;
+  /** The change-history database on the same host, which records when a topic's status changed. */
+  auditDatabase: string;
 }
 
 export type ConfigResult = { config: ForumConfig } | { error: string };
 
-const KEYS = ['queryCommand', 'forumId', 'userId', 'maxRows'];
+const KEYS = ['queryCommand', 'forumId', 'userId', 'maxRows', 'auditDatabase'];
 
 /** Reads the Forum keys of `sources.forum`. */
 export function parseForumConfig(options: Record<string, unknown>): ConfigResult {
@@ -24,7 +26,7 @@ export function parseForumConfig(options: Record<string, unknown>): ConfigResult
     return { error: `sources.forum.${unknown[0]} is not a setting.` };
   }
 
-  const { queryCommand = 'bash ~/.claude/scripts/run-forum-sql.sh', forumId = 1, userId, maxRows = 500 } = options;
+  const { queryCommand = 'bash ~/.claude/scripts/run-forum-sql.sh', forumId = 1, userId, maxRows = 500, auditDatabase = 'audit' } = options;
 
   if (typeof queryCommand !== 'string' || queryCommand === '') {
     return { error: 'sources.forum.queryCommand must be a non-empty string.' };
@@ -34,13 +36,17 @@ export function parseForumConfig(options: Record<string, unknown>): ConfigResult
     return { error: 'sources.forum.userId must be set to your forum user ID, as a string.' };
   }
 
+  if (typeof auditDatabase !== 'string' || !/^\w+$/.test(auditDatabase)) {
+    return { error: 'sources.forum.auditDatabase must be a database name.' };
+  }
+
   for (const [key, value] of Object.entries({ forumId, maxRows })) {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
       return { error: `sources.forum.${key} must be a whole number of at least 1.` };
     }
   }
 
-  return { config: { queryCommand, forumId: forumId as number, userId, maxRows: maxRows as number } };
+  return { config: { queryCommand, forumId: forumId as number, userId, maxRows: maxRows as number, auditDatabase } };
 }
 
 export type QueryResult = { rows: Record<string, unknown>[] } | { error: string };
@@ -107,6 +113,8 @@ export const TEXT_LIMIT = 2_000;
 const AI_ANALYSIS_USER = 2;
 /** `Entry.Status` of a private note. */
 const PRIVATE = 2;
+/** `EntityType.Thread` in the audit store. */
+const TOPIC_ENTITY = 1;
 
 function stripHtml(html: string): string {
   return html
@@ -150,13 +158,15 @@ export class ForumSource implements Source {
     }
 
     const tickets: PolledTicket[] = [];
+    const kept = result.rows.filter((row) => row['AssigneeId'] === null || row['AssigneeId'] === undefined || String(row['AssigneeId']) === this.config.userId);
+    const opened = await this.openedAt(kept.map((row) => Number(row['Id'])));
 
-    for (const row of result.rows) {
+    if ('error' in opened) {
+      return opened;
+    }
+
+    for (const row of kept) {
       const assignee = row['AssigneeId'] === null || row['AssigneeId'] === undefined ? null : String(row['AssigneeId']);
-
-      if (assignee !== null && assignee !== this.config.userId) {
-        continue;
-      }
 
       tickets.push({
         sourceKey: String(row['Id']),
@@ -168,10 +178,45 @@ export class ForumSource implements Source {
         pool: assignee === null,
         // The last public post is how long the asker has waited; a topic without one falls back to its creation.
         sortAt: utc(row['LastPublicPostUtc']) ?? utc(row['CreatedUtc']),
+        enteredAt: opened.at.get(String(row['Id'])) ?? utc(row['CreatedUtc']),
       });
     }
 
     return { tickets };
+  }
+
+  /**
+   * When each open topic last became Open (PRD R53): its latest audited Status change, since it is Open now. The insert lists every field, so
+   * a topic whose status never changed counts from its creation (mechanics M15).
+   */
+  private async openedAt(ids: number[]): Promise<{ at: Map<string, number> } | { error: string }> {
+    const at = new Map<string, number>();
+    const valid = ids.filter((id) => Number.isInteger(id) && id > 0);
+
+    if (valid.length === 0) {
+      return { at };
+    }
+
+    const result = await this.query(
+      `SELECT e.EntityId, MAX(s.CreatedUtc) AS OpenedUtc FROM ${this.config.auditDatabase}.AuditEntity e ` +
+        `JOIN ${this.config.auditDatabase}.AuditScope s ON s.Id = e.ScopeId ` +
+        `WHERE e.EntityType = ${TOPIC_ENTITY} AND e.EntityId IN (${valid.join(',')}) AND CONCAT(',', e.FieldNames, ',') LIKE '%,Status,%' ` +
+        'GROUP BY e.EntityId;',
+    );
+
+    if ('error' in result) {
+      return result;
+    }
+
+    for (const row of result.rows) {
+      const time = utc(row['OpenedUtc']);
+
+      if (time !== null) {
+        at.set(String(row['EntityId']), time);
+      }
+    }
+
+    return { at };
   }
 
   /** The topic's title and its public posts in order, without deleted posts, private notes or the AI analysis. */

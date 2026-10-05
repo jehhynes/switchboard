@@ -112,7 +112,7 @@ class FakeSource implements Source {
   }
 }
 
-const issue = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null });
+const issue = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null, enteredAt: null });
 
 function setup(cfg = config(), now = () => T0) {
   const store = Store.open(':memory:');
@@ -318,7 +318,7 @@ describe('Runtime', () => {
 
   it('reconciles at startup and installs hooks when enabled', async () => {
     const { store, runtime } = setup(config({ installHooks: true }));
-    store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
+    store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
     runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch' });
     await runtime.settled();
     store.updateSession('s1', { state: 'starting', shortId: null });
@@ -372,7 +372,7 @@ describe('Runtime', () => {
     const cfg = config();
     cfg.settings.sources['github']!.pickPrompt = 'Claim {{ticket.sourceKey}}, then stop.';
     const { store, cli, source, runtime } = setup(cfg);
-    source.result = { tickets: [{ ...issue('9'), assigned: false, pool: true, sortAt: 20 }, { ...issue('8'), assigned: false, pool: true, sortAt: 10 }] };
+    source.result = { tickets: [{ ...issue('9'), assigned: false, pool: true, sortAt: 20, enteredAt: null }, { ...issue('8'), assigned: false, pool: true, sortAt: 10, enteredAt: null }] };
 
     await runtime.pollSource('github');
     await runtime.settled();
@@ -397,7 +397,7 @@ describe('Runtime', () => {
     cli.classifyByContext.set('Issue 2 text', rated('NON-BLOCKING', 'LOW'));
     cli.classifyByContext.set('Issue 3 text', rated('BLOCKING', 'HIGH'));
     cli.classifyByContext.set('Issue 4 text', rated('URGENT', 'MED'));
-    const pooled = (key: string, sortAt: number) => ({ ...issue(key), assigned: false, pool: true, sortAt });
+    const pooled = (key: string, sortAt: number) => ({ ...issue(key), assigned: false, pool: true, sortAt, enteredAt: null });
     source.result = { tickets: [pooled('1', 10), pooled('2', 20), pooled('3', 30), pooled('4', 25), pooled('5', 5)] };
 
     await runtime.pollSource('github');
@@ -413,7 +413,7 @@ describe('Runtime', () => {
     ]);
 
     const ticket = store.findTicket('github', '1')!;
-    store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, createdAt: T0, doneAt: T0, doneReason: 'operator' });
+    store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' });
 
     expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['5', 0], ['1', 1], ['2', 0], ['4', 0], ['3', 0]]);
 
