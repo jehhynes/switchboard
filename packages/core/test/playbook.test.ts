@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadPlaybooks, parsePlaybook } from '../src/playbook.js';
+import { formatPlaybook, isPlaybookName, loadPlaybooks, parsePlaybook } from '../src/playbook.js';
+import type { PlaybookFields } from '../src/playbook.js';
 
 describe('parsePlaybook', () => {
   it('reads front matter and the body, with CRLF and a BOM', () => {
@@ -100,5 +101,53 @@ describe('loadPlaybooks', () => {
     file('file.md', 'x');
 
     expect(() => loadPlaybooks(join(dir, 'file.md'))).toThrow(/ENOTDIR/);
+  });
+});
+
+describe('formatPlaybook', () => {
+  const task: PlaybookFields = {
+    description: 'Review a pull request',
+    kind: 'task',
+    autoStart: true,
+    requiresWorktree: false,
+    permissionMode: null,
+    model: null,
+    workdir: 'worktree',
+    template: '/review-pr {{ticket.sourceKey}}\n',
+  };
+
+  it('writes only the non-default keys, keeping a task playbook\'s autoStart and requiresWorktree', () => {
+    expect(formatPlaybook(task)).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
+    expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
+  });
+
+  it.each<[string, Partial<PlaybookFields>]>([
+    ['every key set', { workdir: 'repoRoot', permissionMode: 'plan', model: 'opus', requiresWorktree: true }],
+    ['a description with a colon and quotes', { description: '"Defect": research it' }],
+    ['a description with outer spaces', { description: ' padded ' }],
+    ['a quoted model', { model: "'x'" }],
+    ['a triage playbook that starts automatically', { kind: 'triage', autoStart: true }],
+  ])('reads back the same fields with %s', (_case, patch) => {
+    const playbook = { ...task, ...patch };
+    const formatted = formatPlaybook(playbook);
+
+    expect(formatted).toHaveProperty('text');
+    expect(parsePlaybook('dev:x', (formatted as { text: string }).text)).toEqual({ playbook: { name: 'dev:x', ...playbook } });
+  });
+
+  it('adds a final newline and turns CRLF into LF', () => {
+    expect(formatPlaybook({ ...task, template: 'a\r\nb' })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\na\nb\n' });
+  });
+
+  it('refuses a description or model of more than one line', () => {
+    expect(formatPlaybook({ ...task, description: 'a\nb' })).toEqual({ error: 'description must be one line.' });
+    expect(formatPlaybook({ ...task, model: 'a\r\nb' })).toEqual({ error: 'model must be one line.' });
+  });
+});
+
+describe('isPlaybookName', () => {
+  it('takes namespace:name in lowercase letters, digits and hyphens', () => {
+    expect(['dev:develop', 'support:how-to', '1:2'].map(isPlaybookName)).toEqual([true, true, true]);
+    expect(['dev', 'dev:', ':x', 'Dev:x', 'dev:x:y', 'dev:-x', '../x:y', 'dev:x.md'].map(isPlaybookName)).toEqual([false, false, false, false, false, false, false, false]);
   });
 });

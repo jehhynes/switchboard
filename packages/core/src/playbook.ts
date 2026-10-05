@@ -147,49 +147,113 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
   };
 }
 
+export type PlaybookFields = Omit<Playbook, 'name'>;
+
+/** A front matter value, quoted when the parser would otherwise trim it or strip its quotes. */
+function frontMatterValue(value: string): string {
+  return value !== value.trim() || /^["']/.test(value) ? `"${value}"` : value;
+}
+
+/**
+ * Writes a playbook file that {@link parsePlaybook} reads back with the same fields; the template gains a final newline.
+ * Defaults are left out, except a task playbook's `autoStart` and `requiresWorktree`. Front matter comments are not kept.
+ */
+export function formatPlaybook(playbook: PlaybookFields): { text: string } | { error: string } {
+  for (const [key, value] of Object.entries({ description: playbook.description, model: playbook.model ?? '' })) {
+    if (/[\r\n]/.test(value)) {
+      return { error: `${key} must be one line.` };
+    }
+  }
+
+  const lines = [`description: ${frontMatterValue(playbook.description)}`];
+
+  if (playbook.kind === 'triage') {
+    lines.push('kind: triage');
+  }
+
+  for (const key of ['autoStart', 'requiresWorktree'] as const) {
+    if (playbook.kind === 'task' || playbook[key]) {
+      lines.push(`${key}: ${playbook[key]}`);
+    }
+  }
+
+  if (playbook.workdir !== 'worktree') {
+    lines.push(`workdir: ${playbook.workdir}`);
+  }
+
+  if (playbook.permissionMode !== null) {
+    lines.push(`permissionMode: ${playbook.permissionMode}`);
+  }
+
+  if (playbook.model !== null && playbook.model !== '') {
+    lines.push(`model: ${frontMatterValue(playbook.model)}`);
+  }
+
+  const body = playbook.template.replace(/\r\n/g, '\n');
+
+  return { text: `---\n${lines.join('\n')}\n---\n${body.endsWith('\n') ? body : `${body}\n`}` };
+}
+
+/** Whether `name` is a valid `<namespace>:<name>` playbook name. */
+export function isPlaybookName(name: string): boolean {
+  const [namespace = '', base = '', ...rest] = name.split(':');
+
+  return rest.length === 0 && SEGMENT.test(namespace) && SEGMENT.test(base);
+}
+
 export interface PlaybookSet {
   playbooks: Map<string, Playbook>;
   errors: PlaybookError[];
 }
 
-/** Reads `<dir>/<namespace>/<name>.md`. An invalid file is left out and reported (PRD R42). A missing directory is empty. */
-export function loadPlaybooks(dir: string): PlaybookSet {
-  const playbooks = new Map<string, Playbook>();
-  const errors: PlaybookError[] = [];
+export interface PlaybookFile {
+  /** `<namespace>:<name>`, from the path, which may not be a valid playbook name. */
+  name: string;
+  /** Relative to the playbook directory, such as `dev/develop.md`. */
+  file: string;
+  path: string;
+}
+
+/** The `<dir>/<namespace>/<name>.md` files, sorted. A missing directory has none. */
+export function listPlaybookFiles(dir: string): PlaybookFile[] {
   let namespaces: string[];
 
   try {
     namespaces = readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { playbooks, errors };
+      return [];
     }
 
     throw error;
   }
 
-  for (const namespace of namespaces) {
-    const files = readdirSync(join(dir, namespace), { withFileTypes: true })
+  return namespaces.flatMap((namespace) =>
+    readdirSync(join(dir, namespace), { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
       .map((entry) => entry.name)
-      .sort();
+      .sort()
+      .map((file) => ({ name: `${namespace}:${file.slice(0, -'.md'.length)}`, file: `${namespace}/${file}`, path: join(dir, namespace, file) })),
+  );
+}
 
-    for (const file of files) {
-      const relative = `${namespace}/${file}`;
-      const base = file.slice(0, -'.md'.length);
+/** Parses one listed playbook file's text. */
+export function parsePlaybookFile(file: PlaybookFile, text: string): PlaybookResult {
+  return isPlaybookName(file.name) ? parsePlaybook(file.name, text) : { error: 'Namespace and name must be lowercase letters, digits and hyphens.' };
+}
 
-      if (!SEGMENT.test(namespace) || !SEGMENT.test(base)) {
-        errors.push({ file: relative, error: 'Namespace and name must be lowercase letters, digits and hyphens.' });
-        continue;
-      }
+/** Reads `<dir>/<namespace>/<name>.md`. An invalid file is left out and reported (PRD R42). A missing directory is empty. */
+export function loadPlaybooks(dir: string): PlaybookSet {
+  const playbooks = new Map<string, Playbook>();
+  const errors: PlaybookError[] = [];
 
-      const result = parsePlaybook(`${namespace}:${base}`, readFileSync(join(dir, namespace, file), 'utf8'));
+  for (const file of listPlaybookFiles(dir)) {
+    const result = parsePlaybookFile(file, readFileSync(file.path, 'utf8'));
 
-      if ('error' in result) {
-        errors.push({ file: relative, error: result.error });
-      } else {
-        playbooks.set(result.playbook.name, result.playbook);
-      }
+    if ('error' in result) {
+      errors.push({ file: file.file, error: result.error });
+    } else {
+      playbooks.set(result.playbook.name, result.playbook);
     }
   }
 

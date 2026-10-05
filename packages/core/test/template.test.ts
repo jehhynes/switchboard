@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, renderTaskPrompt, sessionPrompt } from '../src/template.js';
+import { render, renderTaskPrompt, sessionPrompt, templateError } from '../src/template.js';
 
 describe('render', () => {
   it('replaces variables, with or without inner spaces, and does not re-scan values', () => {
@@ -31,5 +31,12 @@ describe('renderTaskPrompt and sessionPrompt', () => {
         'When you need the operator for a question or a choice, report blocked with the question and end your turn instead of waiting. When the work is ready but posting or publishing it needs approval, report approval with the prompt that would do it, such as /review-pr pr:123 publish, and end your turn.',
       ].join('\n'),
     );
+  });
+});
+
+describe('templateError', () => {
+  it('accepts the known variables and names each unknown one once', () => {
+    expect(templateError('/init-worktree {{ ticket.sourceKey }} {{session.id}} {{report}} {{triage.summary}}')).toBeNull();
+    expect(templateError('{{ticket.key}} {{ticket.key}} {{issue}} {{ticket.ref}}')).toBe('Unknown template variable: ticket.key, issue.');
   });
 });

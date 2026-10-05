@@ -3,6 +3,7 @@ import type { PermissionMode, Settings } from './settings.js';
 import type { FailedStep, Immediacy, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import type { NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt } from './template.js';
+import type { TemplateVariable } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
 
@@ -1155,7 +1156,7 @@ class Flow {
     });
   }
 
-  private values(ticket: Ticket, item: WorkItem): Record<string, string> {
+  private values(ticket: Ticket, item: WorkItem): Record<Exclude<TemplateVariable, 'session.id'>, string> {
     const triage = this.store.triagesFor(item.id).filter((entry) => entry.summary !== null).at(-1);
 
     return {

@@ -1,6 +1,28 @@
 export type TemplateResult = { text: string } | { error: string };
 
+/** The variables a playbook template, `setupPrompt` or `pickPrompt` can use. */
+export const TEMPLATE_VARIABLES = [
+  'ticket.source',
+  'ticket.sourceKey',
+  'ticket.ref',
+  'ticket.title',
+  'ticket.url',
+  'ticket.context',
+  'triage.summary',
+  'session.id',
+  'report',
+] as const;
+
+export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
+
 const VARIABLE = /\{\{\s*([A-Za-z][\w.]*)\s*\}\}/g;
+
+/** Why a template would fail to render, or null. */
+export function templateError(template: string): string | null {
+  const unknown = new Set([...template.matchAll(VARIABLE)].map((match) => match[1]!).filter((name) => !(TEMPLATE_VARIABLES as readonly string[]).includes(name)));
+
+  return unknown.size > 0 ? `Unknown template variable: ${[...unknown].join(', ')}.` : null;
+}
 const SESSION_ID = /\{\{\s*session\.id\s*\}\}/g;
 
 /** Replaces `{{name}}` with `values[name]`. An unknown variable fails the whole render. Values are not re-scanned. */

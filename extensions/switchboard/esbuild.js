@@ -21,9 +21,9 @@ const options = {
   logLevel: 'info',
 };
 
-// The panel script runs in the webview, a browser.
+// The panel and settings editor scripts run in webviews, a browser.
 const webview = {
-  entryPoints: { webview: 'src/webview/main.ts' },
+  entryPoints: { webview: 'src/webview/main.ts', settings: 'src/webview/settingsMain.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -43,6 +43,7 @@ function copyAssets() {
   }
 
   fs.copyFileSync('src/webview/webview.css', 'dist/webview.css');
+  fs.copyFileSync('src/webview/settings.css', 'dist/settings.css');
 }
 
 async function main() {

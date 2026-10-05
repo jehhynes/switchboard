@@ -5,6 +5,7 @@ import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { startHub } from './hubProcess.js';
 import { WorkItemsView, act, attach, claimOpen, openLink, openSession, openWorktree, setSource, startAdhoc } from './panel.js';
+import { SettingsEditor } from './settingsEditor.js';
 import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
 import { ROW_COMMANDS } from './webview/render.js';
 import type { Snapshot } from '@switchboard/hub';
@@ -30,6 +31,19 @@ function showSourceToggles(snapshot: Snapshot): void {
   }
 }
 
+/** Open work items per playbook. */
+function openPlaybooks(snapshot: Snapshot | null): Record<string, number> {
+  const counts: Record<string, number> = {};
+
+  for (const item of snapshot?.workItems ?? []) {
+    if (item.status !== 'done' && item.playbook !== null) {
+      counts[item.playbook] = (counts[item.playbook] ?? 0) + 1;
+    }
+  }
+
+  return counts;
+}
+
 export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   // SWITCHBOARD_HOME points a window at another home, such as live acceptance's; the hub gets it as --home.
   const home = process.env['SWITCHBOARD_HOME'] || homedir();
@@ -49,6 +63,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   });
 
   const view = new WorkItemsView(context.extensionUri);
+  const settings = new SettingsEditor(context.extensionUri, home, () => openPlaybooks(view.state() as Snapshot | null));
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WorkItemsView.id, view, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -61,6 +76,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.open', (sessionId: string, cwd: string) => openSession(keeper.current(), sessionId, cwd)),
     vscode.commands.registerCommand('switchboard.openLink', (target: string) => openLink(target)),
     vscode.commands.registerCommand('switchboard.openWorktree', (path: string) => openWorktree(path)),
+    vscode.commands.registerCommand('switchboard.openSettings', () => void settings.show()),
+    { dispose: () => settings.dispose() },
     vscode.commands.registerCommand('switchboard.newAdhoc', () => startAdhoc(keeper.current(), view.state() as Snapshot | null)),
     vscode.commands.registerCommand('switchboard.setSource', (name: string, enabled: boolean) => setSource(keeper.current(), name, enabled)),
     ...TOGGLED_SOURCES.flatMap((name) => [

@@ -146,14 +146,23 @@ describe('the hub process', () => {
     }
   });
 
-  it('puts New Ad-hoc Session and an on or off toggle per source in the title bar, and refuses to toggle an unknown source', async () => {
+  it('puts New Ad-hoc Session, Open Settings and an on or off toggle per source in the title bar, and refuses to toggle an unknown source', async () => {
     await api();
     const commands = await vscode.commands.getCommands(true);
     const menu = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes.menus['view/title'];
     const shown = (command) => menu.find((entry) => entry.command === command)?.when;
 
     assert.strictEqual(shown('switchboard.newAdhoc'), 'view == switchboard.workItems');
-    assert.deepStrictEqual(menu.map((entry) => entry.group).slice(-2), ['navigation@8', 'navigation@9'], 'the separator sits before New Ad-hoc Session');
+    assert.strictEqual(shown('switchboard.openSettings'), 'view == switchboard.workItems');
+    assert.deepStrictEqual(
+      menu.map((entry) => [entry.command, entry.group]).slice(-3),
+      [
+        ['switchboard.separator', 'navigation@8'],
+        ['switchboard.newAdhoc', 'navigation@9'],
+        ['switchboard.openSettings', 'navigation@10'],
+      ],
+      'the separator sits before New Ad-hoc Session and Open Settings',
+    );
     for (const name of ['github', 'zoho', 'forum']) {
       for (const state of ['on', 'off']) {
         assert.ok(commands.includes(`switchboard.source.${name}.${state}`), `switchboard.source.${name}.${state} is not registered`);
@@ -202,6 +211,20 @@ describe('the hub process', () => {
     } finally {
       fs.rmSync(settings, { force: true });
     }
+  });
+
+  it('opens the settings editor in one tab', async () => {
+    await api();
+    const settingsTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith('switchboard.settings'));
+
+    await vscode.commands.executeCommand('switchboard.openSettings');
+    await until(() => settingsTabs().length === 1, 'the settings editor did not open');
+    await vscode.commands.executeCommand('switchboard.openSettings');
+    await new Promise((done) => setTimeout(done, 500));
+
+    assert.strictEqual(settingsTabs().length, 1);
+    assert.strictEqual(settingsTabs()[0].label, 'Switchboard Settings');
+    await vscode.window.tabGroups.close(settingsTabs());
   });
 
   it('opens a reported file link in an editor', async () => {

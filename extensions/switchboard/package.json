@@ -42,6 +42,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "switchboard.openSettings",
+        "title": "Open Settings",
+        "category": "Switchboard",
+        "icon": "$(gear)"
+      },
+      {
         "command": "switchboard.source.github.on",
         "title": "Stop Polling GitHub",
         "category": "Switchboard",
@@ -183,6 +189,11 @@
           "command": "switchboard.newAdhoc",
           "when": "view == switchboard.workItems",
           "group": "navigation@9"
+        },
+        {
+          "command": "switchboard.openSettings",
+          "when": "view == switchboard.workItems",
+          "group": "navigation@10"
         }
       ],
       "commandPalette": [
