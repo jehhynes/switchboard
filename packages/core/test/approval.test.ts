@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
-import { Harness, issue } from './flowHarness.js';
+import { HOUR, Harness, T0, issue } from './flowHarness.js';
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
   expect(actions).toHaveLength(1);
@@ -49,24 +49,43 @@ describe('approval reports (PRD R23, R31)', () => {
   });
 });
 
-describe('Icebox (PRD R49)', () => {
+describe('Snoozed (PRD R49)', () => {
   const pool = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: key, title: key, url: '', assigned: false, pool: true, sortAt: 1, enteredAt: null });
+  const snoozedTicket = (patch: { source?: string; sourceKey?: string; pool?: boolean; snoozedUntil?: number | null; title?: string; url?: string } = {}) => ({
+    source: 'github',
+    sourceKey: '1',
+    ref: '#1',
+    sourceId: null,
+    title: 't',
+    url: '',
+    assigned: false,
+    pool: false,
+    snoozed: true,
+    snoozedUntil: null,
+    sortAt: patch.pool ? 1 : null,
+    scopeAt: null,
+    lastPolledAt: null,
+    repoRoot: '',
+    ...patch,
+  });
 
-  it('holds an iceboxed pool ticket from triage until restored', () => {
+  it('holds a snoozed pool ticket from triage until restored', () => {
     const h = new Harness();
-    expect(h.send({ type: 'icebox', ticketId: 1 }).refused).toBe('Unknown ticket 1.');
+    expect(h.send({ type: 'snooze', ticketId: 1, until: null }).refused).toBe('Unknown ticket 1.');
+    expect(h.send({ type: 'restore', ticketId: 1 }).refused).toBe('Unknown ticket 1.');
     expect(h.act({ type: 'poll', source: 'zoho', tickets: [pool('500')] })).toHaveLength(1);
 
     const h2 = new Harness();
-    h2.store.insertTicket({ source: 'zoho', sourceKey: '501', ref: '#501', sourceId: '501', title: 't', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    h2.store.insertTicket(snoozedTicket({ source: 'zoho', sourceKey: '501', pool: true }));
 
     expect(h2.act({ type: 'tick' })).toEqual([]);
     expect(only(h2.act({ type: 'restore', ticketId: 1 }), 'triage').ticket.sourceKey).toBe('501');
+    expect(h2.store.ticket(1)).toMatchObject({ snoozed: false, snoozedUntil: null });
   });
 
-  it('holds an iceboxed work item from triage and start until restored', () => {
+  it('holds a snoozed work item from triage and start until restored', () => {
     const h = new Harness();
-    h.store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'u', assigned: false, pool: false, iceboxed: true, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    h.store.insertTicket(snoozedTicket({ title: 'Issue 1', url: 'u' }));
 
     expect(h.poll(issue('1'))).toEqual([]);
     expect(h.item(1).status).toBe('triaging');
@@ -75,37 +94,77 @@ describe('Icebox (PRD R49)', () => {
     h.triaged(triage, 'support:defect');
     expect(h.item(1).status).toBe('running');
 
-    h.act({ type: 'icebox', ticketId: 1 });
-    expect(h.store.ticket(1)?.iceboxed).toBe(true);
+    h.act({ type: 'snooze', ticketId: 1, until: null });
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: true, snoozedUntil: null });
   });
 
-  it('queues the task after setup when the ticket was iceboxed meanwhile', () => {
+  it('wakes a snoozed pool ticket when its wake time passes, on any event', () => {
+    const h = new Harness();
+    h.store.insertTicket(snoozedTicket({ source: 'zoho', sourceKey: '501', pool: true, snoozedUntil: T0 + HOUR }));
+
+    h.now = T0 + HOUR - 1;
+    expect(h.act({ type: 'tick' })).toEqual([]);
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: true, snoozedUntil: T0 + HOUR });
+
+    h.now = T0 + HOUR;
+    expect(only(h.act({ type: 'tick' }), 'triage').ticket.sourceKey).toBe('501');
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: false, snoozedUntil: null });
+  });
+
+  it('wakes a snoozed work item into its queued start when its wake time passes; a second snooze replaces the wake time', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    h.triaged(triage, 'dev:question');
+    h.act({ type: 'snooze', ticketId: 1, until: T0 + 2 * HOUR });
+    h.act({ type: 'snooze', ticketId: 1, until: T0 + HOUR });
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: true, snoozedUntil: T0 + HOUR });
+
+    expect(h.act({ type: 'start', workItemId: 1 })).toEqual([]);
+    expect(h.item(1).status).toBe('queued');
+
+    h.now = T0 + HOUR;
+    expect(only(h.poll(issue('1')), 'start-session').workItemId).toBe(1);
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: false, snoozedUntil: null });
+  });
+
+  it('refuses a wake time that has passed and leaves the ticket as it was', () => {
+    const h = new Harness();
+    h.poll(issue('1'));
+
+    expect(h.send({ type: 'snooze', ticketId: 1, until: T0 }).refused).toBe('The snooze time has passed.');
+    expect(h.send({ type: 'snooze', ticketId: 1, until: T0 - 1 }).refused).toBe('The snooze time has passed.');
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: false, snoozedUntil: null });
+    expect(h.send({ type: 'snooze', ticketId: 1, until: T0 + 1 }).refused).toBeNull();
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: true, snoozedUntil: T0 + 1 });
+  });
+
+  it('queues the task after setup when the ticket was snoozed meanwhile', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('15619'));
     const setup = h.started(only(h.triaged(triage, 'dev:develop'), 'start-session'));
 
-    h.act({ type: 'icebox', ticketId: 1 });
+    h.act({ type: 'snooze', ticketId: 1, until: null });
     h.report(setup, { kind: 'worktree', path: 'D:/wt/1', branch: null });
     expect(h.act({ type: 'roster', sessions: [] })).toEqual([]);
     expect(h.item(1).status).toBe('queued');
     expect(only(h.act({ type: 'restore', ticketId: 1 }), 'start-session').kind).toBe('task');
   });
 
-  it('keeps the work items of an iceboxed ticket listed however long ago they were done', () => {
+  it('keeps the work items of a snoozed ticket listed however long ago they were done', () => {
     const h = new Harness();
     h.poll(issue('1'), issue('2'));
     h.act({ type: 'mark-done', workItemId: 1 });
     h.act({ type: 'mark-done', workItemId: 2 });
-    h.act({ type: 'icebox', ticketId: 1 });
+    h.act({ type: 'snooze', ticketId: 1, until: null });
 
     expect(h.store.workItems(h.now + 1).map((item) => item.id)).toEqual([1]);
   });
 
-  it('does not start a queued work item of an iceboxed ticket', () => {
+  it('does not start a queued work item of a snoozed ticket', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
-    h.act({ type: 'icebox', ticketId: 1 });
+    h.act({ type: 'snooze', ticketId: 1, until: null });
 
     expect(h.act({ type: 'start', workItemId: 1 })).toEqual([]);
     expect(h.item(1).status).toBe('queued');

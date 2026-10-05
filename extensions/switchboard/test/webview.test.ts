@@ -52,7 +52,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     scopeAt: null,
     doneAt: null,
     doneReason: null,
-    ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
+    ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
     sessions: [],
     worktree: null,
@@ -92,15 +92,15 @@ describe('groupOf', () => {
 
 describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
-    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Icebox']);
-    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Icebox']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Icebox']);
-    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Icebox']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Retry', 'Triage again', 'Mark done', 'Icebox']);
-    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Icebox']);
+    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze']);
+    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze']);
+    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Retry', 'Triage again', 'Mark done', 'Snooze']);
+    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze']);
     expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual([]);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Icebox']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Retry', 'Mark done', 'Icebox']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Retry', 'Mark done', 'Snooze']);
     expect(controlsOf(item(7, { sessions: [session()] }))[0]?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 7 } });
   });
 });
@@ -200,8 +200,8 @@ describe('markOf', () => {
 
 describe('clockOf', () => {
   it('counts Needs you from the status or the wait, Working from the run start, and the rest from scope entry, stopping at done (PRD R27)', () => {
-    const scoped = (patch: Partial<WorkItemView>, scopeAt: number | null = 5, iceboxed = false) =>
-      item(1, { createdAt: 1, statusAt: 2, runStartedAt: 3, ...patch, ticket: { ...item(1).ticket, scopeAt, iceboxed } });
+    const scoped = (patch: Partial<WorkItemView>, scopeAt: number | null = 5, snoozed = false) =>
+      item(1, { createdAt: 1, statusAt: 2, runStartedAt: 3, ...patch, ticket: { ...item(1).ticket, scopeAt, snoozed } });
 
     expect(clockOf(scoped({ status: 'blocked' }))).toEqual({ since: 2, label: 'In this status since' });
     expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
@@ -321,15 +321,15 @@ describe('renderPanel', () => {
     expect(rowMenu(closed.querySelector('[data-item="1"]')!)).toEqual({
       section: 'row',
       defaults: true,
-      shown: ['approve', 'triageAgain', 'markDone', 'icebox'],
+      shown: ['approve', 'triageAgain', 'markDone', 'snooze'],
       actions: {
         approve: { type: 'approve', workItemId: 1 },
         triageAgain: { type: 'retriage', workItemId: 1 },
         markDone: { type: 'mark-done', workItemId: 1 },
-        icebox: { type: 'icebox', ticketId: 1 },
+        snooze: { type: 'snooze', ticketId: 1 },
       },
     });
-    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['retry', 'stop', 'markDone', 'icebox']);
+    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['retry', 'stop', 'markDone', 'snooze']);
     expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual([]);
   });
 
@@ -398,8 +398,8 @@ describe('renderPanel', () => {
     expect(renderPanel(snapshot([]), NOW, ui())).not.toContain('No source is polled');
   });
 
-  it('lists pool tickets in Unstarted with no Unclaimed tag, a priority dot, time in queue, Returned mark and Start, with Icebox in the right-click menu and no summary', () => {
-    const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), ref: `#${500 + id}`, sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, iceboxed: false, sortAt: NOW - id * 3_600_000, scopeAt: NOW - id * 1_800_000, lastPolledAt: NOW, repoRoot: '' });
+  it('lists pool tickets in Unstarted with no Unclaimed tag, a priority dot, time in queue, Returned mark and Start, with Snooze in the right-click menu and no summary', () => {
+    const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), ref: `#${500 + id}`, sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: NOW - id * 3_600_000, scopeAt: NOW - id * 1_800_000, lastPolledAt: NOW, repoRoot: '' });
     const rated = (id: number, patch: Partial<Triage> = {}) => triage({ id, ticketId: id, workItemId: null, playbook: 'support:case', summary: 'Fix sync — defect', immediacy: 'BLOCKING', severity: 'MED', ...patch });
     const root = render(
       snapshot([], {
@@ -429,7 +429,7 @@ describe('renderPanel', () => {
     expect(byId(1).querySelector('.line.second a.key')?.getAttribute('href')).toBe('https://desk.example.test/1');
     expect(titles(byId(1), ':scope > .actions > button.control.action-button')).toEqual(['Start']);
     expect(byId(1).querySelector('.line:first-child .actions')).toBeNull();
-    expect(rowMenu(byId(1))).toMatchObject({ shown: ['start', 'icebox'], actions: { start: { type: 'pick', ticketId: 1 }, icebox: { type: 'icebox', ticketId: 1 } } });
+    expect(rowMenu(byId(1))).toMatchObject({ shown: ['start', 'snooze'], actions: { start: { type: 'pick', ticketId: 1 }, snooze: { type: 'snooze', ticketId: 1 } } });
     expect(byId(1).querySelector('.line.second .meta > .playbook-name:first-child')?.textContent).toBe('support:case');
     expect(byId(1).querySelector('.line:first-child .playbook-name')).toBeNull();
     expect(byId(1).querySelector('button.action-button')?.textContent).toBe('Start');
@@ -446,7 +446,7 @@ describe('renderPanel', () => {
     expect(JSON.parse(controlNamed(byId(1), 'Start').dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
     expect(byId(4).querySelector('.note')?.textContent).toBe('Timed out.');
     expect(titles(byId(4), '.actions > button.control')).toEqual(['Triage again']);
-    expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'start', 'icebox'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
+    expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'start', 'snooze'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
     expect(titles(byId(5), '.line.third .mark.codicon-search')).toEqual(['Triaging']);
     const adhoc = render(snapshot([item(6, { ticket: { ...item(6).ticket, source: 'adhoc', sourceKey: '6', url: '' } })]));
     expect(adhoc.querySelector('.line.second span.key')?.textContent).toBe('adhoc 6');
@@ -459,7 +459,7 @@ describe('renderPanel', () => {
     const rated = (immediacy: Triage['immediacy'], severity: Triage['severity']) => triage({ immediacy, severity, summary: 'Build it.' });
     const assigned = item(1, { status: 'unstarted', createdAt: NOW - 5 * 3_600_000, triage: rated('BLOCKING', 'HIGH') });
     const unrated = item(2, { status: 'unstarted', createdAt: NOW - 9 * 3_600_000 });
-    const ticket = { id: 9, source: 'forum', sourceKey: '509', ref: 'T509', sourceId: null, title: 'Topic', url: '', assigned: false, pool: true, iceboxed: false, sortAt: NOW - 3_600_000, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
+    const ticket = { id: 9, source: 'forum', sourceKey: '509', ref: 'T509', sourceId: null, title: 'Topic', url: '', assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: NOW - 3_600_000, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
     const pool = [{ ticket, triage: rated('NON-BLOCKING', 'HIGH'), returned: 0 }];
     const root = render(snapshot([assigned, unrated, item(3, { status: 'awaiting-approval', approvalPrompt: '/publish' })], { pool }));
     const unstarted = root.querySelector('[data-group="unstarted"]')!;
@@ -479,26 +479,32 @@ describe('renderPanel', () => {
     expect(labels(item(4, { status: 'unstarted' }))).not.toContain('Approve');
   });
 
-  it('moves iceboxed work items and pool tickets into a collapsed Icebox group with their own marks, and shows an approval summary', () => {
-    const icy = item(2, { status: 'unstarted', ticket: { ...item(2).ticket, iceboxed: true } });
+  it('moves snoozed work items and pool tickets into a collapsed Snoozed group with their own marks and wake times, and shows an approval summary', () => {
+    const wakeAt = new Date(2026, 9, 12, 6).getTime();
+    const sleepy = item(2, { status: 'unstarted', ticket: { ...item(2).ticket, snoozed: true, snoozedUntil: wakeAt } });
     const ready = item(3, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.' });
-    const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', ref: '#509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, iceboxed: true, sortAt: 1, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
-    const data = snapshot([icy, ready], { pool: [{ ticket: poolTicket, triage: null, returned: 0 }] });
+    const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', ref: '#509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, snoozed: true, snoozedUntil: null, sortAt: 1, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
+    const data = snapshot([sleepy, ready], { pool: [{ ticket: poolTicket, triage: null, returned: 0 }] });
     const root = render(data);
-    const icebox = root.querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!;
+    const snoozed = root.querySelector<HTMLDetailsElement>('details[data-group="snoozed"]')!;
 
-    expect(headings(root)).toEqual(['Needs you 1', 'Working 0', 'Unstarted 0', 'Done 0', 'Icebox 2']);
-    expect(icebox.open).toBe(false);
-    expect([...icebox.querySelectorAll('.title')].map((t) => t.textContent)).toEqual(['Issue <2>', 'Cold case']);
-    expect(icebox.querySelectorAll('.priority')).toHaveLength(0);
-    expect(icebox.querySelector('.mark.codicon')).toBeNull();
+    expect(headings(root)).toEqual(['Needs you 1', 'Working 0', 'Unstarted 0', 'Done 0', 'Snoozed 2']);
+    expect(snoozed.open).toBe(false);
+    expect([...snoozed.querySelectorAll('.title')].map((t) => t.textContent)).toEqual(['Issue <2>', 'Cold case']);
+    expect(snoozed.querySelectorAll('.priority')).toHaveLength(0);
+    expect(snoozed.querySelector('.mark.codicon')).toBeNull();
+    expect([...snoozed.querySelectorAll('.wake')].map((w) => [w.textContent?.trim(), w.getAttribute('title')])).toEqual([['Mon, Oct 12, 6:00 AM', 'Wakes Mon, Oct 12, 6:00 AM']]);
+    expect(root.querySelector('[data-item="2"] .wake .codicon-clock')).not.toBeNull();
+    expect(root.querySelector('[data-ticket="9"] .line.third')).toBeNull();
     expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Approve the publish']);
-    expect(rowMenu(icebox.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'restore'], actions: { restore: { type: 'restore', ticketId: 2 } } });
+    expect(rowMenu(snoozed.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'snooze', 'restore'], actions: { snooze: { type: 'snooze', ticketId: 2 }, restore: { type: 'restore', ticketId: 2 } } });
+    expect(rowMenu(snoozed.querySelector('[data-ticket="9"]')!)).toMatchObject({ shown: ['start', 'snooze', 'restore'], actions: { snooze: { type: 'snooze', ticketId: 9 }, restore: { type: 'restore', ticketId: 9 } } });
     expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
     expect(root.querySelector('[data-item="3"] .approval')?.hasAttribute('title')).toBe(false);
     expect(root.querySelector<HTMLButtonElement>('[data-item="3"] .actions > button.control')?.title).toBe('Approve: runs /review-pr pr:123 publish');
-    expect(render(data, { groups: new Map([['icebox', true]]) }).querySelector<HTMLDetailsElement>('details[data-group="icebox"]')!.open).toBe(true);
-    expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, iceboxed: true } }))).toEqual(['Restore']);
+    expect(render(data, { groups: new Map([['snoozed', true]]) }).querySelector<HTMLDetailsElement>('details[data-group="snoozed"]')!.open).toBe(true);
+    expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, snoozed: true, snoozedUntil: null } }))).toEqual(['Snooze', 'Restore']);
+    expect(render(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: false, snoozedUntil: wakeAt } })])).querySelector('.wake')).toBeNull();
   });
 
   it('shows the priority dot first, pull requests and other-repo issues on line 2, and other links and Returned on line 3 (PRD R50–R52)', () => {

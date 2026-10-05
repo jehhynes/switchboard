@@ -4,7 +4,7 @@ import { hubBundlePath, hubLogPath } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { startHub } from './hubProcess.js';
-import { WorkItemsView, act, attach, claimOpen, openLink, openSession, openWorktree, setSource, startAdhoc } from './panel.js';
+import { WorkItemsView, attach, claimOpen, dispatch, openLink, openSession, openWorktree, setSource, startAdhoc } from './panel.js';
 import { SettingsEditor } from './settingsEditor.js';
 import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
 import { ROW_COMMANDS } from './webview/render.js';
@@ -67,10 +67,10 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WorkItemsView.id, view, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand('switchboard.action', (action: unknown) => act(keeper.current(), action)),
+    vscode.commands.registerCommand('switchboard.action', (action: unknown) => dispatch(keeper.current(), action)),
     // A row's right-click menu passes the row's `data-vscode-context`, which holds the hub action for each command.
     ...Object.values(ROW_COMMANDS).map((key) =>
-      vscode.commands.registerCommand(`switchboard.row.${key}`, (row: { actions: Record<string, unknown> }) => act(keeper.current(), row.actions[key])),
+      vscode.commands.registerCommand(`switchboard.row.${key}`, (row: { actions: Record<string, unknown> }) => dispatch(keeper.current(), row.actions[key])),
     ),
     vscode.commands.registerCommand('switchboard.attach', (shortId: string, name: string) => attach(shortId, name)),
     vscode.commands.registerCommand('switchboard.open', (sessionId: string, cwd: string) => openSession(keeper.current(), sessionId, cwd)),

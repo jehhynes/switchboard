@@ -65,7 +65,12 @@ describe('parseReport and reportBody', () => {
       expect(parseReport({ sessionId: 's1', kind: 'link', label: 'x', target })).toBeNull();
     }
     expect(parseReport({ sessionId: 's1', kind: 'link', label: ' ', target: 'https://x' })).toBeNull();
-    expect(parseAction({ type: 'icebox', ticketId: 1 })).toEqual({ type: 'icebox', ticketId: 1 });
+    expect(parseAction({ type: 'snooze', ticketId: 1, until: null })).toEqual({ type: 'snooze', ticketId: 1, until: null });
+    expect(parseAction({ type: 'snooze', ticketId: 1, until: 1_800_000_000_000 })).toEqual({ type: 'snooze', ticketId: 1, until: 1_800_000_000_000 });
+    expect(parseAction({ type: 'snooze', ticketId: 1 })).toBeNull();
+    expect(parseAction({ type: 'snooze', ticketId: 1, until: 'tomorrow' })).toBeNull();
+    expect(parseAction({ type: 'icebox', ticketId: 1 })).toBeNull();
+    expect(parseAction({ type: 'restore', ticketId: 1 })).toEqual({ type: 'restore', ticketId: 1 });
     expect(parseReport({ kind: 'stage', stage: 'x' })).toBeNull();
     expect(parseReport('text')).toBeNull();
     expect(parseAction({ type: 'approve', workItemId: 1 })).toEqual({ type: 'approve', workItemId: 1 });

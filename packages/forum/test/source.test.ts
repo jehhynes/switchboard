@@ -62,7 +62,7 @@ describe('ForumSource.poll', () => {
 });
 
 describe('ForumSource.context', () => {
-  const ticket: Ticket = { id: 1, source: 'forum', sourceKey: '90001', ref: 'T90001', sourceId: null, title: 'Topic 90001', url: 'https://forum.example.com/t/forum/topic-90001', assigned: false, pool: true, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' };
+  const ticket: Ticket = { id: 1, source: 'forum', sourceKey: '90001', ref: 'T90001', sourceId: null, title: 'Topic 90001', url: 'https://forum.example.com/t/forum/topic-90001', assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' };
 
   it('lists the public posts oldest first, without deleted posts, private notes or the AI analysis', async () => {
     const query = vi.fn<Query>(async () => parseRows(raw('posts')));

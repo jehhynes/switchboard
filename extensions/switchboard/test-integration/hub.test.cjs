@@ -195,6 +195,36 @@ describe('the hub process', () => {
     assert.deepStrictEqual([retry.status, retry.error], [409, 'Unknown work item 42.']);
   });
 
+  it('asks how long to snooze before sending the action, and sends nothing when the pick is dismissed (PRD R49)', async () => {
+    await api();
+    const actions = { snooze: { type: 'snooze', ticketId: 43 } };
+    // Either entry point reaches the picker: the row's menu command and the panel's action command.
+    for (const run of [() => vscode.commands.executeCommand('switchboard.row.snooze', { actions }), () => vscode.commands.executeCommand('switchboard.action', actions.snooze)]) {
+      let reply = 'pending';
+      const picking = run().then((answer) => (reply = answer));
+
+      // The quick pick is open once accepting its selected item settles the command; the first item is Tomorrow.
+      await until(async () => {
+        await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+        await new Promise((done) => setTimeout(done, 100));
+        return reply !== 'pending';
+      }, 'the snooze pick never settled');
+      await picking;
+      assert.deepStrictEqual([reply.status, reply.error], [409, 'Unknown ticket 43.'], 'a chosen wake time reaches the hub, which refuses the unknown ticket');
+    }
+
+    let reply = 'pending';
+    const dismissed = vscode.commands.executeCommand('switchboard.row.snooze', { actions }).then((answer) => (reply = answer));
+
+    await until(async () => {
+      await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+      await new Promise((done) => setTimeout(done, 100));
+      return reply !== 'pending';
+    }, 'the dismissed snooze pick never settled');
+    await dismissed;
+    assert.strictEqual(reply, null, 'a dismissed pick sends no action');
+  });
+
   it('turns a source off with its on toggle and on with its off toggle, in settings.json', async () => {
     await api();
     const settings = join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'settings.json');

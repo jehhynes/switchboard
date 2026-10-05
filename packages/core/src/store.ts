@@ -131,9 +131,12 @@ export const MIGRATIONS = [
       ELSE COALESCE((SELECT MAX(s.startedAt) FROM sessions s WHERE s.workItemId = workItems.id), createdAt)
     END,
     scopeAt = CASE WHEN status = 'done' THEN createdAt END;`,
+  // The Icebox becomes Snoozed with a wake time (PRD R49); an iceboxed ticket stays snoozed indefinitely.
+  `ALTER TABLE tickets RENAME COLUMN iceboxed TO snoozed;
+  ALTER TABLE tickets ADD COLUMN snoozedUntil INTEGER;`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'iceboxed', 'needsPick', 'released']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'needsPick', 'released']);
 
 type Row = Record<string, unknown>;
 
@@ -294,12 +297,17 @@ export class Store {
     return this.#all('SELECT * FROM workItems WHERE status = ? ORDER BY id', status);
   }
 
-  /** Work items not done, those done since `doneSince`, and every work item of an iceboxed ticket, newest first. */
+  /** Work items not done, those done since `doneSince`, and every work item of a snoozed ticket, newest first. */
   workItems(doneSince: number): WorkItem[] {
     return this.#all(
-      "SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE w.status <> 'done' OR w.doneAt >= ? OR t.iceboxed = 1 ORDER BY w.id DESC",
+      "SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE w.status <> 'done' OR w.doneAt >= ? OR t.snoozed = 1 ORDER BY w.id DESC",
       doneSince,
     );
+  }
+
+  /** Snoozed tickets whose wake time has passed. */
+  dueSnoozes(now: number): Ticket[] {
+    return this.#all('SELECT * FROM tickets WHERE snoozed = 1 AND snoozedUntil IS NOT NULL AND snoozedUntil <= ? ORDER BY id', now);
   }
 
   insertTriage(triage: NewTriage): Triage {

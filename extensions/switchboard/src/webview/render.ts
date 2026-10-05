@@ -1,4 +1,5 @@
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
+import { wakeText } from '../snooze.js';
 
 export type Group = 'needs' | 'working' | 'unstarted' | 'done';
 
@@ -99,8 +100,8 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Mark done', icon: 'pass', message: action('mark-done') });
   }
 
-  if (item.status !== 'done' || item.ticket.iceboxed) {
-    controls.push(iceboxControl(item.ticket.id, item.ticket.iceboxed));
+  if (item.status !== 'done' || item.ticket.snoozed) {
+    controls.push(...snoozeControls(item.ticket));
   }
 
   return controls;
@@ -140,11 +141,25 @@ function openAttribute(item: WorkItemView): string {
   return action === null ? '' : ` data-open="${escape(JSON.stringify(action))}"`;
 }
 
-/** Icebox or Restore for a ticket (PRD R49). */
-function iceboxControl(ticketId: number, iceboxed: boolean): Control {
-  return iceboxed
-    ? { label: 'Restore', icon: 'debug-restart', message: { type: 'action', action: { type: 'restore', ticketId } } }
-    : { label: 'Icebox', icon: 'archive', message: { type: 'action', action: { type: 'icebox', ticketId } } };
+/**
+ * Snooze for a ticket, and Restore when it is snoozed, so a snoozed ticket can take a new wake time without waking first (PRD R49).
+ * Snooze carries no wake time: the extension asks for one before it reaches the hub.
+ */
+function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
+  const controls: Control[] = [{ label: 'Snooze', icon: 'bell-slash', message: { type: 'action', action: { type: 'snooze', ticketId: ticket.id } } }];
+
+  if (ticket.snoozed) {
+    controls.push({ label: 'Restore', icon: 'debug-restart', message: { type: 'action', action: { type: 'restore', ticketId: ticket.id } } });
+  }
+
+  return controls;
+}
+
+/** The wake time on a snoozed row's line 3; nothing for an indefinite snooze, which the group already says. */
+function wake(ticket: { snoozed: boolean; snoozedUntil: number | null }): string {
+  return ticket.snoozed && ticket.snoozedUntil !== null
+    ? `<span class="wake" title="Wakes ${escape(wakeText(ticket.snoozedUntil))}"><span class="codicon codicon-clock"></span> ${escape(wakeText(ticket.snoozedUntil))}</span>`
+    : '';
 }
 
 /** The last segment of a file path, with either separator. */
@@ -223,7 +238,7 @@ export const ROW_COMMANDS: Record<string, string> = {
   Stop: 'stop',
   'Triage again': 'triageAgain',
   'Mark done': 'markDone',
-  Icebox: 'icebox',
+  Snooze: 'snooze',
   Restore: 'restore',
 };
 
@@ -272,7 +287,7 @@ export interface Clock {
 
 /**
  * The row's time, by group (PRD R27): Needs you since the work item entered its status or its session began to wait, Working since the run
- * started, and Unstarted, Icebox and Done since the ticket entered the source's scope, stopping at done.
+ * started, and Unstarted, Snoozed and Done since the ticket entered the source's scope, stopping at done.
  */
 export function clockOf(item: WorkItemView): Clock {
   const group = groupOf(item);
@@ -283,7 +298,7 @@ export function clockOf(item: WorkItemView): Clock {
     return { since: item.scopeAt ?? item.createdAt, label: 'In scope from' };
   }
 
-  if (item.ticket.iceboxed || group === 'unstarted') {
+  if (item.ticket.snoozed || group === 'unstarted') {
     return { since: item.ticket.scopeAt ?? item.createdAt, label: 'In scope since' };
   }
 
@@ -349,7 +364,7 @@ function asksQuestion(item: WorkItemView): boolean {
   return item.status === 'blocked' && (item.error ?? '').trim().endsWith('?');
 }
 
-/** The row mark shows what differs between rows of the same group; an iceboxed item shows its group's mark (PRD R27). Unstarted rows show the priority dot. */
+/** The row mark shows what differs between rows of the same group; a snoozed item shows its group's mark (PRD R27). Unstarted rows show the priority dot. */
 export function markOf(item: WorkItemView): Mark | 'priority' {
   const session = activeSession(item);
 
@@ -488,7 +503,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
   return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(item)}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
-    `${statusMark(item)}${notes}${stage}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}`,
+    `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.filter((link) => link !== report).map(linkBadge).join('')}${returned(item.returned)}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }
@@ -524,22 +539,22 @@ function setup(snapshot: Snapshot): string {
 }
 
 
-/** A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Start; Returned on line 3; Icebox in the right-click menu (PRD R27, R47, R48). */
+/** A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Start; Returned on line 3; Snooze in the right-click menu (PRD R27, R47, R48). */
 function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
   const { ticket, triage } = entry;
   const rowKey = `ticket:${ticket.id}`;
   const pick: Control = { label: 'Start', icon: 'play', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const failed = triage?.error != null;
-  // An iceboxed ticket is never triaged, so a missing triage is not shown as running.
+  // A snoozed ticket is never triaged, so a missing triage is not shown as running.
   const triaging = triage !== null && triage.endedAt === null;
-  const controls = failed ? [again, pick, iceboxControl(ticket.id, ticket.iceboxed)] : [pick, iceboxControl(ticket.id, ticket.iceboxed)];
+  const controls = failed ? [again, pick, ...snoozeControls(ticket)] : [pick, ...snoozeControls(ticket)];
   const main = controls[0]!;
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
 <div class="line second"><span class="meta">${playbookLabel(triage?.playbook ?? '')}${ticketLink(ticket)}</span></div>${thirdLine(
-    `${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : ''}${returned(entry.returned)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
+    `${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : ''}${wake(ticket)}${returned(entry.returned)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
   )}${actionsColumn(actionButton(main))}
 </div>`;
 }
@@ -574,7 +589,7 @@ function selectedClass(key: string, ui: PanelUi): string {
   return ui.selected === key ? ' selected' : '';
 }
 
-/** Needs you, Working and Unstarted start open; Done and Icebox start closed. */
+/** Needs you, Working and Unstarted start open; Done and Snoozed start closed. */
 const OPEN_BY_DEFAULT = new Set(['needs', 'working', 'unstarted']);
 
 function group(key: string, title: string, count: number, body: string, ui: PanelUi): string {
@@ -586,12 +601,12 @@ function group(key: string, title: string, count: number, body: string, ui: Pane
 /** The whole panel. */
 export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): string {
   const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], unstarted: [], done: [] };
-  const iceboxedItems = snapshot.workItems.filter((item) => item.ticket.iceboxed);
-  const iceboxedPool = snapshot.pool.filter((entry) => entry.ticket.iceboxed);
-  const pool = snapshot.pool.filter((entry) => !entry.ticket.iceboxed);
+  const snoozedItems = snapshot.workItems.filter((item) => item.ticket.snoozed);
+  const snoozedPool = snapshot.pool.filter((entry) => entry.ticket.snoozed);
+  const pool = snapshot.pool.filter((entry) => !entry.ticket.snoozed);
 
   for (const item of snapshot.workItems) {
-    if (!iceboxedItems.includes(item)) {
+    if (!snoozedItems.includes(item)) {
       groups[groupOf(item)].push(item);
     }
   }
@@ -601,12 +616,12 @@ export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): strin
   const waiting = unstartedOrder(groups.unstarted, pool)
     .map((entry) => ('status' in entry ? row(entry, now, ui) : poolRow(entry, now, ui)))
     .join('\n');
-  const iceboxCount = iceboxedItems.length + iceboxedPool.length;
+  const snoozedCount = snoozedItems.length + snoozedPool.length;
 
   return `${errors(snapshot)}${setup(snapshot)}
 ${group('needs', 'Needs you', groups.needs.length, list(groups.needs) || '<p class="empty">Nothing needs you.</p>', ui)}
 ${group('working', 'Working', groups.working.length, list(groups.working) || '<p class="empty">Nothing is running.</p>', ui)}
 ${group('unstarted', 'Unstarted', groups.unstarted.length + pool.length, waiting || '<p class="empty">Nothing waits to be started.</p>', ui)}
 ${group('done', 'Done', groups.done.length, list(groups.done), ui)}
-${iceboxCount === 0 ? '' : group('icebox', 'Icebox', iceboxCount, `${list(iceboxedItems)}${pooled(iceboxedPool)}`, ui)}`;
+${snoozedCount === 0 ? '' : group('snoozed', 'Snoozed', snoozedCount, `${list(snoozedItems)}${pooled(snoozedPool)}`, ui)}`;
 }

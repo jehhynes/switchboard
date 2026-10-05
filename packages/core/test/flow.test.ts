@@ -36,7 +36,7 @@ describe('assigned-state transitions', () => {
       type: 'triage',
       triageId: 1,
       workItemId: 1,
-      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '' },
+      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '' },
       systemPrompt: 'Classify the GitHub issue.\n\nChoose one playbook:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change' },
@@ -751,7 +751,7 @@ describe('in-queue times (PRD R27)', () => {
 
     // A ticket with no scope entry, such as one done before migration 6 polled it, keeps the work item's creation.
     const g = new Harness();
-    g.store.insertTicket({ source: 'github', sourceKey: '9', ref: '#9', sourceId: null, title: 't', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    g.store.insertTicket({ source: 'github', sourceKey: '9', ref: '#9', sourceId: null, title: 't', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     g.store.insertWorkItem({ ...h.item(1), ticketId: 1, status: 'unstarted', createdAt: T0 - 7_000, scopeAt: null, doneAt: null, doneReason: null });
     g.now = T0 + 9_000;
     g.act({ type: 'mark-done', workItemId: 1 });

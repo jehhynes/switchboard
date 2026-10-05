@@ -7,6 +7,10 @@ import { listWorktrees, reportedWorktree } from './git.js';
 
 export const ROSTER_MS = 30_000;
 export const MARKER_MS = 5_000;
+/** How often a tick ends snoozes whose wake time has passed (PRD R49). */
+export const WAKE_MS = 60_000;
+/** The roster, marker and wake timers `start` sets before the poll timers. */
+const FIXED_TIMERS = 3;
 /** How long the panel lists done work items. */
 export const DONE_DAYS = 7;
 /** How long a pending open waits for a window on its folder. */
@@ -79,6 +83,7 @@ export class Runtime {
   private hookError: string | null = null;
   private pending = new Set<Promise<void>>();
   private listeners = new Set<() => void>();
+  /** The roster, marker and wake timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
   private timers: NodeJS.Timeout[] = [];
   private polling = new Set<string>();
   private pendingOpens = new Map<string, { sessionId: string; at: number }>();
@@ -158,7 +163,7 @@ export class Runtime {
   }
 
   start(): void {
-    this.timers.push(setInterval(() => void this.readRoster(), ROSTER_MS), setInterval(() => this.readMarkers(), MARKER_MS));
+    this.timers.push(setInterval(() => void this.readRoster(), ROSTER_MS), setInterval(() => this.readMarkers(), MARKER_MS), setInterval(() => this.send({ type: 'tick' }), WAKE_MS));
     this.restartPolls();
   }
 
@@ -371,7 +376,7 @@ export class Runtime {
       return;
     }
 
-    for (const timer of this.timers.splice(2)) {
+    for (const timer of this.timers.splice(FIXED_TIMERS)) {
       clearInterval(timer);
     }
 

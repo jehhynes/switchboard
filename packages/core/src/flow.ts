@@ -86,7 +86,9 @@ export type FlowEvent =
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
   | { type: 'start' | 'approve' | 'retry' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
-  | { type: 'pick' | 'retriage-pool' | 'icebox' | 'restore'; ticketId: number }
+  | { type: 'pick' | 'retriage-pool' | 'restore'; ticketId: number }
+  /** Snoozes the ticket until `until`, or indefinitely when null (PRD R49). */
+  | { type: 'snooze'; ticketId: number; until: number | null }
   | { type: 'tick' };
 
 export interface TriageChoice {
@@ -141,6 +143,8 @@ const TURN_ENDED: readonly SessionState[] = ['idle', 'failed'];
 /** Decides what one event changes and which actions the hub runs. Call it inside one store transaction. */
 export function handle(store: Store, event: FlowEvent, context: FlowContext): FlowResult {
   const flow = new Flow(store, context);
+
+  flow.wake();
 
   try {
     flow.apply(event);
@@ -216,9 +220,17 @@ class Flow {
         return this.pick(this.poolTicket(event.ticketId));
       case 'retriage-pool':
         return this.retriagePool(this.poolTicket(event.ticketId));
-      case 'icebox':
+      case 'snooze':
+        return this.snooze(event.ticketId, event.until);
       case 'restore':
-        return this.icebox(event.ticketId, event.type === 'icebox');
+        return this.restore(event.ticketId);
+    }
+  }
+
+  /** Ends every snooze whose wake time has passed, so the ticket returns to its group on the next event (PRD R49). */
+  wake(): void {
+    for (const ticket of this.store.dueSnoozes(this.now)) {
+      this.store.updateTicket(ticket.id, { snoozed: false, snoozedUntil: null });
     }
   }
 
@@ -244,7 +256,7 @@ class Flow {
       };
 
       if (known === null) {
-        const ticket = this.store.insertTicket({ source, sourceKey: entry.sourceKey, repoRoot: '', iceboxed: false, ...fields });
+        const ticket = this.store.insertTicket({ source, sourceKey: entry.sourceKey, repoRoot: '', snoozed: false, snoozedUntil: null, ...fields });
 
         if (entry.assigned) {
           this.createWorkItem(ticket.id);
@@ -369,7 +381,7 @@ class Flow {
 
     const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
     const sourceKey = String(Math.max(0, ...keys) + 1);
-    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
+    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
     const item = this.store.insertWorkItem({
       ticketId: ticket.id,
       playbook: null,
@@ -666,8 +678,8 @@ class Flow {
       } else {
         this.store.updateSession(session.id, { outcome: 'done' });
 
-        // An iceboxed ticket's task waits in the queue until it is restored (PRD R49).
-        if (this.store.ticket(item.ticketId)!.iceboxed) {
+        // A snoozed ticket's task waits in the queue until the ticket wakes or is restored (PRD R49).
+        if (this.store.ticket(item.ticketId)!.snoozed) {
           this.queue(item);
         } else {
           this.startSession(item);
@@ -827,15 +839,27 @@ class Flow {
     return item;
   }
 
-  /** PRD R49: local only; an iceboxed ticket gets no automatic triage or start. */
-  private icebox(ticketId: number, iceboxed: boolean): void {
+  /** PRD R49: local only; a snoozed ticket gets no automatic triage or start until `until` passes, or until restored when `until` is null. */
+  private snooze(ticketId: number, until: number | null): void {
+    if (until !== null && until <= this.now) {
+      throw new Refusal('The snooze time has passed.');
+    }
+
+    this.store.updateTicket(this.knownTicket(ticketId).id, { snoozed: true, snoozedUntil: until });
+  }
+
+  private restore(ticketId: number): void {
+    this.store.updateTicket(this.knownTicket(ticketId).id, { snoozed: false, snoozedUntil: null });
+  }
+
+  private knownTicket(ticketId: number): Ticket {
     const ticket = this.store.ticket(ticketId);
 
     if (ticket === null) {
       throw new Refusal(`Unknown ticket ${ticketId}.`);
     }
 
-    this.store.updateTicket(ticket.id, { iceboxed });
+    return ticket;
   }
 
   private poolTicket(ticketId: number): Ticket {
@@ -1028,7 +1052,7 @@ class Flow {
 
       const ticket = this.store.ticket(item.ticketId)!;
 
-      if (!busy.has(item.id) && !ticket.iceboxed) {
+      if (!busy.has(item.id) && !ticket.snoozed) {
         start(ticket, item);
       }
     }
@@ -1038,7 +1062,7 @@ class Flow {
         return;
       }
 
-      if (!ticket.iceboxed && this.store.poolTriages(ticket.id).length === 0 && !this.hasOpenWorkItem(ticket.id)) {
+      if (!ticket.snoozed && this.store.poolTriages(ticket.id).length === 0 && !this.hasOpenWorkItem(ticket.id)) {
         start(ticket, null);
       }
     }
@@ -1057,7 +1081,7 @@ class Flow {
         return;
       }
 
-      if (this.store.activeSessionsForTicket(item.ticketId).length === 0 && !this.store.ticket(item.ticketId)!.iceboxed) {
+      if (this.store.activeSessionsForTicket(item.ticketId).length === 0 && !this.store.ticket(item.ticketId)!.snoozed) {
         this.startSession(item);
       }
     }

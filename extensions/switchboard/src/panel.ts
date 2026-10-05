@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import type { Snapshot } from '@switchboard/hub';
 import { postToHub } from '@switchboard/hub';
+import { snoozeChoices } from './snooze.js';
 
 const ACTION_TIMEOUT_MS = 10_000;
 
@@ -81,6 +82,22 @@ export async function openLink(target: string): Promise<void> {
 /** Opens a worktree in its own window; VS Code focuses a window that already has it. */
 export async function openWorktree(path: string): Promise<void> {
   await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path), { forceNewWindow: true });
+}
+
+/** Runs a panel action: a snooze without a wake time asks for one first; everything else goes to the hub. */
+export async function dispatch(record: HubRecord | null, action: unknown): Promise<{ status: number; error: string | null } | null> {
+  if (typeof action === 'object' && action !== null && (action as { type?: unknown }).type === 'snooze' && !('until' in action)) {
+    return snooze(record, Number((action as { ticketId: unknown }).ticketId));
+  }
+
+  return act(record, action);
+}
+
+/** Asks how long to snooze the ticket, then snoozes it; null when the operator picked nothing (PRD R49). */
+export async function snooze(record: HubRecord | null, ticketId: number, now: () => Date = () => new Date()): Promise<{ status: number; error: string | null } | null> {
+  const choice = await vscode.window.showQuickPick(snoozeChoices(now()), { title: 'Switchboard: snooze until', placeHolder: 'Days wake at 6am; weeks on a Monday at 6am' });
+
+  return choice === undefined ? null : act(record, { type: 'snooze', ticketId, until: choice.until });
 }
 
 /** Sends an operator event to the hub and shows a refusal. Returns the hub's answer, or null when it did not answer. */

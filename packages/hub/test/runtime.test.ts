@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { Runtime } from '../src/runtime.js';
+import { Runtime, WAKE_MS } from '../src/runtime.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -140,6 +140,31 @@ function setup(cfg = config(), now = () => T0) {
 }
 
 describe('Runtime', () => {
+  it('wakes a due snooze on its minute tick, without any other event', async () => {
+    vi.useFakeTimers();
+    try {
+      let now = T0;
+      const { store, runtime } = setup(config(), () => now);
+      store.insertTicket({ source: 'github', sourceKey: '5', ref: '#5', sourceId: null, title: 'Issue 5', url: 'u', assigned: true, pool: false, snoozed: true, snoozedUntil: T0 + WAKE_MS, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+      let changes = 0;
+      runtime.onChange(() => changes++);
+      runtime.start();
+
+      now = T0 + WAKE_MS - 1;
+      await vi.advanceTimersByTimeAsync(WAKE_MS - 1);
+      expect(store.ticket(1)).toMatchObject({ snoozed: true, snoozedUntil: T0 + WAKE_MS });
+
+      now = T0 + WAKE_MS;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(store.ticket(1)).toMatchObject({ snoozed: false, snoozedUntil: null });
+      expect(changes).toBeGreaterThan(0);
+      runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+
   it('polls, triages through the source and classifier, and starts the chosen playbook', async () => {
     const { store, cli, source, runtime } = setup();
     let changes = 0;
@@ -318,7 +343,7 @@ describe('Runtime', () => {
 
   it('reconciles at startup and installs hooks when enabled', async () => {
     const { store, runtime } = setup(config({ installHooks: true }));
-    store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
+    store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
     runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch' });
     await runtime.settled();
     store.updateSession('s1', { state: 'starting', shortId: null });

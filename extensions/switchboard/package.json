@@ -138,8 +138,8 @@
         "category": "Switchboard"
       },
       {
-        "command": "switchboard.row.icebox",
-        "title": "Icebox",
+        "command": "switchboard.row.snooze",
+        "title": "Snooze…",
         "category": "Switchboard"
       },
       {
@@ -250,7 +250,7 @@
           "when": "false"
         },
         {
-          "command": "switchboard.row.icebox",
+          "command": "switchboard.row.snooze",
           "when": "false"
         },
         {
@@ -290,14 +290,14 @@
           "group": "2_status@2"
         },
         {
-          "command": "switchboard.row.icebox",
-          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.icebox",
-          "group": "3_icebox@1"
+          "command": "switchboard.row.snooze",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.snooze",
+          "group": "3_snooze@1"
         },
         {
           "command": "switchboard.row.restore",
           "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.restore",
-          "group": "3_icebox@1"
+          "group": "3_snooze@1"
         }
       ]
     }

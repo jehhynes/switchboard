@@ -41,8 +41,10 @@ export interface Ticket {
   assigned: boolean;
   /** Whether the last complete poll saw the ticket in the source's pool (PRD R47). */
   pool: boolean;
-  /** Moved to the Icebox by the operator: no automatic triage or start (PRD R49). Local only. */
-  iceboxed: boolean;
+  /** Snoozed by the operator: no automatic triage or start until it wakes or is restored (PRD R49). Local only. */
+  snoozed: boolean;
+  /** When the snooze ends and the ticket returns to its group; null for an indefinite snooze (PRD R49). */
+  snoozedUntil: number | null;
   /** The source's sort time, which orders the pool so the longest-waiting customer comes first (PRD R27). */
   sortAt: number | null;
   /** When the ticket last entered the source's scope (assigned or pool); the in-queue time counts from it (PRD R27). */

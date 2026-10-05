@@ -18,7 +18,7 @@ import type { ReportBody, RuntimeDeps } from './runtime.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the panel may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'icebox', 'restore']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'snooze', 'restore']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'blocked', 'approval', 'link']);
 
@@ -78,9 +78,17 @@ export function parseReport(body: unknown): ReportBody | null {
   return { ...body, [text]: value, ...(body['kind'] === 'approval' ? { summary: body['summary'] ?? null } : {}) } as ReportBody;
 }
 
-/** An operator event from the panel. The core validates its target and refuses what does not apply. */
+/** An operator event from the panel. The core validates its target and refuses what does not apply; a snooze names its wake time or null. */
 export function parseAction(body: unknown): FlowEvent | null {
-  return isRecord(body) && OPERATOR_EVENTS.has(String(body['type'])) ? (body as unknown as FlowEvent) : null;
+  if (!isRecord(body) || !OPERATOR_EVENTS.has(String(body['type']))) {
+    return null;
+  }
+
+  if (body['type'] === 'snooze' && body['until'] !== null && !Number.isFinite(body['until'])) {
+    return null;
+  }
+
+  return body as unknown as FlowEvent;
 }
 
 export interface AppOptions {
