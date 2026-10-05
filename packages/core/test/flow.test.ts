@@ -33,7 +33,7 @@ describe('assigned-state transitions', () => {
       triageId: 1,
       workItemId: 1,
       ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, iceboxed: false, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '' },
-      systemPrompt: 'Classify the GitHub issue.',
+      systemPrompt: 'Classify the GitHub issue.\n\nChoose one playbook:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change' },
         { name: 'dev:question', description: 'Answer a question' },
@@ -173,7 +173,18 @@ describe('triage', () => {
     expect(h.store.triage(1)).toMatchObject({ endedAt: T0, playbook: null, error: 'Triage chose an unknown playbook: triage:github.', context: 'Context 1' });
   });
 
+  it('renders {{playbooks}} into the classifier instructions in place of the appended list', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, { 'triage:github': '---\ndescription: Triage\nkind: triage\n---\nPick one:\n{{playbooks}}\nThen summarize.\n' }) });
+    const [triage] = h.poll(issue('1'));
+
+    expect(triage).toMatchObject({ type: 'triage', systemPrompt: 'Pick one:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect\nThen summarize.\n' });
+  });
+
   it('fails on configuration errors', () => {
+    const variable = new Harness({ playbooks: playbooks(undefined, { 'triage:github': '---\ndescription: Triage\nkind: triage\n---\n{{ticket.title}}\n' }) });
+    variable.poll(issue('1'));
+    expect(variable.item(1)).toMatchObject({ status: 'failed', failedStep: 'triage', error: 'Triage playbook triage:github: Unknown template variable: ticket.title.' });
+
     const missing = new Harness({ playbooks: playbooks(['dev:question']) });
     missing.poll(issue('1'));
     expect(missing.item(1)).toMatchObject({ status: 'failed', failedStep: 'triage', error: 'Triage playbook triage:github is not loaded.' });

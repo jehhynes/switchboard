@@ -10,7 +10,7 @@ const CHOICES = [
   { name: 'dev:develop', description: 'Build a change' },
   { name: 'dev:question', description: 'Answer a question' },
 ];
-const INPUT: ClassifyInput = { claudePath: 'claude', systemPrompt: 'Classify the issue.\n', choices: CHOICES, context: 'Issue #1 text', model: 'claude-sonnet-5', timeoutSeconds: 180, cwd: 'C:/home/.switchboard' };
+const INPUT: ClassifyInput = { claudePath: 'claude', systemPrompt: 'Classify the issue.\n\nChoose one playbook:\n- dev:develop: Build a change\n- dev:question: Answer a question\n', choices: CHOICES, context: 'Issue #1 text', model: 'claude-sonnet-5', timeoutSeconds: 180, cwd: 'C:/home/.switchboard' };
 const SCHEMA =
   '{"type":"object","properties":{"playbook":{"type":"string","enum":["dev:develop","dev:question"]},"summary":{"type":"string"},' +
   '"immediacy":{"type":"string","enum":["URGENT","BLOCKING","NON-BLOCKING"]},"severity":{"type":"string","enum":["HIGH","MED","LOW"]}},' +
@@ -37,7 +37,7 @@ describe('classifierArgs', () => {
       '--model',
       'claude-sonnet-5',
     ]);
-    expect(classifierArgs({ ...INPUT, model: null }).at(-1)).toBe(classifierPrompt(INPUT.systemPrompt, CHOICES));
+    expect(classifierArgs({ ...INPUT, model: null }).at(-1)).toBe(classifierPrompt(INPUT.systemPrompt));
   });
 });
 

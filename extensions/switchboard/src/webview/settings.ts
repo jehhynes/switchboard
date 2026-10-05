@@ -358,7 +358,7 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
     kind: 'prompt',
     help:
       playbook.kind === 'triage'
-        ? 'The classifier’s system prompt. Triage adds the task playbooks’ descriptions.'
+        ? 'The classifier’s system prompt. {{playbooks}} inserts the task playbooks as “- name: description” lines; without it, triage appends them.'
         : `Variables: ${state.config.templateVariables.map((name) => `{{${name}}}`).join(' ')}. Switchboard adds the report commands after it.`,
   });
 

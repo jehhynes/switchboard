@@ -22,7 +22,7 @@ describe('pool triage (PRD R47, R50)', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool'), zoho('501', 'neither')), 'triage');
 
-    expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the Support case.', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A Support case' }] });
+    expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the Support case.\n\nChoose one playbook:\n- support:defect: Research a defect\n- support:case: A Support case', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A Support case' }] });
     expect(h.store.workItem(1)).toBeNull();
 
     h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 'Fix the sync — defect', immediacy: 'BLOCKING', severity: 'MED', model: null });
@@ -52,6 +52,13 @@ describe('pool triage (PRD R47, R50)', () => {
 
     expect(pollZoho(h, zoho('500', 'pool'))).toEqual([]);
     expect(h.store.poolTriages(1)).toMatchObject([{ error: 'No task playbooks in the support namespace.', endedAt: T0 }]);
+  });
+
+  it('fails a pool triage at once when the triage playbook uses a variable other than {{playbooks}}', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, { 'triage:zoho': '---\ndescription: Zoho triage\nkind: triage\n---\n{{ticket.title}}\n{{playbooks}}' }) });
+
+    expect(pollZoho(h, zoho('500', 'pool'))).toEqual([]);
+    expect(h.store.poolTriages(1)).toMatchObject([{ error: 'Triage playbook triage:zoho: Unknown template variable: ticket.title.', endedAt: T0 }]);
   });
 
   it('drops the pool triage of a ticket that leaves the pool, and triages it again if it returns', () => {

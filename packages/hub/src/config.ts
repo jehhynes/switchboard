@@ -12,7 +12,9 @@ import {
   parsePlaybookFile,
   parseSettings,
   switchboardHome,
+  TEMPLATE_VARIABLES,
   templateError,
+  TRIAGE_VARIABLES,
 } from '@switchboard/core';
 import type { Playbook, PlaybookError, PlaybookFields, Settings } from '@switchboard/core';
 import { parseForumConfig } from '@switchboard/forum';
@@ -247,7 +249,7 @@ export function checkPlaybook(name: string, playbook: PlaybookFields): { text: s
 
   const parsed = parsePlaybook(name, formatted.text);
   const errors = 'error' in parsed ? [parsed.error] : [];
-  const unknown = templateError(playbook.template);
+  const unknown = templateError(playbook.template, playbook.kind === 'triage' ? TRIAGE_VARIABLES : TEMPLATE_VARIABLES);
 
   if (unknown !== null) {
     errors.push(unknown);

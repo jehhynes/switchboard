@@ -2,7 +2,7 @@ import type { Playbook } from './playbook.js';
 import type { PermissionMode, Settings } from './settings.js';
 import type { FailedStep, Immediacy, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import type { NewWorkItem, Store } from './store.js';
-import { renderTaskPrompt, sessionPrompt } from './template.js';
+import { renderTaskPrompt, sessionPrompt, triagePrompt } from './template.js';
 import type { TemplateVariable } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
@@ -494,6 +494,13 @@ class Flow {
       return;
     }
 
+    const systemPrompt = triagePrompt(playbook.template, choices);
+
+    if ('error' in systemPrompt) {
+      fail(`Triage playbook ${name}: ${systemPrompt.error}`);
+      return;
+    }
+
     const triage = this.store.insertTriage({ ...EMPTY_TRIAGE, ticketId: ticket.id, workItemId: item?.id ?? null, startedAt: this.now, endedAt: null, error: null });
 
     this.actions.push({
@@ -501,7 +508,7 @@ class Flow {
       triageId: triage.id,
       workItemId: item?.id ?? null,
       ticket,
-      systemPrompt: playbook.template,
+      systemPrompt: systemPrompt.text,
       choices,
       model: this.context.settings.triage.model || null,
       timeoutSeconds: this.context.settings.triage.timeoutSeconds,

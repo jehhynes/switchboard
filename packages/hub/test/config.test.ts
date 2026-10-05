@@ -135,6 +135,9 @@ describe('savePlaybook and deletePlaybook', () => {
   it('checks a playbook without writing it', () => {
     expect(checkPlaybook('dev:x', TASK)).toEqual({ text: '---\ndescription: Develop it\nautoStart: false\nrequiresWorktree: true\n---\n/gc-plan {{ticket.sourceKey}}\n' });
     expect(checkPlaybook('dev:x', { ...TASK, description: '', template: '{{nope}}' })).toEqual({ errors: ['description is required.', 'Unknown template variable: nope.'] });
+    expect(checkPlaybook('triage:x', { ...TASK, kind: 'triage', template: 'Pick:\n{{playbooks}}\n' })).toEqual({ text: '---\ndescription: Develop it\nkind: triage\nrequiresWorktree: true\n---\nPick:\n{{playbooks}}\n' });
+    expect(checkPlaybook('triage:x', { ...TASK, kind: 'triage', template: '{{ticket.sourceKey}}' })).toEqual({ errors: ['Unknown template variable: ticket.sourceKey.'] });
+    expect(checkPlaybook('dev:x', { ...TASK, template: '{{playbooks}}' })).toEqual({ errors: ['Unknown template variable: playbooks.'] });
   });
 
   it('deletes a playbook only at the version it was read, and refuses one that is not listed', () => {

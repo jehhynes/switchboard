@@ -5,7 +5,7 @@ import { failureOf } from './exec.js';
 
 export interface ClassifyInput {
   claudePath: string;
-  /** The triage playbook's body. */
+  /** The triage playbook's body with the choices rendered in (core `triagePrompt`). */
   systemPrompt: string;
   choices: TriageChoice[];
   context: string;
@@ -17,9 +17,9 @@ export interface ClassifyInput {
 
 export type ClassifyResult = { playbook: string; summary: string; immediacy: Immediacy | null; severity: Severity | null } | { error: string };
 
-/** The classifier's system prompt: the triage playbook, then each choice and when to use it. */
-export function classifierPrompt(systemPrompt: string, choices: TriageChoice[]): string {
-  return `${systemPrompt.trimEnd()}\n\nChoose one playbook:\n${choices.map((choice) => `- ${choice.name}: ${choice.description}`).join('\n')}\n\nThe ticket follows as the user message. Summarize it in a few sentences. Set immediacy and severity only when the instructions above ask you to rate the ticket.`;
+/** The classifier's system prompt: the rendered triage playbook, then what to do with the ticket. */
+export function classifierPrompt(systemPrompt: string): string {
+  return `${systemPrompt.trimEnd()}\n\nThe ticket follows as the user message. Summarize it in a few sentences. Set immediacy and severity only when the instructions above ask you to rate the ticket.`;
 }
 
 /** One-shot triage with no tools, settings, MCP servers or saved transcript (mechanics M3). */
@@ -50,7 +50,7 @@ export function classifierArgs(input: ClassifyInput): string[] {
     '',
     '--strict-mcp-config',
     '--system-prompt',
-    classifierPrompt(input.systemPrompt, input.choices),
+    classifierPrompt(input.systemPrompt),
     ...(input.model === null ? [] : ['--model', input.model]),
   ];
 }

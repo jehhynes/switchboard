@@ -15,11 +15,14 @@ export const TEMPLATE_VARIABLES = [
 
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
 
+/** The variables a triage playbook's classifier instructions can use. */
+export const TRIAGE_VARIABLES = ['playbooks'] as const;
+
 const VARIABLE = /\{\{\s*([A-Za-z][\w.]*)\s*\}\}/g;
 
 /** Why a template would fail to render, or null. */
-export function templateError(template: string): string | null {
-  const unknown = new Set([...template.matchAll(VARIABLE)].map((match) => match[1]!).filter((name) => !(TEMPLATE_VARIABLES as readonly string[]).includes(name)));
+export function templateError(template: string, variables: readonly string[] = TEMPLATE_VARIABLES): string | null {
+  const unknown = new Set([...template.matchAll(VARIABLE)].map((match) => match[1]!).filter((name) => !variables.includes(name)));
 
   return unknown.size > 0 ? `Unknown template variable: ${[...unknown].join(', ')}.` : null;
 }
@@ -45,6 +48,29 @@ export function render(template: string, values: Readonly<Record<string, string>
 /** Renders a playbook template, leaving `{{session.id}}` for {@link sessionPrompt}, because a retry reuses the prompt in a new session. */
 export function renderTaskPrompt(template: string, values: Readonly<Record<string, string>>): TemplateResult {
   return render(template, { ...values, 'session.id': '{{session.id}}' });
+}
+
+export interface PlaybookChoice {
+  name: string;
+  description: string;
+}
+
+const PLAYBOOKS = /\{\{\s*playbooks\s*\}\}/;
+
+/**
+ * The classifier's instructions: the triage playbook with `{{playbooks}}` replaced by the choices as `- name: description` lines,
+ * or, when it has no `{{playbooks}}`, with the choices appended under "Choose one playbook:".
+ */
+export function triagePrompt(template: string, choices: readonly PlaybookChoice[]): TemplateResult {
+  const error = templateError(template, TRIAGE_VARIABLES);
+
+  if (error !== null) {
+    return { error };
+  }
+
+  const list = choices.map((choice) => `- ${choice.name}: ${choice.description}`).join('\n');
+
+  return PLAYBOOKS.test(template) ? render(template, { playbooks: list }) : { text: `${template.trimEnd()}\n\nChoose one playbook:\n${list}` };
 }
 
 /** Appended to every session prompt, because skills written for Ground Control do not know Switchboard. */

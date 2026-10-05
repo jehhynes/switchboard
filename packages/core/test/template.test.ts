@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, renderTaskPrompt, sessionPrompt, templateError } from '../src/template.js';
+import { TRIAGE_VARIABLES, render, renderTaskPrompt, sessionPrompt, templateError, triagePrompt } from '../src/template.js';
 
 describe('render', () => {
   it('replaces variables, with or without inner spaces, and does not re-scan values', () => {
@@ -38,5 +38,31 @@ describe('templateError', () => {
   it('accepts the known variables and names each unknown one once', () => {
     expect(templateError('/init-worktree {{ ticket.sourceKey }} {{session.id}} {{report}} {{triage.summary}}')).toBeNull();
     expect(templateError('{{ticket.key}} {{ticket.key}} {{issue}} {{ticket.ref}}')).toBe('Unknown template variable: ticket.key, issue.');
+  });
+
+  it('allows only {{playbooks}} in classifier instructions', () => {
+    expect(templateError('{{playbooks}}', TRIAGE_VARIABLES)).toBeNull();
+    expect(templateError('{{playbooks}} {{ticket.title}}', TRIAGE_VARIABLES)).toBe('Unknown template variable: ticket.title.');
+    expect(templateError('{{playbooks}}')).toBe('Unknown template variable: playbooks.');
+  });
+});
+
+describe('triagePrompt', () => {
+  const choices = [
+    { name: 'support:defect', description: 'Something is broken.' },
+    { name: 'support:how-to', description: 'A usage question.' },
+  ];
+
+  it('replaces {{playbooks}} with the choices and appends nothing', () => {
+    expect(triagePrompt('Pick one of:\n{{ playbooks }}\nThen rate it.\n', choices)).toEqual({ text: 'Pick one of:\n- support:defect: Something is broken.\n- support:how-to: A usage question.\nThen rate it.\n' });
+  });
+
+  it('appends the choices when the instructions have no {{playbooks}}', () => {
+    expect(triagePrompt('Classify it.\n\n', choices)).toEqual({ text: 'Classify it.\n\nChoose one playbook:\n- support:defect: Something is broken.\n- support:how-to: A usage question.' });
+  });
+
+  it('fails on another variable, with or without {{playbooks}}', () => {
+    expect(triagePrompt('{{playbooks}} {{ticket.title}}', choices)).toEqual({ error: 'Unknown template variable: ticket.title.' });
+    expect(triagePrompt('{{ticket.title}}', choices)).toEqual({ error: 'Unknown template variable: ticket.title.' });
   });
 });
