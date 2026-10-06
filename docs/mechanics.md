@@ -175,6 +175,14 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Result:** `event.stopPropagation()` in the panel's root `click` handler keeps the event from the window, so only the panel's `openUrl` message opens the link. The panel keeps its own handler because a local file path in `href` resolves against the webview origin, which the host's open would get wrong.
 - **Current use:** the webview's link click handler in `main.ts` (architecture.md § Panel).
 
+## M17. A missing or mistyped project status field
+
+- **Date:** 2026-10-06.
+- **Versions:** gh 2.100.0; project `acme/3`.
+- **Experiment:** `fieldValueByName(name:"NoSuchField")` on a project item, and `repositoryOwner(login:"acme"){ ... on ProjectV2Owner{ projectV2(number:3){ field(name:$status){ __typename } } } }` with `Status`, `NoSuchField` and `Title`. Then `GithubSource.poll` with each name.
+- **Result:** `fieldValueByName` with an unknown name returns null and gh exits 0, so every issue read as unassigned. `field(name:)` returns `ProjectV2SingleSelectField` for `Status` and `ProjectV2Field` for `Title`; for `NoSuchField` gh exits 1 with `Could not resolve to a Unions::ProjectV2FieldConfiguration with the name NoSuchField`. Asking for `field(name:)` on every project an issue belongs to would fail the whole search when any other project lacks the field, so the poll asks the configured project once. The poll listed 10 issues, 8 assigned, with `Status`, and failed with the missing-field and wrong-type messages for the other two.
+- **Current use:** the GitHub source's field check (architecture.md § Settings).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

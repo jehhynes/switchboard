@@ -1,3 +1,9 @@
+/** The configured status field's type; gh exits 1 when the project has no field of that name (mechanics M17). */
+export const FIELD_QUERY = `
+query($owner:String!, $number:Int!, $status:String!){
+  repositoryOwner(login:$owner){ ... on ProjectV2Owner{ projectV2(number:$number){ field(name:$status){ __typename } } } }
+}`;
+
 /** Repeated `assignee:` qualifiers are ORed in issue search (GC issues.ts, verified live). */
 export const ISSUES_QUERY = `
 query($q:String!, $status:String!, $after:String){

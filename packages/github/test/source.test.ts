@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseGithubConfig } from '../src/config.js';
 import type { GithubConfig } from '../src/config.js';
 import type { Gh, GhResult } from '../src/gh.js';
-import { CONTEXT_QUERY, ISSUES_QUERY } from '../src/queries.js';
+import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY } from '../src/queries.js';
 import { GithubSource } from '../src/source.js';
 
 function fixture(name: string): unknown {
@@ -34,11 +34,13 @@ function fakeGh(...answers: GhResult[]) {
   });
 }
 
+const SINGLE_SELECT: GhResult = { json: { data: { repositoryOwner: { projectV2: { field: { __typename: 'ProjectV2SingleSelectField' } } } } } };
+
 const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
 describe('GithubSource.poll', () => {
   it('lists every searched issue, assigned only when its project status is configured', async () => {
-    const gh = fakeGh({ json: fixture('issues') });
+    const gh = fakeGh(SINGLE_SELECT, { json: fixture('issues') });
     const result = await new GithubSource(config(), gh).poll();
 
     expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'repo:acme/widgets is:issue is:open assignee:work-login assignee:work-ai-login project:acme/3', status: 'Status' });
@@ -77,7 +79,7 @@ describe('GithubSource.poll', () => {
         },
       },
     };
-    const result = await new GithubSource(config(), fakeGh({ json })).poll();
+    const result = await new GithubSource(config(), fakeGh(SINGLE_SELECT, { json })).poll();
 
     expect('tickets' in result && result.tickets.map((t) => t.sortAt)).toEqual([Date.parse('2026-10-02T12:00:00Z'), Date.parse('2026-10-02T15:00:00Z'), null]);
     expect(ISSUES_QUERY).toContain('ProjectV2ItemFieldSingleSelectValue{ name updatedAt }');
@@ -110,7 +112,7 @@ describe('GithubSource.poll', () => {
         },
       },
     };
-    const result = await new GithubSource(config(), fakeGh({ json })).poll();
+    const result = await new GithubSource(config(), fakeGh(SINGLE_SELECT, { json })).poll();
 
     expect('tickets' in result && result.tickets.map((t) => t.enteredAt)).toEqual([Date.parse('2026-10-03T00:00:00Z'), Date.parse('2026-10-01T00:00:00Z'), null, null]);
     // The sort time is unchanged: the later of the latest assignment and the status change.
@@ -119,7 +121,7 @@ describe('GithubSource.poll', () => {
   });
 
   it('treats a status on another project as not assigned', async () => {
-    const result = await new GithubSource(config({ project: { owner: 'acme', number: 4, statusField: 'Status' } }), fakeGh({ json: fixture('issues') })).poll();
+    const result = await new GithubSource(config({ project: { owner: 'acme', number: 4, statusField: 'Status' } }), fakeGh(SINGLE_SELECT, { json: fixture('issues') })).poll();
 
     expect('tickets' in result && result.tickets.filter((t) => t.assigned)).toEqual([]);
   });
@@ -135,19 +137,41 @@ describe('GithubSource.poll', () => {
         },
       },
     });
-    const gh = fakeGh(page(1, 'c1'), page(2, null));
+    const gh = fakeGh(SINGLE_SELECT, page(1, 'c1'), page(2, null));
     const result = await new GithubSource(config({ maxPages: 2 }), gh).poll();
 
     expect(result).toEqual({ tickets: [expect.objectContaining({ sourceKey: '1', assigned: true }), expect.objectContaining({ sourceKey: '2', assigned: true })] });
-    expect(gh.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ after: 'c1' }));
+    expect(gh.mock.calls[2]?.[1]).toEqual(expect.objectContaining({ after: 'c1' }));
     expect(ISSUES_QUERY).toContain('search(query:$q, type:ISSUE, first:100, after:$after)');
 
-    expect(await new GithubSource(config({ maxPages: 1 }), fakeGh(page(1, 'c1'))).poll()).toEqual({ error: 'More than 1 pages of assigned issues; raise sources.github.maxPages.' });
+    expect(await new GithubSource(config({ maxPages: 1 }), fakeGh(SINGLE_SELECT, page(1, 'c1'))).poll()).toEqual({ error: 'More than 1 pages of assigned issues; raise sources.github.maxPages.' });
+  });
+
+  it("fails the read when the configured project's status field is missing or not single-select, so no issue reads as unassigned", async () => {
+    const field = (value: unknown): GhResult => ({ json: { data: { repositoryOwner: { projectV2: { field: value } } } } });
+    const missing = 'Project acme/3 has no field named "Status". Set sources.github.project.statusField.';
+    // gh exits 1 with this message when the project has no field of that name (mechanics M17).
+    const notFound = 'gh: Could not resolve to a Unions::ProjectV2FieldConfiguration with the name Status';
+    const poll = (...answers: GhResult[]) => new GithubSource(config(), fakeGh(...answers)).poll();
+
+    expect(await poll({ error: notFound })).toEqual({ error: missing });
+    expect(await poll({ error: `${notFound}\nAPI rate limit exceeded` })).toEqual({ error: `${notFound}\nAPI rate limit exceeded` });
+    expect(await poll(field(null))).toEqual({ error: missing });
+    expect(await poll(field({ __typename: 'ProjectV2Field' }))).toEqual({ error: 'The "Status" field on project acme/3 is a ProjectV2Field, not a single-select field.' });
+    expect(await poll(field({}))).toEqual({ error: 'GitHub returned an unexpected response.' });
+    expect(await poll({ json: { data: { repositoryOwner: null } } })).toEqual({ error: 'GitHub returned an unexpected response.' });
+
+    const gh = fakeGh(SINGLE_SELECT, { json: fixture('issues') });
+
+    expect(await new GithubSource(config(), gh).poll()).toEqual({ tickets: expect.any(Array) });
+    expect(gh).toHaveBeenNthCalledWith(1, FIELD_QUERY, { owner: 'acme', number: 3, status: 'Status' });
+    // Asking each issue's projects for the field would fail on any other project without it.
+    expect(ISSUES_QUERY).not.toContain('field(name:');
   });
 
   it('fails on a gh error or a malformed response', async () => {
-    expect(await new GithubSource(config(), fakeGh({ error: 'The GitHub CLI is not signed in. Run gh auth login.' })).poll()).toEqual({ error: 'The GitHub CLI is not signed in. Run gh auth login.' });
-    expect(await new GithubSource(config(), fakeGh({ json: { errors: [{ message: 'x' }] } })).poll()).toEqual({ error: 'GitHub returned an unexpected response.' });
+    expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, { error: 'The GitHub CLI is not signed in. Run gh auth login.' })).poll()).toEqual({ error: 'The GitHub CLI is not signed in. Run gh auth login.' });
+    expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, { json: { errors: [{ message: 'x' }] } })).poll()).toEqual({ error: 'GitHub returned an unexpected response.' });
   });
 });
 

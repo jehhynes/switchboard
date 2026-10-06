@@ -2,7 +2,7 @@ import type { ContextResult, PolledTicket, PollResult, Source, Ticket } from '@s
 import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
-import { CONTEXT_QUERY, ISSUES_QUERY } from './queries.js';
+import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY } from './queries.js';
 
 /** Each issue body, comment and review-thread comment is clipped to this many characters (GC). */
 export const TEXT_LIMIT = 2_000;
@@ -163,6 +163,12 @@ export class GithubSource implements Source {
     const q = [`repo:${repo}`, 'is:issue', 'is:open', ...logins.map((login) => `assignee:${login}`), `project:${project.owner}/${project.number}`].join(' ');
     const tickets: PolledTicket[] = [];
     let after: string | null = null;
+    // A field that cannot hold a status would read every issue as unassigned and end its work item.
+    const problem = await this.fieldProblem();
+
+    if (problem !== null) {
+      return { error: problem };
+    }
 
     for (let page = 1; page <= maxPages; page++) {
       const result = await this.gh(ISSUES_QUERY, { q, status: project.statusField, ...(after === null ? {} : { after }) });
@@ -221,6 +227,33 @@ export class GithubSource implements Source {
     const pr = pullRequestOf(issue.closedByPullRequestsReferences.nodes);
 
     return { context: this.format(issue, pr), links: pr === null ? [] : [{ label: `Pull request #${pr.number}`, target: pr.url }] };
+  }
+
+  /** Why the configured project's status field cannot hold a status, or null when it is a single-select field. */
+  private async fieldProblem(): Promise<string | null> {
+    const { owner, number, statusField } = this.config.project;
+    const missing = `Project ${owner}/${number} has no field named "${statusField}". Set sources.github.project.statusField.`;
+    const result = await this.gh(FIELD_QUERY, { owner, number, status: statusField });
+
+    if ('error' in result) {
+      const lines = result.error.split('\n').filter((line) => line.trim() !== '');
+
+      // Rewrite gh's message only when it is the sole error, so another error stays visible.
+      return lines.length > 0 && lines.every((line) => /ProjectV2FieldConfiguration with the name/.test(line)) ? missing : result.error;
+    }
+
+    const json = result.json as { data?: { repositoryOwner?: { projectV2?: { field?: { __typename?: string } | null } | null } | null } } | null;
+    const field = json?.data?.repositoryOwner?.projectV2?.field;
+
+    if (field === null) {
+      return missing;
+    }
+
+    if (typeof field?.__typename !== 'string') {
+      return UNEXPECTED;
+    }
+
+    return field.__typename === 'ProjectV2SingleSelectField' ? null : `The "${statusField}" field on project ${owner}/${number} is a ${field.__typename}, not a single-select field.`;
   }
 
   private onProject(project: ProjectRef | null | undefined): boolean {
