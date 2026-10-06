@@ -8,14 +8,14 @@ export interface GitWorktree {
 
 const GIT_TIMEOUT_MS = 15_000;
 
-/** Parses `git worktree list --porcelain`. Paths use forward slashes, as git prints them. */
+/** Parses `git worktree list --porcelain`. Paths use forward slashes, as git prints them. An entry git marks `prunable`, such as a deleted directory, is left out. */
 export function parseWorktrees(text: string): GitWorktree[] {
   const worktrees: GitWorktree[] = [];
 
   for (const block of text.replace(/\r\n/g, '\n').split('\n\n')) {
     const path = /^worktree (.+)$/m.exec(block)?.[1];
 
-    if (path !== undefined) {
+    if (path !== undefined && !/^prunable\b/m.test(block)) {
       worktrees.push({ path, branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? null });
     }
   }

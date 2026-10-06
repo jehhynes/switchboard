@@ -134,7 +134,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 ### Worktrees
 
 - R24. A worktree belongs to a ticket, and every work item for that ticket reuses it.
-- R25. Switchboard links a worktree from a session report, or by branch-name convention when no report exists, such as branch `15619-fix-foo` for GitHub issue 15619.
+- R25. Switchboard links a worktree from a session report, or by branch-name convention when no report exists, such as branch `15619-fix-foo` for GitHub issue 15619. A worktree that git marks prunable, such as one whose directory was deleted, is never linked.
 - R26. Tickets from different sources do not share work items. A Zoho ticket gets its own worktree when coding begins.
 
 ### Observation and control
