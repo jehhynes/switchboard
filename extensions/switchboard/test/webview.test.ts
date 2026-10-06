@@ -457,7 +457,7 @@ describe('renderPanel', () => {
     expect(byId(1).querySelector('.queue')?.textContent).toBe('30m');
     expect(byId(1).querySelector('.queue')?.getAttribute('title')).toMatch(/^In scope since \d{4}-\d\d-\d\d \d\d:\d\d UTC$/);
     expect(root.textContent).not.toContain('Fix sync — defect');
-    expect(byId(1).querySelector('.returned')?.textContent).toBe('Returned ×2');
+    expect(byId(1).querySelector('.line.second .returned')?.textContent).toBe('Returned ×2');
     expect(byId(2).querySelector('.returned')).toBeNull();
     expect(byId(1).querySelector('.playbook-name')?.textContent).toBe('support:case');
     expect([byId(1).querySelector('.playbook-name .namespace')?.textContent, byId(1).querySelector('.playbook-name .name')?.textContent]).toEqual(['support:', 'case']);
@@ -558,7 +558,7 @@ describe('renderPanel', () => {
     expect(back.querySelector('details[data-group="snoozed"] [data-ticket="9"]')).not.toBeNull();
   });
 
-  it('shows the priority dot first, pull requests and other-repo issues on line 2, and other links and Returned on line 3 (PRD R50–R52)', () => {
+  it('shows the priority dot first, pull requests and other-repo issues on line 2, then Returned on line 2, and other links on line 3 (PRD R50–R52)', () => {
     const link = (id: number, label: string, target: string) => ({ id, ticketId: 1, label, target, reportedAt: NOW });
     const zoho = { ...item(1).ticket, source: 'zoho', sourceKey: '501', url: 'https://desk.example.test/501' };
     const rated = item(1, {
@@ -603,9 +603,9 @@ describe('renderPanel', () => {
       null,
       null,
     ]);
-    expect([...row.querySelector('.line.second .meta')!.children].map((child) => child.textContent?.trim())).toEqual(['dev:develop', 'zoho 501', '12', 'gh 7']);
+    expect([...row.querySelector('.line.second .meta')!.children].map((child) => child.textContent?.trim())).toEqual(['dev:develop', 'zoho 501', '12', 'gh 7', 'Returned ×1']);
     expect(badges('[data-item="1"] .line.third')).toEqual([['Docs', 'https://example.test/docs']]);
-    expect(row.querySelector('.line.third .returned')?.textContent).toBe('Returned ×1');
+    expect(row.querySelector('.line.third .returned')).toBeNull();
     expect(badges('[data-item="9"] .line.second')).toEqual([['13', 'https://github.com/o/r/pull/13']]);
     // Each kind has its own class and icon; a GitHub issue looks like a GitHub ticket's key, with no icon.
     expect([...row.querySelectorAll('a.badge')].map((a) => [a.className, a.querySelector('.codicon')?.className])).toEqual([

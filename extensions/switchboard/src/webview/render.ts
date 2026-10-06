@@ -505,8 +505,8 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
 
   return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
-<div class="line second"><span class="meta">${playbookLabel(item.status === 'triaging' ? triageLabel(item.ticket.source, namespaces) : (item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : '')))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
-    `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}${returned(item.returned)}`,
+<div class="line second"><span class="meta">${playbookLabel(item.status === 'triaging' ? triageLabel(item.ticket.source, namespaces) : (item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : '')))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
+    `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }
@@ -543,7 +543,7 @@ function setup(snapshot: Snapshot): string {
 
 
 /**
- * A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Start; Returned on line 3; Snooze in the right-click menu.
+ * A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Returned, Start; Snooze in the right-click menu.
  * A click opens the ticket (PRD R27, R47, R48).
  */
 function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
@@ -559,8 +559,8 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<s
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
-<div class="line second"><span class="meta">${playbookLabel(triaging ? triageLabel(ticket.source, namespaces) : (triage?.playbook ?? ''))}${ticketLink(ticket)}</span></div>${thirdLine(
-    `${triaging ? markIcon(TRIAGING) : ''}${wake(ticket)}${returned(entry.returned)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
+<div class="line second"><span class="meta">${playbookLabel(triaging ? triageLabel(ticket.source, namespaces) : (triage?.playbook ?? ''))}${ticketLink(ticket)}${returned(entry.returned)}</span></div>${thirdLine(
+    `${triaging ? markIcon(TRIAGING) : ''}${wake(ticket)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
   )}${actionsColumn(actionButton(main))}
 </div>`;
 }
