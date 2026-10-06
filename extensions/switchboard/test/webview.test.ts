@@ -124,9 +124,10 @@ describe('openAction', () => {
     expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toBeNull();
   });
 
-  it('opens the session in VS Code on Ctrl+click unless it runs in its background process', () => {
-    expect(editorAction(item(7, { sessions: [session({ state: 'ended' })] }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+  it('opens the session in VS Code on Ctrl+click, or the worktree while the session runs in its background process', () => {
+    expect(editorAction(item(7, { sessions: [session({ state: 'ended' })], worktree }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
     expect(editorAction(item(7, { sessions: [session({ state: 'waiting', released: true })] }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+    expect(editorAction(item(7, { sessions: [session()], worktree }))).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
     expect(editorAction(item(7, { sessions: [session()] }))).toBeNull();
     expect(editorAction(item(7))).toBeNull();
   });

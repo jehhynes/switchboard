@@ -145,11 +145,18 @@ function ticketOpen(ticket: { url: string }): Record<string, unknown> | null {
   return ticket.url === '' ? null : { type: 'openUrl', url: ticket.url };
 }
 
-/** What a Ctrl+click on the row opens: the session in VS Code, when it is not running in its background process; otherwise null. */
+/**
+ * What a Ctrl+click on the row opens: the session in VS Code when it is not running in its background process, else the
+ * worktree in VS Code, because an editor resume of a live background session is refused (M7); otherwise null.
+ */
 export function editorAction(item: WorkItemView): Record<string, unknown> | null {
   const action = openAction(item);
 
-  return action?.['type'] === 'resume' ? { type: 'open', sessionId: action['sessionId'], cwd: action['cwd'] } : null;
+  if (action?.['type'] === 'resume') {
+    return { type: 'open', sessionId: action['sessionId'], cwd: action['cwd'] };
+  }
+
+  return item.worktree === null ? null : { type: 'openFolder', path: item.worktree.path };
 }
 
 function openAttribute(action: Record<string, unknown> | null, editor: Record<string, unknown> | null = null): string {
