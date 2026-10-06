@@ -183,6 +183,22 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Result:** `fieldValueByName` with an unknown name returns null and gh exits 0, so every issue read as unassigned. `field(name:)` returns `ProjectV2SingleSelectField` for `Status` and `ProjectV2Field` for `Title`; for `NoSuchField` gh exits 1 with `Could not resolve to a Unions::ProjectV2FieldConfiguration with the name NoSuchField`. Asking for `field(name:)` on every project an issue belongs to would fail the whole search when any other project lacks the field, so the poll asks the configured project once. The poll listed 10 issues, 8 assigned, with `Status`, and failed with the missing-field and wrong-type messages for the other two.
 - **Current use:** the GitHub source's field check (architecture.md § Settings).
 
+## M18. Entering a worktree: EnterWorktree versus resume
+
+- **Date:** 2026-10-06.
+- **Versions:** Claude Code CLI 2.1.291, updated to 2.1.292 during the run.
+- **Experiment:**
+  - `claude -p --model haiku` in a scratch repo, calling EnterWorktree on a linked worktree outside `.claude/worktrees/` under `--permission-mode bypassPermissions`, `auto`, and `auto` with `--allowedTools EnterWorktree`.
+  - In the trusted `.wip/mech`, a `--bg` session told a code word, then stopped. From a linked worktree `.wip/mech-wt`, which had no trust entry of its own, `claude --bg --resume <sessionId> --permission-mode auto --settings <json>` asked for the code word, `pwd` and a Write in the worktree. This was done once after `claude stop` alone and once after `claude stop` and `claude rm`.
+- **Result:**
+  - EnterWorktree on a path outside `.claude/worktrees/` ran without a prompt under `bypassPermissions`. Under `auto`, with or without the allow rule, it asked: "Enter the worktree at …? This moves the session's working directory and write access there, and loads project configuration (CLAUDE.md, settings) from that location." An unattended session in auto mode waits at that prompt.
+  - The resumed session kept the conversation, ran in the worktree (`pwd`, roster `cwd`) and wrote there in auto mode with no prompt. The worktree inherited the main checkout's trust, as GC found.
+  - After `claude stop` alone, the resume printed ``note: session 68838687 is already running in the background, so this started a copy as 4df6b678`` and ran under a new session ID, with its transcript in the worktree's project directory.
+  - After `claude stop` and `claude rm`, the resume kept the session ID and short ID. The roster listed it with the worktree as `cwd` and `kind: background`. The transcript stayed in the original directory's project directory, with each entry's `cwd` set to the directory it ran in.
+  - A `--bg` session in `.wip/mech` under `auto` wrote and then edited a file in a sibling folder outside its working directory, with no prompt. Support relies on this: its sessions stay in `D:\git\support` and `/support-fix` works in its widgets worktree by absolute path.
+- **Ground Control:** GC never entered a worktree inside a session. A worktree run went first, and the action then started as a new session in the worktree it reported (GC R46).
+- **Current use:** Switchboard sessions do not call EnterWorktree or resume in another directory. `dev:develop`, `dev:qa-failure` and `dev:qa-question` require a worktree, so a setup session creates it and the skill starts inside it, as in GC. `/gc-route` creates a worktree when its own work changes code and edits it by absolute path, as `/support-fix` does.
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:
