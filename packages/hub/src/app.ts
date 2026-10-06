@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { join, posix, win32 } from 'node:path';
+import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
-import { claudeSettingsPath, spawnExec } from '@switchboard/claude';
+import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
+import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { loadConfig, playbooksDir, setSourceEnabled } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
@@ -113,22 +114,37 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   const store = Store.open(join(home, 'switchboard.db'));
   let config = loadConfig(options.home);
-  const runtime = new Runtime(
-    {
-      home: options.home,
-      store,
-      exec: spawnExec,
-      claudePath: 'claude',
-      makeSource,
-      now: Date.now,
-      sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
-      newSessionId: () => randomUUID().slice(0, 8),
-      claudeSettings: claudeSettingsPath(homedir(), process.env),
-      log: options.log,
-      ...options.deps,
-    },
-    config,
-  );
+  const deps: RuntimeDeps = {
+    home: options.home,
+    store,
+    exec: spawnExec,
+    claudePath: 'claude',
+    makeSource,
+    now: Date.now,
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    newSessionId: () => randomUUID().slice(0, 8),
+    claudeSettings: claudeSettingsPath(homedir(), process.env),
+    log: options.log,
+    ...options.deps,
+  };
+  const runtime = new Runtime(deps, config);
+  const claudeRoot = dirname(deps.claudeSettings).replaceAll('\\', '/');
+  const debriefs = new Debriefs({
+    dir: `${claudeRoot}/.wip/debrief`,
+    promptPath: `${claudeRoot}/skills/friction-review/prompt.md`,
+    projectsDir: `${claudeRoot}/projects`,
+    claudePath: deps.claudePath,
+    codexScript: `${claudeRoot}/tools/agent-delegate/debrief.mjs`,
+    nodePath: process.execPath,
+    exec: deps.exec,
+    enabled: () => config.settings.sessions.debriefs,
+    sessions: () => store.startedSessions(),
+    workItemDone: (id) => store.workItem(id)?.status === 'done',
+    roster: () => readRoster(deps.claudePath, deps.exec),
+    now: deps.now,
+    newId: randomUUID,
+    log: deps.log,
+  });
 
   // Settings and playbooks are reloaded when they change (PRD R42).
   let pending: NodeJS.Timeout | undefined;
@@ -146,6 +162,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   await runtime.startup();
   runtime.start();
+
+  const debriefTimer = setInterval(() => void debriefs.scan(), DEBRIEF_SCAN_MS);
 
   return {
     runtime,
@@ -200,9 +218,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     snapshot: () => runtime.snapshot(),
     onChange: (listener) => void runtime.onChange(listener),
-    busy: () => runtime.hasActiveSessions(),
+    busy: () => runtime.hasActiveSessions() || debriefs.running(),
     close: () => {
       clearTimeout(pending);
+      clearInterval(debriefTimer);
       runtime.stop();
 
       for (const watcher of watchers) {

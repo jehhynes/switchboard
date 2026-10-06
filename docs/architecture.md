@@ -11,11 +11,11 @@ npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, fol
 | Package | Contents | Depends on |
 |---|---|---|
 | `packages/core` | Domain types, source and runner interfaces, store, playbook loader and renderer, flow rules | — |
-| `packages/claude` | Claude Code runner and classifier | core |
+| `packages/claude` | Claude Code runner, classifier and debrief fork | core |
 | `packages/github` | GitHub source: assigned state, triage context | core |
 | `packages/zoho` | Zoho Desk source | core |
 | `packages/forum` | Forum source over the forum database | core |
-| `packages/hub` | Polling scheduler, flow execution, loopback HTTP/SSE server, report endpoint | core, sources, claude |
+| `packages/hub` | Polling scheduler, flow execution, loopback HTTP/SSE server, report endpoint, debrief scheduler | core, sources, claude |
 | `apps/hub` | Hub entry point and the `switchboard report` CLI, bundled as one file | hub |
 | `extensions/switchboard` | Hub process lifecycle, panel webview, attach, open in Claude Code tab | core, hub client |
 
@@ -63,7 +63,7 @@ Implemented. Follows Ground Control's hub (GC R35, M25).
 - **Start:** extension activation copies `dist/hub.js` to `~/.switchboard/hub.js` when it differs. It accepts a running hub only when the hub's `build`, a hash of its bundle, matches the bundle installed at that moment. It asks a hub of another build to stop and starts a new one only after the old one has gone; if the old hub refuses, the window reports it. Otherwise it starts one detached with VS Code's executable and `ELECTRON_RUN_AS_NODE=1`, with `ELECTRON_*`, `VSCODE_*` and `NODE_OPTIONS` removed from its environment. Output goes to `~/.switchboard/hub.log`.
 - **Record:** the hub listens on `127.0.0.1` on an ephemeral port and writes `~/.switchboard/hub.json` with `protocol`, `version`, `build`, `port`, `token`, `pid` and `startedAt`. The hub holds a lock for its lifetime: a named pipe `\\.\pipe\switchboard-<hash of home>` on Windows, `~/.switchboard/hub.sock` elsewhere. Only the lock holder writes or removes the record, so concurrent starts leave one hub, and the OS releases the pipe when the hub dies. A hub that cannot take the lock waits up to 5 seconds for the holder's record and otherwise exits. A forced exit on Windows leaves the record behind, so clients accept it only when `GET /status` with the token returns the recorded pid.
 - **Endpoints:** `GET /hub` returns identity without a token. `GET /status`, `GET /events`, `POST /shutdown`, `POST /report`, `POST /action`, `POST /open` and `POST /claim` require `Authorization: Bearer <token>`. `/events` sends a `state` event with the whole panel snapshot when it opens and after every change. `/action` takes an operator event (`adhoc`, `start`, `approve`, `retry`, `mark-done`, `retriage`, `stop`) and answers 409 with the core's refusal.
-- **Clients:** each window holds one `/events` stream. The hub exits 30 minutes after its last stream closes, but not while any session is active (PRD R43). A stream that sends no response headers within 5 seconds counts as refused. When a stream ends, the window finds or starts a hub and reconnects. It gives up and shows an error after three consecutive failures; a connection that lasts under 10 seconds counts as a failure.
+- **Clients:** each window holds one `/events` stream. The hub exits 30 minutes after its last stream closes, but not while any session is active or a debrief runs (PRD R43, R55). A stream that sends no response headers within 5 seconds counts as refused. When a stream ends, the window finds or starts a hub and reconnects. It gives up and shows an error after three consecutive failures; a connection that lasts under 10 seconds counts as a failure.
 - **Entry point:** `hub.js [--home=<dir>] [--idle-ms=<ms>]` serves; `hub.js --stop` stops the running hub; `hub.js report …` sends a session report.
 - **Runtime:** the hub opens the store, loads settings and playbooks and reloads them on change, polls each enabled source every `pollIntervalSeconds`, then reads `git worktree list` in its repo root for the branch convention. Entries that git marks `prunable`, such as one whose directory was deleted, are left out of both the convention and report validation. While any session has started, it reads the roster every 30 seconds and hook markers every 5 seconds. Before a roster read or a release stop can end a setup session, it reads the convention again, so an unreported worktree still counts.
 - **Startup:** the hub installs hooks when `sessions.installHooks` is on, runs again any triage it abandoned, fails any session still `starting` with "The hub stopped while the session was starting.", and reads the roster (PRD R43).
@@ -106,7 +106,7 @@ PRD R54. A webview editor tab, **Switchboard Settings**, one per window; the com
 - WAL mode; one write transaction per flow step, so a crash leaves each work item in its last committed state.
 - Core accesses the database only through a store interface, which isolates changes to the `node:sqlite` API. Tests use `:memory:`.
 - Schema changes are numbered migrations applied by the hub at startup, recorded in `PRAGMA user_version`.
-- Not in the database: playbooks and settings, which are files the operator edits and can keep in git, and session transcripts, which Claude Code stores. Sessions keep `nativeSessionId` to find them.
+- Not in the database: playbooks and settings, which are files the operator edits and can keep in git; session transcripts, which Claude Code stores, and which sessions find by `nativeSessionId`; and the [debrief](#friction-debriefs) state and log, which the friction-review skill reads.
 
 ## Playbooks
 
@@ -198,7 +198,7 @@ Actions are `triage`, `start-session` and `stop-session`. After every event the 
 - Hooks:
   - The hub installs async command hooks for those events plus `SessionEnd` in `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`. It preserves other entries, refuses to edit malformed JSON, and adds missing entries at startup. The `sessions.installHooks` setting is on by default; when it is off, the roster alone decides state.
   - The hook runs `node "<home>/hook.mjs"`. It skips subagent events, always exits 0 and prints nothing, and writes `<home>/activity/<nativeSessionId>.json` atomically: `{v, sessionId, event, at, notificationType, source, toolName, backgroundTasks, error, errorMessage}`, with `errorMessage` capped at 500 characters. `SessionEnd` deletes the marker.
-  - Ground Control's hooks stay separate; the two do not share markers.
+  - A debrief fork runs with `FRICTION_DEBRIEF=1`, and the hook writes no marker for it.
 - Release: when a session's turn ends (`idle` or `failed`), run `claude stop <id>` once (PRD R39). A `waiting` session is not released, because it is mid-turn. A session whose background process has ended, by release, stop, failed start or leaving the roster, is never released again, and neither is a session the roster lists as interactive, so a session the operator resumed in a VS Code tab is never stopped by Switchboard. Before a release stop, the hub also reads the roster and skips the stop unless the session is listed as a background process. An interactive roster entry, such as a VS Code tab, has no `state`; its `status` (`idle`, `busy` or `waiting`) gives `idle`, `running` or `waiting`.
 - Stop: `claude stop <id>`, 15-second timeout. A failed stop leaves the session stoppable. Never `claude rm`, which can delete the worktree.
 - Attach: a VS Code terminal running `claude attach <id>`. Leaving it keeps the session running (M33, M45).
@@ -227,13 +227,25 @@ node "<home>/hub.js" report playbook <sessionId> <name>
 - `playbook` names a task playbook in the work item's namespace; the hub refuses any other with "<name> is not a task playbook in the <namespace> namespace." It sets the work item's playbook only, so the session keeps the reports its prompt offered and a later Retry or Start renders the new playbook.
 - `link` takes an http(s) URL; the CLI and the hub refuse any other target with exit 1. Migration 8 deleted the local-file links of earlier sessions, after copying an open approval's newest one to its `approvalReport`. A link to a target the ticket already has replaces its label.
 
+## Friction debriefs
+
+PRD R55, ported from Ground Control's debrief runner (GC M64). Off unless `sessions.debriefs` is true.
+
+- **Files:** under the Claude root, `CLAUDE_CONFIG_DIR` or `~/.claude`: the prompt `skills/friction-review/prompt.md`, and `.wip/debrief/state.json` and `.wip/debrief/log/YYYY-MM.jsonl`. They are the files Ground Control wrote, in the same format, so Ground Control's record of what it asked still holds, and the friction-review skill reads both runners' lines. Ground Control's `codex` entries that wait for a debrief stay as they are. A session's entry has one writer, the hub that started the session; Ground Control's runner must not run beside it.
+- **Candidates:** every minute, the started sessions in the store with provider `claude`, a native session ID, state `idle`, `failed` or `ended`, and no end more than an hour ago. The session's transcript, `<Claude root>/projects/<slug of cwd>/<nativeSessionId>.jsonl`, gives its last turn by its write time. A session is due as soon as its work item is done, otherwise 45 minutes after its last turn, and is skipped from 60 minutes after that turn. It also needs at least 10 main-transcript tool calls after the last debriefed message, in a range whose debrief has not failed. The due session with the oldest transcript goes first, one fork at a time.
+- **Roster:** before each fork the hub reads the state and `claude agents --json`, skips a session listed with a pid that is not idle, and checks the setting and the 60-minute limit again. An idle background session and a stopped one can be forked (mechanics M19).
+- **Fork:** `claude -p --resume <nativeSessionId> --fork-session --session-id <new uuid> --no-session-persistence --output-format json` in the session's `cwd`, the prompt on stdin, `FRICTION_DEBRIEF=1`, a 10-minute timeout. No model, effort, tool or MCP flag, because each changes the prompt prefix and loses the cache. `{{scope}}` is the whole conversation, or the work after the first message after the last debriefed one, named by its first 200 characters. `{{subagents}}` lists the subagents written within 55 minutes whose type can be resumed (not `codex`, `Explore` or `Plan`), with new messages since their last debrief; their transcripts are copied to `<project>/<forkId>/subagents/` for the run, because a fork looks for them under its own ID, and removed after it.
+- **Codex threads:** a session's fork, whether it succeeded or failed, marks `pending` in the state each thread that an `mcp__agent-delegate__*` result names in the range, in the main transcript or a subagent's transcript written after the range starts, and every pending thread is then asked once, at the next scan when the hub stopped or a write was held, through agent-delegate's command: `<node> <Claude root>/tools/agent-delegate/debrief.mjs <thread> --prompt <prompt> [--since <its last debrief>]`, with the hub's own executable, `ELECTRON_RUN_AS_NODE=1` and `FRICTION_DEBRIEF=1`, and a 10-minute timeout. Exit 0 with the friction JSON appends a `codex` log line with the session as `parentSessionId`; exit 3, a thread with no turn since, records nothing new; anything else is reported in the hub log and the state's `lastError`, and not retried. A missing command skips the threads.
+- **Answer:** the last `result` event whose text, without a code fence, is `{"friction": [...]}` or a bare array, each item with non-empty `what`, `source`, `workaround`, `cost` and `evidence`. The last `result` event gives the cache use and cost.
+- **Record:** a success appends a log line (`v`, `at`, `provider`, `sessionId`, `parentSessionId`, `cwd`, `fromMessageUuid`, `throughMessageUuid`, `skills`, `toolCalls`, `cache`, `friction`, `startedAt`, `subagents`, `delegated`), on a fresh line when the file ends inside one, then merges into the state as it is on disk, so another writer's entries are kept: the last message covered, and the fork's start as each shown subagent's last debrief. A failure, including a fork that throws, records the range and its error in the state and the hub log, and is not retried; the next debrief covers that range with any later work. A write that fails is held, and no fork starts until a later scan writes it. A hub that stops between the two writes asks about that range again.
+
 ## Settings
 
 `<home>/settings.json`, plain JSON. The hub validates it on load and on change (PRD R42).
 
 ```json
 {
-  "sessions": { "concurrency": 2, "permissionMode": "auto", "model": "", "installHooks": true },
+  "sessions": { "concurrency": 2, "permissionMode": "auto", "model": "", "installHooks": true, "debriefs": false },
   "triage": { "model": "claude-sonnet-5", "concurrency": 2, "timeoutSeconds": 180 },
   "sources": {
     "github": {

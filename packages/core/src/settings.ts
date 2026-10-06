@@ -9,6 +9,8 @@ export interface SessionSettings {
   /** Empty means Claude's default model. */
   model: string;
   installHooks: boolean;
+  /** Ask each finished Claude session what slowed it down, for the friction-review skill (PRD R55). */
+  debriefs: boolean;
 }
 
 export interface TriageSettings {
@@ -38,7 +40,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  sessions: { concurrency: 2, permissionMode: 'auto', model: '', installHooks: true },
+  sessions: { concurrency: 2, permissionMode: 'auto', model: '', installHooks: true, debriefs: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
 };
@@ -155,12 +157,13 @@ export function parseSettings(text: string): SettingsResult {
 
   const sessionsIn = read.section(root, 'sessions', 'sessions');
   const defaults = DEFAULT_SETTINGS;
-  read.unknown(sessionsIn, ['concurrency', 'permissionMode', 'model', 'installHooks'], 'sessions');
+  read.unknown(sessionsIn, ['concurrency', 'permissionMode', 'model', 'installHooks', 'debriefs'], 'sessions');
   const sessions: SessionSettings = {
     concurrency: read.integer(sessionsIn, 'concurrency', 'sessions', defaults.sessions.concurrency, 1, 4),
     permissionMode: read.permissionMode(sessionsIn, 'permissionMode', 'sessions', defaults.sessions.permissionMode),
     model: read.string(sessionsIn, 'model', 'sessions', defaults.sessions.model),
     installHooks: read.boolean(sessionsIn, 'installHooks', 'sessions', defaults.sessions.installHooks),
+    debriefs: read.boolean(sessionsIn, 'debriefs', 'sessions', defaults.sessions.debriefs),
   };
 
   const triageIn = read.section(root, 'triage', 'triage');

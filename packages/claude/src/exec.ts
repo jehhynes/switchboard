@@ -13,6 +13,8 @@ export interface ExecOptions {
   cwd?: string;
   stdin?: string;
   timeoutMs: number;
+  /** Variables added to the CLI environment. */
+  env?: Record<string, string>;
 }
 
 /** Runs a CLI without a shell, so a prompt's leading slash command reaches it unchanged. */
@@ -33,7 +35,7 @@ export function cliEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 export const spawnExec: Exec = (file, args, options) =>
   new Promise((resolve) => {
-    const child = spawn(file, args, { cwd: options.cwd, env: cliEnvironment(process.env), windowsHide: true });
+    const child = spawn(file, args, { cwd: options.cwd, env: { ...cliEnvironment(process.env), ...options.env }, windowsHide: true });
     let stdout = '';
     let stderr = '';
     let timedOut = false;

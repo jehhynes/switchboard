@@ -83,13 +83,21 @@ describe('hook writer', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function run(payload: unknown): { status: number | null; stdout: string } {
-    const result = spawnSync(process.execPath, [join(dir, 'hook.mjs')], { input: typeof payload === 'string' ? payload : JSON.stringify(payload), encoding: 'utf8' });
+  function run(payload: unknown, env: NodeJS.ProcessEnv = process.env): { status: number | null; stdout: string } {
+    const result = spawnSync(process.execPath, [join(dir, 'hook.mjs')], { input: typeof payload === 'string' ? payload : JSON.stringify(payload), encoding: 'utf8', env });
 
     return { status: result.status, stdout: result.stdout };
   }
 
   const markerPath = () => join(dir, 'activity', 'abc-123.json');
+
+  it('writes no marker for a debrief fork', () => {
+    expect(run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...process.env, FRICTION_DEBRIEF: '1' })).toEqual({ status: 0, stdout: '' });
+    expect(existsSync(markerPath())).toBe(false);
+
+    run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...process.env, FRICTION_DEBRIEF: '' });
+    expect(existsSync(markerPath())).toBe(true);
+  });
 
   it('writes a marker, ignores subagent events, deletes it on SessionEnd, and always exits 0 silently', () => {
     expect(run({ session_id: 'abc-123', hook_event_name: 'StopFailure', error: 'rate_limit', last_assistant_message: 'x'.repeat(600), cwd: 'D:/x' })).toEqual({ status: 0, stdout: '' });

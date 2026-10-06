@@ -15,8 +15,8 @@ try {
   const payload = JSON.parse(readFileSync(0, 'utf8'));
   const id = payload.session_id;
 
-  // Subagent events carry the parent's session ID and would overwrite its state.
-  if (typeof payload.agent_id !== 'string' && typeof id === 'string' && /^[A-Za-z0-9._-]+$/.test(id)) {
+  // Subagent events carry the parent's session ID and would overwrite its state; a debrief fork is not a session.
+  if (typeof payload.agent_id !== 'string' && process.env.FRICTION_DEBRIEF !== '1' && typeof id === 'string' && /^[A-Za-z0-9._-]+$/.test(id)) {
     const dir = fileURLToPath(new URL('./activity/', import.meta.url));
     const marker = dir + id + '.json';
 

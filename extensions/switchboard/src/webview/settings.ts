@@ -247,6 +247,13 @@ export function generalFields(state: EditorState): { heading: string; fields: Fi
           fallback: true,
           help: 'Add Switchboard’s hooks to your Claude settings, so the panel shows when a session waits for you. Off, the session list alone decides state.',
         },
+        {
+          path: 'sessions.debriefs',
+          label: 'Friction debriefs',
+          kind: 'boolean',
+          fallback: false,
+          help: 'Ask each session what slowed it down, in a paid fork of the session, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.',
+        },
       ],
     },
     {

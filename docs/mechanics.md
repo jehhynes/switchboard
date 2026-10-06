@@ -199,6 +199,20 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Ground Control:** GC never entered a worktree inside a session. A worktree run went first, and the action then started as a new session in the worktree it reported (GC R46).
 - **Current use:** Switchboard sessions do not call EnterWorktree or resume in another directory. `dev:develop`, `dev:qa-failure` and `dev:qa-question` require a worktree, so a setup session creates it and the skill starts inside it, as in GC. `/gc-route` creates a worktree when its own work changes code and edits it by absolute path, as `/support-fix` does.
 
+## M19. Forking a session for a friction debrief
+
+- **Date:** 2026-10-06.
+- **Versions:** Claude Code CLI 2.1.292.
+- **Experiment:** in the trusted `.wip/mech`, a `--bg --model haiku` session ran two Bash calls and ended its turn (roster `state: done`, with a pid). It was forked with `claude -p --resume <sessionId> --fork-session --session-id <uuid> --no-session-persistence --output-format json`, the prompt on stdin and `FRICTION_DEBRIEF=1`, once while its process was listed and once after `claude stop`. Then `runDebrief` from the built `packages/claude` forked the stopped session with the operator's friction-review prompt.
+- **Result:**
+  - Both forks exited 0. Ground Control found a live `--bg` job refusing `-p --resume` (GC M64); on this version a background session that has ended its turn can be forked while its process is listed.
+  - Output is an array of stream events (`system`, `assistant`, `rate_limit_event`, `result`). The `result` text came wrapped in a `json` code fence. Cache reads were 45,789 and 48,955 tokens; costs $0.013 and $0.11.
+  - No transcript was written for the fork's ID, the original transcript was unchanged, and Switchboard's activity directory had no marker for it. After `claude stop` the roster no longer listed the session.
+  - `runDebrief` returned `{"friction": [], "cache": {"read": 48955, "created": 2353, "costUsd": 0.115}, "subagents": []}`.
+  - From the hub (an isolated home with `sessions.debriefs` on): an ad-hoc session in `.wip/mech` made 16 tool calls, delegated one Codex task through agent-delegate and reported done. The next scan, 2 minutes after the start, forked it with no wait because its work item was done: one friction report, $0.72, cache read 69,695 tokens. The Codex thread was asked right after through `debrief.mjs` and answered with no friction. The log got a `claude` line naming the thread in `delegated` and a `codex` line with the session as parent; `store.mjs input analysis` read both. A restarted hub ran a scan and asked neither again. An unknown thread made `debrief.mjs` exit 3.
+- **Not verified:** a fork that messages subagents (GC M64 verified it on CLI 2.1.286).
+- **Current use:** friction debriefs (architecture.md § Friction debriefs). The hub skips a session the roster lists with a pid only when it is not idle.
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

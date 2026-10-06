@@ -5,7 +5,7 @@ describe('parseSettings', () => {
   it('fills defaults for an empty object', () => {
     expect(parseSettings('{}')).toEqual({
       settings: {
-        sessions: { concurrency: 2, permissionMode: 'auto', model: '', installHooks: true },
+        sessions: { concurrency: 2, permissionMode: 'auto', model: '', installHooks: true, debriefs: false },
         triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
         sources: {},
       },
@@ -15,7 +15,7 @@ describe('parseSettings', () => {
   it('reads every value and passes source-specific keys through', () => {
     const result = parseSettings(
       JSON.stringify({
-        sessions: { concurrency: 4, permissionMode: 'acceptEdits', model: 'opus', installHooks: false },
+        sessions: { concurrency: 4, permissionMode: 'acceptEdits', model: 'opus', installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
@@ -25,7 +25,7 @@ describe('parseSettings', () => {
 
     expect(result).toEqual({
       settings: {
-        sessions: { concurrency: 4, permissionMode: 'acceptEdits', model: 'opus', installHooks: false },
+        sessions: { concurrency: 4, permissionMode: 'acceptEdits', model: 'opus', installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: {
