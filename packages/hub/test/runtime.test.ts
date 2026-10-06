@@ -461,10 +461,12 @@ describe('Runtime', () => {
     // A disabled source's pool is not read, so it is hidden; the filter lists it as off.
     const off = config();
     off.settings.sources['github']!.enabled = false;
+    off.settings.sources['github']!.namespace = 'dev';
     runtime.reload(off);
 
     expect(runtime.snapshot().pool).toEqual([]);
     expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', enabled: false }]);
+    expect(runtime.snapshot().namespaces).toEqual({ github: 'dev' });
   });
 
   it('records a link report and lists the ticket links and earlier work items on the work item (PRD R51, R52)', async () => {

@@ -75,6 +75,7 @@ function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): Snapsho
     repoRoots: ['D:/git/widgets', 'D:/git/support'],
     sources: ['github'],
     sourceStates: [{ name: 'github', enabled: true }],
+    namespaces: { github: 'dev', zoho: 'support', adhoc: '' },
     home: 'C:\\Users\\me\\.switchboard',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
     ...patch,
@@ -84,11 +85,12 @@ function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): Snapsho
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
 
 describe('groupOf', () => {
-  it('puts done first, then work that needs the operator, then the rest', () => {
+  it('puts done first, then unstarted and triaging work, then work that needs the operator, then the rest', () => {
     expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');
+    expect(['unstarted', 'triaging'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['unstarted', 'unstarted']);
     expect(['awaiting-approval', 'blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['needs', 'needs', 'needs']);
     expect(groupOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('needs');
-    expect(['triaging', 'queued', 'setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['working', 'working', 'working', 'working']);
+    expect(['queued', 'setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['working', 'working', 'working']);
   });
 });
 
@@ -176,6 +178,7 @@ describe('mainControl', () => {
     expect(mainControl(item(1, { status: 'awaiting-approval' }))?.label).toBe('Approve');
     expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Retry');
     expect(mainControl(item(1, { status: 'unstarted' }))?.label).toBe('Start');
+    expect(mainControl(item(1, { status: 'triaging' }))).toBeNull();
     expect(mainControl(item(1, { sessions: [session({ state: 'waiting' })] }))).toBeNull();
     expect(mainControl(item(1))).toBeNull();
   });
@@ -190,6 +193,7 @@ describe('markOf', () => {
   it('shows what the operator must do in Needs you', () => {
     expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish' })).toEqual(['cloud-upload', 'Approve the publish', null]);
     expect(mark({ status: 'unstarted' })).toBe('priority');
+    expect(mark({ status: 'triaging' })).toEqual(['loading codicon-modifier-spin', 'Triaging', null]);
     expect(mark({ sessions: [session({ state: 'waiting' })] })).toEqual(['comment-discussion', 'Answer a question', null]);
     expect(mark({ status: 'blocked', error: 'Which account should I use?' })).toEqual(['debug-pause', 'Blocked', null]);
     expect(mark({ status: 'blocked', error: 'Needs VPN access.' })).toEqual(['debug-pause', 'Blocked', null]);
@@ -197,7 +201,6 @@ describe('markOf', () => {
   });
 
   it('shows the phase in Working and how it ended in Done', () => {
-    expect(mark({ status: 'triaging' })).toEqual(['search', 'Triaging', null]);
     expect(mark({ status: 'queued' })).toEqual(['clock', 'Queued', null]);
     expect(mark({ status: 'setup', needsPick: true })).toEqual(['tools', 'Claiming', null]);
     expect(mark({ status: 'setup' })).toEqual(['tools', 'Setting up', null]);
@@ -463,7 +466,8 @@ describe('renderPanel', () => {
     expect(byId(4).querySelector('.note')?.textContent).toBe('Timed out.');
     expect(titles(byId(4), '.actions > button.control')).toEqual(['Triage again']);
     expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'start', 'snooze'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
-    expect(titles(byId(5), '.line.third .mark.codicon-search')).toEqual(['Triaging']);
+    expect(titles(byId(5), '.line.third .mark.codicon-loading.codicon-modifier-spin')).toEqual(['Triaging']);
+    expect(byId(5).querySelector('.playbook-name')?.textContent).toBe('support:triage');
     const adhoc = render(snapshot([item(6, { ticket: { ...item(6).ticket, source: 'adhoc', sourceKey: '6', url: '' } })]));
     expect(adhoc.querySelector('.line.second span.key')?.textContent).toBe('adhoc 6');
     expect(byId(1).querySelector('.line.second a.key')?.className).toBe('key zoho');
@@ -494,6 +498,18 @@ describe('renderPanel', () => {
     expect(JSON.parse(controlNamed(unstarted.querySelector('[data-item="1"]')!, 'Start').dataset['message']!)).toEqual({ type: 'action', action: { type: 'start', workItemId: 1 } });
     expect(titles(root, '[data-group="needs"] .actions > button.control')).toEqual(['Approve: runs /publish']);
     expect(labels(item(4, { status: 'unstarted' }))).not.toContain('Approve');
+  });
+
+  it('lists a triaging work item in Unstarted with its source namespace and triage as the playbook, the Triaging mark and no Start', () => {
+    const triaging = (id: number, source: string) => item(id, { status: 'triaging', playbook: 'dev:develop', ticket: { ...item(id).ticket, source } });
+    const root = render(snapshot([triaging(1, 'github'), triaging(2, 'zoho'), triaging(3, 'other')]));
+    const byId = (id: number) => root.querySelector(`[data-group="unstarted"] [data-item="${id}"]`)!;
+
+    expect(headings(root)).toEqual(['Needs you 0', 'Working 0', 'Unstarted 3', 'Done 0']);
+    expect([1, 2, 3].map((id) => byId(id).querySelector('.playbook-name')?.textContent)).toEqual(['dev:triage', 'support:triage', 'triage']);
+    expect(titles(byId(1), '.line.third .mark.codicon-loading.codicon-modifier-spin')).toEqual(['Triaging']);
+    expect(byId(1).querySelector('.actions')).toBeNull();
+    expect(rowMenu(byId(1)).shown).toEqual(['markDone', 'snooze']);
   });
 
   it('moves snoozed work items and pool tickets into a collapsed Snoozed group with their own marks and wake times, and shows an approval summary', () => {

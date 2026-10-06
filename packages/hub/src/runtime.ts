@@ -62,6 +62,8 @@ export interface Snapshot {
   sources: string[];
   /** Every configured source but ad-hoc, for the operator's source filter. */
   sourceStates: { name: string; enabled: boolean }[];
+  /** Each configured source's playbook namespace, which names a triage in progress, such as `dev:triage`. */
+  namespaces: Record<string, string>;
   /** The Switchboard home, where settings.json and playbooks/ live. */
   home: string;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
@@ -327,6 +329,7 @@ export class Runtime {
       sourceStates: Object.entries(settings.sources)
         .filter(([name]) => name !== ADHOC_SOURCE)
         .map(([name, source]) => ({ name, enabled: source.enabled })),
+      namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
       home: this.home,
       errors: {
         settings: settingsError,

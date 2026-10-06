@@ -3,13 +3,13 @@ import { wakeText } from '../snooze.js';
 
 export type Group = 'needs' | 'working' | 'unstarted' | 'done';
 
-/** PRD R27 checks Done first, then Unstarted, then Needs you, then Working. */
+/** PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Needs you, then Working. */
 export function groupOf(item: WorkItemView): Group {
   if (item.status === 'done') {
     return 'done';
   }
 
-  if (item.status === 'unstarted') {
+  if (item.status === 'unstarted' || item.status === 'triaging') {
     return 'unstarted';
   }
 
@@ -362,7 +362,9 @@ export interface Mark {
   tone?: 'error' | 'warning';
 }
 
-/** The row mark shows what differs between rows of the same group; a snoozed item shows its group's mark (PRD R27). Unstarted rows show the priority dot. */
+const TRIAGING: Mark = { icon: 'loading codicon-modifier-spin', title: 'Triaging' };
+
+/** The row mark shows what differs between rows of the same group; a snoozed item shows its group's mark (PRD R27). Unstarted rows show the priority dot, or Triaging. */
 export function markOf(item: WorkItemView): Mark | 'priority' {
   const session = activeSession(item);
 
@@ -378,10 +380,6 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
 
       return item.status === 'failed' ? { icon: 'error', title: 'Failed', tone: 'error' } : { icon: 'debug-pause', title: 'Blocked' };
     case 'working':
-      if (item.status === 'triaging') {
-        return { icon: 'search', title: 'Triaging' };
-      }
-
       if (item.status === 'queued') {
         return { icon: 'clock', title: 'Queued' };
       }
@@ -392,7 +390,7 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
 
       return { icon: 'sync codicon-modifier-spin', title: 'Running' };
     case 'unstarted':
-      return 'priority';
+      return item.status === 'triaging' ? TRIAGING : 'priority';
     case 'done':
       return item.doneReason === 'operator'
         ? { icon: 'account', title: DONE_WORDS.operator }
@@ -402,7 +400,7 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
   }
 }
 
-/** The status mark for line 3; Unstarted rows have none, because their mark is the priority dot. */
+/** The status mark for line 3; Unstarted rows have none but Triaging, because their mark is the priority dot. */
 function statusMark(item: WorkItemView): string {
   const mark = markOf(item);
 
@@ -419,6 +417,13 @@ function playbookLabel(name: string): string {
   const namespace = colon === -1 ? '' : name.slice(0, colon + 1);
 
   return `<span class="playbook-name"><span class="namespace">${escape(namespace)}</span><span class="name">${escape(name.slice(colon + 1))}</span></span>`;
+}
+
+/** The playbook slot during triage: the source's namespace and `triage`, such as `dev:triage`. */
+function triageLabel(source: string, namespaces: Record<string, string>): string {
+  const namespace = namespaces[source] ?? '';
+
+  return namespace === '' ? 'triage' : `${namespace}:triage`;
 }
 
 /** Marks a ticket that came back after earlier work items (PRD R51). */
@@ -488,7 +493,7 @@ export function splitLinks(item: WorkItemView): { primary: WorkItemView['links']
   return { primary, rest: links.filter((link) => !primary.includes(link)) };
 }
 
-function row(item: WorkItemView, now: number, ui: PanelUi): string {
+function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const main = mainControl(item);
   const rowKey = `item:${item.id}`;
   const stage = item.stage === null ? '' : clipped('stage', item.stage, CAPS.stage, item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`);
@@ -500,7 +505,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi): string {
 
   return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
-<div class="line second"><span class="meta">${playbookLabel(item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : ''))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
+<div class="line second"><span class="meta">${playbookLabel(item.status === 'triaging' ? triageLabel(item.ticket.source, namespaces) : (item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : '')))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}</span></div>${thirdLine(
     `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}${returned(item.returned)}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
@@ -541,7 +546,7 @@ function setup(snapshot: Snapshot): string {
  * A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Start; Returned on line 3; Snooze in the right-click menu.
  * A click opens the ticket (PRD R27, R47, R48).
  */
-function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
+function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const { ticket, triage } = entry;
   const rowKey = `ticket:${ticket.id}`;
   const pick: Control = { label: 'Start', icon: 'play', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
@@ -554,8 +559,8 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi): string {
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
-<div class="line second"><span class="meta">${playbookLabel(triage?.playbook ?? '')}${ticketLink(ticket)}</span></div>${thirdLine(
-    `${triaging ? markIcon({ icon: 'search', title: 'Triaging' }) : ''}${wake(ticket)}${returned(entry.returned)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
+<div class="line second"><span class="meta">${playbookLabel(triaging ? triageLabel(ticket.source, namespaces) : (triage?.playbook ?? ''))}${ticketLink(ticket)}</span></div>${thirdLine(
+    `${triaging ? markIcon(TRIAGING) : ''}${wake(ticket)}${returned(entry.returned)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
   )}${actionsColumn(actionButton(main))}
 </div>`;
 }
@@ -629,10 +634,11 @@ export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): strin
     }
   }
 
-  const list = (items: WorkItemView[]) => items.map((item) => row(item, now, ui)).join('\n');
-  const pooled = (entries: PoolView[]) => entries.map((entry) => poolRow(entry, now, ui)).join('\n');
+  const { namespaces } = snapshot;
+  const list = (items: WorkItemView[]) => items.map((item) => row(item, now, ui, namespaces)).join('\n');
+  const pooled = (entries: PoolView[]) => entries.map((entry) => poolRow(entry, now, ui, namespaces)).join('\n');
   const waiting = unstartedOrder(groups.unstarted, pool)
-    .map((entry) => ('status' in entry ? row(entry, now, ui) : poolRow(entry, now, ui)))
+    .map((entry) => ('status' in entry ? row(entry, now, ui, namespaces) : poolRow(entry, now, ui, namespaces)))
     .join('\n');
   const snoozedCount = snoozedItems.length + snoozedPool.length;
 
