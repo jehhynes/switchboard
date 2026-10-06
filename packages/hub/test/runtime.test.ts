@@ -144,7 +144,8 @@ describe('Runtime', () => {
     vi.useFakeTimers();
     try {
       let now = T0;
-      const { store, runtime } = setup(config(), () => now);
+      const { store, source, runtime } = setup(config(), () => now);
+      source.result = { tickets: [issue('5')] };
       store.insertTicket({ source: 'github', sourceKey: '5', ref: '#5', sourceId: null, title: 'Issue 5', url: 'u', assigned: true, pool: false, snoozed: true, snoozedUntil: T0 + WAKE_MS, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
       let changes = 0;
       runtime.onChange(() => changes++);

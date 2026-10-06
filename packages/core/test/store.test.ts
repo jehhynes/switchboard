@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -70,6 +70,26 @@ describe('Store', () => {
     store.updateTicket(8, { snoozed: true, snoozedUntil: 100 });
     expect(store.dueSnoozes(99)).toEqual([]);
     expect(store.dueSnoozes(100).map((ticket) => ticket.id)).toEqual([8]);
+    store.close();
+  });
+
+  it('ends a version 10 snooze on a ticket out of the source scope, and keeps one on an assigned or pool ticket', () => {
+    const path = join(dir, 'v10.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 10).join(';'));
+    raw.exec('PRAGMA user_version = 10');
+    raw.exec(
+      "INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, snoozed, snoozedUntil, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, 0, 1, 50, ''), (2, 'zoho', '2', 'b', 'u', 0, 1, 1, NULL, ''), (3, 'github', '3', 'c', 'u', 0, 0, 1, 50, '')",
+    );
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([1, 2, 3].map((id) => [store.ticket(id)?.snoozed, store.ticket(id)?.snoozedUntil])).toEqual([
+      [true, 50],
+      [true, null],
+      [false, null],
+    ]);
     store.close();
   });
 
@@ -193,7 +213,7 @@ describe('Store', () => {
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (10).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (11).');
   });
 
   it('rolls back a transaction that throws', () => {

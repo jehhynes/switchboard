@@ -144,6 +144,8 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN reports TEXT NOT NULL DEFAULT 'stage,worktree,done,approval,link';`,
   // A work item done because its ticket left the assigned state has no warning (PRD R11).
   `UPDATE workItems SET warning = NULL WHERE status = 'done' AND doneReason = 'unassigned';`,
+  // A ticket out of the source's scope is not snoozed (PRD R49).
+  `UPDATE tickets SET snoozed = 0, snoozedUntil = NULL WHERE snoozed = 1 AND assigned = 0 AND pool = 0;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'needsPick', 'released']);

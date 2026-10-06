@@ -12,6 +12,9 @@ export const ADHOC_SOURCE = 'adhoc';
 /** The statuses of a run; entering one from another status starts the Working clock (PRD R27). */
 const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['triaging', 'queued', 'setup', 'running']);
 
+/** A ticket that leaves the source's scope stops being snoozed, so it leaves the Snoozed group (PRD R49). */
+const UNSNOOZED = { snoozed: false, snoozedUntil: null } as const;
+
 const EMPTY_TRIAGE = { context: null, playbook: null, summary: null, immediacy: null, severity: null, model: null } as const;
 
 export const MESSAGES = {
@@ -285,6 +288,7 @@ class Flow {
         sortAt: entry.sortAt,
         scopeAt: this.scopeAt(known, entry),
         lastPolledAt: this.now,
+        ...(entry.assigned || entry.pool ? {} : UNSNOOZED),
       };
 
       if (known === null) {
@@ -312,7 +316,7 @@ class Flow {
 
     for (const ticket of this.store.tickets(source)) {
       if (!seen.has(ticket.sourceKey) && (ticket.assigned || ticket.pool)) {
-        this.store.updateTicket(ticket.id, { assigned: false, pool: false, lastPolledAt: this.now });
+        this.store.updateTicket(ticket.id, { assigned: false, pool: false, lastPolledAt: this.now, ...UNSNOOZED });
 
         if (ticket.pool) {
           this.leftPool(ticket.id);

@@ -168,6 +168,25 @@ describe('Snoozed (PRD R49)', () => {
     expect(h.store.workItems(h.now + 1).map((item) => item.id)).toEqual([1]);
   });
 
+  it('ends the snooze when the ticket leaves the assigned state or the pool, and keeps it while the ticket stays in scope', () => {
+    const h = new Harness();
+    h.poll(issue('1'), issue('2'), issue('3'));
+    h.act({ type: 'poll', source: 'zoho', tickets: [pool('500')] });
+    for (const ticketId of [1, 2, 3, 4]) {
+      h.act({ type: 'snooze', ticketId, until: T0 + HOUR });
+    }
+
+    h.poll(issue('1'), issue('2', false));
+    h.act({ type: 'poll', source: 'zoho', tickets: [] });
+
+    expect(h.store.ticket(1)).toMatchObject({ snoozed: true, snoozedUntil: T0 + HOUR });
+    for (const ticketId of [2, 3, 4]) {
+      expect(h.store.ticket(ticketId)).toMatchObject({ snoozed: false, snoozedUntil: null });
+    }
+    expect(h.item(2)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+    expect(h.item(3)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+  });
+
   it('does not start a queued work item of a snoozed ticket', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
