@@ -15,7 +15,7 @@ export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed
 export type SessionOutcome = 'done' | 'failed' | 'stopped';
 
 /** The reports a session can send (PRD R23). */
-export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link'] as const;
+export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link', 'playbook'] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 
 /** Triage's importance rating (PRD R50). Earlier values rank first. */

@@ -49,7 +49,8 @@ export type Report =
   | { kind: 'worktree'; path: string; branch: string | null }
   | { kind: 'done' }
   | { kind: 'approval'; prompt: string; summary: string | null; report: string | null }
-  | { kind: 'link'; label: string; target: string };
+  | { kind: 'link'; label: string; target: string }
+  | { kind: 'playbook'; playbook: string };
 
 export type StopReason = 'operator' | 'release';
 
@@ -152,7 +153,8 @@ function sessionReports(kind: SessionKind, approved: boolean, playbook: Playbook
     return ['stage', 'worktree', 'done', 'link'];
   }
 
-  return playbook === null ? [...REPORT_KINDS] : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || (playbook.reports as readonly string[]).includes(entry));
+  // An ad-hoc work item has no playbook to change.
+  return playbook === null ? REPORT_KINDS.filter((entry) => entry !== 'playbook') : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || (playbook.reports as readonly string[]).includes(entry));
 }
 
 /** Why a task session's turn or process ended without finishing, naming only a report its prompt offered. */
@@ -783,7 +785,25 @@ class Flow {
         // Links belong to the ticket, so a returned ticket keeps them (PRD R52).
         this.store.addLink({ ticketId: this.store.workItem(session.workItemId)!.ticketId, label: report.label, target: report.target, reportedAt: this.now });
         return;
+      case 'playbook':
+        if (item !== null && session.kind === 'task') {
+          this.store.updateWorkItem(item.id, { playbook: this.handoffPlaybook(item, report.playbook) });
+        }
+
+        return;
     }
+  }
+
+  /** The playbook a session hands its work item to: a task playbook in the work item's namespace (PRD R23). */
+  private handoffPlaybook(item: WorkItem, name: string): string {
+    const namespace = item.playbook?.split(':')[0];
+    const playbook = this.context.playbooks.get(name);
+
+    if (playbook === undefined || playbook.kind !== 'task' || name.split(':')[0] !== namespace) {
+      throw new Refusal(`${name} is not a task playbook in the ${namespace} namespace.`);
+    }
+
+    return name;
   }
 
   private stop(item: WorkItem): void {

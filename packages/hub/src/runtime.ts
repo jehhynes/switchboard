@@ -74,7 +74,8 @@ export type ReportBody =
   | { sessionId: string; kind: 'worktree'; path: string }
   | { sessionId: string; kind: 'done' }
   | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null; report: string | null }
-  | { sessionId: string; kind: 'link'; label: string; target: string };
+  | { sessionId: string; kind: 'link'; label: string; target: string }
+  | { sessionId: string; kind: 'playbook'; playbook: string };
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -281,7 +282,9 @@ export class Runtime {
           ? { kind: body.kind }
           : body.kind === 'approval'
             ? { kind: body.kind, prompt: body.prompt, summary: body.summary, report: body.report }
-            : { kind: body.kind, label: body.label, target: body.target };
+            : body.kind === 'playbook'
+              ? { kind: body.kind, playbook: body.playbook }
+              : { kind: body.kind, label: body.label, target: body.target };
 
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }

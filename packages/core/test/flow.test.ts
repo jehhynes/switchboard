@@ -15,6 +15,7 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
       `  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
     ],
     link: [`- ${REPORT} link ${id} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.`],
+    playbook: [`- ${REPORT} playbook ${id} <name>, when you hand the work to the skill of another playbook, such as dev:review-pr.`],
   };
   const finish = reports.includes('done') || reports.includes('approval') ? [] : ['', 'When the work is finished, end your turn; the operator reviews it.'];
 
@@ -373,6 +374,35 @@ describe('sessions', () => {
 
     h.report(retry, { kind: 'done' });
     expect(h.item(item).status).toBe('done');
+  });
+
+  it('hands a work item to another task playbook in its namespace, refuses any other, and retries with the new playbook', () => {
+    const h = new Harness({
+      playbooks: playbooks(undefined, { 'dev:other': '---\ndescription: Route it\nreports: done, playbook\n---\nRoute {{ticket.sourceKey}}.', 'dev:triage': '---\ndescription: Dev triage\nkind: triage\n---\nClassify it.' }),
+    });
+    const { item, session } = running(h, '1', 'dev:other');
+
+    expect(h.store.session(session)?.reports).toEqual(['stage', 'done', 'link', 'playbook']);
+    expect(h.item(item).taskPrompt).toContain(`${REPORT} playbook ${session} <name>`);
+
+    for (const name of ['dev:missing', 'support:defect', 'triage:github', 'dev:triage']) {
+      expect(h.report(session, { kind: 'playbook', playbook: name }).refused).toBe(`${name} is not a task playbook in the dev namespace.`);
+    }
+
+    expect(h.item(item).playbook).toBe('dev:other');
+    expect(h.report(session, { kind: 'playbook', playbook: 'dev:question' }).refused).toBeNull();
+    expect(h.item(item)).toMatchObject({ playbook: 'dev:question', status: 'running' });
+    expect(h.store.session(session)?.reports).toEqual(['stage', 'done', 'link', 'playbook']);
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.status(item)).toBe('blocked');
+    h.act({ type: 'retry', workItemId: item });
+    h.started(h.act({ type: 'roster', sessions: [] })[0]);
+    expect(h.item(item).taskPrompt).toMatch(/^Answer /);
+
+    // A session whose playbook does not list it, and an ad-hoc prompt, cannot change the playbook.
+    const other = running(h, '2');
+    expect(h.report(other.session, { kind: 'playbook', playbook: 'dev:develop' }).refused).toBe("This session's prompt does not offer the playbook report.");
   });
 
   it('refuses a report the session was not offered, and ends a session that cannot finish in Needs you without a done fault', () => {

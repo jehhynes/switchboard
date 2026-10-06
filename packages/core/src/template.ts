@@ -87,6 +87,7 @@ const REPORT_LINES: Record<ReportKind, string> = {
   - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.
   - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
   link: '- {{report}} link {{session.id}} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.',
+  playbook: '- {{report}} playbook {{session.id}} <name>, when you hand the work to the skill of another playbook, such as dev:review-pr.',
 };
 
 /**

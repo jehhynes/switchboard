@@ -271,7 +271,7 @@ describe('startSettings', () => {
     field('autoStart').dispatchEvent(new Event('change', { bubbles: true }));
     expect([field<HTMLInputElement>('reports.done').checked, field<HTMLInputElement>('reports.approval').checked]).toEqual([false, false]);
 
-    for (const kind of ['worktree', 'done']) {
+    for (const kind of ['worktree', 'done', 'playbook']) {
       field<HTMLInputElement>(`reports.${kind}`).checked = true;
       field(`reports.${kind}`).dispatchEvent(new Event('change', { bubbles: true }));
     }
@@ -281,6 +281,7 @@ describe('startSettings', () => {
 
     expect(field('autoStart')).toBeNull();
     expect(field('reports.done')).toBeNull();
+    expect(field('reports.playbook')).toBeNull();
     expect(root.querySelector('label[for]')).not.toBeNull();
 
     type(field('kind'), 'task', 'change');
@@ -289,7 +290,7 @@ describe('startSettings', () => {
     expect(last('save-playbook')).toEqual({
       type: 'save-playbook',
       name: 'dev:develop',
-      playbook: { ...TASK, description: 'Plan and build it', permissionMode: 'plan', autoStart: true, reports: ['done', 'worktree'] },
+      playbook: { ...TASK, description: 'Plan and build it', permissionMode: 'plan', autoStart: true, reports: ['done', 'worktree', 'playbook'] },
       version: 'p1',
     });
 

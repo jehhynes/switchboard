@@ -41,6 +41,8 @@ export function reportBody(argv: readonly string[]): Record<string, unknown> | n
       // A --report flag without a value is bad usage, not an approval without a draft.
       return prompt === null || prompt === '' || ((report === null || report === '') && hasFlag(argv, 'report')) ? null : { sessionId, kind, prompt, summary: valueOf(argv, 'summary'), report: report === null ? null : resolve(report) };
     }
+    case 'playbook':
+      return text === undefined ? null : { sessionId, kind, playbook: text };
     case 'link': {
       const label = valueOf(argv, 'label');
       const target = valueOf(argv, 'target');

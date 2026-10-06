@@ -4,7 +4,7 @@ import { PERMISSION_MODES } from './settings.js';
 import type { PermissionMode } from './settings.js';
 
 /** The reports a task playbook can offer its session; stage and link are always offered (PRD R23). */
-export const PLAYBOOK_REPORTS = ['done', 'approval', 'worktree'] as const;
+export const PLAYBOOK_REPORTS = ['done', 'approval', 'worktree', 'playbook'] as const;
 export type PlaybookReport = (typeof PLAYBOOK_REPORTS)[number];
 
 export interface Playbook {

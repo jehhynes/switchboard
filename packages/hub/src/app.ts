@@ -20,7 +20,7 @@ const RELOAD_DEBOUNCE_MS = 300;
 /** Operator events the panel may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'snooze', 'restore']);
 
-const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link']);
+const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook']);
 
 /** A link target: an http(s) URL (PRD R52). */
 export function isLinkTarget(target: unknown): target is string {
@@ -69,7 +69,7 @@ export function parseReport(body: unknown): ReportBody | null {
     return { sessionId: body['sessionId'], kind: 'done' };
   }
 
-  const text = { stage: 'stage', worktree: 'path', approval: 'prompt' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done'>];
+  const text = { stage: 'stage', worktree: 'path', approval: 'prompt', playbook: 'playbook' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done'>];
   const value = body[text];
 
   const optional = (field: string, valid: (value: unknown) => boolean) => body[field] === undefined || body[field] === null || valid(body[field]);
