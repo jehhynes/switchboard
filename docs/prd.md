@@ -8,8 +8,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - All Switchboard state is local. Switchboard reads sources and never writes to them; only the skills its sessions invoke change external state.
 - Switchboard manages only sessions it starts. It does not discover or adopt sessions started elsewhere.
 - Switchboard tracks worktrees but never creates or deletes them. Skills create worktrees; the operator removes them.
-- Switchboard overlaps with Ground Control but does not replace it. Ground Control began as an observability layer linking sessions to GitHub cards; Switchboard is a modular, source-agnostic factory. Switchboard reuses Ground Control's session mechanics (see [architecture.md](architecture.md)).
-- Switchboard does not coordinate with Ground Control. Where both could act on the same GitHub issue, the operator disables Ground Control's automatic card actions for that work.
+- Switchboard replaces Ground Control and the Support board. Ground Control began as an observability layer linking sessions to GitHub cards; Switchboard is a modular, source-agnostic factory that reuses Ground Control's session mechanics (see [architecture.md](architecture.md)).
 
 ## Goals
 
@@ -27,7 +26,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - Answering a session's permission prompts or questions for the operator.
 - Inferring state it did not observe: no stuck-session detection, and no check that a session's done report is true.
 - Reproducing the source's ticket view or conversation. The panel links to the source.
-- Replacing Ground Control's board, lanes or review workflow.
+- Reproducing Ground Control's board, lanes or review views, or the Support board.
 - Built-in playbooks or namespaces.
 - Unattended overnight operation as a committed goal.
 - Complex error handling or support for rare edge cases. A failure shows its cause, and the operator recovers with Retry, Mark done, or a fix to their configuration.
