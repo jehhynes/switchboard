@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -170,13 +170,30 @@ describe('Store', () => {
     store.close();
   });
 
+  it('clears the warning of a version 9 work item done because its ticket left the assigned state', () => {
+    const path = join(dir, 'v9.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 9).join(';'));
+    raw.exec('PRAGMA user_version = 9');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 0, '')");
+    raw.exec(
+      "INSERT INTO workItems (id, ticketId, status, createdAt, doneReason, warning) VALUES (1, 1, 'done', 1, 'unassigned', 'Left.'), (2, 1, 'done', 1, 'session', 'Kept.'), (3, 1, 'blocked', 1, NULL, 'Kept.')",
+    );
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([1, 2, 3].map((id) => store.workItem(id)?.warning)).toEqual([null, 'Kept.', 'Kept.']);
+    store.close();
+  });
+
   it('refuses a database from a newer schema', () => {
     const path = join(dir, 'newer.db');
     const raw = new DatabaseSync(path);
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (9).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (10).');
   });
 
   it('rolls back a transaction that throws', () => {

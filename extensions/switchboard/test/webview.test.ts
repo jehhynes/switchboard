@@ -207,7 +207,7 @@ describe('markOf', () => {
     expect(mark({ status: 'running' })).toEqual(['sync codicon-modifier-spin', 'Running', null]);
     expect(mark({ status: 'done', doneReason: 'session' })).toEqual(['check', 'Finished by the session', null]);
     expect(mark({ status: 'done', doneReason: 'operator' })).toEqual(['account', 'Marked done', null]);
-    expect(mark({ status: 'done', doneReason: 'unassigned' })).toEqual(['warning', 'Left without a done report', 'warning']);
+    expect(mark({ status: 'done', doneReason: 'unassigned' })).toEqual(['sign-out', 'Left the assigned state', null]);
   });
 });
 
@@ -377,9 +377,9 @@ describe('renderPanel', () => {
     );
     expect([5, 6, 7].map((id) => [...others.querySelectorAll<HTMLButtonElement>(`[data-item="${id}"] > .actions > button`)].map((button) => button.title))).toEqual([[], [], ['Approve: runs /push']]);
 
-    const done = render(snapshot([item(5, { status: 'done', doneAt: NOW, doneReason: 'unassigned', warning: 'The ticket left the assigned state without a done report.', stage: 'review', stageAt: NOW - 60_000, links })])).querySelector('[data-item="5"]')!;
+    const done = render(snapshot([item(5, { status: 'done', doneAt: NOW, doneReason: 'session', warning: 'The ticket left the assigned state.', stage: 'review', stageAt: NOW - 60_000, links })])).querySelector('[data-item="5"]')!;
     // The warning note follows its mark, before the stage and the badges.
-    expect([...done.querySelector('.line.third .meta')!.children].map((child) => child.className)).toEqual(['mark codicon codicon-warning warning', 'note', 'stage', 'badge url']);
+    expect([...done.querySelector('.line.third .meta')!.children].map((child) => child.className)).toEqual(['mark codicon codicon-check', 'note', 'stage', 'badge url']);
   });
 
   it('shows no triage summary, triage context, task prompt or session history', () => {

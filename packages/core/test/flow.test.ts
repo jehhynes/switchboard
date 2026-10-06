@@ -78,13 +78,13 @@ describe('assigned-state transitions', () => {
     expect(h.status(1)).toBe('triaging');
   });
 
-  it('finishes a work item with a warning when its ticket leaves with no active session, and creates a new one when it returns', () => {
+  it('finishes a work item without a warning when its ticket leaves with no active session, and creates a new one when it returns', () => {
     const h = new Harness();
     h.poll(issue('1'));
     h.now += MINUTE;
     h.poll();
 
-    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'unassigned', doneAt: T0 + MINUTE, warning: 'The ticket left the assigned state without a done report.' });
+    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'unassigned', doneAt: T0 + MINUTE, warning: null });
     expect(h.store.findTicket('github', '1')?.assigned).toBe(false);
 
     h.poll(issue('1', false));
@@ -628,7 +628,7 @@ describe('limits and the one-active-session rule', () => {
     expect(next.workItemId).toBe(2);
   });
 
-  it('finishes a deferred unassignment with a warning when the session ends its turn, fails to start, or is stopped', () => {
+  it('finishes a deferred unassignment without a warning when the session ends its turn, fails to start, or is stopped', () => {
     const cases: [string, (h: Harness, session: string) => void][] = [
       ['idle', (h, s) => h.act({ type: 'marker', sessionId: s, state: 'idle', detail: null })],
       ['ended', (h) => h.act({ type: 'roster', sessions: [] })],
@@ -648,11 +648,11 @@ describe('limits and the one-active-session rule', () => {
       h.poll();
       end(h, start.sessionId);
 
-      expect({ name, ...h.item(1) }).toMatchObject({ name, status: 'done', doneReason: 'unassigned', warning: 'The ticket left the assigned state without a done report.' });
+      expect({ name, ...h.item(1) }).toMatchObject({ name, status: 'done', doneReason: 'unassigned', warning: null });
     }
   });
 
-  it('finishes a deferred unassignment with a warning when a setup session ends', () => {
+  it('finishes a deferred unassignment without a warning when a setup session ends', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     const setup = h.started(only(h.triaged(triage, 'dev:develop'), 'start-session'));
@@ -660,7 +660,7 @@ describe('limits and the one-active-session rule', () => {
     h.report(setup, { kind: 'worktree', path: 'D:/wt/1', branch: null });
     h.poll();
     expect(h.act({ type: 'roster', sessions: [] })).toEqual([]);
-    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'unassigned', warning: 'The ticket left the assigned state without a done report.' });
+    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'unassigned', warning: null });
   });
 });
 

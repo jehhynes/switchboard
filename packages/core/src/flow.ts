@@ -15,7 +15,6 @@ const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['triaging', 'queued',
 const EMPTY_TRIAGE = { context: null, playbook: null, summary: null, immediacy: null, severity: null, model: null } as const;
 
 export const MESSAGES = {
-  unassigned: 'The ticket left the assigned state without a done report.',
   stopped: 'Stopped by you.',
   setupWithoutWorktree: 'Setup ended without a worktree.',
   turnEnded: 'The turn ended without a done report.',
@@ -385,7 +384,7 @@ class Flow {
       }
 
       if (this.activeSession(item) === null) {
-        this.done(item, 'unassigned', MESSAGES.unassigned);
+        this.done(item, 'unassigned', null);
       } else if (item.unassignedAt === null) {
         this.store.updateWorkItem(item.id, { unassignedAt: this.now });
       }
@@ -597,7 +596,7 @@ class Flow {
     }
 
     if (item.unassignedAt !== null) {
-      this.done(item, 'unassigned', MESSAGES.unassigned);
+      this.done(item, 'unassigned', null);
       return;
     }
 
@@ -669,7 +668,7 @@ class Flow {
 
     if (TURN_ENDED.includes(state) && current.outcome === null && item.status === 'running') {
       if (item.unassignedAt !== null) {
-        this.done(item, 'unassigned', MESSAGES.unassigned);
+        this.done(item, 'unassigned', null);
       } else {
         this.block(item, state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : endedMessage(current, true));
       }
@@ -707,7 +706,7 @@ class Flow {
       }
 
       if (item.unassignedAt !== null) {
-        this.done(item, 'unassigned', MESSAGES.unassigned);
+        this.done(item, 'unassigned', null);
       } else if (this.store.worktreeFor(item.ticketId) === null) {
         this.fail(item, 'setup', MESSAGES.setupWithoutWorktree);
       } else {
@@ -729,7 +728,7 @@ class Flow {
     }
 
     if (item.unassignedAt !== null) {
-      this.done(item, 'unassigned', MESSAGES.unassigned);
+      this.done(item, 'unassigned', null);
     } else if (item.status === 'running') {
       this.block(item, endedMessage(session, false));
     }
@@ -827,7 +826,7 @@ class Flow {
     }
 
     if (item.unassignedAt !== null) {
-      this.done(item, 'unassigned', MESSAGES.unassigned);
+      this.done(item, 'unassigned', null);
     } else {
       this.block(item, MESSAGES.stopped, session.kind);
     }

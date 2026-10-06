@@ -24,7 +24,7 @@ export function activeSession(item: WorkItemView): WorkItemView['sessions'][numb
   return item.sessions.find((session) => session.state !== 'ended') ?? null;
 }
 
-const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left without a done report' };
+const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
 /** The one control a Needs you or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
 export function mainControl(item: WorkItemView): Control | null {
@@ -395,7 +395,7 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
       return item.doneReason === 'operator'
         ? { icon: 'account', title: DONE_WORDS.operator }
         : item.doneReason === 'unassigned'
-          ? { icon: 'warning', title: DONE_WORDS.unassigned, tone: 'warning' }
+          ? { icon: 'sign-out', title: DONE_WORDS.unassigned }
           : { icon: 'check', title: DONE_WORDS.session };
   }
 }

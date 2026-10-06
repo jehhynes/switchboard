@@ -142,6 +142,8 @@ export const MIGRATIONS = [
   DELETE FROM links WHERE target NOT LIKE 'http://%' AND target NOT LIKE 'https://%';`,
   // Each session keeps the reports its prompt offered (PRD R23); earlier sessions were offered all of them.
   `ALTER TABLE sessions ADD COLUMN reports TEXT NOT NULL DEFAULT 'stage,worktree,done,approval,link';`,
+  // A work item done because its ticket left the assigned state has no warning (PRD R11).
+  `UPDATE workItems SET warning = NULL WHERE status = 'done' AND doneReason = 'unassigned';`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'needsPick', 'released']);
