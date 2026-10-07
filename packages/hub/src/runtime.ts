@@ -54,6 +54,8 @@ export interface WorkItemView extends WorkItem {
 export interface PoolView {
   ticket: Ticket;
   triage: Triage | null;
+  /** The ticket's links, such as a GitHub issue its thread names (PRD R52, R61). */
+  links: Link[];
   /** Started done work items for the ticket; above 0 the panel marks it Returned (PRD R51). */
   returned: number;
 }
@@ -396,7 +398,7 @@ export class Runtime {
         .map(({ ticket, items }) => {
           const triage = store.poolTriages(ticket.id).at(-1) ?? null;
 
-          return { ticket, triage, returned: returned(items, triage?.playbook ?? null) };
+          return { ticket, triage, links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null) };
         }),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: repoRoots(settings),

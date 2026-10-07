@@ -101,11 +101,11 @@ describe('cardsOf', () => {
       snapshot(
         [item(1, picked, 'done', 'support:defect')],
         [
-          { ticket: picked, triage: triage('support:case', 10), returned: 1 },
-          { ticket: ticket(2, 'zoho', 'https://desk.example.test/2'), triage: triage(null, null), returned: 0 },
-          { ticket: ticket(3, 'zoho', 'https://desk.example.test/3'), triage: triage(null, 10, 'Model refused'), returned: 0 },
-          { ticket: ticket(4, 'zoho', 'https://desk.example.test/4', true), triage: null, returned: 0 },
-          { ticket: ticket(5, 'zoho', ''), triage: triage('support:case', 10), returned: 0 },
+          { ticket: picked, triage: triage('support:case', 10), links: [], returned: 1 },
+          { ticket: ticket(2, 'zoho', 'https://desk.example.test/2'), triage: triage(null, null), links: [], returned: 0 },
+          { ticket: ticket(3, 'zoho', 'https://desk.example.test/3'), triage: triage(null, 10, 'Model refused'), links: [], returned: 0 },
+          { ticket: ticket(4, 'zoho', 'https://desk.example.test/4', true), triage: null, links: [], returned: 0 },
+          { ticket: ticket(5, 'zoho', ''), triage: triage('support:case', 10), links: [], returned: 0 },
         ],
         ['zoho'],
       ),

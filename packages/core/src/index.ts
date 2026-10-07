@@ -10,3 +10,4 @@ export * from './template.js';
 export * from './source.js';
 export * from './clip.js';
 export * from './snooze.js';
+export * from './githubLinks.js';

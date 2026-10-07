@@ -506,10 +506,10 @@ function thirdLine(parts: string): string {
 }
 
 /**
- * Splits a work item's links: line 2 shows pull requests, and GitHub issues unless the ticket is a GitHub one; the rest go to line 3.
- * A link to the ticket itself is dropped, because the ticket link already shows it (PRD R52).
+ * Splits a work item's or pool ticket's links: line 2 shows pull requests, and GitHub issues unless the ticket is a GitHub one; the rest go
+ * to line 3. A link to the ticket itself is dropped, because the ticket link already shows it (PRD R52).
  */
-export function splitLinks(item: WorkItemView): { primary: WorkItemView['links']; rest: WorkItemView['links'] } {
+export function splitLinks(item: Pick<WorkItemView, 'links' | 'ticket'>): { primary: WorkItemView['links']; rest: WorkItemView['links'] } {
   const links = item.links.filter((link) => link.target !== item.ticket.url);
   const primary = [
     ...links.filter((link) => linkKind(link.target) === 'pr'),
@@ -619,7 +619,7 @@ function setup(snapshot: Snapshot): string {
 
 
 /**
- * A pool row in Unstarted: priority, title, time in queue; playbook, ticket, Returned, Start; Snooze in the right-click menu.
+ * A pool row in Unstarted: priority, title, time in queue; playbook, ticket, links, Returned, Start; Snooze in the right-click menu.
  * A click opens the ticket (PRD R27, R47, R48).
  */
 function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
@@ -631,12 +631,13 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<s
   const triaging = triage !== null && triage.endedAt === null;
   // Start appears once triage has chosen a playbook, which the pick starts (PRD R48).
   const main = failed ? again : triage?.playbook != null ? pick : null;
-  const controls = main === null ? snoozeControls(ticket) : [main, ...snoozeControls(ticket)];
+  const controls = [...(main === null ? [] : [main]), ...snoozeControls(ticket)];
+  const { primary, rest } = splitLinks(entry);
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
-<div class="line second"><span class="meta">${playbookLabel(playbookText(entry, namespaces))}${ticketLink(ticket)}${returned(entry.returned)}</span></div>${thirdLine(
-    `${triaging ? markIcon(TRIAGING) : ''}${wake(ticket)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
+<div class="line second"><span class="meta">${playbookLabel(playbookText(entry, namespaces))}${ticketLink(ticket)}${primary.map(linkBadge).join('')}${returned(entry.returned)}</span></div>${thirdLine(
+    `${triaging ? markIcon(TRIAGING) : ''}${wake(ticket)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(main === null ? '' : actionButton(main))}
 </div>`;
 }

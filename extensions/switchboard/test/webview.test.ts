@@ -512,14 +512,21 @@ describe('renderPanel', () => {
   it('lists pool tickets in Unstarted with no Unclaimed tag, a priority dot, time in queue, Returned mark and Start, with Snooze in the right-click menu', () => {
     const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), ref: `#${500 + id}`, sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: NOW - id * 3_600_000, scopeAt: NOW - id * 1_800_000, lastPolledAt: NOW, repoRoot: '' });
     const rated = (id: number, patch: Partial<Triage> = {}) => triage({ id, ticketId: id, workItemId: null, playbook: 'support:case', immediacy: 'BLOCKING', severity: 'MED', ...patch });
+    const link = (id: number, label: string, target: string) => ({ id, ticketId: 2, label, target, reportedAt: NOW });
+    // Links a triage found in the thread (PRD R61): issue and pull request on line 2, any other URL on line 3.
+    const poolLinks = [
+      link(1, 'Issue #19515', 'https://github.com/acme/widgets/issues/19515'),
+      link(2, 'Pull request #19600', 'https://github.com/acme/widgets/pull/19600'),
+      link(3, 'Help', 'https://help.example.com/articles/1'),
+    ];
     const root = render(
       snapshot([], {
         pool: [
-          { ticket: ticket(1), triage: rated(1, { immediacy: 'URGENT', severity: 'MED' }), returned: 2 },
-          { ticket: ticket(2), triage: rated(2), returned: 0 },
-          { ticket: ticket(3), triage: rated(3, { immediacy: 'NON-BLOCKING', severity: 'MED' }), returned: 0 },
-          { ticket: ticket(4), triage: rated(4, { playbook: null, immediacy: null, severity: null, error: 'Timed out.' }), returned: 0 },
-          { ticket: ticket(5), triage: rated(5, { playbook: null, immediacy: null, severity: null, endedAt: null }), returned: 0 },
+          { ticket: ticket(1), triage: rated(1, { immediacy: 'URGENT', severity: 'MED' }), links: [], returned: 2 },
+          { ticket: ticket(2), triage: rated(2), links: poolLinks, returned: 0 },
+          { ticket: ticket(3), triage: rated(3, { immediacy: 'NON-BLOCKING', severity: 'MED' }), links: [], returned: 0 },
+          { ticket: ticket(4), triage: rated(4, { playbook: null, immediacy: null, severity: null, error: 'Timed out.' }), links: [], returned: 0 },
+          { ticket: ticket(5), triage: rated(5, { playbook: null, immediacy: null, severity: null, endedAt: null, context: null }), links: [], returned: 0 },
         ],
       }),
     );
@@ -551,6 +558,13 @@ describe('renderPanel', () => {
     expect(byId(1).querySelector('.queue')?.getAttribute('title')).toMatch(/^In scope since \d{4}-\d\d-\d\d \d\d:\d\d UTC$/);
     expect(byId(1).querySelector('.line.second .returned')?.textContent).toBe('Returned ×2');
     expect(byId(2).querySelector('.returned')).toBeNull();
+    expect([...byId(2).querySelectorAll('.line.second a.key, .line.second a.badge')].map((a) => [a.className, a.textContent?.trim(), a.getAttribute('href')])).toEqual([
+      ['key zoho', 'zoho 502', 'https://desk.example.test/2'],
+      ['badge pr', '19600', 'https://github.com/acme/widgets/pull/19600'],
+      ['key github', 'gh 19515', 'https://github.com/acme/widgets/issues/19515'],
+    ]);
+    expect([...byId(2).querySelectorAll('.line.third a')].map((a) => a.getAttribute('href'))).toEqual(['https://help.example.com/articles/1']);
+    expect(byId(1).querySelector('.line.second a.badge')).toBeNull();
     expect(byId(1).querySelector('.playbook-name')?.textContent).toBe('support:case');
     expect([byId(1).querySelector('.playbook-name .namespace')?.textContent, byId(1).querySelector('.playbook-name .name')?.textContent]).toEqual(['support:', 'case']);
     expect(controlLabels(byId(1), 'button.control')).toEqual(['Start']);
@@ -575,7 +589,7 @@ describe('renderPanel', () => {
     const assigned = item(1, { status: 'unstarted', createdAt: NOW - 5 * 3_600_000, triage: rated('BLOCKING', 'HIGH') });
     const unrated = item(2, { status: 'unstarted', createdAt: NOW - 9 * 3_600_000 });
     const ticket = { id: 9, source: 'forum', sourceKey: '509', ref: 'T509', sourceId: null, title: 'Topic', url: '', assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: NOW - 3_600_000, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
-    const pool = [{ ticket, triage: rated('NON-BLOCKING', 'HIGH'), returned: 0 }];
+    const pool = [{ ticket, triage: rated('NON-BLOCKING', 'HIGH'), links: [], returned: 0 }];
     const root = render(snapshot([assigned, unrated, item(3, { status: 'awaiting-approval', approvalPrompt: '/publish' })], { pool }));
     const unstarted = root.querySelector('[data-group="unstarted"]')!;
 
@@ -612,7 +626,7 @@ describe('renderPanel', () => {
     const sleepy = item(2, { status: 'unstarted', ticket: { ...item(2).ticket, snoozed: true, snoozedUntil: wakeAt } });
     const ready = item(3, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish', approvalSummary: 'Review ready to post.' });
     const poolTicket = { id: 9, source: 'zoho', sourceKey: '509', ref: '#509', sourceId: 'z9', title: 'Cold case', url: '', assigned: false, pool: true, snoozed: true, snoozedUntil: null, sortAt: 1, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };
-    const data = snapshot([sleepy, ready], { pool: [{ ticket: poolTicket, triage: null, returned: 0 }] });
+    const data = snapshot([sleepy, ready], { pool: [{ ticket: poolTicket, triage: null, links: [], returned: 0 }] });
     const root = render(data);
     const snoozed = root.querySelector<HTMLDetailsElement>('details[data-group="snoozed"]')!;
 
@@ -653,7 +667,7 @@ describe('renderPanel', () => {
 
     // A ticket back in the pool shows as its pool row only.
     const pooled = { ...item(9).ticket, assigned: false, pool: true, snoozed: true };
-    const back = render(snapshot([asleep(6, 9, 'done')], { pool: [{ ticket: pooled, triage: null, returned: 1 }] }));
+    const back = render(snapshot([asleep(6, 9, 'done')], { pool: [{ ticket: pooled, triage: null, links: [], returned: 1 }] }));
 
     expect(headings(back).at(-1)).toBe('Snoozed 1');
     expect(back.querySelector('[data-item="6"]')).toBeNull();
@@ -943,7 +957,7 @@ describe('startPanel', () => {
 describe('Go to Work Item (PRD R63)', () => {
   const worktree = { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' as const };
   const zoho = (id: number, patch: Partial<WorkItemView['ticket']> = {}): WorkItemView['ticket'] => ({ ...item(id).ticket, source: 'zoho', sourceKey: `Z${id}`, title: `Case ${id}`, url: '', ...patch });
-  const pooled = (id: number, patch: Partial<PoolView> = {}): PoolView => ({ ticket: zoho(id, { pool: true, assigned: false }), triage: triage({ ticketId: id, workItemId: null, playbook: 'support:defect' }), returned: 0, ...patch });
+  const pooled = (id: number, patch: Partial<PoolView> = {}): PoolView => ({ ticket: zoho(id, { pool: true, assigned: false }), triage: triage({ ticketId: id, workItemId: null, playbook: 'support:defect' }), links: [], returned: 0, ...patch });
   // A snoozed ticket 8 with a done and an open work item, a snoozed pool ticket 9 with a done work item, and one row per other group.
   const data = snapshot(
     [

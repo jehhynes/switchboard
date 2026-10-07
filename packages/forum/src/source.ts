@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { clip } from '@switchboard/core';
+import { clip, githubLinks } from '@switchboard/core';
 import type { ContextResult, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
 
 export interface ForumConfig {
@@ -238,15 +238,19 @@ export class ForumSource implements Source {
     }
 
     const lines = [`Forum topic T${ticket.sourceKey}: ${ticket.title}`, ticket.url, '', '## Posts, oldest first'];
+    // Links come from the unclipped HTML, so a clip cannot shorten a URL and a link's href counts.
+    const bodies = [ticket.title];
 
     for (const row of result.rows) {
       const when = String(row['CreatedUtc'] ?? '').slice(0, 16);
       const author = String(row['Author'] ?? '').trim() || 'someone';
+      const body = String(row['HtmlBody'] ?? '');
 
-      lines.push('', `### ${author}, ${when}`, clip(stripHtml(String(row['HtmlBody'] ?? '')), TEXT_LIMIT));
+      lines.push('', `### ${author}, ${when}`, clip(stripHtml(body), TEXT_LIMIT));
+      bodies.push(body);
     }
 
-    return { context: lines.join('\n') };
+    return { context: lines.join('\n'), links: githubLinks(bodies) };
   }
 
   /** Forum worktrees are not named by topic, so none is linked by branch name. */

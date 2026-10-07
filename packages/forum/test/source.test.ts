@@ -81,6 +81,18 @@ describe('ForumSource.context', () => {
     ]);
     expect(text).toMatch(/Post starts here\..*\nPost ends here\.$/s);
     expect(text).not.toContain('<p>');
+    expect(await new ForumSource(CONFIG, query).context(ticket)).toMatchObject({ links: [] });
+  });
+
+  it('links each distinct GitHub issue and pull request in the posts, including one clipped out of the context (PRD R61)', async () => {
+    const result = (await new ForumSource(CONFIG, async () => parseRows(raw('links-posts'))).context(ticket)) as { context: string; links: unknown };
+
+    // The issue appears three times: as an href, as link text, and with a comment anchor. The help page and the topic's own URL are not links.
+    expect(result.links).toEqual([
+      { label: 'Issue #19515', target: 'https://github.com/acme/widgets/issues/19515' },
+      { label: 'Pull request #19600', target: 'https://github.com/acme/widgets/pull/19600' },
+    ]);
+    expect(result.context).not.toContain('19600');
   });
 
   it('refuses a key that is not a topic ID and passes a query error through', async () => {

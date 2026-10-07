@@ -537,12 +537,15 @@ describe('Runtime', () => {
   it('triages the pool, lists it oldest first, and starts the triaged playbook on a pick with fake runners', async () => {
     const { store, cli, source, runtime } = setup(config());
     source.result = { tickets: [{ ...issue('9'), assigned: false, pool: true, sortAt: 20, enteredAt: null }, { ...issue('8'), assigned: false, pool: true, sortAt: 10, enteredAt: null }] };
+    source.context = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text`, links: ticket.sourceKey === '9' ? [{ label: 'Issue #90', target: 'https://github.com/o/r/issues/90' }] : [] });
 
     await runtime.pollSource('github');
     await runtime.settled();
 
     const pool = runtime.snapshot().pool;
     expect(pool.map((entry) => [entry.ticket.sourceKey, entry.triage?.playbook])).toEqual([['8', 'dev:develop'], ['9', 'dev:develop']]);
+    // A pool ticket shows the links its triage found before any session runs (PRD R61).
+    expect(pool.map((entry) => entry.links.map((link) => link.target))).toEqual([[], ['https://github.com/o/r/issues/90']]);
     expect(runtime.snapshot().workItems).toEqual([]);
 
     expect(runtime.send({ type: 'pick', ticketId: pool[0]!.ticket.id }).refused).toBeNull();

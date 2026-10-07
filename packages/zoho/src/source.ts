@@ -1,3 +1,4 @@
+import { githubLinks } from '@switchboard/core';
 import type { ContextResult, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
 import type { ZohoConfig } from './config.js';
 import type { DeskGet, DeskResult } from './desk.js';
@@ -233,11 +234,17 @@ export class ZohoSource implements Source {
 
       lines.push('', '## Conversation, oldest first');
 
+      // Links come from the unclipped HTML, so a clip cannot shorten a URL and a link's href counts.
+      const bodies = [lines.join('\n')];
+
       for (const entry of [...conversations].reverse()) {
-        lines.push('', ...(await this.entryLines(id, entry)));
+        const { heading, body } = await this.entry(id, entry);
+
+        lines.push('', heading, clip(stripHtml(body), TEXT_LIMIT));
+        bodies.push(body);
       }
 
-      return { context: lines.join('\n') };
+      return { context: lines.join('\n'), links: githubLinks(bodies) };
     } catch (error) {
       return { error: error instanceof DeskError ? error.message : 'Zoho Desk returned an unexpected response.' };
     }
@@ -319,11 +326,12 @@ export class ZohoSource implements Source {
     return field === 'Case Owner' ? this.ownerLabel(String(value)) : String(value);
   }
 
-  private async entryLines(id: string, entry: ConversationEntry): Promise<string[]> {
+  /** An entry's heading and its HTML body. */
+  private async entry(id: string, entry: ConversationEntry): Promise<{ heading: string; body: string }> {
     if (entry.type === 'comment') {
       const when = (entry.commentedTime ?? '').slice(0, 16).replace('T', ' ');
 
-      return [`### ${entry.isPublic === true ? 'Public comment' : 'Internal note'} by ${nameOf(entry.commenter)}, ${when}`, clip(stripHtml(entry.content ?? ''), TEXT_LIMIT)];
+      return { heading: `### ${entry.isPublic === true ? 'Public comment' : 'Internal note'} by ${nameOf(entry.commenter)}, ${when}`, body: entry.content ?? '' };
     }
 
     // The conversation list omits thread bodies; each thread is read on its own.
@@ -331,6 +339,6 @@ export class ZohoSource implements Source {
     const when = (thread?.createdTime ?? entry.createdTime ?? '').slice(0, 16).replace('T', ' ');
     const direction = (thread?.direction ?? entry.direction) === 'in' ? 'from the customer' : 'to the customer';
 
-    return [`### Message ${direction} by ${nameOf(thread?.author ?? entry.author)}, ${when}`, clip(stripHtml(thread?.content ?? thread?.summary ?? entry.summary ?? ''), TEXT_LIMIT)];
+    return { heading: `### Message ${direction} by ${nameOf(thread?.author ?? entry.author)}, ${when}`, body: thread?.content ?? thread?.summary ?? entry.summary ?? '' };
   }
 }

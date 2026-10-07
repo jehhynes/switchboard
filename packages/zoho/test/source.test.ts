@@ -255,6 +255,25 @@ describe('ZohoSource.context', () => {
     expect(text).toContain('### Internal note by Agent');
     expect(text).not.toMatch(/<div>|<br>/);
     expect(text.match(/\[…\d+ characters omitted…\]/g)?.length).toBeGreaterThan(0);
+    expect(result).toMatchObject({ links: [] });
+  });
+
+  it('links each distinct GitHub issue and pull request in the conversation, including one clipped out of the context (PRD R61)', async () => {
+    const detail = fixture('ticket') as { id: string };
+    const threads = fixture('links-threads') as { id: string }[];
+    const get = desk({
+      [`/tickets/${detail.id}/conversations?limit=100`]: { json: fixture('links-conversations') },
+      ...Object.fromEntries(threads.map((thread) => [`/tickets/${detail.id}/threads/${thread.id}`, { json: thread }])),
+    });
+    const result = (await new ZohoSource(CONFIG, get).context(ticket(detail.id))) as { context: string; links: unknown };
+
+    // The issue appears three times: as an href, as link text, and with a comment anchor. The help page, a file and a project are not links.
+    expect(result.links).toEqual([
+      { label: 'Issue #19515', target: 'https://github.com/acme/widgets/issues/19515' },
+      { label: 'Pull request #19600', target: 'https://github.com/acme/widgets/pull/19600' },
+      { label: 'Pull request #19601', target: 'https://github.com/acme/widgets/pull/19601' },
+    ]);
+    expect(result.context).not.toContain('19601');
   });
 
   it('reads a sparse ticket: no detail, an unassigned owner, missing names and an unreadable thread', async () => {
