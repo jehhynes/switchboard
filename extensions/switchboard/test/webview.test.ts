@@ -346,6 +346,18 @@ describe('renderPanel', () => {
     expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual([]);
   });
 
+  it('offers Open Changes and Show in Source Control in the menu of a row with a worktree, done or not, and not as a button (R57)', () => {
+    const worktree = { id: 1, ticketId: 8, path: 'D:/git/widgets.worktrees/108-fix', branch: '108-fix', linkedBy: 'report' as const };
+    const panel = render(snapshot([item(8, { status: 'awaiting-approval', worktree }), item(9, { status: 'done', doneAt: NOW, worktree: { ...worktree, ticketId: 9 } })]), { groups: new Map([['done', true]]) });
+    const menu = rowMenu(panel.querySelector('[data-item="8"]')!);
+
+    expect(menu.shown).toEqual(['approve', 'triageAgain', 'markDone', 'snooze', 'changes', 'sourceControl']);
+    expect(menu.actions['changes']).toEqual({ type: 'changes', path: 'D:/git/widgets.worktrees/108-fix', key: 'gh 108', title: 'Issue <8>' });
+    expect(menu.actions['sourceControl']).toEqual({ type: 'sourceControl', path: 'D:/git/widgets.worktrees/108-fix' });
+    expect(rowMenu(panel.querySelector('[data-item="9"]')!).shown).toEqual(['changes', 'sourceControl']);
+    expect(titles(panel, '[data-item="8"] .actions > *')).toEqual(['Approve']);
+  });
+
   it('stripes failed rows in the error colour and blocked rows and questions in the warning colour, except while snoozed', () => {
     const stripes = (row: WorkItemView) =>
       [...render(snapshot([row]), { groups: new Map([['done', true]]) }).querySelector(`[data-item="${row.id}"]`)!.classList].filter((name) => name.startsWith('stripe'));

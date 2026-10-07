@@ -157,6 +157,16 @@
         "command": "switchboard.row.restore",
         "title": "Restore",
         "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.changes",
+        "title": "Open Changes",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.sourceControl",
+        "title": "Show in Source Control",
+        "category": "Switchboard"
       }
     ],
     "menus": {
@@ -267,6 +277,14 @@
         {
           "command": "switchboard.row.restore",
           "when": "false"
+        },
+        {
+          "command": "switchboard.row.changes",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.sourceControl",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -309,6 +327,16 @@
           "command": "switchboard.row.restore",
           "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.restore",
           "group": "3_snooze@1"
+        },
+        {
+          "command": "switchboard.row.changes",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.changes",
+          "group": "4_worktree@1"
+        },
+        {
+          "command": "switchboard.row.sourceControl",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.sourceControl",
+          "group": "4_worktree@2"
         }
       ]
     }

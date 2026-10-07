@@ -104,6 +104,16 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push(...snoozeControls(item.ticket));
   }
 
+  // These run in the extension, not the hub (PRD R57).
+  if (item.worktree !== null) {
+    const key = `${sourceLabel(item.ticket.source)} ${item.ticket.sourceKey}`;
+
+    controls.push(
+      { label: 'Open Changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key, title: item.ticket.title } },
+      { label: 'Show in Source Control', icon: 'source-control', message: { type: 'sourceControl', path: item.worktree.path } },
+    );
+  }
+
   return controls;
 }
 
@@ -250,11 +260,13 @@ export const ROW_COMMANDS: Record<string, string> = {
   'Mark done': 'markDone',
   Snooze: 'snooze',
   Restore: 'restore',
+  'Open Changes': 'changes',
+  'Show in Source Control': 'sourceControl',
 };
 
 /**
  * The row's right-click menu: VS Code shows each `webview/context` command whose context key is set here, and passes this
- * object, with the hub action for each command, to the command it runs.
+ * object to the command it runs. It holds each command's hub action, or the whole message of a control the extension runs itself.
  */
 export function rowContext(controls: Control[]): string {
   const actions: Record<string, unknown> = {};
@@ -264,7 +276,7 @@ export function rowContext(controls: Control[]): string {
     const key = ROW_COMMANDS[control.label]!;
 
     context[`switchboard.row.${key}`] = true;
-    actions[key] = control.message['action'];
+    actions[key] = control.message['type'] === 'action' ? control.message['action'] : control.message;
   }
 
   return ` data-vscode-context="${escape(JSON.stringify(context))}"`;

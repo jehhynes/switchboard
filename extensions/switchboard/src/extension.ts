@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
+import { openChanges, showInSourceControl } from './git.js';
 import { startHub } from './hubProcess.js';
 import { WorkItemsView, attach, claimOpen, dispatch, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
 import { SettingsEditor } from './settingsEditor.js';
@@ -86,9 +87,20 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WorkItemsView.id, view, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('switchboard.action', (action: unknown) => dispatch(keeper.current(), action)),
-    // A row's right-click menu passes the row's `data-vscode-context`, which holds the hub action for each command.
+    // A row's right-click menu passes the row's `data-vscode-context`, which holds what each command runs.
     ...Object.values(ROW_COMMANDS).map((key) =>
-      vscode.commands.registerCommand(`switchboard.row.${key}`, (row: { actions: Record<string, unknown> }) => dispatch(keeper.current(), row.actions[key])),
+      vscode.commands.registerCommand(`switchboard.row.${key}`, (row: { actions: Record<string, unknown> }) => {
+        const local = row.actions[key] as { path: string; key: string; title: string };
+
+        switch (key) {
+          case 'changes':
+            return openChanges(local.path, local.key, local.title);
+          case 'sourceControl':
+            return showInSourceControl(local.path);
+          default:
+            return dispatch(keeper.current(), row.actions[key]);
+        }
+      }),
     ),
     vscode.commands.registerCommand('switchboard.attach', (shortId: string, name: string) => attach(shortId, name)),
     vscode.commands.registerCommand('switchboard.open', (sessionId: string, cwd: string) => openSession(keeper.current(), sessionId, cwd)),

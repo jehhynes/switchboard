@@ -9,7 +9,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/webview/**/*.ts', 'src/snooze.ts'],
+      include: ['src/webview/**/*.ts', 'src/snooze.ts', 'src/changes.ts'],
       thresholds: { lines: 85, branches: 85, functions: 85, statements: 85 },
     },
   },
