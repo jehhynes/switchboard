@@ -279,6 +279,7 @@ const OPTION_FIELDS: Record<string, (Omit<Field, 'path'> & { key: string })[]> =
     { key: 'branchPattern', label: 'Branch pattern', kind: 'text', placeholder: '^(\\d+)-', help: 'A regular expression whose first group is the issue number a worktree branch names.' },
     { key: 'ghPath', label: 'gh path', kind: 'text', placeholder: 'gh', help: 'The gh executable.' },
     { key: 'maxPages', label: 'Page limit', kind: 'integer', placeholder: '5', help: 'A poll that needs more pages of 100 issues fails.' },
+    { key: 'rolesFile', label: 'Roles file', kind: 'text', help: 'A JSON file of {"login": {"roles": ["tester"]}}. Triage shows each comment author\'s roles. Starts with ~ or is absolute.' },
   ],
   zoho: [
     { key: 'orgId', label: 'Organization ID', kind: 'text', help: 'The Desk organization ID.' },

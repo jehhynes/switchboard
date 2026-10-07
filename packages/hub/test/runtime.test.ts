@@ -209,6 +209,18 @@ describe('Runtime', () => {
     expect(changes).toBeGreaterThan(3);
   });
 
+  it('logs a context warning and still triages', async () => {
+    const { store, source, runtime, logs } = setup();
+    source.result = { tickets: [issue('7')] };
+    source.context = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text`, warning: 'Roles file r.json is not JSON.' });
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(logs).toContain('triage context for #7: Roles file r.json is not JSON.');
+    expect(store.triage(1)).toMatchObject({ playbook: 'dev:develop', error: null });
+  });
+
   it('records a failed poll and a failed triage', async () => {
     const { store, cli, source, runtime } = setup();
 

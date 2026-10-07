@@ -15,8 +15,15 @@ describe('parseGithubConfig', () => {
         assignedStatuses: ['⚒️ Dev'],
         branchPattern: /^(\d+)-/,
         maxPages: 5,
+        rolesFile: null,
       },
     });
+  });
+
+  it('keeps a roles file that is absolute or starts with ~', () => {
+    expect(parseGithubConfig({ ...VALID, rolesFile: ' ~/.claude/skills/gc-handoff/roster.json ' })).toMatchObject({ config: { rolesFile: '~/.claude/skills/gc-handoff/roster.json' } });
+    expect(parseGithubConfig({ ...VALID, rolesFile: 'C:/roles.json' })).toMatchObject({ config: { rolesFile: 'C:/roles.json' } });
+    expect(parseGithubConfig({ ...VALID, rolesFile: '' })).toMatchObject({ config: { rolesFile: null } });
   });
 
   it.each([
@@ -29,6 +36,8 @@ describe('parseGithubConfig', () => {
     [{ ghPath: '' }, 'sources.github.ghPath must be a path.'],
     [{ maxPages: 0 }, 'sources.github.maxPages must be a whole number of at least 1.'],
     [{ branchPattern: '(' }, 'sources.github.branchPattern is not a valid regular expression.'],
+    [{ rolesFile: 'roles.json' }, 'sources.github.rolesFile must be an absolute path or start with ~.'],
+    [{ rolesFile: 3 }, 'sources.github.rolesFile must be an absolute path or start with ~.'],
   ])('rejects %j', (patch, error) => {
     expect(parseGithubConfig({ ...VALID, ...patch })).toEqual({ error });
   });

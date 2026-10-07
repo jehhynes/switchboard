@@ -176,6 +176,40 @@ describe('GithubSource.poll', () => {
 });
 
 describe('GithubSource.context', () => {
+  it('shows each comment author\'s roles from the roles file, matching the login in any case, and reads the file for each context', async () => {
+    const json = JSON.parse(JSON.stringify(fixture('context-with-pr')).replaceAll('"user-a"', '"User-A"'));
+    // The fixture's user-a wrote 5 issue comments, 2 pull request comments and 5 review-thread comments.
+    const USER_A_HEADINGS = 12;
+    const readRoles = vi.fn(async () => ({ roles: new Map([['user-a', ['tester', 'test-wrangler']]]) }));
+    const source = new GithubSource(config({ rolesFile: '~/roster.json' }), fakeGh({ json }, { json }), readRoles);
+    const result = await source.context(ticket('19504'));
+    const text = (result as { context: string }).context;
+
+    expect(readRoles).toHaveBeenCalledWith('~/roster.json');
+    expect(result).not.toHaveProperty('warning');
+    expect(text).toContain('### Last 5 pull request comments\n### User-A (tester, test-wrangler), 2026-09-10 12:01\nComment starts here.');
+    expect(text.match(/^### User-A[ ,]/gm)).toHaveLength(USER_A_HEADINGS);
+    expect(text.match(/^### User-A \(tester, test-wrangler\), /gm)).toHaveLength(USER_A_HEADINGS);
+    expect(text).toMatch(/^### user-[b-z], /m);
+
+    readRoles.mockResolvedValueOnce({ roles: new Map([['user-a', ['dev']]]) });
+    const again = ((await source.context(ticket('19504'))) as { context: string }).context;
+
+    expect(again.match(/^### User-A \(dev\), /gm)).toHaveLength(USER_A_HEADINGS);
+  });
+
+  it('reads no roles without a roles file, and warns without roles when the file fails', async () => {
+    const readRoles = vi.fn(async () => ({ error: 'Roles file r.json is not JSON.' }));
+    const without = await new GithubSource(config(), fakeGh({ json: fixture('context-with-pr') }), readRoles).context(ticket('19504'));
+
+    expect(readRoles).not.toHaveBeenCalled();
+    expect(without).not.toHaveProperty('warning');
+
+    const failed = await new GithubSource(config({ rolesFile: '/r.json' }), fakeGh({ json: fixture('context-with-pr') }), readRoles).context(ticket('19504'));
+
+    expect(failed).toMatchObject({ context: (without as { context: string }).context, warning: 'Roles file r.json is not JSON. Comment authors show no roles.' });
+  });
+
   it('formats the issue, history, last comments and the closing pull request, clipping each text', async () => {
     const gh = fakeGh({ json: fixture('context-with-pr') });
     const result = await new GithubSource(config(), gh).context(ticket('19504'));

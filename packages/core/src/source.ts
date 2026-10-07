@@ -10,7 +10,8 @@ export interface SourceLink {
   target: string;
 }
 
-export type ContextResult = { context: string; links?: SourceLink[] } | { error: string };
+/** A warning does not fail triage; the hub logs it. */
+export type ContextResult = { context: string; links?: SourceLink[]; warning?: string } | { error: string };
 
 /** A source plugin (PRD R1). It reads and never writes. */
 export interface Source {

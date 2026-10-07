@@ -3,6 +3,7 @@ import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
 import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY } from './queries.js';
+import type { Roles, RolesResult } from './roles.js';
 
 /** Each issue body, comment and review-thread comment is clipped to this many characters (GC). */
 export const TEXT_LIMIT = 2_000;
@@ -88,6 +89,8 @@ export class GithubSource implements Source {
   constructor(
     private readonly config: GithubConfig,
     private readonly gh: Gh,
+    /** Reads `config.rolesFile`; called only when it is set. */
+    private readonly readRoles: (path: string) => Promise<RolesResult> = async () => ({ roles: new Map() }),
   ) {}
 
   /** Reads every open issue assigned to a configured login on the project. An issue whose status is not configured is listed as not assigned. A malformed response is a failed read. */
@@ -225,8 +228,11 @@ export class GithubSource implements Source {
     }
 
     const pr = pullRequestOf(issue.closedByPullRequestsReferences.nodes);
+    const roles = this.config.rolesFile === null ? { roles: new Map() } : await this.readRoles(this.config.rolesFile);
+    const links = pr === null ? [] : [{ label: `Pull request #${pr.number}`, target: pr.url }];
+    const context = this.format(issue, pr, 'roles' in roles ? roles.roles : new Map());
 
-    return { context: this.format(issue, pr), links: pr === null ? [] : [{ label: `Pull request #${pr.number}`, target: pr.url }] };
+    return 'error' in roles ? { context, links, warning: `${roles.error} Comment authors show no roles.` } : { context, links };
   }
 
   /** Why the configured project's status field cannot hold a status, or null when it is a single-select field. */
@@ -260,7 +266,7 @@ export class GithubSource implements Source {
     return project?.number === this.config.project.number && project.owner?.login === this.config.project.owner;
   }
 
-  private format(issue: ContextIssue, pr: PullRequest | null): string {
+  private format(issue: ContextIssue, pr: PullRequest | null, roles: Roles): string {
     // GitHub stopped logging status events around 2026-09-25, so the Status field is the current status.
     const field = issue.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName;
     const lines = [
@@ -282,12 +288,12 @@ export class GithubSource implements Source {
       lines.push('', `## Last ${issue.comments.nodes.length} comments`);
 
       for (const comment of issue.comments.nodes) {
-        lines.push('', commentHeading(comment), clip(comment.body, TEXT_LIMIT));
+        lines.push('', commentHeading(comment, roles), clip(comment.body, TEXT_LIMIT));
       }
     }
 
     if (pr !== null) {
-      lines.push('', ...pullRequestLines(pr));
+      lines.push('', ...pullRequestLines(pr, roles));
     }
 
     return lines.join('\n');
@@ -332,8 +338,12 @@ export class GithubSource implements Source {
   }
 }
 
-function commentHeading(comment: Comment): string {
-  return `### ${comment.author?.login ?? 'ghost'}, ${comment.createdAt.slice(0, 16).replace('T', ' ')}`;
+/** The author's roles from the roles file follow the login, as `### QaTester (tester), 2026-10-06 14:02`. */
+function commentHeading(comment: Comment, roles: Roles): string {
+  const login = comment.author?.login ?? 'ghost';
+  const listed = roles.get(login.toLowerCase());
+
+  return `### ${login}${listed === undefined ? '' : ` (${listed.join(', ')})`}, ${comment.createdAt.slice(0, 16).replace('T', ' ')}`;
 }
 
 /** The most recently updated open closing pull request, else the most recently updated one (GC selectPullRequest). */
@@ -343,7 +353,7 @@ function pullRequestOf(nodes: PullRequest[]): PullRequest | null {
   return byRecency.find((pr) => pr.state === 'OPEN') ?? byRecency[0] ?? null;
 }
 
-function pullRequestLines(pr: PullRequest): string[] {
+function pullRequestLines(pr: PullRequest, roles: Roles): string[] {
   const checks = pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? 'none';
   const lines = [
     `## Pull request #${pr.number}: ${pr.title}`,
@@ -363,7 +373,7 @@ function pullRequestLines(pr: PullRequest): string[] {
     lines.push('', `### Last ${pr.comments.nodes.length} pull request comments`);
 
     for (const comment of pr.comments.nodes) {
-      lines.push(commentHeading(comment), clip(comment.body, TEXT_LIMIT));
+      lines.push(commentHeading(comment, roles), clip(comment.body, TEXT_LIMIT));
     }
   }
 
@@ -378,7 +388,7 @@ function pullRequestLines(pr: PullRequest): string[] {
       lines.push('', `#### ${thread.isResolved ? 'Resolved' : 'Unresolved'} thread`);
 
       for (const comment of thread.comments.nodes) {
-        lines.push(commentHeading(comment), clip(comment.body, TEXT_LIMIT));
+        lines.push(commentHeading(comment, roles), clip(comment.body, TEXT_LIMIT));
       }
     }
   }

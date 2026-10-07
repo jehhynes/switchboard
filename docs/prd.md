@@ -70,7 +70,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ### Sources
 
-- R1. Each source is a plugin behind one interface that lists the operator's tickets and reports whether each is in the assigned state. The plugin defines the assigned state and builds the triage context: the ticket's text, clipped to size limits and formatted with authors, status changes and assignees.
+- R1. Each source is a plugin behind one interface that lists the operator's tickets and reports whether each is in the assigned state. The plugin defines the assigned state and builds the triage context: the ticket's text, clipped to size limits and formatted with authors, status changes and assignees. The GitHub source can show each comment author's roles, such as tester, from a file the operator names, so triage can tell a tester's report from a developer's question.
 - R2. Switchboard polls each enabled polling source and stores each ticket's last-seen state locally.
 - R3. Each source has its own settings: enabled, poll interval, repo root, and its triage playbook. The operator turns sources on and off with an on/off icon per source in the panel's title bar, because some work, such as Support, is done only some weeks; a disabled source is not polled and its pool is hidden, while its work items stay.
 - R4. GitHub is the first source. Zoho Desk and Forum follow.

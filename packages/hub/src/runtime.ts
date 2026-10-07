@@ -491,6 +491,10 @@ export class Runtime {
           return;
         }
 
+        if (context.warning !== undefined) {
+          this.deps.log(`triage context for ${action.ticket.ref}: ${context.warning}`);
+        }
+
         const text = triageText(context.context, this.deps.now());
         const result = await classify(
           { claudePath: this.deps.claudePath, systemPrompt: action.systemPrompt, choices: action.choices, rates: action.rates, context: text, model: action.model, timeoutSeconds: action.timeoutSeconds, cwd: this.home },

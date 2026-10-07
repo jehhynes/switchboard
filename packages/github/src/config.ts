@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path';
+
 export interface GithubConfig {
   ghPath: string;
   /** `owner/name`. */
@@ -8,11 +10,13 @@ export interface GithubConfig {
   /** Its first group is the issue number a worktree branch names. */
   branchPattern: RegExp;
   maxPages: number;
+  /** A JSON file of `{login: {roles: string[]}}`, or null. Triage shows each comment author's roles from it. */
+  rolesFile: string | null;
 }
 
 export type ConfigResult = { config: GithubConfig } | { error: string };
 
-const KEYS = ['ghPath', 'repo', 'logins', 'project', 'assignedStatuses', 'branchPattern', 'maxPages'];
+const KEYS = ['ghPath', 'repo', 'logins', 'project', 'assignedStatuses', 'branchPattern', 'maxPages', 'rolesFile'];
 
 function strings(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry !== '') ? (value as string[]) : null;
@@ -26,7 +30,7 @@ export function parseGithubConfig(options: Record<string, unknown>): ConfigResul
     return { error: `sources.github.${unknown[0]} is not a setting.` };
   }
 
-  const { ghPath = 'gh', repo, logins, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5 } = options;
+  const { ghPath = 'gh', repo, logins, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
 
   if (typeof repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     return { error: 'sources.github.repo must be set to owner/name.' };
@@ -58,6 +62,12 @@ export function parseGithubConfig(options: Record<string, unknown>): ConfigResul
     return { error: 'sources.github.maxPages must be a whole number of at least 1.' };
   }
 
+  const rolesPath = typeof rolesFile === 'string' ? rolesFile.trim() : null;
+
+  if (rolesPath === null || (rolesPath !== '' && !isAbsolute(rolesPath) && !/^~([\\/]|$)/.test(rolesPath))) {
+    return { error: 'sources.github.rolesFile must be an absolute path or start with ~.' };
+  }
+
   let pattern: RegExp;
 
   try {
@@ -75,6 +85,7 @@ export function parseGithubConfig(options: Record<string, unknown>): ConfigResul
       assignedStatuses: statuses,
       branchPattern: pattern,
       maxPages,
+      rolesFile: rolesPath === '' ? null : rolesPath,
     },
   };
 }
