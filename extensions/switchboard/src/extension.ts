@@ -17,6 +17,10 @@ export interface SwitchboardApi {
   hub(): HubRecord | null;
   /** The last panel state the hub sent, or null. */
   state(): unknown;
+  /** The view's activity bar badge, or null before VS Code resolves the view. */
+  badge(): vscode.ViewBadge | undefined | null;
+  /** Shows a state as if the hub sent it, so the integration suite can show recorded snapshots. */
+  show(state: string): void;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -157,7 +161,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   context.subscriptions.push({ dispose: () => keeper.dispose() });
 
-  return { hub: () => keeper.current(), state: () => view.state() };
+  return { hub: () => keeper.current(), state: () => view.state(), badge: () => view.badge(), show: (state) => view.update(state) };
 }
 
 export function deactivate(): void {}

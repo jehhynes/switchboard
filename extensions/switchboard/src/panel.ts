@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import type { Snapshot } from '@switchboard/hub';
 import { postToHub } from '@switchboard/hub';
+import { needsBadge } from './badge.js';
 import { snoozeChoices } from './snooze.js';
 
 const ACTION_TIMEOUT_MS = 10_000;
@@ -19,11 +20,24 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
   /** The latest `state` event from the hub, as its JSON text. */
   update(state: string): void {
     this.latest = state;
+    this.showBadge();
     void this.view?.webview.postMessage({ type: 'state', snapshot: JSON.parse(state) });
   }
 
   state(): unknown {
     return this.latest === null ? null : JSON.parse(this.latest);
+  }
+
+  /** The activity bar badge, or null before VS Code resolves the view. */
+  badge(): vscode.ViewBadge | undefined | null {
+    return this.view === undefined ? null : this.view.badge;
+  }
+
+  /** Counts the Needs you work items on the view's badge, which VS Code shows on the activity bar icon (PRD R64). */
+  private showBadge(): void {
+    if (this.view !== undefined) {
+      this.view.badge = this.latest === null ? undefined : needsBadge(JSON.parse(this.latest) as Snapshot);
+    }
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -42,6 +56,7 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
 
     view.webview.onDidReceiveMessage((message: { type: string; [key: string]: unknown }) => void this.receive(message));
     view.onDidDispose(() => (this.view = undefined));
+    this.showBadge();
   }
 
   private async receive(message: { type: string; [key: string]: unknown }): Promise<void> {

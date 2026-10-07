@@ -174,6 +174,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
   - Open Changes opens one VS Code multi-diff editor with every change in the worktree since it branched: committed, staged, unstaged, conflicted and untracked, each file shown once from the merge base to the file on disk, following renames. Untracked files follow VS Code's `git.untrackedChanges` setting, so `hidden` leaves them out. Opening it again replaces the ticket's earlier editor with the current changes, or closes it when there are none. The base is the merge base of HEAD with `origin/HEAD`, else `origin/main`, else `origin/master`, read without fetching; with none, the editor shows uncommitted changes against HEAD and its title says so. The title names the ticket and the base, such as `gh 18941 Inbox badge — since 3f2a91c`. A worktree with no changes, or a path that is no longer a repository, shows a message instead.
   - Show in Source Control adds the worktree to the Source Control view's repositories and shows the view. VS Code keeps it there until the window closes; it is not saved with the workspace. Open Changes adds it too.
   - Both use VS Code's own editor and view and only read the repository.
+- R64. The Switchboard icon in the activity bar shows a badge with the number of work items in the Needs you group, not counting snoozed ones, with the tooltip `N need you` (`1 needs you`), so the operator sees from any view that something needs them. At 0 there is no badge. VS Code shows the badge only after it has first shown the panel in that window.
 
 ### Runtime
 
@@ -209,6 +210,7 @@ Steps 1–7 are delivered: R1–R4 for GitHub, R6–R25 and R27–R45 work end t
 - Friction debriefs (R55) are tested with a recorded transcript and a fake CLI, and ran live from an isolated hub on an ad-hoc session and its Codex thread ([mechanics.md](mechanics.md) M19). A fork that messages subagents has not run on this CLI version.
 - The Settings editor (R54) is tested in jsdom and in a real VS Code host. No save has been made through it to the operator's home.
 - The Chrome extension (R56) is tested in jsdom against a recorded board column, and ran unpacked in Chromium against a test-owned hub endpoint on the public board `github.com/orgs/github/projects/4247` on 2026-10-07: snoozed cards hid, the column link showed and hid them, and an unsnooze showed them again. It has not run on the operator's signed-in project board.
+- The activity bar badge (R64) is tested by reading the view's `badge` in a real VS Code host; no test sees the activity bar icon itself.
 - Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 ## Open questions
 
