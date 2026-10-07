@@ -350,3 +350,71 @@ describe('the hub process', () => {
     await until(() => record()?.configDir === configDir, 'the hub did not return to the configured folder');
   });
 });
+
+// After the hub process tests, which expect a store with no work items. The decisions are tested in test/toast.test.ts.
+describe('the Needs you toast (PRD R65)', () => {
+  // An ad-hoc prompt for a folder that does not exist fails at spawn, so no Claude process starts and the item enters Needs you.
+  const missingRepo = join(process.env.SWITCHBOARD_TEST_HOME, 'no-such-repo');
+  const originalMessage = vscode.window.showInformationMessage;
+  const originalState = Object.getOwnPropertyDescriptor(vscode.window, 'state');
+  const created = [];
+  let extension;
+  let focused = true;
+  let shown = [];
+
+  /** Sends an ad-hoc prompt that fails to start, and waits until this window's panel shows it failed. */
+  async function failAdhoc(title) {
+    const hub = extension.hub();
+
+    assert.strictEqual((await call(hub.port, '/action', hub.token, 'POST', { type: 'adhoc', prompt: title, repoRoot: missingRepo })).status, 200);
+
+    const item = await until(() => extension.state()?.workItems.find((entry) => entry.ticket.title === title && entry.status === 'failed'), `${title} never reached the panel as failed`);
+
+    created.push(item.id);
+  }
+
+  before(async () => {
+    extension = await api();
+    await until(() => extension.hub() && extension.state(), 'the extension never received the hub state');
+    vscode.window.showInformationMessage = (...args) => (shown.push(args), Promise.resolve(undefined));
+    Object.defineProperty(vscode.window, 'state', { configurable: true, get: () => ({ focused, active: focused }) });
+  });
+
+  after(async () => {
+    vscode.window.showInformationMessage = originalMessage;
+    Object.defineProperty(vscode.window, 'state', originalState);
+    await vscode.workspace.getConfiguration('switchboard').update('notifyNeedsYou', undefined, vscode.ConfigurationTarget.Global);
+
+    const hub = extension.hub();
+
+    for (const id of created) {
+      await call(hub.port, '/action', hub.token, 'POST', { type: 'mark-done', workItemId: id });
+    }
+  });
+
+  beforeEach(() => {
+    shown = [];
+    focused = true;
+  });
+
+  it('shows nothing in a window that is not focused', async () => {
+    focused = false;
+    await failAdhoc('Toast while unfocused');
+
+    assert.deepStrictEqual(shown, []);
+  });
+
+  it('shows one toast naming the ticket and the mark in the focused window', async () => {
+    await failAdhoc('Toast check');
+
+    // A failed ad-hoc start has no session or URL to open, so the toast has no Open button.
+    assert.deepStrictEqual(shown, [['Switchboard: Toast check — Failed']]);
+  });
+
+  it('shows nothing when switchboard.notifyNeedsYou is off', async () => {
+    await vscode.workspace.getConfiguration('switchboard').update('notifyNeedsYou', false, vscode.ConfigurationTarget.Global);
+    await failAdhoc('Toast while off');
+
+    assert.deepStrictEqual(shown, []);
+  });
+});

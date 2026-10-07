@@ -176,6 +176,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
   - Show in Source Control adds the worktree to the Source Control view's repositories and shows the view. VS Code keeps it there until the window closes; it is not saved with the workspace. Open Changes adds it too.
   - Both use VS Code's own editor and view and only read the repository.
 - R64. The Switchboard icon in the activity bar shows a badge with the number of work items in the Needs you group, not counting snoozed ones, with the tooltip `N need you` (`1 needs you`), so the operator sees from any view that something needs them. At 0 there is no badge. VS Code shows the badge only after it has first shown the panel in that window.
+- R65. When a work item enters Needs you (R27), the focused VS Code window shows a notification naming its ticket title and its mark's tooltip, such as `Switchboard: Fix the inbox badge — Approve the publish`, so the operator learns of it without watching the panel. Its **Open** button runs the row's click action (R27); a row with nothing to open, such as a failed ad-hoc start, gets no button. Each window gets every snapshot, so only the focused window notifies; with no window focused, none does. A snoozed item notifies when it wakes, and an item that leaves Needs you and returns notifies again. The first snapshot after a window connects or reconnects to the hub notifies nothing, so a reload does not repeat every item already in Needs you. The VS Code setting `switchboard.notifyNeedsYou` (default on) turns it off.
 
 ### Runtime
 
@@ -212,6 +213,7 @@ Steps 1–7 are delivered: R1–R4 for GitHub, R6–R25 and R27–R45 work end t
 - The Settings editor (R54) is tested in jsdom and in a real VS Code host. No save has been made through it to the operator's home.
 - The Chrome extension (R56) is tested in jsdom against a recorded board column, and ran unpacked in Chromium against a test-owned hub endpoint on the public board `github.com/orgs/github/projects/4247` on 2026-10-07: snoozed cards hid, the column link showed and hid them, and an unsnooze showed them again. It has not run on the operator's signed-in project board.
 - The activity bar badge (R64) is tested by reading the view's `badge` in a real VS Code host; no test sees the activity bar icon itself.
+- The Needs you notification (R65) is tested in Vitest and in a real VS Code host with a failed ad-hoc start, which has nothing to open; its Open button has not been pressed in a real host.
 - Only Windows is supported and tested. On other platforms the hub lock is a socket file, and two hubs starting at the same moment over a socket left by a crashed hub can both take it.
 ## Open questions
 

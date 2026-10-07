@@ -6,6 +6,7 @@ import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { openChanges, showInSourceControl } from './git.js';
 import { startHub } from './hubProcess.js';
+import { NeedsYouToasts } from './notify.js';
 import { WorkItemsView, attach, claimOpen, dispatch, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
 import { SettingsEditor } from './settingsEditor.js';
 import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
@@ -143,6 +144,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     }),
   );
 
+  const toasts = new NeedsYouToasts(() => view.state() as Snapshot | null);
   const keeper = keepHub({
     ensure,
     open: (record, onEnd) =>
@@ -150,7 +152,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         if (event === 'state') {
           view.update(data);
           showSourceToggles(JSON.parse(data) as Snapshot);
+          toasts.update(JSON.parse(data) as Snapshot);
         } else if (event === 'hello') {
+          toasts.connected();
           void claimOpen(record).catch(() => {});
         }
       }),

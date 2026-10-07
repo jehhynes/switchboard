@@ -69,22 +69,30 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
       case 'action':
         await vscode.commands.executeCommand('switchboard.action', message['action']);
         return;
-      case 'attach':
-        await vscode.commands.executeCommand('switchboard.attach', message['shortId'], message['name']);
-        return;
-      case 'resume':
-        await vscode.commands.executeCommand('switchboard.resume', message['sessionId'], message['cwd'], message['name'], message['active']);
-        return;
-      case 'open':
-        await vscode.commands.executeCommand('switchboard.open', message['sessionId'], message['cwd']);
-        return;
-      case 'openFolder':
-        await vscode.commands.executeCommand('switchboard.openWorktree', String(message['path']));
-        return;
-      case 'openUrl':
-        await vscode.commands.executeCommand('switchboard.openLink', String(message['url']));
-        return;
+      default:
+        await runOpen(message);
     }
+  }
+}
+
+/** Runs a row's open or editor action (`openAction`, `editorAction`), from the panel or a toast. */
+export async function runOpen(message: { type: string; [key: string]: unknown }): Promise<void> {
+  switch (message.type) {
+    case 'attach':
+      await vscode.commands.executeCommand('switchboard.attach', message['shortId'], message['name']);
+      return;
+    case 'resume':
+      await vscode.commands.executeCommand('switchboard.resume', message['sessionId'], message['cwd'], message['name'], message['active']);
+      return;
+    case 'open':
+      await vscode.commands.executeCommand('switchboard.open', message['sessionId'], message['cwd']);
+      return;
+    case 'openFolder':
+      await vscode.commands.executeCommand('switchboard.openWorktree', String(message['path']));
+      return;
+    case 'openUrl':
+      await vscode.commands.executeCommand('switchboard.openLink', String(message['url']));
+      return;
   }
 }
 
