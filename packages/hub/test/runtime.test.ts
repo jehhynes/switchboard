@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import { DONE_CHECK_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -101,10 +101,19 @@ class FakeCli {
 class FakeSource implements Source {
   readonly name = 'github';
   result: PollResult = { tickets: [] };
+  /** When set, the next poll waits for this before returning the `result` it started with. */
+  gate: Promise<void> | null = null;
+  polls = 0;
   context: (ticket: { sourceKey: string }) => Promise<ContextResult> = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text` });
 
   async poll(): Promise<PollResult> {
-    return this.result;
+    this.polls++;
+    const result = this.result;
+    const gate = this.gate;
+    this.gate = null;
+    await gate;
+
+    return result;
   }
 
   keyOfBranch(branch: string): string | null {
@@ -114,12 +123,23 @@ class FakeSource implements Source {
 
 const issue = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null, enteredAt: null });
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {};
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+
+  return { promise, resolve };
+}
+
 function setup(cfg = config(), now = () => T0) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
   const source = new FakeSource();
   let ids = 0;
   const logs: string[] = [];
+  // The done check's timeout fires only when a test releases it.
+  const late = deferred();
   const runtime = new Runtime(
     {
       home,
@@ -128,7 +148,7 @@ function setup(cfg = config(), now = () => T0) {
       claudePath: 'claude',
       makeSource: (name) => (name === 'github' ? { source } : null),
       now,
-      sleep: async () => {},
+      sleep: (ms) => (ms === DONE_CHECK_MS ? late.promise : Promise.resolve()),
       newSessionId: () => `s${++ids}`,
       claudeSettings: join(home, '.claude', 'settings.json'),
       configDir: join(home, 'cfg'),
@@ -137,7 +157,7 @@ function setup(cfg = config(), now = () => T0) {
     cfg,
   );
 
-  return { store, cli, source, runtime, logs };
+  return { store, cli, source, runtime, logs, late };
 }
 
 describe('Runtime', () => {
@@ -325,6 +345,7 @@ describe('Runtime', () => {
     expect(await runtime.report({ sessionId: 's9', kind: 'done' })).toEqual({ refused: 'Unknown session s9.' });
     expect(await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:/wt/review.md' })).toEqual({ refused: null });
     expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: 'Ready.', approvalReport: 'D:/wt/review.md' });
+    source.result = { tickets: [] };
     expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
     expect(store.workItem(1)?.status).toBe('done');
 
@@ -334,6 +355,67 @@ describe('Runtime', () => {
     store.updateSession('s2', { reports: ['stage', 'link'] });
     expect(await runtime.report({ sessionId: 's2', kind: 'done' })).toEqual({ refused: "This session's prompt does not offer the done report." });
     expect(store.workItem(2)?.status).toBe('running');
+  });
+
+  it('blocks a done report while a fresh read lists the ticket as assigned, without telling the session (PRD R10)', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The session reported done, but the ticket is still assigned to you.' });
+    expect(store.session('s1')?.outcome).toBe('done');
+  });
+
+  it('finishes on a done report when a fresh read lists the ticket outside the assigned state', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    source.result = { tickets: [{ ...issue('8'), assigned: false }] };
+    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'done', doneReason: 'session' });
+    expect(store.ticket(1)?.assigned).toBe(false);
+  });
+
+  it('accepts a done report when the source read fails', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    source.result = { error: 'GitHub is down.' };
+    expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
+    expect(store.workItem(1)?.status).toBe('done');
+    expect(runtime.snapshot().errors.sources).toEqual({ github: 'GitHub is down.' });
+  });
+
+  it('accepts a done report unchecked when the source read outlasts the check, and applies reads in order', async () => {
+    const { store, source, runtime, logs, late } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const slow = deferred();
+    source.gate = slow.promise;
+    const scheduled = runtime.pollSource('github');
+    await vi.waitFor(() => expect(source.polls).toBe(2));
+    source.result = { tickets: [] };
+    const report = runtime.report({ sessionId: 's1', kind: 'done' });
+    late.resolve();
+
+    expect(await report).toEqual({ refused: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'done', doneReason: 'session' });
+    expect(logs).toContain('done report for #8 accepted unchecked: the github read took over 6 seconds');
+
+    // The scheduled poll, read before the ticket left, applies before the done check's read, so the ticket ends unassigned.
+    slow.resolve();
+    await scheduled;
+    await vi.waitFor(() => expect(store.ticket(1)?.assigned).toBe(false));
+    await runtime.settled();
+    expect(store.workItemsForTicket(1)).toHaveLength(1);
   });
 
   it('stops a session and reports a failed stop', async () => {

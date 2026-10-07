@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
+import { MESSAGES } from '../src/flow.js';
 import { Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 
 /** The report contract offering `reports`, written out so a change to the contract shows here. */
@@ -246,6 +247,35 @@ describe('sessions', () => {
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
     expect(h.store.session(session)).toMatchObject({ state: 'ended', outcome: 'done', outcomeDetail: null, endedAt: T0 });
     expect(h.item(item).status).toBe('done');
+  });
+
+  it('blocks a done report whose ticket is still assigned, and finishes it when the ticket leaves (PRD R10)', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
+
+    expect(h.report(session, { kind: 'done', assigned: true })).toEqual({ actions: [], refused: null });
+    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.doneStillAssigned, failedStep: 'task', doneAt: null });
+    expect(h.store.session(session)?.outcome).toBe('done');
+
+    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12345', reason: 'release' }]);
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+    expect(h.item(item).status).toBe('blocked');
+
+    h.poll();
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+  });
+
+  it('finishes a blocked done report when the ticket left while the session was active', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
+
+    h.report(session, { kind: 'done', assigned: true });
+    h.poll();
+    expect(h.item(item).status).toBe('blocked');
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
   });
 
   it('blocks on a turn that ends without a report, a failed turn, or a session that ends, but not while it waits on the operator', () => {

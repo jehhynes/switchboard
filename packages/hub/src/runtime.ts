@@ -1,7 +1,7 @@
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
 import { ADHOC_SOURCE, handle, switchboardHome } from '@switchboard/core';
-import type { FlowAction, FlowEvent, FlowResult, Link, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, Link, PolledTicket, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -15,6 +15,8 @@ const FIXED_TIMERS = 3;
 export const DONE_DAYS = 7;
 /** How long a pending open waits for a window on its folder. */
 export const OPEN_CLAIM_MS = 2 * 60_000;
+/** How long a done report waits for the source read that checks its ticket (PRD R10). */
+export const DONE_CHECK_MS = 6_000;
 
 export interface RuntimeDeps {
   /** The operator's home; the Switchboard home is `<home>/.switchboard`. */
@@ -89,7 +91,8 @@ export class Runtime {
   private listeners = new Set<() => void>();
   /** The roster, marker and wake timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
   private timers: NodeJS.Timeout[] = [];
-  private polling = new Set<string>();
+  /** The read in flight per source; reads run one at a time, so their results apply in order. */
+  private reads = new Map<string, Promise<void>>();
   private pendingOpens = new Map<string, { sessionId: string; at: number }>();
 
   constructor(
@@ -185,27 +188,76 @@ export class Runtime {
   async pollSource(name: string): Promise<void> {
     const source = this.sources.get(name);
 
-    if (source === undefined || this.polling.has(name)) {
+    if (source === undefined || this.reads.has(name)) {
       return;
     }
 
-    this.polling.add(name);
+    await this.readAfter(name, source);
+  }
 
-    try {
-      const result = await source.poll();
+  /** Reads the source once any read in flight has finished. */
+  private readAfter(name: string, source: Source): Promise<PolledTicket[] | null> {
+    const read = (this.reads.get(name) ?? Promise.resolve()).then(() => this.read(name, source));
+    const settled: Promise<void> = read.then(
+      () => undefined,
+      () => undefined,
+    );
 
-      if ('error' in result) {
-        this.sourceErrors[name] = result.error;
-        this.send({ type: 'poll-failed', source: name, error: result.error });
-        return;
+    this.reads.set(name, settled);
+    void settled.then(() => {
+      if (this.reads.get(name) === settled) {
+        this.reads.delete(name);
       }
+    });
 
-      delete this.sourceErrors[name];
-      this.send({ type: 'poll', source: name, tickets: result.tickets });
-      await this.findWorktrees(name, source);
-    } finally {
-      this.polling.delete(name);
+    return read;
+  }
+
+  /** Polls the source and applies the result; null when the read failed. */
+  private async read(name: string, source: Source): Promise<PolledTicket[] | null> {
+    const result = await source.poll();
+
+    if ('error' in result) {
+      this.sourceErrors[name] = result.error;
+      this.send({ type: 'poll-failed', source: name, error: result.error });
+      return null;
     }
+
+    delete this.sourceErrors[name];
+    this.send({ type: 'poll', source: name, tickets: result.tickets });
+    await this.findWorktrees(name, source);
+
+    return result.tickets;
+  }
+
+  /**
+   * Whether a fresh read lists a task session's ticket as assigned when it reports done (PRD R10). False when the read fails or takes
+   * longer than DONE_CHECK_MS, which keeps the reply inside the report CLI's 10-second timeout.
+   */
+  private async stillAssigned(sessionId: string): Promise<boolean> {
+    const store = this.deps.store;
+    const session = store.session(sessionId);
+    const item = session === null ? null : store.workItem(session.workItemId);
+
+    if (session?.kind !== 'task' || item === null || item.status === 'done') {
+      return false;
+    }
+
+    const ticket = store.ticket(item.ticketId)!;
+    const source = this.sources.get(ticket.source);
+
+    if (source === undefined) {
+      return false;
+    }
+
+    const tickets = await Promise.race([this.readAfter(ticket.source, source).catch(() => null), this.deps.sleep(DONE_CHECK_MS).then(() => 'late' as const)]);
+
+    if (tickets === 'late') {
+      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the ${ticket.source} read took over ${DONE_CHECK_MS / 1000} seconds`);
+      return false;
+    }
+
+    return tickets?.some((entry) => entry.sourceKey === ticket.sourceKey && entry.assigned) ?? false;
   }
 
   /** Reads the roster and hook markers; a failed read changes nothing. */
@@ -281,7 +333,7 @@ export class Runtime {
       body.kind === 'stage'
         ? { kind: body.kind, stage: body.stage }
         : body.kind === 'done'
-          ? { kind: body.kind }
+          ? { kind: body.kind, assigned: await this.stillAssigned(body.sessionId) }
           : body.kind === 'approval'
             ? { kind: body.kind, prompt: body.prompt, summary: body.summary, report: body.report }
             : body.kind === 'playbook'

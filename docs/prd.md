@@ -24,7 +24,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - Remote, cloud or multi-machine operation. One hub runs per machine.
 - Changing git state: no commits, branches, or creating, cleaning up or removing worktrees. Read-only git queries that validate and link worktrees are allowed.
 - Answering a session's permission prompts or questions for the operator.
-- Inferring state it did not observe: no stuck-session detection, and no check that a session's done report is true.
+- Inferring state it did not observe: no stuck-session detection, and no check of a session's work beyond whether its ticket is still assigned when it reports done (R10).
 - Reproducing the source's ticket view or conversation. The panel links to the source.
 - Reproducing Ground Control's board, lanes or review views, or the Support board.
 - Built-in playbooks or namespaces.
@@ -89,13 +89,13 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R7. Switchboard creates a work item each time a ticket enters the assigned state with no open work item. A ticket assigned again after its work item is done gets a new work item; one that returns while its work item is still open, such as during that item's active session, continues that work item.
 - R8. On first run, every ticket already in the assigned state gets a work item.
 - R9. Work item status is local and never mirrored to the source.
-- R10. A work item is done when its task session reports done, when the operator marks it done, or when its ticket leaves the assigned state while no session is active. If the ticket leaves while a session is active, the work item stays open until that session reports done or ends, because skills such as `/finalize-issue` unassign the operator before the session finishes.
+- R10. A work item is done when its task session reports done, when the operator marks it done, or when its ticket leaves the assigned state while no session is active. If the ticket leaves while a session is active, the work item stays open until that session reports done or ends, because skills such as `/finalize-issue` unassign the operator before the session finishes. When a task session reports done, the hub reads the ticket's source again; if the ticket is still in the assigned state, the session did not hand it off, which is a skill defect, so the work item becomes `blocked` for the operator instead of done, and the session is not told. The blocked work item is done when its ticket leaves the assigned state. A read that fails or takes over 6 seconds accepts the report.
 - R11. A work item that ends because its ticket left the assigned state, without a done report, stays listed in Done with no warning; leaving the assigned state is routine.
 - R34. Work item statuses are `triaging`, `unstarted`, `queued`, `setup`, `running`, `awaiting-approval`, `blocked`, `failed` and `done`.
   - `unstarted` waits for the operator to start it, because its playbook does not start automatically.
   - `awaiting-approval` means a session's work is finished and waits for the operator to approve the prompt that publishes it (R23).
   - `queued` waits for a session slot (R38), or for an earlier work item of the same ticket to finish its active session (R17).
-  - `blocked` means a session ended its turn or its process without reporting done or approval, or the operator stopped it. Its reason names only a report the session was offered: "The session finished its turn." when it was offered neither. The operator resumes it, retries, or marks it done.
+  - `blocked` means a session ended its turn or its process without reporting done or approval, or the operator stopped it, or a task session reported done while its ticket was still in the assigned state (R10). Its reason names only a report the session was offered: "The session finished its turn." when it was offered neither. The operator resumes it, retries, or marks it done.
   - `failed` means a Switchboard step failed: triage, a session start, or a setup session that ended without a worktree. The panel shows the cause and offers Retry.
 - R35. The operator can triage a work item again while it has no active session. There is no control to choose a playbook by hand; the operator handles that rare case outside Switchboard, for example with Mark done and an ad-hoc session.
 - R45. Retry repeats the step that stopped:

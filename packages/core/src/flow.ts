@@ -27,6 +27,7 @@ export const MESSAGES = {
   turnFinished: 'The session finished its turn.',
   sessionFinished: 'The session ended.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
+  doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
 } as const;
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
@@ -49,7 +50,8 @@ export interface PolledTicket {
 export type Report =
   | { kind: 'stage'; stage: string }
   | { kind: 'worktree'; path: string; branch: string | null }
-  | { kind: 'done' }
+  /** `assigned`: a fresh read still lists the task's ticket as assigned, so the session did not hand it off (PRD R10). */
+  | { kind: 'done'; assigned?: boolean }
   | { kind: 'approval'; prompt: string; summary: string | null; report: string | null }
   | { kind: 'link'; label: string; target: string }
   | { kind: 'playbook'; playbook: string };
@@ -708,12 +710,11 @@ class Flow {
       return;
     }
 
-    if (session.outcome === 'done') {
-      return;
-    }
-
+    // A session that reported done with its ticket still assigned leaves the work item blocked until the ticket leaves.
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', null);
+    } else if (session.outcome === 'done') {
+      return;
     } else if (item.status === 'running') {
       this.block(item, endedMessage(session, false));
     }
@@ -753,7 +754,11 @@ class Flow {
         this.store.updateSession(sessionId, { outcome: 'done', outcomeDetail: null });
 
         if (item !== null && session.kind === 'task') {
-          this.done(item, 'session', null);
+          if (report.assigned === true) {
+            this.block(item, MESSAGES.doneStillAssigned);
+          } else {
+            this.done(item, 'session', null);
+          }
         }
 
         return;
