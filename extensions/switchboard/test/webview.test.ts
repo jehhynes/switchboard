@@ -988,6 +988,21 @@ describe('Go to Work Item (PRD R63)', () => {
     expect(searchEntries(snapshot([]))).toEqual([]);
   });
 
+  it('describes each row with the numbers of the pull requests and issues it links (R52), for the quick pick to match', () => {
+    const link = (target: string) => ({ id: 1, ticketId: 1, label: 'link', target, reportedAt: NOW });
+    const linked = snapshot(
+      [
+        item(1, {
+          status: 'awaiting-approval',
+          links: [link('https://github.com/issues/123/pull/55/files'), link('https://github.com/o/r/pull/55/files'), link('https://github.com/o/r/pull/55'), link('https://github.com/o/r/issues/202'), link('https://desk.example.test/1'), link(item(1).ticket.url)],
+        }),
+      ],
+      { pool: [pooled(10, { links: [link('https://github.com/o/r/issues/303')] })] },
+    );
+
+    expect(searchEntries(linked).map((entry) => entry.description)).toEqual(['gh 101 · PR #55 · gh 202 · dev:develop · Needs you', 'zoho Z10 · gh 303 · support:defect · Unstarted']);
+  });
+
   it('finds the row that shows a work item or pool ticket, the snoozed row standing for a hidden work item, and null for none', () => {
     expect(rowFor(data, { workItemId: 4 })).toBe('item:4');
     expect(rowFor(data, { ticketId: 10 })).toBe('ticket:10');

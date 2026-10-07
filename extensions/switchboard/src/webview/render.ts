@@ -455,6 +455,11 @@ export function linkKind(target: string): 'pr' | 'issue' | 'url' {
   return PULL_REQUEST.test(target) ? 'pr' : ISSUE.test(target) ? 'issue' : 'url';
 }
 
+/** A GitHub pull request's or issue's number, from the same URL patterns as `linkKind`, or null for another URL. */
+export function linkNumber(target: string): string | null {
+  return (PULL_REQUEST.exec(target) ?? ISSUE.exec(target))?.[1] ?? null;
+}
+
 const LINK_ICONS = { pr: 'git-pull-request', url: 'link' } as const;
 
 function linkBadge(link: { label: string; target: string }): string {

@@ -1,6 +1,6 @@
 import { urlKey } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
-import { GROUP_TITLES, panelGroups, playbookText, rowKeyOf, ticketKey } from './webview/render.js';
+import { GROUP_TITLES, linkKind, linkNumber, panelGroups, playbookText, rowKeyOf, ticketKey } from './webview/render.js';
 import type { RowGroup } from './webview/render.js';
 
 /** A panel row by its work item, or by its pool ticket. */
@@ -9,7 +9,7 @@ export type RowTarget = { workItemId: number } | { ticketId: number };
 export interface SearchEntry {
   /** The ticket's title. */
   label: string;
-  /** The key, playbook and group, such as `gh 18941 · dev:develop · Needs you`. */
+  /** The key, linked pull requests and issues, playbook and group, such as `gh 18941 · PR #19002 · dev:develop · Needs you`. */
   description: string;
   /** The worktree's branch, when there is one. */
   detail?: string;
@@ -24,11 +24,24 @@ function rows(snapshot: Snapshot): { group: RowGroup; entry: WorkItemView | Pool
   return Object.entries(panelGroups(snapshot)).flatMap(([group, entries]) => entries.map((entry) => ({ group: group as RowGroup, entry })));
 }
 
+/** The row's linked GitHub pull requests and issues as `PR #<n>` and `gh <n>`, as the row's badges show them (PRD R52). */
+function linkedKeys(entry: WorkItemView | PoolView): string[] {
+  const keys = entry.links.flatMap((link) => {
+    const kind = linkKind(link.target);
+    const number = linkNumber(link.target);
+
+    return kind === 'url' || number === null ? [] : [kind === 'pr' ? `PR #${number}` : `gh ${number}`];
+  });
+
+  // A link to the ticket itself repeats its key.
+  return [...new Set(keys)].filter((key) => key !== ticketKey(entry.ticket));
+}
+
 /** A quick pick entry for every row the panel shows, in panel order (PRD R63). */
 export function searchEntries(snapshot: Snapshot): SearchEntry[] {
   return rows(snapshot).map(({ group, entry }) => {
     const branch = 'status' in entry ? entry.worktree?.branch : undefined;
-    const description = [ticketKey(entry.ticket), playbookText(entry, snapshot.namespaces), GROUP_TITLES[group]].filter((part) => part !== '').join(' · ');
+    const description = [ticketKey(entry.ticket), ...linkedKeys(entry), playbookText(entry, snapshot.namespaces), GROUP_TITLES[group]].filter((part) => part !== '').join(' · ');
 
     return { label: entry.ticket.title, description, ...(branch ? { detail: branch } : {}), target: targetOf(entry) };
   });
