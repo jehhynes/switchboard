@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { Runtime, WAKE_MS } from '../src/runtime.js';
+import { Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -179,7 +179,8 @@ describe('Runtime', () => {
     expect(store.linksFor(1)).toMatchObject([{ label: 'Pull request #70', target: 'https://github.com/o/r/pull/70' }]);
     const classifyCall = cli.calls.find((call) => call[1] === '-p');
     expect(classifyCall?.at(-1)).toContain('Classify.');
-    expect(store.triage(1)).toMatchObject({ context: 'Issue 7 text', playbook: 'dev:develop', summary: 'Build the thing.' });
+    expect(store.triage(1)?.context).toBe('Current time: 2026-10-03 12:00 UTC\n\nIssue 7 text');
+    expect(store.triage(1)).toMatchObject({ playbook: 'dev:develop', summary: 'Build the thing.' });
     expect(store.session('s1')).toMatchObject({ shortId: '00000001', nativeSessionId: '00000001-native', state: 'running', cwd: 'D:/git/widgets-wt/7-fix' });
     expect(store.workItem(1)?.status).toBe('running');
     expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', branch: '7-fix', linkedBy: 'convention' });
@@ -431,9 +432,9 @@ describe('Runtime', () => {
     cfg.playbooks = new Map([...PLAYBOOKS, playbook('triage:github', '---\ndescription: Triage\nkind: triage\nrates: true\n---\nClassify and rate.')]);
     const { store, cli, source, runtime } = setup(cfg);
     const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 's', immediacy, severity } }));
-    cli.classifyByContext.set('Issue 2 text', rated('NON-BLOCKING', 'LOW'));
-    cli.classifyByContext.set('Issue 3 text', rated('BLOCKING', 'HIGH'));
-    cli.classifyByContext.set('Issue 4 text', rated('URGENT', 'MED'));
+    cli.classifyByContext.set(triageText('Issue 2 text', T0), rated('NON-BLOCKING', 'LOW'));
+    cli.classifyByContext.set(triageText('Issue 3 text', T0), rated('BLOCKING', 'HIGH'));
+    cli.classifyByContext.set(triageText('Issue 4 text', T0), rated('URGENT', 'MED'));
     const pooled = (key: string, sortAt: number) => ({ ...issue(key), assigned: false, pool: true, sortAt, enteredAt: null });
     source.result = { tickets: [pooled('1', 10), pooled('2', 20), pooled('3', 30), pooled('4', 25), pooled('5', 5)] };
 

@@ -437,18 +437,19 @@ export class Runtime {
           return;
         }
 
+        const text = triageText(context.context, this.deps.now());
         const result = await classify(
-          { claudePath: this.deps.claudePath, systemPrompt: action.systemPrompt, choices: action.choices, rates: action.rates, context: context.context, model: action.model, timeoutSeconds: action.timeoutSeconds, cwd: this.home },
+          { claudePath: this.deps.claudePath, systemPrompt: action.systemPrompt, choices: action.choices, rates: action.rates, context: text, model: action.model, timeoutSeconds: action.timeoutSeconds, cwd: this.home },
           this.deps.exec,
         );
 
         this.send(
           'error' in result
-            ? { type: 'triage-failed', triageId: action.triageId, error: result.error, context: context.context }
+            ? { type: 'triage-failed', triageId: action.triageId, error: result.error, context: text }
             : {
                 type: 'triage-succeeded',
                 triageId: action.triageId,
-                context: context.context,
+                context: text,
                 playbook: result.playbook,
                 summary: result.summary,
                 immediacy: result.immediacy,
@@ -491,4 +492,9 @@ export class Runtime {
 
 function folderKey(path: string): string {
   return path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/** The source's triage context led by the current UTC time, in the form sources use, so triage can judge how recent each event is. */
+export function triageText(context: string, now: number): string {
+  return `Current time: ${new Date(now).toISOString().slice(0, 16).replace('T', ' ')} UTC\n\n${context}`;
 }
