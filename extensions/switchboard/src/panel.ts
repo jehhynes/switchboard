@@ -6,7 +6,7 @@ import type { Snapshot } from '@switchboard/hub';
 import { snoozeChoices } from '@switchboard/core';
 import { postToHub } from '@switchboard/hub';
 import { needsBadge } from './badge.js';
-import { rowFor, searchEntries } from './search.js';
+import { openUrlOf, rowFor, searchEntries, targetForUrl } from './search.js';
 import type { RowTarget, SearchEntry } from './search.js';
 
 const ACTION_TIMEOUT_MS = 10_000;
@@ -24,15 +24,35 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
+  /** Waiting for the first state, such as a URI that started this window (PRD R69). */
+  private stateWaiters: (() => void)[] = [];
+
   /** The latest `state` event from the hub, as its JSON text. */
   update(state: string): void {
     this.latest = state;
+    this.stateWaiters.splice(0).forEach((resume) => resume());
     this.showBadge();
     void this.view?.webview.postMessage({ type: 'state', snapshot: JSON.parse(state) });
   }
 
   state(): unknown {
     return this.latest === null ? null : JSON.parse(this.latest);
+  }
+
+  /** The latest state, waiting up to `ms` for the first one; null when none arrives. */
+  async firstState(ms: number): Promise<Snapshot | null> {
+    if (this.latest === null) {
+      await new Promise<void>((resume) => {
+        const timer = setTimeout(resume, ms);
+
+        this.stateWaiters.push(() => {
+          clearTimeout(timer);
+          resume();
+        });
+      });
+    }
+
+    return this.state() as Snapshot | null;
   }
 
   /** The activity bar badge, or null before VS Code resolves the view. */
@@ -218,6 +238,38 @@ export async function copyPaste(pastes: readonly PasteChoice[]): Promise<string 
   vscode.window.setStatusBarMessage(`Copied ${paste.label}`, COPIED_MESSAGE_MS);
 
   return paste.label;
+}
+
+/** How long a URI that arrives before the hub's first state, such as one that started VS Code, waits for it. */
+const URI_STATE_WAIT_MS = 15_000;
+
+/**
+ * Open in Switchboard (PRD R69): `vscode://switchboard.switchboard/open?url=<ticket url>` reveals the row of the work item or pool
+ * ticket with that URL, or a link to it, and runs its click action, as Go to Work Item does. Resolves to the row's target, or null.
+ */
+export async function openUri(view: WorkItemsView, uri: vscode.Uri, waitMs = URI_STATE_WAIT_MS): Promise<RowTarget | null> {
+  const url = openUrlOf(uri.path, uri.query);
+
+  if (url === null) {
+    void vscode.window.showWarningMessage(`Switchboard cannot open ${uri.toString(true)}.`);
+    return null;
+  }
+
+  const snapshot = await view.firstState(waitMs);
+
+  if (snapshot === null) {
+    void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
+    return null;
+  }
+
+  const target = targetForUrl(snapshot, url);
+
+  if (target === null || !(await view.reveal(target))) {
+    void vscode.window.showInformationMessage(`Switchboard has no work item for ${url}`);
+    return null;
+  }
+
+  return target;
 }
 
 /** Opens an http(s) URL in the browser and anything else, a reported file path, in VS Code (PRD R52). */

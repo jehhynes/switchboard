@@ -7,8 +7,9 @@ import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopH
 import { openChanges, showInSourceControl } from './git.js';
 import { startHub } from './hubProcess.js';
 import { NeedsYouToasts } from './notify.js';
-import { WorkItemsView, attach, claimOpen, copyPaste, dispatch, goTo, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
+import { WorkItemsView, attach, claimOpen, copyPaste, dispatch, goTo, openLink, openSession, openUri, openWorktree, resume, setSource, startAdhoc } from './panel.js';
 import type { PasteChoice } from './panel.js';
+import type { RowTarget } from './search.js';
 import { SettingsEditor } from './settingsEditor.js';
 import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
 import { ROW_COMMANDS } from './webview/render.js';
@@ -23,6 +24,8 @@ export interface SwitchboardApi {
   badge(): vscode.ViewBadge | undefined | null;
   /** Shows a state as if the hub sent it, so the integration suite can show recorded snapshots. */
   show(state: string): void;
+  /** Runs the URI handler, which the integration suite cannot reach through the OS (PRD R69). */
+  openUri(uri: vscode.Uri, waitMs?: number): Promise<RowTarget | null>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -119,6 +122,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     { dispose: () => settings.dispose() },
     vscode.commands.registerCommand('switchboard.newAdhoc', () => startAdhoc(keeper.current(), view.state() as Snapshot | null)),
     vscode.commands.registerCommand('switchboard.goTo', () => goTo(view)),
+    vscode.window.registerUriHandler({ handleUri: (uri) => void openUri(view, uri) }),
     vscode.commands.registerCommand('switchboard.setSource', (name: string, enabled: boolean) => setSource(keeper.current(), name, enabled)),
     ...TOGGLED_SOURCES.flatMap((name) => [
       vscode.commands.registerCommand(`switchboard.source.${name}.on`, () => setSource(keeper.current(), name, false)),
@@ -169,7 +173,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   context.subscriptions.push({ dispose: () => keeper.dispose() });
 
-  return { hub: () => keeper.current(), state: () => view.state(), badge: () => view.badge(), show: (state) => view.update(state) };
+  return { hub: () => keeper.current(), state: () => view.state(), badge: () => view.badge(), show: (state) => view.update(state), openUri: (uri, waitMs) => openUri(view, uri, waitMs) };
 }
 
 export function deactivate(): void {}

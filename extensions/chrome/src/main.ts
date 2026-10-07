@@ -1,5 +1,6 @@
 import type { Card } from '@switchboard/core/group';
 import { issueKey, watchBoard } from './board.js';
+import { watchOpen } from './open.js';
 import { watchPills } from './pills.js';
 import { snoozableKeys, watchSnoozeControls } from './snooze.js';
 import type { SnoozeAnswer } from './snooze.js';
@@ -34,4 +35,15 @@ watchSnoozeControls(
   () => board.refresh(),
   () => new Date(),
   (url) => snoozable.has(issueKey(url) ?? ''),
+);
+
+// A vscode:// navigation leaves the page as it is; Chrome asks before opening VS Code (mechanics M22).
+watchOpen(
+  document,
+  async () => {
+    const cards = await chrome.runtime.sendMessage({ type: 'cards' }).catch(() => null);
+
+    return Array.isArray(cards) ? (cards as Card[]) : null;
+  },
+  (uri) => location.assign(uri),
 );

@@ -32,6 +32,24 @@ export function triageLabel(source: string, namespaces: Record<string, string>):
   return namespace === '' ? 'triage' : `${namespace}:triage`;
 }
 
+/**
+ * A URL as Open in Switchboard compares it (PRD R69): a GitHub issue or pull request page, any tab such as `/files` included, as
+ * `github.com/<owner>/<repo>/<issues|pull>/<number>` in lower case; any other URL as parsed, without a trailing slash.
+ */
+export function urlKey(url: string): string {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+
+  const match = parsed.hostname === 'github.com' ? /^\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)(?:\/|$)/.exec(parsed.pathname) : null;
+
+  return match === null ? parsed.href.replace(/\/$/, '') : `github.com/${match[1]}/${match[2]}/${match[3]}/${match[4]}`.toLowerCase();
+}
+
 /** A ticket on the browser endpoint's `GET /cards` (PRD R67). `url` is the ticket's URL as stored. */
 export interface Card {
   url: string;
@@ -39,4 +57,6 @@ export interface Card {
   playbook: string | null;
   group: Group;
   snoozed: boolean;
+  /** The URLs of the ticket's links (PRD R52), so a pull request page finds its ticket (PRD R69). A hub older than R69 sends none. */
+  links?: string[];
 }

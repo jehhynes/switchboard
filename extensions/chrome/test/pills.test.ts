@@ -63,9 +63,9 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([needs, working, { url: 'https://github.com/github/roadmap/issues/1153', playbook: null, group: 'unstarted', snoozed: true }]));
 
     expect(pills()).toEqual([
-      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr', group: 'needs', title: 'Switchboard: Needs you' },
-      { card: '94970044', after: 'board-card-header-title-94970044', namespace: 'dev:', text: 'dev:new-dev', group: 'working', title: 'Switchboard: Working' },
-      { card: '126571572', after: 'board-card-header-title-126571572', namespace: '', text: 'Unstarted', group: 'snoozed', title: 'Switchboard: Snoozed' },
+      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr', group: 'needs', title: 'Switchboard: Needs you. Click to open in VS Code.' },
+      { card: '94970044', after: 'board-card-header-title-94970044', namespace: 'dev:', text: 'dev:new-dev', group: 'working', title: 'Switchboard: Working. Click to open in VS Code.' },
+      { card: '126571572', after: 'board-card-header-title-126571572', namespace: '', text: 'Unstarted', group: 'snoozed', title: 'Switchboard: Snoozed. Click to open in VS Code.' },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([{ ...needs, playbook: 'dev:review-pr-followup', group: 'working' }]));
 
     expect(pills()).toEqual([
-      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr-followup', group: 'working', title: 'Switchboard: Working' },
+      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr-followup', group: 'working', title: 'Switchboard: Working. Click to open in VS Code.' },
     ]);
 
     applyPills(document, new Map());

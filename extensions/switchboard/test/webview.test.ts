@@ -1,6 +1,6 @@
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { rowFor, searchEntries } from '../src/search.js';
+import { openUrlOf, rowFor, searchEntries, targetForUrl } from '../src/search.js';
 import { startPanel } from '../src/webview/main.js';
 import { age, CAPS, clip, clockOf, controlsOf, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
@@ -993,6 +993,52 @@ describe('Go to Work Item (PRD R63)', () => {
     expect(rowFor(data, { workItemId: 99 })).toBeNull();
     // A ticket that is not in the pool has no pool row, though its work item has one.
     expect(rowFor(data, { ticketId: 1 })).toBeNull();
+  });
+});
+
+describe('Open in Switchboard (PRD R69)', () => {
+  const desk = (id: number) => `https://desk.example.test/tickets/${id}`;
+  const zoho = (id: number, patch: Partial<WorkItemView['ticket']> = {}): WorkItemView['ticket'] => ({ ...item(id).ticket, source: 'zoho', sourceKey: `Z${id}`, url: desk(id), ...patch });
+  const link = (target: string) => ({ id: 1, ticketId: 1, label: 'link', target, reportedAt: NOW });
+  const data = snapshot(
+    [
+      // Work item 1 links issue 102, which is also work item 2's ticket.
+      item(1, { links: [link('https://github.com/o/r/pull/55'), link('https://github.com/o/r/issues/102')] }),
+      item(2),
+      // Ticket 3 returned: a done work item and an open one.
+      item(3, { status: 'done', doneAt: NOW }),
+      item(4, { ticketId: 3, ticket: item(3).ticket, status: 'unstarted' }),
+      // Snoozed ticket 8: the panel shows its open work item 6 only.
+      item(5, { ticketId: 8, status: 'done', doneAt: NOW, ticket: zoho(8, { snoozed: true }) }),
+      item(6, { ticketId: 8, status: 'unstarted', ticket: zoho(8, { snoozed: true }) }),
+    ],
+    { sources: ['github', 'zoho'], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: true }], pool: [{ ticket: zoho(10, { pool: true, assigned: false }), triage: null, returned: 0, links: [link('https://github.com/o/r/pull/77')] }] },
+  );
+
+  it("finds the row of the ticket with the URL, by GitHub's case and any page tab, before a work item that links to it", () => {
+    expect(targetForUrl(data, 'https://github.com/O/R/issues/102/')).toEqual({ workItemId: 2 });
+    expect(targetForUrl(data, 'https://github.com/o/r/pull/55/files')).toEqual({ workItemId: 1 });
+    expect(targetForUrl(data, desk(10))).toEqual({ ticketId: 10 });
+    expect(targetForUrl(data, 'https://github.com/o/r/pull/77')).toEqual({ ticketId: 10 });
+  });
+
+  it('finds an open work item before a done one of the same ticket, and the row the panel shows for a snoozed ticket', () => {
+    expect(targetForUrl(data, 'https://github.com/o/r/issues/103')).toEqual({ workItemId: 4 });
+    expect(targetForUrl(data, desk(8))).toEqual({ workItemId: 6 });
+  });
+
+  it('finds nothing for a URL no row has, another kind of GitHub page, or an empty URL', () => {
+    expect(targetForUrl(data, 'https://github.com/o/r/issues/999')).toBeNull();
+    expect(targetForUrl(data, 'https://github.com/o/r/pull/102')).toBeNull();
+    expect(targetForUrl(snapshot([item(1, { ticket: { ...item(1).ticket, url: '' } })]), '')).toBeNull();
+  });
+
+  it('reads the ticket URL from an open URI and refuses any other', () => {
+    expect(openUrlOf('/open', 'url=https://github.com/o/r/issues/1')).toBe('https://github.com/o/r/issues/1');
+    expect(openUrlOf('/open', 'url=https://desk.example.test/t?a=1&b=2')).toBe('https://desk.example.test/t?a=1&b=2');
+    expect(openUrlOf('/other', 'url=https://github.com/o/r/issues/1')).toBeNull();
+    expect(openUrlOf('/open', 'link=https://github.com/o/r/issues/1')).toBeNull();
+    expect(openUrlOf('/open', 'url=')).toBeNull();
   });
 });
 

@@ -4,7 +4,7 @@ import { BROWSER_PORT } from './hub.js';
 
 export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
 
-const PILL = 'switchboard-pill';
+export const PILL = 'switchboard-pill';
 const GROUPS: Record<Group, string> = { needs: 'Needs you', working: 'Working', unstarted: 'Unstarted', done: 'Done' };
 
 function isCard(value: unknown): value is Card {
@@ -51,8 +51,11 @@ function pill(doc: Document, card: Card): HTMLElement {
   const namespace = doc.createElement('span');
 
   element.className = PILL;
+  // A link to the ticket's row in VS Code, which open.ts follows on a click or Enter (PRD R69).
+  element.tabIndex = 0;
+  element.setAttribute('role', 'link');
   element.dataset['switchboardGroup'] = card.snoozed ? 'snoozed' : card.group;
-  element.title = `Switchboard: ${card.snoozed ? 'Snoozed' : GROUPS[card.group]}`;
+  element.title = `Switchboard: ${card.snoozed ? 'Snoozed' : GROUPS[card.group]}. Click to open in VS Code.`;
   namespace.className = 'switchboard-namespace';
   namespace.textContent = label.slice(0, colon + 1);
   element.append(namespace, label.slice(colon + 1));

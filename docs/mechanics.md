@@ -231,6 +231,19 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Experiment:** [changes.test.cjs](../extensions/switchboard/test-integration/changes.test.cjs) builds a clone with `origin/main` and a worktree holding a committed edit, addition and deletion, an untracked file, a staged edit deleted on disk, and a staged rename. Show in Source Control added the worktree to the Git API's repositories. Open Changes opened one editor titled `gh 18941 Inbox badge — since <base> (5 files)`, whose one two-sided row ran from `kept.txt` at the base (`git:`) to `renamed.txt` on disk (`file:`), both inside the worktree. A plain folder got the no-repository warning and no editor. A second `_workbench.openMultiDiffEditor` call with the same source URI and more resources kept the open editor's title and resources (a Codex probe on this version), so each open uses a new source URI after closing the ticket's earlier tab; reopening after adding a file and changing the title showed one tab with 6 files, and reopening on a worktree with no changes closed it. Conflicted files are in the repository's `mergeChanges` group, not the working-tree group.
 - **Current use:** Open Changes and Show in Source Control (architecture.md § Panel). Re-verify after a VS Code upgrade by running the integration suite.
 
+## M22. Opening a `vscode://` link from Chrome
+
+- **Date:** 2026-10-07.
+- **Versions:** VS Code 1.141.0 (`2a59476c`), `resources/app/out/mainImpl.js` and `out/vs/workbench/workbench.desktop.main.js`. Chrome was not inspected.
+- **Inspection, VS Code:**
+  - The main process registers itself for the product's `urlProtocol` (`vscode`) with `app.setAsDefaultProtocolClient` only when it is not portable, which is why the integration suite's portable VS Code leaves the operator's registration alone. A launch with `--open-url` and no window opens an empty window first, then handles the URI.
+  - `URLHandlerRouter.routeCall` sends a URI whose query has `windowId=<n>` to that window; any other goes to the active window, which the main process tracks as the last focused main window. Switchboard's URIs carry no `windowId`, so the last focused window gets them, whatever folder it has open.
+  - In that window, `ExtensionUrlHandler.handleURL` asks "Allow '<extension>' extension to open this URI?", with a "Do not ask me again for this extension" checkbox, unless the extension is in the product's trusted handlers, in the user's `extensions.confirmedUriHandlerExtensionIds` setting, or was trusted through that checkbox, which the profile's storage keeps. It then activates the extension with `onUri:<id>` and passes the URI once the extension registers its handler, buffering it for up to 5 minutes.
+  - `URI.parse` percent-decodes each component, so the handler's `uri.query` is decoded once.
+- **Integration suite:** calling the handler through the extension API with an encoded GitHub issue URL in another case and with `/files`, and with a URL holding `?id=5&x=1`, revealed the matching rows and ran their click actions (`open.test.cjs`).
+- **Not verified:** no `vscode://` link was opened from Chrome, because that would open the operator's own VS Code. Chrome's own documentation and behavior, not checked here, describe an "Open Visual Studio Code?" prompt for an external protocol with an "Always allow github.com to open links of this type" checkbox for an https page; whether it appears every time for the operator is unknown. Whether VS Code brings the receiving window to the front was not observed.
+- **Current use:** Open in Switchboard (architecture.md § Panel, § Chrome extension). The operator can avoid VS Code's prompt with `"extensions.confirmedUriHandlerExtensionIds": ["switchboard.switchboard"]`.
+
 ## M23. Requests from an extension service worker and from a web page to the browser endpoint
 
 - **Date:** 2026-10-07.

@@ -1,3 +1,4 @@
+import { urlKey } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 import { GROUP_TITLES, panelGroups, playbookText, rowKeyOf, ticketKey } from './webview/render.js';
 import type { RowGroup } from './webview/render.js';
@@ -31,6 +32,25 @@ export function searchEntries(snapshot: Snapshot): SearchEntry[] {
 
     return { label: entry.ticket.title, description, ...(branch ? { detail: branch } : {}), target: targetOf(entry) };
   });
+}
+
+/**
+ * The row Open in Switchboard reveals for a URL (PRD R69): the first row in panel order whose ticket has the URL, else the first
+ * row whose ticket has a link to it, such as its pull request (PRD R52). URLs compare by `urlKey`. Null when no row the panel shows has it.
+ */
+export function targetForUrl(snapshot: Snapshot, url: string): RowTarget | null {
+  const key = urlKey(url);
+  const shown = rows(snapshot).map(({ entry }) => entry);
+  const found =
+    shown.find((entry) => entry.ticket.url !== '' && urlKey(entry.ticket.url) === key) ??
+    shown.find((entry) => entry.links.some((link) => urlKey(link.target) === key));
+
+  return found === undefined ? null : targetOf(found);
+}
+
+/** The ticket URL of a `vscode://switchboard.switchboard/open?url=<url>` URI's path and decoded query, or null for another URI. */
+export function openUrlOf(path: string, query: string): string | null {
+  return path === '/open' && query.startsWith('url=') && query.length > 4 ? query.slice(4) : null;
 }
 
 /**

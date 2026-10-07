@@ -47,12 +47,12 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:review-pr', group: 'needs', snoozed: false },
-      { url: issue(2), playbook: 'dev:qa-failure', group: 'needs', snoozed: false },
-      { url: issue(3), playbook: 'dev:new-dev', group: 'working', snoozed: true },
-      { url: issue(4), playbook: 'dev:triage', group: 'unstarted', snoozed: false },
-      { url: issue(5), playbook: 'dev:other', group: 'done', snoozed: false },
-      { url: issue(6), playbook: null, group: 'needs', snoozed: false },
+      { url: issue(1), playbook: 'dev:review-pr', group: 'needs', snoozed: false, links: [] },
+      { url: issue(2), playbook: 'dev:qa-failure', group: 'needs', snoozed: false, links: [] },
+      { url: issue(3), playbook: 'dev:new-dev', group: 'working', snoozed: true, links: [] },
+      { url: issue(4), playbook: 'dev:triage', group: 'unstarted', snoozed: false, links: [] },
+      { url: issue(5), playbook: 'dev:other', group: 'done', snoozed: false, links: [] },
+      { url: issue(6), playbook: null, group: 'needs', snoozed: false, links: [] },
     ]);
   });
 
@@ -74,8 +74,8 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:review-pr-followup', group: 'unstarted', snoozed: false },
-      { url: issue(2), playbook: 'dev:new-dev', group: 'done', snoozed: false },
+      { url: issue(1), playbook: 'dev:review-pr-followup', group: 'unstarted', snoozed: false, links: [] },
+      { url: issue(2), playbook: 'dev:new-dev', group: 'done', snoozed: false, links: [] },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe('cardsOf', () => {
       ),
     );
 
-    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'working', snoozed: false }]);
+    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'working', snoozed: false, links: [] }]);
   });
 
   it('shows a pool ticket as Unstarted with its triage\'s playbook, over its done work items', () => {
@@ -112,10 +112,29 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: 'https://desk.example.test/1', playbook: 'support:case', group: 'unstarted', snoozed: true },
-      { url: 'https://desk.example.test/2', playbook: 'support:triage', group: 'unstarted', snoozed: false },
-      { url: 'https://desk.example.test/3', playbook: null, group: 'unstarted', snoozed: false },
-      { url: 'https://desk.example.test/4', playbook: null, group: 'unstarted', snoozed: true },
+      { url: 'https://desk.example.test/1', playbook: 'support:case', group: 'unstarted', snoozed: true, links: [] },
+      { url: 'https://desk.example.test/2', playbook: 'support:triage', group: 'unstarted', snoozed: false, links: [] },
+      { url: 'https://desk.example.test/3', playbook: null, group: 'unstarted', snoozed: false, links: [] },
+      { url: 'https://desk.example.test/4', playbook: null, group: 'unstarted', snoozed: true, links: [] },
+    ]);
+  });
+
+  it("gives a card the link URLs of its work item or pool entry (PRD R69)", () => {
+    const linked = ticket(1, 'github', issue(1));
+    const pooled = ticket(2, 'zoho', 'https://desk.example.test/2');
+    const link = (target: string) => ({ id: 1, ticketId: 0, label: 'PR', target, reportedAt: 0 });
+    const withLinks = (entry: WorkItemView, targets: string[]): WorkItemView => ({ ...entry, links: targets.map(link) });
+    const cards = cardsOf(
+      snapshot(
+        [withLinks(item(1, linked, 'running', 'dev:develop'), ['https://github.com/o/r/pull/7', 'https://example.test/doc']), withLinks(item(2, pooled, 'done', 'support:defect'), ['https://github.com/o/r/issues/8'])],
+        [{ ticket: pooled, triage: triage('support:case', 10), returned: 1, links: [link('https://github.com/o/r/issues/9')] }],
+        ['github', 'zoho'],
+      ),
+    );
+
+    expect(cards).toEqual([
+      { url: issue(1), playbook: 'dev:develop', group: 'working', snoozed: false, links: ['https://github.com/o/r/pull/7', 'https://example.test/doc'] },
+      { url: 'https://desk.example.test/2', playbook: 'support:case', group: 'unstarted', snoozed: false, links: ['https://github.com/o/r/issues/9'] },
     ]);
   });
 });
