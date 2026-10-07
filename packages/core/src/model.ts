@@ -98,7 +98,6 @@ export interface Triage {
   workItemId: number | null;
   context: string | null;
   playbook: string | null;
-  summary: string | null;
   immediacy: Immediacy | null;
   severity: Severity | null;
   model: string | null;

@@ -11,7 +11,6 @@ export const TEMPLATE_VARIABLES = [
   'ticket.title',
   'ticket.url',
   'ticket.context',
-  'triage.summary',
   'session.id',
   'report',
 ] as const;

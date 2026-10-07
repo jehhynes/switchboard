@@ -150,6 +150,8 @@ export const MIGRATIONS = [
   `UPDATE workItems SET status = 'blocked', failedStep = 'task', error = COALESCE(error, 'Pick sessions were removed. Retry starts the playbook, which claims the ticket.')
     WHERE needsPick = 1 AND status <> 'done';
   ALTER TABLE workItems DROP COLUMN needsPick;`,
+  // Triage no longer writes a summary (PRD R18).
+  `ALTER TABLE triages DROP COLUMN summary;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released']);

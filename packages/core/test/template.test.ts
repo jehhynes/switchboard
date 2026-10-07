@@ -64,7 +64,8 @@ describe('renderTaskPrompt and sessionPrompt', () => {
 
 describe('templateError', () => {
   it('accepts the known variables and names each unknown one once', () => {
-    expect(templateError('/init-worktree {{ ticket.sourceKey }} {{session.id}} {{report}} {{triage.summary}}')).toBeNull();
+    expect(templateError('/init-worktree {{ ticket.sourceKey }} {{session.id}} {{report}}')).toBeNull();
+    expect(templateError('{{triage.summary}}')).toBe('Unknown template variable: triage.summary.');
     expect(templateError('{{ticket.key}} {{ticket.key}} {{issue}} {{ticket.ref}}')).toBe('Unknown template variable: ticket.key, issue.');
   });
 

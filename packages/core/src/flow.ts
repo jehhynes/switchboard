@@ -15,7 +15,7 @@ const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['triaging', 'queued',
 /** A ticket that leaves the source's scope stops being snoozed, so it leaves the Snoozed group (PRD R49). */
 const UNSNOOZED = { snoozed: false, snoozedUntil: null } as const;
 
-const EMPTY_TRIAGE = { context: null, playbook: null, summary: null, immediacy: null, severity: null, model: null } as const;
+const EMPTY_TRIAGE = { context: null, playbook: null, immediacy: null, severity: null, model: null } as const;
 
 export const MESSAGES = {
   stopped: 'Stopped by you.',
@@ -77,7 +77,6 @@ export type FlowEvent =
       triageId: number;
       context: string;
       playbook: string;
-      summary: string;
       immediacy: Immediacy | null;
       severity: Severity | null;
       model: string | null;
@@ -465,7 +464,6 @@ class Flow {
       endedAt: this.now,
       context: event.context,
       playbook: event.playbook,
-      summary: event.summary,
       immediacy: event.immediacy,
       severity: event.severity,
       model: event.model,
@@ -912,7 +910,7 @@ class Flow {
   /** PRD R48: a queued work item with the pool triage's playbook; its task session's skill claims the ticket. */
   private pick(ticket: Ticket): void {
     const triages = this.store.poolTriages(ticket.id);
-    const triaged = triages.filter((triage) => triage.summary !== null).at(-1);
+    const triaged = triages.filter((triage) => triage.playbook !== null).at(-1);
 
     if (triaged?.playbook == null) {
       throw new Refusal('The ticket has no triage result yet.');
@@ -1212,7 +1210,7 @@ class Flow {
   }
 
   private values(ticket: Ticket, item: WorkItem): Record<Exclude<TemplateVariable, 'session.id'>, string> {
-    const triage = this.store.triagesFor(item.id).filter((entry) => entry.summary !== null).at(-1);
+    const triage = this.store.triagesFor(item.id).filter((entry) => entry.playbook !== null).at(-1);
 
     return {
       'ticket.source': ticket.source,
@@ -1221,7 +1219,6 @@ class Flow {
       'ticket.title': ticket.title,
       'ticket.url': ticket.url,
       'ticket.context': triage?.context ?? '',
-      'triage.summary': triage?.summary ?? '',
       report: this.context.report,
     };
   }

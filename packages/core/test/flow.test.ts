@@ -115,7 +115,7 @@ describe('assigned-state transitions', () => {
 
     expect(h.triaged(first, 'dev:question')).toEqual([]);
     expect(h.item(1)).toMatchObject({ status: 'done', playbook: null });
-    expect(h.store.triage(1)).toMatchObject({ playbook: 'dev:question', summary: 'A summary.' });
+    expect(h.store.triage(1)).toMatchObject({ playbook: 'dev:question' });
 
     h.act({ type: 'triage-failed', triageId: 2, error: 'late', context: null });
     expect(h.item(2)).toMatchObject({ status: 'done', error: null });
@@ -141,7 +141,7 @@ describe('triage', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
 
-    expect(h.triaged(triage, 'dev:question', 'Asks about fees.')).toEqual([]);
+    expect(h.triaged(triage, 'dev:question')).toEqual([]);
     expect(h.item(1)).toMatchObject({ status: 'unstarted', playbook: 'dev:question' });
     expect(h.send({ type: 'approve', workItemId: 1 }).refused).toBe('The work item is not awaiting approval.');
 
@@ -153,7 +153,7 @@ describe('triage', () => {
       workItemId: 1,
       kind: 'task',
       cwd: 'D:/git/widgets',
-      prompt: 'Answer Issue 1.\nAsks about fees.' + CONTRACT('s1', QUESTION_REPORTS),
+      prompt: 'Answer Issue 1.\nContext 1' + CONTRACT('s1', QUESTION_REPORTS),
       name: 'switchboard · dev:question · github 1',
       permissionMode: 'plan',
       model: 'opus',
@@ -379,7 +379,7 @@ describe('sessions', () => {
     const second = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
 
     expect(second.sessionId).toBe('s2');
-    expect(second.prompt).toBe('Answer Issue 1.\nA summary.' + CONTRACT('s2', QUESTION_REPORTS));
+    expect(second.prompt).toBe('Answer Issue 1.\nContext 1' + CONTRACT('s2', QUESTION_REPORTS));
 
   });
 

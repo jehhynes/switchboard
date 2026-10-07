@@ -35,7 +35,7 @@ describe('link reports (PRD R52)', () => {
       throw new Error('Expected a triage action.');
     }
 
-    const succeeded = { type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'dev:develop', summary: 's', immediacy: null, severity: null, model: null } as const;
+    const succeeded = { type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'dev:develop', immediacy: null, severity: null, model: null } as const;
 
     h.act({ ...succeeded, links: [pr] });
     h.act({ ...succeeded, links: [{ label: 'Late', target: 'https://github.com/o/r/pull/3' }] });

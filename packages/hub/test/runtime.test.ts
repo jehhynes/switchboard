@@ -55,7 +55,7 @@ const fail = (stderr: string): ExecResult => ({ code: 1, stdout: '', stderr, mis
 class FakeCli {
   roster: object[] = [];
   calls: string[][] = [];
-  classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 'Build the thing.' } }));
+  classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop' } }));
   /** Per-ticket classifier output by triage context, overriding `classifyResult`. */
   classifyByContext = new Map<string, ExecResult>();
   startResult: ExecResult | null = null;
@@ -201,7 +201,7 @@ describe('Runtime', () => {
     const classifyCall = cli.calls.find((call) => call[1] === '-p');
     expect(classifyCall?.at(-1)).toContain('Classify.');
     expect(store.triage(1)?.context).toBe('Current time: 2026-10-03 12:00 UTC\n\nIssue 7 text');
-    expect(store.triage(1)).toMatchObject({ playbook: 'dev:develop', summary: 'Build the thing.' });
+    expect(store.triage(1)).toMatchObject({ playbook: 'dev:develop' });
     expect(store.session('s1')).toMatchObject({ shortId: '00000001', nativeSessionId: '00000001-native', state: 'running', cwd: 'D:/git/widgets-wt/7-fix' });
     expect(store.workItem(1)?.status).toBe('running');
     expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', branch: '7-fix', linkedBy: 'convention' });
@@ -512,7 +512,7 @@ describe('Runtime', () => {
     const cfg = config();
     cfg.playbooks = new Map([...PLAYBOOKS, playbook('triage:github', '---\ndescription: Triage\nkind: triage\nrates: true\n---\nClassify and rate.')]);
     const { store, cli, source, runtime } = setup(cfg);
-    const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 's', immediacy, severity } }));
+    const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', immediacy, severity } }));
     cli.classifyByContext.set(triageText('Issue 2 text', T0), rated('NON-BLOCKING', 'LOW'));
     cli.classifyByContext.set(triageText('Issue 3 text', T0), rated('BLOCKING', 'HIGH'));
     cli.classifyByContext.set(triageText('Issue 4 text', T0), rated('URGENT', 'MED'));

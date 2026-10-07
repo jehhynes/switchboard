@@ -162,7 +162,6 @@ const triage = (patch: Partial<Triage> = {}): Triage => ({
   workItemId: 1,
   context: 'Issue text',
   playbook: 'dev:develop',
-  summary: 'A summary.',
   immediacy: null,
   severity: null,
   model: null,
@@ -397,10 +396,10 @@ describe('renderPanel', () => {
     expect(done.querySelector('.stage')?.textContent).toBe('review · 1m');
   });
 
-  it('shows no triage summary, triage context, task prompt or session history', () => {
-    const root = render(snapshot([item(1, { status: 'blocked', taskPrompt: 'Build 101.', triage: triage({ summary: 'A summary.', context: 'Issue text' }), sessions: [session({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' })] })]));
+  it('shows no triage context, task prompt or session history', () => {
+    const root = render(snapshot([item(1, { status: 'blocked', taskPrompt: 'Build 101.', triage: triage({ context: 'Issue text' }), sessions: [session({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' })] })]));
 
-    for (const hidden of ['A summary.', 'Issue text', 'Build 101.', 'Stopped by you.']) {
+    for (const hidden of ['Issue text', 'Build 101.', 'Stopped by you.']) {
       expect(root.textContent).not.toContain(hidden);
     }
   });
@@ -431,17 +430,17 @@ describe('renderPanel', () => {
     expect(renderPanel(snapshot([]), NOW, ui())).not.toContain('No source is polled');
   });
 
-  it('lists pool tickets in Unstarted with no Unclaimed tag, a priority dot, time in queue, Returned mark and Start, with Snooze in the right-click menu and no summary', () => {
+  it('lists pool tickets in Unstarted with no Unclaimed tag, a priority dot, time in queue, Returned mark and Start, with Snooze in the right-click menu', () => {
     const ticket = (id: number) => ({ id, source: 'zoho', sourceKey: String(500 + id), ref: `#${500 + id}`, sourceId: `z${id}`, title: `Case <${id}>`, url: `https://desk.example.test/${id}`, assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: NOW - id * 3_600_000, scopeAt: NOW - id * 1_800_000, lastPolledAt: NOW, repoRoot: '' });
-    const rated = (id: number, patch: Partial<Triage> = {}) => triage({ id, ticketId: id, workItemId: null, playbook: 'support:case', summary: 'Fix sync — defect', immediacy: 'BLOCKING', severity: 'MED', ...patch });
+    const rated = (id: number, patch: Partial<Triage> = {}) => triage({ id, ticketId: id, workItemId: null, playbook: 'support:case', immediacy: 'BLOCKING', severity: 'MED', ...patch });
     const root = render(
       snapshot([], {
         pool: [
           { ticket: ticket(1), triage: rated(1, { immediacy: 'URGENT', severity: 'MED' }), returned: 2 },
           { ticket: ticket(2), triage: rated(2), returned: 0 },
           { ticket: ticket(3), triage: rated(3, { immediacy: 'NON-BLOCKING', severity: 'MED' }), returned: 0 },
-          { ticket: ticket(4), triage: rated(4, { playbook: null, summary: null, immediacy: null, severity: null, error: 'Timed out.' }), returned: 0 },
-          { ticket: ticket(5), triage: rated(5, { playbook: null, summary: null, immediacy: null, severity: null, endedAt: null }), returned: 0 },
+          { ticket: ticket(4), triage: rated(4, { playbook: null, immediacy: null, severity: null, error: 'Timed out.' }), returned: 0 },
+          { ticket: ticket(5), triage: rated(5, { playbook: null, immediacy: null, severity: null, endedAt: null }), returned: 0 },
         ],
       }),
     );
@@ -471,7 +470,6 @@ describe('renderPanel', () => {
     // A pool ticket counts from entering scope, not from the customer's last message, which orders the group.
     expect(byId(1).querySelector('.queue')?.textContent).toBe('30m');
     expect(byId(1).querySelector('.queue')?.getAttribute('title')).toMatch(/^In scope since \d{4}-\d\d-\d\d \d\d:\d\d UTC$/);
-    expect(root.textContent).not.toContain('Fix sync — defect');
     expect(byId(1).querySelector('.line.second .returned')?.textContent).toBe('Returned ×2');
     expect(byId(2).querySelector('.returned')).toBeNull();
     expect(byId(1).querySelector('.playbook-name')?.textContent).toBe('support:case');
@@ -494,7 +492,7 @@ describe('renderPanel', () => {
   });
 
   it('puts unstarted work items in Unstarted as Assigned with Start, ordered with the pool by importance then age, and Approve only on an approval report', () => {
-    const rated = (immediacy: Triage['immediacy'], severity: Triage['severity']) => triage({ immediacy, severity, summary: 'Build it.' });
+    const rated = (immediacy: Triage['immediacy'], severity: Triage['severity']) => triage({ immediacy, severity });
     const assigned = item(1, { status: 'unstarted', createdAt: NOW - 5 * 3_600_000, triage: rated('BLOCKING', 'HIGH') });
     const unrated = item(2, { status: 'unstarted', createdAt: NOW - 9 * 3_600_000 });
     const ticket = { id: 9, source: 'forum', sourceKey: '509', ref: 'T509', sourceId: null, title: 'Topic', url: '', assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: NOW - 3_600_000, scopeAt: null, lastPolledAt: NOW, repoRoot: '' };

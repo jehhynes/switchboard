@@ -505,7 +505,6 @@ export class Runtime {
                 triageId: action.triageId,
                 context: text,
                 playbook: result.playbook,
-                summary: result.summary,
                 immediacy: result.immediacy,
                 severity: result.severity,
                 model: action.model,

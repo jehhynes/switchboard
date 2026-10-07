@@ -15,7 +15,7 @@ const PLAYBOOKS: Record<string, string> = {
   'triage:github': '---\ndescription: GitHub triage\nkind: triage\n---\nClassify the GitHub issue.',
   'triage:zoho': '---\ndescription: Zoho triage\nkind: triage\nrates: true\n---\nTriage the Support case.',
   'dev:develop': '---\ndescription: Plan and build the change\nautoStart: true\nrequiresWorktree: true\nreports: done, worktree\n---\n/gc-plan {{ticket.sourceKey}}',
-  'dev:question': '---\ndescription: Answer a question\npermissionMode: plan\nmodel: opus\nreports: approval\n---\nAnswer {{ticket.title}}.\n{{triage.summary}}',
+  'dev:question': '---\ndescription: Answer a question\npermissionMode: plan\nmodel: opus\nreports: approval\n---\nAnswer {{ticket.title}}.\n{{ticket.context}}',
   'support:defect': '---\ndescription: Research a defect\nautoStart: true\nworkdir: repoRoot\nreports: done\n---\nResearch {{ticket.sourceKey}} in {{ticket.url}}.',
 };
 
@@ -86,12 +86,12 @@ export class Harness {
   }
 
   /** Succeeds the triage of the given action with the playbook. */
-  triaged(action: FlowAction | undefined, playbook: string, summary = 'A summary.'): FlowAction[] {
+  triaged(action: FlowAction | undefined, playbook: string): FlowAction[] {
     if (action?.type !== 'triage') {
       throw new Error(`Expected a triage action, got ${JSON.stringify(action)}`);
     }
 
-    return this.act({ type: 'triage-succeeded', triageId: action.triageId, context: `Context ${action.ticket.sourceKey}`, playbook, summary, immediacy: null, severity: null, model: 'claude-sonnet-5' });
+    return this.act({ type: 'triage-succeeded', triageId: action.triageId, context: `Context ${action.ticket.sourceKey}`, playbook, immediacy: null, severity: null, model: 'claude-sonnet-5' });
   }
 
   started(action: FlowAction | undefined, shortId = 'abc12345'): string {

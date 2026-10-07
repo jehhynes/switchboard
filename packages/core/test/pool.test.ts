@@ -25,10 +25,10 @@ describe('pool triage (PRD R47, R50)', () => {
     expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the Support case.\n\nChoose one playbook:\n- support:defect: Research a defect\n- support:case: A Support case', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A Support case' }], rates: true });
     expect(h.store.workItem(1)).toBeNull();
 
-    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 'Fix the sync — defect', immediacy: 'BLOCKING', severity: 'MED', model: null, links: [{ label: 'PR', target: 'https://github.com/o/r/pull/2' }] });
+    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', immediacy: 'BLOCKING', severity: 'MED', model: null, links: [{ label: 'PR', target: 'https://github.com/o/r/pull/2' }] });
 
     expect(h.store.linksFor(1)).toMatchObject([{ ticketId: 1, label: 'PR', target: 'https://github.com/o/r/pull/2' }]);
-    expect(h.store.poolTriages(1)).toMatchObject([{ ticketId: 1, workItemId: null, playbook: 'support:case', summary: 'Fix the sync — defect', immediacy: 'BLOCKING', severity: 'MED' }]);
+    expect(h.store.poolTriages(1)).toMatchObject([{ ticketId: 1, workItemId: null, playbook: 'support:case', immediacy: 'BLOCKING', severity: 'MED' }]);
     expect(h.store.workItem(1)).toBeNull();
     expect(pollZoho(h, zoho('500', 'pool'))).toEqual([]);
   });
@@ -65,7 +65,7 @@ describe('pool triage (PRD R47, R50)', () => {
   it('drops the pool triage of a ticket that leaves the pool, and triages it again if it returns', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool')), 'triage');
-    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 's', immediacy: null, severity: null, model: null });
+    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null });
 
     pollZoho(h);
     expect(h.store.ticket(1)).toMatchObject({ pool: false, assigned: false });
@@ -89,7 +89,7 @@ describe('pick (PRD R48)', () => {
     const triage = only(pollZoho(h, zoho(key, 'pool')), 'triage');
 
     if (playbook !== null) {
-      h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook, summary: 'A summary.', immediacy: null, severity: null, model: null });
+      h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook, immediacy: null, severity: null, model: null });
     } else {
       h.act({ type: 'triage-failed', triageId: triage.triageId, error: 'x', context: null });
     }
@@ -105,7 +105,7 @@ describe('pick (PRD R48)', () => {
     expect(start).toMatchObject({ kind: 'task', cwd: 'D:/git/support', name: 'switchboard · support:case · zoho 500', permissionMode: 'auto', model: null });
     expect(start.prompt.startsWith('/support-process R500\n\n')).toBe(true);
     expect(h.item(1)).toMatchObject({ ticketId, status: 'running', playbook: 'support:case' });
-    expect(h.store.triagesFor(1)).toMatchObject([{ ticketId, workItemId: 1, summary: 'A summary.' }]);
+    expect(h.store.triagesFor(1)).toMatchObject([{ ticketId, workItemId: 1, playbook: 'support:case' }]);
     expect(h.send({ type: 'pick', ticketId }).refused).toBe('The ticket already has a work item.');
   });
 
@@ -118,7 +118,7 @@ describe('pick (PRD R48)', () => {
     expect(h.item(1).status).toBe('running');
 
     const reopened = only(pollZoho(h, zoho('500', 'assigned'), zoho('600', 'assigned')), 'triage');
-    expect(h.act({ type: 'triage-succeeded', triageId: reopened.triageId, context: 'c', playbook: 'support:case', summary: 's', immediacy: null, severity: null, model: null })).toEqual([]);
+    expect(h.act({ type: 'triage-succeeded', triageId: reopened.triageId, context: 'c', playbook: 'support:case', immediacy: null, severity: null, model: null })).toEqual([]);
     expect(h.item(2).status).toBe('unstarted');
   });
 

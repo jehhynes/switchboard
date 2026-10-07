@@ -17,11 +17,11 @@ export interface ClassifyInput {
   cwd: string;
 }
 
-export type ClassifyResult = { playbook: string; summary: string; immediacy: Immediacy | null; severity: Severity | null } | { error: string };
+export type ClassifyResult = { playbook: string; immediacy: Immediacy | null; severity: Severity | null } | { error: string };
 
-/** The classifier's system prompt: the rendered triage playbook, then what to do with the ticket. */
+/** The classifier's system prompt: the rendered triage playbook, then where the ticket is. */
 export function classifierPrompt(systemPrompt: string): string {
-  return `${systemPrompt.trimEnd()}\n\nThe ticket follows as the user message. Summarize it in a few sentences.`;
+  return `${systemPrompt.trimEnd()}\n\nThe ticket follows as the user message.`;
 }
 
 /** One-shot triage with no tools, settings, MCP servers or saved transcript (mechanics M3). */
@@ -30,10 +30,9 @@ export function classifierArgs(input: ClassifyInput): string[] {
     type: 'object',
     properties: {
       playbook: { type: 'string', enum: input.choices.map((choice) => choice.name) },
-      summary: { type: 'string' },
       ...(input.rates ? { immediacy: { type: 'string', enum: IMMEDIACIES }, severity: { type: 'string', enum: SEVERITIES } } : {}),
     },
-    required: ['playbook', 'summary'],
+    required: ['playbook'],
     additionalProperties: false,
   };
 
@@ -58,7 +57,7 @@ export function classifierArgs(input: ClassifyInput): string[] {
 
 /** Reads `structured_output` from `--output-format json`. A body-level error fails even when the process exits 0. Ratings count only when `rates`. */
 export function parseClassifierOutput(stdout: string, choices: TriageChoice[], rates: boolean): ClassifyResult {
-  let output: { is_error?: boolean; subtype?: string; result?: string; structured_output?: { playbook?: unknown; summary?: unknown; immediacy?: unknown; severity?: unknown } };
+  let output: { is_error?: boolean; subtype?: string; result?: string; structured_output?: { playbook?: unknown; immediacy?: unknown; severity?: unknown } };
 
   try {
     output = JSON.parse(stdout);
@@ -70,10 +69,10 @@ export function parseClassifierOutput(stdout: string, choices: TriageChoice[], r
     return { error: `Claude did not finish triage (${output.subtype ?? 'error'}): ${output.result ?? ''}`.trim() };
   }
 
-  const { playbook, summary, immediacy, severity } = output.structured_output ?? {};
+  const { playbook, immediacy, severity } = output.structured_output ?? {};
 
-  if (typeof playbook !== 'string' || typeof summary !== 'string') {
-    return { error: 'Claude returned no playbook and summary.' };
+  if (typeof playbook !== 'string') {
+    return { error: 'Claude returned no playbook.' };
   }
 
   if (!choices.some((choice) => choice.name === playbook)) {
@@ -82,7 +81,6 @@ export function parseClassifierOutput(stdout: string, choices: TriageChoice[], r
 
   return {
     playbook,
-    summary,
     immediacy: rates && (IMMEDIACIES as readonly unknown[]).includes(immediacy) ? (immediacy as Immediacy) : null,
     severity: rates && (SEVERITIES as readonly unknown[]).includes(severity) ? (severity as Severity) : null,
   };

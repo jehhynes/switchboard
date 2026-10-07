@@ -577,7 +577,7 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<s
   // A snoozed ticket is never triaged, so a missing triage is not shown as running.
   const triaging = triage !== null && triage.endedAt === null;
   // Start appears once triage has chosen a playbook, which the pick starts (PRD R48).
-  const main = failed ? again : triage?.summary != null ? pick : null;
+  const main = failed ? again : triage?.playbook != null ? pick : null;
   const controls = main === null ? snoozeControls(ticket) : [main, ...snoozeControls(ticket)];
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>

@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 12 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -33,7 +33,7 @@ describe('Store', () => {
     reopened.close();
   });
 
-  it('moves a version 1 database to the current schema, keeping each triage with its ticket and leaving it unrated', () => {
+  it('moves a version 1 database to the current schema, keeping each triage with its ticket, unrated and without its summary', () => {
     const path = join(dir, 'v1.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS[0]!);
@@ -50,7 +50,7 @@ describe('Store', () => {
     // A work item waiting to be started is unstarted from migration 4 on (PRD R34).
     expect(store.workItem(3)).toMatchObject({ status: 'unstarted', approvalPrompt: null, approvalSummary: null });
     expect(store.workItem(3)).not.toHaveProperty('needsPick');
-    expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, summary: 'A summary.', immediacy: null, severity: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
+    expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, immediacy: null, severity: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
     store.close();
   });
 
@@ -239,7 +239,7 @@ describe('Store', () => {
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (12).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (13).');
   });
 
   it('rolls back a transaction that throws', () => {
