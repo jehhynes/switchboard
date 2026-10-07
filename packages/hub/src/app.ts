@@ -10,6 +10,7 @@ import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
+import { cardsOf } from './cards.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { loadConfig, playbooksDir, setSourceEnabled } from './config.js';
 import type { HubApp } from './serve.js';
@@ -222,6 +223,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     snapshot: () => runtime.snapshot(),
     snoozedUrls: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
+    cards: () => cardsOf(runtime.snapshot()),
     onChange: (listener) => void runtime.onChange(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
     close: () => {

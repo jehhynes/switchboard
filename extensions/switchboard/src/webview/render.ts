@@ -1,28 +1,10 @@
+import { activeSession, groupOf, triageLabel } from '@switchboard/core/group';
+import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 import { wakeText } from '../snooze.js';
 
-export type Group = 'needs' | 'working' | 'unstarted' | 'done';
-
-/** PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Needs you, then Working. */
-export function groupOf(item: WorkItemView): Group {
-  if (item.status === 'done') {
-    return 'done';
-  }
-
-  if (item.status === 'unstarted' || item.status === 'triaging') {
-    return 'unstarted';
-  }
-
-  if (item.status === 'awaiting-approval' || item.status === 'blocked' || item.status === 'failed' || activeSession(item)?.state === 'waiting') {
-    return 'needs';
-  }
-
-  return 'working';
-}
-
-export function activeSession(item: WorkItemView): WorkItemView['sessions'][number] | null {
-  return item.sessions.find((session) => session.state !== 'ended') ?? null;
-}
+export { activeSession, groupOf };
+export type { Group };
 
 const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
@@ -436,13 +418,6 @@ function playbookLabel(name: string): string {
   const namespace = colon === -1 ? '' : name.slice(0, colon + 1);
 
   return `<span class="playbook-name"><span class="namespace">${escape(namespace)}</span><span class="name">${escape(name.slice(colon + 1))}</span></span>`;
-}
-
-/** The playbook slot during triage: the source's namespace and `triage`, such as `dev:triage`. */
-function triageLabel(source: string, namespaces: Record<string, string>): string {
-  const namespace = namespaces[source] ?? '';
-
-  return namespace === '' ? 'triage' : `${namespace}:triage`;
 }
 
 /** Marks a ticket that came back after earlier work items (PRD R51). */

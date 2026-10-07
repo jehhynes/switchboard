@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
+import type { Card } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openEvents } from '../src/client.js';
 import { findHub } from '../src/discover.js';
@@ -180,7 +181,8 @@ describe('serveHub', () => {
   });
 
   describe('browser endpoint', () => {
-    const app = (urls: string[]): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, onChange: () => {}, busy: () => false, close: () => {} });
+    const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'needs', snoozed: false }];
+    const app = (urls: string[]): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, cards: () => cards, onChange: () => {}, busy: () => false, close: () => {} });
 
     async function freePort(): Promise<number> {
       const probe = createServer();
@@ -194,13 +196,16 @@ describe('serveHub', () => {
       return port;
     }
 
-    it('serves the app\'s snoozed URLs on the browser port and stops serving them when stopped', async () => {
+    it('serves the app\'s snoozed URLs and cards on the browser port and stops serving them when stopped', async () => {
       const browserPort = await freePort();
       const hub = served(await serve({ browserPort, app: async () => app(['https://github.com/o/r/issues/1']) }));
       const reply = await call(browserPort, 'GET', '/snoozed', null);
 
       expect(reply?.status).toBe(200);
       expect(JSON.parse(reply!.body)).toEqual({ urls: ['https://github.com/o/r/issues/1'] });
+      expect(JSON.parse((await call(browserPort, 'GET', '/cards', null))!.body)).toEqual({
+        cards: [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'needs', snoozed: false }],
+      });
 
       await hub.stop('test');
       expect(await call(browserPort, 'GET', '/snoozed', null, 500)).toBeNull();

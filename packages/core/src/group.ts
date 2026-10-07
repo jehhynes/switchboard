@@ -1,0 +1,42 @@
+import type { Session, WorkItem } from './model.js';
+
+// Imports only types, so the panel webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
+
+export type Group = 'needs' | 'working' | 'unstarted' | 'done';
+
+export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions: S[] }): S | null {
+  return item.sessions.find((session) => session.state !== 'ended') ?? null;
+}
+
+/** PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Needs you, then Working. */
+export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state'>[] }): Group {
+  if (item.status === 'done') {
+    return 'done';
+  }
+
+  if (item.status === 'unstarted' || item.status === 'triaging') {
+    return 'unstarted';
+  }
+
+  if (item.status === 'awaiting-approval' || item.status === 'blocked' || item.status === 'failed' || activeSession(item)?.state === 'waiting') {
+    return 'needs';
+  }
+
+  return 'working';
+}
+
+/** The playbook slot during triage: the source's namespace and `triage`, such as `dev:triage`, or `triage` without one. */
+export function triageLabel(source: string, namespaces: Record<string, string>): string {
+  const namespace = namespaces[source] ?? '';
+
+  return namespace === '' ? 'triage' : `${namespace}:triage`;
+}
+
+/** A ticket on the browser endpoint's `GET /cards` (PRD R67). `url` is the ticket's URL as stored. */
+export interface Card {
+  url: string;
+  /** The playbook the panel shows, `<namespace>:triage` during triage, or null before triage chooses one. */
+  playbook: string | null;
+  group: Group;
+  snoozed: boolean;
+}

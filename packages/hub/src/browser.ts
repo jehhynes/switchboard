@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
+import type { Card } from '@switchboard/core';
 
 export interface BrowserServer {
   port: number;
@@ -7,11 +8,12 @@ export interface BrowserServer {
 }
 
 /**
- * Unauthenticated loopback endpoint for the Chrome extension (PRD R56): `GET /snoozed` lists the URLs of snoozed
- * tickets. A browser extension cannot read `hub.json`, so the port is fixed and the endpoint is read-only. It sends no
- * CORS headers, so web pages cannot read it, and it refuses a Host other than the loopback address, against DNS rebinding.
+ * Unauthenticated loopback endpoint for the Chrome extension: `GET /snoozed` lists the URLs of snoozed tickets (PRD R56),
+ * and `GET /cards` each ticket's playbook and group (PRD R67). A browser extension cannot read `hub.json`, so the port is
+ * fixed and the endpoint is read-only. It sends no CORS headers, so web pages cannot read it, and it refuses a Host other
+ * than the loopback address, against DNS rebinding.
  */
-export function listenBrowser(port: number, snoozed: () => string[]): Promise<BrowserServer> {
+export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[]): Promise<BrowserServer> {
   const server: Server = createServer((request, response) => {
     const listening = (server.address() as { port: number }).port;
     const hosts = new Set([`127.0.0.1:${listening}`, `localhost:${listening}`]);
@@ -26,6 +28,8 @@ export function listenBrowser(port: number, snoozed: () => string[]): Promise<Br
       reply(403, { error: 'forbidden host' });
     } else if (request.method === 'GET' && path === '/snoozed') {
       reply(200, { urls: snoozed() });
+    } else if (request.method === 'GET' && path === '/cards') {
+      reply(200, { cards: cards() });
     } else {
       reply(404, { error: 'not found' });
     }

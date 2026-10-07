@@ -21,3 +21,24 @@
 .switchboard-snoozed-toggle:hover {
   text-decoration: underline;
 }
+
+.switchboard-pill {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 999px;
+  color: var(--fgColor-default, #1f2328);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.switchboard-pill .switchboard-namespace {
+  color: var(--fgColor-muted, #59636e);
+}
+
+.switchboard-pill[data-switchboard-group="needs"] {
+  border-color: var(--borderColor-attention-emphasis, #9a6700);
+  background: var(--bgColor-attention-muted, #fff8c5);
+  color: var(--fgColor-attention, #9a6700);
+}

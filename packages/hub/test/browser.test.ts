@@ -1,5 +1,6 @@
 import { request } from 'node:http';
 import { createServer } from 'node:net';
+import type { Card } from '@switchboard/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { listenBrowser } from '../src/browser.js';
 import type { BrowserServer } from '../src/browser.js';
@@ -30,7 +31,7 @@ describe('listenBrowser', () => {
   it('lists the snoozed URLs on each request, with no CORS header', async () => {
     let urls = ['https://github.com/o/r/issues/1'];
 
-    server = await listenBrowser(0, () => urls);
+    server = await listenBrowser(0, () => urls, () => []);
 
     const first = await get(server.port, '/snoozed');
 
@@ -43,8 +44,34 @@ describe('listenBrowser', () => {
     expect(JSON.parse((await get(server.port, '/snoozed', `localhost:${server.port}`)).body)).toEqual({ urls: [] });
   });
 
+  it('lists the cards on each request, with no CORS header', async () => {
+    let cards: Card[] = [
+      { url: 'https://github.com/o/r/issues/1', playbook: 'dev:review-pr', group: 'needs', snoozed: false },
+      { url: 'https://github.com/o/r/issues/2', playbook: null, group: 'unstarted', snoozed: true },
+    ];
+
+    server = await listenBrowser(0, () => [], () => cards);
+
+    const first = await get(server.port, '/cards');
+
+    expect(first.status).toBe(200);
+    expect(JSON.parse(first.body)).toEqual({
+      cards: [
+        { url: 'https://github.com/o/r/issues/1', playbook: 'dev:review-pr', group: 'needs', snoozed: false },
+        { url: 'https://github.com/o/r/issues/2', playbook: null, group: 'unstarted', snoozed: true },
+      ],
+    });
+    expect(first.headers['access-control-allow-origin']).toBeUndefined();
+    expect(first.headers['cache-control']).toBe('no-store');
+
+    cards = [];
+    expect(JSON.parse((await get(server.port, '/cards?x=1', `localhost:${server.port}`)).body)).toEqual({ cards: [] });
+    expect((await get(server.port, '/cards', `rebound.example:${server.port}`)).status).toBe(403);
+    expect((await get(server.port, '/cards', undefined, 'POST')).status).toBe(404);
+  });
+
   it('refuses another Host, another path and another method', async () => {
-    server = await listenBrowser(0, () => ['https://github.com/o/r/issues/1']);
+    server = await listenBrowser(0, () => ['https://github.com/o/r/issues/1'], () => []);
 
     expect((await get(server.port, '/snoozed', `rebound.example:${server.port}`)).status).toBe(403);
     expect((await get(server.port, '/snoozed', '127.0.0.1:1')).status).toBe(403);
@@ -62,7 +89,7 @@ describe('listenBrowser', () => {
 
     const port = (holder.address() as { port: number }).port;
 
-    await expect(listenBrowser(port, () => [])).rejects.toThrow(/EADDRINUSE/);
+    await expect(listenBrowser(port, () => [], () => [])).rejects.toThrow(/EADDRINUSE/);
     await new Promise((done) => holder.close(done));
   });
 });
