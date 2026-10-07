@@ -91,6 +91,8 @@ export function applySnoozed(
 export interface BoardWatch {
   /** Applies the snoozed set now, reading it first when it is older than `REFRESH_MS`. */
   update(): void;
+  /** Reads the snoozed set now and applies it, as after a snooze from the page. */
+  refresh(): void;
   stop(): void;
 }
 
@@ -145,10 +147,13 @@ export function watchBoard(doc: Document, read: () => Promise<string[] | null>, 
       update();
     }, 50);
   });
+  const refresh = (): void => {
+    readAt = -Infinity;
+    update();
+  };
   const onVisible = (): void => {
     if (doc.visibilityState === 'visible') {
-      readAt = -Infinity;
-      update();
+      refresh();
     }
   };
   const timer = setInterval(update, REFRESH_MS);
@@ -159,6 +164,7 @@ export function watchBoard(doc: Document, read: () => Promise<string[] | null>, 
 
   return {
     update,
+    refresh,
     stop: () => {
       observer.disconnect();
       clearInterval(timer);

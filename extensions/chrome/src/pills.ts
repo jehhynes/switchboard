@@ -91,7 +91,12 @@ export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): 
  * Keeps the pills on a GitHub project board's cards while GitHub renders it. Reads the cards only while a board is on the
  * page, when one appears, every `REFRESH_MS` and when the tab becomes visible. A failed read removes every pill.
  */
-export function watchPills(doc: Document, read: () => Promise<Card[] | null>, now: () => number = Date.now): { stop(): void } {
+export function watchPills(
+  doc: Document,
+  read: () => Promise<Card[] | null>,
+  now: () => number = Date.now,
+  onCards: (cards: Card[] | null) => void = () => {},
+): { stop(): void } {
   let cards = new Map<string, Card>();
   let readAt = -Infinity;
   let reads = 0;
@@ -112,6 +117,7 @@ export function watchPills(doc: Document, read: () => Promise<Card[] | null>, no
         if (current === reads) {
           cards = cardsByIssue(result ?? []);
           applyPills(doc, cards);
+          onCards(result);
         }
       });
     }

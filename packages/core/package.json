@@ -14,6 +14,10 @@
     "./group": {
       "types": "./dist/group.d.ts",
       "default": "./dist/group.js"
+    },
+    "./snooze": {
+      "types": "./dist/snooze.d.ts",
+      "default": "./dist/snooze.js"
     }
   },
   "scripts": {

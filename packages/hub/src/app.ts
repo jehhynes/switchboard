@@ -242,6 +242,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     snapshot: () => runtime.snapshot(),
     snoozedUrls: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
     cards: () => cardsOf(runtime.snapshot()),
+    snoozeUrl: (url, until) => {
+      const ticket = store.ticketInScopeByUrl(url);
+
+      return ticket === null ? null : { refused: runtime.send({ type: 'snooze', ticketId: ticket.id, until }).refused };
+    },
     onChange: (listener) => void runtime.onChange(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
     close: () => {

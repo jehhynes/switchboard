@@ -82,6 +82,97 @@ describe('listenBrowser', () => {
     expect((await get(server.port, '/snoozed?x=1')).status).toBe(200);
   });
 
+  describe('POST /snooze (PRD R66)', () => {
+    const EXTENSION = 'chrome-extension://abcdefghijklmnop';
+    const JSON_TYPE = 'application/json';
+    const ISSUE = 'https://github.com/o/r/issues/1';
+
+    function post(port: number, body: string, headers: Record<string, string>): Promise<{ status: number; headers: Record<string, unknown>; body: string }> {
+      return new Promise((resolve, reject) => {
+        const outbound = request({ host: '127.0.0.1', port, method: 'POST', path: '/snooze', headers: { Host: `127.0.0.1:${port}`, ...headers } }, (response) => {
+          let text = '';
+
+          response.setEncoding('utf8');
+          response.on('data', (chunk: string) => (text += chunk));
+          response.on('end', () => resolve({ status: response.statusCode ?? 0, headers: response.headers, body: text }));
+        });
+
+        outbound.on('error', reject);
+        outbound.end(body);
+      });
+    }
+
+    function snoozing(answer: (url: string, until: number | null) => { refused: string | null } | null) {
+      const calls: [string, number | null][] = [];
+
+      return { calls, snooze: (url: string, until: number | null) => (calls.push([url, until]), answer(url, until)) };
+    }
+
+    it('snoozes the ticket for an extension origin with a JSON body, with no CORS header', async () => {
+      const fake = snoozing(() => ({ refused: null }));
+
+      server = await listenBrowser(0, () => [], () => [], fake.snooze);
+
+      const timed = await post(server.port, JSON.stringify({ url: ISSUE, until: 1_800_000_000_000 }), { Origin: EXTENSION, 'Content-Type': JSON_TYPE });
+      const indefinite = await post(server.port, JSON.stringify({ url: ISSUE, until: null }), { Origin: EXTENSION, 'Content-Type': 'application/json; charset=utf-8' });
+
+      expect([timed.status, JSON.parse(timed.body)]).toEqual([200, { done: true }]);
+      expect(timed.headers['access-control-allow-origin']).toBeUndefined();
+      expect(indefinite.status).toBe(200);
+      expect(fake.calls).toEqual([
+        [ISSUE, 1_800_000_000_000],
+        [ISSUE, null],
+      ]);
+    });
+
+    it('answers 404 for an unknown URL and 409 with the core refusal', async () => {
+      server = await listenBrowser(0, () => [], () => [], (url) => (url === ISSUE ? { refused: 'The snooze time has passed.' } : null));
+
+      const unknown = await post(server.port, JSON.stringify({ url: 'https://github.com/o/r/issues/2', until: null }), { Origin: EXTENSION, 'Content-Type': JSON_TYPE });
+      const past = await post(server.port, JSON.stringify({ url: ISSUE, until: 1 }), { Origin: EXTENSION, 'Content-Type': JSON_TYPE });
+
+      expect([unknown.status, JSON.parse(unknown.body)]).toEqual([404, { error: 'Switchboard has no ticket for https://github.com/o/r/issues/2.' }]);
+      expect([past.status, JSON.parse(past.body)]).toEqual([409, { error: 'The snooze time has passed.' }]);
+    });
+
+    it('refuses a web page origin, a missing origin, a form content type and another Host before snoozing', async () => {
+      const fake = snoozing(() => ({ refused: null }));
+      const body = JSON.stringify({ url: ISSUE, until: null });
+
+      server = await listenBrowser(0, () => [], () => [], fake.snooze);
+
+      expect((await post(server.port, body, { Origin: 'https://github.com', 'Content-Type': JSON_TYPE })).status).toBe(403);
+      expect((await post(server.port, body, { Origin: 'null', 'Content-Type': JSON_TYPE })).status).toBe(403);
+      expect((await post(server.port, body, { 'Content-Type': JSON_TYPE })).status).toBe(403);
+      expect((await post(server.port, body, { Origin: EXTENSION, 'Content-Type': 'text/plain;charset=UTF-8' })).status).toBe(415);
+      expect((await post(server.port, body, { Origin: EXTENSION, 'Content-Type': 'application/x-www-form-urlencoded' })).status).toBe(415);
+      expect((await post(server.port, body, { Origin: EXTENSION })).status).toBe(415);
+      expect((await post(server.port, body, { Origin: EXTENSION, 'Content-Type': JSON_TYPE, Host: `rebound.example:${server.port}` })).status).toBe(403);
+      expect(fake.calls).toEqual([]);
+    });
+
+    it('refuses a body without a URL or with a wake time that is not a number or null', async () => {
+      const fake = snoozing(() => ({ refused: null }));
+      const headers = { Origin: EXTENSION, 'Content-Type': JSON_TYPE };
+
+      server = await listenBrowser(0, () => [], () => [], fake.snooze);
+
+      for (const body of ['{', '[]', 'null', JSON.stringify({ until: null }), JSON.stringify({ url: '', until: null }), JSON.stringify({ url: ISSUE }), JSON.stringify({ url: ISSUE, until: 'tomorrow' }), `{"url":"${ISSUE}","until":1e999}`, JSON.stringify({ url: ISSUE, until: null, pad: 'x'.repeat(20_000) })]) {
+        const reply = await post(server.port, body, headers);
+
+        expect([body.slice(0, 40), reply.status]).toEqual([body.slice(0, 40), 400]);
+      }
+
+      expect(fake.calls).toEqual([]);
+    });
+
+    it('serves no snooze route when the hub gives no snooze handler', async () => {
+      server = await listenBrowser(0, () => [], () => []);
+
+      expect((await post(server.port, JSON.stringify({ url: ISSUE, until: null }), { Origin: EXTENSION, 'Content-Type': JSON_TYPE })).status).toBe(404);
+    });
+  });
+
   it('rejects when the port is taken', async () => {
     const holder = createServer();
 

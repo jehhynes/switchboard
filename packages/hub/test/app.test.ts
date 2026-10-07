@@ -262,6 +262,27 @@ describe('createHubApp', () => {
     expect(app.snoozedUrls()).toEqual(['https://github.com/o/r/issues/1', 'https://github.com/o/r/issues/2']);
   });
 
+  it('snoozes an assigned or pool ticket by URL, ignoring case, and finds no ticket out of scope (PRD R66)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+    const ticket = (sourceKey: string, assigned: boolean, pool: boolean) =>
+      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: 't', url: `https://github.com/O/r/issues/${sourceKey}`, assigned, pool, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+
+    ticket('1', true, false);
+    ticket('2', false, true);
+    ticket('3', false, false);
+    store.close();
+
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, now: () => 1000 } });
+    closers.push(() => app.close());
+
+    expect(app.snoozeUrl('https://github.com/o/r/issues/1', 5000)).toEqual({ refused: null });
+    expect(app.snoozeUrl('https://github.com/O/r/issues/2', null)).toEqual({ refused: null });
+    expect(app.snoozeUrl('https://github.com/O/r/issues/3', null)).toBeNull();
+    expect(app.snoozeUrl('https://github.com/O/r/issues/1', 1000)).toEqual({ refused: 'The snooze time has passed.' });
+    expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/1', 'https://github.com/O/r/issues/2']);
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();

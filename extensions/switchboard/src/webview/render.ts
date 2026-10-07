@@ -1,7 +1,7 @@
 import { activeSession, groupOf, triageLabel } from '@switchboard/core/group';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
-import { wakeText } from '../snooze.js';
+import { wakeText } from '@switchboard/core/snooze';
 
 export { activeSession, groupOf };
 export type { Group };

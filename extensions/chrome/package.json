@@ -2,7 +2,7 @@
   "name": "@switchboard/chrome",
   "version": "0.0.1",
   "private": true,
-  "description": "Chrome extension that shows Switchboard's playbook on GitHub project board cards and hides cards for snoozed tickets. Load dist/ unpacked.",
+  "description": "Chrome extension that shows Switchboard's playbook on GitHub project board cards, hides cards for snoozed tickets and snoozes a card. Load dist/ unpacked.",
   "scripts": {
     "build": "node esbuild.mjs",
     "typecheck": "tsc -p tsconfig.json",

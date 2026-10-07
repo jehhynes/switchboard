@@ -1,4 +1,5 @@
 export * from './browser.js';
+export * from './browserSnooze.js';
 export * from './bundle.js';
 export * from './client.js';
 export * from './discover.js';

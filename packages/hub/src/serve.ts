@@ -3,6 +3,7 @@ import { BROWSER_PORT, HUB_NAME, PROTOCOL, hubRecordPath, switchboardHome } from
 import type { Card, HubRecord } from '@switchboard/core';
 import { listenBrowser } from './browser.js';
 import type { BrowserServer } from './browser.js';
+import type { SnoozeByUrl } from './browserSnooze.js';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
 import { listenHub } from './server.js';
@@ -16,6 +17,8 @@ export interface HubApp {
   snoozedUrls(): string[];
   /** Each ticket's playbook and group, for the Chrome extension (PRD R67). */
   cards(): Card[];
+  /** Snoozes a ticket by URL for the Chrome extension (PRD R66). */
+  snoozeUrl: SnoozeByUrl;
   onChange(listener: () => void): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
   busy(): boolean;
@@ -106,7 +109,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   if (app !== undefined && browserPort !== null) {
     // A taken port, such as one held by a second hub for another home, costs only the Chrome extension.
-    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards()).catch((error: unknown) => {
+    browser = await listenBrowser(browserPort, () => app.snoozedUrls(), () => app.cards(), (url, until) => app.snoozeUrl(url, until)).catch((error: unknown) => {
       log(`browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`);
 
       return null;

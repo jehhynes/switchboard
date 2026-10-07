@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
 import type { Card } from '@switchboard/core';
@@ -182,7 +183,7 @@ describe('serveHub', () => {
 
   describe('browser endpoint', () => {
     const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'needs', snoozed: false }];
-    const app = (urls: string[]): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, cards: () => cards, onChange: () => {}, busy: () => false, close: () => {} });
+    const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });
 
     async function freePort(): Promise<number> {
       const probe = createServer();
@@ -209,6 +210,27 @@ describe('serveHub', () => {
 
       await hub.stop('test');
       expect(await call(browserPort, 'GET', '/snoozed', null, 500)).toBeNull();
+    });
+
+    it('passes a snooze from the browser port to the app (PRD R66)', async () => {
+      const browserPort = await freePort();
+      const snoozes: unknown[][] = [];
+
+      served(await serve({ browserPort, app: async () => app([], (url, until) => (snoozes.push([url, until]), { refused: null })) }));
+
+      const status = await new Promise<number>((resolve, reject) => {
+        const headers = { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc' };
+        const outbound = request({ host: '127.0.0.1', port: browserPort, method: 'POST', path: '/snooze', headers }, (response) => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        });
+
+        outbound.on('error', reject);
+        outbound.end(JSON.stringify({ url: 'https://github.com/o/r/issues/1', until: null }));
+      });
+
+      expect(status).toBe(200);
+      expect(snoozes).toEqual([['https://github.com/o/r/issues/1', null]]);
     });
 
     it('logs a taken browser port and serves the hub anyway', async () => {

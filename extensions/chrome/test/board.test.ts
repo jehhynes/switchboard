@@ -207,4 +207,20 @@ describe('watchBoard', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     expect(read).toHaveBeenCalledTimes(2);
   });
+
+  it('reads again on refresh, within the refresh interval, and hides a card snoozed since (PRD R66)', async () => {
+    const read = vi.fn(async (): Promise<string[]> => []);
+
+    board();
+    watch = watchBoard(document, read, () => 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hiddenIds('Paused')).toEqual([]);
+
+    read.mockResolvedValueOnce(['https://github.com/github/roadmap/issues/1090']);
+    watch.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(hiddenIds('Paused')).toEqual(['94970044']);
+  });
 });

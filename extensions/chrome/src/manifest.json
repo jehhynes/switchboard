@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Switchboard",
   "version": "0.0.1",
-  "description": "Shows Switchboard's playbook on GitHub project board cards, and hides cards for tickets snoozed in Switchboard, with a link at the bottom of each column to show them.",
+  "description": "Shows Switchboard's playbook on GitHub project board cards, hides cards for tickets snoozed in Switchboard, with a link at the bottom of each column to show them, and snoozes a card from its hover button.",
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {

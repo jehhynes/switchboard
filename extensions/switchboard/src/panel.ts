@@ -3,11 +3,11 @@ import { readFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import type { Snapshot } from '@switchboard/hub';
+import { snoozeChoices } from '@switchboard/core';
 import { postToHub } from '@switchboard/hub';
 import { needsBadge } from './badge.js';
 import { rowFor, searchEntries } from './search.js';
 import type { RowTarget, SearchEntry } from './search.js';
-import { snoozeChoices } from './snooze.js';
 
 const ACTION_TIMEOUT_MS = 10_000;
 

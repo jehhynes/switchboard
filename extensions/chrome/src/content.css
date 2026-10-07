@@ -42,3 +42,81 @@
   background: var(--bgColor-attention-muted, #fff8c5);
   color: var(--fgColor-attention, #9a6700);
 }
+
+.switchboard-snooze-bell {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 6px;
+  background: var(--bgColor-default, #ffffff);
+  color: var(--fgColor-muted, #59636e);
+  cursor: pointer;
+}
+
+.switchboard-snooze-bell[hidden] {
+  display: none;
+}
+
+.switchboard-snooze-bell:hover {
+  color: var(--fgColor-default, #1f2328);
+}
+
+.switchboard-snooze-menu {
+  position: fixed;
+  z-index: 101;
+  width: 220px;
+  padding: 4px 0;
+  border: 1px solid var(--borderColor-default, #d1d9e0);
+  border-radius: 8px;
+  background: var(--overlay-bgColor, var(--bgColor-default, #ffffff));
+  box-shadow: var(--shadow-floating-small, 0 6px 12px rgba(0, 0, 0, 0.15));
+  color: var(--fgColor-default, #1f2328);
+  font-size: 13px;
+}
+
+.switchboard-snooze-menu-heading {
+  padding: 4px 12px;
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.switchboard-snooze-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switchboard-snooze-menu button:hover:not(:disabled) {
+  background: var(--bgColor-neutral-muted, rgba(129, 139, 152, 0.12));
+}
+
+.switchboard-snooze-menu button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.switchboard-snooze-menu-description {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.switchboard-snooze-menu-status:not(:empty) {
+  padding: 4px 12px;
+  color: var(--fgColor-danger, #d1242f);
+  font-size: 12px;
+}

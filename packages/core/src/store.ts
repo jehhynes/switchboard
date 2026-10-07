@@ -304,6 +304,11 @@ export class Store {
     return this.#one('SELECT * FROM tickets WHERE source = ? AND sourceKey = ?', source, sourceKey);
   }
 
+  /** The assigned or pool ticket with this URL, ignoring case, as a GitHub URL's owner and repository do. */
+  ticketInScopeByUrl(url: string): Ticket | null {
+    return this.#one("SELECT * FROM tickets WHERE url <> '' AND url = ? COLLATE NOCASE AND (assigned = 1 OR pool = 1) ORDER BY id LIMIT 1", url);
+  }
+
   tickets(source: string): Ticket[] {
     return this.#all('SELECT * FROM tickets WHERE source = ? ORDER BY id', source);
   }

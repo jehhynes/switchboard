@@ -1,6 +1,8 @@
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import type { Card } from '@switchboard/core';
+import { handleSnooze } from './browserSnooze.js';
+import type { SnoozeByUrl } from './browserSnooze.js';
 
 export interface BrowserServer {
   port: number;
@@ -9,11 +11,11 @@ export interface BrowserServer {
 
 /**
  * Unauthenticated loopback endpoint for the Chrome extension: `GET /snoozed` lists the URLs of snoozed tickets (PRD R56),
- * and `GET /cards` each ticket's playbook and group (PRD R67). A browser extension cannot read `hub.json`, so the port is
- * fixed and the endpoint is read-only. It sends no CORS headers, so web pages cannot read it, and it refuses a Host other
- * than the loopback address, against DNS rebinding.
+ * `GET /cards` each ticket's playbook and group (PRD R67), and `POST /snooze` snoozes one (PRD R66). A browser extension
+ * cannot read `hub.json`, so the port is fixed. It sends no CORS headers, so web pages cannot read it, and it refuses a
+ * Host other than the loopback address, against DNS rebinding.
  */
-export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[]): Promise<BrowserServer> {
+export function listenBrowser(port: number, snoozed: () => string[], cards: () => Card[], snooze?: SnoozeByUrl): Promise<BrowserServer> {
   const server: Server = createServer((request, response) => {
     const listening = (server.address() as { port: number }).port;
     const hosts = new Set([`127.0.0.1:${listening}`, `localhost:${listening}`]);
@@ -30,6 +32,8 @@ export function listenBrowser(port: number, snoozed: () => string[], cards: () =
       reply(200, { urls: snoozed() });
     } else if (request.method === 'GET' && path === '/cards') {
       reply(200, { cards: cards() });
+    } else if (request.method === 'POST' && path === '/snooze' && snooze !== undefined) {
+      void handleSnooze(request, snooze).then(({ status, body }) => reply(status, body));
     } else {
       reply(404, { error: 'not found' });
     }

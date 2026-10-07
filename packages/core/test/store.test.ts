@@ -277,6 +277,23 @@ describe('Store', () => {
     expect(store.tickets('github')).toHaveLength(1);
   });
 
+  it('finds an assigned or pool ticket by URL ignoring case, and no ticket out of scope or without a URL', () => {
+    const store = Store.open(':memory:');
+    const add = (sourceKey: string, url: string, assigned: boolean, pool: boolean) =>
+      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: sourceKey, url, assigned, pool, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' }).id;
+
+    add('1', 'https://github.com/o/r/issues/1', false, false);
+    const assigned = add('2', 'https://github.com/O/R/issues/2', true, false);
+    const pool = add('3', 'https://github.com/o/r/issues/3', false, true);
+    add('4', '', true, false);
+
+    expect(store.ticketInScopeByUrl('https://github.com/o/r/issues/2')?.id).toBe(assigned);
+    expect(store.ticketInScopeByUrl('https://github.com/o/r/issues/3')?.id).toBe(pool);
+    expect(store.ticketInScopeByUrl('https://github.com/o/r/issues/1')).toBeNull();
+    expect(store.ticketInScopeByUrl('')).toBeNull();
+    expect(store.ticketInScopeByUrl('https://github.com/o/r/issues/9')).toBeNull();
+  });
+
   it('throws when an update matches no row', () => {
     const store = Store.open(':memory:');
 

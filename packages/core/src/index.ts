@@ -9,3 +9,4 @@ export * from './store.js';
 export * from './template.js';
 export * from './source.js';
 export * from './clip.js';
+export * from './snooze.js';
