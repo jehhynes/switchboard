@@ -2,7 +2,7 @@ import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openUrlOf, rowFor, searchEntries, targetForUrl } from '../src/search.js';
 import { startPanel } from '../src/webview/main.js';
-import { age, CAPS, clip, clockOf, controlsOf, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
+import { age, CAPS, clip, clockOf, controlsOf, doneBand, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -238,6 +238,37 @@ describe('clockOf', () => {
 
     expect(root.querySelector('[data-item="1"] .queue')?.textContent).toBe('2d');
     expect(root.querySelector('[data-item="1"] .queue')?.getAttribute('title')).toMatch(/^In scope from .+ UTC to .+ UTC$/);
+  });
+});
+
+describe('doneBand', () => {
+  // Wednesday 7 October 2026, 10:00 local time; the week began on Monday 5 October.
+  const now = new Date(2026, 9, 7, 10).getTime();
+  const at = (day: number, hour = 0) => new Date(2026, 9, day, hour).getTime();
+
+  it('bands by local day, with weeks starting on Monday', () => {
+    const times = [at(7), at(6, 23), at(6), at(5), at(4, 23), new Date(2026, 8, 28).getTime(), new Date(2026, 8, 27, 23).getTime()];
+
+    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'This week', 'Last week', 'Last week', 'Older']);
+  });
+
+  it('puts Monday’s yesterday in Yesterday, not Last week', () => {
+    expect(doneBand(at(4, 12), at(5, 9))).toBe('Yesterday');
+    expect(doneBand(at(3, 12), at(5, 9))).toBe('Last week');
+  });
+
+  it('heads each band of Done once, newest first', () => {
+    const root = document.createElement('div');
+    const items = [item(1, { status: 'done', doneAt: at(1) }), item(2, { status: 'done', doneAt: at(7, 9) }), item(3, { status: 'done', doneAt: at(6) }), item(4, { status: 'done', doneAt: at(7, 8) }), item(5, { status: 'blocked' })];
+
+    root.innerHTML = renderPanel(snapshot(items), now, ui({ groups: new Map([['done', true]]) }));
+
+    const done = root.querySelector('[data-group="done"]')!;
+    const order = [...done.querySelectorAll<HTMLElement>('h4.band, [data-item]')].map((element) => (element.matches('h4') ? element.textContent : element.dataset['item']));
+
+    expect(order).toEqual(['Today', '2', '4', 'Yesterday', '3', 'Last week', '1']);
+    expect(root.querySelector('[data-group="needs"] [data-item="5"]')).not.toBeNull();
+    expect(root.querySelectorAll('[data-group="needs"] h4.band')).toHaveLength(0);
   });
 });
 

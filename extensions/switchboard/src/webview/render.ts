@@ -734,6 +734,7 @@ export function panelGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView 
 
   return {
     ...groups,
+    done: groups.done.sort((a, b) => (b.doneAt ?? b.createdAt) - (a.doneAt ?? a.createdAt) || b.id - a.id),
     unstarted: unstartedOrder(groups.unstarted, snapshot.pool.filter((entry) => !entry.ticket.snoozed)),
     snoozed: [...snoozedItems, ...snoozedPool],
   };
@@ -741,12 +742,55 @@ export function panelGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView 
 
 const EMPTY: Partial<Record<RowGroup, string>> = { needs: 'Nothing needs you.', working: 'Nothing is running.', unstarted: 'Nothing waits to be started.' };
 
+/** Local midnight `days` days after the day of `time`. */
+function midnight(time: number, days = 0): number {
+  const date = new Date(time);
+
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days).getTime();
+}
+
+/** Done's date bands, as in Windows Explorer: Today, Yesterday, This week, Last week and Older, with weeks starting on Monday (PRD R27). */
+export function doneBand(doneAt: number, now: number): string {
+  const today = midnight(now);
+  const week = midnight(now, -((new Date(now).getDay() + 6) % 7));
+
+  if (doneAt >= today) {
+    return 'Today';
+  }
+
+  if (doneAt >= midnight(now, -1)) {
+    return 'Yesterday';
+  }
+
+  if (doneAt >= week) {
+    return 'This week';
+  }
+
+  return doneAt >= midnight(week, -7) ? 'Last week' : 'Older';
+}
+
 /** The whole panel. */
 export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): string {
   const groups = panelGroups(snapshot);
   const { namespaces } = snapshot;
   const body = (key: RowGroup) => {
-    const rows = groups[key].map((entry) => ('status' in entry ? row(entry, now, ui, namespaces) : poolRow(entry, now, ui, namespaces))).join('\n');
+    let band: string | null = null;
+    const rows = groups[key]
+      .map((entry) => {
+        const html = 'status' in entry ? row(entry, now, ui, namespaces) : poolRow(entry, now, ui, namespaces);
+
+        if (key !== 'done' || !('status' in entry)) {
+          return html;
+        }
+
+        const next = doneBand(entry.doneAt ?? entry.createdAt, now);
+        const heading = next === band ? '' : `<h4 class="band">${next}</h4>\n`;
+
+        band = next;
+
+        return `${heading}${html}`;
+      })
+      .join('\n');
 
     return rows || (EMPTY[key] === undefined ? '' : `<p class="empty">${EMPTY[key]}</p>`);
   };
