@@ -11,7 +11,6 @@ import {
   parsePlaybook,
   parsePlaybookFile,
   parseSettings,
-  switchboardHome,
   TEMPLATE_VARIABLES,
   templateError,
   TRIAGE_VARIABLES,
@@ -32,12 +31,12 @@ export interface Config {
 /** The sources Switchboard has, by their key under `sources`. */
 export const SOURCE_KINDS = ['github', 'zoho', 'forum'] as const;
 
-export function settingsPath(home: string): string {
-  return join(switchboardHome(home), 'settings.json');
+export function settingsPath(configDir: string): string {
+  return join(configDir, 'settings.json');
 }
 
-export function playbooksDir(home: string): string {
-  return join(switchboardHome(home), 'playbooks');
+export function playbooksDir(configDir: string): string {
+  return join(configDir, 'playbooks');
 }
 
 /** Why a source's own keys are invalid, or null. */
@@ -78,8 +77,8 @@ const changed = (file: string) => `${file} changed on disk after the editor read
  * Turns a configured source on or off in settings.json, which the hub then reloads. The file is rewritten as formatted JSON.
  * Returns why it could not, or null.
  */
-export function setSourceEnabled(home: string, name: string, enabled: boolean): string | null {
-  const path = settingsPath(home);
+export function setSourceEnabled(configDir: string, name: string, enabled: boolean): string | null {
+  const path = settingsPath(configDir);
   let settings: { sources?: Record<string, Record<string, unknown>> };
 
   try {
@@ -156,8 +155,8 @@ export interface ConfigFiles {
 }
 
 /** Reads settings.json and every playbook file, valid or not, for the settings editor. */
-export function readConfigFiles(home: string): ConfigFiles {
-  const path = settingsPath(home);
+export function readConfigFiles(configDir: string): ConfigFiles {
+  const path = settingsPath(configDir);
   const text = readText(path);
   let settings: SettingsFile = { path, version: fileVersion(text), value: {}, error: null };
 
@@ -169,7 +168,7 @@ export function readConfigFiles(home: string): ConfigFiles {
     }
   }
 
-  const playbooks = listPlaybookFiles(playbooksDir(home)).flatMap((file): PlaybookFileView[] => {
+  const playbooks = listPlaybookFiles(playbooksDir(configDir)).flatMap((file): PlaybookFileView[] => {
     const content = readText(file.path);
 
     if (content === null) {
@@ -192,8 +191,8 @@ export function readConfigFiles(home: string): ConfigFiles {
 }
 
 /** Writes settings.json as formatted JSON. Refuses when the file changed since `version` was read, or with the errors of {@link checkSettings}. */
-export function saveSettings(home: string, value: unknown, version: string | null): string[] {
-  const path = settingsPath(home);
+export function saveSettings(configDir: string, value: unknown, version: string | null): string[] {
+  const path = settingsPath(configDir);
 
   if (fileVersion(readText(path)) !== version) {
     return [changed('settings.json')];
@@ -208,22 +207,22 @@ export function saveSettings(home: string, value: unknown, version: string | nul
   return errors;
 }
 
-function playbookPath(home: string, name: string): string {
+function playbookPath(configDir: string, name: string): string {
   const [namespace = '', base = ''] = name.split(':');
 
-  return join(playbooksDir(home), namespace, `${base}.md`);
+  return join(playbooksDir(configDir), namespace, `${base}.md`);
 }
 
 /**
  * Writes a playbook. `version` null creates it, and refuses when the file exists. Refuses when the file changed since
  * `version` was read, or when the hub would leave the playbook out.
  */
-export function savePlaybook(home: string, name: string, playbook: PlaybookFields, version: string | null): string[] {
+export function savePlaybook(configDir: string, name: string, playbook: PlaybookFields, version: string | null): string[] {
   if (!isPlaybookName(name)) {
     return ['The name must be namespace:name, in lowercase letters, digits and hyphens.'];
   }
 
-  const path = playbookPath(home, name);
+  const path = playbookPath(configDir, name);
   const current = fileVersion(readText(path));
 
   if (current !== version) {
@@ -259,8 +258,8 @@ export function checkPlaybook(name: string, playbook: PlaybookFields): { text: s
 }
 
 /** Deletes a playbook file, unless it changed since `version` was read. */
-export function deletePlaybook(home: string, name: string, version: string): string[] {
-  const file = listPlaybookFiles(playbooksDir(home)).find((entry) => entry.name === name);
+export function deletePlaybook(configDir: string, name: string, version: string): string[] {
+  const file = listPlaybookFiles(playbooksDir(configDir)).find((entry) => entry.name === name);
 
   if (file === undefined || fileVersion(readText(file.path)) !== version) {
     return [changed(name)];
@@ -272,13 +271,13 @@ export function deletePlaybook(home: string, name: string, version: string): str
 }
 
 /** Reads settings and playbooks. A missing settings file means the defaults; an invalid one keeps `previous`. */
-export function loadConfig(home: string, previous: Settings = DEFAULT_SETTINGS): Config {
+export function loadConfig(configDir: string, previous: Settings = DEFAULT_SETTINGS): Config {
   let settings = previous;
   let settingsError: string | null = null;
   let text: string | null = null;
 
   try {
-    text = readFileSync(settingsPath(home), 'utf8');
+    text = readFileSync(settingsPath(configDir), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       settingsError = `settings.json could not be read: ${(error as Error).message}`;
@@ -297,7 +296,7 @@ export function loadConfig(home: string, previous: Settings = DEFAULT_SETTINGS):
     settings = DEFAULT_SETTINGS;
   }
 
-  const { playbooks, errors } = loadPlaybooks(playbooksDir(home));
+  const { playbooks, errors } = loadPlaybooks(playbooksDir(configDir));
 
   return { settings, settingsError, playbooks, playbookErrors: errors };
 }

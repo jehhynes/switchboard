@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { switchboardHome } from '@switchboard/core';
 import { buildOf, createHubApp, findHub, gitBashRoot, postToHub, reportBody, serveHub, stopHub } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
@@ -78,7 +79,8 @@ async function main(argv: readonly string[]): Promise<number> {
   const idle = Number(flag(argv, 'idle-ms'));
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
   const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
-  const result = await serveHub({ home, version: VERSION, build, log, app: () => createHubApp({ home, log }), ...(idle > 0 ? { idleMs: idle } : {}) });
+  const configDir = resolve(flag(argv, 'config') || switchboardHome(home));
+  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log }), ...(idle > 0 ? { idleMs: idle } : {}) });
 
   if ('existing' in result) {
     process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);

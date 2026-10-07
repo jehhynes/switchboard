@@ -76,7 +76,7 @@ function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): Snapsho
     sources: ['github'],
     sourceStates: [{ name: 'github', enabled: true }],
     namespaces: { github: 'dev', zoho: 'support', adhoc: '' },
-    home: 'C:\\Users\\me\\.switchboard',
+    configDir: 'C:\\Users\\me\\.claude\\switchboard',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
     ...patch,
   };
@@ -427,8 +427,8 @@ describe('renderPanel', () => {
 
     expect(render(snapshot([], { sources: [], sourceStates: [{ name: 'zoho', enabled: false }] })).querySelector('p.empty')?.textContent?.trim()).toBe('No source is polled. Turn one on in the title bar.');
     expect([...root.querySelectorAll('p.empty')].slice(0, 2).map((p) => p.textContent?.trim())).toEqual([
-      'No source is configured. Add one in C:\\Users\\me\\.switchboard\\settings.json.',
-      'No task playbooks are loaded. Add them under C:\\Users\\me\\.switchboard\\playbooks.',
+      'No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.',
+      'No task playbooks are loaded. Add them under C:\\Users\\me\\.claude\\switchboard\\playbooks.',
     ]);
     expect(renderPanel(snapshot([]), NOW, ui())).not.toContain('No source is polled');
   });

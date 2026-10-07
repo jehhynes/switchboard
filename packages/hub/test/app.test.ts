@@ -111,22 +111,22 @@ describe('parseReport and reportBody', () => {
 
 describe('loadConfig', () => {
   it('uses defaults without a settings file, keeps the previous settings on an invalid file, and lists playbook errors', () => {
-    const fresh = loadConfig(temp.home);
+    const fresh = loadConfig(join(temp.home, '.switchboard'));
     expect(fresh.settingsError).toBeNull();
     expect(fresh.settings.sessions.concurrency).toBe(2);
 
     writeSettings({ sessions: { concurrency: 3 } });
-    const valid = loadConfig(temp.home);
+    const valid = loadConfig(join(temp.home, '.switchboard'));
     expect(valid.settings.sessions.concurrency).toBe(3);
 
     writeSettings({ sessions: { concurrency: 9 } });
-    const invalid = loadConfig(temp.home, valid.settings);
+    const invalid = loadConfig(join(temp.home, '.switchboard'), valid.settings);
     expect(invalid.settings.sessions.concurrency).toBe(3);
     expect(invalid.settingsError).toBe('sessions.concurrency must be a whole number from 1 to 4.');
 
     mkdirSync(join(temp.home, '.switchboard', 'playbooks', 'dev'), { recursive: true });
     writeFileSync(join(temp.home, '.switchboard', 'playbooks', 'dev', 'bad.md'), 'no front matter');
-    expect(loadConfig(temp.home).playbookErrors).toEqual([{ file: 'dev/bad.md', error: 'The file must start with front matter between --- lines.' }]);
+    expect(loadConfig(join(temp.home, '.switchboard')).playbookErrors).toEqual([{ file: 'dev/bad.md', error: 'The file must start with front matter between --- lines.' }]);
   });
 });
 
@@ -181,12 +181,33 @@ describe('createHubApp', () => {
     expect(await app.post['/sources']!({ name: 'zoho', enabled: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {name, enabled}.' } });
   });
 
+  it('reads, reloads and writes settings and playbooks in a configDir outside the Switchboard home', async () => {
+    const configDir = join(temp.home, 'repo', 'switchboard');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ sessions: { installHooks: false }, sources: { zoho: { enabled: true, repoRoot: 'D:/support', orgId: '1' } } }));
+    writeSettings({ sessions: { installHooks: false } });
+    const app = await createHubApp({ home: temp.home, configDir, log: () => {}, deps: { exec: noCli } });
+    closers.push(() => app.close());
+
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: true }]);
+    expect((app.snapshot() as { configDir: string }).configDir).toBe(configDir);
+
+    mkdirSync(join(configDir, 'playbooks', 'dev'), { recursive: true });
+    writeFileSync(join(configDir, 'playbooks', 'dev', 'develop.md'), '---\ndescription: Build it\n---\nBuild.');
+    await until(() => ((app.snapshot() as { playbooks: unknown[] }).playbooks.length === 1 ? true : null));
+
+    expect(await app.post['/sources']!({ name: 'zoho', enabled: false })).toEqual({ status: 200, body: { done: true } });
+    expect(JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf8')).sources.zoho.enabled).toBe(false);
+    await until(() => (JSON.stringify((app.snapshot() as { sourceStates: unknown }).sourceStates) === '[{"name":"zoho","enabled":false}]' ? true : null));
+    expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'))).toEqual({ sessions: { installHooks: false } });
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
     const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
     closers.push(() => server.close());
-    const record = { protocol: 1, version: 't', build: 'b', port: server.port, token: server.token, pid: 1, startedAt: '' };
+    const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
     expect(await postToHub(record, '/action', { type: 'mark-done', workItemId: 1 }, 5000)).toMatchObject({ status: 409, error: 'Unknown work item 1.' });
     expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' });

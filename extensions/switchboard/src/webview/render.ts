@@ -556,8 +556,8 @@ function setup(snapshot: Snapshot): string {
       ? null
       : snapshot.sourceStates.length > 0
         ? 'No source is polled. Turn one on in the title bar.'
-        : `No source is configured. Add one in ${snapshot.home}\\settings.json.`,
-    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under ${snapshot.home}\\playbooks.` : null,
+        : `No source is configured. Add one in ${snapshot.configDir}\\settings.json.`,
+    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under ${snapshot.configDir}\\playbooks.` : null,
   ].filter((line): line is string => line !== null);
 
   return lines.map((line) => `<p class="empty"><span class="codicon codicon-info"></span> ${escape(line)}</p>`).join('');

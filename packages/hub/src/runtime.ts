@@ -19,6 +19,8 @@ export const OPEN_CLAIM_MS = 2 * 60_000;
 export interface RuntimeDeps {
   /** The operator's home; the Switchboard home is `<home>/.switchboard`. */
   home: string;
+  /** The folder holding settings.json and playbooks/. */
+  configDir: string;
   store: Store;
   exec: Exec;
   claudePath: string;
@@ -64,8 +66,8 @@ export interface Snapshot {
   sourceStates: { name: string; enabled: boolean }[];
   /** Each configured source's playbook namespace, which names a triage in progress, such as `dev:triage`. */
   namespaces: Record<string, string>;
-  /** The Switchboard home, where settings.json and playbooks/ live. */
-  home: string;
+  /** The folder holding settings.json and playbooks/. */
+  configDir: string;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
 }
 
@@ -339,7 +341,7 @@ export class Runtime {
         .filter(([name]) => name !== ADHOC_SOURCE)
         .map(([name, source]) => ({ name, enabled: source.enabled })),
       namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
-      home: this.home,
+      configDir: this.deps.configDir,
       errors: {
         settings: settingsError,
         playbooks: playbookErrors.map((entry) => `${entry.file}: ${entry.error}`),

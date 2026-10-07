@@ -16,6 +16,17 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "configuration": {
+      "title": "Switchboard",
+      "properties": {
+        "switchboard.configDir": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Folder holding `settings.json` and `playbooks/`, such as a folder in a git repository. An absolute path or one starting with `~`. Empty uses `~/.switchboard`. A change restarts the hub on the new folder."
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {

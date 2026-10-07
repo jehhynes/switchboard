@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import * as vscode from 'vscode';
-import { PERMISSION_MODES, TEMPLATE_VARIABLES, switchboardHome } from '@switchboard/core';
+import { PERMISSION_MODES, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { PlaybookFields } from '@switchboard/core';
 import { SOURCE_KINDS, checkPlaybook, checkSettings, deletePlaybook, playbooksDir, readConfigFiles, savePlaybook, saveSettings } from '@switchboard/hub';
 import type { EditorConfig } from './webview/settings.js';
@@ -19,7 +19,7 @@ type Message =
   | { type: 'open-file'; path: string };
 
 /**
- * The settings editor: a webview tab that edits settings.json and the playbook files in the Switchboard home. It writes the
+ * The settings editor: a webview tab that edits settings.json and the playbook files in the config folder. It writes the
  * files directly, and the hub reloads them as it does any edit (PRD R42, R54).
  */
 export class SettingsEditor {
@@ -28,11 +28,13 @@ export class SettingsEditor {
   private panel: vscode.WebviewPanel | undefined;
   private watchers: FSWatcher[] = [];
   private timer: NodeJS.Timeout | undefined;
+  /** The config folder the open editor reads and watches. */
+  private dir = '';
 
   /** `inUse` counts the open work items of each playbook, so a delete can say what still uses it. */
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly home: string,
+    private readonly configDir: () => string,
     private readonly inUse: () => Record<string, number>,
   ) {}
 
@@ -72,14 +74,28 @@ export class SettingsEditor {
     this.panel?.dispose();
   }
 
+  /**
+   * Closes an open editor when the config folder setting changes, because its drafts and file versions belong to the
+   * old folder, and a save could overwrite an identical copy in the new one.
+   */
+  moved(): void {
+    if (this.panel === undefined || this.dir === this.configDir()) {
+      return;
+    }
+
+    this.panel.dispose();
+    void vscode.window.showWarningMessage('Switchboard Settings closed because switchboard.configDir changed; any unsaved changes were discarded. Open it again to edit the new folder.');
+  }
+
   private watch(): void {
     const refresh = () => {
       clearTimeout(this.timer);
       this.timer = setTimeout(() => this.send({ type: 'config', config: this.config() }), REFRESH_DELAY_MS);
     };
 
-    mkdirSync(playbooksDir(this.home), { recursive: true });
-    this.watchers = [watch(switchboardHome(this.home), (_event, file) => file === 'settings.json' && refresh()), watch(playbooksDir(this.home), { recursive: true }, refresh)];
+    this.dir = this.configDir();
+    mkdirSync(playbooksDir(this.dir), { recursive: true });
+    this.watchers = [watch(this.dir, (_event, file) => file === 'settings.json' && refresh()), watch(playbooksDir(this.dir), { recursive: true }, refresh)];
   }
 
   private close(): void {
@@ -94,7 +110,7 @@ export class SettingsEditor {
   }
 
   private config(): EditorConfig {
-    return { ...readConfigFiles(this.home), permissionModes: [...PERMISSION_MODES], templateVariables: [...TEMPLATE_VARIABLES], sourceKinds: [...SOURCE_KINDS] };
+    return { ...readConfigFiles(this.dir), permissionModes: [...PERMISSION_MODES], templateVariables: [...TEMPLATE_VARIABLES], sourceKinds: [...SOURCE_KINDS] };
   }
 
   private send(message: unknown): void {
@@ -124,21 +140,23 @@ export class SettingsEditor {
           return;
         }
         case 'save-settings':
-          this.written('settings', saveSettings(this.home, message.value, message.version), { type: 'saved', target: 'settings' });
+          this.written('settings', saveSettings(this.dir, message.value, message.version), { type: 'saved', target: 'settings' });
           return;
         case 'save-playbook':
-          this.written(message.name, savePlaybook(this.home, message.name, message.playbook, message.version), { type: 'saved', target: message.name });
+          this.written(message.name, savePlaybook(this.dir, message.name, message.playbook, message.version), { type: 'saved', target: message.name });
           return;
         case 'create-playbook':
-          this.written('new', savePlaybook(this.home, message.name, message.playbook, null), { type: 'saved', target: 'new' });
+          this.written('new', savePlaybook(this.dir, message.name, message.playbook, null), { type: 'saved', target: 'new' });
           return;
         case 'delete-playbook': {
           const count = this.inUse()[message.name] ?? 0;
           const detail = count === 0 ? 'Its file is deleted.' : `${count} open work ${count === 1 ? 'item uses' : 'items use'} it. Its file is deleted.`;
+          const panel = this.panel;
           const answer = await vscode.window.showWarningMessage(`Delete playbook ${message.name}?`, { modal: true, detail }, 'Delete');
 
-          if (answer === 'Delete') {
-            this.written(message.name, deletePlaybook(this.home, message.name, message.version), { type: 'deleted', name: message.name });
+          // The editor closes when the config folder changes, and a confirmation given after that is for the old folder.
+          if (answer === 'Delete' && this.panel === panel) {
+            this.written(message.name, deletePlaybook(this.dir, message.name, message.version), { type: 'deleted', name: message.name });
           }
           return;
         }

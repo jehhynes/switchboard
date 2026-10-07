@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
 import { holdLock, releaseLock } from '@switchboard/hub';
 import type { HubRecord } from '@switchboard/core';
@@ -87,6 +87,7 @@ describe('hub entry point', () => {
     const found = await recorded();
 
     expect(found.pid).toBe(first.child.pid);
+    expect(found.configDir).toBe(resolve(home, '.switchboard'));
     expect(await status(found)).toBe(200);
 
     const second = await start().exited;
@@ -99,6 +100,19 @@ describe('hub entry point', () => {
     expect(stop.stdout).toBe('Stopped the hub.\n');
     expect((await first.exited).code).toBe(0);
     expect(record()).toBeNull();
+  });
+
+  it('creates the playbook folder under --config, not the Switchboard home, and records the folder', async () => {
+    const configDir = join(home, 'repo', 'switchboard');
+    const first = start('--idle-ms=60000', `--config=${configDir}`);
+    const found = await recorded();
+
+    expect(found.configDir).toBe(resolve(configDir));
+    expect(existsSync(join(configDir, 'playbooks'))).toBe(true);
+    expect(existsSync(join(home, '.switchboard', 'playbooks'))).toBe(false);
+
+    await start('--stop').exited;
+    expect((await first.exited).code).toBe(0);
   });
 
   it('reports when there is no hub to stop', async () => {

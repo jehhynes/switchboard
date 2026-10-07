@@ -7,6 +7,8 @@ export interface HubRecord {
   version: string;
   /** Hash of the hub bundle; differs between builds of one version. */
   build: string;
+  /** The folder holding settings.json and playbooks/. */
+  configDir: string;
   port: number;
   token: string;
   pid: number;
@@ -53,7 +55,10 @@ export function parseHubRecord(text: string): HubRecord | null {
     return null;
   }
 
-  return { protocol: raw.protocol, version: raw.version, build: raw.build, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt };
+  // A record from a hub older than configDir reads as '', so a window replaces that hub.
+  const configDir = typeof raw.configDir === 'string' ? raw.configDir : '';
+
+  return { protocol: raw.protocol, version: raw.version, build: raw.build, configDir, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt };
 }
 
 export function parseHubIdentity(text: string): HubIdentity | null {

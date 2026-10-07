@@ -4,6 +4,8 @@ export interface EnsureDeps {
   find(): Promise<HubRecord | null>;
   /** The build to accept, read on every attempt so all windows follow the currently installed bundle. */
   build(): string;
+  /** The config folder the hub must read, read on every attempt so all windows follow the current setting. */
+  configDir(): string;
   /** Ask a hub to stop. True when it agreed. */
   stop(record: HubRecord): Promise<boolean>;
   /** Starts a hub and returns; the caller waits for `find` to see it. */
@@ -21,7 +23,7 @@ export const STOP_TIMEOUT_MS = 5000;
 export const POLL_MS = 100;
 
 /**
- * Find a running hub of the installed build, or start one. A hub of another build is asked to stop first, and
+ * Find a running hub of the installed build and config folder, or start one. Any other hub is asked to stop first, and
  * nothing starts until it has gone. Concurrent calls share one attempt.
  */
 export function makeEnsure(deps: EnsureDeps): () => Promise<Ensured> {
@@ -43,15 +45,17 @@ export function makeEnsure(deps: EnsureDeps): () => Promise<Ensured> {
 
   async function attempt(): Promise<Ensured> {
     const build = deps.build();
+    const configDir = deps.configDir();
+    const wanted = (record: HubRecord) => record.build === build && record.configDir === configDir;
     const found = await deps.find();
 
-    if (found?.build === build) {
+    if (found !== null && wanted(found)) {
       return { record: found };
     }
 
     if (found !== null) {
       if (!(await deps.stop(found))) {
-        return { failed: `The running hub (pid ${found.pid}) is from another build and refused to stop.` };
+        return { failed: `The running hub (pid ${found.pid}) is from another build or config folder and refused to stop.` };
       }
 
       const gone = await poll(STOP_TIMEOUT_MS, async () => ((await deps.find())?.token === found.token ? null : true));
@@ -70,7 +74,7 @@ export function makeEnsure(deps: EnsureDeps): () => Promise<Ensured> {
     const live = await poll(START_TIMEOUT_MS, async () => {
       const candidate = await deps.find();
 
-      return candidate?.build === build ? candidate : null;
+      return candidate !== null && wanted(candidate) ? candidate : null;
     });
 
     return live === null ? { failed: `The hub did not start within ${START_TIMEOUT_MS / 1000} seconds. Log: ${deps.logPath}` } : { record: live };

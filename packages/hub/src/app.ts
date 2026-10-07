@@ -101,6 +101,8 @@ export function parseAction(body: unknown): FlowEvent | null {
 
 export interface AppOptions {
   home: string;
+  /** The folder holding settings.json and playbooks/; the Switchboard home when left out. */
+  configDir?: string;
   log(line: string): void;
   /** Overrides for tests. */
   deps?: Partial<RuntimeDeps>;
@@ -109,13 +111,15 @@ export interface AppOptions {
 /** Opens the store, loads configuration, and runs the core for the hub process. */
 export async function createHubApp(options: AppOptions): Promise<HubApp & { runtime: Runtime }> {
   const home = switchboardHome(options.home);
+  const configDir = options.configDir ?? home;
 
-  mkdirSync(join(home, 'playbooks'), { recursive: true });
+  mkdirSync(playbooksDir(configDir), { recursive: true });
 
   const store = Store.open(join(home, 'switchboard.db'));
-  let config = loadConfig(options.home);
+  let config = loadConfig(configDir);
   const deps: RuntimeDeps = {
     home: options.home,
+    configDir,
     store,
     exec: spawnExec,
     claudePath: 'claude',
@@ -151,13 +155,13 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const reload = () => {
     clearTimeout(pending);
     pending = setTimeout(() => {
-      config = loadConfig(options.home, config.settings);
+      config = loadConfig(configDir, config.settings);
       runtime.reload(config);
     }, RELOAD_DEBOUNCE_MS);
   };
   const watchers: FSWatcher[] = [
-    watch(home, (_event, file) => file === 'settings.json' && reload()),
-    watch(playbooksDir(options.home), { recursive: true }, reload),
+    watch(configDir, (_event, file) => file === 'settings.json' && reload()),
+    watch(playbooksDir(configDir), { recursive: true }, reload),
   ];
 
   await runtime.startup();
@@ -200,7 +204,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Expected {name, enabled}.' } };
         }
 
-        const error = setSourceEnabled(options.home, body['name'], body['enabled']);
+        const error = setSourceEnabled(configDir, body['name'], body['enabled']);
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },

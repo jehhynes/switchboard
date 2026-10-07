@@ -5,6 +5,7 @@ const { join } = require('node:path');
 const vscode = require('vscode');
 
 const hubJson = join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'hub.json');
+const configDir = join(process.env.SWITCHBOARD_TEST_HOME, 'repo', 'switchboard');
 
 function record() {
   try {
@@ -60,6 +61,7 @@ describe('the hub process', () => {
     const started = await until(() => record(), 'no hub.json was written');
 
     assert.notStrictEqual(started.pid, process.pid, 'the hub runs inside the extension host');
+    assert.strictEqual(started.configDir, configDir);
 
     const status = await call(started.port, '/status', started.token);
 
@@ -227,7 +229,7 @@ describe('the hub process', () => {
 
   it('turns a source off with its on toggle and on with its off toggle, in settings.json', async () => {
     await api();
-    const settings = join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'settings.json');
+    const settings = join(configDir, 'settings.json');
     const fs = require('node:fs');
     const enabled = () => JSON.parse(fs.readFileSync(settings, 'utf8')).sources.github.enabled;
 
@@ -318,5 +320,33 @@ describe('the hub process', () => {
     await vscode.commands.executeCommand('switchboard.openLink', file);
 
     assert.strictEqual(vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase(), file.toLowerCase());
+  });
+
+  it('replaces the hub with one on the new folder when switchboard.configDir changes, the panel follows it, and the settings editor closes', async () => {
+    const extension = await api();
+    const before = await until(() => record(), 'no hub is running');
+    const moved = join(process.env.SWITCHBOARD_TEST_HOME, 'moved');
+    const config = vscode.workspace.getConfiguration('switchboard');
+    const settingsTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith('switchboard.settings'));
+
+    await vscode.commands.executeCommand('switchboard.openSettings');
+    await until(() => settingsTabs().length === 1, 'the settings editor did not open');
+    await config.update('configDir', moved, vscode.ConfigurationTarget.Global);
+    try {
+      // Its drafts belong to the old folder, so the settings editor closes rather than saving them into the new one.
+      await until(() => settingsTabs().length === 0, 'the settings editor stayed open on the old folder');
+      const after = await until(() => {
+        const now = record();
+
+        return now && now.pid !== before.pid && now.configDir === moved ? now : null;
+      }, 'the hub was not replaced on the new config folder');
+
+      await until(() => extension.hub()?.pid === after.pid, 'the window did not reconnect to the new hub');
+      await until(() => extension.state()?.configDir === moved, 'the panel state does not name the new config folder');
+    } finally {
+      await config.update('configDir', '~/repo/switchboard', vscode.ConfigurationTarget.Global);
+    }
+
+    await until(() => record()?.configDir === configDir, 'the hub did not return to the configured folder');
   });
 });

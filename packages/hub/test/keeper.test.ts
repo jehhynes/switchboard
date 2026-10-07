@@ -6,7 +6,7 @@ import { keepHub } from '../src/keeper.js';
 import type { KeeperDeps } from '../src/keeper.js';
 import { until } from './helpers.js';
 
-const record: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', port: 5000, token: 't', pid: 7, startedAt: 'now' };
+const record: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', port: 5000, token: 't', pid: 7, startedAt: 'now' };
 
 function harness(ensured: () => Ensured, opens: () => boolean = () => true) {
   let time = 0;
@@ -83,6 +83,28 @@ describe('keepHub', () => {
     expect(h.onFailed).toHaveBeenCalledWith('The hub kept stopping shortly after starting.');
     expect(h.ends).toHaveLength(3);
     expect(keeper.current()).toBeNull();
+  });
+
+  it('does not count a quick end it was told to expect, and counts the next one again', async () => {
+    const h = harness(() => ({ record }));
+    const keeper = keepHub(h.deps);
+
+    for (let round = 1; round <= 3; round++) {
+      await until(() => (h.ends.length === round ? true : null));
+      keeper.expectEnd();
+      h.ends[round - 1]!();
+    }
+
+    await until(() => (h.ends.length === 4 ? true : null));
+    expect(h.onFailed).not.toHaveBeenCalled();
+
+    for (let round = 4; round <= 6; round++) {
+      await until(() => (h.ends.length === round ? true : null));
+      h.ends[round - 1]!();
+    }
+
+    await keeper.done;
+    expect(h.onFailed).toHaveBeenCalledWith('The hub kept stopping shortly after starting.');
   });
 
   it('gives up after repeated start failures with the last reason', async () => {

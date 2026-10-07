@@ -8,7 +8,7 @@ import { until } from './helpers.js';
 const identity = { hub: 'switchboard', protocol: 1, version: '0.1.0', pid: 99 };
 
 function recordFor(port: number, token: string) {
-  return { protocol: 1, version: '', build: 'b1', port, token, pid: 99, startedAt: '' };
+  return { protocol: 1, version: '', build: 'b1', configDir: 'C:/cfg', port, token, pid: 99, startedAt: '' };
 }
 
 describe('openEvents', () => {

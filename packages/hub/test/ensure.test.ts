@@ -3,16 +3,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeEnsure } from '../src/ensure.js';
 import type { EnsureDeps } from '../src/ensure.js';
 
-const current: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', port: 5000, token: 't1', pid: 7, startedAt: 'now' };
+const current: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', port: 5000, token: 't1', pid: 7, startedAt: 'now' };
 const old: HubRecord = { ...current, build: 'b0', port: 5001, token: 't0', pid: 6 };
 
 /** `find` returns the answers in order and then repeats the last one. */
-function fakes(answers: (HubRecord | null)[], overrides: Partial<Pick<EnsureDeps, 'build' | 'stop' | 'start'>> = {}) {
+function fakes(answers: (HubRecord | null)[], overrides: Partial<Pick<EnsureDeps, 'build' | 'configDir' | 'stop' | 'start'>> = {}) {
   let time = 0;
 
   return {
     find: vi.fn(async (): Promise<HubRecord | null> => (answers.length > 1 ? answers.shift()! : answers[0]!)),
     build: overrides.build ?? (() => 'b1'),
+    configDir: overrides.configDir ?? (() => 'C:/cfg'),
     stop: vi.fn(overrides.stop ?? (async () => true)),
     start: vi.fn(overrides.start ?? (() => {})),
     now: () => time,
@@ -69,6 +70,30 @@ describe('makeEnsure', () => {
     expect(deps.start.mock.invocationCallOrder[0]).toBeGreaterThan(deps.find.mock.invocationCallOrder[2]!);
   });
 
+  it('replaces a hub of the installed build that reads another config folder', async () => {
+    const elsewhere: HubRecord = { ...current, configDir: 'C:/other', token: 't2', pid: 8 };
+    const deps = fakes([elsewhere, null, null, current]);
+
+    expect(await makeEnsure(deps)()).toEqual({ record: current });
+    expect(deps.stop).toHaveBeenCalledWith(elsewhere);
+    expect(deps.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows the config folder set at the time of each attempt, so a window does not restore a hub on the old folder', async () => {
+    let configDir = 'C:/old';
+    const onOld: HubRecord = { ...current, configDir: 'C:/old' };
+    const deps = fakes([onOld], { configDir: () => configDir });
+    const ensure = makeEnsure(deps);
+
+    expect(await ensure()).toEqual({ record: onOld });
+
+    configDir = 'C:/cfg';
+    deps.find.mockResolvedValueOnce(onOld).mockResolvedValueOnce(null).mockResolvedValue(current);
+
+    expect(await ensure()).toEqual({ record: current });
+    expect(deps.stop).toHaveBeenCalledWith(onOld);
+  });
+
   it('follows the build installed at the time of each attempt', async () => {
     let installed = 'b0';
     const deps = fakes([old], { build: () => installed });
@@ -87,7 +112,7 @@ describe('makeEnsure', () => {
   it('fails without starting when a hub of another build refuses to stop', async () => {
     const deps = fakes([old], { stop: async () => false });
 
-    expect(await makeEnsure(deps)()).toEqual({ failed: 'The running hub (pid 6) is from another build and refused to stop.' });
+    expect(await makeEnsure(deps)()).toEqual({ failed: 'The running hub (pid 6) is from another build or config folder and refused to stop.' });
     expect(deps.stop).toHaveBeenCalledTimes(1);
     expect(deps.start).not.toHaveBeenCalled();
   });

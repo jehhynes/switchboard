@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import * as vscode from 'vscode';
-import { hubBundlePath, hubLogPath } from '@switchboard/core';
+import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { startHub } from './hubProcess.js';
@@ -48,22 +49,39 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   // SWITCHBOARD_HOME points a window at another home, such as live acceptance's; the hub gets it as --home.
   const home = process.env['SWITCHBOARD_HOME'] || homedir();
   const bundle = hubBundlePath(home);
+  // Read on every use, so all windows follow the current setting and never replace each other's hub.
+  const configDir = (): string => {
+    // An overridden home is for isolation, so it ignores a config folder that would hold the operator's own settings.
+    const setting = process.env['SWITCHBOARD_HOME'] ? '' : vscode.workspace.getConfiguration('switchboard').get<string>('configDir', '');
+    const resolved = resolveConfigDir(setting, home, homedir());
 
+    return 'dir' in resolved ? resolved.dir : resolve(switchboardHome(home));
+  };
+  const reportConfigError = (): void => {
+    const resolved = resolveConfigDir(vscode.workspace.getConfiguration('switchboard').get<string>('configDir', ''), home, homedir());
+
+    if ('error' in resolved && !process.env['SWITCHBOARD_HOME']) {
+      void vscode.window.showErrorMessage(`Switchboard: ${resolved.error}. Using ${configDir()}.`);
+    }
+  };
+
+  reportConfigError();
   installBundle(context.asAbsolutePath('dist/hub.js'), bundle);
 
-  // A hub from another build, such as one started before this extension was updated, is replaced.
+  // A hub from another build or config folder, such as one started before this extension was updated, is replaced.
   const ensure = makeEnsure({
     find: () => findHub(home),
     build: () => buildOf(bundle),
+    configDir,
     stop: stopHub,
-    start: () => startHub(bundle, home),
+    start: () => startHub(bundle, home, configDir()),
     now: Date.now,
     sleep,
     logPath: hubLogPath(home),
   });
 
   const view = new WorkItemsView(context.extensionUri);
-  const settings = new SettingsEditor(context.extensionUri, home, () => openPlaybooks(view.state() as Snapshot | null));
+  const settings = new SettingsEditor(context.extensionUri, configDir, () => openPlaybooks(view.state() as Snapshot | null));
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WorkItemsView.id, view, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -91,6 +109,22 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       return record === null ? null : claimOpen(record);
     }),
     vscode.window.onDidChangeWindowState((state) => state.focused && void vscode.commands.executeCommand('switchboard.claim').then(undefined, () => {})),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration('switchboard.configDir')) {
+        return;
+      }
+
+      reportConfigError();
+      settings.moved();
+
+      // Stopping the hub ends every window's stream; each reconnects to one hub started on the new folder.
+      const record = keeper.current();
+
+      if (record !== null && record.configDir !== configDir()) {
+        keeper.expectEnd();
+        void stopHub(record);
+      }
+    }),
   );
 
   const keeper = keepHub({

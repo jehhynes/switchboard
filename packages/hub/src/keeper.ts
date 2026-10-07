@@ -13,6 +13,8 @@ export interface KeeperDeps {
 export interface Keeper {
   /** The hub this client is connected to, or null. */
   current(): HubRecord | null;
+  /** The current stream will end on purpose, such as a hub stopped for a new config folder, so its end is not a failure. */
+  expectEnd(): void;
   /** Resolves when the loop stops: after `dispose()` or after giving up. */
   done: Promise<void>;
   dispose(): void;
@@ -29,6 +31,7 @@ export function keepHub(deps: KeeperDeps): Keeper {
   let current: HubRecord | null = null;
   let stream: EventStream | null = null;
   let wake: (() => void) | null = null;
+  let expected = false;
 
   async function run(): Promise<void> {
     let failures = 0;
@@ -62,6 +65,8 @@ export function keepHub(deps: KeeperDeps): Keeper {
         } else {
           const connectedAt = deps.now();
 
+          expected = false;
+
           current = ensured.record;
           stream = opened;
           await ended;
@@ -72,7 +77,7 @@ export function keepHub(deps: KeeperDeps): Keeper {
             return;
           }
 
-          failures = deps.now() - connectedAt < STABLE_MS ? failures + 1 : 0;
+          failures = !expected && deps.now() - connectedAt < STABLE_MS ? failures + 1 : 0;
           reason = 'The hub kept stopping shortly after starting.';
         }
       }
@@ -91,6 +96,9 @@ export function keepHub(deps: KeeperDeps): Keeper {
 
   return {
     current: () => current,
+    expectEnd: () => {
+      expected = true;
+    },
     done,
     dispose: () => {
       disposed = true;

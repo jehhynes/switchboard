@@ -20,6 +20,8 @@ export interface ServeOptions {
   home: string;
   version: string;
   build: string;
+  /** Recorded so a window can tell whether the hub reads the config folder it expects. */
+  configDir: string;
   idleMs?: number;
   /** How long a hub that lost the lock waits for the holder's record. */
   waitMs?: number;
@@ -64,7 +66,7 @@ async function waitForHub(home: string, waitMs: number): Promise<HubRecord | nul
  * `hub.json`, so concurrent starts leave one hub. Exits after `idleMs` with no connected client.
  */
 export async function serveHub(options: ServeOptions): Promise<ServeResult> {
-  const { home, version, build } = options;
+  const { home, version, build, configDir } = options;
   const path = hubRecordPath(home);
   const exit = options.exit ?? ((code: number) => process.exit(code));
   const log = options.log ?? ((line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`));
@@ -95,6 +97,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     protocol: PROTOCOL,
     version,
     build,
+    configDir,
     port: server.port,
     token: server.token,
     pid: process.pid,

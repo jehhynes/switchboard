@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 async function serve(options: { idleMs?: number; waitMs?: number; exit?: (code: number) => void } = {}): Promise<ServeResult> {
-  const result = await serveHub({ home, version: '0.1.0', build: 'b1', log: () => {}, exit: vi.fn(), ...options });
+  const result = await serveHub({ home, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', log: () => {}, exit: vi.fn(), ...options });
 
   if ('served' in result) {
     running.push(result.served);
@@ -67,6 +67,7 @@ describe('serveHub', () => {
     expect(record.pid).toBe(process.pid);
     expect(record.version).toBe('0.1.0');
     expect(record.build).toBe('b1');
+    expect(record.configDir).toBe('C:/cfg');
     expect(await findHub(home)).toEqual(record);
   });
 
