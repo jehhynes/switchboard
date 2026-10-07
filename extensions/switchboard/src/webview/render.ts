@@ -520,13 +520,17 @@ ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, n
 </div>`;
 }
 
-/** A failed or blocked row outside Snoozed takes a stripe in its Retry colour, so trouble stands out in Needs you (PRD R27). */
+/** Outside Snoozed, a failed row takes the error stripe, and a blocked row or one with a question the warning stripe (PRD R27). */
 function stripeClass(item: WorkItemView): string {
   if (item.ticket.snoozed) {
     return '';
   }
 
-  return item.status === 'failed' ? ' stripe-error' : item.status === 'blocked' ? ' stripe-warning' : '';
+  if (item.status === 'failed') {
+    return ' stripe-error';
+  }
+
+  return item.status === 'blocked' || (groupOf(item) === 'needs' && activeSession(item)?.state === 'waiting') ? ' stripe-warning' : '';
 }
 
 /** Approve's tooltip names the prompt it runs, so the operator can read the exact command before approving. */

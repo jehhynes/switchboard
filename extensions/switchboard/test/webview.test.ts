@@ -349,11 +349,14 @@ describe('renderPanel', () => {
     expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual([]);
   });
 
-  it('stripes failed rows in the error colour and blocked rows in the warning colour, except while snoozed', () => {
-    const stripes = (row: WorkItemView) => [...render(snapshot([row])).querySelector(`[data-item="${row.id}"]`)!.classList].filter((name) => name.startsWith('stripe'));
+  it('stripes failed rows in the error colour and blocked rows and questions in the warning colour, except while snoozed', () => {
+    const stripes = (row: WorkItemView) =>
+      [...render(snapshot([row]), { groups: new Map([['done', true]]) }).querySelector(`[data-item="${row.id}"]`)!.classList].filter((name) => name.startsWith('stripe'));
 
     expect(stripes(item(1, { status: 'failed' }))).toEqual(['stripe-error']);
     expect(stripes(item(2, { status: 'blocked' }))).toEqual(['stripe-warning']);
+    expect(stripes(item(6, { status: 'running', sessions: [session({ state: 'waiting' })] }))).toEqual(['stripe-warning']);
+    expect(stripes(item(7, { status: 'done', doneAt: NOW, sessions: [session({ state: 'waiting' })] }))).toEqual([]);
     expect(stripes(item(3, { status: 'awaiting-approval' }))).toEqual([]);
     expect(stripes(item(4, { status: 'running' }))).toEqual([]);
     expect(stripes(item(5, { status: 'failed', ticket: { ...item(5).ticket, snoozed: true, snoozedUntil: null } }))).toEqual([]);
