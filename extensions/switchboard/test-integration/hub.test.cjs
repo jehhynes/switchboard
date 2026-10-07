@@ -157,13 +157,14 @@ describe('the hub process', () => {
     assert.strictEqual(shown('switchboard.newAdhoc'), 'view == switchboard.workItems');
     assert.strictEqual(shown('switchboard.openSettings'), 'view == switchboard.workItems');
     assert.deepStrictEqual(
-      menu.map((entry) => [entry.command, entry.group]).slice(-3),
+      menu.map((entry) => [entry.command, entry.group]).slice(-4),
       [
         ['switchboard.separator', 'navigation@8'],
-        ['switchboard.newAdhoc', 'navigation@9'],
-        ['switchboard.openSettings', 'navigation@10'],
+        ['switchboard.goTo', 'navigation@9'],
+        ['switchboard.newAdhoc', 'navigation@10'],
+        ['switchboard.openSettings', 'navigation@11'],
       ],
-      'the separator sits before New Ad-hoc Session and Open Settings',
+      'the separator sits before Go to Work Item, New Ad-hoc Session and Open Settings',
     );
     for (const name of ['github', 'zoho', 'forum']) {
       for (const state of ['on', 'off']) {
@@ -225,6 +226,28 @@ describe('the hub process', () => {
     }, 'the dismissed snooze pick never settled');
     await dismissed;
     assert.strictEqual(reply, null, 'a dismissed pick sends no action');
+  });
+
+  it('opens Go to Work Item from the title bar or the Command Palette as a quick pick, and resolves to null when dismissed (PRD R63)', async () => {
+    await api();
+    const contributes = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
+    const command = contributes.commands.find((entry) => entry.command === 'switchboard.goTo');
+
+    assert.deepStrictEqual([command.title, command.icon], ['Go to Work Item…', '$(search)']);
+    assert.ok(!contributes.menus.commandPalette.some((entry) => entry.command === 'switchboard.goTo'), 'a commandPalette entry hides Go to Work Item');
+    assert.ok((await vscode.commands.getCommands(true)).includes('switchboard.goTo'));
+
+    let reply = 'pending';
+    const picking = vscode.commands.executeCommand('switchboard.goTo').then((answer) => (reply = answer));
+
+    // The quick pick is open once closing it settles the command.
+    await until(async () => {
+      await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+      await new Promise((done) => setTimeout(done, 100));
+      return reply !== 'pending';
+    }, 'the Go to Work Item pick never settled');
+    await picking;
+    assert.strictEqual(reply, null);
   });
 
   it('turns a source off with its on toggle and on with its off toggle, in settings.json', async () => {

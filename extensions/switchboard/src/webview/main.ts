@@ -7,6 +7,13 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
+/** The extension's Go to Work Item: reveal a row by its `data-row` key and, with `open`, run its click action. */
+interface SelectMessage {
+  type: 'select';
+  row: string;
+  open: boolean;
+}
+
 const CLIPPED = '.title, .playbook-name, .key, .stage, .approval, .note';
 const FOCUSABLE = 'button, a[href]';
 
@@ -38,12 +45,51 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
     }
   };
 
-  window.addEventListener('message', (event: MessageEvent<{ type: string; snapshot?: Snapshot }>) => {
-    if (event.data.type === 'state' && event.data.snapshot !== undefined) {
-      snapshot = event.data.snapshot;
+  // A select that arrives before the state that shows its row waits for the next state, and is dropped if that state lacks it too.
+  let pending: SelectMessage | null = null;
+
+  window.addEventListener('message', (event: MessageEvent<{ type: string; snapshot?: Snapshot } | SelectMessage>) => {
+    const data = event.data;
+
+    if (data.type === 'state' && 'snapshot' in data && data.snapshot !== undefined) {
+      snapshot = data.snapshot;
       draw();
+
+      const waiting = pending;
+
+      pending = null;
+      if (waiting !== null) {
+        reveal(waiting);
+      }
+    } else if (data.type === 'select' && 'row' in data) {
+      // A newer select replaces one still waiting.
+      pending = reveal(data) ? null : data;
     }
   });
+
+  /** Opens the row's group, selects, scrolls to and focuses the row, then runs its click action unless only revealing (PRD R63). */
+  const reveal = (message: SelectMessage): boolean => {
+    const find = () => root.querySelector<HTMLElement>(`[data-row="${message.row}"]`);
+    const group = find()?.closest<HTMLElement>('details[data-group]');
+
+    if (group === null || group === undefined) {
+      return false;
+    }
+
+    groups.set(group.dataset['group']!, true);
+    selected = message.row;
+    draw();
+
+    const row = find()!;
+
+    row.focus();
+    row.scrollIntoView({ block: 'nearest' });
+    if (message.open) {
+      open(row, false);
+    }
+
+    return true;
+  };
 
   root.addEventListener(
     'toggle',

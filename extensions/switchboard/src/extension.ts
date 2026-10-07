@@ -7,7 +7,7 @@ import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopH
 import { openChanges, showInSourceControl } from './git.js';
 import { startHub } from './hubProcess.js';
 import { NeedsYouToasts } from './notify.js';
-import { WorkItemsView, attach, claimOpen, dispatch, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
+import { WorkItemsView, attach, claimOpen, dispatch, goTo, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
 import { SettingsEditor } from './settingsEditor.js';
 import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
 import { ROW_COMMANDS } from './webview/render.js';
@@ -115,6 +115,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.openSettings', () => void settings.show()),
     { dispose: () => settings.dispose() },
     vscode.commands.registerCommand('switchboard.newAdhoc', () => startAdhoc(keeper.current(), view.state() as Snapshot | null)),
+    vscode.commands.registerCommand('switchboard.goTo', () => goTo(view)),
     vscode.commands.registerCommand('switchboard.setSource', (name: string, enabled: boolean) => setSource(keeper.current(), name, enabled)),
     ...TOGGLED_SOURCES.flatMap((name) => [
       vscode.commands.registerCommand(`switchboard.source.${name}.on`, () => setSource(keeper.current(), name, false)),

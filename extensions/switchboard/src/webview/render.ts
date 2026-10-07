@@ -88,7 +88,7 @@ export function controlsOf(item: WorkItemView): Control[] {
 
   // These run in the extension, not the hub (PRD R57).
   if (item.worktree !== null) {
-    const key = `${sourceLabel(item.ticket.source)} ${item.ticket.sourceKey}`;
+    const key = ticketKey(item.ticket);
 
     controls.push(
       { label: 'Open Changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key, title: item.ticket.title } },
@@ -420,6 +420,16 @@ function playbookLabel(name: string): string {
   return `<span class="playbook-name"><span class="namespace">${escape(namespace)}</span><span class="name">${escape(name.slice(colon + 1))}</span></span>`;
 }
 
+/** The playbook a row names: `<namespace>:triage` while triage runs, else the chosen playbook, `ad-hoc`, or empty before triage. */
+export function playbookText(entry: WorkItemView | PoolView, namespaces: Record<string, string>): string {
+  if ('status' in entry) {
+    return entry.status === 'triaging' ? triageLabel(entry.ticket.source, namespaces) : (entry.playbook ?? (entry.ticket.source === 'adhoc' ? 'ad-hoc' : ''));
+  }
+
+  // A snoozed ticket is never triaged, so a missing triage is not shown as running.
+  return entry.triage !== null && entry.triage.endedAt === null ? triageLabel(entry.ticket.source, namespaces) : (entry.triage?.playbook ?? '');
+}
+
 /** Marks a ticket that came back after earlier work items (PRD R51). */
 function returned(count: number): string {
   return count === 0 ? '' : `<span class="returned">Returned ×${count}</span>`;
@@ -455,9 +465,14 @@ function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
+/** The ticket's source and key, such as `gh 18941`. */
+export function ticketKey(ticket: { source: string; sourceKey: string }): string {
+  return `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
+}
+
 /** The ticket's source and key, coloured by source, with github shortened to gh. */
 function ticketLink(ticket: WorkItemView['ticket']): string {
-  const label = `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
+  const label = ticketKey(ticket);
   const attributes = `class="key ${escape(ticket.source)}"`;
 
   return ticket.url === '' ? `<span ${attributes}>${escape(label)}</span>` : `<a ${attributes} href="${escape(ticket.url)}">${escape(label)}</a>`;
@@ -524,7 +539,7 @@ function stageText(item: WorkItemView, now: number): string {
 
 function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const main = mainControl(item);
-  const rowKey = `item:${item.id}`;
+  const rowKey = rowKeyOf(item);
   const stage = stageText(item, now);
   const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : clipped('approval', item.approvalSummary, CAPS.approval);
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
@@ -534,7 +549,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
 
   return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
-<div class="line second"><span class="meta">${playbookLabel(item.status === 'triaging' ? triageLabel(item.ticket.source, namespaces) : (item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : '')))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
+<div class="line second"><span class="meta">${playbookLabel(playbookText(item, namespaces))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
     `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
@@ -590,11 +605,10 @@ function setup(snapshot: Snapshot): string {
  */
 function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const { ticket, triage } = entry;
-  const rowKey = `ticket:${ticket.id}`;
+  const rowKey = rowKeyOf(entry);
   const pick: Control = { label: 'Start', icon: 'play', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const failed = triage?.error != null;
-  // A snoozed ticket is never triaged, so a missing triage is not shown as running.
   const triaging = triage !== null && triage.endedAt === null;
   // Start appears once triage has chosen a playbook, which the pick starts (PRD R48).
   const main = failed ? again : triage?.playbook != null ? pick : null;
@@ -602,7 +616,7 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<s
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
-<div class="line second"><span class="meta">${playbookLabel(triaging ? triageLabel(ticket.source, namespaces) : (triage?.playbook ?? ''))}${ticketLink(ticket)}${returned(entry.returned)}</span></div>${thirdLine(
+<div class="line second"><span class="meta">${playbookLabel(playbookText(entry, namespaces))}${ticketLink(ticket)}${returned(entry.returned)}</span></div>${thirdLine(
     `${triaging ? markIcon(TRIAGING) : ''}${wake(ticket)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
   )}${actionsColumn(main === null ? '' : actionButton(main))}
 </div>`;
@@ -664,14 +678,22 @@ function snoozedRows(items: WorkItemView[]): WorkItemView[] {
   return items.filter((item) => rows.get(item.ticketId) === item);
 }
 
-/** The whole panel. */
-export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): string {
+export type RowGroup = Group | 'snoozed';
+
+export const GROUP_TITLES: Record<RowGroup, string> = { needs: 'Needs you', working: 'Working', unstarted: 'Unstarted', done: 'Done', snoozed: 'Snoozed' };
+
+/** A row's `data-row` key: `item:<work item ID>` or `ticket:<pool ticket ID>`. */
+export function rowKeyOf(entry: WorkItemView | PoolView): string {
+  return 'status' in entry ? `item:${entry.id}` : `ticket:${entry.ticket.id}`;
+}
+
+/** The rows the panel shows, by group, each in panel order (PRD R27, R49). */
+export function panelGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView | PoolView)[]> {
   const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], unstarted: [], done: [] };
   const snoozedPool = snapshot.pool.filter((entry) => entry.ticket.snoozed);
   // A pool row stands for its ticket, whose work items are all done.
   const pooledTickets = new Set(snoozedPool.map((entry) => entry.ticket.id));
   const snoozedItems = snoozedRows(snapshot.workItems.filter((item) => item.ticket.snoozed && !pooledTickets.has(item.ticketId)));
-  const pool = snapshot.pool.filter((entry) => !entry.ticket.snoozed);
 
   for (const item of snapshot.workItems) {
     if (!item.ticket.snoozed) {
@@ -679,18 +701,30 @@ export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): strin
     }
   }
 
+  return {
+    ...groups,
+    unstarted: unstartedOrder(groups.unstarted, snapshot.pool.filter((entry) => !entry.ticket.snoozed)),
+    snoozed: [...snoozedItems, ...snoozedPool],
+  };
+}
+
+const EMPTY: Partial<Record<RowGroup, string>> = { needs: 'Nothing needs you.', working: 'Nothing is running.', unstarted: 'Nothing waits to be started.' };
+
+/** The whole panel. */
+export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): string {
+  const groups = panelGroups(snapshot);
   const { namespaces } = snapshot;
-  const list = (items: WorkItemView[]) => items.map((item) => row(item, now, ui, namespaces)).join('\n');
-  const pooled = (entries: PoolView[]) => entries.map((entry) => poolRow(entry, now, ui, namespaces)).join('\n');
-  const waiting = unstartedOrder(groups.unstarted, pool)
-    .map((entry) => ('status' in entry ? row(entry, now, ui, namespaces) : poolRow(entry, now, ui, namespaces)))
-    .join('\n');
-  const snoozedCount = snoozedItems.length + snoozedPool.length;
+  const body = (key: RowGroup) => {
+    const rows = groups[key].map((entry) => ('status' in entry ? row(entry, now, ui, namespaces) : poolRow(entry, now, ui, namespaces))).join('\n');
+
+    return rows || (EMPTY[key] === undefined ? '' : `<p class="empty">${EMPTY[key]}</p>`);
+  };
+  const shown = (key: RowGroup) => group(key, GROUP_TITLES[key], groups[key].length, body(key), ui);
 
   return `${errors(snapshot)}${setup(snapshot)}
-${group('needs', 'Needs you', groups.needs.length, list(groups.needs) || '<p class="empty">Nothing needs you.</p>', ui)}
-${group('working', 'Working', groups.working.length, list(groups.working) || '<p class="empty">Nothing is running.</p>', ui)}
-${group('unstarted', 'Unstarted', groups.unstarted.length + pool.length, waiting || '<p class="empty">Nothing waits to be started.</p>', ui)}
-${group('done', 'Done', groups.done.length, list(groups.done), ui)}
-${snoozedCount === 0 ? '' : group('snoozed', 'Snoozed', snoozedCount, `${list(snoozedItems)}${pooled(snoozedPool)}`, ui)}`;
+${shown('needs')}
+${shown('working')}
+${shown('unstarted')}
+${shown('done')}
+${groups.snoozed.length === 0 ? '' : shown('snoozed')}`;
 }

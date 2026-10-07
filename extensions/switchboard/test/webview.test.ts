@@ -1,5 +1,6 @@
-import type { Snapshot, WorkItemView } from '@switchboard/hub';
-import { beforeEach, describe, expect, it } from 'vitest';
+import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { rowFor, searchEntries } from '../src/search.js';
 import { startPanel } from '../src/webview/main.js';
 import { age, CAPS, clip, clockOf, controlsOf, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
@@ -870,5 +871,126 @@ describe('startPanel', () => {
 
     expect(root.querySelector<HTMLDetailsElement>('details[data-group="done"]')!.open).toBe(true);
     expect(root.querySelector<HTMLDetailsElement>('details[data-group="working"]')!.open).toBe(false);
+  });
+});
+
+describe('Go to Work Item (PRD R63)', () => {
+  const worktree = { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' as const };
+  const zoho = (id: number, patch: Partial<WorkItemView['ticket']> = {}): WorkItemView['ticket'] => ({ ...item(id).ticket, source: 'zoho', sourceKey: `Z${id}`, title: `Case ${id}`, url: '', ...patch });
+  const pooled = (id: number, patch: Partial<PoolView> = {}): PoolView => ({ ticket: zoho(id, { pool: true, assigned: false }), triage: triage({ ticketId: id, workItemId: null, playbook: 'support:defect' }), returned: 0, ...patch });
+  // A snoozed ticket 8 with a done and an open work item, a snoozed pool ticket 9 with a done work item, and one row per other group.
+  const data = snapshot(
+    [
+      item(1, { status: 'awaiting-approval', worktree }),
+      item(2),
+      item(3, { status: 'triaging', playbook: null }),
+      item(4, { status: 'done', doneAt: NOW, ticket: { ...item(4).ticket, source: 'adhoc', sourceKey: '7', url: '' }, playbook: null }),
+      item(5, { ticketId: 8, status: 'done', doneAt: NOW, ticket: zoho(8, { snoozed: true }) }),
+      item(6, { ticketId: 8, status: 'unstarted', ticket: zoho(8, { snoozed: true }) }),
+      item(7, { ticketId: 9, status: 'done', doneAt: NOW, ticket: zoho(9, { snoozed: true }) }),
+    ],
+    { pool: [pooled(10), pooled(9, { ticket: zoho(9, { pool: true, assigned: false, snoozed: true }), triage: null })] },
+  );
+
+  it('lists every row the panel shows, in panel order, with its key, playbook, group and branch', () => {
+    expect(searchEntries(data)).toEqual([
+      { label: 'Issue <1>', description: 'gh 101 · dev:develop · Needs you', detail: '101-fix', target: { workItemId: 1 } },
+      { label: 'Issue <2>', description: 'gh 102 · dev:develop · Working', target: { workItemId: 2 } },
+      { label: 'Issue <3>', description: 'gh 103 · dev:triage · Unstarted', target: { workItemId: 3 } },
+      { label: 'Case 10', description: 'zoho Z10 · support:defect · Unstarted', target: { ticketId: 10 } },
+      { label: 'Issue <4>', description: 'adhoc 7 · ad-hoc · Done', target: { workItemId: 4 } },
+      { label: 'Case 8', description: 'zoho Z8 · dev:develop · Snoozed', target: { workItemId: 6 } },
+      { label: 'Case 9', description: 'zoho Z9 · Snoozed', target: { ticketId: 9 } },
+    ]);
+    expect(searchEntries(snapshot([]))).toEqual([]);
+  });
+
+  it('finds the row that shows a work item or pool ticket, the snoozed row standing for a hidden work item, and null for none', () => {
+    expect(rowFor(data, { workItemId: 4 })).toBe('item:4');
+    expect(rowFor(data, { ticketId: 10 })).toBe('ticket:10');
+    expect(rowFor(data, { workItemId: 5 })).toBe('item:6');
+    expect(rowFor(data, { workItemId: 7 })).toBe('ticket:9');
+    expect(rowFor(data, { workItemId: 99 })).toBeNull();
+    // A ticket that is not in the pool has no pool row, though its work item has one.
+    expect(rowFor(data, { ticketId: 1 })).toBeNull();
+  });
+});
+
+describe('startPanel select (PRD R63)', () => {
+  let root: HTMLElement;
+  let posted: unknown[];
+  let scrolled: string[];
+
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="root"></div>';
+    root = document.getElementById('root')!;
+    scrolled = [];
+    // jsdom has no layout, so it does not implement scrollIntoView. Panels started by earlier tests still listen on the window, so only this test's panel counts.
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+      if (root.contains(this)) {
+        scrolled.push(this.getAttribute('data-row')!);
+      }
+    });
+
+    const mine: unknown[] = [];
+
+    startPanel(root, { postMessage: (message) => mine.push(message) }, () => NOW);
+    mine.length = 0;
+    posted = mine;
+  });
+
+  const send = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
+  const state = () => snapshot([item(1, { status: 'awaiting-approval' }), item(2, { status: 'done', doneAt: NOW })]);
+  const doneGroup = () => root.querySelector<HTMLDetailsElement>('details[data-group="done"]')!;
+
+  it("opens the row's collapsed group, selects, scrolls to and focuses the row, and runs its click action", () => {
+    send({ type: 'state', snapshot: state() });
+    expect(doneGroup().open).toBe(false);
+
+    send({ type: 'select', row: 'item:2', open: true });
+
+    expect(doneGroup().open).toBe(true);
+    expect([...root.querySelectorAll('.item.selected')].map((element) => element.getAttribute('data-row'))).toEqual(['item:2']);
+    expect(document.activeElement).toBe(root.querySelector('[data-row="item:2"]'));
+    expect(scrolled).toEqual(['item:2']);
+    expect(posted).toEqual([{ type: 'openUrl', url: 'https://github.com/o/r/issues/102' }]);
+
+    // The group stays open across a redraw.
+    send({ type: 'state', snapshot: state() });
+    expect(doneGroup().open).toBe(true);
+  });
+
+  it('only reveals the row when asked to, and runs nothing', () => {
+    send({ type: 'state', snapshot: state() });
+    send({ type: 'select', row: 'item:1', open: false });
+
+    expect(document.activeElement).toBe(root.querySelector('[data-row="item:1"]'));
+    expect(scrolled).toEqual(['item:1']);
+    expect(posted).toEqual([]);
+  });
+
+  it('reveals a row selected before the state that shows it, and drops a select the next state does not show', () => {
+    send({ type: 'select', row: 'item:2', open: true });
+    expect(posted).toEqual([]);
+    send({ type: 'state', snapshot: state() });
+    expect(scrolled).toEqual(['item:2']);
+    expect(posted).toEqual([{ type: 'openUrl', url: 'https://github.com/o/r/issues/102' }]);
+
+    send({ type: 'select', row: 'item:3', open: true });
+    send({ type: 'state', snapshot: state() });
+    send({ type: 'state', snapshot: snapshot([item(3)]) });
+    expect(scrolled).toEqual(['item:2']);
+    expect(posted).toHaveLength(1);
+  });
+
+  it('drops a waiting select when a newer one reveals its row', () => {
+    send({ type: 'state', snapshot: state() });
+    send({ type: 'select', row: 'item:3', open: true });
+    send({ type: 'select', row: 'item:1', open: false });
+    send({ type: 'state', snapshot: snapshot([item(1, { status: 'awaiting-approval' }), item(3)]) });
+
+    expect(scrolled).toEqual(['item:1']);
+    expect([...root.querySelectorAll('.item.selected')].map((element) => element.getAttribute('data-row'))).toEqual(['item:1']);
+    expect(posted).toEqual([]);
   });
 });

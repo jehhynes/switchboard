@@ -4,6 +4,8 @@ import type { HubRecord } from '@switchboard/core';
 import type { Snapshot } from '@switchboard/hub';
 import { postToHub } from '@switchboard/hub';
 import { needsBadge } from './badge.js';
+import { rowFor, searchEntries } from './search.js';
+import type { RowTarget, SearchEntry } from './search.js';
 import { snoozeChoices } from './snooze.js';
 
 const ACTION_TIMEOUT_MS = 10_000;
@@ -14,6 +16,10 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
 
   private view: vscode.WebviewView | undefined;
   private latest: string | null = null;
+  /** Whether the view's script has sent `ready`; a message posted before then can be lost. */
+  private ready = false;
+  /** The latest `select` made before the view's script was ready, sent after the state on `ready`. */
+  private pendingSelect: { type: 'select'; row: string; open: boolean } | null = null;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -40,8 +46,34 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Shows the view, then has the panel open the row's group, select, scroll to and focus the row, and run its click action
+   * unless `revealOnly` (PRD R63). False when the latest state has no row for the target.
+   */
+  async reveal(target: RowTarget, options: { revealOnly?: boolean } = {}): Promise<boolean> {
+    const snapshot = this.state() as Snapshot | null;
+    const row = snapshot === null ? null : rowFor(snapshot, target);
+
+    if (row === null) {
+      return false;
+    }
+
+    await vscode.commands.executeCommand(`${WorkItemsView.id}.focus`);
+
+    const message = { type: 'select' as const, row, open: options.revealOnly !== true };
+
+    if (this.view !== undefined && this.ready) {
+      void this.view.webview.postMessage(message);
+    } else {
+      this.pendingSelect = message;
+    }
+
+    return true;
+  }
+
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
+    this.ready = false;
 
     const dist = vscode.Uri.joinPath(this.extensionUri, 'dist');
     const nonce = randomBytes(16).toString('hex');
@@ -55,15 +87,24 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${view.webview.asWebviewUri(vscode.Uri.joinPath(dist, 'webview.js')).toString()}"></script></body></html>`;
 
     view.webview.onDidReceiveMessage((message: { type: string; [key: string]: unknown }) => void this.receive(message));
-    view.onDidDispose(() => (this.view = undefined));
+    view.onDidDispose(() => {
+      this.view = undefined;
+      this.ready = false;
+    });
     this.showBadge();
   }
 
   private async receive(message: { type: string; [key: string]: unknown }): Promise<void> {
     switch (message.type) {
       case 'ready':
+        this.ready = true;
         if (this.latest !== null) {
           this.update(this.latest);
+        }
+
+        if (this.pendingSelect !== null) {
+          void this.view?.webview.postMessage(this.pendingSelect);
+          this.pendingSelect = null;
         }
         return;
       case 'action':
@@ -94,6 +135,47 @@ export async function runOpen(message: { type: string; [key: string]: unknown })
       await vscode.commands.executeCommand('switchboard.openLink', String(message['url']));
       return;
   }
+}
+
+const REVEAL_BUTTON: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('eye'), tooltip: 'Show in the panel' };
+
+/**
+ * Go to Work Item: a quick pick of every row the panel shows, matched on title, key, playbook, group and branch. Accepting an
+ * entry reveals its row and runs its click action; the entry's eye button only reveals it (PRD R63). Resolves to the chosen
+ * row's target, or null when dismissed.
+ */
+export function goTo(view: WorkItemsView): Promise<RowTarget | null> {
+  const snapshot = view.state() as Snapshot | null;
+  const pick = vscode.window.createQuickPick<SearchEntry & vscode.QuickPickItem>();
+
+  pick.title = 'Switchboard: go to work item';
+  pick.placeholder = 'Title, key, playbook, group or branch';
+  pick.matchOnDescription = true;
+  pick.matchOnDetail = true;
+  pick.items = (snapshot === null ? [] : searchEntries(snapshot)).map((entry) => ({ ...entry, buttons: [REVEAL_BUTTON] }));
+
+  return new Promise((done) => {
+    let chosen: RowTarget | null = null;
+    const choose = (target: RowTarget, revealOnly: boolean) => {
+      chosen = target;
+      pick.hide();
+      void view.reveal(target, { revealOnly });
+    };
+
+    pick.onDidAccept(() => {
+      const item = pick.selectedItems[0];
+
+      if (item !== undefined) {
+        choose(item.target, false);
+      }
+    });
+    pick.onDidTriggerItemButton((event) => choose(event.item.target, true));
+    pick.onDidHide(() => {
+      pick.dispose();
+      done(chosen);
+    });
+    pick.show();
+  });
 }
 
 /** Opens an http(s) URL in the browser and anything else, a reported file path, in VS Code (PRD R52). */

@@ -52,6 +52,12 @@
     },
     "commands": [
       {
+        "command": "switchboard.goTo",
+        "title": "Go to Work Item…",
+        "category": "Switchboard",
+        "icon": "$(search)"
+      },
+      {
         "command": "switchboard.newAdhoc",
         "title": "New Ad-hoc Session…",
         "category": "Switchboard",
@@ -212,14 +218,19 @@
           "group": "navigation@8"
         },
         {
-          "command": "switchboard.newAdhoc",
+          "command": "switchboard.goTo",
           "when": "view == switchboard.workItems",
           "group": "navigation@9"
         },
         {
-          "command": "switchboard.openSettings",
+          "command": "switchboard.newAdhoc",
           "when": "view == switchboard.workItems",
           "group": "navigation@10"
+        },
+        {
+          "command": "switchboard.openSettings",
+          "when": "view == switchboard.workItems",
+          "group": "navigation@11"
         }
       ],
       "commandPalette": [
