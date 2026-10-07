@@ -211,6 +211,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return { status: 200, body: { recorded: true } };
       },
+      '/history': async (body) => {
+        if (!isRecord(body) || !Number.isInteger(body['ticketId'])) {
+          return { status: 400, body: { error: 'Expected {ticketId}.' } };
+        }
+
+        const history = store.ticketHistory(body['ticketId'] as number);
+
+        return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
+      },
       '/claim': async (body) => {
         if (!isRecord(body) || typeof body['folder'] !== 'string') {
           return { status: 400, body: { error: 'Expected {folder}.' } };

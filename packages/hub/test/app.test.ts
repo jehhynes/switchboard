@@ -283,6 +283,23 @@ describe('createHubApp', () => {
     expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/1', 'https://github.com/O/r/issues/2']);
   });
 
+  it('returns a ticket\'s history, and refuses an unknown ticket with 409 and a missing ticketId with 400 (PRD R59)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+
+    store.insertTicket({ source: 'github', sourceKey: '7', ref: '#7', sourceId: null, title: 'Seven', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    store.close();
+
+    const app = await start();
+    const reply = await app.post['/history']!({ ticketId: 1 });
+
+    expect(reply.status).toBe(200);
+    expect(reply.body).toMatchObject({ ticket: { id: 1, sourceKey: '7', title: 'Seven' }, workItems: [], poolTriages: [] });
+    expect(await app.post['/history']!({ ticketId: 2 })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
+    expect(await app.post['/history']!({ ticketId: '1' })).toEqual({ status: 400, body: { error: 'Expected {ticketId}.' } });
+    expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {ticketId}.' } });
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();

@@ -6,7 +6,7 @@ import { wakeText } from '@switchboard/core/snooze';
 export { activeSession, groupOf };
 export type { Group };
 
-const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
+export const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
 /** The one control a Needs you or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
 export function mainControl(item: WorkItemView): Control | null {
@@ -101,7 +101,12 @@ export function controlsOf(item: WorkItemView): Control[] {
     );
   }
 
-  return controls;
+  return [...controls, historyControl(item.ticket)];
+}
+
+/** Every run the ticket has had, in a read-only document the extension opens (PRD R59). */
+function historyControl(ticket: { id: number; source: string; sourceKey: string }): Control {
+  return { label: 'History', icon: 'history', message: { type: 'history', ticketId: ticket.id, key: ticketKey(ticket) } };
 }
 
 type SessionView = WorkItemView['sessions'][number];
@@ -250,6 +255,7 @@ export const ROW_COMMANDS: Record<string, string> = {
   'Open Changes': 'changes',
   'Show in Source Control': 'sourceControl',
   Copy: 'copy',
+  History: 'history',
 };
 
 /**
@@ -467,7 +473,7 @@ function linkBadge(link: { label: string; target: string }): string {
 
 const SOURCE_LABELS: Record<string, string> = { github: 'gh' };
 
-function sourceLabel(source: string): string {
+export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
@@ -631,7 +637,7 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<s
   const triaging = triage !== null && triage.endedAt === null;
   // Start appears once triage has chosen a playbook, which the pick starts (PRD R48).
   const main = failed ? again : triage?.playbook != null ? pick : null;
-  const controls = [...(main === null ? [] : [main]), ...snoozeControls(ticket)];
+  const controls = [...(main === null ? [] : [main]), ...snoozeControls(ticket), historyControl(ticket)];
   const { primary, rest } = splitLinks(entry);
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>

@@ -184,6 +184,11 @@
         "command": "switchboard.row.copy",
         "title": "Copy…",
         "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.history",
+        "title": "History",
+        "category": "Switchboard"
       }
     ],
     "menus": {
@@ -311,6 +316,10 @@
         {
           "command": "switchboard.row.copy",
           "when": "false"
+        },
+        {
+          "command": "switchboard.row.history",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -368,6 +377,11 @@
           "command": "switchboard.row.copy",
           "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.copy",
           "group": "1_run@5"
+        },
+        {
+          "command": "switchboard.row.history",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.history",
+          "group": "5_ticket@2"
         }
       ]
     }

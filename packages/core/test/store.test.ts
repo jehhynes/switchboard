@@ -301,6 +301,39 @@ describe('Store', () => {
     expect(() => store.updateSession('nope', { released: true })).toThrow('No sessions row with id nope.');
   });
 
+  it('reads a ticket\'s history: work items newest first, each with its sessions and triages, and pool triages, without contexts or prompts (PRD R59)', () => {
+    const path = join(dir, 'history.db');
+
+    Store.open(path).close();
+
+    const raw = new DatabaseSync(path);
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, ''), (2, 'github', '2', 'b', 'u', 1, '')");
+    raw.exec(
+      "INSERT INTO workItems (id, ticketId, playbook, status, taskPrompt, createdAt) VALUES (1, 1, 'dev:review-pr', 'done', 'Review.', 10), (2, 1, 'dev:review-pr', 'running', 'Review again.', 20), (3, 2, 'dev:develop', 'running', NULL, 15)",
+    );
+    raw.exec(
+      "INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, startedAt, released) VALUES ('t1', 1, 'task', 'claude', 'C:/r', 'ended', 1, 12, 0), ('s1', 1, 'setup', 'claude', 'C:/r', 'ended', 1, 11, 0), ('t2', 2, 'task', 'claude', 'C:/r', 'running', 1, 21, 0), ('x', 3, 'task', 'claude', 'C:/r', 'running', 1, 16, 0)",
+    );
+    raw.exec(
+      "INSERT INTO triages (id, ticketId, workItemId, context, playbook, startedAt, endedAt, error) VALUES (1, 1, 1, 'Context one.', 'dev:review-pr', 10, 11, NULL), (2, 1, NULL, 'Pool context.', NULL, 5, 6, 'Timed out.'), (3, 1, 2, 'Context two.', 'dev:review-pr', 20, 21, NULL), (4, 2, 3, 'Other.', 'dev:develop', 15, 16, NULL)",
+    );
+    raw.close();
+
+    const store = Store.open(path);
+    const history = store.ticketHistory(1)!;
+
+    expect(history.ticket.id).toBe(1);
+    expect(history.workItems.map((item) => [item.id, item.sessions.map((session) => session.id), item.triages.map((triage) => triage.id)])).toEqual([
+      [2, ['t2'], [3]],
+      [1, ['s1', 't1'], [1]],
+    ]);
+    expect(history.poolTriages).toEqual([{ id: 2, ticketId: 1, workItemId: null, playbook: null, immediacy: null, severity: null, model: null, startedAt: 5, endedAt: 6, error: 'Timed out.' }]);
+    expect(history.workItems[0]).not.toHaveProperty('taskPrompt');
+    expect(history.workItems[0]!.triages[0]).not.toHaveProperty('context');
+    expect(store.ticketHistory(9)).toBeNull();
+    store.close();
+  });
+
   it('replaces a ticket worktree link', () => {
     const store = Store.open(':memory:');
     const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });

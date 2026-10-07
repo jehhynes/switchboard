@@ -99,15 +99,15 @@ describe('groupOf', () => {
 
 describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
-    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze']);
-    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze']);
-    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Retry', 'Triage again', 'Mark done', 'Snooze']);
-    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze']);
-    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual([]);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Retry', 'Mark done', 'Snooze']);
+    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Retry', 'Triage again', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Retry', 'Mark done', 'Snooze', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] }))[0]?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 7 } });
   });
 });
@@ -359,16 +359,17 @@ describe('renderPanel', () => {
     expect(rowMenu(closed.querySelector('[data-item="1"]')!)).toEqual({
       section: 'row',
       defaults: true,
-      shown: ['approve', 'triageAgain', 'markDone', 'snooze'],
+      shown: ['approve', 'triageAgain', 'markDone', 'snooze', 'history'],
       actions: {
         approve: { type: 'approve', workItemId: 1 },
         triageAgain: { type: 'retriage', workItemId: 1 },
         markDone: { type: 'mark-done', workItemId: 1 },
         snooze: { type: 'snooze', ticketId: 1 },
+        history: { type: 'history', ticketId: 1, key: 'gh 101' },
       },
     });
-    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['retry', 'stop', 'markDone', 'snooze']);
-    expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual([]);
+    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['retry', 'stop', 'markDone', 'snooze', 'history']);
+    expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual(['history']);
   });
 
   it('offers Open Changes and Show in Source Control in the menu of a row with a worktree, done or not, and not as a button (R57)', () => {
@@ -376,10 +377,10 @@ describe('renderPanel', () => {
     const panel = render(snapshot([item(8, { status: 'awaiting-approval', worktree }), item(9, { status: 'done', doneAt: NOW, worktree: { ...worktree, ticketId: 9 } })]), { groups: new Map([['done', true]]) });
     const menu = rowMenu(panel.querySelector('[data-item="8"]')!);
 
-    expect(menu.shown).toEqual(['approve', 'triageAgain', 'markDone', 'snooze', 'changes', 'sourceControl']);
+    expect(menu.shown).toEqual(['approve', 'triageAgain', 'markDone', 'snooze', 'changes', 'sourceControl', 'history']);
     expect(menu.actions['changes']).toEqual({ type: 'changes', path: 'D:/git/widgets.worktrees/108-fix', key: 'gh 108', title: 'Issue <8>' });
     expect(menu.actions['sourceControl']).toEqual({ type: 'sourceControl', path: 'D:/git/widgets.worktrees/108-fix' });
-    expect(rowMenu(panel.querySelector('[data-item="9"]')!).shown).toEqual(['changes', 'sourceControl']);
+    expect(rowMenu(panel.querySelector('[data-item="9"]')!).shown).toEqual(['changes', 'sourceControl', 'history']);
     expect(titles(panel, '[data-item="8"] .actions > *')).toEqual(['Approve']);
   });
 
@@ -416,7 +417,7 @@ describe('renderPanel', () => {
 
     const menu = rowMenu(panel.querySelector('[data-item="1"]')!);
 
-    expect(menu.shown).toEqual(['approve', 'copy', 'triageAgain', 'markDone', 'snooze']);
+    expect(menu.shown).toEqual(['approve', 'copy', 'triageAgain', 'markDone', 'snooze', 'history']);
     expect(menu.actions['copy']).toEqual({ type: 'copy', pastes });
 
     for (const id of [3, 4, 5, 6]) {
@@ -548,7 +549,7 @@ describe('renderPanel', () => {
     expect(byId(1).querySelector('.line.second a.key')?.getAttribute('href')).toBe('https://desk.example.test/1');
     expect(titles(byId(1), ':scope > .actions > button.control.action-button')).toEqual(['Start']);
     expect(byId(1).querySelector('.line:first-child .actions')).toBeNull();
-    expect(rowMenu(byId(1))).toMatchObject({ shown: ['start', 'snooze'], actions: { start: { type: 'pick', ticketId: 1 }, snooze: { type: 'snooze', ticketId: 1 } } });
+    expect(rowMenu(byId(1))).toMatchObject({ shown: ['start', 'snooze', 'history'], actions: { start: { type: 'pick', ticketId: 1 }, snooze: { type: 'snooze', ticketId: 1 } } });
     expect(byId(1).querySelector('.line.second .meta > .playbook-name:first-child')?.textContent).toBe('support:case');
     expect(byId(1).querySelector('.line:first-child .playbook-name')).toBeNull();
     expect(byId(1).querySelector('button.action-button')?.textContent).toBe('Start');
@@ -571,11 +572,13 @@ describe('renderPanel', () => {
     expect(JSON.parse(controlNamed(byId(1), 'Start').dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
     expect(byId(4).querySelector('.note')?.textContent).toBe('Timed out.');
     expect(titles(byId(4), '.actions > button.control')).toEqual(['Triage again']);
-    expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'snooze'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
+    expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'snooze', 'history'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
     // Start waits for a triage result (PRD R48).
     expect(titles(byId(5), '.line.third .mark.codicon-loading.codicon-modifier-spin')).toEqual(['Triaging']);
     expect(byId(5).querySelector('.actions')).toBeNull();
-    expect(rowMenu(byId(5))).toMatchObject({ shown: ['snooze'] });
+    expect(rowMenu(byId(5))).toMatchObject({ shown: ['snooze', 'history'] });
+    // History runs in the extension, keyed by the ticket, on pool rows as on work item rows (PRD R59).
+    expect(rowMenu(byId(5)).actions['history']).toEqual({ type: 'history', ticketId: 5, key: 'zoho 505' });
     expect(byId(5).querySelector('.playbook-name')?.textContent).toBe('support:triage');
     const adhoc = render(snapshot([item(6, { ticket: { ...item(6).ticket, source: 'adhoc', sourceKey: '6', url: '' } })]));
     expect(adhoc.querySelector('.line.second span.key')?.textContent).toBe('adhoc 6');
@@ -618,7 +621,7 @@ describe('renderPanel', () => {
     expect([1, 2, 3].map((id) => byId(id).querySelector('.playbook-name')?.textContent)).toEqual(['dev:triage', 'support:triage', 'triage']);
     expect(titles(byId(1), '.line.third .mark.codicon-loading.codicon-modifier-spin')).toEqual(['Triaging']);
     expect(byId(1).querySelector('.actions')).toBeNull();
-    expect(rowMenu(byId(1)).shown).toEqual(['markDone', 'snooze']);
+    expect(rowMenu(byId(1)).shown).toEqual(['markDone', 'snooze', 'history']);
   });
 
   it('moves snoozed work items and pool tickets into a collapsed Snoozed group with their own marks and wake times, and shows an approval summary', () => {
@@ -646,13 +649,13 @@ describe('renderPanel', () => {
     expect(root.querySelector('[data-item="2"] .wake .codicon-clock')).not.toBeNull();
     expect(root.querySelector('[data-ticket="9"] .line.third')).toBeNull();
     expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Approve the publish']);
-    expect(rowMenu(snoozed.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'snooze', 'restore'], actions: { snooze: { type: 'snooze', ticketId: 2 }, restore: { type: 'restore', ticketId: 2 } } });
-    expect(rowMenu(snoozed.querySelector('[data-ticket="9"]')!)).toMatchObject({ shown: ['snooze', 'restore'], actions: { snooze: { type: 'snooze', ticketId: 9 }, restore: { type: 'restore', ticketId: 9 } } });
+    expect(rowMenu(snoozed.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'snooze', 'restore', 'history'], actions: { snooze: { type: 'snooze', ticketId: 2 }, restore: { type: 'restore', ticketId: 2 } } });
+    expect(rowMenu(snoozed.querySelector('[data-ticket="9"]')!)).toMatchObject({ shown: ['snooze', 'restore', 'history'], actions: { snooze: { type: 'snooze', ticketId: 9 }, restore: { type: 'restore', ticketId: 9 } } });
     expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
     expect(root.querySelector('[data-item="3"] .approval')?.hasAttribute('title')).toBe(false);
     expect(root.querySelector<HTMLButtonElement>('[data-item="3"] .actions > button.control')?.title).toBe('Approve: runs /review-pr pr:123 publish');
     expect(render(data, { groups: new Map([['snoozed', true]]) }).querySelector<HTMLDetailsElement>('details[data-group="snoozed"]')!.open).toBe(true);
-    expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, snoozed: true, snoozedUntil: null } }))).toEqual(['Snooze', 'Restore']);
+    expect(labels(item(4, { status: 'done', ticket: { ...item(4).ticket, snoozed: true, snoozedUntil: null } }))).toEqual(['Snooze', 'Restore', 'History']);
     expect(render(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: false, snoozedUntil: wakeAt } })])).querySelector('.wake')).toBeNull();
   });
 

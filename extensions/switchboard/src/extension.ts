@@ -5,6 +5,8 @@ import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@s
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { openChanges, showInSourceControl } from './git.js';
+import { HistoryDocuments } from './historyDocument.js';
+import type { HistoryMessage } from './historyDocument.js';
 import { startHub } from './hubProcess.js';
 import { NeedsYouToasts } from './notify.js';
 import { WorkItemsView, attach, claimOpen, copyPaste, dispatch, goTo, openLink, openSession, openUri, openWorktree, resume, setSource, startAdhoc } from './panel.js';
@@ -92,8 +94,10 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   const view = new WorkItemsView(context.extensionUri);
   const settings = new SettingsEditor(context.extensionUri, configDir, () => openPlaybooks(view.state() as Snapshot | null));
+  const history = new HistoryDocuments(() => keeper.current());
 
   context.subscriptions.push(
+    history.register(),
     vscode.window.registerWebviewViewProvider(WorkItemsView.id, view, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('switchboard.action', (action: unknown) => dispatch(keeper.current(), action)),
     // A row's right-click menu passes the row's `data-vscode-context`, which holds what each command runs.
@@ -108,6 +112,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
             return showInSourceControl(local.path);
           case 'copy':
             return copyPaste(local.pastes);
+          case 'history':
+            return history.open(row.actions[key] as HistoryMessage);
           default:
             return dispatch(keeper.current(), row.actions[key]);
         }
@@ -164,6 +170,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         } else if (event === 'hello') {
           toasts.connected();
           void claimOpen(record).catch(() => {});
+          history.retryFailed(record);
         }
       }),
     now: Date.now,

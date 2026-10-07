@@ -200,6 +200,18 @@ export type NewWorkItem = Omit<WorkItem, 'id'>;
 export type NewTriage = Omit<Triage, 'id'>;
 export type NewWorktree = Omit<Worktree, 'id'>;
 
+/** A triage without its context, which History does not show. */
+export type HistoryTriage = Omit<Triage, 'context'>;
+
+/** Every run a ticket has had, for History (PRD R59). */
+export interface TicketHistory {
+  ticket: Ticket;
+  /** Newest first, each with its sessions and triages oldest first; no task prompt. */
+  workItems: (Omit<WorkItem, 'taskPrompt'> & { sessions: Session[]; triages: HistoryTriage[] })[];
+  /** Pool triages no pick attached to a work item, oldest first. */
+  poolTriages: HistoryTriage[];
+}
+
 /** All database access. The hub is the only process that opens the database. */
 export class Store {
   readonly #db: DatabaseSync;
@@ -465,4 +477,21 @@ export class Store {
     );
   }
 
+  /** The ticket's work items, sessions and triages; null for an unknown ticket. */
+  ticketHistory(ticketId: number): TicketHistory | null {
+    const ticket = this.ticket(ticketId);
+
+    if (ticket === null) {
+      return null;
+    }
+
+    const triages = this.#all<Triage>('SELECT * FROM triages WHERE ticketId = ? ORDER BY startedAt, id', ticketId).map(({ context: _context, ...triage }) => triage);
+    const workItems = this.#all<WorkItem>('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id DESC', ticketId).map(({ taskPrompt: _prompt, ...item }) => ({
+      ...item,
+      sessions: this.sessionsFor(item.id),
+      triages: triages.filter((triage) => triage.workItemId === item.id),
+    }));
+
+    return { ticket, workItems, poolTriages: triages.filter((triage) => triage.workItemId === null) };
+  }
 }
