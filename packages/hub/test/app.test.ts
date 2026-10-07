@@ -6,7 +6,7 @@ import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
 import { listenHub } from '../src/server.js';
-import { reportBody } from '../src/report.js';
+import { gitBashRoot, reportBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
 
 let temp: ReturnType<typeof tempHome>;
@@ -43,6 +43,33 @@ describe('parseReport and reportBody', () => {
     expect(reportBody(['approval', 's1', '--prompt=/publish'])).toEqual({ sessionId: 's1', kind: 'approval', prompt: '/publish', summary: null, report: null });
     expect(reportBody(['link', 's1', '--label', 'PR #12', '--target', 'https://github.com/o/r/pull/12'])).toEqual({ sessionId: 's1', kind: 'link', label: 'PR #12', target: 'https://github.com/o/r/pull/12' });
     expect(reportBody(['playbook', 's1', 'dev:review-pr'])).toEqual({ sessionId: 's1', kind: 'playbook', playbook: 'dev:review-pr' });
+  });
+
+  it('restores a slash command that Git Bash rewrote under its root, and leaves other prompts alone', () => {
+    const root = 'C:/Program Files/Git';
+
+    expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Git/legacy-ship 16416'], root)).toMatchObject({ prompt: '/legacy-ship 16416' });
+    expect(reportBody(['approval', 's1', '--prompt=c:/program files/git/publish'], root)).toMatchObject({ prompt: '/publish' });
+    expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Git/legacy-ship 16416'])).toMatchObject({ prompt: 'C:/Program Files/Git/legacy-ship 16416' });
+    expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Gitlab/run'], root)).toMatchObject({ prompt: 'C:/Program Files/Gitlab/run' });
+    expect(reportBody(['approval', 's1', '--prompt', 'Post the reply in C:/Program Files/Git/x'], root)).toMatchObject({ prompt: 'Post the reply in C:/Program Files/Git/x' });
+  });
+
+  it('asks cygpath for the Git Bash root only under Git Bash', () => {
+    const calls: string[][] = [];
+    const run = (file: string, args: string[]) => {
+      calls.push([file, ...args]);
+      return 'C:/Program Files/Git/\n';
+    };
+
+    expect(gitBashRoot({}, run)).toBeNull();
+    expect(calls).toEqual([]);
+    expect(gitBashRoot({ MSYSTEM: 'MINGW64' }, run)).toBe('C:/Program Files/Git');
+    expect(calls).toEqual([['cygpath', '-m', '/']]);
+    expect(gitBashRoot({ MSYSTEM: 'MINGW64' }, () => '/\n')).toBeNull();
+    expect(gitBashRoot({ MSYSTEM: 'MINGW64' }, () => {
+      throw new Error('cygpath not found');
+    })).toBeNull();
   });
 
   it('rejects bad usage', () => {

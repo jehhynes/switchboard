@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { buildOf, createHubApp, findHub, postToHub, reportBody, serveHub, stopHub } from '@switchboard/hub';
+import { buildOf, createHubApp, findHub, gitBashRoot, postToHub, reportBody, serveHub, stopHub } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -29,7 +29,7 @@ function flag(argv: readonly string[], name: string): string | null {
 
 /** Exit codes: 0 recorded, 1 usage, 2 no hub, 3 refused (architecture.md § Session reports). */
 async function report(home: string, argv: readonly string[]): Promise<number> {
-  const body = reportBody(argv);
+  const body = reportBody(argv, gitBashRoot(process.env));
 
   if (body === null) {
     process.stderr.write(REPORT_USAGE);

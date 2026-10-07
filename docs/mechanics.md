@@ -213,6 +213,16 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** a fork that messages subagents (GC M64 verified it on CLI 2.1.286).
 - **Current use:** friction debriefs (architecture.md § Friction debriefs). The hub skips a session the roster lists with a pid only when it is not idle.
 
+## M20. Git Bash rewriting report arguments
+
+- **Date:** 2026-10-07.
+- **Versions:** Claude Code CLI 2.1.292, Git for Windows 2.53 at `C:\Program Files\Git`, Windows 11.
+- **Observation:** the approval prompts of two widgets work items were stored as `C:/Program Files/Git/legacy-ship 16416` and `C:/Program Files/Git/address-feedback 19703 publish`. The sessions ran the report command with Claude Code's Bash tool, which is Git Bash.
+- **Experiment:** in Git Bash, `node -e … -- --prompt "/legacy-ship 16416" ~/x.ps1` printed `["--prompt","C:/Program Files/Git/legacy-ship 16416","C:/Users/operator/x.ps1"]`; with `MSYS_NO_PATHCONV=1` it printed `["--prompt","/legacy-ship 16416","/c/Users/operator/x.ps1"]`. The `--prompt=/…` form is rewritten too. In Git Bash `MSYSTEM` is `MINGW64` and `cygpath -m /` prints `C:/Program Files/Git/`.
+- **Not covered:** a prompt that starts with `/` and also holds a URL is rewritten further (`https://` becomes `https;\\`), and a `--summary`, stage or link label starting with `/` is rewritten too; the CLI restores neither. A prompt holding `pr:123` is not rewritten at all. The skills' prompts (`/legacy-ship <issue>`, `/<skill> <issue> publish`, `/review-pr pr:<pr> publish`) are restored or left intact. The `gc-session-reports` skill already tells sessions to report through `pwsh`; the two sessions above did not.
+- **Limitation:** `MSYS_NO_PATHCONV=1` for a whole session would also stop the rewrite of paths such as `~/…` that sessions pass to native programs like `pwsh -File`, so it is not set.
+- **Current use:** under Git Bash (`MSYSTEM` set), the report CLI asks `cygpath -m /` for the root and turns an approval prompt that starts with `<root>/` back into `/…` (architecture.md § Session reports).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

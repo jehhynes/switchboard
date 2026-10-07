@@ -1,4 +1,29 @@
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+
+/** The Windows root that Git Bash puts in front of an argument starting with `/` (mechanics M20), or null outside Git Bash. */
+export function gitBashRoot(env: NodeJS.ProcessEnv, run: (file: string, args: string[]) => string = runSync): string | null {
+  if (env['MSYSTEM'] === undefined) {
+    return null;
+  }
+
+  try {
+    const root = run('cygpath', ['-m', '/']).trim().replace(/\/+$/, '');
+
+    return root === '' ? null : root;
+  } catch {
+    return null;
+  }
+}
+
+function runSync(file: string, args: string[]): string {
+  return execFileSync(file, args, { encoding: 'utf8', timeout: 5_000, windowsHide: true });
+}
+
+/** Undoes Git Bash's rewrite of a slash command such as `/legacy-ship 16416`. */
+function unconverted(value: string, root: string | null): string {
+  return root !== null && value.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? value.slice(root.length) : value;
+}
 
 function valueOf(argv: readonly string[], name: string): string | null {
   const at = argv.indexOf(`--${name}`);
@@ -18,8 +43,8 @@ function hasFlag(argv: readonly string[], name: string): boolean {
   return argv.some((argument) => argument === `--${name}` || argument.startsWith(`--${name}=`));
 }
 
-/** A report body from `report <kind> <sessionId> …`, or null for bad usage. */
-export function reportBody(argv: readonly string[]): Record<string, unknown> | null {
+/** A report body from `report <kind> <sessionId> …`, or null for bad usage. `root` is the Git Bash root the CLI ran under. */
+export function reportBody(argv: readonly string[], root: string | null = null): Record<string, unknown> | null {
   const [kind, sessionId, text] = argv;
 
   if (sessionId === undefined || sessionId.startsWith('--')) {
@@ -34,7 +59,8 @@ export function reportBody(argv: readonly string[]): Record<string, unknown> | n
     case 'done':
       return { sessionId, kind };
     case 'approval': {
-      const prompt = valueOf(argv, 'prompt');
+      const given = valueOf(argv, 'prompt');
+      const prompt = given === null ? null : unconverted(given, root);
 
       const report = valueOf(argv, 'report');
 

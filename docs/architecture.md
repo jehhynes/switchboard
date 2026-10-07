@@ -219,6 +219,7 @@ node "<home>/hub.js" report playbook <sessionId> <name>
 ```
 
 - The contract asks for the approval summary; the CLI and the hub accept its omission, and `done` takes no text. The CLI resolves a relative `--report` against its working directory, and the hub refuses a report path that is not absolute.
+- Git Bash rewrites an argument that starts with `/` to a path under its Windows root, so `/legacy-ship 16416` arrives as `C:/Program Files/Git/legacy-ship 16416`. When `MSYSTEM` is set, the CLI reads the root from `cygpath -m /` and restores an approval prompt that starts with it (mechanics M20).
 - The CLI's home is the directory that holds the `hub.js` it runs from, so a session started by a hub with `--home` reports to that home.
 - The CLI finds the hub through `hub.json` and never starts one. Timeout: 10 seconds. Repeating a report is safe, because each report sets a value.
 - When no hub answers, the CLI exits 2 and prints that the hub is not running. The hub stays up while sessions are active, so this is rare; the work item then ends `blocked`, and the operator marks it done.
