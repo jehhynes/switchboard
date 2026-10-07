@@ -512,12 +512,21 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
   const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report } }, null, true, fileName(report));
 
-  return `<div class="item${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
+  return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(item.status === 'triaging' ? triageLabel(item.ticket.source, namespaces) : (item.playbook ?? (item.ticket.source === 'adhoc' ? 'ad-hoc' : '')))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
     `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
+}
+
+/** A failed or blocked row outside Snoozed takes a stripe in its Retry colour, so trouble stands out in Needs you (PRD R27). */
+function stripeClass(item: WorkItemView): string {
+  if (item.ticket.snoozed) {
+    return '';
+  }
+
+  return item.status === 'failed' ? ' stripe-error' : item.status === 'blocked' ? ' stripe-warning' : '';
 }
 
 /** Approve's tooltip names the prompt it runs, so the operator can read the exact command before approving. */

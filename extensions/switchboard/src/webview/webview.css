@@ -18,6 +18,9 @@ details.group > summary .count.zero { font-weight: normal; background: color-mix
 /* One selected style: focusing a row selects it, and the selection keeps the row's text colours. */
 .item:hover:not(.selected) { background: var(--vscode-list-hoverBackground); }
 .item.selected { background: var(--vscode-list-activeSelectionBackground); }
+/* A failed or blocked row has a left stripe; an inset shadow follows the rounded corners and does not move the content. */
+.item.stripe-error { box-shadow: inset 3px 0 0 var(--vscode-errorForeground); }
+.item.stripe-warning { box-shadow: inset 3px 0 0 var(--vscode-editorWarning-foreground); }
 /* Line 1 spans the row; the actions column sits at the right of lines 2 and 3, centred across them. */
 .item { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; container-type: inline-size; }
 .item > .line.first { grid-column: 1 / -1; }
