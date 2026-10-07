@@ -10,8 +10,11 @@ const CHOICES = [
   { name: 'dev:develop', description: 'Build a change' },
   { name: 'dev:question', description: 'Answer a question' },
 ];
-const INPUT: ClassifyInput = { claudePath: 'claude', systemPrompt: 'Classify the issue.\n\nChoose one playbook:\n- dev:develop: Build a change\n- dev:question: Answer a question\n', choices: CHOICES, context: 'Issue #1 text', model: 'claude-sonnet-5', timeoutSeconds: 180, cwd: 'C:/home/.switchboard' };
+const INPUT: ClassifyInput = { claudePath: 'claude', systemPrompt: 'Classify the issue.\n\nChoose one playbook:\n- dev:develop: Build a change\n- dev:question: Answer a question\n', choices: CHOICES, rates: false, context: 'Issue #1 text', model: 'claude-sonnet-5', timeoutSeconds: 180, cwd: 'C:/home/.switchboard' };
 const SCHEMA =
+  '{"type":"object","properties":{"playbook":{"type":"string","enum":["dev:develop","dev:question"]},"summary":{"type":"string"}},' +
+  '"required":["playbook","summary"],"additionalProperties":false}';
+const RATED_SCHEMA =
   '{"type":"object","properties":{"playbook":{"type":"string","enum":["dev:develop","dev:question"]},"summary":{"type":"string"},' +
   '"immediacy":{"type":"string","enum":["URGENT","BLOCKING","NON-BLOCKING"]},"severity":{"type":"string","enum":["HIGH","MED","LOW"]}},' +
   '"required":["playbook","summary"],"additionalProperties":false}';
@@ -33,17 +36,21 @@ describe('classifierArgs', () => {
       '',
       '--strict-mcp-config',
       '--system-prompt',
-      'Classify the issue.\n\nChoose one playbook:\n- dev:develop: Build a change\n- dev:question: Answer a question\n\nThe ticket follows as the user message. Summarize it in a few sentences. Set immediacy and severity only when the instructions above ask you to rate the ticket.',
+      'Classify the issue.\n\nChoose one playbook:\n- dev:develop: Build a change\n- dev:question: Answer a question\n\nThe ticket follows as the user message. Summarize it in a few sentences.',
       '--model',
       'claude-sonnet-5',
     ]);
     expect(classifierArgs({ ...INPUT, model: null }).at(-1)).toBe(classifierPrompt(INPUT.systemPrompt));
   });
+
+  it('offers immediacy and severity only to a rating playbook', () => {
+    expect(classifierArgs({ ...INPUT, rates: true })[4]).toBe(RATED_SCHEMA);
+  });
 });
 
 describe('parseClassifierOutput', () => {
   it('reads structured_output from recorded CLI output', () => {
-    expect(parseClassifierOutput(OUTPUT, CHOICES)).toEqual({
+    expect(parseClassifierOutput(OUTPUT, CHOICES, true)).toEqual({
       playbook: 'dev:develop',
       summary: 'GitHub issue #1 reports a defect: on Safari, clicking the login button does nothing, whereas it is expected to open a dialog. This is a bug fix/change to the build, so the dev:develop playbook applies.',
       immediacy: null,
@@ -51,11 +58,15 @@ describe('parseClassifierOutput', () => {
     });
   });
 
-  it('reads a rating, and drops a value outside the enum', () => {
-    const output = (rating: Record<string, unknown>) => JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:question', summary: 's', ...rating } });
+  const rated = (rating: Record<string, unknown>) => JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:question', summary: 's', ...rating } });
 
-    expect(parseClassifierOutput(output({ immediacy: 'BLOCKING', severity: 'HIGH' }), CHOICES)).toEqual({ playbook: 'dev:question', summary: 's', immediacy: 'BLOCKING', severity: 'HIGH' });
-    expect(parseClassifierOutput(output({ immediacy: 'SOON', severity: 'LOW' }), CHOICES)).toEqual({ playbook: 'dev:question', summary: 's', immediacy: null, severity: 'LOW' });
+  it('reads a rating, and drops a value outside the enum', () => {
+    expect(parseClassifierOutput(rated({ immediacy: 'BLOCKING', severity: 'HIGH' }), CHOICES, true)).toEqual({ playbook: 'dev:question', summary: 's', immediacy: 'BLOCKING', severity: 'HIGH' });
+    expect(parseClassifierOutput(rated({ immediacy: 'SOON', severity: 'LOW' }), CHOICES, true)).toEqual({ playbook: 'dev:question', summary: 's', immediacy: null, severity: 'LOW' });
+  });
+
+  it('drops a rating from a playbook that does not rate', () => {
+    expect(parseClassifierOutput(rated({ immediacy: 'BLOCKING', severity: 'MED' }), CHOICES, false)).toEqual({ playbook: 'dev:question', summary: 's', immediacy: null, severity: null });
   });
 
   it.each([
@@ -64,7 +75,7 @@ describe('parseClassifierOutput', () => {
     ['no structured output', JSON.stringify({ subtype: 'success', result: 'text' }), 'Claude returned no playbook and summary.'],
     ['an unknown playbook', JSON.stringify({ subtype: 'success', structured_output: { playbook: 'support:defect', summary: 's' } }), 'Triage chose an unknown playbook: support:defect.'],
   ])('fails on %s', (_case, stdout, error) => {
-    expect(parseClassifierOutput(stdout, CHOICES)).toEqual({ error });
+    expect(parseClassifierOutput(stdout, CHOICES, false)).toEqual({ error });
   });
 });
 

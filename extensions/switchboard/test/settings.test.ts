@@ -5,7 +5,7 @@ import type { EditorConfig, EditorState } from '../src/webview/settings.js';
 import { startSettings } from '../src/webview/settingsMain.js';
 import type { EditorMessage } from '../src/webview/settingsMain.js';
 
-const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', reports: [], template: '/gc-plan {{ticket.sourceKey}}\n' };
+const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', reports: [], rates: false, template: '/gc-plan {{ticket.sourceKey}}\n' };
 
 const GITHUB = { enabled: true, repo: 'o/r', logins: ['me', 'me-ai'], project: { owner: 'o', number: 3 }, assignedStatuses: ['Dev'] };
 
@@ -255,6 +255,26 @@ describe('startSettings', () => {
     expect(root.querySelector('.page-errors')!.textContent).toBe('settings.json is not valid JSON: Unexpected token');
     expect(root.querySelector('[data-field]')).toBeNull();
     expect(posted.filter((message) => message['type'] === 'check')).toEqual([]);
+  });
+
+  it('offers Rates importance only on a triage playbook and saves it', () => {
+    send({ type: 'config', config: config() });
+    click('[data-arg="playbook:dev:develop"]');
+    expect(field('rates')).toBeNull();
+
+    click('[data-arg="playbook:triage:github"]');
+    expect(field<HTMLInputElement>('rates').checked).toBe(false);
+    field<HTMLInputElement>('rates').checked = true;
+    field('rates').dispatchEvent(new Event('change', { bubbles: true }));
+    click('[data-command="save"]');
+
+    expect(last('save-playbook')).toMatchObject({ type: 'save-playbook', name: 'triage:github', playbook: { kind: 'triage', rates: true }, version: 'p2' });
+
+    type(field('kind'), 'task', 'change');
+    expect(field('rates')).toBeNull();
+    click('[data-command="save"]');
+
+    expect(last('save-playbook')).toMatchObject({ name: 'triage:github', playbook: { kind: 'task', rates: false } });
   });
 
   it('edits a playbook, hides the task fields on a triage playbook, and saves over its version', () => {

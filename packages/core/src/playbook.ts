@@ -21,6 +21,8 @@ export interface Playbook {
   workdir: 'worktree' | 'repoRoot';
   /** Empty by default: the session's turn then ends in Needs you. */
   reports: PlaybookReport[];
+  /** A triage playbook's classifier rates immediacy and severity (PRD R50); without it, triage stores neither. */
+  rates: boolean;
   template: string;
 }
 
@@ -33,7 +35,7 @@ export interface PlaybookError {
 export type PlaybookResult = { playbook: Playbook } | { error: string };
 
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports'];
+const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'rates'];
 
 function parseFrontMatter(text: string): { fields: Map<string, string>; body: string } | { error: string } {
   const normalized = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
@@ -113,6 +115,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
 
   const autoStart = flag(fields, 'autoStart');
   const requiresWorktree = flag(fields, 'requiresWorktree');
+  const rates = flag(fields, 'rates');
 
   if (typeof autoStart !== 'boolean') {
     return autoStart;
@@ -120,6 +123,14 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
 
   if (typeof requiresWorktree !== 'boolean') {
     return requiresWorktree;
+  }
+
+  if (typeof rates !== 'boolean') {
+    return rates;
+  }
+
+  if (kind === 'task' && rates) {
+    return { error: 'rates applies only to a triage playbook.' };
   }
 
   const permissionMode = fields.get('permissionMode') ?? null;
@@ -160,6 +171,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
       model: fields.get('model') || null,
       workdir,
       reports: PLAYBOOK_REPORTS.filter((entry) => reports.includes(entry)),
+      rates,
       template: body,
     },
   };
@@ -187,6 +199,10 @@ export function formatPlaybook(playbook: PlaybookFields): { text: string } | { e
 
   if (playbook.kind === 'triage') {
     lines.push('kind: triage');
+  }
+
+  if (playbook.kind === 'triage' && playbook.rates) {
+    lines.push('rates: true');
   }
 
   for (const key of ['autoStart', 'requiresWorktree'] as const) {

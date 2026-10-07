@@ -13,7 +13,7 @@ export const REPORT = 'node "C:/home/.switchboard/hub.js" report';
 
 const PLAYBOOKS: Record<string, string> = {
   'triage:github': '---\ndescription: GitHub triage\nkind: triage\n---\nClassify the GitHub issue.',
-  'triage:zoho': '---\ndescription: Zoho triage\nkind: triage\n---\nTriage the Support case.',
+  'triage:zoho': '---\ndescription: Zoho triage\nkind: triage\nrates: true\n---\nTriage the Support case.',
   'dev:develop': '---\ndescription: Plan and build the change\nautoStart: true\nrequiresWorktree: true\nreports: done, worktree\n---\n/gc-plan {{ticket.sourceKey}}',
   'dev:question': '---\ndescription: Answer a question\npermissionMode: plan\nmodel: opus\nreports: approval\n---\nAnswer {{ticket.title}}.\n{{triage.summary}}',
   'support:defect': '---\ndescription: Research a defect\nautoStart: true\nworkdir: repoRoot\nreports: done\n---\nResearch {{ticket.sourceKey}} in {{ticket.url}}.',

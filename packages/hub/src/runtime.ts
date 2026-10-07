@@ -438,7 +438,7 @@ export class Runtime {
         }
 
         const result = await classify(
-          { claudePath: this.deps.claudePath, systemPrompt: action.systemPrompt, choices: action.choices, context: context.context, model: action.model, timeoutSeconds: action.timeoutSeconds, cwd: this.home },
+          { claudePath: this.deps.claudePath, systemPrompt: action.systemPrompt, choices: action.choices, rates: action.rates, context: context.context, model: action.model, timeoutSeconds: action.timeoutSeconds, cwd: this.home },
           this.deps.exec,
         );
 

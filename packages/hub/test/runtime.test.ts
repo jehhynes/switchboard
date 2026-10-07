@@ -427,7 +427,9 @@ describe('Runtime', () => {
   });
 
   it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook, and hides a disabled source (PRD R50, R51)', async () => {
-    const { store, cli, source, runtime } = setup();
+    const cfg = config();
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('triage:github', '---\ndescription: Triage\nkind: triage\nrates: true\n---\nClassify and rate.')]);
+    const { store, cli, source, runtime } = setup(cfg);
     const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 's', immediacy, severity } }));
     cli.classifyByContext.set('Issue 2 text', rated('NON-BLOCKING', 'LOW'));
     cli.classifyByContext.set('Issue 3 text', rated('BLOCKING', 'HIGH'));

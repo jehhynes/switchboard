@@ -20,6 +20,7 @@ describe('parsePlaybook', () => {
         model: 'opus',
         workdir: 'repoRoot',
         reports: ['done', 'worktree'],
+        rates: false,
         template: 'Research {{ticket.sourceKey}}.\n',
       },
     });
@@ -37,6 +38,7 @@ describe('parsePlaybook', () => {
         model: null,
         workdir: 'worktree',
         reports: [],
+        rates: false,
         template: 'Classify.',
       },
     });
@@ -57,6 +59,8 @@ describe('parsePlaybook', () => {
     ['a bad workdir', '---\ndescription: x\nworkdir: home\n---\nbody', 'workdir must be worktree or repoRoot.'],
     ['an unknown report', '---\ndescription: x\nreports: done, stage, blocked\n---\nbody', 'reports can list done, approval, worktree, playbook, not stage, blocked.'],
     ['reports on a triage playbook', '---\ndescription: x\nkind: triage\nreports: done\n---\nbody', 'reports applies only to a task playbook.'],
+    ['a bad rates', '---\ndescription: x\nkind: triage\nrates: yes\n---\nbody', 'rates must be true or false.'],
+    ['rates on a task playbook', '---\ndescription: x\nrates: true\n---\nbody', 'rates applies only to a triage playbook.'],
     ['an empty body', '---\ndescription: x\n---\n  \n', 'The prompt template is empty.'],
   ])('rejects %s', (_case, text, error) => {
     expect(parsePlaybook('dev:x', text)).toEqual({ error });
@@ -118,6 +122,7 @@ describe('formatPlaybook', () => {
     model: null,
     workdir: 'worktree',
     reports: [],
+    rates: false,
     template: '/review-pr {{ticket.sourceKey}}\n',
   };
 
@@ -125,6 +130,7 @@ describe('formatPlaybook', () => {
     expect(formatPlaybook(task)).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
     expect(formatPlaybook({ ...task, reports: ['approval'] })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreports: approval\n---\n/review-pr {{ticket.sourceKey}}\n' });
     expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, reports: ['done'], template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
+    expect(formatPlaybook({ ...task, rates: true })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
   });
 
   it.each<[string, Partial<PlaybookFields>]>([
@@ -133,6 +139,7 @@ describe('formatPlaybook', () => {
     ['a description with outer spaces', { description: ' padded ' }],
     ['a quoted model', { model: "'x'" }],
     ['a triage playbook that starts automatically', { kind: 'triage', autoStart: true }],
+    ['a triage playbook that rates', { kind: 'triage', autoStart: false, rates: true }],
   ])('reads back the same fields with %s', (_case, patch) => {
     const playbook = { ...task, ...patch };
     const formatted = formatPlaybook(playbook);

@@ -8,6 +8,8 @@ export interface ClassifyInput {
   /** The triage playbook's body with the choices rendered in (core `triagePrompt`). */
   systemPrompt: string;
   choices: TriageChoice[];
+  /** Whether the triage playbook rates immediacy and severity; without it, the schema has neither field. */
+  rates: boolean;
   context: string;
   model: string | null;
   timeoutSeconds: number;
@@ -19,7 +21,7 @@ export type ClassifyResult = { playbook: string; summary: string; immediacy: Imm
 
 /** The classifier's system prompt: the rendered triage playbook, then what to do with the ticket. */
 export function classifierPrompt(systemPrompt: string): string {
-  return `${systemPrompt.trimEnd()}\n\nThe ticket follows as the user message. Summarize it in a few sentences. Set immediacy and severity only when the instructions above ask you to rate the ticket.`;
+  return `${systemPrompt.trimEnd()}\n\nThe ticket follows as the user message. Summarize it in a few sentences.`;
 }
 
 /** One-shot triage with no tools, settings, MCP servers or saved transcript (mechanics M3). */
@@ -29,8 +31,7 @@ export function classifierArgs(input: ClassifyInput): string[] {
     properties: {
       playbook: { type: 'string', enum: input.choices.map((choice) => choice.name) },
       summary: { type: 'string' },
-      immediacy: { type: 'string', enum: IMMEDIACIES },
-      severity: { type: 'string', enum: SEVERITIES },
+      ...(input.rates ? { immediacy: { type: 'string', enum: IMMEDIACIES }, severity: { type: 'string', enum: SEVERITIES } } : {}),
     },
     required: ['playbook', 'summary'],
     additionalProperties: false,
@@ -55,8 +56,8 @@ export function classifierArgs(input: ClassifyInput): string[] {
   ];
 }
 
-/** Reads `structured_output` from `--output-format json`. A body-level error fails even when the process exits 0. */
-export function parseClassifierOutput(stdout: string, choices: TriageChoice[]): ClassifyResult {
+/** Reads `structured_output` from `--output-format json`. A body-level error fails even when the process exits 0. Ratings count only when `rates`. */
+export function parseClassifierOutput(stdout: string, choices: TriageChoice[], rates: boolean): ClassifyResult {
   let output: { is_error?: boolean; subtype?: string; result?: string; structured_output?: { playbook?: unknown; summary?: unknown; immediacy?: unknown; severity?: unknown } };
 
   try {
@@ -82,8 +83,8 @@ export function parseClassifierOutput(stdout: string, choices: TriageChoice[]): 
   return {
     playbook,
     summary,
-    immediacy: (IMMEDIACIES as readonly unknown[]).includes(immediacy) ? (immediacy as Immediacy) : null,
-    severity: (SEVERITIES as readonly unknown[]).includes(severity) ? (severity as Severity) : null,
+    immediacy: rates && (IMMEDIACIES as readonly unknown[]).includes(immediacy) ? (immediacy as Immediacy) : null,
+    severity: rates && (SEVERITIES as readonly unknown[]).includes(severity) ? (severity as Severity) : null,
   };
 }
 
@@ -95,5 +96,5 @@ export async function classify(input: ClassifyInput, exec: Exec): Promise<Classi
     return { error: failureOf(input.claudePath, result, timeoutMs) };
   }
 
-  return parseClassifierOutput(result.stdout, input.choices);
+  return parseClassifierOutput(result.stdout, input.choices, input.rates);
 }

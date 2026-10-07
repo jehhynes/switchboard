@@ -69,6 +69,7 @@ export const EMPTY_PLAYBOOK: PlaybookFields = {
   model: null,
   workdir: 'worktree',
   reports: [],
+  rates: false,
   template: '',
 };
 
@@ -149,13 +150,15 @@ export function applyPlaybookField(playbook: PlaybookFields, key: string, input:
   switch (key) {
     case 'autoStart':
     case 'requiresWorktree':
+    case 'rates':
       return { ...playbook, [key]: input.checked === true };
     case 'permissionMode':
       return { ...playbook, permissionMode: input.value === '' ? null : (input.value as PlaybookFields['permissionMode']) };
     case 'model':
       return { ...playbook, model: input.value === '' ? null : input.value };
     case 'kind':
-      return { ...playbook, kind: input.value === 'triage' ? 'triage' : 'task' };
+      // A task playbook's file cannot hold rates, so keeping it would leave the saved draft unlike the file.
+      return input.value === 'triage' ? { ...playbook, kind: 'triage' } : { ...playbook, kind: 'task', rates: false };
     case 'workdir':
       return { ...playbook, workdir: input.value === 'repoRoot' ? 'repoRoot' : 'worktree' };
     case 'description':
@@ -355,6 +358,10 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
       help: 'A triage playbook holds a source’s classifier instructions and is never chosen for work.',
     },
   ];
+
+  if (playbook.kind === 'triage') {
+    fields.push({ path: 'rates', label: 'Rates importance', kind: 'boolean', help: 'Triage stores immediacy and severity, which these instructions must define. Off, it stores neither.' });
+  }
 
   if (playbook.kind === 'task') {
     fields.push(

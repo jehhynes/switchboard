@@ -25,7 +25,7 @@ function write(path: string, text: string): void {
 
 const GITHUB = { enabled: true, repo: 'o/r', logins: ['me'], project: { owner: 'o', number: 3 }, assignedStatuses: ['Dev'] };
 
-const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', reports: [], template: '/gc-plan {{ticket.sourceKey}}\n' };
+const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', reports: [], rates: false, template: '/gc-plan {{ticket.sourceKey}}\n' };
 
 describe('checkSettings', () => {
   it('passes valid settings, and a disabled source whose own keys are incomplete', () => {

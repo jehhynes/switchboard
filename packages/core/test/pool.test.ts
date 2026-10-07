@@ -22,7 +22,7 @@ describe('pool triage (PRD R47, R50)', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool'), zoho('501', 'neither')), 'triage');
 
-    expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the Support case.\n\nChoose one playbook:\n- support:defect: Research a defect\n- support:case: A Support case', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A Support case' }] });
+    expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the Support case.\n\nChoose one playbook:\n- support:defect: Research a defect\n- support:case: A Support case', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A Support case' }], rates: true });
     expect(h.store.workItem(1)).toBeNull();
 
     h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', summary: 'Fix the sync — defect', immediacy: 'BLOCKING', severity: 'MED', model: null, links: [{ label: 'PR', target: 'https://github.com/o/r/pull/2' }] });

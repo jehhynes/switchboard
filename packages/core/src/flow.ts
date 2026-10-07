@@ -114,6 +114,8 @@ export type FlowAction =
       ticket: Ticket;
       systemPrompt: string;
       choices: TriageChoice[];
+      /** Whether the triage playbook rates immediacy and severity. */
+      rates: boolean;
       model: string | null;
       timeoutSeconds: number;
     }
@@ -564,6 +566,7 @@ class Flow {
       ticket,
       systemPrompt: systemPrompt.text,
       choices,
+      rates: playbook.rates,
       model: this.context.settings.triage.model || null,
       timeoutSeconds: this.context.settings.triage.timeoutSeconds,
     });

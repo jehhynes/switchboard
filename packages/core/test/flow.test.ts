@@ -58,6 +58,7 @@ describe('assigned-state transitions', () => {
         { name: 'dev:question', description: 'Answer a question' },
         { name: 'support:defect', description: 'Research a defect' },
       ],
+      rates: false,
       model: null,
       timeoutSeconds: 180,
     });
