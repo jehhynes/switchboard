@@ -66,6 +66,11 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Approve', icon: 'check', message: action('approve') });
   }
 
+  // Runs in the extension, which reads the file and writes the clipboard (PRD R60).
+  if (item.status === 'awaiting-approval' && item.pastes.length > 0) {
+    controls.push({ label: 'Copy', icon: 'copy', message: { type: 'copy', pastes: item.pastes.map(({ label, file }) => ({ label, file })) } });
+  }
+
   if (item.status === 'failed' || item.status === 'blocked') {
     controls.push({ label: 'Retry', icon: 'refresh', message: action('retry') });
   }
@@ -244,6 +249,7 @@ export const ROW_COMMANDS: Record<string, string> = {
   Restore: 'restore',
   'Open Changes': 'changes',
   'Show in Source Control': 'sourceControl',
+  Copy: 'copy',
 };
 
 /**
@@ -546,12 +552,14 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
   const { primary, rest } = splitLinks(item);
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
   const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report } }, null, true, fileName(report));
+  const copy = controlsOf(item).find((control) => control.label === 'Copy');
+  const copyButton = copy === undefined ? '' : actionButton(copy, null, true, item.pastes.length === 1 ? `Copy ${item.pastes[0]!.label}` : 'Copy…');
 
   return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(playbookText(item, namespaces))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
     `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}`,
-  )}${actionsColumn(`${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
+  )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }
 

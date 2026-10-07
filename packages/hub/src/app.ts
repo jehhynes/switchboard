@@ -11,6 +11,7 @@ import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
+import { isPastePath } from './report.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { loadConfig, playbooksDir, setSourceEnabled } from './config.js';
 import type { HubApp } from './serve.js';
@@ -22,7 +23,7 @@ const RELOAD_DEBOUNCE_MS = 300;
 /** Operator events the panel may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'snooze', 'restore']);
 
-const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook']);
+const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste']);
 
 /** A link target: an http(s) URL (PRD R52). */
 export function isLinkTarget(target: unknown): target is string {
@@ -71,7 +72,15 @@ export function parseReport(body: unknown): ReportBody | null {
     return { sessionId: body['sessionId'], kind: 'done' };
   }
 
-  const text = { stage: 'stage', worktree: 'path', approval: 'prompt', playbook: 'playbook' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done'>];
+  if (body['kind'] === 'paste') {
+    const label = body['label'];
+
+    return typeof label === 'string' && label.trim() !== '' && isPastePath(body['file'])
+      ? { sessionId: body['sessionId'], kind: 'paste', label: label.trim(), file: body['file'] }
+      : null;
+  }
+
+  const text = { stage: 'stage', worktree: 'path', approval: 'prompt', playbook: 'playbook' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done' | 'paste'>];
   const value = body[text];
 
   const optional = (field: string, valid: (value: unknown) => boolean) => body[field] === undefined || body[field] === null || valid(body[field]);

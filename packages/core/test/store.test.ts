@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 13 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: MIGRATIONS.length });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -239,7 +239,7 @@ describe('Store', () => {
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (13).');
+    expect(() => Store.open(path)).toThrow(`The database is schema version 99, newer than this hub supports (${MIGRATIONS.length}).`);
   });
 
   it('rolls back a transaction that throws', () => {
@@ -272,5 +272,24 @@ describe('Store', () => {
     store.linkWorktree({ ticketId: ticket.id, path: 'D:/wt/b', branch: null, linkedBy: 'report' });
 
     expect(store.worktreeFor(ticket.id)).toEqual({ id: 1, ticketId: 1, path: 'D:/wt/b', branch: null, linkedBy: 'report' });
+  });
+
+  it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
+    const store = Store.open(':memory:');
+    const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: id, statusAt: id, runStartedAt: null, scopeAt: null, doneAt: null, doneReason: null }) as const;
+    const first = store.insertWorkItem(item(1));
+    const second = store.insertWorkItem(item(2));
+
+    store.setPaste({ workItemId: first.id, label: 'Customer reply', file: 'D:/case/draft-reply.md', reportedAt: 1 });
+    store.setPaste({ workItemId: first.id, label: 'Private note', file: 'D:/case/private-note.md', reportedAt: 2 });
+    store.setPaste({ workItemId: second.id, label: 'Customer reply', file: 'D:/case/other.md', reportedAt: 3 });
+    store.setPaste({ workItemId: first.id, label: 'Customer reply', file: 'D:/case/draft-reply-2.md', reportedAt: 4 });
+
+    expect(store.pastesFor(first.id)).toEqual([
+      { id: 1, workItemId: first.id, label: 'Customer reply', file: 'D:/case/draft-reply-2.md', reportedAt: 4 },
+      { id: 2, workItemId: first.id, label: 'Private note', file: 'D:/case/private-note.md', reportedAt: 2 },
+    ]);
+    expect(store.pastesFor(second.id).map((paste) => paste.file)).toEqual(['D:/case/other.md']);
   });
 });

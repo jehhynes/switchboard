@@ -1,7 +1,7 @@
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
 import { ADHOC_SOURCE, handle, switchboardHome } from '@switchboard/core';
-import type { FlowAction, FlowEvent, FlowResult, Link, PolledTicket, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -42,6 +42,8 @@ export interface WorkItemView extends WorkItem {
   sessions: Session[];
   worktree: Worktree | null;
   links: Link[];
+  /** Drafted texts the operator copies into the source (PRD R60). */
+  pastes: Paste[];
   /** Earlier started work items for the same ticket; above 0 the panel marks the work item Returned (PRD R51). */
   returned: number;
 }
@@ -79,7 +81,8 @@ export type ReportBody =
   | { sessionId: string; kind: 'done' }
   | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null; report: string | null }
   | { sessionId: string; kind: 'link'; label: string; target: string }
-  | { sessionId: string; kind: 'playbook'; playbook: string };
+  | { sessionId: string; kind: 'playbook'; playbook: string }
+  | { sessionId: string; kind: 'paste'; label: string; file: string };
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -338,7 +341,9 @@ export class Runtime {
             ? { kind: body.kind, prompt: body.prompt, summary: body.summary, report: body.report }
             : body.kind === 'playbook'
               ? { kind: body.kind, playbook: body.playbook }
-              : { kind: body.kind, label: body.label, target: body.target };
+              : body.kind === 'paste'
+                ? { kind: body.kind, label: body.label, file: body.file }
+                : { kind: body.kind, label: body.label, target: body.target };
 
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }
@@ -374,6 +379,7 @@ export class Runtime {
         sessions: store.sessionsFor(item.id),
         worktree: store.worktreeFor(item.ticketId),
         links: store.linksFor(item.ticketId),
+        pastes: store.pastesFor(item.id),
         returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
       })),
       pool: store

@@ -17,6 +17,10 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
     ],
     link: [`- ${REPORT} link ${id} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.`],
     playbook: [`- ${REPORT} playbook ${id} <name>, when you hand the work to the skill of another playbook, such as dev:review-pr.`],
+    paste: [
+      `- ${REPORT} paste ${id} --label <text> --file <absolute path>, for each drafted text the operator pastes into the ticket by hand, such as --label "Customer reply".`,
+      `  - The file holds only the text to paste. A later paste with the same label replaces the earlier one.`,
+    ],
   };
   const finish = reports.includes('done') || reports.includes('approval') ? [] : ['', 'When the work is finished, end your turn; the operator reviews it.'];
 
@@ -784,7 +788,7 @@ describe('ad-hoc', () => {
       workItemId: 1,
       kind: 'task',
       cwd: 'D:/scratch',
-      prompt: '  Write hello.txt\nthen report done' + CONTRACT('s1'),
+      prompt: '  Write hello.txt\nthen report done' + CONTRACT('s1', ['stage', 'worktree', 'done', 'approval', 'link', 'paste']),
       name: 'switchboard · ad-hoc · adhoc 1',
       permissionMode: 'auto',
       model: null,

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { posix, resolve } from 'node:path';
 
 /** The Windows root that Git Bash puts in front of an argument starting with `/` (mechanics M20), or null outside Git Bash. */
 export function gitBashRoot(env: NodeJS.ProcessEnv, run: (file: string, args: string[]) => string = runSync): string | null {
@@ -23,6 +23,25 @@ function runSync(file: string, args: string[]): string {
 /** Undoes Git Bash's rewrite of a slash command such as `/legacy-ship 16416`. */
 function unconverted(value: string, root: string | null): string {
   return root !== null && value.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? value.slice(root.length) : value;
+}
+
+/**
+ * A paste's file: a path that names one file wherever it is read (PRD R60). On Windows that is a drive or UNC path, because
+ * `\x` and `C:x` depend on the reader's current drive or directory; elsewhere it is a POSIX absolute path.
+ */
+export function isPastePath(path: unknown, platform: NodeJS.Platform = process.platform): path is string {
+  if (typeof path !== 'string') {
+    return false;
+  }
+
+  return platform === 'win32' ? /^([a-z]:[\\/]|[\\/]{2}[^\\/])/i.test(path) : posix.isAbsolute(path);
+}
+
+/** Turns a Git Bash drive path such as `/d/case/reply.md`, which Git Bash leaves unconverted under `MSYS_NO_PATHCONV`, into `D:/case/reply.md`. */
+function windowsDrivePath(value: string, root: string | null): string {
+  const drive = /^\/([a-z])(\/|$)/i.exec(value);
+
+  return root === null || drive === null ? value : `${drive[1]!.toUpperCase()}:/${value.slice(3)}`;
 }
 
 function valueOf(argv: readonly string[], name: string): string | null {
@@ -74,6 +93,14 @@ export function reportBody(argv: readonly string[], root: string | null = null):
       const target = valueOf(argv, 'target');
 
       return label === null || label === '' || target === null || !/^https?:\/\//i.test(target) ? null : { sessionId, kind, label, target };
+    }
+    case 'paste': {
+      const label = valueOf(argv, 'label');
+      const given = valueOf(argv, 'file');
+      const file = given === null ? null : windowsDrivePath(given, root);
+
+      // The extension reads the file later from another directory, so a relative path is refused rather than resolved.
+      return label === null || label.trim() === '' || file === null || !isPastePath(file) ? null : { sessionId, kind, label, file };
     }
     default:
       return null;

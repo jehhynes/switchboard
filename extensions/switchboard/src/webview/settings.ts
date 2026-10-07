@@ -77,6 +77,7 @@ const REPORT_FIELDS: { kind: PlaybookReport; label: string; help: string }[] = [
   { kind: 'approval', label: 'Session can report approval', help: 'The session can leave a prompt for you to approve, such as one that posts its draft.' },
   { kind: 'worktree', label: 'Session can report a worktree', help: 'The session can link a worktree it creates. Branch names link worktrees without it.' },
   { kind: 'playbook', label: 'Session can change the playbook', help: 'The session can hand its work item to another playbook in the namespace, whose skill it runs.' },
+  { kind: 'paste', label: 'Session can report pastes', help: 'The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row.' },
 ];
 
 /** A playbook field's value; a `reports.<kind>` field is whether the playbook lists that report. */

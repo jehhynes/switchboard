@@ -59,6 +59,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     sessions: [],
     worktree: null,
     links: [],
+    pastes: [],
     returned: 0,
     ...patch,
   };
@@ -357,6 +358,48 @@ describe('renderPanel', () => {
     expect(menu.actions['sourceControl']).toEqual({ type: 'sourceControl', path: 'D:/git/widgets.worktrees/108-fix' });
     expect(rowMenu(panel.querySelector('[data-item="9"]')!).shown).toEqual(['changes', 'sourceControl']);
     expect(titles(panel, '[data-item="8"] .actions > *')).toEqual(['Approve']);
+  });
+
+  it('shows Copy as an icon button before Report and in the menu of an approval row with pastes, and nowhere else (R60)', () => {
+    const paste = (id: number, label: string, file: string) => ({ id, workItemId: 1, label, file, reportedAt: NOW });
+    const reply = paste(1, 'Customer reply', 'D:\\git\\support\\work\\cases\\123\\draft-reply.md');
+    const note = paste(2, 'Private note', 'D:\\git\\support\\work\\cases\\123\\private-note.md');
+    const report = 'D:\\git\\support\\work\\cases\\123\\draft-reply.md';
+    const panel = render(
+      snapshot([
+        item(1, { status: 'awaiting-approval', approvalReport: report, pastes: [reply, note] }),
+        item(2, { status: 'awaiting-approval', pastes: [reply] }),
+        item(3, { status: 'blocked', pastes: [reply] }),
+        item(4, { status: 'running', sessions: [session()], pastes: [reply] }),
+        item(5, { status: 'done', doneAt: NOW, pastes: [reply] }),
+        item(6, { status: 'awaiting-approval' }),
+      ]),
+      { groups: new Map([['done', true]]) },
+    );
+    const buttons = (id: number) => [...panel.querySelectorAll<HTMLButtonElement>(`[data-item="${id}"] > .actions > button`)].map((button) => [button.title, button.className]);
+    const pastes = [
+      { label: 'Customer reply', file: reply.file },
+      { label: 'Private note', file: note.file },
+    ];
+
+    expect(buttons(1)).toEqual([
+      ['Copy…', 'control action-button icon-only'],
+      ['draft-reply.md', 'control action-button icon-only'],
+      ['Approve', 'control action-button primary'],
+    ]);
+    expect(panel.querySelector('[data-item="1"] .actions .codicon-copy')).not.toBeNull();
+    expect(JSON.parse(controlNamed(panel, 'Copy…').dataset['message']!)).toEqual({ type: 'copy', pastes });
+    expect(buttons(2).map(([title]) => title)).toEqual(['Copy Customer reply', 'Approve']);
+
+    const menu = rowMenu(panel.querySelector('[data-item="1"]')!);
+
+    expect(menu.shown).toEqual(['approve', 'copy', 'triageAgain', 'markDone', 'snooze']);
+    expect(menu.actions['copy']).toEqual({ type: 'copy', pastes });
+
+    for (const id of [3, 4, 5, 6]) {
+      expect(rowMenu(panel.querySelector(`[data-item="${id}"]`)!).shown).not.toContain('copy');
+      expect(panel.querySelector(`[data-item="${id}"] .codicon-copy`)).toBeNull();
+    }
   });
 
   it('stripes failed rows in the error colour and blocked rows and questions in the warning colour, except while snoozed', () => {

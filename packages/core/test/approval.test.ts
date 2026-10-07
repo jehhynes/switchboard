@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
-import { HOUR, Harness, T0, issue } from './flowHarness.js';
+import { HOUR, Harness, REPORT, T0, issue, playbooks } from './flowHarness.js';
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
   expect(actions).toHaveLength(1);
@@ -54,6 +54,47 @@ describe('approval reports (PRD R23, R31)', () => {
     h.act({ type: 'roster', sessions: [] });
     h.act({ type: 'retriage', workItemId: item });
     expect(h.item(item)).toMatchObject({ status: 'triaging', approvalPrompt: null, approvalSummary: null, approvalReport: null });
+  });
+});
+
+describe('paste reports (PRD R60)', () => {
+  const withPaste = () => new Harness({ playbooks: playbooks(undefined, { 'dev:reply': '---\ndescription: Draft a reply\nreports: approval, paste\n---\nDraft the reply.' }) });
+
+  it('offers paste only from a playbook that lists it, and keeps the latest file per label on the work item', () => {
+    const h = withPaste();
+    const [triage] = h.poll(issue('1'));
+    h.triaged(triage, 'dev:reply');
+    const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
+    const session = h.started(start);
+
+    expect(start.prompt).toContain(`- ${REPORT} paste ${session} --label <text> --file <absolute path>, for each drafted text`);
+    expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply.md' }).refused).toBeNull();
+    h.report(session, { kind: 'paste', label: 'Private note', file: 'D:\\case\\private-note.md' });
+    h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply-2.md' });
+    h.report(session, { kind: 'approval', prompt: '/support-release #1', summary: 'Release the case', report: 'D:\\case\\draft-reply-2.md' });
+
+    expect(h.store.pastesFor(1).map(({ label, file }) => [label, file])).toEqual([
+      ['Customer reply', 'D:\\case\\draft-reply-2.md'],
+      ['Private note', 'D:\\case\\private-note.md'],
+    ]);
+    expect(h.item(1).status).toBe('awaiting-approval');
+
+    // The approved prompt's session is not offered paste.
+    h.act({ type: 'roster', sessions: [] });
+    const approved = h.started(h.act({ type: 'approve', workItemId: 1 })[0]);
+    expect(h.report(approved, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\late.md' }).refused).toBe("This session's prompt does not offer the paste report.");
+
+    // An earlier session's paste is not applied, as for its other reports (PRD R45).
+    expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\stale.md' }).refused).toBeNull();
+    expect(h.store.pastesFor(1)[0]?.file).toBe('D:\\case\\draft-reply-2.md');
+  });
+
+  it('refuses paste from a playbook that does not list it', () => {
+    const h = withPaste();
+    const { session } = running(h);
+
+    expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply.md' }).refused).toBe("This session's prompt does not offer the paste report.");
+    expect(h.store.pastesFor(1)).toEqual([]);
   });
 });
 

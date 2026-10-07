@@ -57,7 +57,7 @@ describe('parsePlaybook', () => {
     ['a bad requiresWorktree', '---\ndescription: x\nrequiresWorktree: 1\n---\nbody', 'requiresWorktree must be true or false.'],
     ['a bad permissionMode', '---\ndescription: x\npermissionMode: yolo\n---\nbody', 'permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.'],
     ['a bad workdir', '---\ndescription: x\nworkdir: home\n---\nbody', 'workdir must be worktree or repoRoot.'],
-    ['an unknown report', '---\ndescription: x\nreports: done, stage, blocked\n---\nbody', 'reports can list done, approval, worktree, playbook, not stage, blocked.'],
+    ['an unknown report', '---\ndescription: x\nreports: done, stage, blocked\n---\nbody', 'reports can list done, approval, worktree, playbook, paste, not stage, blocked.'],
     ['reports on a triage playbook', '---\ndescription: x\nkind: triage\nreports: done\n---\nbody', 'reports applies only to a task playbook.'],
     ['a bad rates', '---\ndescription: x\nkind: triage\nrates: yes\n---\nbody', 'rates must be true or false.'],
     ['rates on a task playbook', '---\ndescription: x\nrates: true\n---\nbody', 'rates applies only to a triage playbook.'],

@@ -54,7 +54,8 @@ export type Report =
   | { kind: 'done'; assigned?: boolean }
   | { kind: 'approval'; prompt: string; summary: string | null; report: string | null }
   | { kind: 'link'; label: string; target: string }
-  | { kind: 'playbook'; playbook: string };
+  | { kind: 'playbook'; playbook: string }
+  | { kind: 'paste'; label: string; file: string };
 
 export type StopReason = 'operator' | 'release';
 
@@ -774,6 +775,13 @@ class Flow {
       case 'playbook':
         if (item !== null && session.kind === 'task') {
           this.store.updateWorkItem(item.id, { playbook: this.handoffPlaybook(item, report.playbook) });
+        }
+
+        return;
+      case 'paste':
+        // Pastes belong to the work item whose draft they are; Copy shows on its approval row (PRD R60).
+        if (item !== null) {
+          this.store.setPaste({ workItemId: item.id, label: report.label, file: report.file, reportedAt: this.now });
         }
 
         return;

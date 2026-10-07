@@ -178,6 +178,11 @@
         "command": "switchboard.row.sourceControl",
         "title": "Show in Source Control",
         "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.copy",
+        "title": "Copy…",
+        "category": "Switchboard"
       }
     ],
     "menus": {
@@ -301,6 +306,10 @@
         {
           "command": "switchboard.row.sourceControl",
           "when": "false"
+        },
+        {
+          "command": "switchboard.row.copy",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -353,6 +362,11 @@
           "command": "switchboard.row.sourceControl",
           "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.sourceControl",
           "group": "4_worktree@2"
+        },
+        {
+          "command": "switchboard.row.copy",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.copy",
+          "group": "1_run@5"
         }
       ]
     }

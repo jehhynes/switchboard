@@ -14,7 +14,7 @@ export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed
 export type SessionOutcome = 'done' | 'failed' | 'stopped';
 
 /** The reports a session can send (PRD R23). */
-export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link', 'playbook'] as const;
+export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste'] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 
 /** Triage's importance rating (PRD R50). Earlier values rank first. */
@@ -121,6 +121,17 @@ export interface Link {
   label: string;
   /** An http(s) URL or an absolute file path. */
   target: string;
+  reportedAt: number;
+}
+
+/** A drafted text the operator pastes into the source by hand, such as a customer reply; Copy puts the file's text on the clipboard (PRD R60). */
+export interface Paste {
+  id: number;
+  workItemId: number;
+  /** Names the text in the panel, such as `Customer reply`; a later paste with the same label replaces it. */
+  label: string;
+  /** An absolute path, read when the operator copies it. */
+  file: string;
   reportedAt: number;
 }
 

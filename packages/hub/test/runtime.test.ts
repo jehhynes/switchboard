@@ -369,6 +369,21 @@ describe('Runtime', () => {
     expect(store.workItem(2)?.status).toBe('running');
   });
 
+  it('records a paste only from a session offered it, and puts the pastes in the snapshot (R60)', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    store.updateSession('s1', { reports: ['stage', 'link'] });
+    expect(await runtime.report({ sessionId: 's1', kind: 'paste', label: 'Customer reply', file: 'D:/case/draft-reply.md' })).toEqual({ refused: "This session's prompt does not offer the paste report." });
+    expect(runtime.snapshot().workItems[0]?.pastes).toEqual([]);
+
+    store.updateSession('s1', { reports: ['stage', 'link', 'paste'] });
+    expect(await runtime.report({ sessionId: 's1', kind: 'paste', label: 'Customer reply', file: 'D:/case/draft-reply.md' })).toEqual({ refused: null });
+    expect(runtime.snapshot().workItems[0]?.pastes).toMatchObject([{ workItemId: 1, label: 'Customer reply', file: 'D:/case/draft-reply.md' }]);
+  });
+
   it('blocks a done report while a fresh read lists the ticket as assigned, without telling the session (PRD R10)', async () => {
     const { store, source, runtime } = setup();
     source.result = { tickets: [issue('8')] };

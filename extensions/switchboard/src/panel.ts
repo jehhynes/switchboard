@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import type { Snapshot } from '@switchboard/hub';
@@ -110,6 +111,9 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
       case 'action':
         await vscode.commands.executeCommand('switchboard.action', message['action']);
         return;
+      case 'copy':
+        await copyPaste(message['pastes'] as PasteChoice[]);
+        return;
       default:
         await runOpen(message);
     }
@@ -176,6 +180,44 @@ export function goTo(view: WorkItemsView): Promise<RowTarget | null> {
     });
     pick.show();
   });
+}
+
+export interface PasteChoice {
+  label: string;
+  file: string;
+}
+
+const COPIED_MESSAGE_MS = 5_000;
+
+/**
+ * Puts a paste's file on the clipboard, asking which one when there are several (PRD R60). Trailing whitespace is dropped, so the
+ * pasted text ends where the draft does. Returns the copied label, or null when nothing was copied.
+ */
+export async function copyPaste(pastes: readonly PasteChoice[]): Promise<string | null> {
+  const paste =
+    pastes.length === 1
+      ? pastes[0]
+      : (await vscode.window.showQuickPick(pastes.map((entry) => ({ label: entry.label, description: entry.file, paste: entry })), { title: 'Switchboard: copy' }))?.paste;
+
+  if (paste === undefined) {
+    return null;
+  }
+
+  let text: string;
+
+  try {
+    text = await readFile(paste.file, 'utf8');
+  } catch (error) {
+    const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
+
+    void vscode.window.showWarningMessage(`Switchboard: ${paste.label} was not copied: ${missing ? `${paste.file} does not exist` : (error as Error).message}.`);
+    return null;
+  }
+
+  await vscode.env.clipboard.writeText(text.replace(/^﻿/, '').trimEnd());
+  vscode.window.setStatusBarMessage(`Copied ${paste.label}`, COPIED_MESSAGE_MS);
+
+  return paste.label;
 }
 
 /** Opens an http(s) URL in the browser and anything else, a reported file path, in VS Code (PRD R52). */

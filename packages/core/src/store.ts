@@ -1,5 +1,5 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import type { Link, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
+import type { Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -152,6 +152,15 @@ export const MIGRATIONS = [
   ALTER TABLE workItems DROP COLUMN needsPick;`,
   // Triage no longer writes a summary (PRD R18).
   `ALTER TABLE triages DROP COLUMN summary;`,
+  // Drafted texts the operator copies into the source (PRD R60); one per label per work item.
+  `CREATE TABLE pastes (
+    id INTEGER PRIMARY KEY,
+    workItemId INTEGER NOT NULL REFERENCES workItems(id),
+    label TEXT NOT NULL,
+    file TEXT NOT NULL,
+    reportedAt INTEGER NOT NULL,
+    UNIQUE (workItemId, label)
+  );`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released']);
@@ -395,6 +404,20 @@ export class Store {
 
   linksFor(ticketId: number): Link[] {
     return this.#all('SELECT * FROM links WHERE ticketId = ? ORDER BY id', ticketId);
+  }
+
+  /** Adds a paste to the work item; a paste with the same label replaces its file and keeps its place. */
+  setPaste(paste: Omit<Paste, 'id'>): void {
+    this.#db
+      .prepare(
+        'INSERT INTO pastes (workItemId, label, file, reportedAt) VALUES (:workItemId, :label, :file, :reportedAt) ' +
+          'ON CONFLICT (workItemId, label) DO UPDATE SET file = excluded.file, reportedAt = excluded.reportedAt',
+      )
+      .run(toParams(paste as unknown as Row));
+  }
+
+  pastesFor(workItemId: number): Paste[] {
+    return this.#all('SELECT * FROM pastes WHERE workItemId = ? ORDER BY id', workItemId);
   }
 
   insertSession(session: Session): void {

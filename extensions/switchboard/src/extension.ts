@@ -7,7 +7,8 @@ import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopH
 import { openChanges, showInSourceControl } from './git.js';
 import { startHub } from './hubProcess.js';
 import { NeedsYouToasts } from './notify.js';
-import { WorkItemsView, attach, claimOpen, dispatch, goTo, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
+import { WorkItemsView, attach, claimOpen, copyPaste, dispatch, goTo, openLink, openSession, openWorktree, resume, setSource, startAdhoc } from './panel.js';
+import type { PasteChoice } from './panel.js';
 import { SettingsEditor } from './settingsEditor.js';
 import { TOGGLED_SOURCES, sourceContexts } from './sources.js';
 import { ROW_COMMANDS } from './webview/render.js';
@@ -95,13 +96,15 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     // A row's right-click menu passes the row's `data-vscode-context`, which holds what each command runs.
     ...Object.values(ROW_COMMANDS).map((key) =>
       vscode.commands.registerCommand(`switchboard.row.${key}`, (row: { actions: Record<string, unknown> }) => {
-        const local = row.actions[key] as { path: string; key: string; title: string };
+        const local = row.actions[key] as { path: string; key: string; title: string; pastes: PasteChoice[] };
 
         switch (key) {
           case 'changes':
             return openChanges(local.path, local.key, local.title);
           case 'sourceControl':
             return showInSourceControl(local.path);
+          case 'copy':
+            return copyPaste(local.pastes);
           default:
             return dispatch(keeper.current(), row.actions[key]);
         }
