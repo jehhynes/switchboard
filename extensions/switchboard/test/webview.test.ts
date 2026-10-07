@@ -302,7 +302,7 @@ describe('renderPanel', () => {
     expect([...root.querySelectorAll('.item')].map((row) => row.textContent).join(' ')).not.toMatch(/Failed|Running|Finished/);
     expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Running']);
     expect(root.querySelector('[data-item="2"] .line.third .mark.codicon-error.error')?.getAttribute('title')).toBe('Failed');
-    expect(root.querySelector('[data-item="3"] .line.third .stage')?.textContent).toBe('Planning · 3m');
+    expect(root.querySelector('[data-item="3"] .line.third .stage')?.textContent).toBe('Planning… · 3m');
     expect([...root.querySelectorAll('.errors .note')].map((note) => note.textContent?.trim())).toEqual([
       'Settings: sessions.concurrency must be a whole number from 1 to 4.',
       'Playbook dev/bad.md: description is required.',
@@ -382,6 +382,8 @@ describe('renderPanel', () => {
     const done = render(snapshot([item(5, { status: 'done', doneAt: NOW, doneReason: 'session', warning: 'The ticket left the assigned state.', stage: 'review', stageAt: NOW - 60_000, links })])).querySelector('[data-item="5"]')!;
     // The warning note follows its mark, before the stage and the badges.
     expect([...done.querySelector('.line.third .meta')!.children].map((child) => child.className)).toEqual(['mark codicon codicon-check', 'note', 'stage', 'badge url']);
+    // Only a running stage ends in an ellipsis.
+    expect(done.querySelector('.stage')?.textContent).toBe('review · 1m');
   });
 
   it('shows no triage summary, triage context, task prompt or session history', () => {
@@ -565,6 +567,13 @@ describe('renderPanel', () => {
     expect(headings(back).at(-1)).toBe('Snoozed 1');
     expect(back.querySelector('[data-item="6"]')).toBeNull();
     expect(back.querySelector('details[data-group="snoozed"] [data-ticket="9"]')).not.toBeNull();
+
+    // A snoozed running row is not in Working, so its stage has no ellipsis.
+    const running = item(10, { stage: 'fixing checks', stageAt: NOW, sessions: [session()], ticket: { ...item(10).ticket, snoozed: true, snoozedUntil: null } });
+    const sleeping = render(snapshot([running]));
+
+    expect(headings(sleeping)).toEqual(['Needs you 0', 'Working 0', 'Unstarted 0', 'Done 0', 'Snoozed 1']);
+    expect(sleeping.querySelector('[data-item="10"] .stage')?.textContent).toBe('fixing checks · 0s');
   });
 
   it('shows the priority dot first, pull requests and other-repo issues on line 2, then Returned on line 2, and other links on line 3 (PRD R50–R52)', () => {
@@ -656,6 +665,7 @@ describe('renderPanel', () => {
       snapshot([
         item(1, { status: 'awaiting-approval', approvalPrompt: '/publish', approvalSummary: summary, stage: 'Waiting for the operator to approve', stageAt: NOW }),
         item(2, { status: 'blocked', error: reason }),
+        item(3, { stage: 'Waiting for the operator to approve', stageAt: NOW, sessions: [session()] }),
       ]),
     );
     const approval = root.querySelector<HTMLElement>('[data-item="1"] .approval')!;
@@ -667,6 +677,8 @@ describe('renderPanel', () => {
     expect([approval.title, approval.hasAttribute('data-full')]).toEqual([summary, true]);
     expect(stage.textContent).toBe('Waiting for the operator… · 0s');
     expect(stage.title).toBe('Waiting for the operator to approve');
+    // A clipped running stage keeps the one ellipsis the clip adds.
+    expect(root.querySelector('[data-item="3"] .stage')?.textContent).toBe('Waiting for the operator… · 0s');
     expect(note.textContent).toBe('Which of the two migration strategies in the plan should the fix use, the…');
     expect(note.title).toBe(reason);
   });

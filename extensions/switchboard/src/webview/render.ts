@@ -503,7 +503,9 @@ export function splitLinks(item: WorkItemView): { primary: WorkItemView['links']
 function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const main = mainControl(item);
   const rowKey = `item:${item.id}`;
-  const stage = item.stage === null ? '' : clipped('stage', item.stage, CAPS.stage, item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`);
+  // A running stage ends in an ellipsis, which a clipped stage already has.
+  const running = groupOf(item) === 'working' && !item.ticket.snoozed && item.stage !== null && clip(item.stage, CAPS.stage).full === null;
+  const stage = item.stage === null ? '' : clipped('stage', item.stage, CAPS.stage, `${running ? '…' : ''}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}`);
   const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : clipped('approval', item.approvalSummary, CAPS.approval);
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);

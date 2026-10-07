@@ -5,7 +5,7 @@ import { Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowH
 /** The report contract offering `reports`, written out so a change to the contract shows here. */
 const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 'approval', 'link']) => {
   const lines: Record<string, string[]> = {
-    stage: [`- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`, `  - The stage is one or two words, such as Reviewing or Fixing tests.`],
+    stage: [`- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`, `  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`],
     worktree: [`- ${REPORT} worktree ${id} <path>, when you create a worktree.`],
     done: [`- ${REPORT} done ${id}, when the work is finished.`],
     approval: [

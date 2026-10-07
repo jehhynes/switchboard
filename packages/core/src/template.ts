@@ -79,7 +79,7 @@ export function triagePrompt(template: string, choices: readonly PlaybookChoice[
 /** Each report's lines in the contract, in contract order. */
 const REPORT_LINES: Record<ReportKind, string> = {
   stage: `- {{report}} stage {{session.id}} <stage>, when you start a new phase of the work.
-  - The stage is one or two words, such as Reviewing or Fixing tests.`,
+  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
   worktree: '- {{report}} worktree {{session.id}} <path>, when you create a worktree.',
   done: '- {{report}} done {{session.id}}, when the work is finished.',
   approval: `- {{report}} approval {{session.id}} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.
