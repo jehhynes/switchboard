@@ -14,7 +14,7 @@ export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed
 export type SessionOutcome = 'done' | 'failed' | 'stopped';
 
 /** The reports a session can send (PRD R23). */
-export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste'] as const;
+export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task'] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 
 /** Triage's importance rating (PRD R50). Earlier values rank first. */
@@ -89,6 +89,8 @@ export interface WorkItem {
   scopeAt: number | null;
   doneAt: number | null;
   doneReason: DoneReason | null;
+  /** The work item whose session created this one with a task report (PRD R68). */
+  parentId: number | null;
 }
 
 export interface Triage {

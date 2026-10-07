@@ -1,4 +1,5 @@
 import type { Playbook } from './playbook.js';
+import { repoRoots } from './settings.js';
 import type { PermissionMode, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { FailedStep, Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
@@ -55,7 +56,9 @@ export type Report =
   | { kind: 'approval'; prompt: string; summary: string | null; report: string | null }
   | { kind: 'link'; label: string; target: string }
   | { kind: 'playbook'; playbook: string }
-  | { kind: 'paste'; label: string; file: string };
+  | { kind: 'paste'; label: string; file: string }
+  /** A follow-up for a new ad-hoc work item (PRD R68); a null repo or title takes the default. */
+  | { kind: 'task'; prompt: string; repo: string | null; title: string | null };
 
 export type StopReason = 'operator' | 'release';
 
@@ -156,11 +159,11 @@ class Refusal extends Error {}
  */
 function sessionReports(kind: SessionKind, approved: boolean, playbook: Playbook | null): ReportKind[] {
   if (kind !== 'task' || approved) {
-    return ['stage', 'worktree', 'done', 'link'];
+    return ['stage', 'worktree', 'done', 'link', 'task'];
   }
 
   // An ad-hoc work item has no playbook to change.
-  return playbook === null ? REPORT_KINDS.filter((entry) => entry !== 'playbook') : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || (playbook.reports as readonly string[]).includes(entry));
+  return playbook === null ? REPORT_KINDS.filter((entry) => entry !== 'playbook') : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || entry === 'task' || (playbook.reports as readonly string[]).includes(entry));
 }
 
 /** Why a task session's turn or process ended without finishing, naming only a report its prompt offered. */
@@ -177,6 +180,18 @@ function endedMessage(session: Session, turn: boolean): string {
 }
 
 const TURN_ENDED: readonly SessionState[] = ['idle', 'failed'];
+
+/** The prompt's first non-empty line, which titles an ad-hoc ticket. */
+function firstLine(prompt: string): string {
+  return prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
+}
+
+/** Compares repo paths as Windows does: either separator, any case, no trailing separator. */
+function samePath(a: string, b: string): boolean {
+  const key = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+
+  return key(a) === key(b);
+}
 
 /** Decides what one event changes and which actions the hub runs. Call it inside one store transaction. */
 export function handle(store: Store, event: FlowEvent, context: FlowContext): FlowResult {
@@ -374,6 +389,7 @@ class Flow {
       scopeAt: null,
       doneAt: null,
       doneReason: null,
+      parentId: null,
     });
   }
 
@@ -408,7 +424,7 @@ class Flow {
   }
 
   private adhoc(prompt: string, repoRoot: string): void {
-    const title = prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
+    const title = firstLine(prompt);
 
     if (title === '') {
       throw new Refusal('The prompt is empty.');
@@ -418,13 +434,48 @@ class Flow {
       throw new Refusal('Choose a repo for the prompt.');
     }
 
+    this.insertAdhoc(prompt, title, repoRoot, null);
+  }
+
+  /**
+   * PRD R68: a session's follow-up becomes an unstarted ad-hoc work item, in the named repo or else the reporting ticket's, which must be
+   * a configured repo root. A repeated report adds nothing while the earlier work item is open.
+   */
+  private task(session: Session, report: Extract<Report, { kind: 'task' }>): void {
+    const line = firstLine(report.prompt);
+
+    if (line === '') {
+      throw new Refusal('The prompt is empty.');
+    }
+
+    const parent = this.store.workItem(session.workItemId)!;
+    const ticket = this.store.ticket(parent.ticketId)!;
+    const wanted = report.repo ?? (ticket.repoRoot || this.context.settings.sources[ticket.source]?.repoRoot || '');
+    const roots = repoRoots(this.context.settings);
+    const repoRoot = roots.find((root) => samePath(root, wanted));
+
+    if (repoRoot === undefined) {
+      throw new Refusal(`${wanted === '' ? 'Name a repo with --repo.' : `${wanted} is not a configured repo root.`} Repo roots: ${roots.join(', ') || 'none'}.`);
+    }
+
+    if (this.store.workItemsWithParent(parent.id).some((item) => item.status !== 'done' && item.taskPrompt === report.prompt)) {
+      return;
+    }
+
+    this.insertAdhoc(report.prompt, report.title?.trim() || line, repoRoot, parent.id);
+  }
+
+  /** An ad-hoc ticket and work item: queued when the operator typed the prompt, unstarted when a session reported it (PRD R6, R68). */
+  private insertAdhoc(prompt: string, title: string, repoRoot: string, parentId: number | null): void {
     const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
     const sourceKey = String(Math.max(0, ...keys) + 1);
     const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
-    const item = this.store.insertWorkItem({
+    const queued = parentId === null;
+
+    this.store.insertWorkItem({
       ticketId: ticket.id,
       playbook: null,
-      status: 'queued',
+      status: queued ? 'queued' : 'unstarted',
       stage: null,
       stageAt: null,
       taskPrompt: prompt,
@@ -432,16 +483,17 @@ class Flow {
       error: null,
       failedStep: null,
       unassignedAt: null,
-      queuedAt: this.now,
+      queuedAt: queued ? this.now : null,
       approvalPrompt: null,
       approvalSummary: null,
       approvalReport: null,
       createdAt: this.now,
       statusAt: this.now,
-      runStartedAt: this.now,
+      runStartedAt: queued ? this.now : null,
       scopeAt: null,
       doneAt: null,
       doneReason: null,
+      parentId,
     });
   }
 
@@ -785,6 +837,9 @@ class Flow {
         }
 
         return;
+      case 'task':
+        // Follow-up work is new work, so it is recorded whatever the state of the reporting work item.
+        return this.task(session, report);
     }
   }
 
@@ -945,6 +1000,7 @@ class Flow {
       scopeAt: null,
       doneAt: null,
       doneReason: null,
+      parentId: null,
     });
 
     for (const triage of triages) {

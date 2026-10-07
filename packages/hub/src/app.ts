@@ -23,7 +23,7 @@ const RELOAD_DEBOUNCE_MS = 300;
 /** Operator events the panel may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'snooze', 'restore']);
 
-const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste']);
+const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task']);
 
 /** A link target: an http(s) URL (PRD R52). */
 export function isLinkTarget(target: unknown): target is string {
@@ -80,10 +80,19 @@ export function parseReport(body: unknown): ReportBody | null {
       : null;
   }
 
-  const text = { stage: 'stage', worktree: 'path', approval: 'prompt', playbook: 'playbook' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done' | 'paste'>];
-  const value = body[text];
-
   const optional = (field: string, valid: (value: unknown) => boolean) => body[field] === undefined || body[field] === null || valid(body[field]);
+
+  // A task's repo is checked against the repo roots by the core; here it must be an absolute path (PRD R68).
+  if (body['kind'] === 'task') {
+    const prompt = body['prompt'];
+
+    return typeof prompt === 'string' && prompt !== '' && optional('repo', isReportPath) && optional('title', (value) => typeof value === 'string')
+      ? { sessionId: body['sessionId'], kind: 'task', prompt, repo: (body['repo'] as string | undefined) ?? null, title: (body['title'] as string | undefined) ?? null }
+      : null;
+  }
+
+  const text = { stage: 'stage', worktree: 'path', approval: 'prompt', playbook: 'playbook' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done' | 'paste' | 'task'>];
+  const value = body[text];
 
   if (body['kind'] === 'approval' && !(optional('summary', (value) => typeof value === 'string') && optional('report', isReportPath))) {
     return null;

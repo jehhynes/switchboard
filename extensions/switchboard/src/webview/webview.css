@@ -74,6 +74,9 @@ a { color: var(--vscode-textLink-foreground); }
 /* Returned asks for attention, so it takes the warning colour. */
 .returned { white-space: nowrap; flex: 0 0 auto; font-size: 12px; line-height: 18px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--vscode-editorWarning-foreground); color: var(--vscode-editorWarning-foreground); }
 .wake { white-space: nowrap; flex-shrink: 0; color: var(--vscode-descriptionForeground); }
+/* "From <key>" on a task report's row selects the work item it came from (PRD R68). */
+.from { display: inline-flex; gap: 4px; align-items: center; flex: 0 0 auto; white-space: nowrap; padding: 0; border: 0; background: none; font: inherit; color: var(--vscode-descriptionForeground); cursor: pointer; }
+.from:hover .key { background: color-mix(in srgb, var(--hue, var(--vscode-foreground)) 32%, transparent); }
 .mark { width: 16px; flex-shrink: 0; display: inline-flex; justify-content: center; }
 .mark.error { color: var(--vscode-errorForeground); }
 .mark.warning { color: var(--vscode-editorWarning-foreground); }

@@ -1,7 +1,7 @@
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
-import { ADHOC_SOURCE, handle, switchboardHome } from '@switchboard/core';
 import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import { ADHOC_SOURCE, handle, repoRoots, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -46,6 +46,8 @@ export interface WorkItemView extends WorkItem {
   pastes: Paste[];
   /** Earlier started work items for the same ticket; above 0 the panel marks the work item Returned (PRD R51). */
   returned: number;
+  /** The ticket of the work item whose session reported this one as a task (PRD R68). */
+  parent: Ticket | null;
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
@@ -82,7 +84,8 @@ export type ReportBody =
   | { sessionId: string; kind: 'approval'; prompt: string; summary: string | null; report: string | null }
   | { sessionId: string; kind: 'link'; label: string; target: string }
   | { sessionId: string; kind: 'playbook'; playbook: string }
-  | { sessionId: string; kind: 'paste'; label: string; file: string };
+  | { sessionId: string; kind: 'paste'; label: string; file: string }
+  | { sessionId: string; kind: 'task'; prompt: string; repo: string | null; title: string | null };
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -343,7 +346,9 @@ export class Runtime {
               ? { kind: body.kind, playbook: body.playbook }
               : body.kind === 'paste'
                 ? { kind: body.kind, label: body.label, file: body.file }
-                : { kind: body.kind, label: body.label, target: body.target };
+                : body.kind === 'task'
+                  ? { kind: body.kind, prompt: body.prompt, repo: body.repo, title: body.title }
+                  : { kind: body.kind, label: body.label, target: body.target };
 
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }
@@ -381,6 +386,7 @@ export class Runtime {
         links: store.linksFor(item.ticketId),
         pastes: store.pastesFor(item.id),
         returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
+        parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
       })),
       pool: store
         .poolTickets()
@@ -393,7 +399,7 @@ export class Runtime {
           return { ticket, triage, returned: returned(items, triage?.playbook ?? null) };
         }),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
-      repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
+      repoRoots: repoRoots(settings),
       sources: [...this.sources.keys()],
       sourceStates: Object.entries(settings.sources)
         .filter(([name]) => name !== ADHOC_SOURCE)

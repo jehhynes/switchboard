@@ -384,6 +384,26 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems[0]?.pastes).toMatchObject([{ workItemId: 1, label: 'Customer reply', file: 'D:/case/draft-reply.md' }]);
   });
 
+  it('turns a task report into an unstarted ad-hoc row from its parent, which Start runs in the repo (PRD R68)', async () => {
+    const { store, cli, source, runtime } = setup();
+    source.result = { tickets: [issue('18941')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(await runtime.report({ sessionId: 's1', kind: 'task', prompt: 'Fix the flaky CartTests', repo: null, title: null })).toEqual({ refused: null });
+    expect(await runtime.report({ sessionId: 's1', kind: 'task', prompt: 'x', repo: 'D:/git/support', title: null })).toEqual({ refused: 'D:/git/support is not a configured repo root. Repo roots: D:/git/widgets.' });
+
+    const child = runtime.snapshot().workItems.find((item) => item.parentId === 1);
+    expect(child).toMatchObject({ status: 'unstarted', playbook: null, ticket: { source: 'adhoc', title: 'Fix the flaky CartTests', repoRoot: 'D:/git/widgets' }, parent: { source: 'github', sourceKey: '18941' } });
+    expect(runtime.snapshot().workItems.find((item) => item.id === 1)?.parent).toBeNull();
+
+    runtime.send({ type: 'start', workItemId: child!.id });
+    await runtime.settled();
+
+    expect(store.sessionsFor(child!.id)).toMatchObject([{ cwd: 'D:/git/widgets', state: 'running' }]);
+    expect(cli.calls.filter((call) => call[1] === '--bg').at(-1)?.at(-1)).toMatch(/^Fix the flaky CartTests\n\nReport to Switchboard/);
+  });
+
   it('blocks a done report while a fresh read lists the ticket as assigned, without telling the session (PRD R10)', async () => {
     const { store, source, runtime } = setup();
     source.result = { tickets: [issue('8')] };
@@ -560,7 +580,7 @@ describe('Runtime', () => {
 
     // Of four done work items, only the started one with the triaged playbook counts: one never ran a session, one's launch failed, one ran another playbook.
     const ticket = store.findTicket('github', '1')!;
-    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' } as const;
+    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator', parentId: null } as const;
     const ran = store.insertWorkItem(done);
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);

@@ -4,7 +4,7 @@ import { MESSAGES } from '../src/flow.js';
 import { Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 
 /** The report contract offering `reports`, written out so a change to the contract shows here. */
-const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 'approval', 'link']) => {
+const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 'approval', 'link', 'task']) => {
   const lines: Record<string, string[]> = {
     stage: [`- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`, `  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`],
     worktree: [`- ${REPORT} worktree ${id} <path>, when you create a worktree.`],
@@ -21,6 +21,11 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
       `- ${REPORT} paste ${id} --label <text> --file <absolute path>, for each drafted text the operator pastes into the ticket by hand, such as --label "Customer reply".`,
       `  - The file holds only the text to paste. A later paste with the same label replaces the earlier one.`,
     ],
+    task: [
+      `- ${REPORT} task ${id} --prompt <prompt> --title <text> --repo <repo root>, for each separate, actionable follow-up outside this work; the operator starts it later.`,
+      `  - The prompt runs in a new session with no memory of this one, so it names the files and the context it needs.`,
+      `  - Leave out --title to use the prompt's first line, and --repo to use this work's repo.`,
+    ],
   };
   const finish = reports.includes('done') || reports.includes('approval') ? [] : ['', 'When the work is finished, end your turn; the operator reviews it.'];
 
@@ -35,10 +40,10 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
   ].join('\n');
 };
 
-const QUESTION_REPORTS = ['stage', 'approval', 'link'];
+const QUESTION_REPORTS = ['stage', 'approval', 'link', 'task'];
 /** A playbook whose session may report done. */
 const FINISH = { 'dev:finish': '---\ndescription: Finish it\nreports: done\n---\nFinish {{ticket.sourceKey}}.' };
-const FINISHING_REPORTS = ['stage', 'worktree', 'done', 'link'];
+const FINISHING_REPORTS = ['stage', 'worktree', 'done', 'link', 'task'];
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
   expect(actions).toHaveLength(1);
@@ -417,7 +422,7 @@ describe('sessions', () => {
     });
     const { item, session } = running(h, '1', 'dev:other');
 
-    expect(h.store.session(session)?.reports).toEqual(['stage', 'done', 'link', 'playbook']);
+    expect(h.store.session(session)?.reports).toEqual(['stage', 'done', 'link', 'playbook', 'task']);
     expect(h.item(item).taskPrompt).toContain(`${REPORT} playbook ${session} <name>`);
 
     for (const name of ['dev:missing', 'support:defect', 'triage:github', 'dev:triage']) {
@@ -427,7 +432,7 @@ describe('sessions', () => {
     expect(h.item(item).playbook).toBe('dev:other');
     expect(h.report(session, { kind: 'playbook', playbook: 'dev:question' }).refused).toBeNull();
     expect(h.item(item)).toMatchObject({ playbook: 'dev:question', status: 'running' });
-    expect(h.store.session(session)?.reports).toEqual(['stage', 'done', 'link', 'playbook']);
+    expect(h.store.session(session)?.reports).toEqual(['stage', 'done', 'link', 'playbook', 'task']);
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.status(item)).toBe('blocked');
@@ -459,7 +464,7 @@ describe('sessions', () => {
     const g = read();
     const b = running(g, '2', 'dev:read');
 
-    expect(g.store.session(b.session)?.reports).toEqual(['stage', 'link']);
+    expect(g.store.session(b.session)?.reports).toEqual(['stage', 'link', 'task']);
     g.act({ type: 'marker', sessionId: b.session, state: 'idle', detail: null });
     expect(g.item(b.item)).toMatchObject({ status: 'blocked', error: 'The session finished its turn.' });
 
@@ -619,7 +624,7 @@ describe('setup', () => {
     const defect = only(h.triaged({ type: 'triage', triageId: 2, workItemId: 2, ticket: h.store.ticket(2)! } as FlowAction, 'support:defect'), 'start-session');
 
     expect(develop).toMatchObject({ kind: 'task', cwd: 'D:/wt/1' });
-    expect(defect).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets', prompt: 'Research 2 in https://github.com/acme/widgets/issues/2.' + CONTRACT(defect.sessionId, ['stage', 'done', 'link']) });
+    expect(defect).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets', prompt: 'Research 2 in https://github.com/acme/widgets/issues/2.' + CONTRACT(defect.sessionId, ['stage', 'done', 'link', 'task']) });
   });
 });
 
@@ -788,7 +793,7 @@ describe('ad-hoc', () => {
       workItemId: 1,
       kind: 'task',
       cwd: 'D:/scratch',
-      prompt: '  Write hello.txt\nthen report done' + CONTRACT('s1', ['stage', 'worktree', 'done', 'approval', 'link', 'paste']),
+      prompt: '  Write hello.txt\nthen report done' + CONTRACT('s1', ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task']),
       name: 'switchboard · ad-hoc · adhoc 1',
       permissionMode: 'auto',
       model: null,
@@ -819,6 +824,74 @@ describe('ad-hoc', () => {
     h.triaged(triage, 'support:defect');
 
     expect(h.item(1)).toMatchObject({ status: 'failed', failedStep: 'task', error: 'sources.github.repoRoot is not set.' });
+  });
+});
+
+describe('task reports (PRD R68)', () => {
+  /** Runs GitHub issue 18941 under dev:question, whose playbook lists no task report. */
+  function parent(h: Harness): { item: number; session: string } {
+    const [triage] = h.poll(issue('18941'));
+    h.triaged(triage, 'dev:question');
+    const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+
+    return { item: 1, session };
+  }
+
+  it('creates an unstarted ad-hoc work item in the reporting ticket repo, titled by the first line, and Start runs the prompt there', () => {
+    const h = new Harness();
+    const { item, session } = parent(h);
+    const prompt = '  Fix the flaky CartTests\nin D:/git/widgets/Test/CartTests.cs';
+
+    h.now += MINUTE;
+    expect(h.report(session, { kind: 'task', prompt, repo: null, title: null })).toEqual({ actions: [], refused: null });
+    expect(h.store.ticket(2)).toMatchObject({ source: 'adhoc', sourceKey: '1', ref: '#1', title: 'Fix the flaky CartTests', url: '', assigned: true, repoRoot: 'D:/git/widgets', scopeAt: T0 + MINUTE });
+    expect(h.item(2)).toMatchObject({ ticketId: 2, playbook: null, status: 'unstarted', taskPrompt: prompt, parentId: item, queuedAt: null, runStartedAt: null, statusAt: T0 + MINUTE });
+    expect(h.item(item)).toMatchObject({ status: 'running', parentId: null });
+
+    const start = only(h.act({ type: 'start', workItemId: 2 }), 'start-session');
+
+    expect(start).toEqual({
+      type: 'start-session',
+      sessionId: 's2',
+      workItemId: 2,
+      kind: 'task',
+      cwd: 'D:/git/widgets',
+      prompt: prompt + CONTRACT('s2', ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task']),
+      name: 'switchboard · ad-hoc · adhoc 1',
+      permissionMode: 'auto',
+      model: null,
+    });
+    expect(h.item(2)).toMatchObject({ status: 'running', runStartedAt: T0 + MINUTE });
+  });
+
+  it('takes a configured repo in any spelling and a title, adds nothing for a repeat while the first is open, and accepts a report after the parent is done', () => {
+    const h = new Harness();
+    const { item, session } = parent(h);
+    const report = { kind: 'task', prompt: 'Write the Support runbook', repo: 'd:\\GIT\\support\\', title: ' Runbook ' } as const;
+
+    h.report(session, report);
+    expect(h.store.ticket(2)).toMatchObject({ title: 'Runbook', repoRoot: 'D:/git/support' });
+
+    h.report(session, report);
+    expect(h.store.tickets('adhoc')).toHaveLength(1);
+
+    h.act({ type: 'mark-done', workItemId: 2 });
+    h.act({ type: 'mark-done', workItemId: item });
+    h.report(session, { ...report, title: '' });
+    expect(h.store.ticket(3)).toMatchObject({ title: 'Write the Support runbook', repoRoot: 'D:/git/support' });
+    expect(h.item(3)).toMatchObject({ status: 'unstarted', parentId: item });
+  });
+
+  it('refuses an empty prompt and a repo that is not a configured repo root', () => {
+    const h = new Harness();
+    const { session } = parent(h);
+
+    expect(h.report(session, { kind: 'task', prompt: ' \n ', repo: null, title: 'x' }).refused).toBe('The prompt is empty.');
+    expect(h.report(session, { kind: 'task', prompt: 'Do it', repo: 'D:/git/other', title: null }).refused).toBe('D:/git/other is not a configured repo root. Repo roots: D:/git/widgets, D:/git/support.');
+
+    h.settings.sources['github']!.repoRoot = '';
+    expect(h.report(session, { kind: 'task', prompt: 'Do it', repo: null, title: null }).refused).toBe('Name a repo with --repo. Repo roots: D:/git/support.');
+    expect(h.store.tickets('adhoc')).toEqual([]);
   });
 });
 

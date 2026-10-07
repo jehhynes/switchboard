@@ -143,6 +143,15 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
 
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+    const from = target.closest<HTMLElement>('[data-reveal]');
+
+    // "From" reveals the parent row without opening it (PRD R68); a parent not in the panel, such as one done long ago, changes nothing.
+    if (from !== null) {
+      event.preventDefault();
+      reveal({ type: 'select', row: from.dataset['reveal']!, open: false });
+      return;
+    }
+
     const control = target.closest<HTMLElement>('button.control');
     const link = target.closest<HTMLAnchorElement>('a[href]');
 

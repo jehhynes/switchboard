@@ -89,6 +89,9 @@ const REPORT_LINES: Record<ReportKind, string> = {
   playbook: '- {{report}} playbook {{session.id}} <name>, when you hand the work to the skill of another playbook, such as dev:review-pr.',
   paste: `- {{report}} paste {{session.id}} --label <text> --file <absolute path>, for each drafted text the operator pastes into the ticket by hand, such as --label "Customer reply".
   - The file holds only the text to paste. A later paste with the same label replaces the earlier one.`,
+  task: `- {{report}} task {{session.id}} --prompt <prompt> --title <text> --repo <repo root>, for each separate, actionable follow-up outside this work; the operator starts it later.
+  - The prompt runs in a new session with no memory of this one, so it names the files and the context it needs.
+  - Leave out --title to use the prompt's first line, and --repo to use this work's repo.`,
 };
 
 /**

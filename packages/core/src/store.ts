@@ -161,6 +161,8 @@ export const MIGRATIONS = [
     reportedAt INTEGER NOT NULL,
     UNIQUE (workItemId, label)
   );`,
+  // A session's task report records the work item it came from (PRD R68).
+  `ALTER TABLE workItems ADD COLUMN parentId INTEGER REFERENCES workItems(id);`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released']);
@@ -320,6 +322,11 @@ export class Store {
 
   workItemsForTicket(ticketId: number): WorkItem[] {
     return this.#all('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id', ticketId);
+  }
+
+  /** Work items created by task reports from the sessions of `parentId` (PRD R68). */
+  workItemsWithParent(parentId: number): WorkItem[] {
+    return this.#all('SELECT * FROM workItems WHERE parentId = ? ORDER BY id', parentId);
   }
 
   workItemsWithStatus(status: WorkItemStatus): WorkItem[] {

@@ -484,6 +484,17 @@ function ticketLink(ticket: WorkItemView['ticket']): string {
   return ticket.url === '' ? `<span ${attributes}>${escape(label)}</span>` : `<a ${attributes} href="${escape(ticket.url)}">${escape(label)}</a>`;
 }
 
+/** "From <key>" on a work item a session reported as a task; a click selects the work item it came from (PRD R68). */
+function fromParent(item: WorkItemView): string {
+  if (item.parent === null || item.parentId === null) {
+    return '';
+  }
+
+  const label = `${sourceLabel(item.parent.source)} ${item.parent.sourceKey}`;
+
+  return `<button class="from" data-reveal="item:${item.parentId}" title="${escape(`Show the work item it came from: ${item.parent.title}`)}">From <span class="key ${escape(item.parent.source)}">${escape(label)}</span></button>`;
+}
+
 /** Line 1: the title, led by the priority dot on a priority ticket, and the time in queue (PRD R27). */
 function firstLine(triage: Rating, title: string, queue: string): string {
   return `<div class="line first"><span class="title">${priorityDot(triage)}${escape(title)}</span>${queue}</div>`;
@@ -558,7 +569,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
   return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(playbookText(item, namespaces))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
-    `${statusMark(item)}${wake(item.ticket)}${notes}${stage}${approval}${rest.map(linkBadge).join('')}`,
+    `${statusMark(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${approval}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }

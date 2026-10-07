@@ -43,6 +43,11 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
 };
 
+/** The repos an ad-hoc prompt or a task report can run in: each source's repo root, the first being the default. */
+export function repoRoots(settings: Settings): string[] {
+  return [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))];
+}
+
 const SOURCE_DEFAULTS = { enabled: false, pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '' };
 
 export type SettingsResult = { settings: Settings } | { errors: string[] };

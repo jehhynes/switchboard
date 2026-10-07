@@ -88,6 +88,18 @@ export function reportBody(argv: readonly string[], root: string | null = null):
     }
     case 'playbook':
       return text === undefined ? null : { sessionId, kind, playbook: text };
+    case 'task': {
+      const given = valueOf(argv, 'prompt');
+      const repo = valueOf(argv, 'repo');
+      const title = valueOf(argv, 'title');
+
+      // A --repo or --title flag without a value is bad usage, not a request for the default.
+      if (given === null || given.trim() === '' || ((repo === null || repo === '') && hasFlag(argv, 'repo')) || (title === null && hasFlag(argv, 'title'))) {
+        return null;
+      }
+
+      return { sessionId, kind, prompt: unconverted(given, root), repo: repo === null ? null : resolve(repo), title };
+    }
     case 'link': {
       const label = valueOf(argv, 'label');
       const target = valueOf(argv, 'target');

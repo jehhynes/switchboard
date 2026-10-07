@@ -54,6 +54,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     scopeAt: null,
     doneAt: null,
     doneReason: null,
+    parentId: null,
     ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
     sessions: [],
@@ -61,6 +62,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     links: [],
     pastes: [],
     returned: 0,
+    parent: null,
     ...patch,
   };
 }
@@ -263,6 +265,27 @@ describe('rankOf and queueTime', () => {
 });
 
 describe('renderPanel', () => {
+  it('shows From and the parent key on line 3 of a reported task, and nothing on other rows (PRD R68)', () => {
+    const parent = { ...item(1).ticket, sourceKey: '18941', title: 'Quote <totals>' };
+    const root = render(
+      snapshot([
+        item(2, { status: 'unstarted', playbook: null, parentId: 1, parent, ticket: { ...item(2).ticket, source: 'adhoc', sourceKey: '1', url: '' } }),
+        item(3, { status: 'unstarted', playbook: null, parentId: 2, parent: { ...item(2).ticket, source: 'adhoc', sourceKey: '1', url: '' } }),
+        item(4, { status: 'unstarted' }),
+      ]),
+    );
+    const from = root.querySelector<HTMLElement>('[data-item="2"] .line.third button.from')!;
+
+    expect(from.textContent).toBe('From gh 18941');
+    expect(from.dataset['reveal']).toBe('item:1');
+    expect(from.title).toBe('Show the work item it came from: Quote <totals>');
+    expect(from.querySelector('.key')?.className).toBe('key github');
+    expect(from.classList.contains('control')).toBe(false);
+    expect(root.querySelector('[data-item="3"] button.from')?.textContent).toBe('From adhoc 1');
+    expect(root.querySelector('[data-item="4"] button.from')).toBeNull();
+    expect(root.querySelector('[data-item="4"] .line.third')).toBeNull();
+  });
+
   it('groups rows in collapsible groups, escapes text, and shows the mark, stage age, notes and errors', () => {
     const root = render(
       snapshot(
@@ -985,6 +1008,30 @@ describe('startPanel select (PRD R63)', () => {
   const send = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
   const state = () => snapshot([item(1, { status: 'awaiting-approval' }), item(2, { status: 'done', doneAt: NOW })]);
   const doneGroup = () => root.querySelector<HTMLDetailsElement>('details[data-group="done"]')!;
+
+  it('reveals the parent row when From is clicked, without running its click action, and leaves the panel alone when the parent is not listed (PRD R68)', () => {
+    const parentTicket = { ...item(1).ticket, sourceKey: '18941', title: 'Quote totals' };
+    const task = item(3, { status: 'unstarted', playbook: null, parentId: 2, parent: parentTicket, ticket: { ...item(3).ticket, source: 'adhoc', sourceKey: '1', url: '' } });
+    const parent = item(2, { status: 'done', doneAt: NOW, ticket: parentTicket });
+    send({ type: 'state', snapshot: snapshot([parent, task]) });
+    expect(doneGroup().open).toBe(false);
+
+    root.querySelector<HTMLElement>('[data-item="3"] button.from')!.click();
+
+    expect(doneGroup().open).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('[data-item="2"]'));
+    expect([...root.querySelectorAll('.item.selected')].map((element) => element.getAttribute('data-item'))).toEqual(['2']);
+    expect(scrolled).toEqual(['item:2']);
+    expect(posted).toEqual([]);
+
+    send({ type: 'state', snapshot: snapshot([parent, task]) });
+    expect(doneGroup().open).toBe(true);
+
+    send({ type: 'state', snapshot: snapshot([task]) });
+    root.querySelector<HTMLElement>('[data-item="3"] button.from')!.click();
+    expect(posted).toEqual([]);
+    expect(scrolled).toEqual(['item:2']);
+  });
 
   it("opens the row's collapsed group, selects, scrolls to and focuses the row, and runs its click action", () => {
     send({ type: 'state', snapshot: state() });
