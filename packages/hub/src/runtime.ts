@@ -307,8 +307,10 @@ export class Runtime {
   snapshot(): Snapshot {
     const store = this.deps.store;
     const { settings, playbooks, settingsError, playbookErrors } = this.config;
-    // Only a work item that started a session counts toward Returned; a session row whose launch failed has no shortId.
+    // Returned counts earlier work items with the same playbook that started a session; a failed launch has no shortId.
     const started = (item: WorkItem) => store.sessionsFor(item.id).some((session) => session.shortId !== null);
+    const returned = (items: WorkItem[], playbook: string | null) =>
+      playbook === null ? 0 : items.filter((item) => item.playbook === playbook && started(item)).length;
 
     return {
       workItems: store.workItems(this.deps.now() - DONE_DAYS * 24 * 60 * 60 * 1000).map((item) => ({
@@ -318,14 +320,18 @@ export class Runtime {
         sessions: store.sessionsFor(item.id),
         worktree: store.worktreeFor(item.ticketId),
         links: store.linksFor(item.ticketId),
-        returned: store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id && started(other)).length,
+        returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
       })),
       pool: store
         .poolTickets()
         .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
         // A disabled source's pool is not read, so its tickets are not shown.
         .filter(({ ticket, items }) => this.sources.has(ticket.source) && items.every((item) => item.status === 'done'))
-        .map(({ ticket, items }) => ({ ticket, triage: store.poolTriages(ticket.id).at(-1) ?? null, returned: items.filter(started).length })),
+        .map(({ ticket, items }) => {
+          const triage = store.poolTriages(ticket.id).at(-1) ?? null;
+
+          return { ticket, triage, returned: returned(items, triage?.playbook ?? null) };
+        }),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))],
       sources: [...this.sources.keys()],

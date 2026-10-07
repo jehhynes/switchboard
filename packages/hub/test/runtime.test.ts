@@ -426,7 +426,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'setup', needsPick: true, triage: { playbook: 'dev:develop' } }]);
   });
 
-  it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket, and hides a disabled source (PRD R50, R51)', async () => {
+  it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook, and hides a disabled source (PRD R50, R51)', async () => {
     const { store, cli, source, runtime } = setup();
     const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', summary: 's', immediacy, severity } }));
     cli.classifyByContext.set('Issue 2 text', rated('NON-BLOCKING', 'LOW'));
@@ -447,15 +447,17 @@ describe('Runtime', () => {
       ['3', 'BLOCKING', 'HIGH'],
     ]);
 
-    // Of three done work items, only the one whose session started counts: one never ran a session, one's launch failed.
+    // Of four done work items, only the started one with the triaged playbook counts: one never ran a session, one's launch failed, one ran another playbook.
     const ticket = store.findTicket('github', '1')!;
-    const done = { ticketId: ticket.id, playbook: null, status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' } as const;
+    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' } as const;
     const ran = store.insertWorkItem(done);
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);
+    const review = store.insertWorkItem({ ...done, playbook: 'dev:review' });
     const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false } as const;
     store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123', reports: [] });
     store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null, reports: [] });
+    store.insertSession({ ...session, id: 'review', workItemId: review.id, shortId: 'def456', reports: [] });
 
     expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['5', 0], ['1', 1], ['2', 0], ['4', 0], ['3', 0]]);
 
@@ -481,12 +483,18 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems[0]).toMatchObject({ returned: 0, links: [{ label: 'PR #12', target: 'https://github.com/o/r/pull/12' }] });
 
     // The started earlier work item is counted after it leaves the Done list; work item 2 started no session, so it is not.
+    // Work item 4 has another playbook, so the earlier started work item does not count for it.
     const { id: _id, ...first } = store.workItem(1)!;
     store.updateWorkItem(1, { status: 'done', doneAt: T0 - 30 * 86_400_000, doneReason: 'operator' });
     store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
     store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
+    store.insertWorkItem({ ...first, playbook: 'dev:review', status: 'triaging', createdAt: T0 });
 
-    expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned, item.links.length])).toEqual([[3, 1, 1], [2, 1, 1]]);
+    expect(runtime.snapshot().workItems.map((item) => [item.id, item.playbook, item.returned, item.links.length])).toEqual([
+      [4, 'dev:review', 0, 1],
+      [3, 'dev:develop', 1, 1],
+      [2, 'dev:develop', 1, 1],
+    ]);
   });
 
   it('reports an unknown or misconfigured source', () => {
