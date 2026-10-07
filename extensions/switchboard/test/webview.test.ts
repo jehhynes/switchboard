@@ -1,7 +1,7 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { startPanel } from '../src/webview/main.js';
-import { age, CAPS, clip, clockOf, controlsOf, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, unstartedOrder } from '../src/webview/render.js';
+import { age, CAPS, clip, clockOf, controlsOf, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -705,6 +705,40 @@ describe('renderPanel', () => {
     expect(root.querySelector('[data-item="3"] .stage')?.textContent).toBe('Waiting for the operator… · 0s');
     expect(note.textContent).toBe('Which of the two migration strategies in the plan should the fix use, the…');
     expect(note.title).toBe(reason);
+  });
+
+  it('colours the stage age of a running session with no stage report for 20 minutes', () => {
+    const under = NOW - STALE_STAGE_MS + 60_000;
+    const at = NOW - STALE_STAGE_MS;
+    const running = (id: number, patch: Partial<WorkItemView>, state: Partial<Session> = {}) => item(id, { runStartedAt: at, sessions: [session({ stateAt: at, ...state })], ...patch });
+    const snoozed = { ...item(7).ticket, snoozed: true, snoozedUntil: null };
+    const root = render(
+      snapshot([
+        running(1, { stage: 'Planning', stageAt: under }),
+        running(2, { stage: 'Planning', stageAt: at }),
+        running(3, {}, { stateAt: under }),
+        running(4, {}),
+        running(5, { stage: 'Planning', stageAt: at }, { state: 'waiting' }),
+        running(6, { status: 'queued', runStartedAt: null, sessions: [] }),
+        running(7, { stage: 'Planning', stageAt: at, ticket: snoozed }),
+        // A stage from before the session resumed does not count against it.
+        running(8, { stage: 'Planning', stageAt: NOW - 3_600_000 }, { stateAt: under }),
+        running(9, { stage: 'Planning', stageAt: NOW - 3_600_000 }),
+      ]),
+      { groups: new Map([['snoozed', true]]) },
+    );
+    const stale = (id: number) => [...root.querySelectorAll(`[data-item="${id}"] .stale`)].map((element) => [element.textContent, element.getAttribute('title')]);
+
+    expect(root.querySelector('[data-item="1"] .stage')?.textContent).toBe('Planning… · 19m');
+    expect(stale(1)).toEqual([]);
+    expect(stale(2)).toEqual([[' · 20m', 'No stage report for 20m']]);
+    expect(root.querySelector('[data-item="2"] .stage')?.textContent).toBe('Planning… · 20m');
+    expect(stale(3)).toEqual([]);
+    expect(root.querySelector('[data-item="3"] .line.third')?.textContent).not.toContain('No stage report');
+    expect(stale(4)).toEqual([['No stage report · 20m', 'No stage report for 20m']]);
+    expect([stale(5), stale(6), stale(7), stale(8)]).toEqual([[], [], [], []]);
+    expect(stale(9)).toEqual([[' · 1h', 'No stage report for 20m']]);
+    expect([staleSince(item(9, { sessions: [session({ stateAt: at })], runStartedAt: at }), NOW), staleSince(item(9, { sessions: [session({ stateAt: under })], runStartedAt: at }), NOW)]).toEqual([at, null]);
   });
 
   it('formats ages', () => {

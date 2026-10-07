@@ -512,12 +512,45 @@ export function splitLinks(item: WorkItemView): { primary: WorkItemView['links']
   return { primary, rest: links.filter((link) => !primary.includes(link)) };
 }
 
+/** How long a running session goes without a stage report before the panel colours the stage age (PRD R58). */
+export const STALE_STAGE_MS = 20 * 60_000;
+
+/**
+ * When a Working row's running session last reported a stage, or began running if it has reported none since: null unless the row is
+ * stale (PRD R58). A stage from before a retry or a wait does not count against the current run.
+ */
+export function staleSince(item: WorkItemView, now: number): number | null {
+  const session = activeSession(item);
+
+  if (groupOf(item) !== 'working' || item.ticket.snoozed || session?.state !== 'running') {
+    return null;
+  }
+
+  const since = Math.max(item.stageAt ?? -Infinity, item.runStartedAt ?? -Infinity, session.stateAt);
+
+  return now - since >= STALE_STAGE_MS ? since : null;
+}
+
+/** The stage and its age on line 3; a stale row colours the age, or shows `No stage report` when it has no stage (PRD R58). */
+function stageText(item: WorkItemView, now: number): string {
+  const stale = staleSince(item, now);
+  const title = stale === null ? '' : escape(`No stage report for ${age(stale, now)}`);
+
+  if (item.stage === null) {
+    return stale === null ? '' : `<span class="stale" title="${title}">No stage report · ${age(stale, now)}</span>`;
+  }
+
+  // A running stage ends in an ellipsis, which a clipped stage already has.
+  const running = groupOf(item) === 'working' && !item.ticket.snoozed && clip(item.stage, CAPS.stage).full === null;
+  const since = item.stageAt === null ? '' : stale === null ? ` · ${age(item.stageAt, now)}` : `<span class="stale" title="${title}"> · ${age(item.stageAt, now)}</span>`;
+
+  return clipped('stage', item.stage, CAPS.stage, `${running ? '…' : ''}${since}`);
+}
+
 function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const main = mainControl(item);
   const rowKey = `item:${item.id}`;
-  // A running stage ends in an ellipsis, which a clipped stage already has.
-  const running = groupOf(item) === 'working' && !item.ticket.snoozed && item.stage !== null && clip(item.stage, CAPS.stage).full === null;
-  const stage = item.stage === null ? '' : clipped('stage', item.stage, CAPS.stage, `${running ? '…' : ''}${item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`}`);
+  const stage = stageText(item, now);
   const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : clipped('approval', item.approvalSummary, CAPS.approval);
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);
