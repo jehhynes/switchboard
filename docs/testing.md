@@ -40,6 +40,7 @@ Do not test type declarations, pass-through property bags, or simple settings re
 | Hub server | Vitest with test-owned loopback listeners | Report endpoint, panel protocol, refusals |
 | Built hub | Spawn the built hub under a temporary home | Startup, single instance, shutdown |
 | Webview | Vitest/jsdom with an `acquireVsCodeApi` stub | Rendering, controls and messages |
+| Chrome extension | Vitest/jsdom with a recorded board column and an injected hub read | Card marks, the column link, reads and refusals |
 | Extension host | Mocha inside real VS Code | Registration, hub process wiring, terminal and editor calls |
 
 Keep decisions in packages that do not import `vscode`.

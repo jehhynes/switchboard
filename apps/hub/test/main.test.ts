@@ -29,7 +29,7 @@ afterEach(() => {
 function start(...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
   // CLAUDE_CONFIG_DIR keeps hook installation inside the temporary home.
   const env = { ...process.env, CLAUDE_CONFIG_DIR: join(home, '.claude') };
-  const child = spawn(process.execPath, [main, ...args, `--home=${home}`], { windowsHide: true, env });
+  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 

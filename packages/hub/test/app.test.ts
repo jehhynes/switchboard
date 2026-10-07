@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
+import { Store } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
@@ -200,6 +201,25 @@ describe('createHubApp', () => {
     expect(JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf8')).sources.zoho.enabled).toBe(false);
     await until(() => (JSON.stringify((app.snapshot() as { sourceStates: unknown }).sourceStates) === '[{"name":"zoho","enabled":false}]' ? true : null));
     expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'))).toEqual({ sessions: { installHooks: false } });
+  });
+
+  it('lists the URLs of tickets snoozed now, leaving out woken, unsnoozed and URL-less tickets (PRD R56)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+    const ticket = (sourceKey: string, url: string, snoozed: boolean, snoozedUntil: number | null) =>
+      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: 't', url, assigned: true, pool: false, snoozed, snoozedUntil, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+
+    ticket('1', 'https://github.com/o/r/issues/1', true, null);
+    ticket('2', 'https://github.com/o/r/issues/2', true, 2000);
+    ticket('3', 'https://github.com/o/r/issues/3', true, 1000);
+    ticket('4', 'https://github.com/o/r/issues/4', false, null);
+    ticket('5', '', true, null);
+    store.close();
+
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, now: () => 1000 } });
+    closers.push(() => app.close());
+
+    expect(app.snoozedUrls()).toEqual(['https://github.com/o/r/issues/1', 'https://github.com/o/r/issues/2']);
   });
 
   it('answers posts through the server', async () => {

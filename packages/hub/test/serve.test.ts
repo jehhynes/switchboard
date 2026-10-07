@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openEvents } from '../src/client.js';
@@ -6,7 +7,7 @@ import { findHub } from '../src/discover.js';
 import { call } from '../src/http.js';
 import { holdLock, releaseLock } from '../src/lock.js';
 import { serveHub } from '../src/serve.js';
-import type { ServeResult, Served } from '../src/serve.js';
+import type { HubApp, ServeResult, ServeOptions, Served } from '../src/serve.js';
 import { tempHome, until } from './helpers.js';
 
 let home: string;
@@ -25,7 +26,7 @@ afterEach(async () => {
   remove();
 });
 
-async function serve(options: { idleMs?: number; waitMs?: number; exit?: (code: number) => void } = {}): Promise<ServeResult> {
+async function serve(options: Partial<ServeOptions> = {}): Promise<ServeResult> {
   const result = await serveHub({ home, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', log: () => {}, exit: vi.fn(), ...options });
 
   if ('served' in result) {
@@ -176,5 +177,47 @@ describe('serveHub', () => {
     stream!.close();
     await until(() => (exit.mock.calls.length > 0 ? true : null));
     expect(exit).toHaveBeenCalledWith(0);
+  });
+
+  describe('browser endpoint', () => {
+    const app = (urls: string[]): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, onChange: () => {}, busy: () => false, close: () => {} });
+
+    async function freePort(): Promise<number> {
+      const probe = createServer();
+
+      await new Promise<void>((done) => probe.listen(0, '127.0.0.1', done));
+
+      const port = (probe.address() as { port: number }).port;
+
+      await new Promise((done) => probe.close(done));
+
+      return port;
+    }
+
+    it('serves the app\'s snoozed URLs on the browser port and stops serving them when stopped', async () => {
+      const browserPort = await freePort();
+      const hub = served(await serve({ browserPort, app: async () => app(['https://github.com/o/r/issues/1']) }));
+      const reply = await call(browserPort, 'GET', '/snoozed', null);
+
+      expect(reply?.status).toBe(200);
+      expect(JSON.parse(reply!.body)).toEqual({ urls: ['https://github.com/o/r/issues/1'] });
+
+      await hub.stop('test');
+      expect(await call(browserPort, 'GET', '/snoozed', null, 500)).toBeNull();
+    });
+
+    it('logs a taken browser port and serves the hub anyway', async () => {
+      const holder = createServer();
+
+      await new Promise<void>((done) => holder.listen(0, '127.0.0.1', done));
+
+      const browserPort = (holder.address() as { port: number }).port;
+      const log = vi.fn();
+      const hub = served(await serve({ browserPort, log, app: async () => app([]) }));
+
+      expect(await findHub(home)).toEqual(hub.record);
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^browser endpoint not served on 127\\.0\\.0\\.1:${browserPort}: .*EADDRINUSE`)));
+      await new Promise((done) => holder.close(done));
+    });
   });
 });

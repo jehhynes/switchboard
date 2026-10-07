@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Switchboard snoozed cards",
+  "version": "0.0.1",
+  "description": "Hides GitHub project board cards for tickets snoozed in Switchboard, with a link at the bottom of each column to show them.",
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["http://127.0.0.1:47615/*"]
+}

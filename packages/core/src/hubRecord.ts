@@ -1,5 +1,7 @@
 export const HUB_NAME = 'switchboard';
 export const PROTOCOL = 1;
+/** The fixed loopback port of the hub's browser endpoint, which the Chrome extension reads (PRD R56). */
+export const BROWSER_PORT = 47615;
 
 /** Contents of `hub.json`: how a client reaches the running hub. */
 export interface HubRecord {

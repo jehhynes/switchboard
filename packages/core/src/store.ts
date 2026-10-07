@@ -319,6 +319,11 @@ export class Store {
     );
   }
 
+  /** Tickets snoozed at `now`: indefinitely, or until a later time. */
+  snoozedTickets(now: number): Ticket[] {
+    return this.#all('SELECT * FROM tickets WHERE snoozed = 1 AND (snoozedUntil IS NULL OR snoozedUntil > ?) ORDER BY id', now);
+  }
+
   /** Snoozed tickets whose wake time has passed. */
   dueSnoozes(now: number): Ticket[] {
     return this.#all('SELECT * FROM tickets WHERE snoozed = 1 AND snoozedUntil IS NOT NULL AND snoozedUntil <= ? ORDER BY id', now);

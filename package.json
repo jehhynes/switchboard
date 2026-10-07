@@ -14,7 +14,8 @@
     "packages/claude",
     "packages/hub",
     "apps/hub",
-    "extensions/switchboard"
+    "extensions/switchboard",
+    "extensions/chrome"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

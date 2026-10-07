@@ -53,7 +53,7 @@ describe('Store', () => {
     store.close();
   });
 
-  it('moves a version 6 iceboxed ticket to an indefinite snooze, and lists only timed snoozes that are due', () => {
+  it('moves a version 6 iceboxed ticket to an indefinite snooze, lists only timed snoozes that are due, and lists the snoozes in force', () => {
     const path = join(dir, 'v6.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS.slice(0, 6).join(';'));
@@ -70,6 +70,8 @@ describe('Store', () => {
     store.updateTicket(8, { snoozed: true, snoozedUntil: 100 });
     expect(store.dueSnoozes(99)).toEqual([]);
     expect(store.dueSnoozes(100).map((ticket) => ticket.id)).toEqual([8]);
+    expect(store.snoozedTickets(99).map((ticket) => ticket.id)).toEqual([7, 8]);
+    expect(store.snoozedTickets(100).map((ticket) => ticket.id)).toEqual([7]);
     store.close();
   });
 

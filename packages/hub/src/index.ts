@@ -1,3 +1,4 @@
+export * from './browser.js';
 export * from './bundle.js';
 export * from './client.js';
 export * from './discover.js';

@@ -1,6 +1,8 @@
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { HUB_NAME, PROTOCOL, hubRecordPath, switchboardHome } from '@switchboard/core';
+import { BROWSER_PORT, HUB_NAME, PROTOCOL, hubRecordPath, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
+import { listenBrowser } from './browser.js';
+import type { BrowserServer } from './browser.js';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
 import { listenHub } from './server.js';
@@ -10,6 +12,8 @@ import type { Reply } from './server.js';
 export interface HubApp {
   post: Record<string, (body: unknown) => Promise<Reply>>;
   snapshot(): unknown;
+  /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
+  snoozedUrls(): string[];
   onChange(listener: () => void): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
   busy(): boolean;
@@ -23,6 +27,8 @@ export interface ServeOptions {
   /** Recorded so a window can tell whether the hub reads the config folder it expects. */
   configDir: string;
   idleMs?: number;
+  /** The browser endpoint's port; null serves none. Defaults to `BROWSER_PORT`. */
+  browserPort?: number | null;
   /** How long a hub that lost the lock waits for the holder's record. */
   waitMs?: number;
   exit?: (code: number) => void;
@@ -93,6 +99,18 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   app?.onChange(() => server.broadcast('state', app.snapshot()));
 
+  const browserPort = options.browserPort === undefined ? BROWSER_PORT : options.browserPort;
+  let browser: BrowserServer | null = null;
+
+  if (app !== undefined && browserPort !== null) {
+    // A taken port, such as one held by a second hub for another home, costs only the Chrome extension.
+    browser = await listenBrowser(browserPort, () => app.snoozedUrls()).catch((error: unknown) => {
+      log(`browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`);
+
+      return null;
+    });
+  }
+
   const record: HubRecord = {
     protocol: PROTOCOL,
     version,
@@ -135,6 +153,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       clearInterval(idle);
       process.off('exit', unclaim);
       app?.close();
+      await browser?.close();
       await server.close();
       unclaim();
       await releaseLock(lock);

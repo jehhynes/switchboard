@@ -221,6 +221,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
     },
     snapshot: () => runtime.snapshot(),
+    snoozedUrls: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
     onChange: (listener) => void runtime.onChange(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
     close: () => {

@@ -77,10 +77,12 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   const idle = Number(flag(argv, 'idle-ms'));
+  // --browser-port=0 serves no browser endpoint, for a second hub such as a test's.
+  const browserPort = flag(argv, 'browser-port');
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
   const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const configDir = resolve(flag(argv, 'config') || switchboardHome(home));
-  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log }), ...(idle > 0 ? { idleMs: idle } : {}) });
+  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }) });
 
   if ('existing' in result) {
     process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);
