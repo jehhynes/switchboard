@@ -195,7 +195,7 @@ describe('markOf', () => {
     expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish' })).toEqual(['cloud-upload', 'Approve the publish', null]);
     expect(mark({ status: 'unstarted' })).toBe('priority');
     expect(mark({ status: 'triaging' })).toEqual(['loading codicon-modifier-spin', 'Triaging', null]);
-    expect(mark({ sessions: [session({ state: 'waiting' })] })).toEqual(['comment-discussion', 'Answer a question', null]);
+    expect(mark({ sessions: [session({ state: 'waiting' })] })).toEqual(['question', 'Answer a question', null]);
     expect(mark({ status: 'blocked', error: 'Which account should I use?' })).toEqual(['debug-pause', 'Blocked', null]);
     expect(mark({ status: 'blocked', error: 'Needs VPN access.' })).toEqual(['debug-pause', 'Blocked', null]);
     expect(mark({ status: 'failed', error: 'exit 1' })).toEqual(['error', 'Failed', 'error']);
@@ -277,6 +277,7 @@ describe('renderPanel', () => {
     );
 
     expect(headings(root)).toEqual(['Needs you 1', 'Working 1', 'Unstarted 0', 'Done 1']);
+    expect([...root.querySelectorAll('.count.zero')].map((count) => count.closest('details')!.getAttribute('data-group'))).toEqual(['unstarted']);
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.group')].map((group) => [group.dataset['group'], group.open])).toEqual([
       ['needs', true],
       ['working', true],
@@ -523,6 +524,13 @@ describe('renderPanel', () => {
     const snoozed = root.querySelector<HTMLDetailsElement>('details[data-group="snoozed"]')!;
 
     expect(headings(root)).toEqual(['Needs you 1', 'Working 0', 'Unstarted 0', 'Done 0', 'Snoozed 2']);
+    expect([...root.querySelectorAll('details.group > summary > .codicon')].map((icon) => icon.className)).toEqual([
+      'codicon codicon-bell',
+      'codicon codicon-run-all',
+      'codicon codicon-inbox',
+      'codicon codicon-check-all',
+      'codicon codicon-bell-slash',
+    ]);
     expect(snoozed.open).toBe(false);
     expect([...snoozed.querySelectorAll('.title')].map((t) => t.textContent)).toEqual(['Issue <2>', 'Cold case']);
     expect(snoozed.querySelectorAll('.priority')).toHaveLength(0);

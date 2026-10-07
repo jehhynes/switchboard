@@ -378,7 +378,7 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
   switch (groupOf(item)) {
     case 'needs':
       if (session?.state === 'waiting') {
-        return { icon: 'comment-discussion', title: 'Answer a question' };
+        return { icon: 'question', title: 'Answer a question' };
       }
 
       if (item.status === 'awaiting-approval') {
@@ -605,10 +605,12 @@ function selectedClass(key: string, ui: PanelUi): string {
 /** Needs you, Working and Unstarted start open; Done and Snoozed start closed. */
 const OPEN_BY_DEFAULT = new Set(['needs', 'working', 'unstarted']);
 
+const GROUP_ICONS: Record<string, string> = { needs: 'bell', working: 'run-all', unstarted: 'inbox', done: 'check-all', snoozed: 'bell-slash' };
+
 function group(key: string, title: string, count: number, body: string, ui: PanelUi): string {
   const open = ui.groups.get(key) ?? OPEN_BY_DEFAULT.has(key);
 
-  return `<details class="group" data-group="${key}"${open ? ' open' : ''}><summary><h3>${escape(title)}</h3><span class="count">${count}</span></summary>${body}</details>`;
+  return `<details class="group" data-group="${key}"${open ? ' open' : ''}><summary><span class="codicon codicon-${GROUP_ICONS[key]}"></span><h3>${escape(title)}</h3><span class="count${count === 0 ? ' zero' : ''}">${count}</span></summary>${body}</details>`;
 }
 
 /** A snoozed ticket shows as one row: its pool entry, else its open work item, else its latest one (PRD R49). */

@@ -4,8 +4,11 @@ h3 { font-size: 13px; font-weight: 600; text-transform: capitalize; margin: 14px
 details.group > summary { cursor: pointer; margin: 12px -8px 4px; padding: 6px 8px; color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent); }
 details.group > summary:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent); }
 details.group > summary h3 { display: inline; margin: 0; color: inherit; }
+/* Codicons have one weight, so a stroke in the glyph's colour thickens it to match the bold title. */
+details.group > summary > .codicon { margin-right: 6px; font-size: 16px; vertical-align: text-bottom; color: inherit; -webkit-text-stroke: 0.5px currentColor; }
 /* The count is a badge at the right of the heading, as in Claude Code's session groups. */
-details.group > summary .count { float: right; margin-top: 1px; padding: 1px 6px; border-radius: 10px; font-size: 0.8em; line-height: normal; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+details.group > summary .count { float: right; padding: 0 7px; border-radius: 10px; font-size: 0.95em; font-weight: 600; line-height: 18px; background: var(--vscode-activityBarBadge-background, var(--vscode-badge-background)); color: var(--vscode-activityBarBadge-foreground, var(--vscode-badge-foreground)); }
+details.group > summary .count.zero { font-weight: normal; background: color-mix(in srgb, var(--vscode-descriptionForeground) 18%, transparent); color: var(--vscode-descriptionForeground); }
 /* Rows touch, with a rule across the top of each row after the first; a hovered or selected row hides the rules above and below it. */
 .item { position: relative; padding: 6px 8px; margin: 0 -8px; border-radius: var(--vscode-cornerRadius-medium, 6px); outline: none; }
 /* A click on a row opens its background session, latest session or worktree. */
