@@ -227,4 +227,4 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 These mechanisms are planned but not yet verified for Switchboard:
 
-- A real pick session claiming a pool ticket through `support-bind`. By the operator's rule no test claims a case; the operator makes the first real pick.
+- A real pick whose `/support-process` task session claims the pool ticket through `support-bind`. By the operator's rule no test claims a case; the operator makes the first real pick.

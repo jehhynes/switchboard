@@ -24,7 +24,7 @@ describe('Store', () => {
     store.close();
 
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 12 });
     expect(raw.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
     raw.close();
 
@@ -48,7 +48,8 @@ describe('Store', () => {
     expect(store.ticket(7)).toMatchObject({ pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null });
     expect(store.ticket(7)).not.toHaveProperty('iceboxed');
     // A work item waiting to be started is unstarted from migration 4 on (PRD R34).
-    expect(store.workItem(3)).toMatchObject({ status: 'unstarted', needsPick: false, approvalPrompt: null, approvalSummary: null });
+    expect(store.workItem(3)).toMatchObject({ status: 'unstarted', approvalPrompt: null, approvalSummary: null });
+    expect(store.workItem(3)).not.toHaveProperty('needsPick');
     expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, summary: 'A summary.', immediacy: null, severity: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
     store.close();
   });
@@ -92,6 +93,29 @@ describe('Store', () => {
       [true, null],
       [false, null],
     ]);
+    store.close();
+  });
+
+  it('blocks a version 11 work item waiting on a pick session for Retry, keeping its error, and drops needsPick', () => {
+    const path = join(dir, 'v11.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 11).join(';'));
+    raw.exec('PRAGMA user_version = 11');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, repoRoot) VALUES (1, 'zoho', '1', 'a', 'u', 0, 1, '')");
+    raw.exec(
+      "INSERT INTO workItems (id, ticketId, playbook, status, failedStep, error, createdAt, statusAt, needsPick) VALUES (1, 1, 'support:case', 'blocked', 'pick', 'Stopped by you.', 1, 7, 1), (2, 1, 'support:case', 'setup', NULL, NULL, 1, 8, 1), (3, 1, 'support:case', 'done', NULL, NULL, 1, 9, 1), (4, 1, 'support:case', 'running', NULL, NULL, 1, 9, 0)",
+    );
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([1, 2, 3, 4].map((id) => store.workItem(id))).toMatchObject([
+      { status: 'blocked', failedStep: 'task', error: 'Stopped by you.' },
+      { status: 'blocked', failedStep: 'task', error: 'Pick sessions were removed. Retry starts the playbook, which claims the ticket.' },
+      { status: 'done' },
+      { status: 'running' },
+    ]);
+    expect(store.workItem(1)).not.toHaveProperty('needsPick');
     store.close();
   });
 
@@ -215,7 +239,7 @@ describe('Store', () => {
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
-    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (11).');
+    expect(() => Store.open(path)).toThrow('The database is schema version 99, newer than this hub supports (12).');
   });
 
   it('rolls back a transaction that throws', () => {

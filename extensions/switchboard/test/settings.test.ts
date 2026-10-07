@@ -186,12 +186,11 @@ describe('startSettings', () => {
     expect(field('sources.github.repo').closest('.field')!.classList.contains('invalid')).toBe(false);
   });
 
-  it("edits a source's lists and nested keys, and shows only a pool source's pick prompt", () => {
+  it("edits a source's lists and nested keys", () => {
     send({ type: 'config', config: config() });
     click('[data-arg="source:github"]');
 
     expect(field<HTMLTextAreaElement>('sources.github.logins').value).toBe('me\nme-ai');
-    expect(field('sources.github.pickPrompt')).toBeNull();
     expect([...field<HTMLSelectElement>('sources.github.triagePlaybook').options].map((option) => option.value)).toEqual(['', 'triage:github']);
 
     type(field('sources.github.logins'), 'me\n\nother ');
@@ -202,7 +201,7 @@ describe('startSettings', () => {
     expect((last('check')!['settings'] as { sources: { github: { project: object } } }).sources.github.project).toEqual({ owner: 'o' });
 
     click('[data-arg="source:zoho"]');
-    expect(field('sources.zoho.pickPrompt')).not.toBeNull();
+    expect(field('sources.zoho.pickPrompt')).toBeNull();
     expect(field<HTMLInputElement>('sources.zoho.enabled').checked).toBe(false);
   });
 

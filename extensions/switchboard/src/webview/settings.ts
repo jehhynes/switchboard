@@ -58,8 +58,6 @@ export interface EditorState {
 
 export const SOURCE_LABELS: Record<string, string> = { github: 'GitHub', zoho: 'Zoho Desk', forum: 'Forum' };
 
-const POOL_SOURCES = new Set(['zoho', 'forum']);
-
 export const EMPTY_PLAYBOOK: PlaybookFields = {
   description: '',
   kind: 'task',
@@ -255,7 +253,7 @@ export function generalFields(state: EditorState): { heading: string; fields: Fi
           label: 'Friction debriefs',
           kind: 'boolean',
           fallback: false,
-          help: 'Ask each session what slowed it down, in a paid fork of the session, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.',
+          help: 'Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.',
         },
       ],
     },
@@ -331,10 +329,6 @@ export function sourceFields(state: EditorState, name: string): { heading: strin
     },
     { path: `${base}.setupPrompt`, label: 'Setup prompt', kind: 'prompt', help: 'Runs before a playbook that requires a worktree, when the ticket has none.' },
   ];
-
-  if (POOL_SOURCES.has(name)) {
-    common.push({ path: `${base}.pickPrompt`, label: 'Pick prompt', kind: 'prompt', help: 'Runs when you start a pool ticket, to claim it for you.' });
-  }
 
   const options = (OPTION_FIELDS[name] ?? []).map(({ key, ...field }) => ({ ...field, path: `${base}.${key}` }));
 

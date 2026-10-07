@@ -3,7 +3,7 @@ import type { ReportKind } from './model.js';
 
 export type TemplateResult = { text: string } | { error: string };
 
-/** The variables a playbook template, `setupPrompt` or `pickPrompt` can use. */
+/** The variables a playbook template or `setupPrompt` can use. */
 export const TEMPLATE_VARIABLES = [
   'ticket.source',
   'ticket.sourceKey',

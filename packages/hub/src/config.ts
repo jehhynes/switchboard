@@ -101,7 +101,7 @@ export function setSourceEnabled(configDir: string, name: string, enabled: boole
 
 /**
  * Every error the hub would report for these settings: the file's own, which reject it whole (PRD R42), then each enabled
- * source's keys, which disable that source, and unknown variables in `setupPrompt` and `pickPrompt`.
+ * source's keys, which disable that source, and unknown variables in `setupPrompt`.
  */
 export function checkSettings(value: unknown): string[] {
   const parsed = parseSettings(JSON.stringify(value));
@@ -113,12 +113,10 @@ export function checkSettings(value: unknown): string[] {
   const errors: string[] = [];
 
   for (const [name, source] of Object.entries(parsed.settings.sources)) {
-    for (const key of ['setupPrompt', 'pickPrompt'] as const) {
-      const error = templateError(source[key]);
+    const setupError = templateError(source.setupPrompt);
 
-      if (error !== null) {
-        errors.push(`sources.${name}.${key}: ${error}`);
-      }
+    if (setupError !== null) {
+      errors.push(`sources.${name}.setupPrompt: ${setupError}`);
     }
 
     const error = source.enabled && name !== ADHOC_SOURCE ? sourceOptionsError(name, source.options) : null;

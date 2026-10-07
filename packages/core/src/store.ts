@@ -146,9 +146,13 @@ export const MIGRATIONS = [
   `UPDATE workItems SET warning = NULL WHERE status = 'done' AND doneReason = 'unassigned';`,
   // A ticket out of the source's scope is not snoozed (PRD R49).
   `UPDATE tickets SET snoozed = 0, snoozedUntil = NULL WHERE snoozed = 1 AND assigned = 0 AND pool = 0;`,
+  // Pick sessions are gone; the task session's skill claims the ticket (PRD R48). An open picked work item waits for Retry, which starts its task.
+  `UPDATE workItems SET status = 'blocked', failedStep = 'task', error = COALESCE(error, 'Pick sessions were removed. Retry starts the playbook, which claims the ticket.')
+    WHERE needsPick = 1 AND status <> 'done';
+  ALTER TABLE workItems DROP COLUMN needsPick;`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'needsPick', 'released']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports']);
 

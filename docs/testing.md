@@ -64,4 +64,4 @@ Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, V
 - Use literal expected values. Do not derive an expectation by calling the code under test.
 - Assert counts where an empty result would pass a contents check.
 - Make fakes fail on unexpected calls.
-- Never run a skill that claims or writes to Zoho Desk or Forum in a test or a live check: no `/support-bind`, `/support-claim`, `/support-process`, Pick, or Approve on a Support work item. Test pick sessions with fake runners. The operator makes the first real pick.
+- Never run a skill that claims or writes to Zoho Desk or Forum in a test or a live check: no `/support-bind`, `/support-claim`, `/support-process`, Pick, or Approve on a Support work item. Test picks with fake runners. The operator makes the first real pick.

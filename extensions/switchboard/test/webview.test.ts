@@ -44,7 +44,6 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     failedStep: null,
     unassignedAt: null,
     queuedAt: null,
-    needsPick: false,
     approvalPrompt: null,
     approvalSummary: null,
     approvalReport: null,
@@ -203,7 +202,6 @@ describe('markOf', () => {
 
   it('shows the phase in Working and how it ended in Done', () => {
     expect(mark({ status: 'queued' })).toEqual(['clock', 'Queued', null]);
-    expect(mark({ status: 'setup', needsPick: true })).toEqual(['tools', 'Claiming', null]);
     expect(mark({ status: 'setup' })).toEqual(['tools', 'Setting up', null]);
     expect(mark({ status: 'running' })).toEqual(['sync codicon-modifier-spin', 'Running', null]);
     expect(mark({ status: 'done', doneReason: 'session' })).toEqual(['check', 'Finished by the session', null]);
@@ -219,7 +217,7 @@ describe('clockOf', () => {
 
     expect(clockOf(scoped({ status: 'blocked' }))).toEqual({ since: 2, label: 'In this status since' });
     expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
-    expect(clockOf(scoped({ status: 'setup', sessions: [session({ kind: 'pick', state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
+    expect(clockOf(scoped({ status: 'setup', sessions: [session({ kind: 'setup', state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     // A blocked item whose session still waits counts from the block.
     expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
     expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Working since' });
@@ -482,8 +480,11 @@ describe('renderPanel', () => {
     expect(JSON.parse(controlNamed(byId(1), 'Start').dataset['message']!)).toEqual({ type: 'action', action: { type: 'pick', ticketId: 1 } });
     expect(byId(4).querySelector('.note')?.textContent).toBe('Timed out.');
     expect(titles(byId(4), '.actions > button.control')).toEqual(['Triage again']);
-    expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'start', 'snooze'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
+    expect(rowMenu(byId(4))).toMatchObject({ shown: ['triageAgain', 'snooze'], actions: { triageAgain: { type: 'retriage-pool', ticketId: 4 } } });
+    // Start waits for a triage result (PRD R48).
     expect(titles(byId(5), '.line.third .mark.codicon-loading.codicon-modifier-spin')).toEqual(['Triaging']);
+    expect(byId(5).querySelector('.actions')).toBeNull();
+    expect(rowMenu(byId(5))).toMatchObject({ shown: ['snooze'] });
     expect(byId(5).querySelector('.playbook-name')?.textContent).toBe('support:triage');
     const adhoc = render(snapshot([item(6, { ticket: { ...item(6).ticket, source: 'adhoc', sourceKey: '6', url: '' } })]));
     expect(adhoc.querySelector('.line.second span.key')?.textContent).toBe('adhoc 6');
@@ -555,7 +556,7 @@ describe('renderPanel', () => {
     expect(root.querySelector('[data-ticket="9"] .line.third')).toBeNull();
     expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Approve the publish']);
     expect(rowMenu(snoozed.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'snooze', 'restore'], actions: { snooze: { type: 'snooze', ticketId: 2 }, restore: { type: 'restore', ticketId: 2 } } });
-    expect(rowMenu(snoozed.querySelector('[data-ticket="9"]')!)).toMatchObject({ shown: ['start', 'snooze', 'restore'], actions: { snooze: { type: 'snooze', ticketId: 9 }, restore: { type: 'restore', ticketId: 9 } } });
+    expect(rowMenu(snoozed.querySelector('[data-ticket="9"]')!)).toMatchObject({ shown: ['snooze', 'restore'], actions: { snooze: { type: 'snooze', ticketId: 9 }, restore: { type: 'restore', ticketId: 9 } } });
     expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
     expect(root.querySelector('[data-item="3"] .approval')?.hasAttribute('title')).toBe(false);
     expect(root.querySelector<HTMLButtonElement>('[data-item="3"] .actions > button.control')?.title).toBe('Approve: runs /review-pr pr:123 publish');

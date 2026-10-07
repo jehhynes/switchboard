@@ -392,7 +392,7 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
       }
 
       if (item.status === 'setup') {
-        return { icon: 'tools', title: item.needsPick ? 'Claiming' : 'Setting up' };
+        return { icon: 'tools', title: 'Setting up' };
       }
 
       return { icon: 'sync codicon-modifier-spin', title: 'Running' };
@@ -576,14 +576,15 @@ function poolRow(entry: PoolView, now: number, ui: PanelUi, namespaces: Record<s
   const failed = triage?.error != null;
   // A snoozed ticket is never triaged, so a missing triage is not shown as running.
   const triaging = triage !== null && triage.endedAt === null;
-  const controls = failed ? [again, pick, ...snoozeControls(ticket)] : [pick, ...snoozeControls(ticket)];
-  const main = controls[0]!;
+  // Start appears once triage has chosen a playbook, which the pick starts (PRD R48).
+  const main = failed ? again : triage?.summary != null ? pick : null;
+  const controls = main === null ? snoozeControls(ticket) : [main, ...snoozeControls(ticket)];
 
   return `<div class="item pool-item${selectedClass(rowKey, ui)}" data-ticket="${ticket.id}" data-row="${rowKey}" tabindex="0"${openAttribute(ticketOpen(ticket))}${rowContext(controls)}>
 ${firstLine(triage, ticket.title, queued(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now))}
 <div class="line second"><span class="meta">${playbookLabel(triaging ? triageLabel(ticket.source, namespaces) : (triage?.playbook ?? ''))}${ticketLink(ticket)}${returned(entry.returned)}</span></div>${thirdLine(
     `${triaging ? markIcon(TRIAGING) : ''}${wake(ticket)}${failed ? clipped('note', triage!.error!, CAPS.note) : ''}`,
-  )}${actionsColumn(actionButton(main))}
+  )}${actionsColumn(main === null ? '' : actionButton(main))}
 </div>`;
 }
 

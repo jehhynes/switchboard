@@ -40,7 +40,7 @@ function config(patch: Partial<Settings['sessions']> = {}): Config {
     settings: {
       ...DEFAULT_SETTINGS,
       sessions: { ...DEFAULT_SETTINGS.sessions, installHooks: false, ...patch },
-      sources: { github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', pickPrompt: '', options: {} } },
+      sources: { github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
     },
     settingsError: null,
     playbooks: PLAYBOOKS,
@@ -405,10 +405,8 @@ describe('Runtime', () => {
     expect(runtime.claimOpen('D:/git/widgets-wt/8-fix')).toBeNull();
   });
 
-  it('triages the pool, lists it oldest first, and runs a pick with fake runners', async () => {
-    const cfg = config();
-    cfg.settings.sources['github']!.pickPrompt = 'Claim {{ticket.sourceKey}}, then stop.';
-    const { store, cli, source, runtime } = setup(cfg);
+  it('triages the pool, lists it oldest first, and starts the triaged playbook on a pick with fake runners', async () => {
+    const { store, cli, source, runtime } = setup(config());
     source.result = { tickets: [{ ...issue('9'), assigned: false, pool: true, sortAt: 20, enteredAt: null }, { ...issue('8'), assigned: false, pool: true, sortAt: 10, enteredAt: null }] };
 
     await runtime.pollSource('github');
@@ -422,10 +420,10 @@ describe('Runtime', () => {
     await runtime.settled();
 
     const start = cli.calls.find((call) => call[1] === '--bg');
-    expect(start?.at(-1)).toMatch(/^Claim 8, then stop\.\n\nReport to Switchboard with these commands:/);
-    expect(store.session('s1')).toMatchObject({ kind: 'pick', state: 'running' });
+    expect(start?.at(-1)).toMatch(/^Build 8\.\n\nReport to Switchboard with these commands:/);
+    expect(store.session('s1')).toMatchObject({ kind: 'task', state: 'running' });
     expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['9']);
-    expect(runtime.snapshot().workItems).toMatchObject([{ status: 'setup', needsPick: true, triage: { playbook: 'dev:develop' } }]);
+    expect(runtime.snapshot().workItems).toMatchObject([{ status: 'running', playbook: 'dev:develop', triage: { playbook: 'dev:develop' } }]);
   });
 
   it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook, and hides a disabled source (PRD R50, R51)', async () => {
@@ -453,7 +451,7 @@ describe('Runtime', () => {
 
     // Of four done work items, only the started one with the triaged playbook counts: one never ran a session, one's launch failed, one ran another playbook.
     const ticket = store.findTicket('github', '1')!;
-    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, needsPick: false, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' } as const;
+    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator' } as const;
     const ran = store.insertWorkItem(done);
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);

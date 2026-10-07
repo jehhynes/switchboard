@@ -42,14 +42,14 @@ describe('checkSettings', () => {
       checkSettings({
         sources: {
           github: { ...GITHUB, repo: 'nope', setupPrompt: '/init {{ticket.key}}' },
-          forum: { enabled: true, pickPrompt: '{{x}}' },
+          forum: { enabled: true, setupPrompt: '{{x}}' },
           jira: { enabled: true },
         },
       }),
     ).toEqual([
       'sources.github.setupPrompt: Unknown template variable: ticket.key.',
       'sources.github.repo must be set to owner/name.',
-      'sources.forum.pickPrompt: Unknown template variable: x.',
+      'sources.forum.setupPrompt: Unknown template variable: x.',
       'sources.forum.userId must be set to your forum user ID, as a string.',
       'sources.jira: Switchboard has no source named jira.',
     ]);

@@ -4,10 +4,9 @@ export type WorkItemStatus = 'triaging' | 'unstarted' | 'queued' | 'setup' | 'ru
 export type DoneReason = 'session' | 'operator' | 'unassigned';
 
 /** The step Retry repeats (PRD R45). */
-export type FailedStep = 'triage' | 'pick' | 'setup' | 'task';
+export type FailedStep = 'triage' | 'setup' | 'task';
 
-/** A `pick` session claims a pool ticket for the operator through a skill (PRD R48). */
-export type SessionKind = 'pick' | 'setup' | 'task';
+export type SessionKind = 'setup' | 'task';
 
 /** Observed session state (PRD R36). */
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed' | 'ended';
@@ -76,8 +75,6 @@ export interface WorkItem {
   unassignedAt: number | null;
   /** When a waiting start was queued, for first-in first-out order. */
   queuedAt: number | null;
-  /** Picked from the pool and not yet claimed: the next session is a pick session (PRD R48). */
-  needsPick: boolean;
   /** The prompt an approval report named; Approve starts a task session with it (PRD R23, R31). */
   approvalPrompt: string | null;
   approvalSummary: string | null;

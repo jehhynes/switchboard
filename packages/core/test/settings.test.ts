@@ -35,7 +35,6 @@ describe('parseSettings', () => {
             triagePlaybook: 'triage:github',
             setupPrompt: '/init-worktree {{ticket.sourceKey}}',
             namespace: '',
-            pickPrompt: '',
             options: { repo: 'acme/widgets', logins: ['work-login'] },
           },
         },
@@ -46,7 +45,7 @@ describe('parseSettings', () => {
   it('defaults a source that sets nothing to disabled', () => {
     expect(parseSettings('{"sources":{"adhoc":{}}}')).toEqual({
       settings: expect.objectContaining({
-        sources: { adhoc: { enabled: false, pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', pickPrompt: '', options: {} } },
+        sources: { adhoc: { enabled: false, pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} } },
       }),
     });
   });
