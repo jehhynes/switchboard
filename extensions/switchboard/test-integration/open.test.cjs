@@ -29,7 +29,6 @@ function item(id, url, cwd) {
     taskPrompt: null,
     warning: null,
     error: 'The session finished its turn.',
-    failedStep: null,
     unassignedAt: null,
     queuedAt: null,
     approvalPrompt: null,

@@ -3,7 +3,7 @@ import { heldSlots, queueWaits } from './queue.js';
 import { repoRoots } from './settings.js';
 import type { PermissionMode, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
-import type { FailedStep, Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
+import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import type { SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt, triagePrompt } from './template.js';
@@ -100,7 +100,7 @@ export type FlowEvent =
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
-  | { type: 'start' | 'approve' | 'retry' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
+  | { type: 'start' | 'approve' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
   | { type: 'pick' | 'retriage-pool' | 'restore'; ticketId: number }
   /** Snoozes the ticket until `until`, or indefinitely when null (PRD R49). */
   | { type: 'snooze'; ticketId: number; until: number | null }
@@ -195,7 +195,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'restore', 'snooze']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'restore', 'snooze']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -386,8 +386,6 @@ class Flow {
         return this.start(this.openItem(event.workItemId));
       case 'approve':
         return this.approve(this.openItem(event.workItemId));
-      case 'retry':
-        return this.retry(this.openItem(event.workItemId));
       case 'mark-done':
         return this.done(this.openItem(event.workItemId), 'operator', null);
       case 'retriage':
@@ -502,7 +500,6 @@ class Flow {
       taskPrompt: null,
       warning: null,
       error: null,
-      failedStep: null,
       unassignedAt: null,
       queuedAt: null,
       approvalPrompt: null,
@@ -632,7 +629,6 @@ class Flow {
       taskPrompt: prompt,
       warning: null,
       error: null,
-      failedStep: null,
       unassignedAt: null,
       queuedAt: queued ? this.now : null,
       approvalPrompt: null,
@@ -684,7 +680,7 @@ class Flow {
       return;
     }
 
-    this.store.updateWorkItem(item.id, { playbook: playbook.name, taskPrompt: null, error: null, failedStep: null });
+    this.store.updateWorkItem(item.id, { playbook: playbook.name, taskPrompt: null, error: null });
 
     if (playbook.autoStart) {
       this.queue(item);
@@ -705,7 +701,7 @@ class Flow {
     const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
 
     if (item?.status === 'triaging' && !this.deletedAfterTriage(item)) {
-      this.fail(item, 'triage', error);
+      this.fail(item, error);
     }
   }
 
@@ -735,7 +731,7 @@ class Flow {
       if (item === null) {
         this.store.insertTriage({ ...EMPTY_TRIAGE, ticketId: ticket.id, workItemId: null, startedAt: this.now, endedAt: this.now, error });
       } else {
-        this.fail(item, 'triage', error);
+        this.fail(item, error);
       }
     };
 
@@ -812,7 +808,7 @@ class Flow {
       return;
     }
 
-    this.fail(item, session.kind, message);
+    this.fail(item, message);
   }
 
   /** Liveness comes from the roster alone (GC M20): a listed session is alive, an unlisted one has ended. */
@@ -885,11 +881,11 @@ class Flow {
       }
     } else if (resumed && item.status === 'blocked') {
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
-      this.setStatus(item.id, { status: 'running', error: null, failedStep: null });
+      this.setStatus(item.id, { status: 'running', error: null });
     } else if (state === 'running' && item.status === 'awaiting-approval') {
       // The operator gave the session more work after its approval report; the report waits until the run ends (PRD R34).
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
-      this.setStatus(item.id, { status: 'running', approvalHeld: true, error: null, failedStep: null });
+      this.setStatus(item.id, { status: 'running', approvalHeld: true, error: null });
     }
   }
 
@@ -909,7 +905,7 @@ class Flow {
       if (item.unassignedAt !== null) {
         this.done(item, 'unassigned', null);
       } else if (this.store.worktreeFor(item.ticketId) === null) {
-        this.fail(item, 'setup', MESSAGES.setupWithoutWorktree);
+        this.fail(item, MESSAGES.setupWithoutWorktree);
       } else {
         this.store.updateSession(session.id, { outcome: 'done' });
 
@@ -983,7 +979,7 @@ class Flow {
       case 'approval':
         // The work is ready; Approve starts a new task session with the prompt that publishes it (PRD R23, R31).
         if (item !== null && session.kind === 'task') {
-          this.setStatus(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, approvalReport: report.report, error: null, failedStep: null });
+          this.setStatus(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, approvalReport: report.report, error: null });
         }
 
         return;
@@ -1064,10 +1060,10 @@ class Flow {
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', null);
     } else if (item.approvalHeld || item.status === 'awaiting-approval') {
-      // Stopping never approves: blocked would let Retry run the approval prompt (PRD R40).
+      // A stop is not a decision on the approval, so Approve stays offered (PRD R40).
       this.restoreApproval(item, MESSAGES.stopped);
     } else {
-      this.block(item, MESSAGES.stopped, session.kind);
+      this.block(item, MESSAGES.stopped);
     }
   }
 
@@ -1158,7 +1154,6 @@ class Flow {
       taskPrompt: null,
       warning: null,
       error: null,
-      failedStep: null,
       unassignedAt: null,
       queuedAt: this.now,
       approvalPrompt: null,
@@ -1207,20 +1202,6 @@ class Flow {
     this.queue(item);
   }
 
-  /** PRD R45: repeat the step that stopped. */
-  private retry(item: WorkItem): void {
-    if (item.status !== 'failed' && item.status !== 'blocked') {
-      throw new Refusal('Only a failed or blocked work item can be retried.');
-    }
-
-    if (item.failedStep === 'triage') {
-      this.setStatus(item.id, { status: 'triaging', error: null, failedStep: null });
-      return;
-    }
-
-    this.queue(item);
-  }
-
   private retriage(item: WorkItem): void {
     this.requireNoSession(item);
 
@@ -1232,7 +1213,7 @@ class Flow {
       throw new Refusal('Triage is already running.');
     }
 
-    this.setStatus(item.id, { status: 'triaging', error: null, failedStep: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null });
+    this.setStatus(item.id, { status: 'triaging', error: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null });
   }
 
   private requireNoSession(item: WorkItem): void {
@@ -1245,22 +1226,19 @@ class Flow {
 
   /** Every status change comes here, so statusAt and runStartedAt stay true (PRD R27). */
   private setStatus(id: number, patch: Partial<NewWorkItem> & { status: WorkItemStatus }): void {
-    const item = this.store.workItem(id)!;
-    const before = item.status;
+    const before = this.store.workItem(id)!.status;
     const run = RUN_STATUSES.has(patch.status) && !RUN_STATUSES.has(before) ? { runStartedAt: this.now } : {};
-    // A held approval was never approved, so leaving it for another status drops it, and Retry cannot run its prompt.
-    const dropped = item.approvalHeld && patch.status !== 'running' && patch.status !== 'awaiting-approval' ? { approvalPrompt: null, approvalSummary: null, approvalReport: null } : {};
 
-    this.store.updateWorkItem(id, before === patch.status ? patch : { approvalHeld: false, ...dropped, ...patch, statusAt: this.now, ...run });
+    this.store.updateWorkItem(id, before === patch.status ? patch : { approvalHeld: false, ...patch, statusAt: this.now, ...run });
   }
 
-  /** A held approval's run ended without a report: the earlier approval waits again, with the cause when the run did not finish. */
+  /** A run or stop ended without a report: the earlier approval waits again, with the cause when the run did not finish. */
   private restoreApproval(item: WorkItem, cause: string | null): void {
-    this.setStatus(item.id, { status: 'awaiting-approval', error: cause, failedStep: null });
+    this.setStatus(item.id, { status: 'awaiting-approval', error: cause });
   }
 
   private queue(item: WorkItem): void {
-    this.setStatus(item.id, { status: 'queued', queuedAt: this.now, error: null, failedStep: null });
+    this.setStatus(item.id, { status: 'queued', queuedAt: this.now, error: null });
   }
 
   private done(item: WorkItem, reason: 'session' | 'operator' | 'unassigned', warning: string | null): void {
@@ -1269,12 +1247,12 @@ class Flow {
     this.setStatus(item.id, { status: 'done', doneAt: this.now, doneReason: reason, warning, queuedAt: null, scopeAt });
   }
 
-  private fail(item: WorkItem, step: 'triage' | SessionKind, cause: string): void {
-    this.setStatus(item.id, { status: 'failed', failedStep: step, error: cause, queuedAt: null });
+  private fail(item: WorkItem, cause: string): void {
+    this.setStatus(item.id, { status: 'failed', error: cause, queuedAt: null });
   }
 
-  private block(item: WorkItem, cause: string, step: FailedStep = 'task'): void {
-    this.setStatus(item.id, { status: 'blocked', failedStep: step, error: cause });
+  private block(item: WorkItem, cause: string): void {
+    this.setStatus(item.id, { status: 'blocked', error: cause });
   }
 
   /** The session's work item when the session is its latest and it is not done (PRD R45). */
@@ -1363,7 +1341,7 @@ class Flow {
     const playbook = item.playbook === null ? null : (this.context.playbooks.get(item.playbook) ?? null);
 
     if (item.playbook !== null && playbook === null) {
-      this.fail(item, 'task', `Playbook ${item.playbook} is not loaded.`);
+      this.fail(item, `Playbook ${item.playbook} is not loaded.`);
       return;
     }
 
@@ -1374,7 +1352,7 @@ class Flow {
     const cwd = playbook?.workdir === 'repoRoot' ? repoRoot : (worktree?.path ?? repoRoot);
 
     if (cwd === '') {
-      this.fail(item, kind, `sources.${ticket.source}.repoRoot is not set.`);
+      this.fail(item, `sources.${ticket.source}.repoRoot is not set.`);
       return;
     }
 
@@ -1386,14 +1364,14 @@ class Flow {
       const template = source?.setupPrompt ?? '';
 
       if (template === '') {
-        this.fail(item, kind, `sources.${ticket.source}.setupPrompt is not set.`);
+        this.fail(item, `sources.${ticket.source}.setupPrompt is not set.`);
         return;
       }
 
       const rendered = renderTaskPrompt(template, values);
 
       if ('error' in rendered) {
-        this.fail(item, kind, `sources.${ticket.source}.setupPrompt: ${rendered.error}`);
+        this.fail(item, `sources.${ticket.source}.setupPrompt: ${rendered.error}`);
         return;
       }
 
@@ -1406,7 +1384,7 @@ class Flow {
       const rendered = renderTaskPrompt(playbook.template, values);
 
       if ('error' in rendered) {
-        this.fail(item, 'task', `Playbook ${playbook.name}: ${rendered.error}`);
+        this.fail(item, `Playbook ${playbook.name}: ${rendered.error}`);
         return;
       }
 
@@ -1440,8 +1418,7 @@ class Flow {
       released: false,
       reports,
     });
-    // An approved prompt is kept, so a Retry of a failed or blocked approval session runs it again.
-    this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null, failedStep: null });
+    this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     this.actions.push({
       type: 'start-session',
       sessionId: id,

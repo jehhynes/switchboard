@@ -36,7 +36,6 @@ function item(id: number, status: WorkItemView['status'], patch: { snoozed?: boo
     taskPrompt: null,
     warning: null,
     error: null,
-    failedStep: null,
     unassignedAt: null,
     queuedAt: null,
     approvalPrompt: null,

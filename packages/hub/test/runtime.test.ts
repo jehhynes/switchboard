@@ -246,7 +246,7 @@ describe('Runtime', () => {
     expect(store.linksFor(1)).toEqual([]);
 
     source.context = async () => ({ error: 'Issue 7 was not found in acme/widgets.' });
-    runtime.send({ type: 'retry', workItemId: 1 });
+    runtime.send({ type: 'retriage', workItemId: 1 });
     await runtime.settled();
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Issue 7 was not found in acme/widgets.' });
   });
@@ -713,7 +713,7 @@ describe('Runtime', () => {
 
     // Of four done work items, only the started one with the triaged playbook counts: one never ran a session, one's launch failed, one ran another playbook.
     const ticket = store.findTicket('github', '1')!;
-    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator', parentId: null } as const;
+    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: T0, statusAt: T0, runStartedAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator', parentId: null } as const;
     const ran = store.insertWorkItem(done);
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);

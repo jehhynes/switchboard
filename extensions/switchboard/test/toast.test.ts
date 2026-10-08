@@ -39,7 +39,6 @@ function item(id: number, status: WorkItemView['status'], patch: Partial<WorkIte
     taskPrompt: null,
     warning: null,
     error: null,
-    failedStep: null,
     unassignedAt: null,
     queuedAt: null,
     approvalPrompt: null,

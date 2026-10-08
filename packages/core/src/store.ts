@@ -250,6 +250,10 @@ export const MIGRATIONS = [
     ) ORDER BY at;
   INSERT INTO historyRevisions (ticketId, revision) SELECT ticketId, COUNT(*) FROM events WHERE ticketId IS NOT NULL GROUP BY ticketId;`,
   `ALTER TABLE workItems ADD COLUMN approvalHeld INTEGER NOT NULL DEFAULT 0;`,
+  // Retry is gone; Triage again recovers a failed or blocked work item.
+  `ALTER TABLE workItems DROP COLUMN failedStep;
+  UPDATE workItems SET error = 'Pick sessions were removed. Triage again triages the ticket, and its task claims it.'
+    WHERE error = 'Pick sessions were removed. Retry starts the playbook, which claims the ticket.';`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'approvalHeld']);

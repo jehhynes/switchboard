@@ -122,13 +122,16 @@ describe('pick (PRD R48)', () => {
     expect(h.item(2).status).toBe('unstarted');
   });
 
-  it('blocks a picked work item whose session ends without a report, and Retry starts the task again', () => {
+  it('blocks a picked work item whose session ends without a report, and Triage again leads to a new task session', () => {
     const h = new Harness({ playbooks: MANUAL });
     h.started(only(h.act({ type: 'pick', ticketId: pooled(h) }), 'start-session'));
 
     h.act({ type: 'roster', sessions: [] });
-    expect(h.item(1)).toMatchObject({ status: 'blocked', failedStep: 'task' });
-    expect(only(h.act({ type: 'retry', workItemId: 1 }), 'start-session')).toMatchObject({ kind: 'task', sessionId: 's2' });
+    expect(h.item(1)).toMatchObject({ status: 'blocked' });
+    const triage = only(h.act({ type: 'retriage', workItemId: 1 }), 'triage');
+    expect(h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'support:case', immediacy: null, severity: null, model: null })).toEqual([]);
+    expect(h.item(1).status).toBe('unstarted');
+    expect(only(h.act({ type: 'start', workItemId: 1 }), 'start-session')).toMatchObject({ kind: 'task', sessionId: 's2' });
   });
 
   it('refuses a pick of a ticket not in the pool or without a triage result', () => {

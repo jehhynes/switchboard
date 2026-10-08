@@ -3,9 +3,6 @@ export type WorkItemStatus = 'triaging' | 'unstarted' | 'queued' | 'setup' | 'ru
 
 export type DoneReason = 'session' | 'operator' | 'unassigned';
 
-/** The step Retry repeats (PRD R45). */
-export type FailedStep = 'triage' | 'setup' | 'task';
-
 export type SessionKind = 'setup' | 'task';
 
 /** Observed session state (PRD R36). */
@@ -70,7 +67,6 @@ export interface WorkItem {
   warning: string | null;
   /** The cause shown for `failed` or `blocked`, or a note such as a failed stop. */
   error: string | null;
-  failedStep: FailedStep | null;
   /** The ticket left the assigned state while a session was active (PRD R10). */
   unassignedAt: number | null;
   /** When a waiting start was queued, for first-in first-out order. */

@@ -47,7 +47,7 @@ export function render(template: string, values: Readonly<Record<string, string>
   return unknown.size > 0 ? { error: `Unknown template variable: ${[...unknown].join(', ')}.` } : { text };
 }
 
-/** Renders a playbook template, leaving `{{session.id}}` for {@link sessionPrompt}, because a retry reuses the prompt in a new session. */
+/** Renders a playbook template, leaving `{{session.id}}` for {@link sessionPrompt}, which knows the new session's ID. */
 export function renderTaskPrompt(template: string, values: Readonly<Record<string, string>>): TemplateResult {
   return render(template, { ...values, 'session.id': '{{session.id}}' });
 }

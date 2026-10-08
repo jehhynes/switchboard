@@ -142,11 +142,6 @@
         "category": "Switchboard"
       },
       {
-        "command": "switchboard.row.retry",
-        "title": "Retry",
-        "category": "Switchboard"
-      },
-      {
         "command": "switchboard.row.stop",
         "title": "Stop",
         "category": "Switchboard"
@@ -283,10 +278,6 @@
           "when": "false"
         },
         {
-          "command": "switchboard.row.retry",
-          "when": "false"
-        },
-        {
           "command": "switchboard.row.stop",
           "when": "false"
         },
@@ -333,11 +324,6 @@
           "command": "switchboard.row.approve",
           "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.approve",
           "group": "1_run@2"
-        },
-        {
-          "command": "switchboard.row.retry",
-          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.retry",
-          "group": "1_run@3"
         },
         {
           "command": "switchboard.row.stop",

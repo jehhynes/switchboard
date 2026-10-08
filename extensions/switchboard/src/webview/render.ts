@@ -14,7 +14,7 @@ export function mainControl(item: WorkItemView): Control | null {
     return null;
   }
 
-  const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' || item.status === 'blocked' ? 'Retry' : null;
+  const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Triage again' : null;
 
   return controlsOf(item).find((control) => control.label === wanted) ?? null;
 }
@@ -67,10 +67,6 @@ export function controlsOf(item: WorkItemView): Control[] {
   // Runs in the extension, which reads the file and writes the clipboard (PRD R60).
   if (item.status === 'awaiting-approval' && item.pastes.length > 0) {
     controls.push({ label: 'Copy', icon: 'copy', message: { type: 'copy', pastes: item.pastes.map(({ label, file }) => ({ label, file })) } });
-  }
-
-  if (item.status === 'failed' || item.status === 'blocked') {
-    controls.push({ label: 'Retry', icon: 'refresh', message: action('retry') });
   }
 
   if (isBackground(session)) {
@@ -191,21 +187,12 @@ function fileName(path: string): string {
 
 /**
  * A primary action: a large button with its icon and verb; a narrow panel hides the verb, which stays in the tooltip (PRD R27).
- * The tone colours it: `primary` for Approve, `error` or `warning` for Retry, none for the rest; `iconOnly` drops the verb.
+ * Approve takes the primary colour (`primary`), the rest a muted fill; `iconOnly` drops the verb.
  */
-function actionButton(control: Control, tone: 'primary' | 'error' | 'warning' | null = null, iconOnly = false, title = control.label): string {
+function actionButton(control: Control, primary = false, iconOnly = false, title = control.label): string {
   const label = iconOnly ? '' : `<span class="label">${escape(control.label)}</span>`;
 
-  return `<button class="control action-button${tone === null ? '' : ` ${tone}`}${iconOnly ? ' icon-only' : ''}" title="${escape(title)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span>${label}</button>`;
-}
-
-/** Approve takes the primary colour, and Retry the error colour on a failed row or the warning colour on a blocked one. */
-function toneOf(item: WorkItemView, control: Control): 'primary' | 'error' | 'warning' | null {
-  if (control.label === 'Approve') {
-    return 'primary';
-  }
-
-  return control.label === 'Retry' ? (item.status === 'failed' ? 'error' : 'warning') : null;
+  return `<button class="control action-button${primary ? ' primary' : ''}${iconOnly ? ' icon-only' : ''}" title="${escape(title)}" data-message="${escape(JSON.stringify(control.message))}"><span class="codicon codicon-${control.icon}"></span>${label}</button>`;
 }
 
 /** Character caps for the texts sessions report; the contract asks for less, and a longer text is cut here with its whole in the tooltip. */
@@ -244,7 +231,6 @@ function actionsColumn(parts: string): string {
 export const ROW_COMMANDS: Record<string, string> = {
   Start: 'start',
   Approve: 'approve',
-  Retry: 'retry',
   Stop: 'stop',
   'Triage again': 'triageAgain',
   'Mark done': 'markDone',
@@ -558,7 +544,7 @@ export const STALE_STAGE_MS = 20 * 60_000;
 
 /**
  * When a Working row's running session last reported a stage, or began running if it has reported none since: null unless the row is
- * stale (PRD R58). A stage from before a retry or a wait does not count against the current run.
+ * stale (PRD R58). A stage from before a new session or a wait does not count against the current run.
  */
 export function staleSince(item: WorkItemView, now: number): number | null {
   const session = activeSession(item);
@@ -607,15 +593,15 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
-  const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report } }, null, true, fileName(report));
+  const reportButton = report === null ? '' : actionButton({ label: 'Report', icon: 'file', message: { type: 'openUrl', url: report } }, false, true, fileName(report));
   const copy = controlsOf(item).find((control) => control.label === 'Copy');
-  const copyButton = copy === undefined ? '' : actionButton(copy, null, true, item.pastes.length === 1 ? `Copy ${item.pastes[0]!.label}` : 'Copy…');
+  const copyButton = copy === undefined ? '' : actionButton(copy, false, true, item.pastes.length === 1 ? `Copy ${item.pastes[0]!.label}` : 'Copy…');
 
   return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, groupOf(item) === 'done' && !item.ticket.snoozed ? doneTime(item, now) : queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(playbookText(item, namespaces))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
     `${statusMark(item)}${waits(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${rest.map(linkBadge).join('')}`,
-  )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
+  )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, main.label === 'Approve', false, mainTitle(item, main))}`)}
 </div>`;
 }
 

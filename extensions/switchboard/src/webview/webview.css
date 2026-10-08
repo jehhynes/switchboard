@@ -57,9 +57,6 @@ button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-off
 .action-button.icon-only { padding: 4px 5px; }
 .action-button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .action-button.primary:hover { background: var(--vscode-button-hoverBackground); }
-.action-button.error { background: var(--vscode-statusBarItem-errorBackground, #c72e0f); color: var(--vscode-statusBarItem-errorForeground, #fff); }
-.action-button.warning { background: var(--vscode-statusBarItem-warningBackground, #7a6400); color: var(--vscode-statusBarItem-warningForeground, #fff); }
-.action-button:is(.error, .warning):hover { filter: brightness(1.15); }
 @container (max-width: 360px) {
   .action-button { padding: 4px 5px; }
   .action-button .label { display: none; }

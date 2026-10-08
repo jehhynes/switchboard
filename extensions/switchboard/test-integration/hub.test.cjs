@@ -122,7 +122,7 @@ describe('the hub process', () => {
     const extension = await api();
     await until(() => extension.hub(), 'not connected');
 
-    const reply = await vscode.commands.executeCommand('switchboard.action', { type: 'retry', workItemId: 5 });
+    const reply = await vscode.commands.executeCommand('switchboard.action', { type: 'mark-done', workItemId: 5 });
 
     assert.deepStrictEqual([reply.status, reply.error], [409, 'Unknown work item 5.']);
 
@@ -217,19 +217,20 @@ describe('the hub process', () => {
     const commands = await vscode.commands.getCommands(true);
     const menu = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes.menus['webview/context'];
 
-    assert.strictEqual(menu.length, 12);
+    assert.strictEqual(menu.length, 11);
+    assert.ok(!menu.some((entry) => entry.command === 'switchboard.row.retry'));
     for (const entry of menu) {
       assert.ok(commands.includes(entry.command), `${entry.command} is not registered`);
       assert.strictEqual(entry.when, `webviewId == 'switchboard.workItems' && webviewSection == 'row' && ${entry.command}`);
     }
 
     // Each command sends the action under its own key in the row's context.
-    const actions = { markDone: { type: 'mark-done', workItemId: 41 }, retry: { type: 'retry', workItemId: 42 } };
+    const actions = { markDone: { type: 'mark-done', workItemId: 41 }, triageAgain: { type: 'retriage', workItemId: 42 } };
     const markDone = await vscode.commands.executeCommand('switchboard.row.markDone', { actions });
-    const retry = await vscode.commands.executeCommand('switchboard.row.retry', { actions });
+    const triageAgain = await vscode.commands.executeCommand('switchboard.row.triageAgain', { actions });
 
     assert.deepStrictEqual([markDone.status, markDone.error], [409, 'Unknown work item 41.']);
-    assert.deepStrictEqual([retry.status, retry.error], [409, 'Unknown work item 42.']);
+    assert.deepStrictEqual([triageAgain.status, triageAgain.error], [409, 'Unknown work item 42.']);
   });
 
   it('asks how long to snooze before sending the action, and sends nothing when the pick is dismissed (PRD R49)', async () => {

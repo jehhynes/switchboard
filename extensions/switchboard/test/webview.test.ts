@@ -42,7 +42,6 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     taskPrompt: null,
     warning: null,
     error: null,
-    failedStep: null,
     unassignedAt: null,
     queuedAt: null,
     approvalPrompt: null,
@@ -106,11 +105,11 @@ describe('controlsOf', () => {
     expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Retry', 'Triage again', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['History']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Retry', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] }))[0]?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 7 } });
   });
 });
@@ -182,7 +181,9 @@ describe('mainControl', () => {
   it('picks the one primary control of a Needs you or Unstarted row', () => {
 
     expect(mainControl(item(1, { status: 'awaiting-approval' }))?.label).toBe('Approve');
-    expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Retry');
+    expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Triage again');
+    expect(mainControl(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toBeNull();
+    expect(mainControl(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toBeNull();
     expect(mainControl(item(1, { status: 'unstarted' }))?.label).toBe('Start');
     expect(mainControl(item(1, { status: 'triaging' }))).toBeNull();
     expect(mainControl(item(1, { sessions: [session({ state: 'waiting' })] }))).toBeNull();
@@ -434,7 +435,7 @@ describe('renderPanel', () => {
 
     const running = render(snapshot([item(4, { status: 'blocked', sessions: [session({ state: 'waiting' })] })]));
 
-    expect(titles(running, '[data-item="4"] .actions > *')).toEqual(['Retry']);
+    expect(titles(running, '[data-item="4"] .actions > *')).toEqual([]);
     expect(JSON.parse(running.querySelector<HTMLElement>('[data-item="4"]')!.dataset['open']!)).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 104' });
     expect(running.querySelector('.session-button')).toBeNull();
     expect(JSON.parse(render(snapshot([item(6, { status: 'unstarted' })])).querySelector<HTMLElement>('[data-item="6"]')!.dataset['open']!)).toEqual({ type: 'openUrl', url: 'https://github.com/o/r/issues/106' });
@@ -453,7 +454,7 @@ describe('renderPanel', () => {
         history: { type: 'history', ticketId: 1, key: 'gh 101' },
       },
     });
-    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['retry', 'stop', 'markDone', 'snooze', 'history']);
+    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['stop', 'markDone', 'snooze', 'history']);
     expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual(['history']);
   });
 
@@ -531,19 +532,19 @@ describe('renderPanel', () => {
     const approval = root.querySelector('[data-item="1"]')!;
     const blocked = root.querySelector('[data-item="2"]')!;
 
-    // Report is an icon with the report's filename in the tooltip; Approve is primary, Retry takes the error colour on a failed row and the warning colour on a blocked one, and Start has no tone.
+    // Report is an icon with the report's filename in the tooltip; Approve is primary, and Start and Triage again have no tone.
     expect([...approval.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => [button.title, button.textContent, button.className])).toEqual([
       ['review.md', '', 'control action-button icon-only'],
       ['Approve', 'Approve', 'control action-button primary'],
     ]);
-    expect(root.querySelector('[data-item="2"] .action-button')?.className).toBe('control action-button warning');
-    expect(render(snapshot([item(3, { status: 'failed' })])).querySelector('[data-item="3"] .action-button')?.className).toBe('control action-button error');
+    expect(root.querySelector('[data-item="2"] .action-button')).toBeNull();
+    expect(render(snapshot([item(3, { status: 'failed' })])).querySelector('[data-item="3"] .action-button')?.className).toBe('control action-button');
     expect(render(snapshot([item(4, { status: 'unstarted' })])).querySelector('[data-item="4"] .action-button')?.className).toBe('control action-button');
     expect(approval.querySelector('.line .actions, .line button')).toBeNull();
     expect(JSON.parse(controlNamed(approval, 'review.md').dataset['message']!)).toEqual({ type: 'openUrl', url: report });
     expect([...approval.querySelectorAll('.line.third a.badge')].map((badge) => badge.textContent?.trim())).toEqual(['Docs']);
     // Only an approval row shows Report: not a blocked, done, waiting or approval row without a report.
-    expect([...blocked.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => button.title)).toEqual(['Retry']);
+    expect([...blocked.querySelectorAll<HTMLButtonElement>(':scope > .actions > button')].map((button) => button.title)).toEqual([]);
     const others = render(
       snapshot([
         item(5, { status: 'done', doneAt: NOW, approvalReport: report }),

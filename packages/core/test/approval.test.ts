@@ -33,16 +33,12 @@ describe('approval reports (PRD R23, R31)', () => {
     expect(start.prompt).toMatch(/^\/review-pr pr:123 publish\n\nReport to Switchboard with these commands:\n- .* stage s2 </);
     expect(h.item(item)).toMatchObject({ status: 'running', approvalPrompt: '/review-pr pr:123 publish' });
 
-    h.act({ type: 'session-start-failed', sessionId: 's2', message: 'exit 1' });
-    const retry = only(h.act({ type: 'retry', workItemId: item }), 'start-session');
-    expect(retry.prompt.startsWith('/review-pr pr:123 publish\n\n')).toBe(true);
-
     // The playbook offers no done report, but the approved prompt's session finishes the work item with one.
-    expect(retry.prompt).toContain(` done ${retry.sessionId}, when the work is finished.`);
-    expect(retry.prompt).not.toContain(' approval ');
-    h.started(retry);
-    expect(h.report(retry.sessionId, { kind: 'approval', prompt: '/again', summary: null, report: null }).refused).toBe("This session's prompt does not offer the approval report.");
-    expect(h.report(retry.sessionId, { kind: 'done' }).refused).toBeNull();
+    expect(start.prompt).toContain(' done s2, when the work is finished.');
+    expect(start.prompt).not.toContain(' approval ');
+    h.started(start);
+    expect(h.report('s2', { kind: 'approval', prompt: '/again', summary: null, report: null }).refused).toBe("This session's prompt does not offer the approval report.");
+    expect(h.report('s2', { kind: 'done' }).refused).toBeNull();
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
   });
 
@@ -135,7 +131,7 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'Stopped by you.', ...APPROVAL });
   });
 
-  it('keeps the approval when a background session is stopped after its turn ends, so Retry cannot run the approval prompt', () => {
+  it('keeps the approval when a background session is stopped after its turn ends', () => {
     const h = harness();
     const { item, session } = running(h);
 
@@ -147,7 +143,6 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
 
     expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'Stopped by you.', ...APPROVAL });
-    expect(h.send({ type: 'retry', workItemId: item }).refused).toBe('Only a failed or blocked work item can be retried.');
   });
 
   it('keeps the approval when the operator stops the session that reported it', () => {
@@ -175,16 +170,19 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
   });
 
-  it('drops a held approval that a done report leaves blocked, so Retry runs the playbook, not the approval prompt', () => {
+  it('keeps a held approval that a done report leaves blocked, never starts it without Approve, and clears it on Triage again', () => {
     const h = harness();
     const { item, session } = awaitingApproval(h);
 
     resume(h, session);
     h.report(session, { kind: 'done', assigned: true });
-    expect(h.item(item)).toMatchObject({ status: 'blocked', approvalHeld: false, approvalPrompt: null, approvalSummary: null, approvalReport: null });
+    expect(h.item(item)).toMatchObject({ status: 'blocked', approvalHeld: false, ...APPROVAL });
+    expect(h.send({ type: 'approve', workItemId: item }).refused).toBe('The work item is not awaiting approval.');
 
     h.act({ type: 'roster', sessions: [] });
-    expect(only(h.act({ type: 'retry', workItemId: item }), 'start-session').prompt.startsWith('/publish')).toBe(false);
+    h.triaged(only(h.act({ type: 'retriage', workItemId: item }), 'triage'), 'dev:question');
+    expect(h.item(item)).toMatchObject({ status: 'unstarted', approvalPrompt: null, approvalSummary: null, approvalReport: null });
+    expect(only(h.act({ type: 'start', workItemId: item }), 'start-session').prompt).toMatch(/^Answer Issue 1\./);
   });
 
   it('clears an earlier done outcome, so a held run that ends returns to approval', () => {

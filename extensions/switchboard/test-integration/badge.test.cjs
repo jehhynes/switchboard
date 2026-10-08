@@ -27,7 +27,6 @@ function item(id, status, snoozed = false) {
     taskPrompt: null,
     warning: null,
     error: status === 'failed' ? 'Triage failed.' : null,
-    failedStep: status === 'failed' ? 'triage' : null,
     unassignedAt: null,
     queuedAt: null,
     approvalPrompt: null,

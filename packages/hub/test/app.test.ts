@@ -185,6 +185,7 @@ describe('createHubApp', () => {
 
     expect(await app.post['/action']!({ type: 'approve', workItemId: 9 })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
     expect(await app.post['/action']!({ type: 'poll' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
+    expect(await app.post['/action']!({ type: 'retry', workItemId: 1 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/report']!({ sessionId: 's9', kind: 'stage', stage: 'x' })).toEqual({ status: 409, body: { error: 'Unknown session s9.' } });
     expect(await app.post['/report']!({ kind: 'stage' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' } });
     expect(app.busy()).toBe(false);
