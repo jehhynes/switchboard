@@ -1,12 +1,10 @@
-import { activeSession, groupOf, triageLabel } from '@switchboard/core/group';
-import type { Group } from '@switchboard/core/group';
+import { activeSession, DONE_WORDS, groupOf, MARK_TITLES, markOf as markKindOf, triageLabel } from '@switchboard/core/group';
+import type { Group, Mark as MarkKind } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 import { wakeText } from '@switchboard/core/snooze';
 
-export { activeSession, groupOf };
+export { activeSession, DONE_WORDS, groupOf };
 export type { Group };
-
-export const DONE_WORDS: Record<'session' | 'operator' | 'unassigned', string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
 /** The one control a Needs you or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
 export function mainControl(item: WorkItemView): Control | null {
@@ -390,38 +388,32 @@ export interface Mark {
   tone?: 'error' | 'warning';
 }
 
-const TRIAGING: Mark = { icon: 'loading codicon-modifier-spin', title: 'Triaging' };
+const MARK_ICONS: Record<MarkKind, string> = {
+  question: 'question',
+  send: 'send',
+  review: 'eye',
+  blocked: 'debug-pause',
+  failed: 'error',
+  queued: 'clock',
+  setup: 'tools',
+  running: 'sync codicon-modifier-spin',
+  triaging: 'loading codicon-modifier-spin',
+  'done-session': 'check',
+  'done-operator': 'account',
+  'done-unassigned': 'sign-out',
+};
+
+function markFor(kind: MarkKind): Mark {
+  return kind === 'failed' ? { icon: MARK_ICONS[kind], title: MARK_TITLES[kind], tone: 'error' } : { icon: MARK_ICONS[kind], title: MARK_TITLES[kind] };
+}
+
+const TRIAGING = markFor('triaging');
 
 /** The row mark shows what differs between rows of the same group; a snoozed item shows its group's mark (PRD R27). Unstarted rows show the priority dot, Triaging or Queued. */
 export function markOf(item: WorkItemView): Mark | 'priority' {
-  const session = activeSession(item);
+  const kind = markKindOf(item);
 
-  switch (groupOf(item)) {
-    case 'needs':
-      if (session?.state === 'waiting') {
-        return { icon: 'question', title: 'Answer a question' };
-      }
-
-      if (item.status === 'awaiting-approval') {
-        return item.approvalSends ? { icon: 'send', title: 'Approve to send' } : { icon: 'eye', title: 'Review, then approve' };
-      }
-
-      return item.status === 'failed' ? { icon: 'error', title: 'Failed', tone: 'error' } : { icon: 'debug-pause', title: 'Blocked' };
-    case 'working':
-      if (item.status === 'setup') {
-        return { icon: 'tools', title: 'Setting up' };
-      }
-
-      return { icon: 'sync codicon-modifier-spin', title: 'Running' };
-    case 'unstarted':
-      return item.status === 'triaging' ? TRIAGING : item.status === 'queued' ? { icon: 'clock', title: 'Queued' } : 'priority';
-    case 'done':
-      return item.doneReason === 'operator'
-        ? { icon: 'account', title: DONE_WORDS.operator }
-        : item.doneReason === 'unassigned'
-          ? { icon: 'sign-out', title: DONE_WORDS.unassigned }
-          : { icon: 'check', title: DONE_WORDS.session };
-  }
+  return kind === null ? 'priority' : markFor(kind);
 }
 
 /** The status mark for line 3; Unstarted rows have none but Triaging and Queued, because their mark is the priority dot. */

@@ -1,4 +1,4 @@
-import type { Session, WorkItem } from './model.js';
+import type { DoneReason, Session, WorkItem } from './model.js';
 
 // Imports only types, so the panel webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
 
@@ -24,6 +24,49 @@ export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Sessio
 
   // A queued item waits for a slot or for a live session of its ticket (queueWaits).
   return item.status === 'queued' ? 'unstarted' : 'working';
+}
+
+/** What differs between rows of one group (PRD R27): what the operator must do, the working phase, or how the work ended. */
+export type Mark = 'question' | 'send' | 'review' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
+
+export const DONE_WORDS: Record<DoneReason, string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
+
+/** Each mark in words, for its tooltip. */
+export const MARK_TITLES: Record<Mark, string> = {
+  question: 'Answer a question',
+  send: 'Approve to send',
+  review: 'Review, then approve',
+  blocked: 'Blocked',
+  failed: 'Failed',
+  queued: 'Queued',
+  setup: 'Setting up',
+  running: 'Running',
+  triaging: 'Triaging',
+  'done-session': DONE_WORDS.session,
+  'done-operator': DONE_WORDS.operator,
+  'done-unassigned': DONE_WORDS.unassigned,
+};
+
+/** The work item's mark, or null for an Unstarted item that is neither triaged nor queued, which shows its priority instead. A snoozed item has its group's mark. */
+export function markOf(item: Pick<WorkItem, 'status' | 'doneReason'> & { sessions: Pick<Session, 'state'>[]; approvalSends: boolean }): Mark | null {
+  switch (groupOf(item)) {
+    case 'needs':
+      if (activeSession(item)?.state === 'waiting') {
+        return 'question';
+      }
+
+      if (item.status === 'awaiting-approval') {
+        return item.approvalSends ? 'send' : 'review';
+      }
+
+      return item.status === 'failed' ? 'failed' : 'blocked';
+    case 'working':
+      return item.status === 'setup' ? 'setup' : 'running';
+    case 'unstarted':
+      return item.status === 'triaging' ? 'triaging' : item.status === 'queued' ? 'queued' : null;
+    case 'done':
+      return `done-${item.doneReason ?? 'session'}`;
+  }
 }
 
 /** The playbook slot during triage: the source's namespace and `triage`, such as `dev:triage`, or `triage` without one. */
@@ -57,6 +100,8 @@ export interface Card {
   /** The playbook the panel shows, `<namespace>:triage` during triage, or null before triage chooses one. */
   playbook: string | null;
   group: Group;
+  /** The panel row's mark (PRD R27), or null when the row shows none. A hub older than this field sends none. */
+  mark?: Mark | null;
   snoozed: boolean;
   /** The URLs of the ticket's links (PRD R52), so a pull request page finds its ticket (PRD R69). A hub older than R69 sends none. */
   links?: string[];

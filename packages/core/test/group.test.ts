@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, groupOf, triageLabel, urlKey } from '../src/group.js';
-import type { SessionState, WorkItemStatus } from '../src/model.js';
+import { activeSession, groupOf, markOf, triageLabel, urlKey } from '../src/group.js';
+import type { DoneReason, SessionState, WorkItemStatus } from '../src/model.js';
 
 const item = (status: WorkItemStatus, ...states: SessionState[]) => ({ status, sessions: states.map((state) => ({ state })) });
 
@@ -14,6 +14,32 @@ describe('groupOf', () => {
     expect(groupOf(item('running', 'ended', 'waiting'))).toBe('needs');
     expect(groupOf(item('queued', 'waiting'))).toBe('needs');
     expect(['setup', 'running'].map((status) => groupOf(item(status as WorkItemStatus, 'ended', 'running')))).toEqual(['working', 'working']);
+  });
+});
+
+describe('markOf', () => {
+  const marked = (status: WorkItemStatus, states: SessionState[] = [], patch: { approvalSends?: boolean; doneReason?: DoneReason | null } = {}) =>
+    markOf({ ...item(status, ...states), approvalSends: false, doneReason: null, ...patch });
+
+  it('gives what the operator must do in Needs you, a question first (PRD R27)', () => {
+    expect(marked('awaiting-approval')).toBe('review');
+    expect(marked('awaiting-approval', [], { approvalSends: true })).toBe('send');
+    expect(marked('awaiting-approval', ['waiting'], { approvalSends: true })).toBe('question');
+    expect(marked('running', ['ended', 'waiting'])).toBe('question');
+    expect(marked('blocked')).toBe('blocked');
+    expect(marked('failed')).toBe('failed');
+  });
+
+  it('gives the phase in Working, Triaging or none in Unstarted, and how Done ended', () => {
+    expect(['setup', 'running'].map((status) => marked(status as WorkItemStatus, ['running']))).toEqual(['setup', 'running']);
+    expect(marked('queued')).toBe('queued');
+    expect(marked('queued', ['waiting'])).toBe('question');
+    expect(marked('triaging')).toBe('triaging');
+    expect(marked('unstarted')).toBeNull();
+    expect(marked('done', ['waiting'])).toBe('done-session');
+    expect(marked('done', [], { doneReason: 'session' })).toBe('done-session');
+    expect(marked('done', [], { doneReason: 'operator' })).toBe('done-operator');
+    expect(marked('done', [], { doneReason: 'unassigned' })).toBe('done-unassigned');
   });
 });
 

@@ -1,4 +1,4 @@
-import { groupOf, triageLabel } from '@switchboard/core';
+import { groupOf, markOf, triageLabel } from '@switchboard/core';
 import type { Card } from '@switchboard/core';
 import type { Snapshot } from './runtime.js';
 
@@ -25,7 +25,7 @@ export function cardsOf(snapshot: Snapshot): Card[] {
 
       const links = item.links.map((link) => link.target);
 
-      cards.set(ticket.url, { card: { url: ticket.url, playbook, group: groupOf(item), snoozed: ticket.snoozed, links }, open, id: item.id });
+      cards.set(ticket.url, { card: { url: ticket.url, playbook, group: groupOf(item), mark: markOf(item), snoozed: ticket.snoozed, links }, open, id: item.id });
     }
   }
 
@@ -35,7 +35,7 @@ export function cardsOf(snapshot: Snapshot): Card[] {
       const triaging = triage !== null && triage.endedAt === null;
       const playbook = triaging ? triageLabel(ticket.source, snapshot.namespaces) : (triage?.playbook ?? null);
 
-      cards.set(ticket.url, { card: { url: ticket.url, playbook, group: 'unstarted', snoozed: ticket.snoozed, links: links.map((link) => link.target) }, open: true, id: 0 });
+      cards.set(ticket.url, { card: { url: ticket.url, playbook, group: 'unstarted', mark: triaging ? 'triaging' : null, snoozed: ticket.snoozed, links: links.map((link) => link.target) }, open: true, id: 0 });
     }
   }
 

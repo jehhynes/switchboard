@@ -47,12 +47,12 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:review-pr', group: 'needs', snoozed: false, links: [] },
-      { url: issue(2), playbook: 'dev:qa-failure', group: 'needs', snoozed: false, links: [] },
-      { url: issue(3), playbook: 'dev:new-dev', group: 'working', snoozed: true, links: [] },
-      { url: issue(4), playbook: 'dev:triage', group: 'unstarted', snoozed: false, links: [] },
-      { url: issue(5), playbook: 'dev:other', group: 'done', snoozed: false, links: [] },
-      { url: issue(6), playbook: null, group: 'needs', snoozed: false, links: [] },
+      { url: issue(1), playbook: 'dev:review-pr', group: 'needs', mark: 'review', snoozed: false, links: [] },
+      { url: issue(2), playbook: 'dev:qa-failure', group: 'needs', mark: 'question', snoozed: false, links: [] },
+      { url: issue(3), playbook: 'dev:new-dev', group: 'working', mark: 'running', snoozed: true, links: [] },
+      { url: issue(4), playbook: 'dev:triage', group: 'unstarted', mark: 'triaging', snoozed: false, links: [] },
+      { url: issue(5), playbook: 'dev:other', group: 'done', mark: 'done-session', snoozed: false, links: [] },
+      { url: issue(6), playbook: null, group: 'needs', mark: 'failed', snoozed: false, links: [] },
     ]);
   });
 
@@ -74,8 +74,8 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:review-pr-followup', group: 'unstarted', snoozed: false, links: [] },
-      { url: issue(2), playbook: 'dev:new-dev', group: 'done', snoozed: false, links: [] },
+      { url: issue(1), playbook: 'dev:review-pr-followup', group: 'unstarted', mark: null, snoozed: false, links: [] },
+      { url: issue(2), playbook: 'dev:new-dev', group: 'done', mark: 'done-session', snoozed: false, links: [] },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe('cardsOf', () => {
       ),
     );
 
-    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'working', snoozed: false, links: [] }]);
+    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'working', mark: 'running', snoozed: false, links: [] }]);
   });
 
   it('shows a pool ticket as Unstarted with its triage\'s playbook, over its done work items', () => {
@@ -112,10 +112,10 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: 'https://desk.example.test/1', playbook: 'support:case', group: 'unstarted', snoozed: true, links: [] },
-      { url: 'https://desk.example.test/2', playbook: 'support:triage', group: 'unstarted', snoozed: false, links: [] },
-      { url: 'https://desk.example.test/3', playbook: null, group: 'unstarted', snoozed: false, links: [] },
-      { url: 'https://desk.example.test/4', playbook: null, group: 'unstarted', snoozed: true, links: [] },
+      { url: 'https://desk.example.test/1', playbook: 'support:case', group: 'unstarted', mark: null, snoozed: true, links: [] },
+      { url: 'https://desk.example.test/2', playbook: 'support:triage', group: 'unstarted', mark: 'triaging', snoozed: false, links: [] },
+      { url: 'https://desk.example.test/3', playbook: null, group: 'unstarted', mark: null, snoozed: false, links: [] },
+      { url: 'https://desk.example.test/4', playbook: null, group: 'unstarted', mark: null, snoozed: true, links: [] },
     ]);
   });
 
@@ -133,8 +133,8 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:develop', group: 'working', snoozed: false, links: ['https://github.com/o/r/pull/7', 'https://example.test/doc'] },
-      { url: 'https://desk.example.test/2', playbook: 'support:case', group: 'unstarted', snoozed: false, links: ['https://github.com/o/r/issues/9'] },
+      { url: issue(1), playbook: 'dev:develop', group: 'working', mark: 'running', snoozed: false, links: ['https://github.com/o/r/pull/7', 'https://example.test/doc'] },
+      { url: 'https://desk.example.test/2', playbook: 'support:case', group: 'unstarted', mark: null, snoozed: false, links: ['https://github.com/o/r/issues/9'] },
     ]);
   });
 });

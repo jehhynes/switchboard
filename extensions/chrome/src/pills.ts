@@ -1,6 +1,8 @@
+import { MARK_TITLES } from '@switchboard/core/group';
 import type { Card, Group } from '@switchboard/core/group';
 import { REFRESH_MS, issueKey } from './board.js';
 import { BROWSER_PORT } from './hub.js';
+import { MARK_PATHS } from './marks.js';
 
 export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
 
@@ -14,7 +16,12 @@ function isCard(value: unknown): value is Card {
 
   const card = value as Record<string, unknown>;
 
-  return typeof card['url'] === 'string' && (card['playbook'] === null || typeof card['playbook'] === 'string') && typeof card['group'] === 'string' && Object.hasOwn(GROUPS, card['group']) && typeof card['snoozed'] === 'boolean';
+  return typeof card['url'] === 'string' && (card['playbook'] === null || typeof card['playbook'] === 'string') && typeof card['group'] === 'string' && Object.hasOwn(GROUPS, card['group']) && typeof card['snoozed'] === 'boolean' && isMark(card['mark']);
+}
+
+// A hub older than the mark sends none.
+function isMark(mark: unknown): boolean {
+  return mark === undefined || mark === null || (typeof mark === 'string' && Object.hasOwn(MARK_TITLES, mark));
 }
 
 /** The hub's cards, or null when the hub does not answer or answers with something else, such as a hub older than PRD R67. */
@@ -55,17 +62,30 @@ function pill(doc: Document, card: Card): HTMLElement {
   element.tabIndex = 0;
   element.setAttribute('role', 'link');
   element.dataset['switchboardGroup'] = card.snoozed ? 'snoozed' : card.group;
-  element.title = `Switchboard: ${card.snoozed ? 'Snoozed' : GROUPS[card.group]}. Click to open in VS Code.`;
+  element.title = `Switchboard: ${card.snoozed ? 'Snoozed' : GROUPS[card.group]}${card.mark == null ? '' : ` · ${MARK_TITLES[card.mark]}`}. Click to open in VS Code.`;
   namespace.className = 'switchboard-namespace';
   namespace.textContent = label.slice(0, colon + 1);
+
+  if (card.mark != null) {
+    const mark = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+
+    mark.setAttribute('class', 'switchboard-mark');
+    mark.setAttribute('viewBox', '0 0 16 16');
+    mark.setAttribute('fill', 'currentColor');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.dataset['switchboardMark'] = card.mark;
+    mark.innerHTML = MARK_PATHS[card.mark];
+    element.append(mark);
+  }
+
   element.append(namespace, label.slice(colon + 1));
 
   return element;
 }
 
 /**
- * Puts a pill after the issue reference in each loaded card's header, naming the playbook Switchboard chose and coloured
- * by the panel group (PRD R67). A pill that matches its card is left alone, so a pass that changes nothing makes no mutation.
+ * Puts a pill after the issue reference in each loaded card's header, with the panel row's mark and the playbook Switchboard
+ * chose, coloured by the panel group (PRD R67). A pill that matches its card is left alone, so a pass that changes nothing makes no mutation.
  */
 export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): void {
   for (const element of root.querySelectorAll<HTMLElement>('[data-board-column] [data-board-card-id]')) {

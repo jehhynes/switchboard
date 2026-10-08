@@ -34,6 +34,37 @@
   cursor: pointer;
 }
 
+.switchboard-pill .switchboard-mark {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+.switchboard-pill .switchboard-mark[data-switchboard-mark="failed"] {
+  color: var(--fgColor-danger, #d1242f);
+}
+
+.switchboard-pill .switchboard-mark[data-switchboard-mark="running"],
+.switchboard-pill .switchboard-mark[data-switchboard-mark="triaging"] {
+  animation-name: switchboard-spin;
+  animation-duration: 1.5s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switchboard-pill .switchboard-mark {
+    animation-name: none !important;
+  }
+}
+
+@keyframes switchboard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .switchboard-pill .switchboard-namespace {
   color: var(--fgColor-muted, #59636e);
 }

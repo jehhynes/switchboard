@@ -43,6 +43,14 @@ describe('readCards', () => {
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, playbook: 1 }] })))).toBeNull();
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, snoozed: 'no' }] })))).toBeNull();
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, url: 2 }] })))).toBeNull();
+    expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, mark: 'toString' }] })))).toBeNull();
+    expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, mark: 'waiting' }] })))).toBeNull();
+  });
+
+  it('accepts a mark, a null mark and a card without one', async () => {
+    const cards = [{ ...needs, mark: 'question' }, { ...working, mark: null }, needs];
+
+    expect(await readCards(reply(200, JSON.stringify({ cards })))).toEqual(cards);
   });
 });
 
@@ -80,6 +88,53 @@ describe('applyPills', () => {
     document.head.innerHTML = '';
   });
 
+  it('puts the panel row\'s mark before the playbook and names it in the tooltip', () => {
+    applyPills(document, cardsByIssue([
+      { ...needs, mark: 'question' },
+      { ...working, group: 'unstarted', mark: 'queued' },
+      { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:gc-plan', group: 'needs', mark: 'blocked', snoozed: true },
+    ]));
+
+    const marks = [...document.querySelectorAll('.switchboard-pill')].map((pill) => {
+      const svg = pill.firstElementChild!;
+
+      return [svg.namespaceURI, svg.getAttribute('class'), svg.getAttribute('data-switchboard-mark'), svg.querySelectorAll('path').length, pill.textContent, (pill as HTMLElement).title];
+    });
+
+    expect(marks).toEqual([
+      ['http://www.w3.org/2000/svg', 'switchboard-mark', 'question', 3, 'dev:review-pr', 'Switchboard: Needs you · Answer a question. Click to open in VS Code.'],
+      ['http://www.w3.org/2000/svg', 'switchboard-mark', 'queued', 1, 'dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in VS Code.'],
+      ['http://www.w3.org/2000/svg', 'switchboard-mark', 'blocked', 1, 'dev:gc-plan', 'Switchboard: Snoozed · Blocked. Click to open in VS Code.'],
+    ]);
+  });
+
+  it('shows no mark for a null mark or a hub that sends none', () => {
+    applyPills(document, cardsByIssue([{ ...needs, mark: null }, working]));
+
+    expect(document.querySelectorAll('.switchboard-mark')).toHaveLength(0);
+    expect(pills().map((pill) => pill.title)).toEqual(['Switchboard: Needs you. Click to open in VS Code.', 'Switchboard: Working. Click to open in VS Code.']);
+  });
+
+  it('colours a Failed mark with content.css and spins Running and Triaging', () => {
+    document.head.innerHTML = `<style>${readFileSync(join(import.meta.dirname, '..', 'src', 'content.css'), 'utf8')}</style>`;
+    applyPills(document, cardsByIssue([{ ...needs, mark: 'failed' }, { ...working, mark: 'running' }, { url: 'https://github.com/github/roadmap/issues/1153', playbook: null, group: 'unstarted', mark: 'triaging', snoozed: false }]));
+
+    const style = (id: string) => getComputedStyle(card(id).querySelector('.switchboard-mark')!);
+
+    expect(style('88050488').color).toBe('var(--fgColor-danger, #d1242f)');
+    expect(style('88050488').animationName).toBe('none');
+    expect(style('94970044').animationName).toBe('switchboard-spin');
+    expect(style('126571572').animationName).toBe('switchboard-spin');
+    document.head.innerHTML = '';
+  });
+
+  it('replaces a pill whose mark changed', () => {
+    applyPills(document, cardsByIssue([{ ...working, mark: 'setup' }]));
+    applyPills(document, cardsByIssue([{ ...working, mark: 'running' }]));
+
+    expect([...document.querySelectorAll('.switchboard-mark')].map((mark) => mark.getAttribute('data-switchboard-mark'))).toEqual(['running']);
+  });
+
   it('matches the title link, not an issue linked in the card fields', () => {
     card('94970044').querySelector('ul[aria-label="Fields"]')!.insertAdjacentHTML('beforeend', '<li><a href="https://github.com/github/roadmap/issues/1035">Parent</a></li>');
     applyPills(document, cardsByIssue([needs]));
@@ -100,7 +155,7 @@ describe('applyPills', () => {
   });
 
   it('makes no mutation when applied again unchanged', async () => {
-    const cards = cardsByIssue([needs, working]);
+    const cards = cardsByIssue([{ ...needs, mark: 'question' }, working]);
 
     applyPills(document, cards);
 
