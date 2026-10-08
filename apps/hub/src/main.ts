@@ -17,7 +17,6 @@ const REPORT_USAGE = `Usage:
   report approval <sessionId> --prompt <prompt> [--summary <text>] [--report <path>]
   report link <sessionId> --label <text> --target <http(s) url>
   report paste <sessionId> --label <text> --file <absolute path>
-  report task <sessionId> --prompt <prompt> [--repo <repo root>] [--title <text>]
 `;
 
 function flag(argv: readonly string[], name: string): string | null {

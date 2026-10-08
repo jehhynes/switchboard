@@ -21,11 +21,6 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
       `- ${REPORT} paste ${id} --label <text> --file <absolute path>, for each drafted text the operator pastes into the ticket by hand, such as --label "Customer reply".`,
       `  - The file holds only the text to paste. A later paste with the same label replaces the earlier one.`,
     ],
-    task: [
-      `- ${REPORT} task ${id} --prompt <prompt> --title <text> --repo <repo root>, for each separate, actionable follow-up outside this work; the operator starts it later.`,
-      `  - The prompt runs in a new session with no memory of this one, so it names the files and the context it needs.`,
-      `  - Leave out --title to use the prompt's first line, and --repo to use this work's repo.`,
-    ],
   };
   const finish = reports.includes('done') || reports.includes('approval') ? [] : ['', 'When the work is finished, end your turn; the operator reviews it.'];
 

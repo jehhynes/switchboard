@@ -60,6 +60,10 @@ describe('renderTaskPrompt and sessionPrompt', () => {
     expect(approval).not.toContain('worktree');
     expect(approval).not.toContain('end your turn; the operator reviews it');
   });
+
+  it('does not list the task report a session may send, so only the operator starts one (PRD R68)', () => {
+    expect(sessionPrompt('Answer it.', 's-4', 'R', ['stage', 'link', 'task'])).toBe(sessionPrompt('Answer it.', 's-4', 'R', ['stage', 'link']));
+  });
 });
 
 describe('templateError', () => {

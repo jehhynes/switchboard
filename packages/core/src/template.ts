@@ -75,8 +75,8 @@ export function triagePrompt(template: string, choices: readonly PlaybookChoice[
   return PLAYBOOKS.test(template) ? render(template, { playbooks: list }) : { text: `${template.trimEnd()}\n\nChoose one playbook:\n${list}` };
 }
 
-/** Each report's lines in the contract, in contract order. */
-const REPORT_LINES: Record<ReportKind, string> = {
+/** Each report's lines in the contract, in contract order. The task report is accepted but not listed, so only the operator starts one (PRD R68). */
+const REPORT_LINES: Record<Exclude<ReportKind, 'task'>, string> = {
   stage: `- {{report}} stage {{session.id}} <stage>, when you start a new phase of the work.
   - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
   worktree: '- {{report}} worktree {{session.id}} <path>, when you create a worktree.',
@@ -89,9 +89,6 @@ const REPORT_LINES: Record<ReportKind, string> = {
   playbook: '- {{report}} playbook {{session.id}} <name>, when you hand the work to the skill of another playbook, such as dev:review-pr.',
   paste: `- {{report}} paste {{session.id}} --label <text> --file <absolute path>, for each drafted text the operator pastes into the ticket by hand, such as --label "Customer reply".
   - The file holds only the text to paste. A later paste with the same label replaces the earlier one.`,
-  task: `- {{report}} task {{session.id}} --prompt <prompt> --title <text> --repo <repo root>, for each separate, actionable follow-up outside this work; the operator starts it later.
-  - The prompt runs in a new session with no memory of this one, so it names the files and the context it needs.
-  - Leave out --title to use the prompt's first line, and --repo to use this work's repo.`,
 };
 
 /**
@@ -99,7 +96,7 @@ const REPORT_LINES: Record<ReportKind, string> = {
  * session may send (PRD R23).
  */
 export function reportContract(reports: readonly ReportKind[]): string {
-  const lines = REPORT_KINDS.filter((kind) => reports.includes(kind)).map((kind) => REPORT_LINES[kind]);
+  const lines = REPORT_KINDS.filter((kind): kind is Exclude<ReportKind, 'task'> => kind !== 'task' && reports.includes(kind)).map((kind) => REPORT_LINES[kind]);
   const finish = reports.includes('done') || reports.includes('approval') ? '' : '\n\nWhen the work is finished, end your turn; the operator reviews it.';
 
   return `
