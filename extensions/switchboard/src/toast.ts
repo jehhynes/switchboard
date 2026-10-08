@@ -8,16 +8,21 @@ function needsYou(item: WorkItemView): boolean {
 
 /**
  * The work items in Needs you in `next` that were not in `previous` (PRD R65). None for a connection's first snapshot (`previous`
- * null), so a reconnect does not toast what already needed the operator. A snoozed item counts only once it wakes.
+ * null), so a reconnect does not toast what already needed the operator. A snoozed item counts only once it wakes. An item that
+ * held an approval while its session ran again does not count, because the operator was working in that session.
  */
 export function newlyNeeding(previous: Snapshot | null, next: Snapshot): WorkItemView[] {
   if (previous === null) {
     return [];
   }
 
-  const before = new Set(previous.workItems.filter(needsYou).map((item) => item.id));
+  const before = new Map(previous.workItems.map((item) => [item.id, item]));
 
-  return next.workItems.filter((item) => needsYou(item) && !before.has(item.id));
+  return next.workItems.filter((item) => {
+    const was = before.get(item.id);
+
+    return needsYou(item) && (was === undefined || (!needsYou(was) && (was.ticket.snoozed || !was.approvalHeld)));
+  });
 }
 
 /** Tracks one window's hub connection: each snapshot returns the items to toast (PRD R65). */

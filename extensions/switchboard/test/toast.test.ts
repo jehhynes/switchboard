@@ -103,6 +103,21 @@ describe('newlyNeeding', () => {
     expect(ids(newlyNeeding(left, back))).toEqual([1]);
   });
 
+  it('skips an item that held an approval while its resumed session ran, unless its ticket wakes from a snooze', () => {
+    const held = { approvalHeld: true, approvalPrompt: '/publish' };
+    const running = snapshot([item(1, 'running', held), item(2, 'running', held), item(3, 'running', held, true), item(4, 'running', held)]);
+    const back = snapshot([
+      item(1, 'awaiting-approval', { approvalPrompt: '/publish' }),
+      item(4, 'blocked', { approvalPrompt: '/publish' }),
+      item(2, 'running', { ...held, sessions: [session({ state: 'waiting' })] }),
+      item(3, 'running', { ...held, sessions: [session({ state: 'waiting' })] }),
+    ]);
+
+    expect(ids(newlyNeeding(running, back))).toEqual([3]);
+    // Without a held approval, the same return notifies.
+    expect(ids(newlyNeeding(snapshot([item(1, 'running')]), snapshot([item(1, 'awaiting-approval', { approvalPrompt: '/publish' })])))).toEqual([1]);
+  });
+
   it('skips a snoozed item until it wakes', () => {
     const before = snapshot([item(1, 'running')]);
     const snoozed = snapshot([item(1, 'blocked', {}, true)]);
