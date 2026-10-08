@@ -170,7 +170,7 @@ function openAttribute(action: Record<string, unknown> | null, editor: Record<st
  * Snooze carries no wake time: the extension asks for one before it reaches the hub.
  */
 function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
-  const controls: Control[] = [{ label: 'Snooze', icon: 'bell-slash', message: { type: 'action', action: { type: 'snooze', ticketId: ticket.id } } }];
+  const controls: Control[] = [{ label: 'Snooze', icon: 'clockface', message: { type: 'action', action: { type: 'snooze', ticketId: ticket.id } } }];
 
   if (ticket.snoozed) {
     controls.push({ label: 'Restore', icon: 'debug-restart', message: { type: 'action', action: { type: 'restore', ticketId: ticket.id } } });
@@ -182,7 +182,7 @@ function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
 /** The wake time on a snoozed row's line 3; nothing for an indefinite snooze, which the group already says. */
 function wake(ticket: { snoozed: boolean; snoozedUntil: number | null }): string {
   return ticket.snoozed && ticket.snoozedUntil !== null
-    ? `<span class="wake" title="Wakes ${escape(wakeText(ticket.snoozedUntil))}"><span class="codicon codicon-clock"></span> ${escape(wakeText(ticket.snoozedUntil))}</span>`
+    ? `<span class="wake" title="Wakes ${escape(wakeText(ticket.snoozedUntil))}"><span class="codicon codicon-clockface"></span> ${escape(wakeText(ticket.snoozedUntil))}</span>`
     : '';
 }
 
@@ -712,7 +712,7 @@ function selectedClass(key: string, ui: PanelUi): string {
 /** Needs you, Working and Unstarted start open; Done and Snoozed start closed. */
 const OPEN_BY_DEFAULT = new Set(['needs', 'working', 'unstarted']);
 
-const GROUP_ICONS: Record<string, string> = { needs: 'bell', working: 'run-all', unstarted: 'inbox', done: 'check-all', snoozed: 'bell-slash' };
+const GROUP_ICONS: Record<string, string> = { needs: 'bell', working: 'play-circle', unstarted: 'inbox', done: 'pass', snoozed: 'clockface' };
 
 function group(key: string, title: string, count: number, body: string, ui: PanelUi): string {
   const open = ui.groups.get(key) ?? OPEN_BY_DEFAULT.has(key);

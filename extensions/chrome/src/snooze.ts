@@ -46,11 +46,11 @@ export function snoozableKeys(cards: readonly Card[] | null): Set<string> {
   return new Set((cards ?? []).flatMap((card) => (card.group === 'done' ? [] : (issueKey(card.url) ?? []))));
 }
 
-const BELL = 'switchboard-snooze-bell';
+const BUTTON = 'switchboard-snooze-button';
 const MENU = 'switchboard-snooze-menu';
-// The codicon bell-slash (CC BY 4.0), as the panel's Snooze control shows it.
-const BELL_SLASH =
-  '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.23901 3.118L4.53201 2.411C5.43201 1.541 6.65201 1 7.99901 1C10.756 1 12.999 3.243 12.999 6V9.901L13.65 11.529L11.999 9.878V5.999C11.999 3.793 10.205 1.999 7.99901 1.999C6.92701 1.999 5.95701 2.428 5.23801 3.117L5.23901 3.118ZM14.854 14.854C14.756 14.952 14.628 15 14.5 15C14.372 15 14.244 14.951 14.146 14.854L12.292 13H9.99901C9.99901 14.108 9.10701 15 7.99901 15C6.89101 15 5.99901 14.108 5.99901 13H2.49901C2.33301 13 2.17801 12.918 2.08501 12.78C1.99201 12.643 1.97301 12.468 2.03501 12.314L2.99901 9.901V6C2.99901 5.325 3.14601 4.688 3.39501 4.103L1.14601 1.854C0.951006 1.659 0.951006 1.342 1.14601 1.147C1.34101 0.952 1.65801 0.952 1.85301 1.147L14.853 14.147C15.048 14.342 15.048 14.659 14.853 14.854H14.854ZM9.00001 13H7.00001C7.00001 13.556 7.44401 14 8.00001 14C8.55601 14 9.00001 13.556 9.00001 13ZM11.293 12L4.16301 4.87C4.05701 5.228 4.00001 5.607 4.00001 6V9.998C4.00001 10.062 3.98801 10.125 3.96401 10.184L3.23801 12.001H11.293V12Z"/></svg>';
+// The codicon clockface (CC BY 4.0), as the panel's Snooze control shows it.
+const CLOCKFACE =
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 8C2 4.68629 4.68629 2 8 2C11.3137 2 14 4.68629 14 8C14 11.3137 11.3137 14 8 14C4.68629 14 2 11.3137 2 8ZM8 1C4.13401 1 1 4.13401 1 8C1 11.866 4.13401 15 8 15C11.866 15 15 11.866 15 8C15 4.13401 11.866 1 8 1ZM8 4.5C8 4.22386 7.77614 4 7.5 4C7.22386 4 7 4.22386 7 4.5V8.5C7 8.77614 7.22386 9 7.5 9H10.5C10.7761 9 11 8.77614 11 8.5C11 8.22386 10.7761 8 10.5 8H8V4.5Z"/></svg>';
 
 /** The issue URL of a board card's title link, or null for a card that is not a GitHub issue or has not rendered. */
 function cardIssue(card: Element): string | null {
@@ -64,7 +64,7 @@ export interface SnoozeControls {
 }
 
 /**
- * Shows a bell-slash button over a hovered board card of a GitHub issue that `known` accepts; it opens a menu of the R49 snooze choices and
+ * Shows a clock button over a hovered board card of a GitHub issue that `known` accepts; it opens a menu of the R49 snooze choices and
  * sends the chosen one. The button and menu live in `body`, outside GitHub's cards, so GitHub's renders and card clicks
  * do not reach them. `onSnoozed` runs after the hub accepts a snooze, so the board can read the snoozed tickets again.
  */
@@ -75,16 +75,16 @@ export function watchSnoozeControls(
   now: () => Date = () => new Date(),
   known: (url: string) => boolean = () => true,
 ): SnoozeControls {
-  const bell = doc.createElement('button');
+  const snoozeButton = doc.createElement('button');
   let card: { element: Element; url: string } | null = null;
   let menu: HTMLElement | null = null;
 
-  bell.type = 'button';
-  bell.className = BELL;
-  bell.title = 'Snooze in Switchboard';
-  bell.setAttribute('aria-label', 'Snooze in Switchboard');
-  bell.innerHTML = BELL_SLASH;
-  bell.hidden = true;
+  snoozeButton.type = 'button';
+  snoozeButton.className = BUTTON;
+  snoozeButton.title = 'Snooze in Switchboard';
+  snoozeButton.setAttribute('aria-label', 'Snooze in Switchboard');
+  snoozeButton.innerHTML = CLOCKFACE;
+  snoozeButton.hidden = true;
 
   const closeMenu = (): void => {
     menu?.remove();
@@ -93,7 +93,7 @@ export function watchSnoozeControls(
 
   const hide = (): void => {
     closeMenu();
-    bell.hidden = true;
+    snoozeButton.hidden = true;
     card = null;
   };
 
@@ -105,7 +105,7 @@ export function watchSnoozeControls(
     const { url } = card;
     const list = doc.createElement('div');
     const status = doc.createElement('div');
-    const rect = bell.getBoundingClientRect();
+    const rect = snoozeButton.getBoundingClientRect();
 
     list.className = MENU;
     list.setAttribute('role', 'menu');
@@ -158,7 +158,7 @@ export function watchSnoozeControls(
     doc.body.append(list);
     menu = list;
 
-    // Below the bell, or above it when the viewport has no room below, as for a card near the bottom.
+    // Below the snoozeButton, or above it when the viewport has no room below, as for a card near the bottom.
     const height = list.offsetHeight;
     const viewport = doc.defaultView?.innerHeight ?? Infinity;
     const top = rect.bottom + 4 + height <= viewport ? rect.bottom + 4 : rect.top - 4 - height;
@@ -166,7 +166,7 @@ export function watchSnoozeControls(
     list.style.top = `${Math.max(8, top)}px`;
   };
 
-  bell.addEventListener('click', () => (menu === null ? openMenu() : closeMenu()));
+  snoozeButton.addEventListener('click', () => (menu === null ? openMenu() : closeMenu()));
 
   const onOver = (event: Event): void => {
     const target = event.target as Element | null;
@@ -176,7 +176,7 @@ export function watchSnoozeControls(
       hide();
     }
 
-    if (menu !== null || target === null || bell.contains(target)) {
+    if (menu !== null || target === null || snoozeButton.contains(target)) {
       return;
     }
 
@@ -193,20 +193,20 @@ export function watchSnoozeControls(
       const rect = element.getBoundingClientRect();
 
       card = { element, url };
-      bell.style.top = `${rect.bottom - 30}px`;
-      bell.style.left = `${rect.right - 30}px`;
-      bell.hidden = false;
+      snoozeButton.style.top = `${rect.bottom - 30}px`;
+      snoozeButton.style.left = `${rect.right - 30}px`;
+      snoozeButton.hidden = false;
 
       // Appended on first use, and again after GitHub replaces the body on navigation.
-      if (!bell.isConnected) {
-        doc.body.append(bell);
+      if (!snoozeButton.isConnected) {
+        doc.body.append(snoozeButton);
       }
     }
   };
   const onDown = (event: Event): void => {
     const target = event.target as Node | null;
 
-    if (menu !== null && target !== null && !menu.contains(target) && !bell.contains(target)) {
+    if (menu !== null && target !== null && !menu.contains(target) && !snoozeButton.contains(target)) {
       hide();
     }
   };
@@ -225,7 +225,7 @@ export function watchSnoozeControls(
   return {
     stop: () => {
       hide();
-      bell.remove();
+      snoozeButton.remove();
       doc.removeEventListener('mouseover', onOver);
       doc.removeEventListener('mousedown', onDown, true);
       doc.removeEventListener('keydown', onKey);

@@ -72,7 +72,7 @@ describe('watchSnoozeControls', () => {
   });
 
   const card = (id: string) => document.querySelector(`[data-board-card-id="${id}"]`)!;
-  const bell = () => document.querySelector<HTMLButtonElement>('.switchboard-snooze-bell');
+  const snoozeButton = () => document.querySelector<HTMLButtonElement>('.switchboard-snooze-button');
   const menu = () => document.querySelector<HTMLElement>('.switchboard-snooze-menu');
   const items = () => [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
   const hover = (target: Element) => target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
@@ -86,39 +86,39 @@ describe('watchSnoozeControls', () => {
     return { send, onSnoozed };
   }
 
-  it('shows the bell over a hovered issue card, outside GitHub\'s card, and hides it off the cards', () => {
+  it('shows the snooze button over a hovered issue card, outside GitHub\'s card, and hides it off the cards', () => {
     start(async () => ({ done: true }));
-    expect(bell()).toBeNull();
+    expect(snoozeButton()).toBeNull();
 
     hover(card('94970044').querySelector('h3')!);
-    expect(bell()?.hidden).toBe(false);
-    expect(bell()?.title).toBe('Snooze in Switchboard');
-    expect(bell()?.parentElement).toBe(document.body);
-    expect(card('94970044').querySelector('.switchboard-snooze-bell')).toBeNull();
+    expect(snoozeButton()?.hidden).toBe(false);
+    expect(snoozeButton()?.title).toBe('Snooze in Switchboard');
+    expect(snoozeButton()?.parentElement).toBe(document.body);
+    expect(card('94970044').querySelector('.switchboard-snooze-button')).toBeNull();
 
-    hover(bell()!);
-    expect(bell()?.hidden).toBe(false);
+    hover(snoozeButton()!);
+    expect(snoozeButton()?.hidden).toBe(false);
 
     hover(document.querySelector('[data-board-column]')!);
-    expect(bell()?.hidden).toBe(true);
+    expect(snoozeButton()?.hidden).toBe(true);
   });
 
-  it('shows no bell on a card whose title is not a GitHub issue', () => {
+  it('shows no snooze button on a card whose title is not a GitHub issue', () => {
     start(async () => ({ done: true }));
     card('94970044').querySelector('h3')!.closest('a')!.setAttribute('href', 'https://github.com/github/roadmap/pull/1090');
 
     hover(card('94970044'));
-    expect(bell()).toBeNull();
+    expect(snoozeButton()).toBeNull();
   });
 
-  it('shows no bell on a card the hub does not list', () => {
+  it('shows no snooze button on a card the hub does not list', () => {
     controls = watchSnoozeControls(document, async () => ({ done: true }), () => {}, () => MONDAY, (url) => url === ISSUE);
 
     hover(card('88050488'));
-    expect(bell()).toBeNull();
+    expect(snoozeButton()).toBeNull();
 
     hover(card('94970044'));
-    expect(bell()?.hidden).toBe(false);
+    expect(snoozeButton()?.hidden).toBe(false);
   });
 
   it('takes the snoozable cards from the pills\' accepted read, not from a read a later one overtook', async () => {
@@ -137,9 +137,9 @@ describe('watchSnoozeControls', () => {
 
     expect(card('88050488').querySelector('.switchboard-pill')).toBeNull();
     hover(card('88050488'));
-    expect(bell()).toBeNull();
+    expect(snoozeButton()).toBeNull();
     hover(card('94970044'));
-    expect(bell()?.hidden).toBe(false);
+    expect(snoozeButton()?.hidden).toBe(false);
     pills.stop();
   });
 
@@ -147,7 +147,7 @@ describe('watchSnoozeControls', () => {
     const { send, onSnoozed } = start(async () => ({ done: true }));
 
     hover(card('94970044'));
-    bell()!.click();
+    snoozeButton()!.click();
 
     expect(items().map((item) => item.textContent)).toEqual([
       'TomorrowTue, Oct 6, 6:00 AM',
@@ -165,14 +165,14 @@ describe('watchSnoozeControls', () => {
 
     await vi.waitFor(() => expect(onSnoozed).toHaveBeenCalledTimes(1));
     expect(menu()).toBeNull();
-    expect(bell()?.hidden).toBe(true);
+    expect(snoozeButton()?.hidden).toBe(true);
   });
 
   it('sends null for Indefinitely', async () => {
     const { send } = start(async () => ({ done: true }));
 
     hover(card('88050488'));
-    bell()!.click();
+    snoozeButton()!.click();
     items()[6]!.click();
 
     expect(send).toHaveBeenCalledExactlyOnceWith('https://github.com/github/roadmap/issues/1035', null);
@@ -182,7 +182,7 @@ describe('watchSnoozeControls', () => {
     const { onSnoozed } = start(async () => ({ error: 'Switchboard has no ticket for https://github.com/github/roadmap/issues/1090.' }));
 
     hover(card('94970044'));
-    bell()!.click();
+    snoozeButton()!.click();
     items()[0]!.click();
 
     await vi.waitFor(() => expect(menu()?.querySelector('[role="status"]')?.textContent).toBe('Switchboard has no ticket for https://github.com/github/roadmap/issues/1090.'));
@@ -190,43 +190,43 @@ describe('watchSnoozeControls', () => {
     expect(onSnoozed).not.toHaveBeenCalled();
   });
 
-  it('closes the menu on a second bell click, Escape, a click outside, a scroll, and keeps it while hovering other cards', () => {
+  it('closes the menu on a second button click, Escape, a click outside, a scroll, and keeps it while hovering other cards', () => {
     start(async () => ({ done: true }));
     hover(card('94970044'));
 
-    bell()!.click();
-    bell()!.click();
+    snoozeButton()!.click();
+    snoozeButton()!.click();
     expect(menu()).toBeNull();
 
-    bell()!.click();
+    snoozeButton()!.click();
     hover(card('88050488'));
     expect(menu()).not.toBeNull();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(menu()).toBeNull();
 
     hover(card('94970044'));
-    bell()!.click();
+    snoozeButton()!.click();
     items()[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(menu()).not.toBeNull();
     document.querySelector('[data-board-column]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(menu()).toBeNull();
 
     hover(card('94970044'));
-    bell()!.click();
+    snoozeButton()!.click();
     document.querySelector('[data-dnd-drop-type="card"]')!.dispatchEvent(new Event('scroll'));
     expect(menu()).toBeNull();
-    expect(bell()?.hidden).toBe(true);
+    expect(snoozeButton()?.hidden).toBe(true);
   });
 
-  it('opens the menu below the bell, or above it when the viewport has no room below', () => {
+  it('opens the menu below the button, or above it when the viewport has no room below', () => {
     start(async () => ({ done: true }));
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(230);
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(720);
 
     const at = (top: number) => {
       hover(card('94970044'));
-      bell()!.getBoundingClientRect = () => ({ top, bottom: top + 24, left: 300, right: 324 }) as DOMRect;
-      bell()!.click();
+      snoozeButton()!.getBoundingClientRect = () => ({ top, bottom: top + 24, left: 300, right: 324 }) as DOMRect;
+      snoozeButton()!.click();
 
       const style = { top: menu()!.style.top, left: menu()!.style.left };
 
@@ -240,31 +240,31 @@ describe('watchSnoozeControls', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows the bell on a new card after GitHub replaces the body while the menu is open', () => {
+  it('shows the snooze button on a new card after GitHub replaces the body while the menu is open', () => {
     start(async () => ({ done: true }));
     hover(card('94970044'));
-    bell()!.click();
+    snoozeButton()!.click();
 
     document.body.innerHTML = COLUMN;
     hover(card('88050488'));
 
     expect(menu()).toBeNull();
-    expect(bell()?.hidden).toBe(false);
-    expect(bell()?.isConnected).toBe(true);
+    expect(snoozeButton()?.hidden).toBe(false);
+    expect(snoozeButton()?.isConnected).toBe(true);
   });
 
-  it('appends the bell again after the page body is replaced, and removes it when stopped', () => {
+  it('appends the button again after the page body is replaced, and removes it when stopped', () => {
     start(async () => ({ done: true }));
     hover(card('94970044'));
 
     document.body.innerHTML = COLUMN;
     hover(card('94970044'));
-    expect(document.querySelectorAll('.switchboard-snooze-bell')).toHaveLength(1);
+    expect(document.querySelectorAll('.switchboard-snooze-button')).toHaveLength(1);
 
     controls!.stop();
     controls = null;
-    expect(bell()).toBeNull();
+    expect(snoozeButton()).toBeNull();
     hover(card('94970044'));
-    expect(bell()).toBeNull();
+    expect(snoozeButton()).toBeNull();
   });
 });

@@ -692,17 +692,17 @@ describe('renderPanel', () => {
     expect(headings(root)).toEqual(['Needs you 1', 'Working 0', 'Unstarted 0', 'Done 0', 'Snoozed 2']);
     expect([...root.querySelectorAll('details.group > summary > .codicon')].map((icon) => icon.className)).toEqual([
       'codicon codicon-bell',
-      'codicon codicon-run-all',
+      'codicon codicon-play-circle',
       'codicon codicon-inbox',
-      'codicon codicon-check-all',
-      'codicon codicon-bell-slash',
+      'codicon codicon-pass',
+      'codicon codicon-clockface',
     ]);
     expect(snoozed.open).toBe(false);
     expect([...snoozed.querySelectorAll('.title')].map((t) => t.textContent)).toEqual(['Issue <2>', 'Cold case']);
     expect(snoozed.querySelectorAll('.priority')).toHaveLength(0);
     expect(snoozed.querySelector('.mark.codicon')).toBeNull();
     expect([...snoozed.querySelectorAll('.wake')].map((w) => [w.textContent?.trim(), w.getAttribute('title')])).toEqual([['Mon, Oct 12, 6:00 AM', 'Wakes Mon, Oct 12, 6:00 AM']]);
-    expect(root.querySelector('[data-item="2"] .wake .codicon-clock')).not.toBeNull();
+    expect(root.querySelector('[data-item="2"] .wake .codicon-clockface')).not.toBeNull();
     expect(root.querySelector('[data-ticket="9"] .line.third')).toBeNull();
     expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Review, then approve']);
     expect(rowMenu(snoozed.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'snooze', 'restore', 'history'], actions: { snooze: { type: 'snooze', ticketId: 2 }, restore: { type: 'restore', ticketId: 2 } } });

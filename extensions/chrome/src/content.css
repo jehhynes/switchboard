@@ -51,7 +51,7 @@
   color: var(--fgColor-attention, #9a6700);
 }
 
-.switchboard-snooze-bell {
+.switchboard-snooze-button {
   position: fixed;
   z-index: 100;
   display: flex;
@@ -67,11 +67,11 @@
   cursor: pointer;
 }
 
-.switchboard-snooze-bell[hidden] {
+.switchboard-snooze-button[hidden] {
   display: none;
 }
 
-.switchboard-snooze-bell:hover {
+.switchboard-snooze-button:hover {
   color: var(--fgColor-default, #1f2328);
 }
 
