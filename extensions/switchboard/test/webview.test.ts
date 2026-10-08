@@ -64,6 +64,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     returned: 0,
     parent: null,
     approvalSends: false,
+    waits: [],
     ...patch,
   };
 }
@@ -212,6 +213,31 @@ describe('markOf', () => {
     expect(mark({ status: 'done', doneReason: 'session' })).toEqual(['check', 'Finished by the session', null]);
     expect(mark({ status: 'done', doneReason: 'operator' })).toEqual(['account', 'Marked done', null]);
     expect(mark({ status: 'done', doneReason: 'unassigned' })).toEqual(['sign-out', 'Left the assigned state', null]);
+  });
+});
+
+describe('queue waits', () => {
+  it('lists each reason a queued row has not started after its mark, with what ends it in the tooltip (PRD R34)', () => {
+    const queued = item(1, {
+      status: 'queued',
+      waits: [
+        { kind: 'slot', used: 10, limit: 10 },
+        { kind: 'session', sessionId: 's1', shortId: 'a9d3f95b', ownItem: true, playbook: null },
+        { kind: 'session', sessionId: 's2', shortId: null, ownItem: false, playbook: 'dev:review-pr' },
+        { kind: 'snoozed' },
+      ],
+    });
+    const root = render(snapshot([queued, item(2, { status: 'queued' })]));
+    const waits = [...root.querySelectorAll('[data-item="1"] .line.third .meta > *')].map((child) => [child.className, child.textContent, child.getAttribute('title')]);
+
+    expect(waits).toEqual([
+      ['mark codicon codicon-clock', '', 'Queued'],
+      ['wait', 'Waits for a slot · 10/10 in use', '10 sessions are in Working; sessions.concurrency is 10.'],
+      ['wait', 'Waits for its session to end', 'Session a9d3f95b on this ticket is still open, such as in a VS Code tab. Close or stop it to start.'],
+      ['wait', 'Waits for the dev:review-pr session to end', 'Session s2 on this ticket is still open, such as in a VS Code tab. Close or stop it to start.'],
+      ['wait', 'Starts when the ticket wakes', 'The ticket is snoozed.'],
+    ]);
+    expect(root.querySelector('[data-item="2"] .wait')).toBeNull();
   });
 });
 

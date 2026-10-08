@@ -748,6 +748,18 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems.map((item) => item.approvalSends)).toEqual([false]);
   });
 
+  it('lists the queue waits of a queued work item only (PRD R34)', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    // The task started, so its live session keeps the work item from starting again once it is queued.
+    expect(runtime.snapshot().workItems.map((item) => [item.status, item.waits])).toEqual([['running', []]]);
+
+    store.updateWorkItem(1, { status: 'queued', queuedAt: T0 });
+    expect(runtime.snapshot().workItems[0]!.waits).toMatchObject([{ kind: 'session', sessionId: 's1', ownItem: true, playbook: null }]);
+  });
+
   it('records a link report and lists the ticket links and earlier work items on the work item (PRD R51, R52)', async () => {
     const { store, source, runtime } = setup();
     source.result = { tickets: [issue('8')] };

@@ -52,6 +52,7 @@ function item(id, url, cwd) {
     worktree: null,
     links: [],
     pastes: [],
+    waits: [],
     parent: null,
     returned: 0,
   };

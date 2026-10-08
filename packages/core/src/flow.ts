@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { groupOf } from './group.js';
+import { heldSlots, queueWaits } from './queue.js';
 import { repoRoots } from './settings.js';
 import type { PermissionMode, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
@@ -1187,22 +1187,17 @@ class Flow {
    */
   private scheduleStarts(): void {
     const queued = this.store.workItemsWithStatus('queued').sort((a, b) => a.queuedAt! - b.queuedAt! || a.id - b.id);
-    const holdsSlot = (session: Session) => {
-      const item = this.store.workItem(session.workItemId)!;
-
-      return !this.store.ticket(item.ticketId)!.snoozed && groupOf({ status: item.status, sessions: this.store.sessionsFor(item.id) }) === 'working';
-    };
-    const held = () => this.store.activeSessions().filter(holdsSlot).length;
-    let used = held();
+    const limit = this.context.settings.sessions.concurrency;
+    let used = heldSlots(this.store);
 
     for (const item of queued) {
-      if (used >= this.context.settings.sessions.concurrency) {
+      if (used >= limit) {
         return;
       }
 
-      if (this.store.activeSessionsForTicket(item.ticketId).length === 0 && !this.store.ticket(item.ticketId)!.snoozed) {
+      if (queueWaits(this.store, item, limit, used).length === 0) {
         this.startSession(item);
-        used = held();
+        used = heldSlots(this.store);
       }
     }
   }

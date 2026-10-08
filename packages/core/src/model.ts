@@ -158,3 +158,10 @@ export interface Session {
   /** The reports its prompt offers; the hub refuses the rest (PRD R23). */
   reports: ReportKind[];
 }
+
+/** Why a queued work item has not started (PRD R17, R38, R49). */
+export type QueueWait =
+  | { kind: 'slot'; used: number; limit: number }
+  /** A live session of the ticket; `playbook` is its work item's, or null when it is this work item's own session. */
+  | { kind: 'session'; sessionId: string; shortId: string | null; ownItem: boolean; playbook: string | null }
+  | { kind: 'snoozed' };

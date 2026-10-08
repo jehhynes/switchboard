@@ -15,7 +15,7 @@ function item(id: number, owner: Ticket, status: WorkItemView['status'], playboo
   return {
     id, ticketId: owner.id, playbook, status, stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null,
     approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: 0, statusAt: 0, runStartedAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null,
-    ticket: owner, triage: null, sessions, worktree: null, links: [], pastes: [], returned: 0, parent: null, approvalSends: false,
+    ticket: owner, triage: null, sessions, worktree: null, links: [], pastes: [], returned: 0, parent: null, approvalSends: false, waits: [],
   };
 }
 

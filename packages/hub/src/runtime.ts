@@ -3,8 +3,8 @@ import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { ADHOC_SOURCE, handle, repoRoots, switchboardHome } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, QueueWait, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import { ADHOC_SOURCE, handle, heldSlots, queueWaits, repoRoots, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -57,6 +57,8 @@ export interface WorkItemView extends WorkItem {
   parent: Ticket | null;
   /** The playbook's `approvalSends`: Approve sends the work (PRD R27). */
   approvalSends: boolean;
+  /** What keeps a queued work item from starting; empty for every other status (PRD R34). */
+  waits: QueueWait[];
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
@@ -494,6 +496,7 @@ export class Runtime {
     const started = (item: WorkItem) => store.sessionsFor(item.id).some((session) => session.shortId !== null);
     const returned = (items: WorkItem[], playbook: string | null) =>
       playbook === null ? 0 : items.filter((item) => item.playbook === playbook && started(item)).length;
+    const used = heldSlots(store);
 
     return {
       workItems: store.workItems(this.deps.now() - DONE_DAYS * 24 * 60 * 60 * 1000).map((item) => ({
@@ -507,6 +510,7 @@ export class Runtime {
         returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
         parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
         approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
+        waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
       })),
       pool: store
         .poolTickets()

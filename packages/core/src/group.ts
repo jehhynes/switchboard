@@ -22,7 +22,7 @@ export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Sessio
     return 'needs';
   }
 
-  // A queued item waits for a slot, or for a live session of the same work item, which shows in Needs you while it asks a question.
+  // A queued item waits for a slot or for a live session of its ticket (queueWaits).
   return item.status === 'queued' ? 'unstarted' : 'working';
 }
 

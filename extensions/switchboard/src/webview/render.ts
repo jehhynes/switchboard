@@ -517,6 +517,26 @@ function fromParent(item: WorkItemView): string {
   return `<button class="from" data-reveal="item:${item.parentId}" title="${escape(`Show the work item it came from: ${item.parent.title}`)}">From <span class="key ${escape(item.parent.source)}">${escape(label)}</span></button>`;
 }
 
+/** Each reason a queued row has not started, with what ends it in the tooltip (PRD R34). */
+function waits(item: WorkItemView): string {
+  return item.waits
+    .map((wait): [string, string] => {
+      switch (wait.kind) {
+        case 'slot':
+          return [`Waits for a slot · ${wait.used}/${wait.limit} in use`, `${wait.used} sessions are in Working; sessions.concurrency is ${wait.limit}.`];
+        case 'session': {
+          const owner = wait.ownItem ? 'its session' : `the ${wait.playbook ?? 'ad-hoc'} session`;
+
+          return [`Waits for ${owner} to end`, `Session ${wait.shortId ?? wait.sessionId} on this ticket is still open, such as in a VS Code tab. Close or stop it to start.`];
+        }
+        case 'snoozed':
+          return ['Starts when the ticket wakes', 'The ticket is snoozed.'];
+      }
+    })
+    .map(([text, title]) => `<span class="wait" title="${escape(title)}">${escape(text)}</span>`)
+    .join('');
+}
+
 /** Line 1: the title, led by the priority dot on a priority ticket, and the time in queue (PRD R27). */
 function firstLine(triage: Rating, title: string, queue: string): string {
   return `<div class="line first"><span class="title">${priorityDot(triage)}${escape(title)}</span>${queue}</div>`;
@@ -602,7 +622,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
   return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, groupOf(item) === 'done' && !item.ticket.snoozed ? doneTime(item, now) : queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(playbookText(item, namespaces))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
-    `${statusMark(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${rest.map(linkBadge).join('')}`,
+    `${statusMark(item)}${waits(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }
