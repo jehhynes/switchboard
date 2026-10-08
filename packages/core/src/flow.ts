@@ -12,7 +12,7 @@ import type { TemplateVariable } from './template.js';
 export const ADHOC_SOURCE = 'adhoc';
 
 /** The statuses of a run; entering one from another status starts the Working clock (PRD R27). */
-const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['triaging', 'queued', 'setup', 'running']);
+const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['setup', 'running']);
 
 /** A ticket that leaves the source's scope stops being snoozed, so it leaves the Snoozed group (PRD R49). */
 const UNSNOOZED = { snoozed: false, snoozedUntil: null } as const;

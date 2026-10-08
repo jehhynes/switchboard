@@ -89,12 +89,12 @@ function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): Snapsho
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
 
 describe('groupOf', () => {
-  it('puts done first, then unstarted and triaging work, then work that needs the operator, then the rest', () => {
+  it('puts done first, then unstarted, triaging and queued work, then work that needs the operator, then the rest', () => {
     expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');
-    expect(['unstarted', 'triaging'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['unstarted', 'unstarted']);
+    expect(['unstarted', 'triaging', 'queued'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['unstarted', 'unstarted', 'unstarted']);
     expect(['awaiting-approval', 'blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['needs', 'needs', 'needs']);
     expect(groupOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('needs');
-    expect(['queued', 'setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['working', 'working', 'working']);
+    expect(['setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['working', 'working']);
   });
 });
 
@@ -199,6 +199,7 @@ describe('markOf', () => {
     expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSends: true })).toEqual(['send', 'Approve to send', null]);
     expect(mark({ status: 'unstarted' })).toBe('priority');
     expect(mark({ status: 'triaging' })).toEqual(['loading codicon-modifier-spin', 'Triaging', null]);
+    expect(mark({ status: 'queued' })).toEqual(['clock', 'Queued', null]);
     expect(mark({ sessions: [session({ state: 'waiting' })] })).toEqual(['question', 'Answer a question', null]);
     expect(mark({ status: 'blocked', error: 'Which account should I use?' })).toEqual(['debug-pause', 'Blocked', null]);
     expect(mark({ status: 'blocked', error: 'Needs VPN access.' })).toEqual(['debug-pause', 'Blocked', null]);
@@ -206,7 +207,6 @@ describe('markOf', () => {
   });
 
   it('shows the phase in Working and how it ended in Done', () => {
-    expect(mark({ status: 'queued' })).toEqual(['clock', 'Queued', null]);
     expect(mark({ status: 'setup' })).toEqual(['tools', 'Setting up', null]);
     expect(mark({ status: 'running' })).toEqual(['sync codicon-modifier-spin', 'Running', null]);
     expect(mark({ status: 'done', doneReason: 'session' })).toEqual(['check', 'Finished by the session', null]);
@@ -226,7 +226,8 @@ describe('clockOf', () => {
     // A blocked item whose session still waits counts from the block.
     expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
     expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Working since' });
-    expect(clockOf(scoped({ status: 'queued', runStartedAt: null }))).toEqual({ since: 2, label: 'Working since' });
+    expect(clockOf(scoped({ status: 'setup', runStartedAt: null }))).toEqual({ since: 2, label: 'Working since' });
+    expect(clockOf(scoped({ status: 'queued' }))).toEqual({ since: 5, label: 'In scope since' });
     expect(clockOf(scoped({ status: 'unstarted' }))).toEqual({ since: 5, label: 'In scope since' });
     expect(clockOf(scoped({ status: 'unstarted' }, null))).toEqual({ since: 1, label: 'In scope since' });
     expect(clockOf(scoped({ status: 'blocked' }, 5, true))).toEqual({ since: 5, label: 'In scope since' });

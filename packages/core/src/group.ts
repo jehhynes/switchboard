@@ -8,7 +8,7 @@ export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions
   return item.sessions.find((session) => session.state !== 'ended') ?? null;
 }
 
-/** PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Needs you, then Working. */
+/** PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Needs you, then queued starts in Unstarted, then Working. */
 export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state'>[] }): Group {
   if (item.status === 'done') {
     return 'done';
@@ -22,7 +22,8 @@ export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Sessio
     return 'needs';
   }
 
-  return 'working';
+  // A queued item waits for a slot, or for a live session of the same work item, which shows in Needs you while it asks a question.
+  return item.status === 'queued' ? 'unstarted' : 'working';
 }
 
 /** The playbook slot during triage: the source's namespace and `triage`, such as `dev:triage`, or `triage` without one. */

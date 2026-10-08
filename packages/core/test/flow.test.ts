@@ -1085,4 +1085,16 @@ describe('in-queue times (PRD R27)', () => {
     h.act({ type: 'retry', workItemId: 1 });
     expect(h.item(1)).toMatchObject({ statusAt: T0 + 5_000, runStartedAt: T0 + 5_000 });
   });
+
+  it('starts the run clock when a queued work item starts, not when it was queued', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
+    const triages = h.poll(issue('1'), issue('2'));
+    h.started(only(h.triaged(triages[0], 'support:defect'), 'start-session'));
+    h.triaged(triages[1], 'support:defect');
+    expect(h.status(2)).toBe('queued');
+
+    h.now = T0 + 9_000;
+    only(h.act({ type: 'roster', sessions: [] }), 'start-session');
+    expect(h.item(2)).toMatchObject({ status: 'running', runStartedAt: T0 + 9_000 });
+  });
 });

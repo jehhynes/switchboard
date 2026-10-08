@@ -392,7 +392,7 @@ export interface Mark {
 
 const TRIAGING: Mark = { icon: 'loading codicon-modifier-spin', title: 'Triaging' };
 
-/** The row mark shows what differs between rows of the same group; a snoozed item shows its group's mark (PRD R27). Unstarted rows show the priority dot, or Triaging. */
+/** The row mark shows what differs between rows of the same group; a snoozed item shows its group's mark (PRD R27). Unstarted rows show the priority dot, Triaging or Queued. */
 export function markOf(item: WorkItemView): Mark | 'priority' {
   const session = activeSession(item);
 
@@ -408,17 +408,13 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
 
       return item.status === 'failed' ? { icon: 'error', title: 'Failed', tone: 'error' } : { icon: 'debug-pause', title: 'Blocked' };
     case 'working':
-      if (item.status === 'queued') {
-        return { icon: 'clock', title: 'Queued' };
-      }
-
       if (item.status === 'setup') {
         return { icon: 'tools', title: 'Setting up' };
       }
 
       return { icon: 'sync codicon-modifier-spin', title: 'Running' };
     case 'unstarted':
-      return item.status === 'triaging' ? TRIAGING : 'priority';
+      return item.status === 'triaging' ? TRIAGING : item.status === 'queued' ? { icon: 'clock', title: 'Queued' } : 'priority';
     case 'done':
       return item.doneReason === 'operator'
         ? { icon: 'account', title: DONE_WORDS.operator }
@@ -428,7 +424,7 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
   }
 }
 
-/** The status mark for line 3; Unstarted rows have none but Triaging, because their mark is the priority dot. */
+/** The status mark for line 3; Unstarted rows have none but Triaging and Queued, because their mark is the priority dot. */
 function statusMark(item: WorkItemView): string {
   const mark = markOf(item);
 

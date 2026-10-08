@@ -9,9 +9,11 @@ describe('groupOf', () => {
     expect(groupOf(item('done', 'waiting'))).toBe('done');
     expect(groupOf(item('triaging'))).toBe('unstarted');
     expect(groupOf(item('unstarted'))).toBe('unstarted');
+    expect(groupOf(item('queued'))).toBe('unstarted');
     expect(['awaiting-approval', 'blocked', 'failed'].map((status) => groupOf(item(status as WorkItemStatus)))).toEqual(['needs', 'needs', 'needs']);
     expect(groupOf(item('running', 'ended', 'waiting'))).toBe('needs');
-    expect(['queued', 'setup', 'running'].map((status) => groupOf(item(status as WorkItemStatus, 'ended', 'running')))).toEqual(['working', 'working', 'working']);
+    expect(groupOf(item('queued', 'waiting'))).toBe('needs');
+    expect(['setup', 'running'].map((status) => groupOf(item(status as WorkItemStatus, 'ended', 'running')))).toEqual(['working', 'working']);
   });
 });
 
