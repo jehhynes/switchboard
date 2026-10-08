@@ -206,7 +206,7 @@ Each step ends with `npm run verify` passing and the PRD's affected requirements
 6. **Panel and ad-hoc source.** Work item list and every R27 control, plus the ad-hoc prompt box. The ad-hoc source comes here because it exercises the whole session path without touching a real ticket.
 7. **Live acceptance.** Run the procedure in [testing.md](testing.md#live-acceptance) and record the results.
 
-8. **Operator configuration.** Write the operator's `~/.switchboard/settings.json` for GitHub, a `triage:github` playbook ported from Ground Control's triage prompt (`packages/board/src/triagePrompt.ts`) and the deterministic rules it applies before the model, and `dev:*` playbooks from their Ground Control action table, with `autoStart` set by the design rule "Start automatically unless it writes". The operator reviews them before use.
+8. **Operator configuration.** Write the operator's `settings.json` in the config folder (R42) for GitHub, a `triage:github` playbook ported from Ground Control's triage prompt (`packages/board/src/triagePrompt.ts`) and the deterministic rules it applies before the model, and `dev:*` playbooks from their Ground Control action table, with `autoStart` set by the design rule "Start automatically unless it writes". The operator reviews them before use.
 9. **Zoho Desk source** (R4, R26, R46) and `support:*` playbooks.
 10. **Forum source** (R5).
 
