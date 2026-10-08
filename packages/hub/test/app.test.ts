@@ -160,10 +160,10 @@ describe('loadConfig', () => {
     const valid = loadConfig(join(temp.home, '.switchboard'));
     expect(valid.settings.sessions.concurrency).toBe(3);
 
-    writeSettings({ sessions: { concurrency: 9 } });
+    writeSettings({ sessions: { concurrency: 11 } });
     const invalid = loadConfig(join(temp.home, '.switchboard'), valid.settings);
     expect(invalid.settings.sessions.concurrency).toBe(3);
-    expect(invalid.settingsError).toBe('sessions.concurrency must be a whole number from 1 to 4.');
+    expect(invalid.settingsError).toBe('sessions.concurrency must be a whole number from 1 to 10.');
 
     mkdirSync(join(temp.home, '.switchboard', 'playbooks', 'dev'), { recursive: true });
     writeFileSync(join(temp.home, '.switchboard', 'playbooks', 'dev', 'bad.md'), 'no front matter');

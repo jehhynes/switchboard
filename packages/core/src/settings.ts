@@ -162,7 +162,7 @@ export function parseSettings(text: string): SettingsResult {
   const defaults = DEFAULT_SETTINGS;
   read.unknown(sessionsIn, ['concurrency', 'permissionMode', 'model', 'installHooks', 'debriefs'], 'sessions');
   const sessions: SessionSettings = {
-    concurrency: read.integer(sessionsIn, 'concurrency', 'sessions', defaults.sessions.concurrency, 1, 4),
+    concurrency: read.integer(sessionsIn, 'concurrency', 'sessions', defaults.sessions.concurrency, 1, 10),
     permissionMode: read.permissionMode(sessionsIn, 'permissionMode', 'sessions', defaults.sessions.permissionMode),
     model: read.string(sessionsIn, 'model', 'sessions', defaults.sessions.model),
     installHooks: read.boolean(sessionsIn, 'installHooks', 'sessions', defaults.sessions.installHooks),

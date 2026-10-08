@@ -34,7 +34,7 @@ describe('checkSettings', () => {
   });
 
   it('reports the file errors that reject it whole', () => {
-    expect(checkSettings({ sessions: { concurrency: 9, extra: 1 } })).toEqual(['sessions.extra is not a setting.', 'sessions.concurrency must be a whole number from 1 to 4.']);
+    expect(checkSettings({ sessions: { concurrency: 11, extra: 1 } })).toEqual(['sessions.extra is not a setting.', 'sessions.concurrency must be a whole number from 1 to 10.']);
   });
 
   it("reports an enabled source's own keys, unknown sources and unknown template variables", () => {

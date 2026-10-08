@@ -50,7 +50,7 @@ describe('fieldOfError', () => {
   const paths = ['sessions.concurrency', 'sources.github.enabled', 'sources.github.repo', 'sources.github.project.owner', 'sources.github.project.number', 'sources.github.setupPrompt'];
 
   it.each([
-    ['sessions.concurrency must be a whole number from 1 to 4.', 'sessions.concurrency'],
+    ['sessions.concurrency must be a whole number from 1 to 10.', 'sessions.concurrency'],
     ['sources.github.repo must be set to owner/name.', 'sources.github.repo'],
     ['sources.github.project must give owner and number.', 'sources.github.project.owner'],
     ['sources.github.setupPrompt: Unknown template variable: x.', 'sources.github.setupPrompt'],

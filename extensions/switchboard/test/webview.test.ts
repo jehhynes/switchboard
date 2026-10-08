@@ -351,7 +351,7 @@ describe('renderPanel', () => {
           item(2, { status: 'failed', error: 'Workspace not trusted.' }),
           item(3, { stage: 'Planning', stageAt: NOW - 3 * 60_000, sessions: [session()] }),
         ],
-        { errors: { settings: 'sessions.concurrency must be a whole number from 1 to 4.', playbooks: ['dev/bad.md: description is required.'], hooks: null, sources: { github: 'The GitHub CLI is not signed in.' } } },
+        { errors: { settings: 'sessions.concurrency must be a whole number from 1 to 10.', playbooks: ['dev/bad.md: description is required.'], hooks: null, sources: { github: 'The GitHub CLI is not signed in.' } } },
       ),
     );
 
@@ -383,7 +383,7 @@ describe('renderPanel', () => {
     expect(root.querySelector('[data-item="2"] .line.third .mark.codicon-error.error')?.getAttribute('title')).toBe('Failed');
     expect(root.querySelector('[data-item="3"] .line.third .stage')?.textContent).toBe('Planning · 3m');
     expect([...root.querySelectorAll('.errors .note')].map((note) => note.textContent?.trim())).toEqual([
-      'Settings: sessions.concurrency must be a whole number from 1 to 4.',
+      'Settings: sessions.concurrency must be a whole number from 1 to 10.',
       'Playbook dev/bad.md: description is required.',
       'github: The GitHub CLI is not signed in.',
     ]);

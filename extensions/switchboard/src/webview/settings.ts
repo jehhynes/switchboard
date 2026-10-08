@@ -244,7 +244,7 @@ export function generalFields(state: EditorState): { heading: string; fields: Fi
     {
       heading: 'Sessions',
       fields: [
-        { path: 'sessions.concurrency', label: 'Concurrency', kind: 'integer', placeholder: '2', help: 'Sessions that run at once, 1 to 4. A start with no free slot waits as queued.' },
+        { path: 'sessions.concurrency', label: 'Concurrency', kind: 'integer', placeholder: '2', help: 'Sessions that run at once, 1 to 10. A start with no free slot waits as queued.' },
         { path: 'sessions.permissionMode', label: 'Permission mode', kind: 'select', options: modes, placeholder: 'auto', help: 'Claude Code permission mode for sessions. A playbook can set its own.' },
         { path: 'sessions.model', label: 'Model', kind: 'text', placeholder: "Claude's default", help: 'The model for sessions. A playbook can set its own.' },
         {

@@ -15,7 +15,7 @@ describe('parseSettings', () => {
   it('reads every value and passes source-specific keys through', () => {
     const result = parseSettings(
       JSON.stringify({
-        sessions: { concurrency: 4, permissionMode: 'acceptEdits', model: 'opus', installHooks: false, debriefs: true },
+        sessions: { concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
@@ -25,7 +25,7 @@ describe('parseSettings', () => {
 
     expect(result).toEqual({
       settings: {
-        sessions: { concurrency: 4, permissionMode: 'acceptEdits', model: 'opus', installHooks: false, debriefs: true },
+        sessions: { concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: {
@@ -59,7 +59,7 @@ describe('parseSettings', () => {
     const result = parseSettings(
       JSON.stringify({
         extra: 1,
-        sessions: { concurrency: 5, dailyLimit: 20, permissionMode: 'yolo', model: 3, installHooks: 'yes', other: true },
+        sessions: { concurrency: 11, dailyLimit: 20, permissionMode: 'yolo', model: 3, installHooks: 'yes', other: true },
         triage: { concurrency: 0, timeoutSeconds: 1.5 },
         sources: { github: { enabled: 'true', pollIntervalSeconds: 5 }, zoho: 'on' },
       }),
@@ -70,7 +70,7 @@ describe('parseSettings', () => {
         'settings.extra is not a setting.',
         'sessions.dailyLimit is not a setting.',
         'sessions.other is not a setting.',
-        'sessions.concurrency must be a whole number from 1 to 4.',
+        'sessions.concurrency must be a whole number from 1 to 10.',
         'sessions.permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.',
         'sessions.model must be a string.',
         'sessions.installHooks must be true or false.',
