@@ -225,6 +225,8 @@ describe('Store', () => {
     raw.exec(
       "INSERT INTO workItems (id, ticketId, status, createdAt, doneReason, warning) VALUES (1, 1, 'done', 1, 'unassigned', 'Left.'), (2, 1, 'done', 1, 'session', 'Kept.'), (3, 1, 'blocked', 1, NULL, 'Kept.')",
     );
+    // A session keeps item 1 through migration 16, which deletes sessionless items done as unassigned.
+    raw.exec("INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, startedAt, released) VALUES ('s1', 1, 'task', 'claude', 'c', 'ended', 1, 1, 1)");
     raw.close();
 
     const store = Store.open(path);
@@ -259,6 +261,41 @@ describe('Store', () => {
     expect(store.workItem(1)?.parentId).toBeNull();
     expect(store.workItemsWithParent(1).map((item) => item.id)).toEqual([child.id]);
     expect(store.workItemsWithParent(child.id)).toEqual([]);
+    store.close();
+  });
+
+  it('keeps version 15 work items with their sessions, triages, pastes and parents, deletes sessionless childless ones done as unassigned, never reuses a deleted ID, and enforces foreign keys after', () => {
+    const path = join(dir, 'v15.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 15).join(';'));
+    raw.exec('PRAGMA user_version = 15');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
+    raw.exec(
+      "INSERT INTO workItems (id, ticketId, status, createdAt, statusAt, parentId, doneReason) VALUES (1, 1, 'done', 1, 2, NULL, 'unassigned'), (2, 1, 'unstarted', 3, 4, 1, NULL), " +
+        "(3, 1, 'triaging', 5, 5, NULL, NULL), (4, 1, 'done', 6, 6, NULL, 'operator'), (5, 1, 'done', 7, 7, NULL, 'unassigned'), (6, 1, 'done', 8, 8, NULL, 'unassigned'), (7, 1, 'done', 9, 9, 6, 'operator')",
+    );
+    raw.exec("INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, startedAt, released) VALUES ('s1', 1, 'task', 'claude', 'c', 'ended', 1, 1, 1)");
+    raw.exec("INSERT INTO triages (ticketId, workItemId, startedAt) VALUES (1, 1, 1), (1, 3, 5), (1, 5, 7)");
+    raw.exec("INSERT INTO pastes (workItemId, label, file, reportedAt) VALUES (1, 'Reply', 'f', 1), (5, 'Reply', 'g', 7)");
+    raw.close();
+
+    const store = Store.open(path);
+
+    // Item 1 has a session and item 6 a child, so only item 5 is deleted, with its triage and paste.
+    expect(store.workItemsForTicket(1).map((item) => item.id)).toEqual([1, 2, 3, 4, 6, 7]);
+    expect(store.pastesFor(5)).toEqual([]);
+    expect(store.triagesFor(5)).toEqual([]);
+    expect(store.workItem(2)).toMatchObject({ status: 'unstarted', createdAt: 3, statusAt: 4, parentId: 1 });
+    expect(store.sessionsFor(1).map((session) => session.id)).toEqual(['s1']);
+    expect(store.triagesFor(1)).toHaveLength(1);
+    expect(store.pastesFor(1)).toHaveLength(1);
+
+    store.deleteWorkItem(3);
+    expect(store.workItem(3)).toBeNull();
+    expect(store.triagesFor(3)).toEqual([]);
+    const { id: _, ...base } = store.workItem(2)!;
+    expect(store.insertWorkItem({ ...base, parentId: null }).id).toBe(8);
+    expect(() => store.deleteWorkItem(1)).toThrow(/FOREIGN KEY/);
     store.close();
   });
 

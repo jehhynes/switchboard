@@ -51,10 +51,11 @@ Session    id, workItemId, kind (setup | task), provider, nativeSessionId, short
 - `Ticket.sourceKey` is the key people use, such as a GitHub issue number or a Zoho ticket number. `Ticket.sourceId` is the source's internal ID when API calls need a different one, such as Zoho's internal ticket ID.
 - `Triage.context` is the clipped text the classifier received, with the current time. Keeping it shows why a playbook was chosen.
 - `WorkItem.status` takes the values in PRD R34. `WorkItem.error` holds the cause shown for `failed` or `blocked`, and `WorkItem.failedStep` (`triage`, `setup` or `task`) is the step Retry repeats (PRD R45).
-- `WorkItem.unassignedAt` records that the ticket left the assigned state while a session was active (PRD R10). `WorkItem.queuedAt` orders queued starts.
+- `WorkItem.unassignedAt` records that the ticket left the assigned state while a session or the triage of a sessionless work item was running (PRD R10). `WorkItem.queuedAt` orders queued starts.
 - `WorkItem.taskPrompt` is the rendered prompt the task session ran, or the typed prompt for an ad-hoc work item.
 - `WorkItem.doneReason` is `session`, `operator` or `unassigned`.
 - `WorkItem.parentId` is the work item whose session sent the `task` report that created this one (PRD R68), or null. Migration 15 adds it.
+- Migration 16 rebuilds `workItems` with `AUTOINCREMENT` IDs and deletes the work items done as `unassigned` that never had a session and have no child work item (PRD R10). Migrations run with foreign keys off, because a table rebuild drops a parent table, and each fails unless `PRAGMA foreign_key_check` is empty before it commits.
 - `WorkItem.warning` is set when the work item ends because its ticket left the assigned state with no done report (PRD R10, R11).
 - `Session.state` is the observed state, `Session.stateDetail` the error kind of a `failed` turn, and `Session.outcome` the reported or decided outcome (PRD R36). `Session.released` records that the release stop was sent, so it is sent once (PRD R39).
 - A session's `cwd` follows its playbook's `workdir`: the ticket's worktree when one exists, otherwise the source's repo root.
@@ -180,7 +181,7 @@ A classifier error, an unparsable result, a timeout, or a playbook name outside 
 4. If the playbook's `requiresWorktree` is true and the ticket has none, start a setup session (`setup`) running the source's `setupPrompt`. The setup session succeeds when a worktree is linked, by report or by the branch convention, and the session reports done or ends. If it ends with no worktree linked, the work item fails with "Setup ended without a worktree."
 5. Render the playbook and start the task session (`running`). It reports stages, a worktree link if it creates one, and done or approval.
 6. When the task session reports done, the work item is done with reason `session`. When its turn ends with no report, the work item is `blocked`. A turn that ends `failed` blocks it with the error kind, because the session can still be resumed.
-7. When a ticket leaves the assigned state with no active session, its work item is done with reason `unassigned` and no warning. With an active session, that is deferred until the session reports or ends (PRD R10).
+7. When a ticket leaves the assigned state, an open work item that never had a session is deleted with its triages and pastes, and one with no active session is done with reason `unassigned` and no warning. A sessionless work item whose triage is running gets `unassignedAt` instead, so the triage row keeps its `triage.concurrency` slot; the triage's success, failure or cancellation deletes it, unless the ticket returned and cleared `unassignedAt`. Work item IDs are `AUTOINCREMENT`, so a deleted ID is never reused, and a late result for a deleted triage finds no row and is ignored. With an active session, that is deferred until the session reports or ends (PRD R10).
 
 Pool tickets (PRD R47, R48):
 

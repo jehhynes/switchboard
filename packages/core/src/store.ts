@@ -163,6 +163,45 @@ export const MIGRATIONS = [
   );`,
   // A session's task report records the work item it came from (PRD R68).
   `ALTER TABLE workItems ADD COLUMN parentId INTEGER REFERENCES workItems(id);`,
+  // A work item that never had a session is deleted when its ticket leaves (PRD R10), so IDs must not be reused: the panel can act on a stale one.
+  `CREATE TABLE workItemsNew (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticketId INTEGER NOT NULL REFERENCES tickets(id),
+    playbook TEXT,
+    status TEXT NOT NULL,
+    stage TEXT,
+    stageAt INTEGER,
+    taskPrompt TEXT,
+    warning TEXT,
+    error TEXT,
+    failedStep TEXT,
+    unassignedAt INTEGER,
+    queuedAt INTEGER,
+    createdAt INTEGER NOT NULL,
+    doneAt INTEGER,
+    doneReason TEXT,
+    approvalPrompt TEXT,
+    approvalSummary TEXT,
+    statusAt INTEGER NOT NULL DEFAULT 0,
+    runStartedAt INTEGER,
+    scopeAt INTEGER,
+    approvalReport TEXT,
+    parentId INTEGER REFERENCES workItems(id)
+  );
+  INSERT INTO workItemsNew (id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, failedStep, unassignedAt, queuedAt, createdAt, doneAt, doneReason,
+      approvalPrompt, approvalSummary, statusAt, runStartedAt, scopeAt, approvalReport, parentId)
+    SELECT id, ticketId, playbook, status, stage, stageAt, taskPrompt, warning, error, failedStep, unassignedAt, queuedAt, createdAt, doneAt, doneReason,
+      approvalPrompt, approvalSummary, statusAt, runStartedAt, scopeAt, approvalReport, parentId FROM workItems;
+  DROP TABLE workItems;
+  ALTER TABLE workItemsNew RENAME TO workItems;
+  CREATE INDEX workItemsByTicket ON workItems (ticketId);
+  CREATE INDEX workItemsByStatus ON workItems (status);
+  CREATE TEMP TABLE sessionless AS SELECT id FROM workItems w
+    WHERE doneReason = 'unassigned' AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.workItemId = w.id) AND NOT EXISTS (SELECT 1 FROM workItems c WHERE c.parentId = w.id);
+  DELETE FROM triages WHERE workItemId IN (SELECT id FROM sessionless);
+  DELETE FROM pastes WHERE workItemId IN (SELECT id FROM sessionless);
+  DELETE FROM workItems WHERE id IN (SELECT id FROM sessionless);
+  DROP TABLE sessionless;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released']);
@@ -235,11 +274,19 @@ export class Store {
       throw new Error(`The database is schema version ${version}, newer than this hub supports (${MIGRATIONS.length}).`);
     }
 
+    // A table rebuild drops a parent table, which fails with foreign keys on; each migration checks them before it commits.
+    db.exec('PRAGMA foreign_keys = OFF');
+
     for (let next = version; next < MIGRATIONS.length; next++) {
       db.exec('BEGIN');
 
       try {
         db.exec(MIGRATIONS[next]!);
+
+        if (db.prepare('PRAGMA foreign_key_check').all().length > 0) {
+          throw new Error(`Schema migration ${next + 1} broke a foreign key.`);
+        }
+
         db.exec(`PRAGMA user_version = ${next + 1}`);
         db.exec('COMMIT');
       } catch (error) {
@@ -248,6 +295,8 @@ export class Store {
         throw error;
       }
     }
+
+    db.exec('PRAGMA foreign_keys = ON');
 
     return new Store(db);
   }
@@ -335,6 +384,13 @@ export class Store {
 
   workItem(id: number): WorkItem | null {
     return this.#one('SELECT * FROM workItems WHERE id = ?', id);
+  }
+
+  /** Deletes a work item that never had a session, with its triages and pastes. */
+  deleteWorkItem(id: number): void {
+    this.#db.prepare('DELETE FROM triages WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM workItems WHERE id = ?').run(id);
   }
 
   workItemsForTicket(ticketId: number): WorkItem[] {

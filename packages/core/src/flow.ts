@@ -400,19 +400,40 @@ class Flow {
     }
   }
 
-  /** PRD R10: done now when no session is active, otherwise when the active session reports or ends. */
+  /**
+   * PRD R10: deleted when it never had a session, done now when no session is active, otherwise when the active session reports or ends.
+   * A running triage also defers the deletion, so its row keeps holding a `triage.concurrency` slot until the classifier finishes.
+   */
   private left(ticketId: number): void {
+    const running = new Set(this.store.runningTriages().map((triage) => triage.workItemId));
+
     for (const item of this.store.workItemsForTicket(ticketId)) {
       if (item.status === 'done') {
         continue;
       }
 
-      if (this.activeSession(item) === null) {
+      if (this.store.sessionsFor(item.id).length === 0) {
+        if (!running.has(item.id)) {
+          this.store.deleteWorkItem(item.id);
+        } else if (item.unassignedAt === null) {
+          this.store.updateWorkItem(item.id, { unassignedAt: this.now });
+        }
+      } else if (this.activeSession(item) === null) {
         this.done(item, 'unassigned', null);
       } else if (item.unassignedAt === null) {
         this.store.updateWorkItem(item.id, { unassignedAt: this.now });
       }
     }
+  }
+
+  /** Deletes a work item whose ticket left during its triage, when it never had a session (PRD R10). */
+  private deletedAfterTriage(item: WorkItem): boolean {
+    if (item.unassignedAt === null || this.store.sessionsFor(item.id).length > 0) {
+      return false;
+    }
+
+    this.store.deleteWorkItem(item.id);
+    return true;
   }
 
   private worktreeFound(source: string, sourceKey: string, path: string, branch: string): void {
@@ -528,7 +549,7 @@ class Flow {
 
     const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
 
-    if (item?.status !== 'triaging') {
+    if (item?.status !== 'triaging' || this.deletedAfterTriage(item)) {
       return;
     }
 
@@ -552,7 +573,7 @@ class Flow {
 
     const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
 
-    if (item?.status === 'triaging') {
+    if (item?.status === 'triaging' && !this.deletedAfterTriage(item)) {
       this.fail(item, 'triage', error);
     }
   }
@@ -569,6 +590,7 @@ class Flow {
       this.store.deleteTriage(triage.id);
     } else {
       this.store.updateTriage(triage.id, { endedAt: this.now, error: 'Cancelled.' });
+      this.deletedAfterTriage(this.store.workItem(triage.workItemId)!);
     }
   }
 

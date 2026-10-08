@@ -224,8 +224,9 @@ describe('Snoozed (PRD R49)', () => {
     for (const ticketId of [2, 3, 4]) {
       expect(h.store.ticket(ticketId)).toMatchObject({ snoozed: false, snoozedUntil: null });
     }
-    expect(h.item(2)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
-    expect(h.item(3)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+    // Item 2's triage is still running, so its deletion waits for the triage to end; item 3 waited for a triage slot (PRD R10).
+    expect(h.item(2)).toMatchObject({ status: 'triaging', unassignedAt: T0 });
+    expect(h.store.workItem(3)).toBeNull();
   });
 
   it('does not start a queued work item of a snoozed ticket', () => {

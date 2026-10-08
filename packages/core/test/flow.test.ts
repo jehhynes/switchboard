@@ -90,18 +90,19 @@ describe('assigned-state transitions', () => {
     expect(h.status(1)).toBe('triaging');
   });
 
-  it('finishes a work item without a warning when its ticket leaves with no active session, and creates a new one when it returns', () => {
+  it('deletes a work item that never had a session, with its triage, when its ticket leaves, and creates a new one when it returns', () => {
     const h = new Harness();
-    h.poll(issue('1'));
-    h.now += MINUTE;
+    const [triage] = h.poll(issue('1'));
+    h.triaged(triage, 'dev:question');
+    expect(h.status(1)).toBe('unstarted');
     h.poll();
 
-    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'unassigned', doneAt: T0 + MINUTE, warning: null });
+    expect(h.store.workItem(1)).toBeNull();
+    expect(h.store.triage(1)).toBeNull();
     expect(h.store.findTicket('github', '1')?.assigned).toBe(false);
 
     h.poll(issue('1', false));
     expect(h.store.workItem(2)).toBeNull();
-
 
     const actions = h.poll(issue('1'));
 
@@ -109,18 +110,61 @@ describe('assigned-state transitions', () => {
     expect(only(actions, 'triage').workItemId).toBe(2);
   });
 
+  it('deletes a work item whose ticket left during its triage only when the triage succeeds, fails or is cancelled, so the triage keeps its slot', () => {
+    const h = new Harness({ settings: settings({ triage: { concurrency: 3 } }) });
+    const [a] = h.poll(issue('1'), issue('2'), issue('3'), issue('4'));
+
+    expect(h.poll(issue('4'))).toEqual([]);
+    expect([1, 2, 3].map((id) => h.item(id))).toMatchObject([1, 2, 3].map(() => ({ status: 'triaging', unassignedAt: T0 })));
+
+    expect(only(h.triaged(a, 'dev:question'), 'triage').workItemId).toBe(4);
+    h.act({ type: 'triage-failed', triageId: 2, error: 'late', context: null });
+    h.act({ type: 'triage-cancelled', triageId: 3 });
+
+    for (const id of [1, 2, 3]) {
+      expect(h.store.workItem(id)).toBeNull();
+      expect(h.store.triage(id)).toBeNull();
+    }
+    expect(h.status(4)).toBe('triaging');
+  });
+
+  it('keeps a work item whose ticket left during its triage and returned before the triage ended', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    h.poll();
+    h.poll(issue('1'));
+
+    expect(h.item(1)).toMatchObject({ status: 'triaging', unassignedAt: null });
+    h.triaged(triage, 'dev:question');
+    expect(h.item(1).status).toBe('unstarted');
+  });
+
+  it('ignores a late triage result for a deleted work item', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    h.act({ type: 'triage-failed', triageId: 1, error: 'first', context: null });
+    expect(h.status(1)).toBe('failed');
+    h.poll();
+    expect(h.store.workItem(1)).toBeNull();
+
+    expect(h.triaged(triage, 'dev:question')).toEqual([]);
+    expect(h.act({ type: 'triage-failed', triageId: 1, error: 'late', context: null })).toEqual([]);
+    expect(h.store.triage(1)).toBeNull();
+  });
+
   it('treats a ticket the poll reports as not assigned like one missing from the poll', () => {
     const h = new Harness();
-    h.poll(issue('1'));
+    h.triaged(h.poll(issue('1'))[0], 'dev:question');
     h.poll(issue('1', false));
 
-    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+    expect(h.store.workItem(1)).toBeNull();
   });
 
   it('records a late triage result for a work item that is already done without changing it, and ignores a repeated result', () => {
     const h = new Harness();
     const [first, second] = h.poll(issue('1'), issue('2'));
-    h.poll();
+    h.act({ type: 'mark-done', workItemId: 1 });
+    h.act({ type: 'mark-done', workItemId: 2 });
 
     expect(h.triaged(first, 'dev:question')).toEqual([]);
     expect(h.item(1)).toMatchObject({ status: 'done', playbook: null });
@@ -932,6 +976,7 @@ describe('in-queue times (PRD R27)', () => {
     const h = new Harness();
     h.poll(entered('1', T0 - 5_000));
     h.now = T0 + 1_000;
+    h.act({ type: 'mark-done', workItemId: 1 });
     h.poll();
     expect(h.item(1)).toMatchObject({ status: 'done', scopeAt: T0 - 5_000, doneAt: T0 + 1_000 });
 

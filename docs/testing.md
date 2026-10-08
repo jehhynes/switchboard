@@ -22,7 +22,7 @@ Test behavior that types cannot establish:
 - Assigned-state transitions: first run, entering, leaving, and reassignment creating a new work item.
 - The one-active-session rule, approval gates, and `requiresWorktree` handling.
 - A failed or incomplete poll leaving every ticket's assigned state unchanged.
-- Unassignment during an active session deferring the done decision.
+- Unassignment during an active session deferring the done decision, and unassignment deleting a work item that never had a session.
 - Work item status transitions, the concurrency limit, and `queued`.
 - Hook installation: entries preserved, malformed settings refused, missing entries added. The event-to-state mapping from recorded markers, and the roster fallback.
 - Playbook loading, front-matter errors, and template rendering.
