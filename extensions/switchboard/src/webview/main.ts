@@ -67,16 +67,19 @@ export function startPanel(root: HTMLElement, vscode: VsCodeApi, now: () => numb
     }
   });
 
-  /** Opens the row's group, selects, scrolls to and focuses the row, then runs its click action unless only revealing (PRD R63). */
+  /** Opens the row's group and date band, selects, scrolls to and focuses the row, then runs its click action unless only revealing (PRD R63). */
   const reveal = (message: SelectMessage): boolean => {
     const find = () => root.querySelector<HTMLElement>(`[data-row="${message.row}"]`);
-    const group = find()?.closest<HTMLElement>('details[data-group]');
+    const enclosing = (element: HTMLElement | null | undefined) => element?.closest<HTMLElement>('details[data-group]') ?? null;
+    const group = enclosing(find());
 
-    if (group === null || group === undefined) {
+    if (group === null) {
       return false;
     }
 
-    groups.set(group.dataset['group']!, true);
+    for (let open: HTMLElement | null = group; open !== null; open = enclosing(open.parentElement)) {
+      groups.set(open.dataset['group']!, true);
+    }
     selected = message.row;
     draw();
 

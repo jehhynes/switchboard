@@ -9,9 +9,11 @@ details.group > summary > .codicon { margin-right: 6px; font-size: 16px; vertica
 /* The count is a badge at the right of the heading, as in Claude Code's session groups. */
 details.group > summary .count { float: right; padding: 0 7px; border-radius: 10px; font-size: 0.95em; font-weight: 600; line-height: 18px; background: var(--vscode-activityBarBadge-background, var(--vscode-badge-background)); color: var(--vscode-activityBarBadge-foreground, var(--vscode-badge-foreground)); }
 details.group > summary .count.zero { font-weight: normal; background: color-mix(in srgb, var(--vscode-descriptionForeground) 18%, transparent); color: var(--vscode-descriptionForeground); }
-/* Done's date bands, as in Windows Explorer: a muted label with a rule to its right. */
-h4.band { display: flex; gap: 8px; align-items: center; margin: 8px 0 2px; font-size: 12px; font-weight: 600; color: var(--vscode-descriptionForeground); }
-h4.band::after { content: ''; flex: 1; border-top: 1px solid var(--vscode-widget-border, var(--vscode-descriptionForeground)); opacity: 0.6; }
+/* Done's date bands: a lighter tint of the group bar with a left accent, so they stand apart from the rows but rank below the group headings. */
+details.band > summary { cursor: pointer; margin: 10px -8px 2px; padding: 3px 8px; border-left: 3px solid var(--vscode-focusBorder); color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent); }
+details.band > summary:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent); }
+details.band > summary h4 { display: inline; margin: 0; font-size: 12px; font-weight: 600; }
+details.band > summary .count { margin-left: 6px; font-size: 12px; color: var(--vscode-descriptionForeground); }
 /* Rows touch, with a rule across the top of each row after the first; a hovered or selected row hides the rules above and below it. */
 .item { position: relative; padding: 6px 8px; margin: 0 -8px; border-radius: var(--vscode-cornerRadius-medium, 6px); outline: none; }
 /* A click on a row opens its background session, latest session or worktree. */

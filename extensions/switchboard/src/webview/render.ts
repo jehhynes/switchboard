@@ -303,7 +303,7 @@ export interface Clock {
 
 /**
  * The row's time, by group (PRD R27): Needs you since the work item entered its status or its session began to wait, Working since the run
- * started, and Unstarted, Snoozed and Done since the ticket entered the source's scope, stopping at done.
+ * started, and Unstarted, Snoozed and Done since the ticket entered the source's scope, stopping at done. A Done row shows its done time instead, with this in the tooltip.
  */
 export function clockOf(item: WorkItemView): Clock {
   const group = groupOf(item);
@@ -339,6 +339,21 @@ function queued(clock: Clock | null, until: number | null, now: number): string 
   const title = until === null ? `${clock.label} ${utcText(clock.since)}` : `${clock.label} ${utcText(clock.since)} to ${utcText(until)}`;
 
   return `<span class="queue" title="${escape(title)}">${queueTime(clock.since, until ?? now)}</span>`;
+}
+
+/** When a Done row was done, in local time: 24-hour `HH:mm` today, else `m/d` (PRD R27). */
+export function doneStamp(doneAt: number, now: number): string {
+  const date = new Date(doneAt);
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  return doneAt >= midnight(now) ? `${pad(date.getHours())}:${pad(date.getMinutes())}` : `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function doneTime(item: WorkItemView, now: number): string {
+  const doneAt = item.doneAt ?? item.createdAt;
+  const clock = clockOf(item);
+
+  return `<span class="queue" title="${escape(`Done ${utcText(doneAt)}; ${clock.label.toLowerCase()} ${utcText(clock.since)}`)}">${doneStamp(doneAt, now)}</span>`;
 }
 
 type Rating = { immediacy: string | null; severity: string | null } | null;
@@ -578,7 +593,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
   const copyButton = copy === undefined ? '' : actionButton(copy, null, true, item.pastes.length === 1 ? `Copy ${item.pastes[0]!.label}` : 'Copy…');
 
   return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
-${firstLine(item.triage, item.ticket.title, queued(clockOf(item), item.doneAt, now))}
+${firstLine(item.triage, item.ticket.title, groupOf(item) === 'done' && !item.ticket.snoozed ? doneTime(item, now) : queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(playbookText(item, namespaces))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
     `${statusMark(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${approval}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
@@ -719,7 +734,7 @@ export function rowKeyOf(entry: WorkItemView | PoolView): string {
 }
 
 /** The rows the panel shows, by group, each in panel order (PRD R27, R49). */
-export function panelGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView | PoolView)[]> {
+export function panelGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView | PoolView)[]> & { done: WorkItemView[] } {
   const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], unstarted: [], done: [] };
   const snoozedPool = snapshot.pool.filter((entry) => entry.ticket.snoozed);
   // A pool row stands for its ticket, whose work items are all done.
@@ -749,7 +764,7 @@ function midnight(time: number, days = 0): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days).getTime();
 }
 
-/** Done's date bands, as in Windows Explorer: Today, Yesterday, This week, Last week and Older, with weeks starting on Monday (PRD R27). */
+/** Done's date bands, as in Windows Explorer: Today, Yesterday, Earlier this week, Last week and Older, with weeks starting on Monday (PRD R27). */
 export function doneBand(doneAt: number, now: number): string {
   const today = midnight(now);
   const week = midnight(now, -((new Date(now).getDay() + 6) % 7));
@@ -763,34 +778,39 @@ export function doneBand(doneAt: number, now: number): string {
   }
 
   if (doneAt >= week) {
-    return 'This week';
+    return 'Earlier this week';
   }
 
   return doneAt >= midnight(week, -7) ? 'Last week' : 'Older';
+}
+
+/** A collapsible date band in Done; bands start open, and the operator's choice is kept under `done:<band>`. */
+function band(title: string, rows: string[], ui: PanelUi): string {
+  const key = `done:${title}`;
+  const open = ui.groups.get(key) ?? true;
+
+  return `<details class="band" data-group="${key}"${open ? ' open' : ''}><summary><h4>${title}</h4><span class="count">${rows.length}</span></summary>\n${rows.join('\n')}\n</details>`;
 }
 
 /** The whole panel. */
 export function renderPanel(snapshot: Snapshot, now: number, ui: PanelUi): string {
   const groups = panelGroups(snapshot);
   const { namespaces } = snapshot;
+  const html = (entry: WorkItemView | PoolView) => ('status' in entry ? row(entry, now, ui, namespaces) : poolRow(entry, now, ui, namespaces));
+  const doneBody = () => {
+    // Done is sorted newest first, so each band's rows are consecutive.
+    const bands = new Map<string, string[]>();
+
+    for (const entry of groups.done) {
+      const title = doneBand(entry.doneAt ?? entry.createdAt, now);
+
+      bands.set(title, [...(bands.get(title) ?? []), html(entry)]);
+    }
+
+    return [...bands].map(([title, rows]) => band(title, rows, ui)).join('\n');
+  };
   const body = (key: RowGroup) => {
-    let band: string | null = null;
-    const rows = groups[key]
-      .map((entry) => {
-        const html = 'status' in entry ? row(entry, now, ui, namespaces) : poolRow(entry, now, ui, namespaces);
-
-        if (key !== 'done' || !('status' in entry)) {
-          return html;
-        }
-
-        const next = doneBand(entry.doneAt ?? entry.createdAt, now);
-        const heading = next === band ? '' : `<h4 class="band">${next}</h4>\n`;
-
-        band = next;
-
-        return `${heading}${html}`;
-      })
-      .join('\n');
+    const rows = key === 'done' ? doneBody() : groups[key].map(html).join('\n');
 
     return rows || (EMPTY[key] === undefined ? '' : `<p class="empty">${EMPTY[key]}</p>`);
   };

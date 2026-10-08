@@ -2,7 +2,7 @@ import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openUrlOf, rowFor, searchEntries, targetForUrl } from '../src/search.js';
 import { startPanel } from '../src/webview/main.js';
-import { age, CAPS, clip, clockOf, controlsOf, doneBand, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
+import { age, CAPS, clip, clockOf, controlsOf, doneBand, doneStamp, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -233,8 +233,16 @@ describe('clockOf', () => {
     expect(clockOf(scoped({ status: 'done', doneAt: 9 }, 8))).toEqual({ since: 1, label: 'In scope from' });
   });
 
-  it('shows the span from scope entry to done in a done row', () => {
-    const root = render(snapshot([item(1, { status: 'done', scopeAt: NOW - 3 * 86_400_000, doneAt: NOW - 86_400_000 })]), { groups: new Map([['done', true]]) });
+  it('shows when a Done row was done, with its scope entry in the tooltip', () => {
+    const doneAt = NOW - 86_400_000;
+    const root = render(snapshot([item(1, { status: 'done', scopeAt: NOW - 3 * 86_400_000, doneAt })]), { groups: new Map([['done', true]]) });
+
+    expect(root.querySelector('[data-item="1"] .queue')?.textContent).toBe('10/2');
+    expect(root.querySelector('[data-item="1"] .queue')?.getAttribute('title')).toBe('Done 2026-10-02 12:00 UTC; in scope from 2026-09-30 12:00 UTC');
+  });
+
+  it('keeps the span from scope entry to done on a snoozed done row', () => {
+    const root = render(snapshot([item(1, { status: 'done', scopeAt: NOW - 3 * 86_400_000, doneAt: NOW - 86_400_000, ticket: { ...item(1).ticket, snoozed: true } })]), { groups: new Map([['snoozed', true]]) });
 
     expect(root.querySelector('[data-item="1"] .queue')?.textContent).toBe('2d');
     expect(root.querySelector('[data-item="1"] .queue')?.getAttribute('title')).toMatch(/^In scope from .+ UTC to .+ UTC$/);
@@ -249,7 +257,11 @@ describe('doneBand', () => {
   it('bands by local day, with weeks starting on Monday', () => {
     const times = [at(7), at(6, 23), at(6), at(5), at(4, 23), new Date(2026, 8, 28).getTime(), new Date(2026, 8, 27, 23).getTime()];
 
-    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'This week', 'Last week', 'Last week', 'Older']);
+    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'Earlier this week', 'Last week', 'Last week', 'Older']);
+  });
+
+  it('stamps a done time as 24-hour HH:mm today and m/d before today, in local time', () => {
+    expect([at(7, 9), at(7, 13) + 5 * 60_000, at(7, 0), at(6, 23), new Date(2026, 8, 28).getTime()].map((time) => doneStamp(time, now))).toEqual(['09:00', '13:05', '00:00', '10/6', '9/28']);
   });
 
   it('puts Monday’s yesterday in Yesterday, not Last week', () => {
@@ -257,18 +269,30 @@ describe('doneBand', () => {
     expect(doneBand(at(3, 12), at(5, 9))).toBe('Last week');
   });
 
-  it('heads each band of Done once, newest first', () => {
+  const items = [item(1, { status: 'done', doneAt: at(1) }), item(2, { status: 'done', doneAt: at(7, 9) }), item(3, { status: 'done', doneAt: at(6) }), item(4, { status: 'done', doneAt: at(7, 8) }), item(5, { status: 'blocked' })];
+
+  it('puts each band of Done in one open band with its count, newest first', () => {
     const root = document.createElement('div');
-    const items = [item(1, { status: 'done', doneAt: at(1) }), item(2, { status: 'done', doneAt: at(7, 9) }), item(3, { status: 'done', doneAt: at(6) }), item(4, { status: 'done', doneAt: at(7, 8) }), item(5, { status: 'blocked' })];
 
     root.innerHTML = renderPanel(snapshot(items), now, ui({ groups: new Map([['done', true]]) }));
 
-    const done = root.querySelector('[data-group="done"]')!;
-    const order = [...done.querySelectorAll<HTMLElement>('h4.band, [data-item]')].map((element) => (element.matches('h4') ? element.textContent : element.dataset['item']));
+    const bands = [...root.querySelectorAll<HTMLDetailsElement>('[data-group="done"] > details.band')];
 
-    expect(order).toEqual(['Today', '2', '4', 'Yesterday', '3', 'Last week', '1']);
+    expect(bands.map((band) => [band.querySelector('h4')!.textContent, band.querySelector('.count')!.textContent, band.open, [...band.querySelectorAll<HTMLElement>('[data-item]')].map((row) => row.dataset['item'])])).toEqual([
+      ['Today', '2', true, ['2', '4']],
+      ['Yesterday', '1', true, ['3']],
+      ['Last week', '1', true, ['1']],
+    ]);
     expect(root.querySelector('[data-group="needs"] [data-item="5"]')).not.toBeNull();
-    expect(root.querySelectorAll('[data-group="needs"] h4.band')).toHaveLength(0);
+    expect(root.querySelectorAll('[data-group="needs"] details.band')).toHaveLength(0);
+  });
+
+  it('keeps a band the operator closed closed', () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderPanel(snapshot(items), now, ui({ groups: new Map([['done', true], ['done:Yesterday', false]]) }));
+
+    expect([...root.querySelectorAll<HTMLDetailsElement>('details.band')].map((band) => band.open)).toEqual([true, false, true]);
   });
 });
 
@@ -338,7 +362,7 @@ describe('renderPanel', () => {
       ['done', false],
     ]);
     expect(root.querySelector('[data-group="unstarted"] p.empty')?.textContent).toBe('Nothing waits to be started.');
-    expect(root.querySelector('details.item, details:not(.group), .detail')).toBeNull();
+    expect(root.querySelector('details.item, details:not(.group, .band), .detail')).toBeNull();
     expect(root.querySelector('[data-item="2"] .title')?.textContent).toBe('Issue <2>');
     expect(root.querySelector('[data-item="2"] .line.third .note')?.textContent).toBe('Workspace not trusted.');
     expect(root.querySelector('[data-item="2"] .line.third .note')?.hasAttribute('title')).toBe(false);
@@ -515,7 +539,7 @@ describe('renderPanel', () => {
     }
   });
 
-  it('shows no worktree symbol, the time in queue, and no actions on a done work item with a running session', () => {
+  it('shows no worktree symbol, the done date, and no actions on a done work item with a running session', () => {
     const root = render(
       snapshot([item(1, { status: 'done', createdAt: NOW - 3 * 86_400_000, doneAt: NOW - 86_400_000, sessions: [session()], worktree: { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' } })]),
       { groups: new Map([['done', true]]) },
@@ -526,8 +550,8 @@ describe('renderPanel', () => {
     expect(titles(root, '[data-item="1"] .line.third .mark')).toEqual(['Finished by the session']);
     // A done item with a running session has no control, so no actions column.
     expect(root.querySelector('[data-item="1"] .actions')).toBeNull();
-    // A done item stops its clock when it ends.
-    expect(root.querySelector('[data-item="1"] .queue')?.textContent).toBe('2d');
+    // 12:00 UTC on 2 October is 2 October in every timezone within 12 hours of UTC.
+    expect(root.querySelector('[data-item="1"] .queue')?.textContent).toBe('10/2');
   });
 
   it('says what an unconfigured home is missing', () => {
@@ -980,11 +1004,15 @@ describe('startPanel', () => {
     const working = root.querySelector<HTMLDetailsElement>('details[data-group="working"]')!;
     working.open = false;
     working.dispatchEvent(new Event('toggle'));
+    const today = root.querySelector<HTMLDetailsElement>('details[data-group="done:Today"]')!;
+    today.open = false;
+    today.dispatchEvent(new Event('toggle'));
 
     send(snapshot([item(1), item(2, { status: 'done', doneAt: NOW })]));
 
     expect(root.querySelector<HTMLDetailsElement>('details[data-group="done"]')!.open).toBe(true);
     expect(root.querySelector<HTMLDetailsElement>('details[data-group="working"]')!.open).toBe(false);
+    expect(root.querySelector<HTMLDetailsElement>('details[data-group="done:Today"]')!.open).toBe(false);
   });
 });
 
@@ -1157,6 +1185,19 @@ describe('startPanel select (PRD R63)', () => {
     // The group stays open across a redraw.
     send({ type: 'state', snapshot: state() });
     expect(doneGroup().open).toBe(true);
+  });
+
+  it("opens the row's closed date band", () => {
+    send({ type: 'state', snapshot: state() });
+    const today = () => root.querySelector<HTMLDetailsElement>('details[data-group="done:Today"]')!;
+    today().open = false;
+    today().dispatchEvent(new Event('toggle'));
+
+    send({ type: 'select', row: 'item:2', open: false });
+
+    expect(doneGroup().open).toBe(true);
+    expect(today().open).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('[data-row="item:2"]'));
   });
 
   it('only reveals the row when asked to, and runs nothing', () => {
