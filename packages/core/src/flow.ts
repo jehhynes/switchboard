@@ -508,6 +508,7 @@ class Flow {
       approvalPrompt: null,
       approvalSummary: null,
       approvalReport: null,
+      approvalHeld: false,
       createdAt: this.now,
       statusAt: this.now,
       runStartedAt: this.now,
@@ -637,6 +638,7 @@ class Flow {
       approvalPrompt: null,
       approvalSummary: null,
       approvalReport: null,
+      approvalHeld: false,
       createdAt: this.now,
       statusAt: this.now,
       runStartedAt: queued ? this.now : null,
@@ -872,14 +874,22 @@ class Flow {
     }
 
     if (TURN_ENDED.includes(state) && current.outcome === null && item.status === 'running') {
+      const cause = state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : null;
+
       if (item.unassignedAt !== null) {
         this.done(item, 'unassigned', null);
+      } else if (item.approvalHeld) {
+        this.restoreApproval(item, cause);
       } else {
-        this.block(item, state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : endedMessage(current, true));
+        this.block(item, cause ?? endedMessage(current, true));
       }
     } else if (resumed && item.status === 'blocked') {
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
       this.setStatus(item.id, { status: 'running', error: null, failedStep: null });
+    } else if (state === 'running' && item.status === 'awaiting-approval') {
+      // The operator gave the session more work after its approval report; the report waits until the run ends (PRD R34).
+      this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
+      this.setStatus(item.id, { status: 'running', approvalHeld: true, error: null, failedStep: null });
     }
   }
 
@@ -920,7 +930,11 @@ class Flow {
     } else if (session.outcome === 'done') {
       return;
     } else if (item.status === 'running') {
-      this.block(item, endedMessage(session, false));
+      if (item.approvalHeld) {
+        this.restoreApproval(item, null);
+      } else {
+        this.block(item, endedMessage(session, false));
+      }
     }
   }
 
@@ -1049,6 +1063,9 @@ class Flow {
 
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', null);
+    } else if (item.approvalHeld || item.status === 'awaiting-approval') {
+      // Stopping never approves: blocked would let Retry run the approval prompt (PRD R40).
+      this.restoreApproval(item, MESSAGES.stopped);
     } else {
       this.block(item, MESSAGES.stopped, session.kind);
     }
@@ -1147,6 +1164,7 @@ class Flow {
       approvalPrompt: null,
       approvalSummary: null,
       approvalReport: null,
+      approvalHeld: false,
       createdAt: this.now,
       statusAt: this.now,
       runStartedAt: this.now,
@@ -1227,10 +1245,18 @@ class Flow {
 
   /** Every status change comes here, so statusAt and runStartedAt stay true (PRD R27). */
   private setStatus(id: number, patch: Partial<NewWorkItem> & { status: WorkItemStatus }): void {
-    const before = this.store.workItem(id)!.status;
+    const item = this.store.workItem(id)!;
+    const before = item.status;
     const run = RUN_STATUSES.has(patch.status) && !RUN_STATUSES.has(before) ? { runStartedAt: this.now } : {};
+    // A held approval was never approved, so leaving it for another status drops it, and Retry cannot run its prompt.
+    const dropped = item.approvalHeld && patch.status !== 'running' && patch.status !== 'awaiting-approval' ? { approvalPrompt: null, approvalSummary: null, approvalReport: null } : {};
 
-    this.store.updateWorkItem(id, before === patch.status ? patch : { ...patch, statusAt: this.now, ...run });
+    this.store.updateWorkItem(id, before === patch.status ? patch : { approvalHeld: false, ...dropped, ...patch, statusAt: this.now, ...run });
+  }
+
+  /** A held approval's run ended without a report: the earlier approval waits again, with the cause when the run did not finish. */
+  private restoreApproval(item: WorkItem, cause: string | null): void {
+    this.setStatus(item.id, { status: 'awaiting-approval', error: cause, failedStep: null });
   }
 
   private queue(item: WorkItem): void {

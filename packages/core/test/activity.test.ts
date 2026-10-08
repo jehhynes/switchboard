@@ -200,8 +200,9 @@ describe('activity log', () => {
     try {
       const path = join(dir, 'old.db');
       const raw = new DatabaseSync(path);
-      raw.exec(MIGRATIONS.slice(0, -1).join(';'));
-      raw.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+      const log = MIGRATIONS.findIndex((migration) => migration.includes('CREATE TABLE events'));
+      raw.exec(MIGRATIONS.slice(0, log).join(';'));
+      raw.exec(`PRAGMA user_version = ${log}`);
       raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'One', 'u', 0, '')");
       raw.exec("INSERT INTO workItems (id, ticketId, playbook, status, stage, stageAt, createdAt, statusAt, doneAt, doneReason) VALUES (1, 1, 'dev:develop', 'done', 'testing', 30, 10, 50, 50, 'session')");
       raw.exec("INSERT INTO triages (id, ticketId, workItemId, playbook, startedAt, endedAt) VALUES (1, 1, 1, 'dev:develop', 11, 12)");

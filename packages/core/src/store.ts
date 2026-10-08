@@ -249,9 +249,10 @@ export const MIGRATIONS = [
       UNION ALL SELECT p.reportedAt, w.ticketId, p.workItemId, NULL, json_object('fact', 'paste', 'label', p.label, 'file', p.file) FROM pastes p JOIN workItems w ON w.id = p.workItemId
     ) ORDER BY at;
   INSERT INTO historyRevisions (ticketId, revision) SELECT ticketId, COUNT(*) FROM events WHERE ticketId IS NOT NULL GROUP BY ticketId;`,
+  `ALTER TABLE workItems ADD COLUMN approvalHeld INTEGER NOT NULL DEFAULT 0;`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'approvalHeld']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports']);
 

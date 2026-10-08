@@ -42,6 +42,7 @@ function item(id: number, status: WorkItemView['status'], patch: { snoozed?: boo
     approvalPrompt: null,
     approvalSummary: null,
     approvalReport: null,
+    approvalHeld: false,
     createdAt: 0,
     statusAt: 0,
     runStartedAt: 0,

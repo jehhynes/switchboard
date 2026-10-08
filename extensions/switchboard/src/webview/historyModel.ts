@@ -296,6 +296,7 @@ class Builder {
           break;
         // Shown with the status, state, outcome or snooze they belong to, or internal.
         case 'workItem.failedStep':
+        case 'workItem.approvalHeld':
         case 'workItem.doneAt':
         case 'workItem.doneReason':
         case 'workItem.approvalPrompt':

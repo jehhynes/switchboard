@@ -264,6 +264,23 @@ describe('Store', () => {
     store.close();
   });
 
+  it('gives version 17 work items no held approval, and stores a held approval as a boolean', () => {
+    const path = join(dir, 'v17.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 17).join(';'));
+    raw.exec('PRAGMA user_version = 17');
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
+    raw.exec("INSERT INTO workItems (id, ticketId, status, createdAt, approvalPrompt) VALUES (1, 1, 'awaiting-approval', 1, '/publish')");
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false });
+    store.updateWorkItem(1, { status: 'running', approvalHeld: true });
+    expect(store.workItem(1)?.approvalHeld).toBe(true);
+    store.close();
+  });
+
   it('keeps version 15 work items with their sessions, triages, pastes and parents, deletes sessionless childless ones done as unassigned, never reuses a deleted ID, and enforces foreign keys after', () => {
     const path = join(dir, 'v15.db');
     const raw = new DatabaseSync(path);
@@ -384,7 +401,7 @@ describe('Store', () => {
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
     const store = Store.open(':memory:');
     const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
-    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, createdAt: id, statusAt: id, runStartedAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
+    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, failedStep: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
     const first = store.insertWorkItem(item(1));
     const second = store.insertWorkItem(item(2));
 

@@ -587,7 +587,7 @@ function stageText(item: WorkItemView, now: number): string {
 }
 
 /**
- * On an `awaiting-approval` row, the approval summary, capitalised, and the time since the report take the stage's place. A fixed tooltip holds the
+ * On an `awaiting-approval` row, the approval summary, capitalised, and the time since the row last became `awaiting-approval` take the stage's place. A fixed tooltip holds the
  * whole summary and the last stage, because the hover handler leaves it even when the width cuts the summary (PRD R27).
  */
 function approvalText(item: WorkItemView, summary: string, now: number): string {

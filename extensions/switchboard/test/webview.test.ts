@@ -48,6 +48,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     approvalPrompt: null,
     approvalSummary: null,
     approvalReport: null,
+    approvalHeld: false,
     createdAt: NOW,
     statusAt: NOW,
     runStartedAt: NOW,

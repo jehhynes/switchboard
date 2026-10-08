@@ -80,6 +80,8 @@ export interface WorkItem {
   approvalSummary: string | null;
   /** The draft Approve publishes, which the Report button opens (PRD R27). */
   approvalReport: string | null;
+  /** A resumed session runs on an approval report; the run ending without a report returns the work item to `awaiting-approval` (PRD R23). */
+  approvalHeld: boolean;
   createdAt: number;
   /** When the status last changed; Needs you counts from it (PRD R27). */
   statusAt: number;

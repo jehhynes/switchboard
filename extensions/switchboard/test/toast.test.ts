@@ -45,6 +45,7 @@ function item(id: number, status: WorkItemView['status'], patch: Partial<WorkIte
     approvalPrompt: null,
     approvalSummary: null,
     approvalReport: null,
+    approvalHeld: false,
     createdAt: NOW,
     statusAt: NOW,
     runStartedAt: NOW,

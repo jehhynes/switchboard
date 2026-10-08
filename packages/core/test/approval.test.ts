@@ -57,6 +57,182 @@ describe('approval reports (PRD R23, R31)', () => {
   });
 });
 
+describe('a resumed session after an approval report (PRD R34)', () => {
+  const APPROVAL = { approvalPrompt: '/publish', approvalSummary: 'Ready.', approvalReport: 'D:\\wt\\review.md' };
+  // dev:question offers approval and done, so a held run can finish either way.
+  const harness = () => new Harness({ playbooks: playbooks(undefined, { 'dev:question': '---\ndescription: Answer a question\nreports: approval, done\n---\nAnswer {{ticket.title}}.' }) });
+
+  function awaitingApproval(h: Harness): { item: number; session: string } {
+    const run = running(h);
+
+    h.report(run.session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
+    h.act({ type: 'marker', sessionId: run.session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: run.session, reason: 'release' });
+
+    return run;
+  }
+
+  function resume(h: Harness, session: string): void {
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
+  }
+
+  it('runs in Working with the approval held and Approve refused, then waits for approval again when the turn ends', () => {
+    const h = harness();
+    const { item, session } = awaitingApproval(h);
+
+    resume(h, session);
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true, ...APPROVAL });
+    expect(h.send({ type: 'approve', workItemId: item }).refused).toBe('The work item is not awaiting approval.');
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false, error: null, ...APPROVAL });
+
+    // Approve waits for the resumed session to end, then runs the held prompt.
+    expect(h.act({ type: 'approve', workItemId: item })).toEqual([]);
+    expect(h.item(item).status).toBe('queued');
+    expect(only(h.act({ type: 'roster', sessions: [] }), 'start-session').prompt.startsWith('/publish\n\n')).toBe(true);
+  });
+
+  it('runs again when the operator answers a question the session asked after its approval report', () => {
+    const h = harness();
+    const { item, session } = running(h);
+
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
+    // The approval turn itself goes on running; an unchanged state does not hold the approval.
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false });
+
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false });
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true });
+
+    // A permission prompt during the held run keeps the approval held.
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true });
+
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false, error: null, ...APPROVAL });
+  });
+
+  it('waits for approval again with the cause when the held turn fails or the operator stops it', () => {
+    const h = harness();
+    const { item, session } = awaitingApproval(h);
+
+    resume(h, session);
+    h.act({ type: 'marker', sessionId: session, state: 'failed', detail: 'rate_limit' });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'The turn failed: rate_limit.', ...APPROVAL });
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true, error: null });
+    h.act({ type: 'marker', sessionId: session, state: 'failed', detail: null });
+    expect(h.item(item).error).toBe('The turn failed: unknown error.');
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    h.act({ type: 'stop', workItemId: item });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'Stopped by you.', ...APPROVAL });
+  });
+
+  it('keeps the approval when a background session is stopped after its turn ends, so Retry cannot run the approval prompt', () => {
+    const h = harness();
+    const { item, session } = running(h);
+
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    h.act({ type: 'stop', workItemId: item });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
+
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'Stopped by you.', ...APPROVAL });
+    expect(h.send({ type: 'retry', workItemId: item }).refused).toBe('Only a failed or blocked work item can be retried.');
+  });
+
+  it('keeps the approval when the operator stops the session that reported it', () => {
+    const h = harness();
+    const { item, session } = running(h);
+
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
+    h.act({ type: 'stop', workItemId: item });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
+
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: 'Stopped by you.', ...APPROVAL });
+  });
+
+  it('takes a new approval or done report from the held run', () => {
+    const h = harness();
+    const { item, session } = awaitingApproval(h);
+
+    resume(h, session);
+    h.report(session, { kind: 'approval', prompt: '/publish v2', summary: 'Revised.', report: null });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false, approvalPrompt: '/publish v2', approvalSummary: 'Revised.', approvalReport: null });
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    h.report(session, { kind: 'done' });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
+  });
+
+  it('drops a held approval that a done report leaves blocked, so Retry runs the playbook, not the approval prompt', () => {
+    const h = harness();
+    const { item, session } = awaitingApproval(h);
+
+    resume(h, session);
+    h.report(session, { kind: 'done', assigned: true });
+    expect(h.item(item)).toMatchObject({ status: 'blocked', approvalHeld: false, approvalPrompt: null, approvalSummary: null, approvalReport: null });
+
+    h.act({ type: 'roster', sessions: [] });
+    expect(only(h.act({ type: 'retry', workItemId: item }), 'start-session').prompt.startsWith('/publish')).toBe(false);
+  });
+
+  it('clears an earlier done outcome, so a held run that ends returns to approval', () => {
+    const h = harness();
+    const { item, session } = running(h);
+
+    h.report(session, { kind: 'done', assigned: true });
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+
+    resume(h, session);
+    expect(h.store.session(session)?.outcome).toBeNull();
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', ...APPROVAL });
+  });
+
+  it('finishes as unassigned when the ticket leaves during the held run', () => {
+    const h = harness();
+    const { item, session } = awaitingApproval(h);
+
+    resume(h, session);
+    h.poll();
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+  });
+
+  it('never holds an approval for a blocked work item resumed after Approve', () => {
+    const h = harness();
+    const { item, session } = awaitingApproval(h);
+    const start = only(h.act({ type: 'approve', workItemId: item }), 'start-session');
+
+    h.started(start);
+    h.act({ type: 'marker', sessionId: start.sessionId, state: 'idle', detail: null });
+    expect(h.item(item).status).toBe('blocked');
+    h.act({ type: 'stop-succeeded', sessionId: start.sessionId, reason: 'release' });
+
+    h.act({ type: 'roster', sessions: [{ sessionId: start.sessionId, state: 'running', detail: null }] });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: false });
+    h.act({ type: 'marker', sessionId: start.sessionId, state: 'idle', detail: null });
+    expect(h.item(item).status).toBe('blocked');
+
+    // The older approval session is not the latest, so its resume changes nothing.
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null }] });
+    expect(h.item(item)).toMatchObject({ status: 'blocked', approvalHeld: false });
+  });
+});
+
 describe('paste reports (PRD R60)', () => {
   const withPaste = () => new Harness({ playbooks: playbooks(undefined, { 'dev:reply': '---\ndescription: Draft a reply\nreports: approval, paste\n---\nDraft the reply.' }) });
 
