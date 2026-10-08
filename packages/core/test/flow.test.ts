@@ -710,6 +710,70 @@ describe('limits and the one-active-session rule', () => {
     expect(third.workItemId).toBe(3);
   });
 
+  it('frees the slot of a task session whose turn ended while the operator keeps it open, and takes it back when it runs again', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
+    const triages = h.poll(issue('1'), issue('2'), issue('3'));
+    const first = h.started(only(h.triaged(triages[0], 'support:defect'), 'start-session'));
+    h.triaged(triages[1], 'support:defect');
+    h.triaged(triages[2], 'support:defect');
+
+    const interactive = [{ sessionId: first, state: 'idle' as const, detail: null, interactive: true }];
+    const second = only(h.act({ type: 'roster', sessions: interactive }), 'start-session');
+    expect(second.workItemId).toBe(2);
+    h.started(second);
+
+    // The operator resumes the first session, so it takes a slot again while the second session ends.
+    h.act({ type: 'marker', sessionId: first, state: 'running', detail: null });
+    expect(h.act({ type: 'roster', sessions: [{ sessionId: first, state: 'running', detail: null, interactive: true }] })).toEqual([]);
+    expect([1, 2, 3].map((id) => h.status(id))).toEqual(['running', 'blocked', 'queued']);
+
+    const third = only(h.act({ type: 'marker', sessionId: first, state: 'failed', detail: 'api' }), 'start-session');
+    expect(third.workItemId).toBe(3);
+  });
+
+  it('frees the slot of a live session whose work item is done or whose ticket is snoozed', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
+    const triages = h.poll(issue('1'), issue('2'), issue('3'));
+    const first = h.started(only(h.triaged(triages[0], 'support:defect'), 'start-session'));
+    h.triaged(triages[1], 'support:defect');
+    h.triaged(triages[2], 'support:defect');
+
+    const second = h.started(only(h.report(first, { kind: 'done' }).actions, 'start-session'));
+    expect(h.status(1)).toBe('done');
+    expect(h.store.session(first)!.state).not.toBe('ended');
+
+    expect(only(h.act({ type: 'snooze', ticketId: 2, until: null }), 'start-session').workItemId).toBe(3);
+    expect(h.store.session(second)!.state).not.toBe('ended');
+  });
+
+  it('frees the slot when an approval report moves the work item to Needs you while its session stays live', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
+    const triages = h.poll(issue('1'), issue('2'));
+    h.triaged(triages[0], 'dev:question');
+    const first = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+    h.triaged(triages[1], 'support:defect');
+
+    expect(h.status(2)).toBe('queued');
+    const report = h.send({ type: 'report', sessionId: first, report: { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: null } });
+    expect(only(report.actions, 'start-session').workItemId).toBe(2);
+    expect(h.status(1)).toBe('awaiting-approval');
+  });
+
+  it('keeps the slot of a setup session whose turn ended until its task starts', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
+    const triages = h.poll(issue('1'), issue('2'));
+    const setup = h.started(only(h.triaged(triages[0], 'dev:develop'), 'start-session'));
+    h.triaged(triages[1], 'support:defect');
+
+    h.report(setup, { kind: 'worktree', path: 'D:/wt/1', branch: null });
+    h.report(setup, { kind: 'done' });
+    expect(only(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null }), 'stop-session').sessionId).toBe(setup);
+
+    const task = only(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release' }), 'start-session');
+    expect(task).toMatchObject({ workItemId: 1, kind: 'task' });
+    expect(h.status(2)).toBe('queued');
+  });
+
   it('keeps one work item when its ticket is assigned again while the work item is open', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));

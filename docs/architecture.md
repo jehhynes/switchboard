@@ -209,7 +209,7 @@ Steps 4 and 5 start a session only when no session for the ticket is active and 
 | `worktree-found` | The branch convention. It links a worktree only to a ticket that has none. |
 | `adhoc`, `start`, `approve`, `retry`, `mark-done`, `retriage`, `stop`, `pick`, `retriage-pool`, `snooze`, `restore`, `tick` | The panel; `tick` re-runs scheduling after settings or playbooks change, and every minute wakes due snoozes. |
 
-Actions are `triage`, `start-session` and `stop-session`. After every event the core starts triage for `triaging` work items, then pool triage for pool tickets without a result, up to `triage.concurrency` in all; then it starts `queued` work items in queue order while fewer than `sessions.concurrency` active sessions are not `waiting`, skipping a ticket that already has an active session. A task that follows a setup session starts when the setup session ends, without waiting for a slot.
+Actions are `triage`, `start-session` and `stop-session`. After every event the core starts triage for `triaging` work items, then pool triage for pool tickets without a result, up to `triage.concurrency` in all; then it starts `queued` work items in queue order while fewer than `sessions.concurrency` active sessions hold a slot (a session holds one while its work item's `groupOf` group is Working and its ticket is not snoozed), skipping a ticket that already has an active session. A task that follows a setup session starts when the setup session ends, without waiting for a slot.
 
 ## Claude Code runner
 

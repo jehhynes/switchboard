@@ -1,4 +1,5 @@
 import type { Playbook } from './playbook.js';
+import { groupOf } from './group.js';
 import { repoRoots } from './settings.js';
 import type { PermissionMode, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
@@ -1179,18 +1180,26 @@ class Flow {
 
   /**
    * Starts queued work items in order while slots are free, skipping a ticket that already has an active session (PRD R17, R38).
-   * A `waiting` session holds no slot, so open questions do not stall the queue.
+   * A session holds a slot only while its row is in the panel's Working group, so Needs you, Done and Snoozed do not stall the queue.
    */
   private scheduleStarts(): void {
     const queued = this.store.workItemsWithStatus('queued').sort((a, b) => a.queuedAt! - b.queuedAt! || a.id - b.id);
+    const holdsSlot = (session: Session) => {
+      const item = this.store.workItem(session.workItemId)!;
+
+      return !this.store.ticket(item.ticketId)!.snoozed && groupOf({ status: item.status, sessions: this.store.sessionsFor(item.id) }) === 'working';
+    };
+    const held = () => this.store.activeSessions().filter(holdsSlot).length;
+    let used = held();
 
     for (const item of queued) {
-      if (this.store.activeSessions().filter((session) => session.state !== 'waiting').length >= this.context.settings.sessions.concurrency) {
+      if (used >= this.context.settings.sessions.concurrency) {
         return;
       }
 
       if (this.store.activeSessionsForTicket(item.ticketId).length === 0 && !this.store.ticket(item.ticketId)!.snoozed) {
         this.startSession(item);
+        used = held();
       }
     }
   }
