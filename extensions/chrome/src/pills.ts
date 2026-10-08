@@ -2,7 +2,7 @@ import { MARK_TITLES } from '@switchboard/core/group';
 import type { Card, Group } from '@switchboard/core/group';
 import { REFRESH_MS, issueKey } from './board.js';
 import { BROWSER_PORT } from './hub.js';
-import { MARK_PATHS } from './marks.js';
+import { MARK_GLYPHS } from './marks.js';
 
 export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
 
@@ -67,14 +67,12 @@ function pill(doc: Document, card: Card): HTMLElement {
   namespace.textContent = label.slice(0, colon + 1);
 
   if (card.mark != null) {
-    const mark = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const mark = doc.createElement('span');
 
-    mark.setAttribute('class', 'switchboard-mark');
-    mark.setAttribute('viewBox', '0 0 16 16');
-    mark.setAttribute('fill', 'currentColor');
+    mark.className = 'switchboard-mark';
     mark.setAttribute('aria-hidden', 'true');
     mark.dataset['switchboardMark'] = card.mark;
-    mark.innerHTML = MARK_PATHS[card.mark];
+    mark.textContent = MARK_GLYPHS[card.mark];
     element.append(mark);
   }
 

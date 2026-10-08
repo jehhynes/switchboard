@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { Card } from '@switchboard/core/group';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REFRESH_MS } from '../src/board.js';
+import { MARK_GLYPHS } from '../src/marks.js';
 import { applyPills, cardsByIssue, readCards, watchPills } from '../src/pills.js';
 
 const COLUMN = readFileSync(join(import.meta.dirname, 'fixtures', 'column.html'), 'utf8');
@@ -96,16 +98,24 @@ describe('applyPills', () => {
     ]));
 
     const marks = [...document.querySelectorAll('.switchboard-pill')].map((pill) => {
-      const svg = pill.firstElementChild!;
+      const mark = pill.firstElementChild!;
 
-      return [svg.namespaceURI, svg.getAttribute('class'), svg.getAttribute('data-switchboard-mark'), svg.querySelectorAll('path').length, pill.textContent, (pill as HTMLElement).title];
+      return [mark.tagName, mark.getAttribute('class'), mark.getAttribute('data-switchboard-mark'), mark.getAttribute('aria-hidden'), pill.textContent, (pill as HTMLElement).title];
     });
 
     expect(marks).toEqual([
-      ['http://www.w3.org/2000/svg', 'switchboard-mark', 'question', 3, 'dev:review-pr', 'Switchboard: Needs you · Answer a question. Click to open in VS Code.'],
-      ['http://www.w3.org/2000/svg', 'switchboard-mark', 'queued', 1, 'dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in VS Code.'],
-      ['http://www.w3.org/2000/svg', 'switchboard-mark', 'blocked', 1, 'dev:gc-plan', 'Switchboard: Snoozed · Blocked. Click to open in VS Code.'],
+      ['SPAN', 'switchboard-mark', 'question', 'true', '\u{eb32}dev:review-pr', 'Switchboard: Needs you · Answer a question. Click to open in VS Code.'],
+      ['SPAN', 'switchboard-mark', 'queued', 'true', '\u{ea82}dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in VS Code.'],
+      ['SPAN', 'switchboard-mark', 'blocked', 'true', '\u{ead1}dev:gc-plan', 'Switchboard: Snoozed · Blocked. Click to open in VS Code.'],
     ]);
+  });
+
+  it('draws each mark with the codicon the panel shows for it', () => {
+    const css = readFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.css'), 'utf8');
+    const glyph = (name: string) => String.fromCodePoint(parseInt(new RegExp(`\\.codicon-${name}:before \\{ content: "\\\\(\\w+)" \\}`).exec(css)![1]!, 16));
+    const panel = { question: 'question', send: 'send', review: 'eye', blocked: 'debug-pause', failed: 'error', queued: 'clock', setup: 'tools', running: 'sync', triaging: 'loading', 'done-session': 'check', 'done-operator': 'account', 'done-unassigned': 'sign-out' };
+
+    expect(MARK_GLYPHS).toEqual(Object.fromEntries(Object.entries(panel).map(([mark, name]) => [mark, glyph(name)])));
   });
 
   it('shows no mark for a null mark or a hub that sends none', () => {

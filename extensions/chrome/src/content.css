@@ -34,11 +34,18 @@
   cursor: pointer;
 }
 
+/* The panel's icon font; an SVG of the same paths renders thin and grainy at fractional display scales. */
+@font-face {
+  font-family: switchboard-codicon;
+  src: url('chrome-extension://__MSG_@@extension_id__/codicon.ttf') format('truetype');
+}
+
 .switchboard-pill .switchboard-mark {
-  width: 12px;
-  height: 12px;
+  display: inline-block;
   margin-right: 4px;
-  vertical-align: -2px;
+  font: normal normal 16px/1 switchboard-codicon;
+  vertical-align: -3px;
+  user-select: none;
 }
 
 .switchboard-pill .switchboard-mark[data-switchboard-mark="failed"] {
@@ -51,12 +58,6 @@
   animation-duration: 1.5s;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .switchboard-pill .switchboard-mark {
-    animation-name: none !important;
-  }
 }
 
 @keyframes switchboard-spin {

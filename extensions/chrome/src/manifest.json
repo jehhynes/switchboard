@@ -12,5 +12,6 @@
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [{ "resources": ["codicon.ttf"], "matches": ["https://github.com/*"] }],
   "host_permissions": ["http://127.0.0.1:47615/*"]
 }
