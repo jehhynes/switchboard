@@ -673,6 +673,18 @@ describe('setup', () => {
 });
 
 describe('limits and the one-active-session rule', () => {
+  it('ends only the sessions a roster read looked for, so a start confirmed during the read survives it', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
+
+    expect(h.act({ type: 'roster', sessions: [], checked: [] })).toEqual([]);
+    expect(h.store.session(session)!.state).toBe('running');
+
+    h.act({ type: 'roster', sessions: [], checked: [session] });
+    expect(h.store.session(session)!.state).toBe('ended');
+  });
+
   it('queues starts beyond the concurrency limit and starts them in order as slots free', () => {
     const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
     const triages = h.poll(issue('1'), issue('2'), issue('3'));

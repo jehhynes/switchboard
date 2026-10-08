@@ -92,7 +92,8 @@ export type FlowEvent =
   | { type: 'triage-cancelled'; triageId: number }
   | { type: 'session-started'; sessionId: string; nativeSessionId: string | null; shortId: string }
   | { type: 'session-start-failed'; sessionId: string; message: string }
-  | { type: 'roster'; sessions: ObservedSession[] }
+  /** `checked` lists the sessions the read looked for, so a session whose start completed during the read is not ended; all when absent. */
+  | { type: 'roster'; sessions: ObservedSession[]; checked?: string[] }
   | { type: 'marker'; sessionId: string; state: LiveState; detail: string | null }
   | { type: 'report'; sessionId: string; report: Report }
   | { type: 'stop-succeeded'; sessionId: string; reason: StopReason }
@@ -245,7 +246,7 @@ class Flow {
       case 'session-start-failed':
         return this.sessionStartFailed(event.sessionId, event.message);
       case 'roster':
-        return this.roster(event.sessions);
+        return this.roster(event.sessions, event.checked);
       case 'marker':
         return this.marker(event.sessionId, event.state, event.detail);
       case 'report':
@@ -686,7 +687,7 @@ class Flow {
   }
 
   /** Liveness comes from the roster alone (GC M20): a listed session is alive, an unlisted one has ended. */
-  private roster(observed: ObservedSession[]): void {
+  private roster(observed: ObservedSession[], checked?: string[]): void {
     const listed = new Map(observed.map((entry) => [entry.sessionId, entry]));
 
     for (const entry of observed) {
@@ -702,8 +703,10 @@ class Flow {
       }
     }
 
+    const looked = checked === undefined ? null : new Set(checked);
+
     for (const session of this.store.activeSessions()) {
-      if (session.state !== 'starting' && !listed.has(session.id)) {
+      if (session.state !== 'starting' && !listed.has(session.id) && (looked === null || looked.has(session.id))) {
         // Its background process is gone, so a later resume (such as in a VS Code tab) is never released (PRD R39).
         this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true });
         this.ended({ ...session, state: 'ended' });

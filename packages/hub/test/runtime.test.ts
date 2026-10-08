@@ -54,6 +54,8 @@ const fail = (stderr: string): ExecResult => ({ code: 1, stdout: '', stderr, mis
 /** A fake Claude CLI and git. `roster` is what `claude agents --json` lists. */
 class FakeCli {
   roster: object[] = [];
+  /** When set, the next roster read lists the roster as it is now, then waits for this before returning. */
+  rosterGate: Promise<void> | null = null;
   calls: string[][] = [];
   classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop' } }));
   /** Per-ticket classifier output by triage context, overriding `classifyResult`. */
@@ -86,7 +88,12 @@ class FakeCli {
     }
 
     if (args[0] === 'agents') {
-      return ok(JSON.stringify(this.roster));
+      const listed = JSON.stringify(this.roster);
+      const gate = this.rosterGate;
+      this.rosterGate = null;
+      await gate;
+
+      return ok(listed);
     }
 
     if (args[0] === 'stop') {
@@ -388,6 +395,26 @@ describe('Runtime', () => {
 
     expect(reads()).toBe(before + 2);
     expect(store.session('s1')).toMatchObject({ state: 'running' });
+  });
+
+  it('keeps a session whose start is confirmed during a roster read that did not look for it', async () => {
+    const { store, cli, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const gate = deferred();
+    cli.rosterGate = gate.promise;
+    const read = runtime.readRoster();
+
+    source.result = { tickets: [issue('8'), issue('9')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(store.session('s2')).toMatchObject({ state: 'running' });
+
+    gate.resolve();
+    await read;
+    expect(store.session('s2')).toMatchObject({ state: 'running', released: false });
   });
 
   it('ignores markers when hooks are off', async () => {

@@ -385,7 +385,7 @@ export class Runtime {
     }
 
     await this.findSetupWorktrees();
-    this.send({ type: 'roster', sessions: observe(roster.entries, sessions, this.markers()) });
+    this.send({ type: 'roster', sessions: observe(roster.entries, sessions, this.markers()), checked: sessions.map((session) => session.id) });
   }
 
   /** Hook markers, or none when hooks are off, so the roster alone decides state. */
