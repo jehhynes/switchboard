@@ -27,7 +27,7 @@ describe('planHooks', () => {
 
     expect(settings.model).toBe('opus');
     expect(settings.hooks.Stop).toEqual([gc, { hooks: [ENTRY] }]);
-    expect(settings.hooks.PostToolUse).toEqual([{ matcher: 'Write', hooks: [{ type: 'command', command: 'fmt' }] }]);
+    expect(settings.hooks.PostToolUse).toEqual([{ matcher: 'Write', hooks: [{ type: 'command', command: 'fmt' }] }, { matcher: 'AskUserQuestion|ExitPlanMode', hooks: [ENTRY] }]);
     expect(planHooks(first.text, HOOK)).toEqual({ unchanged: true });
   });
 
@@ -52,6 +52,9 @@ describe('markerState', () => {
   it.each([
     [{ event: 'UserPromptSubmit' }, { state: 'running', detail: null }],
     [{ event: 'PostToolBatch' }, { state: 'running', detail: null }],
+    [{ event: 'PostToolUse', toolName: 'AskUserQuestion' }, { state: 'running', detail: null }],
+    [{ event: 'PostToolUseFailure', toolName: 'ExitPlanMode' }, { state: 'running', detail: null }],
+    [{ event: 'PostToolUse', toolName: 'Bash' }, null],
     [{ event: 'PermissionDenied' }, { state: 'running', detail: null }],
     [{ event: 'SessionStart', source: 'compact' }, { state: 'running', detail: null }],
     [{ event: 'SessionStart', source: 'startup' }, null],

@@ -58,6 +58,9 @@ export const HOOK_EVENTS: readonly (readonly [event: string, matcher: string | n
   ['SessionStart', null],
   ['UserPromptSubmit', null],
   ['PostToolBatch', null],
+  // Only the waiting tools: a parallel tool's result must not end another tool's permission wait.
+  ['PostToolUse', 'AskUserQuestion|ExitPlanMode'],
+  ['PostToolUseFailure', 'AskUserQuestion|ExitPlanMode'],
   ['PermissionRequest', null],
   ['PermissionDenied', null],
   ['PreToolUse', 'AskUserQuestion|ExitPlanMode'],
@@ -123,6 +126,8 @@ export function planHooks(text: string | null, hookPath: string): HookPlan {
 export interface Marker {
   sessionId: string;
   event: string | null;
+  /** When the hook wrote the marker. */
+  at?: number;
   notificationType: string | null;
   source: string | null;
   toolName: string | null;
@@ -141,6 +146,10 @@ export function markerState(marker: Marker): { state: LiveState; detail: string 
     case 'PostToolBatch':
     case 'PermissionDenied':
       return { state: 'running', detail: null };
+    // The operator answered a question or a plan, before the rest of its batch resolves.
+    case 'PostToolUse':
+    case 'PostToolUseFailure':
+      return marker.toolName !== null && WAITING_TOOLS.has(marker.toolName) ? { state: 'running', detail: null } : null;
     case 'SessionStart':
       return marker.source === 'compact' ? { state: 'running', detail: null } : null;
     case 'PermissionRequest':

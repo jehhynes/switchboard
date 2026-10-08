@@ -45,7 +45,7 @@ describe('installHooks', () => {
     const settings = join(dir, 'new', 'settings.json');
 
     expect(installHooks(join(dir, 'sb'), settings)).toBeNull();
-    expect(Object.keys(JSON.parse(readFileSync(settings, 'utf8')).hooks)).toHaveLength(11);
+    expect(Object.keys(JSON.parse(readFileSync(settings, 'utf8')).hooks)).toHaveLength(13);
 
     writeFileSync(settings, '{ broken');
     expect(installHooks(join(dir, 'sb'), settings)).toBe('Claude settings.json is not valid JSON, so Switchboard did not add its hooks.');

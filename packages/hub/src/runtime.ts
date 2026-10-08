@@ -1,3 +1,6 @@
+import { mkdirSync, statSync, watch } from 'node:fs';
+import type { FSWatcher } from 'node:fs';
+import { join } from 'node:path';
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
@@ -7,6 +10,10 @@ import { listWorktrees, reportedWorktree } from './git.js';
 
 export const ROSTER_MS = 30_000;
 export const MARKER_MS = 5_000;
+/** How long a marker change waits for the hook's other writes before the hub reads the markers. */
+export const MARKER_SETTLE_MS = 50;
+/** How long the hub waits to watch the activity folder again after the watch failed or the folder was removed. */
+export const MARKER_WATCH_RETRY_MS = 1_000;
 /** How often a tick ends snoozes whose wake time has passed (PRD R49). */
 export const WAKE_MS = 60_000;
 /** The roster, marker and wake timers `start` sets before the poll timers. */
@@ -101,6 +108,16 @@ export class Runtime {
   private listeners = new Set<() => void>();
   /** The roster, marker and wake timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
   private timers: NodeJS.Timeout[] = [];
+  private markerWatcher: FSWatcher | null = null;
+  private markerRead: NodeJS.Timeout | null = null;
+  private markerWatchRetry: NodeJS.Timeout | null = null;
+  private markerWatchFailed = false;
+  /** The marker time last checked per ended session, so each marker an ended session writes reads the roster once. */
+  private markerSeen = new Map<string, number>();
+  /** The roster read in flight; reads run one at a time, so an older result never overwrites a newer one. */
+  private rosterRead: Promise<void> | null = null;
+  /** A read was asked for while one ran, so it runs again once that read finishes. */
+  private rosterAgain = false;
   /** The read in flight per source; reads run one at a time, so their results apply in order. */
   private reads = new Map<string, Promise<void>>();
   private pendingOpens = new Map<string, { sessionId: string; at: number }>();
@@ -181,12 +198,75 @@ export class Runtime {
 
   start(): void {
     this.timers.push(setInterval(() => void this.readRoster(), ROSTER_MS), setInterval(() => this.readMarkers(), MARKER_MS), setInterval(() => this.send({ type: 'tick' }), WAKE_MS));
+    this.watchMarkers();
     this.restartPolls();
   }
 
   stop(): void {
     for (const timer of this.timers.splice(0)) {
       clearInterval(timer);
+    }
+
+    this.markerWatcher?.close();
+    this.markerWatcher = null;
+    clearTimeout(this.markerRead ?? undefined);
+    this.markerRead = null;
+    clearTimeout(this.markerWatchRetry ?? undefined);
+    this.markerWatchRetry = null;
+  }
+
+  /** Reads the markers soon after a hook writes one; the `MARKER_MS` timer stays as a fallback. */
+  private watchMarkers(): void {
+    const dir = join(this.home, 'activity');
+    const rearm = (reason: string) => {
+      this.markerWatcher?.close();
+      this.markerWatcher = null;
+
+      if (!this.markerWatchFailed) {
+        this.deps.log(`marker watch stopped: ${reason}`);
+        this.markerWatchFailed = true;
+      }
+
+      // `stop` clears the timers; a watcher that fails after it is not re-armed.
+      if (this.timers.length > 0 && this.markerWatchRetry === null) {
+        this.markerWatchRetry = setTimeout(() => {
+          this.markerWatchRetry = null;
+          this.watchMarkers();
+        }, MARKER_WATCH_RETRY_MS);
+      }
+    };
+
+    // Windows keeps firing on a removed folder without an error, and a watch does not follow a folder made again at the same path.
+    const folderId = () => statSync(dir, { bigint: true, throwIfNoEntry: false })?.ino ?? null;
+
+    try {
+      mkdirSync(dir, { recursive: true });
+      const id = folderId();
+      const watcher = watch(dir, () => {
+        if (watcher !== this.markerWatcher) {
+          return;
+        }
+
+        try {
+          if (folderId() !== id) {
+            rearm('the activity folder was removed or replaced');
+            return;
+          }
+        } catch (error) {
+          rearm((error as Error).message);
+          return;
+        }
+
+        this.markerRead ??= setTimeout(() => {
+          this.markerRead = null;
+          this.readMarkers();
+        }, MARKER_SETTLE_MS);
+      });
+      watcher.on('error', (error) => watcher === this.markerWatcher && rearm(error.message));
+      this.markerWatcher = watcher;
+      this.markerWatchFailed = false;
+    } catch (error) {
+      rearm((error as Error).message);
     }
   }
 
@@ -271,7 +351,26 @@ export class Runtime {
   }
 
   /** Reads the roster and hook markers; a failed read changes nothing. */
-  async readRoster(): Promise<void> {
+  /** Reads the roster, or joins the read in flight and repeats it once that read finishes, because it may predate the request. */
+  readRoster(): Promise<void> {
+    if (this.rosterRead !== null) {
+      this.rosterAgain = true;
+      return this.rosterRead;
+    }
+
+    this.rosterRead = (async () => {
+      do {
+        this.rosterAgain = false;
+        await this.readRosterOnce();
+      } while (this.rosterAgain);
+    })().finally(() => {
+      this.rosterRead = null;
+    });
+
+    return this.rosterRead;
+  }
+
+  private async readRosterOnce(): Promise<void> {
     const sessions = this.deps.store.startedSessions();
 
     if (sessions.length === 0) {
@@ -316,6 +415,22 @@ export class Runtime {
   /** Sends a marker event for each live session whose marker shows another state. */
   readMarkers(): void {
     const markers = this.markers();
+    // A new marker from an ended session can mean the operator resumed it, as in a VS Code tab; only the roster can revive it.
+    const changed = this.deps.store.startedSessions().filter((session) => {
+      const at = session.state === 'ended' && session.nativeSessionId !== null ? markers.get(session.nativeSessionId)?.at : undefined;
+
+      if (at === undefined || this.markerSeen.get(session.nativeSessionId!) === at) {
+        return false;
+      }
+
+      this.markerSeen.set(session.nativeSessionId!, at);
+
+      return true;
+    });
+
+    if (changed.length > 0) {
+      void this.readRoster();
+    }
 
     for (const session of this.deps.store.activeSessions()) {
       const marker = session.nativeSessionId === null ? undefined : markers.get(session.nativeSessionId);

@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { DONE_CHECK_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import { DONE_CHECK_MS, MARKER_MS, MARKER_WATCH_RETRY_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -293,6 +293,103 @@ describe('Runtime', () => {
     expect(store.session('s1')).toMatchObject({ state: 'idle', released: true });
   });
 
+  it('reads a marker as soon as the hook writes it, before the marker timer fires', async () => {
+    const { store, source, runtime } = setup(config({ installHooks: true }));
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    runtime.start();
+
+    try {
+      writeFileSync(join(home, '.switchboard', 'activity', '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'PermissionRequest' }));
+      await vi.waitFor(() => expect(store.session('s1')?.state).toBe('waiting'), { timeout: MARKER_MS / 2 });
+
+      writeFileSync(join(home, '.switchboard', 'activity', '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'PostToolUse', toolName: 'AskUserQuestion' }));
+      await vi.waitFor(() => expect(store.session('s1')?.state).toBe('running'), { timeout: MARKER_MS / 2 });
+    } finally {
+      runtime.stop();
+    }
+  });
+
+  it('watches the activity folder again after it is removed', async () => {
+    const { store, source, runtime, logs } = setup(config({ installHooks: true }));
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    runtime.start();
+
+    try {
+      const dir = join(home, '.switchboard', 'activity');
+      // Made again at once, so only the folder's identity shows the watch is stale.
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir);
+      writeFileSync(join(dir, 'other.json'), '{}');
+      await vi.waitFor(() => expect(logs).toContain('marker watch stopped: the activity folder was removed or replaced'), { timeout: MARKER_MS / 2 });
+      await new Promise((resolve) => setTimeout(resolve, MARKER_WATCH_RETRY_MS + 200));
+
+      writeFileSync(join(dir, '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'PermissionRequest' }));
+      await vi.waitFor(() => expect(store.session('s1')?.state).toBe('waiting'), { timeout: MARKER_MS / 2 });
+    } finally {
+      runtime.stop();
+    }
+  });
+
+  it('reads the roster when a session that ended writes a marker, so a resumed session returns to Working at once', async () => {
+    let now = T0;
+    const { store, cli, source, runtime } = setup(config({ installHooks: true }), () => now);
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const dir = join(home, '.switchboard', 'activity');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'Stop', backgroundTasks: 0, at: T0 }));
+    await runtime.readRoster();
+    await runtime.settled();
+    expect(store.session('s1')?.state).toBe('ended');
+    expect(store.workItem(1)?.status).toBe('blocked');
+
+    // Each marker reads the roster once, so a marker left by a process that is gone reads it once only.
+    const reads = () => cli.calls.filter((call) => call[1] === 'agents').length;
+    const idle = () => new Promise((resolve) => setTimeout(resolve, 20));
+    const before = reads();
+    runtime.readMarkers();
+    await idle();
+    expect(reads()).toBe(before + 1);
+    runtime.readMarkers();
+    await idle();
+    expect(reads()).toBe(before + 1);
+    expect(store.session('s1')?.state).toBe('ended');
+
+    // The marker time is the hook's clock, so a resume counts even when it is earlier than the hub's end time.
+    now = T0 + 60_000;
+    cli.roster = [{ id: '00000001', sessionId: '00000001-native', pid: 200, kind: 'interactive', status: 'busy' }];
+    writeFileSync(join(dir, '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'UserPromptSubmit', at: T0 - 1 }));
+    runtime.readMarkers();
+    await vi.waitFor(() => expect(store.workItem(1)?.status).toBe('running'));
+    expect(store.session('s1')?.state).toBe('running');
+  });
+
+  it('reads the roster again when asked during a read, so an older result does not end a resumed session', async () => {
+    const { store, cli, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const reads = () => cli.calls.filter((call) => call[1] === 'agents').length;
+    const before = reads();
+    const roster = cli.roster;
+    cli.roster = [];
+    const first = runtime.readRoster();
+    cli.roster = roster;
+    const second = runtime.readRoster();
+    expect(second).toBe(first);
+    await first;
+
+    expect(reads()).toBe(before + 2);
+    expect(store.session('s1')).toMatchObject({ state: 'running' });
+  });
+
   it('ignores markers when hooks are off', async () => {
     const { store, source, runtime } = setup();
     source.result = { tickets: [issue('8')] };
@@ -493,7 +590,7 @@ describe('Runtime', () => {
 
     expect(store.session('s1')).toMatchObject({ state: 'ended', outcome: 'failed' });
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'The hub stopped while the session was starting.' });
-    expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(11);
+    expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(13);
     expect(runtime.snapshot().errors.hooks).toBeNull();
   });
 
