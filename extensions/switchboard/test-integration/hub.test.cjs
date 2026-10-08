@@ -1,7 +1,7 @@
 const assert = require('node:assert');
-const { readFileSync } = require('node:fs');
+const { mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { request } = require('node:http');
-const { join } = require('node:path');
+const { dirname, join } = require('node:path');
 const vscode = require('vscode');
 
 const hubJson = join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'hub.json');
@@ -145,6 +145,40 @@ describe('the hub process', () => {
       assert.deepStrictEqual(opened, ['here-native', 'there-native']);
     } finally {
       fake.dispose();
+    }
+  });
+
+  it('opens a session in the Claude sidebar when claudeCode.preferredLocation is sidebar', async () => {
+    const extension = await api();
+    await until(() => extension.hub(), 'not connected');
+
+    const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const settings = join(folder, '.vscode', 'settings.json');
+    const tabs = [];
+    const sidebar = [];
+    const fakes = [
+      vscode.commands.registerCommand('claude-vscode.primaryEditor.open', (sessionId) => tabs.push(sessionId)),
+      vscode.commands.registerCommand('claude-vscode.editor.open', (...args) => sidebar.push(args)),
+    ];
+
+    try {
+      mkdirSync(dirname(settings), { recursive: true });
+      writeFileSync(settings, JSON.stringify({ 'claudeCode.preferredLocation': 'sidebar' }));
+      await until(() => vscode.workspace.getConfiguration('claudeCode').get('preferredLocation') === 'sidebar', 'setting not read');
+
+      assert.strictEqual(await vscode.commands.executeCommand('switchboard.open', 'side-native', folder), 'opened');
+
+      const hub = extension.hub();
+      await call(hub.port, '/open', hub.token, 'POST', { sessionId: 'claimed-native', cwd: folder });
+      assert.strictEqual(await vscode.commands.executeCommand('switchboard.claim'), 'claimed-native');
+
+      const honor = [undefined, undefined, undefined, undefined, { programmatic: 'honor-preferred-location' }];
+      assert.deepStrictEqual(sidebar, [['side-native', ...honor], ['claimed-native', ...honor]]);
+      assert.deepStrictEqual(tabs, []);
+    } finally {
+      rmSync(dirname(settings), { recursive: true, force: true });
+      await until(() => vscode.workspace.getConfiguration('claudeCode').get('preferredLocation') === undefined, 'setting not cleared');
+      fakes.forEach((fake) => fake.dispose());
     }
   });
 

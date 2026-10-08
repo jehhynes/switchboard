@@ -357,7 +357,19 @@ function samePath(a: string, b: string): boolean {
 }
 
 /**
- * Resumes or focuses a session in a Claude Code tab. Claude's tab lists only sessions of its window's first folder, and
+ * Opens a session where Claude's `claudeCode.preferredLocation` puts it. primaryEditor.open always uses a tab; editor.open with
+ * `honor-preferred-location` uses the sidebar unless a tab already holds the session, and writes no preference (GC M6, M63).
+ */
+async function showInClaude(sessionId: string): Promise<void> {
+  if (vscode.workspace.getConfiguration('claudeCode').get('preferredLocation') === 'sidebar') {
+    await vscode.commands.executeCommand('claude-vscode.editor.open', sessionId, undefined, undefined, undefined, undefined, { programmatic: 'honor-preferred-location' });
+  } else {
+    await vscode.commands.executeCommand('claude-vscode.primaryEditor.open', sessionId);
+  }
+}
+
+/**
+ * Resumes or focuses a session in Claude Code's preferred location. Claude's tab lists only sessions of its window's first folder, and
  * opening another session there starts an empty one (GC M6, M7, M52). A session from another folder is therefore left with
  * the hub as a pending open, and that folder is opened in its own window, which claims it.
  */
@@ -365,7 +377,7 @@ export async function openSession(record: HubRecord | null, sessionId: string, c
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
   if (folder !== undefined && samePath(folder, cwd)) {
-    await vscode.commands.executeCommand('claude-vscode.primaryEditor.open', sessionId);
+    await showInClaude(sessionId);
     return 'opened';
   }
 
@@ -389,7 +401,7 @@ export async function claimOpen(record: HubRecord): Promise<string | null> {
     return null;
   }
 
-  await vscode.commands.executeCommand('claude-vscode.primaryEditor.open', sessionId);
+  await showInClaude(sessionId);
 
   return sessionId;
 }
