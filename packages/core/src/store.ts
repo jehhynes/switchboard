@@ -202,6 +202,53 @@ export const MIGRATIONS = [
   DELETE FROM pastes WHERE workItemId IN (SELECT id FROM sessionless);
   DELETE FROM workItems WHERE id IN (SELECT id FROM sessionless);
   DROP TABLE sessionless;`,
+  // The activity log (PRD R59): each flow event that wrote or was refused, and each row it wrote. No foreign keys, so a deleted row keeps its log.
+  `CREATE TABLE events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    ticketId INTEGER,
+    workItemId INTEGER,
+    sessionId TEXT,
+    detail TEXT,
+    refused TEXT
+  );
+  CREATE INDEX eventsByTicket ON events (ticketId);
+  CREATE TABLE changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    eventId INTEGER NOT NULL,
+    ticketId INTEGER NOT NULL,
+    workItemId INTEGER,
+    sessionId TEXT,
+    entity TEXT NOT NULL,
+    entityId TEXT NOT NULL,
+    op TEXT NOT NULL,
+    fields TEXT NOT NULL
+  );
+  CREATE INDEX changesByTicket ON changes (ticketId);
+  CREATE INDEX changesByWorkItem ON changes (workItemId);
+  -- Counts every write to a ticket's log, deletions too, so a reader can tell whether its copy is current.
+  CREATE TABLE historyRevisions (ticketId INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
+  INSERT INTO events (at, type, actor) VALUES (CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER), 'recording', 'hub');
+  -- Facts the stored times still show about earlier work, before the log began; later changes to those rows cannot alter them.
+  INSERT INTO events (at, type, actor, ticketId, workItemId, sessionId, detail)
+    SELECT at, 'reconstructed', 'hub', ticketId, workItemId, sessionId, detail FROM (
+      SELECT createdAt AS at, ticketId, id AS workItemId, NULL AS sessionId, json_object('fact', 'created', 'playbook', playbook, 'parentId', parentId) AS detail FROM workItems
+      UNION ALL SELECT startedAt, ticketId, workItemId, NULL, json_object('fact', 'triageStarted', 'triageId', id) FROM triages
+      UNION ALL SELECT endedAt, ticketId, workItemId, NULL, json_object('fact', 'triageEnded', 'triageId', id, 'playbook', playbook, 'error', error, 'immediacy', immediacy, 'severity', severity)
+        FROM triages WHERE endedAt IS NOT NULL
+      UNION ALL SELECT s.startedAt, w.ticketId, s.workItemId, s.id, json_object('fact', 'sessionStarted', 'kind', s.kind, 'state', s.state) FROM sessions s JOIN workItems w ON w.id = s.workItemId
+      UNION ALL SELECT s.endedAt, w.ticketId, s.workItemId, s.id, json_object('fact', 'sessionEnded', 'kind', s.kind, 'outcome', s.outcome, 'outcomeDetail', s.outcomeDetail)
+        FROM sessions s JOIN workItems w ON w.id = s.workItemId WHERE s.endedAt IS NOT NULL
+      UNION ALL SELECT stageAt, ticketId, id, NULL, json_object('fact', 'stage', 'stage', stage) FROM workItems WHERE stage IS NOT NULL AND stageAt IS NOT NULL
+      UNION ALL SELECT statusAt, ticketId, id, NULL, json_object('fact', 'status', 'status', status, 'error', error, 'approvalSummary', approvalSummary, 'approvalReport', approvalReport)
+        FROM workItems WHERE status IN ('awaiting-approval', 'blocked', 'failed') AND statusAt > 0
+      UNION ALL SELECT doneAt, ticketId, id, NULL, json_object('fact', 'done', 'reason', doneReason) FROM workItems WHERE doneAt IS NOT NULL
+      UNION ALL SELECT reportedAt, ticketId, NULL, NULL, json_object('fact', 'link', 'label', label, 'target', target) FROM links
+      UNION ALL SELECT p.reportedAt, w.ticketId, p.workItemId, NULL, json_object('fact', 'paste', 'label', p.label, 'file', p.file) FROM pastes p JOIN workItems w ON w.id = p.workItemId
+    ) ORDER BY at;
+  INSERT INTO historyRevisions (ticketId, revision) SELECT ticketId, COUNT(*) FROM events WHERE ticketId IS NOT NULL GROUP BY ticketId;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released']);
@@ -224,6 +271,49 @@ function fromRow<T>(row: Row | undefined): T | null {
   return result as T;
 }
 
+/** A row's stored value as the log keeps it: booleans and lists as in the model, long text clipped, prompts and contexts as `true`. */
+function loggedValue(key: string, value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (OMITTED.has(key)) {
+    return true;
+  }
+
+  const [converted] = Object.values(fromRow<Row>({ [key]: value })!);
+
+  return typeof converted === 'string' && converted.length > LOGGED_TEXT ? `${converted.slice(0, LOGGED_TEXT)}…` : converted;
+}
+
+/** Logged fields that differ between two stored rows; `before` null for an insert. */
+function diff(table: string, before: Row | null, after: Row): Record<string, [unknown, unknown]> {
+  const fields: Record<string, [unknown, unknown]> = {};
+
+  for (const [key, value] of Object.entries(after)) {
+    if (key === 'id' || UNLOGGED[table]!.has(key)) {
+      continue;
+    }
+
+    const old = before === null ? null : (before[key] ?? null);
+
+    if (old !== (value ?? null)) {
+      fields[key] = [loggedValue(key, old), loggedValue(key, value)];
+    }
+  }
+
+  return fields;
+}
+
+/** Clips the long texts of an event's detail. */
+function loggedDetail(detail: Record<string, unknown> | null): string | null {
+  if (detail === null) {
+    return null;
+  }
+
+  return JSON.stringify(detail, (_key, value: unknown) => (typeof value === 'string' && value.length > LOGGED_TEXT ? `${value.slice(0, LOGGED_TEXT)}…` : value));
+}
+
 function toParams(values: Row): Record<string, SQLInputValue> {
   const result: Record<string, SQLInputValue> = {};
 
@@ -242,18 +332,91 @@ export type NewWorktree = Omit<Worktree, 'id'>;
 /** A triage without its context, which History does not show. */
 export type HistoryTriage = Omit<Triage, 'context'>;
 
-/** Every run a ticket has had, for History (PRD R59). */
+/** Who caused an event (PRD R59). */
+export type Actor = 'operator' | 'session' | 'source' | 'triage' | 'hub';
+
+/** A flow event as the activity log records it, before it has an ID. */
+export interface EventRecord {
+  at: number;
+  /** The flow event's type, or `wake` for snoozes that ended before it. */
+  type: string;
+  actor: Actor;
+  /** The ticket, work item and session the event names, when it names one. */
+  ticketId: number | null;
+  workItemId: number | null;
+  sessionId: string | null;
+  /** The event's own fields, without prompts, contexts or polled lists. */
+  detail: Record<string, unknown> | null;
+}
+
+export type ChangeEntity = 'ticket' | 'workItem' | 'session' | 'triage' | 'worktree' | 'link' | 'paste';
+
+/** One row an event wrote. `fields` maps each changed field to its old and new value; an insert's old values are null. */
+export interface HistoryChange {
+  entity: ChangeEntity;
+  entityId: string;
+  op: 'insert' | 'update' | 'delete';
+  workItemId: number | null;
+  sessionId: string | null;
+  fields: Record<string, [unknown, unknown]>;
+}
+
+export interface HistoryEvent extends EventRecord {
+  id: number;
+  refused: string | null;
+  /** Only the changes to this ticket's rows. */
+  changes: HistoryChange[];
+}
+
+/** Everything recorded about a ticket, for History (PRD R59). */
 export interface TicketHistory {
   ticket: Ticket;
-  /** Newest first, each with its sessions and triages oldest first; no task prompt. */
-  workItems: (Omit<WorkItem, 'taskPrompt'> & { sessions: Session[]; triages: HistoryTriage[] })[];
+  /** Newest first, each with its sessions, triages and pastes oldest first; no task or approval prompt. */
+  workItems: (Omit<WorkItem, 'taskPrompt' | 'approvalPrompt'> & { sessions: Session[]; triages: HistoryTriage[]; pastes: Paste[] })[];
   /** Pool triages no pick attached to a work item, oldest first. */
   poolTriages: HistoryTriage[];
+  worktree: Worktree | null;
+  links: Link[];
+  /** Oldest first. */
+  events: HistoryEvent[];
+  /** When the activity log began; null only for a database the log never ran on. */
+  recordedSince: number | null;
+  /** From `historyRevision`. */
+  revision: string;
 }
+
+/** Fields that change on every poll or status change; their change alone is not activity, and the event's time already says when. */
+const UNLOGGED: Record<string, ReadonlySet<string>> = {
+  tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt']),
+  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt']),
+  sessions: new Set(['stateAt']),
+  triages: new Set(),
+  worktrees: new Set(),
+  links: new Set(['reportedAt']),
+  pastes: new Set(['reportedAt']),
+};
+
+/** Prompts and contexts: the log records that they changed, as `true`, not their text. */
+const OMITTED = new Set(['taskPrompt', 'approvalPrompt', 'context']);
+
+const ENTITIES: Record<string, ChangeEntity> = {
+  tickets: 'ticket',
+  workItems: 'workItem',
+  sessions: 'session',
+  triages: 'triage',
+  worktrees: 'worktree',
+  links: 'link',
+  pastes: 'paste',
+};
+
+/** Longest text kept in a logged field or event detail. */
+const LOGGED_TEXT = 2000;
 
 /** All database access. The hub is the only process that opens the database. */
 export class Store {
   readonly #db: DatabaseSync;
+  /** The event whose writes are logged; its ID is null until it is stored. */
+  #event: (EventRecord & { id: number | null }) | null = null;
 
   private constructor(db: DatabaseSync) {
     this.#db = db;
@@ -319,11 +482,116 @@ export class Store {
     }
   }
 
-  #insert(table: string, values: Row): number {
+  /** Starts logging writes under `record` (PRD R59). An event is stored on its first write, or at once when `always` is set. */
+  beginEvent(record: EventRecord, always = false): void {
+    this.#event = { ...record, id: null };
+
+    if (always) {
+      this.#eventId();
+    }
+  }
+
+  /** Adds fields to the current event's detail, such as the ticket a task report created. */
+  noteEvent(detail: Record<string, unknown>): void {
+    if (this.#event === null) {
+      return;
+    }
+
+    this.#event.detail = { ...this.#event.detail, ...detail };
+
+    if (this.#event.id !== null) {
+      this.#db.prepare('UPDATE events SET detail = ? WHERE id = ?').run(loggedDetail(this.#event.detail), this.#event.id);
+      this.#bump(this.#event.ticketId);
+    }
+  }
+
+  /** Records why the current event was refused; a refusal naming no ticket is not stored, because no History shows it. */
+  refuseEvent(message: string): void {
+    if (this.#event?.ticketId == null) {
+      return;
+    }
+
+    this.#db.prepare('UPDATE events SET refused = ? WHERE id = ?').run(message, this.#eventId());
+    this.#bump(this.#event.ticketId);
+  }
+
+  endEvent(): void {
+    this.#event = null;
+  }
+
+  #eventId(): number {
+    const event = this.#event!;
+
+    if (event.id === null) {
+      event.id = this.#insertRaw('events', { at: event.at, type: event.type, actor: event.actor, ticketId: event.ticketId, workItemId: event.workItemId, sessionId: event.sessionId, detail: loggedDetail(event.detail) });
+      this.#bump(event.ticketId);
+    }
+
+    return event.id;
+  }
+
+  /** Advances the ticket's history revision after a write to its log. */
+  #bump(ticketId: number | null): void {
+    if (ticketId !== null) {
+      this.#db.prepare('INSERT INTO historyRevisions (ticketId, revision) VALUES (?, 1) ON CONFLICT (ticketId) DO UPDATE SET revision = revision + 1').run(ticketId);
+    }
+  }
+
+  /** The ticket, work item and session a row belongs to. */
+  #owner(table: string, row: Row): { ticketId: number; workItemId: number | null; sessionId: string | null } {
+    const ticketOf = (workItemId: unknown) => (this.#db.prepare('SELECT ticketId FROM workItems WHERE id = ?').get(workItemId as number) as { ticketId: number }).ticketId;
+
+    switch (table) {
+      case 'tickets':
+        return { ticketId: row['id'] as number, workItemId: null, sessionId: null };
+      case 'workItems':
+        return { ticketId: row['ticketId'] as number, workItemId: row['id'] as number, sessionId: null };
+      case 'sessions':
+        return { ticketId: ticketOf(row['workItemId']), workItemId: row['workItemId'] as number, sessionId: row['id'] as string };
+      case 'pastes':
+        return { ticketId: ticketOf(row['workItemId']), workItemId: row['workItemId'] as number, sessionId: null };
+      default:
+        return { ticketId: row['ticketId'] as number, workItemId: (row['workItemId'] as number | undefined) ?? null, sessionId: null };
+    }
+  }
+
+  /** Logs one write of the current event; an update of unlogged fields only is not activity. Rows are as stored. */
+  #log(table: string, op: HistoryChange['op'], before: Row | null, after: Row | null): void {
+    if (this.#event === null) {
+      return;
+    }
+
+    const fields = after === null ? {} : diff(table, before, after);
+
+    if (op === 'update' && Object.keys(fields).length === 0) {
+      return;
+    }
+
+    const row = after ?? before!;
+    const owner = this.#owner(table, row);
+
+    this.#insertRaw('changes', { eventId: this.#eventId(), ...owner, entity: ENTITIES[table]!, entityId: String(row['id']), op, fields: JSON.stringify(fields) });
+    this.#bump(owner.ticketId);
+  }
+
+  #raw(table: string, id: number | string): Row | null {
+    return (this.#db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) as Row | undefined) ?? null;
+  }
+
+  #insertRaw(table: string, values: Record<string, SQLInputValue>): number {
     const keys = Object.keys(values);
     const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map((key) => `:${key}`).join(', ')})`;
 
-    return Number(this.#db.prepare(sql).run(toParams(values)).lastInsertRowid);
+    return Number(this.#db.prepare(sql).run(values).lastInsertRowid);
+  }
+
+  #insert(table: string, values: Row): number {
+    const params = toParams(values);
+    const id = this.#insertRaw(table, params);
+
+    this.#log(table, 'insert', null, { ...params, id: params['id'] ?? id });
+
+    return id;
   }
 
   #update(table: string, id: number | string, patch: Row): void {
@@ -333,12 +601,29 @@ export class Store {
       return;
     }
 
+    const before = this.#event === null ? null : this.#raw(table, id);
+    const params = toParams(patch);
     const sql = `UPDATE ${table} SET ${keys.map((key) => `${key} = :${key}`).join(', ')} WHERE id = :id`;
-    const result = this.#db.prepare(sql).run(toParams({ ...patch, id }));
+    const result = this.#db.prepare(sql).run({ ...params, id });
 
     if (result.changes !== 1) {
       throw new Error(`No ${table} row with id ${id}.`);
     }
+
+    if (before !== null) {
+      this.#log(table, 'update', before, { ...before, ...params });
+    }
+  }
+
+  /** Runs an upsert on a row found by `key`, and logs it as an insert or an update. */
+  #upsert(table: string, sql: string, values: Row, key: string[]): void {
+    const where = key.map((column) => `${column} = :${column}`).join(' AND ');
+    const params = toParams(values);
+    const find = () => (this.#db.prepare(`SELECT * FROM ${table} WHERE ${where}`).get(Object.fromEntries(key.map((column) => [column, params[column]!]))) as Row | undefined) ?? null;
+    const before = find();
+
+    this.#db.prepare(sql).run(params);
+    this.#log(table, before === null ? 'insert' : 'update', before, find());
   }
 
   #one<T>(sql: string, ...params: SQLInputValue[]): T | null {
@@ -386,8 +671,26 @@ export class Store {
     return this.#one('SELECT * FROM workItems WHERE id = ?', id);
   }
 
-  /** Deletes a work item that never had a session, with its triages and pastes. */
+  /** Deletes a work item that never had a session, with its triages, pastes and activity, so History does not show it (PRD R10). */
   deleteWorkItem(id: number): void {
+    this.#bump(this.workItem(id)?.ticketId ?? null);
+
+    const triageIds = JSON.stringify(this.#all<{ id: number }>('SELECT id FROM triages WHERE workItemId = ?', id).map((triage) => triage.id));
+
+    // A pick attaches pool triages logged before the work item existed, so their activity is found by triage too.
+    this.#db
+      .prepare("DELETE FROM changes WHERE workItemId = :id OR (entity = 'triage' AND CAST(entityId AS INTEGER) IN (SELECT value FROM json_each(:triageIds)))")
+      .run({ id, triageIds });
+    this.#db
+      .prepare(
+        'DELETE FROM events WHERE (workItemId = :id OR json_extract(detail, \'$.triageId\') IN (SELECT value FROM json_each(:triageIds))) AND id NOT IN (SELECT eventId FROM changes)',
+      )
+      .run({ id, triageIds });
+
+    if (this.#event?.id != null && this.#raw('events', this.#event.id) === null) {
+      this.#event.id = null;
+    }
+
     this.#db.prepare('DELETE FROM triages WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM workItems WHERE id = ?').run(id);
@@ -446,7 +749,13 @@ export class Store {
   }
 
   deleteTriage(id: number): void {
+    const before = this.#raw('triages', id);
+
     this.#db.prepare('DELETE FROM triages WHERE id = ?').run(id);
+
+    if (before !== null) {
+      this.#log('triages', 'delete', before, null);
+    }
   }
 
   /** Tickets in the pool, the longest-waiting customer first. */
@@ -464,22 +773,24 @@ export class Store {
 
   /** Links the ticket's worktree, replacing an earlier link. */
   linkWorktree(worktree: NewWorktree): void {
-    this.#db
-      .prepare(
-        'INSERT INTO worktrees (ticketId, path, branch, linkedBy) VALUES (:ticketId, :path, :branch, :linkedBy) ' +
-          'ON CONFLICT (ticketId) DO UPDATE SET path = excluded.path, branch = excluded.branch, linkedBy = excluded.linkedBy',
-      )
-      .run(toParams(worktree as unknown as Row));
+    this.#upsert(
+      'worktrees',
+      'INSERT INTO worktrees (ticketId, path, branch, linkedBy) VALUES (:ticketId, :path, :branch, :linkedBy) ' +
+        'ON CONFLICT (ticketId) DO UPDATE SET path = excluded.path, branch = excluded.branch, linkedBy = excluded.linkedBy',
+      worktree as unknown as Row,
+      ['ticketId'],
+    );
   }
 
   /** Adds a link to the ticket; a link to the same target replaces its label. */
   addLink(link: Omit<Link, 'id'>): void {
-    this.#db
-      .prepare(
-        'INSERT INTO links (ticketId, label, target, reportedAt) VALUES (:ticketId, :label, :target, :reportedAt) ' +
-          'ON CONFLICT (ticketId, target) DO UPDATE SET label = excluded.label, reportedAt = excluded.reportedAt',
-      )
-      .run(toParams(link as unknown as Row));
+    this.#upsert(
+      'links',
+      'INSERT INTO links (ticketId, label, target, reportedAt) VALUES (:ticketId, :label, :target, :reportedAt) ' +
+        'ON CONFLICT (ticketId, target) DO UPDATE SET label = excluded.label, reportedAt = excluded.reportedAt',
+      link as unknown as Row,
+      ['ticketId', 'target'],
+    );
   }
 
   linksFor(ticketId: number): Link[] {
@@ -488,12 +799,13 @@ export class Store {
 
   /** Adds a paste to the work item; a paste with the same label replaces its file and keeps its place. */
   setPaste(paste: Omit<Paste, 'id'>): void {
-    this.#db
-      .prepare(
-        'INSERT INTO pastes (workItemId, label, file, reportedAt) VALUES (:workItemId, :label, :file, :reportedAt) ' +
-          'ON CONFLICT (workItemId, label) DO UPDATE SET file = excluded.file, reportedAt = excluded.reportedAt',
-      )
-      .run(toParams(paste as unknown as Row));
+    this.#upsert(
+      'pastes',
+      'INSERT INTO pastes (workItemId, label, file, reportedAt) VALUES (:workItemId, :label, :file, :reportedAt) ' +
+        'ON CONFLICT (workItemId, label) DO UPDATE SET file = excluded.file, reportedAt = excluded.reportedAt',
+      paste as unknown as Row,
+      ['workItemId', 'label'],
+    );
   }
 
   pastesFor(workItemId: number): Paste[] {
@@ -533,7 +845,17 @@ export class Store {
     );
   }
 
-  /** The ticket's work items, sessions and triages; null for an unknown ticket. */
+  /** The ticket's history revision, which every write to its log advances, deletions too; `0` for none. */
+  historyRevision(ticketId: number): string {
+    return String(this.#one<{ revision: number }>('SELECT revision FROM historyRevisions WHERE ticketId = ?', ticketId)?.revision ?? 0);
+  }
+
+  /** When the activity log began; earlier work shows only as the facts its migration reconstructed. */
+  recordedSince(): number | null {
+    return this.#one<{ at: number }>("SELECT at FROM events WHERE type = 'recording' ORDER BY id LIMIT 1")?.at ?? null;
+  }
+
+  /** The ticket's rows and its activity log; null for an unknown ticket. */
   ticketHistory(ticketId: number): TicketHistory | null {
     const ticket = this.ticket(ticketId);
 
@@ -542,12 +864,55 @@ export class Store {
     }
 
     const triages = this.#all<Triage>('SELECT * FROM triages WHERE ticketId = ? ORDER BY startedAt, id', ticketId).map(({ context: _context, ...triage }) => triage);
-    const workItems = this.#all<WorkItem>('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id DESC', ticketId).map(({ taskPrompt: _prompt, ...item }) => ({
+    const workItems = this.#all<WorkItem>('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id DESC', ticketId).map(({ taskPrompt: _task, approvalPrompt: _approval, ...item }) => ({
       ...item,
       sessions: this.sessionsFor(item.id),
       triages: triages.filter((triage) => triage.workItemId === item.id),
+      pastes: this.pastesFor(item.id),
     }));
+    const changes = new Map<number, HistoryChange[]>();
 
-    return { ticket, workItems, poolTriages: triages.filter((triage) => triage.workItemId === null) };
+    for (const row of this.#db.prepare('SELECT * FROM changes WHERE ticketId = ? ORDER BY id').all(ticketId) as Row[]) {
+      const change: HistoryChange = {
+        entity: row['entity'] as ChangeEntity,
+        entityId: row['entityId'] as string,
+        op: row['op'] as HistoryChange['op'],
+        workItemId: row['workItemId'] as number | null,
+        sessionId: row['sessionId'] as string | null,
+        fields: JSON.parse(row['fields'] as string) as HistoryChange['fields'],
+      };
+
+      changes.set(row['eventId'] as number, [...(changes.get(row['eventId'] as number) ?? []), change]);
+    }
+
+    const events = (
+      this.#db
+        .prepare('SELECT * FROM events WHERE ticketId = :ticketId OR id IN (SELECT eventId FROM changes WHERE ticketId = :ticketId) ORDER BY at, id')
+        .all({ ticketId }) as Row[]
+    ).map(
+      (row): HistoryEvent => ({
+        id: row['id'] as number,
+        at: row['at'] as number,
+        type: row['type'] as string,
+        actor: row['actor'] as Actor,
+        ticketId: row['ticketId'] as number | null,
+        workItemId: row['workItemId'] as number | null,
+        sessionId: row['sessionId'] as string | null,
+        detail: row['detail'] === null ? null : (JSON.parse(row['detail'] as string) as Record<string, unknown>),
+        refused: row['refused'] as string | null,
+        changes: changes.get(row['id'] as number) ?? [],
+      }),
+    );
+
+    return {
+      ticket,
+      workItems,
+      poolTriages: triages.filter((triage) => triage.workItemId === null),
+      worktree: this.worktreeFor(ticketId),
+      links: this.linksFor(ticketId),
+      events,
+      recordedSince: this.recordedSince(),
+      revision: this.historyRevision(ticketId),
+    };
   }
 }

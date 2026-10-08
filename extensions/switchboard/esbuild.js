@@ -21,9 +21,9 @@ const options = {
   logLevel: 'info',
 };
 
-// The panel and settings editor scripts run in webviews, a browser.
+// The panel, settings editor and History scripts run in webviews, a browser.
 const webview = {
-  entryPoints: { webview: 'src/webview/main.ts', settings: 'src/webview/settingsMain.ts' },
+  entryPoints: { webview: 'src/webview/main.ts', settings: 'src/webview/settingsMain.ts', history: 'src/webview/historyMain.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -44,6 +44,7 @@ function copyAssets() {
 
   fs.copyFileSync('src/webview/webview.css', 'dist/webview.css');
   fs.copyFileSync('src/webview/settings.css', 'dist/settings.css');
+  fs.copyFileSync('src/webview/history.css', 'dist/history.css');
 }
 
 async function main() {

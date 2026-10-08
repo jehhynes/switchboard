@@ -195,7 +195,13 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         const report = parseReport(body);
 
         if (report === null) {
-          return { status: 400, body: { error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' } };
+          const error = 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.';
+
+          if (isRecord(body) && typeof body['sessionId'] === 'string') {
+            runtime.refuseReport(body['sessionId'], body, error);
+          }
+
+          return { status: 400, body: { error } };
         }
 
         const { refused } = await runtime.report(report);
@@ -213,10 +219,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
       '/history': async (body) => {
         if (!isRecord(body) || !Number.isInteger(body['ticketId'])) {
-          return { status: 400, body: { error: 'Expected {ticketId}.' } };
+          return { status: 400, body: { error: 'Expected {ticketId, revision?}.' } };
         }
 
-        const history = store.ticketHistory(body['ticketId'] as number);
+        const ticketId = body['ticketId'] as number;
+
+        // A reader that names the revision it shows gets the full history only when it changed.
+        if (typeof body['revision'] === 'string' && store.ticket(ticketId) !== null && store.historyRevision(ticketId) === body['revision']) {
+          return { status: 200, body: { unchanged: true } };
+        }
+
+        const history = store.ticketHistory(ticketId);
 
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },

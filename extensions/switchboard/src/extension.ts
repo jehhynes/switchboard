@@ -5,8 +5,8 @@ import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@s
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
 import { openChanges, showInSourceControl } from './git.js';
-import { HistoryDocuments } from './historyDocument.js';
-import type { HistoryMessage } from './historyDocument.js';
+import { HistoryPanels } from './historyPanel.js';
+import type { HistoryMessage } from './historyPanel.js';
 import { startHub } from './hubProcess.js';
 import { NeedsYouToasts } from './notify.js';
 import { WorkItemsView, attach, claimOpen, copyPaste, dispatch, goTo, openLink, openSession, openUri, openWorktree, resume, setSource, startAdhoc } from './panel.js';
@@ -26,6 +26,10 @@ export interface SwitchboardApi {
   badge(): vscode.ViewBadge | undefined | null;
   /** Shows a state as if the hub sent it, so the integration suite can show recorded snapshots. */
   show(state: string): void;
+  /** What each open History tab shows (PRD R59). */
+  historyTabs(): { ticketId: number; title: string; shown: string | null; error: string | null }[];
+  /** Restores a History tab from a page's saved state, as VS Code does after a reload. */
+  restoreHistory(state: unknown): Promise<void>;
   /** Runs the URI handler, which the integration suite cannot reach through the OS (PRD R69). */
   openUri(uri: vscode.Uri, waitMs?: number): Promise<RowTarget | null>;
 }
@@ -94,7 +98,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   const view = new WorkItemsView(context.extensionUri);
   const settings = new SettingsEditor(context.extensionUri, configDir, () => openPlaybooks(view.state() as Snapshot | null));
-  const history = new HistoryDocuments(() => keeper.current());
+  const history = new HistoryPanels(context.extensionUri, () => keeper.current());
 
   context.subscriptions.push(
     history.register(),
@@ -165,12 +169,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       openEvents(record, onEnd, undefined, (event, data) => {
         if (event === 'state') {
           view.update(data);
+          history.changed();
           showSourceToggles(JSON.parse(data) as Snapshot);
           toasts.update(JSON.parse(data) as Snapshot);
         } else if (event === 'hello') {
           toasts.connected();
           void claimOpen(record).catch(() => {});
-          history.retryFailed(record);
+          history.connected(record);
         }
       }),
     now: Date.now,
@@ -180,7 +185,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   context.subscriptions.push({ dispose: () => keeper.dispose() });
 
-  return { hub: () => keeper.current(), state: () => view.state(), badge: () => view.badge(), show: (state) => view.update(state), openUri: (uri, waitMs) => openUri(view, uri, waitMs) };
+  return { hub: () => keeper.current(), state: () => view.state(), historyTabs: () => history.shown(), restoreHistory: (state) => history.restore(state), badge: () => view.badge(), show: (state) => view.update(state), openUri: (uri, waitMs) => openUri(view, uri, waitMs) };
 }
 
 export function deactivate(): void {}

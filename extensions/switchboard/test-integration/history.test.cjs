@@ -1,19 +1,24 @@
 const assert = require('node:assert');
+const { request } = require('node:http');
 const { join } = require('node:path');
 const vscode = require('vscode');
 
 /**
- * A row's History (PRD R59): the command reads the hub's /history and opens a read-only Markdown document. The rows are written
- * straight into the test hub's store, done and long ago, so the hub neither shows nor acts on them. historyMarkdown's text is
- * tested in test/history.test.ts.
+ * A row's History (PRD R59): a webview tab per ticket that reads the hub's /history when its page loads, follows the hub's changes while
+ * visible, catches up when shown again, reads again once the window reconnects, and is restored from its saved state. The page's text is
+ * tested in test/history.test.ts; here the revision the page reports after rendering proves that the hub's reply reached it. The rows are written straight into the test hub's store,
+ * done and long ago, so the hub neither shows nor acts on them.
  */
 describe('a row\'s History', () => {
   const TICKET = 9001;
   let db;
+  let extension;
   let warned = [];
   const original = vscode.window.showWarningMessage;
 
   const history = (ticketId) => vscode.commands.executeCommand('switchboard.row.history', { actions: { history: { type: 'history', ticketId, key: 'gh 77' } } });
+  const tabs = () => extension.historyTabs().filter((tab) => tab.ticketId === TICKET);
+  const editorTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => tab.label === 'gh 77 History');
 
   async function until(what, why, within = 30_000) {
     const deadline = Date.now() + within;
@@ -30,9 +35,24 @@ describe('a row\'s History', () => {
     }
   }
 
+  /** Posts to the window's hub as the extension does. */
+  function post(path, body) {
+    const record = extension.hub();
+
+    return new Promise((done, fail) => {
+      const outbound = request({ host: '127.0.0.1', port: record.port, method: 'POST', path, headers: { Authorization: `Bearer ${record.token}`, 'Content-Type': 'application/json' } }, (response) => {
+        response.resume();
+        response.on('end', () => done(response.statusCode));
+      });
+
+      outbound.on('error', fail);
+      outbound.end(JSON.stringify(body));
+    });
+  }
+
   before(async function () {
     this.timeout(60_000);
-    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
+    extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
 
     await until(() => extension.hub(), 'the extension never connected to the hub');
 
@@ -51,6 +71,7 @@ describe('a row\'s History', () => {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
     if (db !== undefined) {
+      db.exec(`DELETE FROM changes WHERE ticketId >= ${TICKET}; DELETE FROM events WHERE ticketId >= ${TICKET}; DELETE FROM historyRevisions WHERE ticketId >= ${TICKET}`);
       db.exec(`DELETE FROM sessions WHERE workItemId >= ${TICKET}; DELETE FROM triages WHERE ticketId >= ${TICKET}; DELETE FROM workItems WHERE ticketId >= ${TICKET}; DELETE FROM tickets WHERE id >= ${TICKET}`);
       db.close();
     }
@@ -60,43 +81,60 @@ describe('a row\'s History', () => {
     warned = [];
   });
 
-  it('opens the ticket\'s history as a read-only Markdown document, and shows the current history when opened again', async function () {
+  it('opens the ticket\'s History in one webview tab, whose page loads and shows the hub\'s history, and reuses the tab when opened again', async function () {
     this.timeout(30_000);
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
-    const editor = await history(TICKET);
+    const panel = await history(TICKET);
 
     assert.deepStrictEqual(warned, []);
-    assert.strictEqual(vscode.window.activeTextEditor?.document, editor.document);
-    assert.strictEqual(editor.document.uri.scheme, 'switchboard-history');
-    assert.strictEqual(editor.document.languageId, 'markdown');
-    assert.strictEqual(vscode.window.tabGroups.activeTabGroup.activeTab?.label, 'gh 77 History.md');
-    assert.match(editor.document.getText(), /^# gh 77 Inbox badge\n/);
-    assert.match(editor.document.getText(), /\n## dev:review-pr · done, finished by the session\n/);
-    assert.match(editor.document.getText(), /\n- task, .+: done\n/);
-
-    db.exec(`INSERT INTO triages (ticketId, workItemId, playbook, startedAt, endedAt, error) VALUES (${TICKET}, NULL, NULL, 3000, 3001, 'Classifier timed out.')`);
+    assert.strictEqual(panel.viewType, 'switchboard.history');
+    await until(() => vscode.window.tabGroups.activeTabGroup.activeTab?.label === 'gh 77 History', 'the History tab is not active');
+    // The page posts ready once its script runs, and the read it asks for stores the revision it was sent.
+    await until(() => tabs()[0]?.shown === revision(), `the page never showed the history: ${JSON.stringify(tabs())}`);
 
     const again = await history(TICKET);
 
-    assert.strictEqual(again.document, editor.document, 'a second open reuses the ticket\'s document');
-    await until(() => again.document.getText().includes(': failed, Classifier timed out.'), 'the document did not show the new triage');
-
-    const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => tab.label === 'gh 77 History.md');
-
-    assert.strictEqual(tabs.length, 1);
+    assert.strictEqual(again, panel, 'a second open reuses the ticket\'s tab');
+    assert.strictEqual(editorTabs().length, 1);
   });
 
-  it('reads a restored document from the hub, and again once the window reconnects when the first read failed', async function () {
+  it('follows a logged change while visible, and catches up on one made while hidden when shown again', async function () {
+    this.timeout(30_000);
+
+    const panel = await history(TICKET);
+
+    await until(() => tabs()[0]?.shown === revision(), 'the page never showed the history');
+
+    const first = revision();
+
+    assert.strictEqual(await post('/action', { type: 'snooze', ticketId: TICKET, until: null }), 200);
+    assert.notStrictEqual(revision(), first);
+    await until(() => tabs()[0].shown === revision(), `the visible tab did not follow the snooze: ${JSON.stringify(tabs())}`);
+
+    // Another editor hides the History tab, so the restore reaches it only when it is shown again.
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content: 'other' }));
+    assert.strictEqual(panel.visible, false);
+
+    const hidden = tabs()[0].shown;
+
+    assert.strictEqual(await post('/action', { type: 'restore', ticketId: TICKET }), 200);
+    await new Promise((done) => setTimeout(done, 2_000));
+    assert.strictEqual(tabs()[0].shown, hidden, 'a hidden tab read the hub');
+
+    panel.reveal();
+    await until(() => tabs()[0].shown === revision() && revision() !== hidden, `the shown tab did not catch up: ${JSON.stringify(tabs())}`);
+  });
+
+  it('opens a tab while no hub answers, says so, and reads the history once the window reconnects', async function () {
     this.timeout(90_000);
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
-    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const before = extension.hub();
-    const restored = vscode.Uri.from({ scheme: 'switchboard-history', path: '/gh 77 restored History.md', query: String(TICKET) });
 
     // No hub answers between the shutdown and the restart, as for a tab VS Code restores before the window connects.
     await new Promise((done) => {
-      const outbound = require('node:http').request({ host: '127.0.0.1', port: before.port, method: 'POST', path: '/shutdown', headers: { Authorization: `Bearer ${before.token}` } }, (response) => {
+      const outbound = request({ host: '127.0.0.1', port: before.port, method: 'POST', path: '/shutdown', headers: { Authorization: `Bearer ${before.token}` } }, (response) => {
         response.resume();
         response.on('end', done);
       });
@@ -112,20 +150,37 @@ describe('a row\'s History', () => {
       });
 
     await until(refused, 'the hub kept listening after its shutdown');
-
-    const { document } = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(restored));
-
-    assert.match(document.getText(), /^Switchboard: /);
+    await history(TICKET);
+    await until(() => tabs()[0]?.error?.startsWith('Switchboard: '), `the tab did not report the missing hub: ${JSON.stringify(tabs())}`);
     await until(() => extension.hub() !== null && extension.hub().pid !== before.pid, 'the window did not reconnect to a new hub', 60_000);
-    await until(() => document.getText().startsWith('# gh 77 Inbox badge\n'), `the restored document was not read again: ${document.getText()}`);
+    await until(() => tabs()[0]?.shown === revision() && tabs()[0].error === null, `the tab was not read again: ${JSON.stringify(tabs())}`);
   });
 
-  it('warns, and opens nothing, for a ticket the hub does not know', async function () {
+  it('restores a tab from the state its page saved, as after a reload, and drops one whose state names no ticket', async function () {
     this.timeout(30_000);
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await until(() => extension.historyTabs().length === 0, 'a tab stayed open');
 
-    assert.strictEqual(await history(TICKET + 1), null);
-    assert.deepStrictEqual(warned, [`Switchboard: Unknown ticket ${TICKET + 1}.`]);
-    assert.strictEqual(vscode.window.activeTextEditor, undefined);
+    await extension.restoreHistory({ ticketId: TICKET, key: 'gh 77', ui: { hidden: ['you'], query: '', sections: {}, runs: [] } });
+    await until(() => tabs()[0]?.shown === revision(), `the restored page never showed the history: ${JSON.stringify(tabs())}`);
+    assert.strictEqual(tabs()[0].title, 'gh 77 History');
+
+    await extension.restoreHistory({ key: 'gh 77' });
+    assert.strictEqual(extension.historyTabs().length, 1);
   });
+
+  it('warns, and leaves no tab, for a ticket the hub does not know', async function () {
+    this.timeout(30_000);
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await history(TICKET + 1);
+
+    await until(() => warned.length > 0, 'no warning');
+    assert.deepStrictEqual(warned, [`Switchboard: Unknown ticket ${TICKET + 1}.`]);
+    await until(() => extension.historyTabs().length === 0, 'the tab stayed open');
+  });
+
+  /** The ticket's history revision as the hub's store holds it. */
+  function revision() {
+    return String(db.prepare(`SELECT revision FROM historyRevisions WHERE ticketId = ${TICKET}`).get()?.revision ?? 0);
+  }
 });

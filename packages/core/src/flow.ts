@@ -5,7 +5,7 @@ import type { PermissionMode, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { FailedStep, Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import type { SourceLink } from './source.js';
-import type { NewWorkItem, Store } from './store.js';
+import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionPrompt, triagePrompt } from './template.js';
 import type { TemplateVariable } from './template.js';
 
@@ -195,25 +195,148 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'retry', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'restore', 'snooze']);
+
+/**
+ * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
+ * roster reads, are logged only when they change a row.
+ */
+const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'session-start-failed', 'stop-failed']);
+
+function actorOf(type: FlowEvent['type']): Actor {
+  if (OPERATOR_EVENTS.has(type)) {
+    return 'operator';
+  }
+
+  switch (type) {
+    case 'report':
+      return 'session';
+    case 'poll':
+    case 'poll-failed':
+      return 'source';
+    case 'triage-succeeded':
+    case 'triage-failed':
+      return 'triage';
+    default:
+      return 'hub';
+  }
+}
+
+/** The event's own fields for the log: no prompt, context or polled list. */
+function detailOf(event: FlowEvent): Record<string, unknown> | null {
+  switch (event.type) {
+    case 'poll':
+    case 'poll-failed':
+      return { source: event.source };
+    case 'triage-succeeded':
+      return { triageId: event.triageId, playbook: event.playbook, immediacy: event.immediacy, severity: event.severity, model: event.model };
+    case 'triage-failed':
+      return { triageId: event.triageId, error: event.error };
+    case 'triage-cancelled':
+      return { triageId: event.triageId };
+    case 'session-started':
+      return { shortId: event.shortId };
+    case 'session-start-failed':
+      return { message: event.message };
+    case 'marker':
+      return { state: event.state, detail: event.detail };
+    case 'report': {
+      const { prompt: _prompt, ...report } = event.report as Report & { prompt?: string };
+      return report;
+    }
+    case 'stop-succeeded':
+      return { reason: event.reason };
+    case 'stop-failed':
+      return { reason: event.reason, message: event.message };
+    case 'worktree-found':
+      return { path: event.path, branch: event.branch };
+    case 'adhoc':
+      return { repoRoot: event.repoRoot };
+    case 'snooze':
+      return { until: event.until };
+    default:
+      return null;
+  }
+}
+
+/** The ticket, work item and session an event names, when it names one that exists. */
+function subjectOf(store: Store, event: FlowEvent): Pick<EventRecord, 'ticketId' | 'workItemId' | 'sessionId'> {
+  const none = { ticketId: null, workItemId: null, sessionId: null };
+  const ofItem = (workItemId: number | null, sessionId: string | null = null) => {
+    const item = workItemId === null ? null : store.workItem(workItemId);
+    return item === null ? none : { ticketId: item.ticketId, workItemId: item.id, sessionId };
+  };
+
+  if ('sessionId' in event) {
+    const session = store.session(event.sessionId);
+    return session === null ? none : ofItem(session.workItemId, session.id);
+  }
+
+  if ('workItemId' in event) {
+    return ofItem(event.workItemId);
+  }
+
+  if ('triageId' in event) {
+    const triage = store.triage(event.triageId);
+    return triage === null ? none : { ticketId: triage.ticketId, workItemId: triage.workItemId, sessionId: null };
+  }
+
+  if ('ticketId' in event) {
+    return { ...none, ticketId: store.ticket(event.ticketId)?.id ?? null };
+  }
+
+  if (event.type === 'worktree-found') {
+    return { ...none, ticketId: store.findTicket(event.source, event.sourceKey)?.id ?? null };
+  }
+
+  return none;
+}
+
+/** The event as the activity log records it (PRD R59). */
+export function eventRecord(store: Store, event: FlowEvent, at: number): EventRecord {
+  return { at, type: event.type, actor: actorOf(event.type), ...subjectOf(store, event), detail: detailOf(event) };
+}
+
+/** Logs an event the hub refused before the flow saw it, such as a worktree report naming no git worktree. */
+export function recordRefusal(store: Store, event: FlowEvent, at: number, message: string): void {
+  const record = eventRecord(store, event, at);
+
+  try {
+    store.beginEvent(record, record.ticketId !== null);
+    store.refuseEvent(message);
+  } finally {
+    store.endEvent();
+  }
+}
+
 /** Decides what one event changes and which actions the hub runs. Call it inside one store transaction. */
 export function handle(store: Store, event: FlowEvent, context: FlowContext): FlowResult {
   const flow = new Flow(store, context);
 
-  flow.wake();
-
   try {
-    flow.apply(event);
-  } catch (error) {
-    if (error instanceof Refusal) {
-      return { actions: [], refused: error.message };
+    store.beginEvent({ at: context.now, type: 'wake', actor: 'hub', ticketId: null, workItemId: null, sessionId: null, detail: null });
+    flow.wake();
+    const record = eventRecord(store, event, context.now);
+
+    store.beginEvent(record, ALWAYS_LOGGED.has(event.type) && record.ticketId !== null);
+
+    try {
+      flow.apply(event);
+    } catch (error) {
+      if (error instanceof Refusal) {
+        store.refuseEvent(error.message);
+        return { actions: [], refused: error.message };
+      }
+
+      throw error;
     }
 
-    throw error;
+    flow.schedule();
+
+    return { actions: flow.actions, refused: null };
+  } finally {
+    store.endEvent();
   }
-
-  flow.schedule();
-
-  return { actions: flow.actions, refused: null };
 }
 
 class Flow {
@@ -494,6 +617,10 @@ class Flow {
     const sourceKey = String(Math.max(0, ...keys) + 1);
     const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
     const queued = parentId === null;
+
+    if (parentId !== null) {
+      this.store.noteEvent({ childTicketId: ticket.id, childRef: ticket.ref, childTitle: title });
+    }
 
     this.store.insertWorkItem({
       ticketId: ticket.id,

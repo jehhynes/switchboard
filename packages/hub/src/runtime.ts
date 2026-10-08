@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { classify, entryFor, installHooks, markerState, observe, readMarkers, readRoster, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, Marker } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, QueueWait, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { ADHOC_SOURCE, handle, heldSlots, queueWaits, repoRoots, switchboardHome } from '@switchboard/core';
+import { ADHOC_SOURCE, handle, heldSlots, queueWaits, recordRefusal, repoRoots, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -444,13 +444,29 @@ export class Runtime {
     }
   }
 
+  /**
+   * Logs a report the hub refused before the flow saw it, such as a bad request or a worktree report naming no git worktree (PRD R59).
+   * Only the report's kind and its short text fields are kept: never a prompt.
+   */
+  refuseReport(sessionId: string, fields: Record<string, unknown>, message: string): void {
+    const kept = Object.fromEntries(['kind', 'stage', 'path', 'label', 'target', 'file', 'title'].filter((key) => typeof fields[key] === 'string').map((key) => [key, fields[key]]));
+    const event = { type: 'report', sessionId, report: kept } as unknown as FlowEvent;
+
+    this.deps.store.transaction(() => recordRefusal(this.deps.store, event, this.deps.now(), message));
+    this.changed();
+  }
+
   /** A report from the `report` command. A worktree must be one `git worktree list` shows in that path. */
   async report(body: ReportBody): Promise<{ refused: string | null }> {
     if (body.kind === 'worktree') {
       const worktree = await reportedWorktree(body.path, this.deps.exec);
 
       if (worktree === null) {
-        return { refused: `${body.path} is not a git worktree.` };
+        const refused = `${body.path} is not a git worktree.`;
+
+        this.refuseReport(body.sessionId, { kind: 'worktree', path: body.path }, refused);
+
+        return { refused };
       }
 
       return { refused: this.send({ type: 'report', sessionId: body.sessionId, report: { kind: 'worktree', path: worktree.path, branch: worktree.branch } }).refused };

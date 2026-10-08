@@ -287,7 +287,7 @@ describe('createHubApp', () => {
     expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/2']);
   });
 
-  it('returns a ticket\'s history, and refuses an unknown ticket with 409 and a missing ticketId with 400 (PRD R59)', async () => {
+  it('returns a ticket\'s history, or that it is unchanged since a revision, and refuses an unknown ticket with 409 and a missing ticketId with 400 (PRD R59)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
 
@@ -298,10 +298,20 @@ describe('createHubApp', () => {
     const reply = await app.post['/history']!({ ticketId: 1 });
 
     expect(reply.status).toBe(200);
-    expect(reply.body).toMatchObject({ ticket: { id: 1, sourceKey: '7', title: 'Seven' }, workItems: [], poolTriages: [] });
+    expect(reply.body).toMatchObject({ ticket: { id: 1, sourceKey: '7', title: 'Seven' }, workItems: [], poolTriages: [], events: [], revision: '0' });
+    expect(await app.post['/history']!({ ticketId: 1, revision: '0' })).toEqual({ status: 200, body: { unchanged: true } });
+
+    // A snooze is logged, so the revision a reader shows is stale and it gets the full history again.
+    expect(await app.post['/action']!({ type: 'snooze', ticketId: 1, until: null })).toMatchObject({ status: 200 });
+
+    const after = await app.post['/history']!({ ticketId: 1, revision: '0' });
+
+    expect(after.body).toMatchObject({ events: [{ type: 'snooze', actor: 'operator', ticketId: 1 }] });
+    expect(after.body).not.toHaveProperty('unchanged');
     expect(await app.post['/history']!({ ticketId: 2 })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
-    expect(await app.post['/history']!({ ticketId: '1' })).toEqual({ status: 400, body: { error: 'Expected {ticketId}.' } });
-    expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {ticketId}.' } });
+    expect(await app.post['/history']!({ ticketId: 2, revision: '0' })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
+    expect(await app.post['/history']!({ ticketId: '1' })).toEqual({ status: 400, body: { error: 'Expected {ticketId, revision?}.' } });
+    expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {ticketId, revision?}.' } });
   });
 
   it('answers posts through the server', async () => {
