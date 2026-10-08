@@ -34,13 +34,6 @@
   cursor: pointer;
 }
 
-.switchboard-open {
-  align-self: center;
-  margin-left: 12px;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
 .switchboard-pill .switchboard-namespace {
   color: var(--fgColor-muted, #59636e);
 }
@@ -49,30 +42,6 @@
   border-color: var(--borderColor-attention-emphasis, #9a6700);
   background: var(--bgColor-attention-muted, #fff8c5);
   color: var(--fgColor-attention, #9a6700);
-}
-
-.switchboard-snooze-button {
-  position: fixed;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid var(--borderColor-default, #d1d9e0);
-  border-radius: 6px;
-  background: var(--bgColor-default, #ffffff);
-  color: var(--fgColor-muted, #59636e);
-  cursor: pointer;
-}
-
-.switchboard-snooze-button[hidden] {
-  display: none;
-}
-
-.switchboard-snooze-button:hover {
-  color: var(--fgColor-default, #1f2328);
 }
 
 .switchboard-snooze-menu {

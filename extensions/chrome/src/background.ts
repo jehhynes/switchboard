@@ -1,6 +1,6 @@
 import { readSnoozed } from './hub.js';
 import { readCards } from './pills.js';
-import { postSnooze, snoozeMessage } from './snooze.js';
+import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
 
 // Content scripts on github.com cannot read a loopback address, so the service worker reads the hub for them.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -32,6 +32,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   void postSnooze((url, init) => fetch(url, init), snooze.url, snooze.until).then(sendResponse);
+
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const unsnooze = unsnoozeMessage(message);
+
+  if (unsnooze === null) {
+    return false;
+  }
+
+  void postUnsnooze((url, init) => fetch(url, init), unsnooze.url).then(sendResponse);
 
   return true;
 });

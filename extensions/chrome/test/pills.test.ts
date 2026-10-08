@@ -167,6 +167,22 @@ describe('watchPills', () => {
     expect(pills()).toEqual([]);
   });
 
+  it('reads again on refresh before REFRESH_MS has passed', async () => {
+    const read = vi.fn(async (): Promise<Card[] | null> => [needs]);
+
+    document.body.innerHTML = COLUMN;
+    const watcher = watchPills(document, read, () => 0);
+    watch = watcher;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenCalledTimes(1);
+
+    read.mockResolvedValueOnce([working]);
+    watcher.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(pills().map((pill) => pill.card)).toEqual(['94970044']);
+  });
+
   it('reads again when the tab becomes visible and ignores a read that a later read overtook', async () => {
     const replies: ((cards: Card[]) => void)[] = [];
 

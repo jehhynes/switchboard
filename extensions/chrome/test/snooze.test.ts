@@ -1,13 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { postSnooze, snoozableKeys, snoozeMessage, watchSnoozeControls } from '../src/snooze.js';
-import type { SnoozeAnswer, SnoozeControls } from '../src/snooze.js';
-import type { Card } from '@switchboard/core/group';
-import { issueKey } from '../src/board.js';
-import { watchPills } from '../src/pills.js';
+import { postSnooze, postUnsnooze, snoozeMenus, snoozeMessage, unsnoozeMessage } from '../src/snooze.js';
+import type { SnoozeAnswer, SnoozeMenus } from '../src/snooze.js';
 
-const COLUMN = readFileSync(join(import.meta.dirname, 'fixtures', 'column.html'), 'utf8');
 const ISSUE = 'https://github.com/github/roadmap/issues/1090';
 // Monday 5 October 2026, 9:54 local time.
 const MONDAY = new Date(2026, 9, 5, 9, 54);
@@ -37,6 +31,32 @@ describe('postSnooze (PRD R66)', () => {
   });
 });
 
+describe('postUnsnooze (PRD R66)', () => {
+  it('posts the URL as JSON to the hub\'s unsnooze route and returns the hub\'s error', async () => {
+    const fetchUrl = vi.fn(async (_url: string, _init: RequestInit) => new Response('{"done":true}', { status: 200 }));
+
+    expect(await postUnsnooze(fetchUrl, ISSUE)).toEqual({ done: true });
+    expect(fetchUrl).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:47615/unsnooze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"url":"https://github.com/github/roadmap/issues/1090"}',
+      cache: 'no-store',
+    });
+    expect(await postUnsnooze(async () => new Response('{"error":"Switchboard has no ticket for x."}', { status: 404 }), ISSUE)).toEqual({ error: 'Switchboard has no ticket for x.' });
+    expect(await postUnsnooze(async () => Promise.reject(new TypeError('Failed to fetch')), ISSUE)).toEqual({ error: 'Switchboard is not running.' });
+  });
+});
+
+describe('unsnoozeMessage', () => {
+  it('accepts an unsnooze with a URL, and nothing else', () => {
+    expect(unsnoozeMessage({ type: 'unsnooze', url: ISSUE })).toEqual({ url: ISSUE });
+    expect(unsnoozeMessage({ type: 'snooze', url: ISSUE, until: null })).toBeNull();
+    expect(unsnoozeMessage({ type: 'unsnooze' })).toBeNull();
+    expect(unsnoozeMessage({ type: 'unsnooze', url: 7 })).toBeNull();
+    expect(unsnoozeMessage(null)).toBeNull();
+  });
+});
+
 describe('snoozeMessage', () => {
   it('accepts a snooze with a URL and a wake time or null, and nothing else', () => {
     expect(snoozeMessage({ type: 'snooze', url: ISSUE, until: 5 })).toEqual({ url: ISSUE, until: 5 });
@@ -49,106 +69,43 @@ describe('snoozeMessage', () => {
   });
 });
 
-describe('snoozableKeys', () => {
-  it('keeps the issue keys of cards outside Done, and none without cards', () => {
-    const card = (url: string, group: 'needs' | 'working' | 'unstarted' | 'done', snoozed = false) => ({ url, playbook: 'dev:x', group, snoozed });
-
-    expect([...snoozableKeys([card('https://github.com/O/R/issues/1', 'needs'), card('https://github.com/o/r/issues/2', 'unstarted', true), card('https://github.com/o/r/issues/3', 'done'), card('https://desk.example.test/4', 'working')])]).toEqual(['o/r#1', 'o/r#2']);
-    expect(snoozableKeys(null).size).toBe(0);
-  });
-});
-
-describe('watchSnoozeControls', () => {
-  let controls: SnoozeControls | null = null;
+describe('snoozeMenus', () => {
+  let menus: SnoozeMenus | null = null;
+  let anchor: HTMLElement;
 
   beforeEach(() => {
-    document.body.innerHTML = COLUMN;
+    document.body.innerHTML = '<button id="anchor">More actions</button><div id="column"></div>';
+    anchor = document.querySelector('#anchor')!;
+    anchor.getBoundingClientRect = () => ({ top: 100, bottom: 124, left: 300, right: 324 }) as DOMRect;
   });
 
   afterEach(() => {
-    controls?.stop();
-    controls = null;
+    menus?.stop();
+    menus = null;
     document.body.innerHTML = '';
   });
 
-  const card = (id: string) => document.querySelector(`[data-board-card-id="${id}"]`)!;
-  const snoozeButton = () => document.querySelector<HTMLButtonElement>('.switchboard-snooze-button');
   const menu = () => document.querySelector<HTMLElement>('.switchboard-snooze-menu');
   const items = () => [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-  const hover = (target: Element) => target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  const status = () => menu()?.querySelector('[role="status"]')?.textContent;
 
-  function start(answer: (url: string, until: number | null) => Promise<SnoozeAnswer>) {
-    const send = vi.fn(answer);
-    const onSnoozed = vi.fn();
+  function start(snooze: (url: string, until: number | null) => Promise<SnoozeAnswer> = async () => ({ done: true }), unsnooze: (url: string) => Promise<SnoozeAnswer> = async () => ({ done: true })) {
+    const hub = { snooze: vi.fn(snooze), unsnooze: vi.fn(unsnooze) };
+    const onChanged = vi.fn();
 
-    controls = watchSnoozeControls(document, send, onSnoozed, () => MONDAY);
+    menus = snoozeMenus(document, hub, onChanged, () => MONDAY);
 
-    return { send, onSnoozed };
+    return { hub, onChanged, menus };
   }
 
-  it('shows the snooze button over a hovered issue card, outside GitHub\'s card, and hides it off the cards', () => {
-    start(async () => ({ done: true }));
-    expect(snoozeButton()).toBeNull();
+  it('offers the R49 choices with their wake times in body, focuses the first after GitHub returns focus to its button, and sends the chosen one', async () => {
+    const { hub, onChanged, menus } = start();
 
-    hover(card('94970044').querySelector('h3')!);
-    expect(snoozeButton()?.hidden).toBe(false);
-    expect(snoozeButton()?.title).toBe('Snooze in Switchboard');
-    expect(snoozeButton()?.parentElement).toBe(document.body);
-    expect(card('94970044').querySelector('.switchboard-snooze-button')).toBeNull();
+    menus.choose(ISSUE, anchor);
 
-    hover(snoozeButton()!);
-    expect(snoozeButton()?.hidden).toBe(false);
-
-    hover(document.querySelector('[data-board-column]')!);
-    expect(snoozeButton()?.hidden).toBe(true);
-  });
-
-  it('shows no snooze button on a card whose title is not a GitHub issue', () => {
-    start(async () => ({ done: true }));
-    card('94970044').querySelector('h3')!.closest('a')!.setAttribute('href', 'https://github.com/github/roadmap/pull/1090');
-
-    hover(card('94970044'));
-    expect(snoozeButton()).toBeNull();
-  });
-
-  it('shows no snooze button on a card the hub does not list', () => {
-    controls = watchSnoozeControls(document, async () => ({ done: true }), () => {}, () => MONDAY, (url) => url === ISSUE);
-
-    hover(card('88050488'));
-    expect(snoozeButton()).toBeNull();
-
-    hover(card('94970044'));
-    expect(snoozeButton()?.hidden).toBe(false);
-  });
-
-  it('takes the snoozable cards from the pills\' accepted read, not from a read a later one overtook', async () => {
-    const replies: ((cards: Card[]) => void)[] = [];
-    let snoozable = new Set<string>();
-    const pills = watchPills(document, () => new Promise((resolve) => replies.push(resolve)), () => 0, (cards) => (snoozable = snoozableKeys(cards)));
-
-    controls = watchSnoozeControls(document, async () => ({ done: true }), () => {}, () => MONDAY, (url) => snoozable.has(issueKey(url) ?? ''));
-    document.dispatchEvent(new Event('visibilitychange'));
-    expect(replies).toHaveLength(2);
-
-    replies[1]!([{ url: ISSUE, playbook: 'dev:review', group: 'needs', snoozed: false }]);
-    await vi.waitFor(() => expect(card('94970044').querySelector('.switchboard-pill')).not.toBeNull());
-    replies[0]!([{ url: 'https://github.com/github/roadmap/issues/1035', playbook: 'dev:old', group: 'needs', snoozed: false }]);
-    await new Promise((done) => setTimeout(done, 0));
-
-    expect(card('88050488').querySelector('.switchboard-pill')).toBeNull();
-    hover(card('88050488'));
-    expect(snoozeButton()).toBeNull();
-    hover(card('94970044'));
-    expect(snoozeButton()?.hidden).toBe(false);
-    pills.stop();
-  });
-
-  it('offers the R49 choices with their wake times, and sends the chosen one for the hovered card', async () => {
-    const { send, onSnoozed } = start(async () => ({ done: true }));
-
-    hover(card('94970044'));
-    snoozeButton()!.click();
-
+    anchor.focus();
+    expect(menu()?.parentElement).toBe(document.body);
+    await vi.waitFor(() => expect(document.activeElement).toBe(items()[0]));
     expect(items().map((item) => item.textContent)).toEqual([
       'TomorrowTue, Oct 6, 6:00 AM',
       'In 2 daysWed, Oct 7, 6:00 AM',
@@ -160,111 +117,95 @@ describe('watchSnoozeControls', () => {
     ]);
 
     items()[3]!.click();
-    expect(send).toHaveBeenCalledExactlyOnceWith(ISSUE, six(9, 12));
+    expect(hub.snooze).toHaveBeenCalledExactlyOnceWith(ISSUE, six(9, 12));
     expect(items().every((item) => item.disabled)).toBe(true);
 
-    await vi.waitFor(() => expect(onSnoozed).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     expect(menu()).toBeNull();
-    expect(snoozeButton()?.hidden).toBe(true);
   });
 
-  it('sends null for Indefinitely', async () => {
-    const { send } = start(async () => ({ done: true }));
+  it('sends null for Indefinitely', () => {
+    const { hub, menus } = start();
 
-    hover(card('88050488'));
-    snoozeButton()!.click();
+    menus.choose(ISSUE, anchor);
     items()[6]!.click();
 
-    expect(send).toHaveBeenCalledExactlyOnceWith('https://github.com/github/roadmap/issues/1035', null);
+    expect(hub.snooze).toHaveBeenCalledExactlyOnceWith(ISSUE, null);
   });
 
   it('shows the hub\'s refusal in the menu and keeps the choices open', async () => {
-    const { onSnoozed } = start(async () => ({ error: 'Switchboard has no ticket for https://github.com/github/roadmap/issues/1090.' }));
+    const { onChanged, menus } = start(async () => ({ error: 'The snooze time has passed.' }));
 
-    hover(card('94970044'));
-    snoozeButton()!.click();
+    menus.choose(ISSUE, anchor);
     items()[0]!.click();
 
-    await vi.waitFor(() => expect(menu()?.querySelector('[role="status"]')?.textContent).toBe('Switchboard has no ticket for https://github.com/github/roadmap/issues/1090.'));
+    await vi.waitFor(() => expect(status()).toBe('The snooze time has passed.'));
     expect(items().some((item) => item.disabled)).toBe(false);
-    expect(onSnoozed).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
   });
 
-  it('closes the menu on a second button click, Escape, a click outside, a scroll, and keeps it while hovering other cards', () => {
-    start(async () => ({ done: true }));
-    hover(card('94970044'));
+  it('unsnoozes with no popup, and shows the hub\'s refusal under the anchor', async () => {
+    const { hub, onChanged, menus } = start();
 
-    snoozeButton()!.click();
-    snoozeButton()!.click();
+    menus.unsnooze(ISSUE, anchor);
+    expect(hub.unsnooze).toHaveBeenCalledExactlyOnceWith(ISSUE);
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     expect(menu()).toBeNull();
+    expect(hub.snooze).not.toHaveBeenCalled();
 
-    snoozeButton()!.click();
-    hover(card('88050488'));
-    expect(menu()).not.toBeNull();
+    hub.unsnooze.mockResolvedValueOnce({ error: 'Switchboard is not running.' });
+    menus.unsnooze(ISSUE, anchor);
+    await vi.waitFor(() => expect(status()).toBe('Switchboard is not running.'));
+    expect(menu()!.querySelectorAll('[role="menuitem"]')).toHaveLength(0);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes on Escape, a click outside and a column scroll, but not a click or scroll inside it', () => {
+    const { menus } = start();
+
+    menus.choose(ISSUE, anchor);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(menu()).toBeNull();
 
-    hover(card('94970044'));
-    snoozeButton()!.click();
+    menus.choose(ISSUE, anchor);
     items()[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    menu()!.dispatchEvent(new Event('scroll'));
     expect(menu()).not.toBeNull();
-    document.querySelector('[data-board-column]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    document.querySelector('#column')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(menu()).toBeNull();
 
-    hover(card('94970044'));
-    snoozeButton()!.click();
-    document.querySelector('[data-dnd-drop-type="card"]')!.dispatchEvent(new Event('scroll'));
+    menus.choose(ISSUE, anchor);
+    document.querySelector('#column')!.dispatchEvent(new Event('scroll'));
     expect(menu()).toBeNull();
-    expect(snoozeButton()?.hidden).toBe(true);
+
+    menus.choose(ISSUE, anchor);
+    menus.choose(ISSUE, anchor);
+    expect(document.querySelectorAll('.switchboard-snooze-menu')).toHaveLength(1);
   });
 
-  it('opens the menu below the button, or above it when the viewport has no room below', () => {
-    start(async () => ({ done: true }));
+  it('opens below the anchor, or above it when the viewport has no room below', () => {
+    const { menus } = start();
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(230);
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(720);
 
     const at = (top: number) => {
-      hover(card('94970044'));
-      snoozeButton()!.getBoundingClientRect = () => ({ top, bottom: top + 24, left: 300, right: 324 }) as DOMRect;
-      snoozeButton()!.click();
+      anchor.getBoundingClientRect = () => ({ top, bottom: top + 24, left: 300, right: 324 }) as DOMRect;
+      menus.choose(ISSUE, anchor);
 
-      const style = { top: menu()!.style.top, left: menu()!.style.left };
-
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-
-      return style;
+      return { top: menu()!.style.top, left: menu()!.style.left };
     };
 
     expect(at(100)).toEqual({ top: '128px', left: '104px' });
-    expect(at(626)).toEqual({ top: '392px', left: '104px' });
+    expect(at(600)).toEqual({ top: '366px', left: '104px' });
     vi.restoreAllMocks();
   });
 
-  it('shows the snooze button on a new card after GitHub replaces the body while the menu is open', () => {
-    start(async () => ({ done: true }));
-    hover(card('94970044'));
-    snoozeButton()!.click();
+  it('removes its popup and stops listening when stopped', () => {
+    const { menus: stopped } = start();
 
-    document.body.innerHTML = COLUMN;
-    hover(card('88050488'));
-
+    stopped.choose(ISSUE, anchor);
+    stopped.stop();
+    menus = null;
     expect(menu()).toBeNull();
-    expect(snoozeButton()?.hidden).toBe(false);
-    expect(snoozeButton()?.isConnected).toBe(true);
-  });
-
-  it('appends the button again after the page body is replaced, and removes it when stopped', () => {
-    start(async () => ({ done: true }));
-    hover(card('94970044'));
-
-    document.body.innerHTML = COLUMN;
-    hover(card('94970044'));
-    expect(document.querySelectorAll('.switchboard-snooze-button')).toHaveLength(1);
-
-    controls!.stop();
-    controls = null;
-    expect(snoozeButton()).toBeNull();
-    hover(card('94970044'));
-    expect(snoozeButton()).toBeNull();
   });
 });

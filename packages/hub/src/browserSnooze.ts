@@ -3,6 +3,9 @@ import type { IncomingMessage } from 'node:http';
 /** Snoozes the ticket in scope with this URL: null when there is none, otherwise the core's refusal or null (PRD R66). */
 export type SnoozeByUrl = (url: string, until: number | null) => { refused: string | null } | null;
 
+/** Ends the snooze of the ticket in scope with this URL: null when there is none, otherwise the core's refusal or null. */
+export type UnsnoozeByUrl = (url: string) => { refused: string | null } | null;
+
 export interface BrowserReply {
   status: number;
   body: unknown;
@@ -28,23 +31,24 @@ function readBody(request: IncomingMessage): Promise<string | null> {
 }
 
 /**
- * `POST /snooze {url, until}` from the Chrome extension's service worker. A web page cannot send it: its JSON content
- * type needs a CORS preflight, which fails because the endpoint sends no CORS headers, and its Origin is not an extension.
+ * Reads the JSON body of a request from the Chrome extension's service worker, or the refusal for any other sender. A web
+ * page cannot send it: its JSON content type needs a CORS preflight, which fails because the endpoint sends no CORS headers,
+ * and its Origin is not an extension.
  */
-export async function handleSnooze(request: IncomingMessage, snooze: SnoozeByUrl): Promise<BrowserReply> {
+async function readExtensionBody(request: IncomingMessage): Promise<{ body: Record<string, unknown> } | { reply: BrowserReply }> {
   const origin = request.headers.origin ?? '';
   const contentType = (request.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
 
   if (!origin.startsWith('chrome-extension://')) {
     request.resume();
 
-    return { status: 403, body: { error: 'forbidden origin' } };
+    return { reply: { status: 403, body: { error: 'forbidden origin' } } };
   }
 
   if (contentType !== 'application/json') {
     request.resume();
 
-    return { status: 415, body: { error: 'Expected Content-Type: application/json.' } };
+    return { reply: { status: 415, body: { error: 'Expected Content-Type: application/json.' } } };
   }
 
   const text = await readBody(request);
@@ -56,17 +60,47 @@ export async function handleSnooze(request: IncomingMessage, snooze: SnoozeByUrl
     body = null;
   }
 
-  const { url, until } = (typeof body === 'object' && body !== null ? body : {}) as { url?: unknown; until?: unknown };
+  return { body: typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {} };
+}
 
-  if (typeof url !== 'string' || url === '' || (until !== null && (typeof until !== 'number' || !Number.isFinite(until)))) {
-    return { status: 400, body: { error: 'Expected {url, until}, where until is epoch milliseconds or null.' } };
-  }
-
-  const result = snooze(url, until);
-
+function answer(url: string, result: { refused: string | null } | null): BrowserReply {
   if (result === null) {
     return { status: 404, body: { error: `Switchboard has no ticket for ${url}.` } };
   }
 
   return result.refused === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: result.refused } };
+}
+
+/** `POST /snooze {url, until}` from the Chrome extension's service worker (PRD R66). */
+export async function handleSnooze(request: IncomingMessage, snooze: SnoozeByUrl): Promise<BrowserReply> {
+  const read = await readExtensionBody(request);
+
+  if ('reply' in read) {
+    return read.reply;
+  }
+
+  const { url, until } = read.body;
+
+  if (typeof url !== 'string' || url === '' || (until !== null && (typeof until !== 'number' || !Number.isFinite(until)))) {
+    return { status: 400, body: { error: 'Expected {url, until}, where until is epoch milliseconds or null.' } };
+  }
+
+  return answer(url, snooze(url, until));
+}
+
+/** `POST /unsnooze {url}` from the Chrome extension's service worker (PRD R66). */
+export async function handleUnsnooze(request: IncomingMessage, unsnooze: UnsnoozeByUrl): Promise<BrowserReply> {
+  const read = await readExtensionBody(request);
+
+  if ('reply' in read) {
+    return read.reply;
+  }
+
+  const { url } = read.body;
+
+  if (typeof url !== 'string' || url === '') {
+    return { status: 400, body: { error: 'Expected {url}.' } };
+  }
+
+  return answer(url, unsnooze(url));
 }

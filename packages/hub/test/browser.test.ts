@@ -87,9 +87,9 @@ describe('listenBrowser', () => {
     const JSON_TYPE = 'application/json';
     const ISSUE = 'https://github.com/o/r/issues/1';
 
-    function post(port: number, body: string, headers: Record<string, string>): Promise<{ status: number; headers: Record<string, unknown>; body: string }> {
+    function post(port: number, body: string, headers: Record<string, string>, path = '/snooze'): Promise<{ status: number; headers: Record<string, unknown>; body: string }> {
       return new Promise((resolve, reject) => {
-        const outbound = request({ host: '127.0.0.1', port, method: 'POST', path: '/snooze', headers: { Host: `127.0.0.1:${port}`, ...headers } }, (response) => {
+        const outbound = request({ host: '127.0.0.1', port, method: 'POST', path, headers: { Host: `127.0.0.1:${port}`, ...headers } }, (response) => {
           let text = '';
 
           response.setEncoding('utf8');
@@ -170,6 +170,51 @@ describe('listenBrowser', () => {
       server = await listenBrowser(0, () => [], () => []);
 
       expect((await post(server.port, JSON.stringify({ url: ISSUE, until: null }), { Origin: EXTENSION, 'Content-Type': JSON_TYPE })).status).toBe(404);
+      expect((await post(server.port, JSON.stringify({ url: ISSUE }), { Origin: EXTENSION, 'Content-Type': JSON_TYPE }, '/unsnooze')).status).toBe(404);
+    });
+
+    describe('POST /unsnooze', () => {
+      function unsnoozing(answer: (url: string) => { refused: string | null } | null) {
+        const calls: string[] = [];
+
+        return { calls, unsnooze: (url: string) => (calls.push(url), answer(url)) };
+      }
+
+      it('ends the snooze for an extension origin, and answers 404 for an unknown URL and 409 with the core refusal', async () => {
+        const fake = unsnoozing((url) => (url === ISSUE ? { refused: null } : url.endsWith('/3') ? { refused: 'Unknown ticket.' } : null));
+        const headers = { Origin: EXTENSION, 'Content-Type': JSON_TYPE };
+
+        server = await listenBrowser(0, () => [], () => [], () => null, fake.unsnooze);
+
+        const done = await post(server.port, JSON.stringify({ url: ISSUE }), headers, '/unsnooze');
+        const unknown = await post(server.port, JSON.stringify({ url: 'https://github.com/o/r/issues/2' }), headers, '/unsnooze');
+        const refused = await post(server.port, JSON.stringify({ url: 'https://github.com/o/r/issues/3' }), headers, '/unsnooze');
+
+        expect([done.status, JSON.parse(done.body)]).toEqual([200, { done: true }]);
+        expect(done.headers['access-control-allow-origin']).toBeUndefined();
+        expect([unknown.status, JSON.parse(unknown.body)]).toEqual([404, { error: 'Switchboard has no ticket for https://github.com/o/r/issues/2.' }]);
+        expect([refused.status, JSON.parse(refused.body)]).toEqual([409, { error: 'Unknown ticket.' }]);
+        expect(fake.calls).toEqual([ISSUE, 'https://github.com/o/r/issues/2', 'https://github.com/o/r/issues/3']);
+      });
+
+      it('refuses a web page origin, a missing origin, a form content type and a body without a URL before unsnoozing', async () => {
+        const fake = unsnoozing(() => ({ refused: null }));
+        const body = JSON.stringify({ url: ISSUE });
+
+        server = await listenBrowser(0, () => [], () => [], () => null, fake.unsnooze);
+
+        expect((await post(server.port, body, { Origin: 'https://github.com', 'Content-Type': JSON_TYPE }, '/unsnooze')).status).toBe(403);
+        expect((await post(server.port, body, { 'Content-Type': JSON_TYPE }, '/unsnooze')).status).toBe(403);
+        expect((await post(server.port, body, { Origin: EXTENSION, 'Content-Type': 'text/plain;charset=UTF-8' }, '/unsnooze')).status).toBe(415);
+
+        for (const bad of ['{', '[]', 'null', JSON.stringify({ url: '' }), JSON.stringify({ url: 7 }), JSON.stringify({ url: ISSUE, pad: 'x'.repeat(20_000) })]) {
+          const reply = await post(server.port, bad, { Origin: EXTENSION, 'Content-Type': JSON_TYPE }, '/unsnooze');
+
+          expect([bad.slice(0, 40), reply.status]).toEqual([bad.slice(0, 40), 400]);
+        }
+
+        expect(fake.calls).toEqual([]);
+      });
     });
   });
 

@@ -183,7 +183,7 @@ describe('serveHub', () => {
 
   describe('browser endpoint', () => {
     const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'needs', snoozed: false }];
-    const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });
+    const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null, unsnoozeUrl: HubApp['unsnoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, unsnoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });
 
     async function freePort(): Promise<number> {
       const probe = createServer();
@@ -212,25 +212,29 @@ describe('serveHub', () => {
       expect(await call(browserPort, 'GET', '/snoozed', null, 500)).toBeNull();
     });
 
-    it('passes a snooze from the browser port to the app (PRD R66)', async () => {
+    it('passes a snooze and an unsnooze from the browser port to the app (PRD R66)', async () => {
       const browserPort = await freePort();
-      const snoozes: unknown[][] = [];
+      const calls: unknown[][] = [];
+      const post = (path: string, body: unknown) =>
+        new Promise<number>((resolve, reject) => {
+          const headers = { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc' };
+          const outbound = request({ host: '127.0.0.1', port: browserPort, method: 'POST', path, headers }, (response) => {
+            response.resume();
+            resolve(response.statusCode ?? 0);
+          });
 
-      served(await serve({ browserPort, app: async () => app([], (url, until) => (snoozes.push([url, until]), { refused: null })) }));
-
-      const status = await new Promise<number>((resolve, reject) => {
-        const headers = { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc' };
-        const outbound = request({ host: '127.0.0.1', port: browserPort, method: 'POST', path: '/snooze', headers }, (response) => {
-          response.resume();
-          resolve(response.statusCode ?? 0);
+          outbound.on('error', reject);
+          outbound.end(JSON.stringify(body));
         });
 
-        outbound.on('error', reject);
-        outbound.end(JSON.stringify({ url: 'https://github.com/o/r/issues/1', until: null }));
-      });
+      served(await serve({ browserPort, app: async () => app([], (url, until) => (calls.push(['snooze', url, until]), { refused: null }), (url) => (calls.push(['unsnooze', url]), { refused: null })) }));
 
-      expect(status).toBe(200);
-      expect(snoozes).toEqual([['https://github.com/o/r/issues/1', null]]);
+      expect(await post('/snooze', { url: 'https://github.com/o/r/issues/1', until: null })).toBe(200);
+      expect(await post('/unsnooze', { url: 'https://github.com/o/r/issues/1' })).toBe(200);
+      expect(calls).toEqual([
+        ['snooze', 'https://github.com/o/r/issues/1', null],
+        ['unsnooze', 'https://github.com/o/r/issues/1'],
+      ]);
     });
 
     it('logs a taken browser port and serves the hub anyway', async () => {

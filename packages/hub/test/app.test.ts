@@ -262,7 +262,7 @@ describe('createHubApp', () => {
     expect(app.snoozedUrls()).toEqual(['https://github.com/o/r/issues/1', 'https://github.com/o/r/issues/2']);
   });
 
-  it('snoozes an assigned or pool ticket by URL, ignoring case, and finds no ticket out of scope (PRD R66)', async () => {
+  it('snoozes and unsnoozes an assigned or pool ticket by URL, ignoring case, and finds no ticket out of scope (PRD R66)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
     const ticket = (sourceKey: string, assigned: boolean, pool: boolean) =>
@@ -281,6 +281,10 @@ describe('createHubApp', () => {
     expect(app.snoozeUrl('https://github.com/O/r/issues/3', null)).toBeNull();
     expect(app.snoozeUrl('https://github.com/O/r/issues/1', 1000)).toEqual({ refused: 'The snooze time has passed.' });
     expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/1', 'https://github.com/O/r/issues/2']);
+
+    expect(app.unsnoozeUrl('https://github.com/o/r/issues/1')).toEqual({ refused: null });
+    expect(app.unsnoozeUrl('https://github.com/O/r/issues/3')).toBeNull();
+    expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/2']);
   });
 
   it('returns a ticket\'s history, and refuses an unknown ticket with 409 and a missing ticketId with 400 (PRD R59)', async () => {
