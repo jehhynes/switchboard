@@ -20,6 +20,7 @@ describe('parsePlaybook', () => {
         model: 'opus',
         workdir: 'repoRoot',
         reports: ['done', 'worktree'],
+        approvalSends: false,
         rates: false,
         template: 'Research {{ticket.sourceKey}}.\n',
       },
@@ -38,10 +39,17 @@ describe('parsePlaybook', () => {
         model: null,
         workdir: 'worktree',
         reports: [],
+        approvalSends: false,
         rates: false,
         template: 'Classify.',
       },
     });
+  });
+
+  it('reads approvalSends beside the approval report', () => {
+    const result = parsePlaybook('dev:review-pr', '---\ndescription: x\nreports: approval\napprovalSends: true\n---\nbody');
+
+    expect('playbook' in result && [result.playbook.reports, result.playbook.approvalSends]).toEqual([['approval'], true]);
   });
 
   it.each([
@@ -55,6 +63,8 @@ describe('parsePlaybook', () => {
     ['a bad kind', '---\ndescription: x\nkind: setup\n---\nbody', 'kind must be task or triage.'],
     ['a bad autoStart', '---\ndescription: x\nautoStart: yes\n---\nbody', 'autoStart must be true or false.'],
     ['a bad requiresWorktree', '---\ndescription: x\nrequiresWorktree: 1\n---\nbody', 'requiresWorktree must be true or false.'],
+    ['a bad approvalSends', '---\ndescription: x\nreports: approval\napprovalSends: yes\n---\nbody', 'approvalSends must be true or false.'],
+    ['approvalSends without the approval report', '---\ndescription: x\nreports: done\napprovalSends: true\n---\nbody', 'approvalSends applies only to a playbook whose reports include approval.'],
     ['a bad permissionMode', '---\ndescription: x\npermissionMode: yolo\n---\nbody', 'permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.'],
     ['a bad workdir', '---\ndescription: x\nworkdir: home\n---\nbody', 'workdir must be worktree or repoRoot.'],
     ['an unknown report', '---\ndescription: x\nreports: done, stage, blocked\n---\nbody', 'reports can list done, approval, worktree, playbook, paste, not stage, blocked.'],
@@ -122,12 +132,16 @@ describe('formatPlaybook', () => {
     model: null,
     workdir: 'worktree',
     reports: [],
+    approvalSends: false,
     rates: false,
     template: '/review-pr {{ticket.sourceKey}}\n',
   };
 
   it('writes only the non-default keys, keeping a task playbook\'s autoStart and requiresWorktree', () => {
     expect(formatPlaybook(task)).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
+    expect(formatPlaybook({ ...task, reports: ['approval'], approvalSends: true })).toEqual({
+      text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreports: approval\napprovalSends: true\n---\n/review-pr {{ticket.sourceKey}}\n',
+    });
     expect(formatPlaybook({ ...task, reports: ['approval'] })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreports: approval\n---\n/review-pr {{ticket.sourceKey}}\n' });
     expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, reports: ['done'], template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
     expect(formatPlaybook({ ...task, rates: true })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });

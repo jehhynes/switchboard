@@ -54,6 +54,7 @@ function item(id: number, status: WorkItemView['status'], patch: Partial<WorkIte
     parentId: null,
     pastes: [],
     parent: null,
+    approvalSends: false,
     ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue ${id}`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, snoozed, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
     sessions: [],
@@ -136,7 +137,7 @@ describe('toastOf', () => {
   it('names the ticket and what the operator must do, and offers Open when the row has an open action', () => {
     const ended = session({ state: 'ended', endedAt: NOW, released: true });
 
-    expect(toastOf(item(1, 'awaiting-approval', { sessions: [ended] }))).toEqual({ message: 'Switchboard: Issue 1 — Approve the publish', open: true });
+    expect(toastOf(item(1, 'awaiting-approval', { sessions: [ended] }))).toEqual({ message: 'Switchboard: Issue 1 — Review, then approve', open: true });
     expect(toastOf(item(2, 'running', { sessions: [session({ state: 'waiting' })] }))).toEqual({ message: 'Switchboard: Issue 2 — Answer a question', open: true });
     expect(toastOf(item(3, 'blocked', { sessions: [ended] }))).toEqual({ message: 'Switchboard: Issue 3 — Blocked', open: true });
   });

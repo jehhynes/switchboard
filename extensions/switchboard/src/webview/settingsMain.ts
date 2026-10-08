@@ -273,8 +273,8 @@ export function startSettings(root: HTMLElement, vscode: VsCodeApi, delay = CHEC
 
     s.refusals.delete(fresh === undefined ? (what ?? '') : 'new');
 
-    // The kind decides which playbook fields show.
-    if (field === 'kind') {
+    // The kind and the approval report decide which playbook fields show.
+    if (field === 'kind' || field === 'reports.approval') {
       draw();
     } else {
       patch();

@@ -73,7 +73,7 @@ a { color: var(--vscode-textLink-foreground); }
 /* The metadata shrinks and clips so the controls stay visible on a narrow panel; clipped text is in tooltips. */
 .meta { display: flex; gap: 6px; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .meta > * { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The approval summary says what Approve publishes, so part of it stays visible to hover. */
+/* The approval summary says what Approve does, so part of it stays visible to hover. */
 .meta > .approval { flex: 1 0 3em; }
 .actions { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
 /* Returned asks for attention, so it takes the warning colour. */
@@ -104,6 +104,7 @@ body.vscode-light .badge.pr { --hue: #8250df; }
 body.vscode-light .key.github { --hue: #1f2328; }
 a.badge.pr:hover, a.key.github:hover, a.key.zoho:hover, a.key.forum:hover { background: color-mix(in srgb, var(--hue) 32%, transparent); }
 .approval { color: var(--vscode-descriptionForeground); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval .since { font-style: normal; }
 /* Scrollbars like VS Code's own: thin, theme-coloured, and shown only while the scrollable area is hovered. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }

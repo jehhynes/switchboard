@@ -63,6 +63,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     pastes: [],
     returned: 0,
     parent: null,
+    approvalSends: false,
     ...patch,
   };
 }
@@ -194,7 +195,8 @@ describe('markOf', () => {
   };
 
   it('shows what the operator must do in Needs you', () => {
-    expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish' })).toEqual(['cloud-upload', 'Approve the publish', null]);
+    expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish' })).toEqual(['eye', 'Review, then approve', null]);
+    expect(mark({ status: 'awaiting-approval', approvalPrompt: '/publish', approvalSends: true })).toEqual(['send', 'Approve to send', null]);
     expect(mark({ status: 'unstarted' })).toBe('priority');
     expect(mark({ status: 'triaging' })).toEqual(['loading codicon-modifier-spin', 'Triaging', null]);
     expect(mark({ sessions: [session({ state: 'waiting' })] })).toEqual(['question', 'Answer a question', null]);
@@ -379,7 +381,7 @@ describe('renderPanel', () => {
     expect([...root.querySelectorAll('.item')].map((row) => row.textContent).join(' ')).not.toMatch(/Failed|Running|Finished/);
     expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Running']);
     expect(root.querySelector('[data-item="2"] .line.third .mark.codicon-error.error')?.getAttribute('title')).toBe('Failed');
-    expect(root.querySelector('[data-item="3"] .line.third .stage')?.textContent).toBe('Planning… · 3m');
+    expect(root.querySelector('[data-item="3"] .line.third .stage')?.textContent).toBe('Planning · 3m');
     expect([...root.querySelectorAll('.errors .note')].map((note) => note.textContent?.trim())).toEqual([
       'Settings: sessions.concurrency must be a whole number from 1 to 4.',
       'Playbook dev/bad.md: description is required.',
@@ -527,7 +529,6 @@ describe('renderPanel', () => {
     const done = render(snapshot([item(5, { status: 'done', doneAt: NOW, doneReason: 'session', warning: 'The ticket left the assigned state.', stage: 'review', stageAt: NOW - 60_000, links })])).querySelector('[data-item="5"]')!;
     // The warning note follows its mark, before the stage and the badges.
     expect([...done.querySelector('.line.third .meta')!.children].map((child) => child.className)).toEqual(['mark codicon codicon-check', 'note', 'stage', 'badge url']);
-    // Only a running stage ends in an ellipsis.
     expect(done.querySelector('.stage')?.textContent).toBe('review · 1m');
   });
 
@@ -703,10 +704,10 @@ describe('renderPanel', () => {
     expect([...snoozed.querySelectorAll('.wake')].map((w) => [w.textContent?.trim(), w.getAttribute('title')])).toEqual([['Mon, Oct 12, 6:00 AM', 'Wakes Mon, Oct 12, 6:00 AM']]);
     expect(root.querySelector('[data-item="2"] .wake .codicon-clock')).not.toBeNull();
     expect(root.querySelector('[data-ticket="9"] .line.third')).toBeNull();
-    expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Approve the publish']);
+    expect(titles(root, '[data-item="3"] .line.third .mark')).toEqual(['Review, then approve']);
     expect(rowMenu(snoozed.querySelector('[data-item="2"]')!)).toMatchObject({ shown: ['start', 'triageAgain', 'markDone', 'snooze', 'restore', 'history'], actions: { snooze: { type: 'snooze', ticketId: 2 }, restore: { type: 'restore', ticketId: 2 } } });
     expect(rowMenu(snoozed.querySelector('[data-ticket="9"]')!)).toMatchObject({ shown: ['snooze', 'restore', 'history'], actions: { snooze: { type: 'snooze', ticketId: 9 }, restore: { type: 'restore', ticketId: 9 } } });
-    expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post.');
+    expect(root.querySelector('[data-item="3"] .approval')?.textContent).toBe('Review ready to post. · 0s');
     expect(root.querySelector('[data-item="3"] .approval')?.hasAttribute('title')).toBe(false);
     expect(root.querySelector<HTMLButtonElement>('[data-item="3"] .actions > button.control')?.title).toBe('Approve: runs /review-pr pr:123 publish');
     expect(render(data, { groups: new Map([['snoozed', true]]) }).querySelector<HTMLDetailsElement>('details[data-group="snoozed"]')!.open).toBe(true);
@@ -832,18 +833,49 @@ describe('renderPanel', () => {
       ]),
     );
     const approval = root.querySelector<HTMLElement>('[data-item="1"] .approval')!;
-    const stage = root.querySelector<HTMLElement>('[data-item="1"] .stage')!;
+    const stage = root.querySelector<HTMLElement>('[data-item="3"] .stage')!;
     const note = root.querySelector<HTMLElement>('[data-item="2"] .note')!;
 
-    expect(approval.textContent).toBe('Round 2 (Fix and sweep): 7 of 8 prior findings fixed, 1…');
-    expect(approval.textContent!.length).toBeLessThanOrEqual(CAPS.approval + 1);
-    expect([approval.title, approval.hasAttribute('data-full')]).toEqual([summary, true]);
+    expect(approval.textContent).toBe('Round 2 (Fix and sweep): 7 of 8 prior findings fixed, 1… · 0s');
+    expect(approval.firstChild!.textContent!.length).toBeLessThanOrEqual(CAPS.approval + 1);
+    expect([approval.title, approval.hasAttribute('data-full')]).toEqual([`${summary}\nLast stage: Waiting for the operator to approve`, true]);
+    // A clipped stage ends in the one ellipsis the clip adds.
     expect(stage.textContent).toBe('Waiting for the operator… · 0s');
     expect(stage.title).toBe('Waiting for the operator to approve');
-    // A clipped running stage keeps the one ellipsis the clip adds.
-    expect(root.querySelector('[data-item="3"] .stage')?.textContent).toBe('Waiting for the operator… · 0s');
     expect(note.textContent).toBe('Which of the two migration strategies in the plan should the fix use, the…');
     expect(note.title).toBe(reason);
+  });
+
+  it('shows an approval row\'s summary, capitalised, and the time since the report in place of the stage, with the stage in the tooltip (R27)', () => {
+    const root = render(
+      snapshot([
+        item(1, { status: 'awaiting-approval', approvalSummary: 'push and open the PR', approvalSends: true, stage: '5/5 ready for review', stageAt: NOW - 3_600_000, statusAt: NOW - 5 * 60_000 }),
+        item(2, { status: 'awaiting-approval', approvalSummary: 'release after you post the reply' }),
+        item(3, { status: 'awaiting-approval', stage: 'hand back', stageAt: NOW - 60_000 }),
+        item(4, { status: 'blocked', approvalSummary: 'post the reply', stage: 'drafting the reply', stageAt: NOW - 60_000 }),
+      ]),
+    );
+    const third = (id: number) => [...root.querySelector(`[data-item="${id}"] .line.third .meta`)!.children].map((child) => [child.className, child.textContent]);
+
+    expect(third(1)).toEqual([
+      ['mark codicon codicon-send', ''],
+      ['approval', 'Push and open the PR · 5m'],
+    ]);
+    // The tooltip keeps the summary, which the panel width can cut although it is under its cap.
+    expect(root.querySelector('[data-item="1"] .approval')?.getAttribute('title')).toBe('Push and open the PR\nLast stage: 5/5 ready for review');
+    expect(root.querySelector('[data-item="1"] .approval .since')?.textContent).toBe(' · 5m');
+    expect(third(2)).toEqual([
+      ['mark codicon codicon-eye', ''],
+      ['approval', 'Release after you post the reply · 0s'],
+    ]);
+    // With no stage and an uncut summary, the hover handler decides the tooltip.
+    expect(root.querySelector('[data-item="2"] .approval')?.hasAttribute('title')).toBe(false);
+    // Without a summary an approval row keeps its stage, and another Needs you row never shows a summary.
+    expect(third(3)).toEqual([
+      ['mark codicon codicon-eye', ''],
+      ['stage', 'hand back · 1m'],
+    ]);
+    expect(third(4).map(([className]) => className)).toEqual(['mark codicon codicon-debug-pause', 'stage']);
   });
 
   it('colours the stage age of a running session with no stage report for 20 minutes', () => {
@@ -868,10 +900,10 @@ describe('renderPanel', () => {
     );
     const stale = (id: number) => [...root.querySelectorAll(`[data-item="${id}"] .stale`)].map((element) => [element.textContent, element.getAttribute('title')]);
 
-    expect(root.querySelector('[data-item="1"] .stage')?.textContent).toBe('Planning… · 19m');
+    expect(root.querySelector('[data-item="1"] .stage')?.textContent).toBe('Planning · 19m');
     expect(stale(1)).toEqual([]);
     expect(stale(2)).toEqual([[' · 20m', 'No stage report for 20m']]);
-    expect(root.querySelector('[data-item="2"] .stage')?.textContent).toBe('Planning… · 20m');
+    expect(root.querySelector('[data-item="2"] .stage')?.textContent).toBe('Planning · 20m');
     expect(stale(3)).toEqual([]);
     expect(root.querySelector('[data-item="3"] .line.third')?.textContent).not.toContain('No stage report');
     expect(stale(4)).toEqual([['No stage report · 20m', 'No stage report for 20m']]);
@@ -984,7 +1016,7 @@ describe('startPanel', () => {
     Object.defineProperty(approval, 'clientWidth', { configurable: true, value: 500 });
     Object.defineProperty(approval, 'scrollWidth', { configurable: true, value: 500 });
     approval.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    expect(approval.title).toBe('x'.repeat(CAPS.approval + 5));
+    expect(approval.title).toBe(`X${'x'.repeat(CAPS.approval + 4)}`);
   });
 
   it('selects a row on right-click, so its menu acts on the highlighted row', () => {

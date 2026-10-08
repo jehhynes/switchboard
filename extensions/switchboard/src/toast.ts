@@ -37,7 +37,7 @@ export class NeedsYouTracker {
   }
 }
 
-/** The toast text, such as `Switchboard: Fix the inbox badge — Approve the publish`, and whether it offers Open. */
+/** The toast text, such as `Switchboard: Fix the inbox badge — Approve to send`, and whether it offers Open. */
 export function toastOf(item: WorkItemView): { message: string; open: boolean } {
   // A Needs you item always has a mark; only Unstarted rows show the priority dot instead.
   const mark = markOf(item) as Mark;

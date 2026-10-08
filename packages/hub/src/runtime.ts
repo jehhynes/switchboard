@@ -48,6 +48,8 @@ export interface WorkItemView extends WorkItem {
   returned: number;
   /** The ticket of the work item whose session reported this one as a task (PRD R68). */
   parent: Ticket | null;
+  /** The playbook's `approvalSends`: Approve sends the work (PRD R27). */
+  approvalSends: boolean;
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
@@ -389,6 +391,7 @@ export class Runtime {
         pastes: store.pastesFor(item.id),
         returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
         parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
+        approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
       })),
       pool: store
         .poolTickets()

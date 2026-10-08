@@ -5,7 +5,7 @@ import type { EditorConfig, EditorState } from '../src/webview/settings.js';
 import { startSettings } from '../src/webview/settingsMain.js';
 import type { EditorMessage } from '../src/webview/settingsMain.js';
 
-const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', reports: [], rates: false, template: '/gc-plan {{ticket.sourceKey}}\n' };
+const TASK: PlaybookFields = { description: 'Develop it', kind: 'task', autoStart: false, requiresWorktree: true, permissionMode: null, model: null, workdir: 'worktree', reports: [], approvalSends: false, rates: false, template: '/gc-plan {{ticket.sourceKey}}\n' };
 
 const GITHUB = { enabled: true, repo: 'o/r', logins: ['me', 'me-ai'], project: { owner: 'o', number: 3 }, assignedStatuses: ['Dev'] };
 
@@ -274,6 +274,30 @@ describe('startSettings', () => {
     click('[data-command="save"]');
 
     expect(last('save-playbook')).toMatchObject({ name: 'triage:github', playbook: { kind: 'task', rates: false } });
+  });
+
+  it('offers Approve sends the work only beside the approval report, and drops it with the report', () => {
+    send({ type: 'config', config: config() });
+    click('[data-arg="playbook:dev:develop"]');
+    expect(field('approvalSends')).toBeNull();
+
+    field<HTMLInputElement>('reports.approval').checked = true;
+    field('reports.approval').dispatchEvent(new Event('change', { bubbles: true }));
+    field<HTMLInputElement>('approvalSends').checked = true;
+    field('approvalSends').dispatchEvent(new Event('change', { bubbles: true }));
+    click('[data-command="save"]');
+
+    expect(last('save-playbook')).toMatchObject({ name: 'dev:develop', playbook: { reports: ['approval'], approvalSends: true } });
+
+    field<HTMLInputElement>('reports.approval').checked = false;
+    field('reports.approval').dispatchEvent(new Event('change', { bubbles: true }));
+    expect(field('approvalSends')).toBeNull();
+    // Another report keeps the draft unlike the file, so Save sends it.
+    field<HTMLInputElement>('reports.done').checked = true;
+    field('reports.done').dispatchEvent(new Event('change', { bubbles: true }));
+    click('[data-command="save"]');
+
+    expect(last('save-playbook')).toMatchObject({ name: 'dev:develop', playbook: { reports: ['done'], approvalSends: false } });
   });
 
   it('edits a playbook, hides the task fields on a triage playbook, and saves over its version', () => {

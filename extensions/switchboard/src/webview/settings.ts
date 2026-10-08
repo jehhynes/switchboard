@@ -67,6 +67,7 @@ export const EMPTY_PLAYBOOK: PlaybookFields = {
   model: null,
   workdir: 'worktree',
   reports: [],
+  approvalSends: false,
   rates: false,
   template: '',
 };
@@ -143,12 +144,16 @@ export function applyPlaybookField(playbook: PlaybookFields, key: string, input:
     const others = playbook.reports.filter((kind) => kind !== report.kind);
     const listed = input.checked === true ? [...others, report.kind] : others;
 
-    return { ...playbook, reports: REPORT_FIELDS.map((field) => field.kind).filter((kind) => listed.includes(kind)) };
+    const reports = REPORT_FIELDS.map((field) => field.kind).filter((kind) => listed.includes(kind));
+
+    // The file holds approvalSends only beside the approval report, so the draft drops it with the report.
+    return { ...playbook, reports, approvalSends: playbook.approvalSends && reports.includes('approval') };
   }
 
   switch (key) {
     case 'autoStart':
     case 'requiresWorktree':
+    case 'approvalSends':
     case 'rates':
       return { ...playbook, [key]: input.checked === true };
     case 'permissionMode':
@@ -363,7 +368,12 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
     fields.push(
       { path: 'autoStart', label: 'Start automatically', kind: 'boolean', help: 'Start the session after triage. Off, the work item waits in Unstarted for you to start it.' },
       { path: 'requiresWorktree', label: 'Requires a worktree', kind: 'boolean', help: 'Run the source’s setup prompt first when the ticket has no worktree.' },
-      ...REPORT_FIELDS.map(({ kind, label, help }): Field => ({ path: `reports.${kind}`, label, kind: 'boolean', help })),
+      ...REPORT_FIELDS.flatMap(({ kind, label, help }): Field[] => [
+        { path: `reports.${kind}`, label, kind: 'boolean', help },
+        ...(kind === 'approval' && playbook.reports.includes('approval')
+          ? [{ path: 'approvalSends', label: 'Approve sends the work', kind: 'boolean', help: 'Approve posts or pushes the session’s work. Off, you send it yourself, such as by pasting a reply, and Approve finishes up.' } satisfies Field]
+          : []),
+      ]),
       {
         path: 'workdir',
         label: 'Working directory',

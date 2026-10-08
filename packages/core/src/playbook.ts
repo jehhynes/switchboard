@@ -21,6 +21,8 @@ export interface Playbook {
   workdir: 'worktree' | 'repoRoot';
   /** Empty by default: the session's turn then ends in Needs you. */
   reports: PlaybookReport[];
+  /** Approve sends the session's work, such as posting a reply or pushing a branch; the panel marks the approval row `send`, else `eye` (PRD R27). */
+  approvalSends: boolean;
   /** A triage playbook's classifier rates immediacy and severity (PRD R50); without it, triage stores neither. */
   rates: boolean;
   template: string;
@@ -35,7 +37,7 @@ export interface PlaybookError {
 export type PlaybookResult = { playbook: Playbook } | { error: string };
 
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'rates'];
+const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates'];
 
 function parseFrontMatter(text: string): { fields: Map<string, string>; body: string } | { error: string } {
   const normalized = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
@@ -116,6 +118,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
   const autoStart = flag(fields, 'autoStart');
   const requiresWorktree = flag(fields, 'requiresWorktree');
   const rates = flag(fields, 'rates');
+  const approvalSends = flag(fields, 'approvalSends');
 
   if (typeof autoStart !== 'boolean') {
     return autoStart;
@@ -127,6 +130,10 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
 
   if (typeof rates !== 'boolean') {
     return rates;
+  }
+
+  if (typeof approvalSends !== 'boolean') {
+    return approvalSends;
   }
 
   if (kind === 'task' && rates) {
@@ -156,6 +163,10 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
     return { error: 'reports applies only to a task playbook.' };
   }
 
+  if (approvalSends && !reports.includes('approval')) {
+    return { error: 'approvalSends applies only to a playbook whose reports include approval.' };
+  }
+
   if (body.trim() === '') {
     return { error: 'The prompt template is empty.' };
   }
@@ -171,6 +182,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
       model: fields.get('model') || null,
       workdir,
       reports: PLAYBOOK_REPORTS.filter((entry) => reports.includes(entry)),
+      approvalSends,
       rates,
       template: body,
     },
@@ -217,6 +229,10 @@ export function formatPlaybook(playbook: PlaybookFields): { text: string } | { e
 
   if (playbook.kind === 'task' && playbook.reports.length > 0) {
     lines.push(`reports: ${playbook.reports.join(', ')}`);
+  }
+
+  if (playbook.kind === 'task' && playbook.reports.includes('approval') && playbook.approvalSends) {
+    lines.push('approvalSends: true');
   }
 
   if (playbook.permissionMode !== null) {

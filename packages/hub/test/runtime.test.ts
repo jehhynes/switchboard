@@ -606,6 +606,24 @@ describe('Runtime', () => {
     expect(runtime.snapshot().namespaces).toEqual({ github: 'dev' });
   });
 
+  it('gives each work item its current playbook\'s approvalSends (PRD R27)', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(runtime.snapshot().workItems.map((item) => [item.playbook, item.approvalSends])).toEqual([['dev:develop', false]]);
+
+    const sends = config();
+    sends.playbooks = new Map([...PLAYBOOKS, playbook('dev:develop', '---\ndescription: Build it\nreports: approval\napprovalSends: true\n---\nBuild.')]);
+    runtime.reload(sends);
+    expect(runtime.snapshot().workItems.map((item) => item.approvalSends)).toEqual([true]);
+
+    // A work item with no playbook, or one whose playbook is gone, has no approval that sends.
+    store.updateWorkItem(1, { playbook: 'dev:gone' });
+    expect(runtime.snapshot().workItems.map((item) => item.approvalSends)).toEqual([false]);
+  });
+
   it('records a link report and lists the ticket links and earlier work items on the work item (PRD R51, R52)', async () => {
     const { store, source, runtime } = setup();
     source.result = { tickets: [issue('8')] };

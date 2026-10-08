@@ -403,7 +403,7 @@ export function markOf(item: WorkItemView): Mark | 'priority' {
       }
 
       if (item.status === 'awaiting-approval') {
-        return { icon: 'cloud-upload', title: 'Approve the publish' };
+        return item.approvalSends ? { icon: 'send', title: 'Approve to send' } : { icon: 'eye', title: 'Review, then approve' };
       }
 
       return item.status === 'failed' ? { icon: 'error', title: 'Failed', tone: 'error' } : { icon: 'debug-pause', title: 'Blocked' };
@@ -573,18 +573,29 @@ function stageText(item: WorkItemView, now: number): string {
     return stale === null ? '' : `<span class="stale" title="${title}">No stage report · ${age(stale, now)}</span>`;
   }
 
-  // A running stage ends in an ellipsis, which a clipped stage already has.
-  const running = groupOf(item) === 'working' && !item.ticket.snoozed && clip(item.stage, CAPS.stage).full === null;
   const since = item.stageAt === null ? '' : stale === null ? ` · ${age(item.stageAt, now)}` : `<span class="stale" title="${title}"> · ${age(item.stageAt, now)}</span>`;
 
-  return clipped('stage', item.stage, CAPS.stage, `${running ? '…' : ''}${since}`);
+  return clipped('stage', item.stage, CAPS.stage, since);
+}
+
+/**
+ * On an `awaiting-approval` row, the approval summary, capitalised, and the time since the report take the stage's place. A fixed tooltip holds the
+ * whole summary and the last stage, because the hover handler leaves it even when the width cuts the summary (PRD R27).
+ */
+function approvalText(item: WorkItemView, summary: string, now: number): string {
+  const whole = summary.charAt(0).toUpperCase() + summary.slice(1);
+  const { text, full } = clip(whole, CAPS.approval);
+  const tooltip = item.stage === null ? full : `${whole}\nLast stage: ${item.stage}`;
+  const attributes = tooltip === null ? '' : ` title="${escape(tooltip)}" data-full`;
+
+  return `<span class="approval"${attributes}>${escape(text)}<span class="since"> · ${age(item.statusAt, now)}</span></span>`;
 }
 
 function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const main = mainControl(item);
   const rowKey = rowKeyOf(item);
-  const stage = stageText(item, now);
-  const approval = item.approvalSummary === null || item.status !== 'awaiting-approval' ? '' : clipped('approval', item.approvalSummary, CAPS.approval);
+  const summary = item.status === 'awaiting-approval' ? item.approvalSummary : null;
+  const stage = summary === null ? stageText(item, now) : approvalText(item, summary, now);
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
@@ -595,7 +606,7 @@ function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<st
   return `<div class="item${stripeClass(item)}${selectedClass(rowKey, ui)}" data-item="${item.id}" data-row="${rowKey}" tabindex="0"${openAttribute(openAction(item), editorAction(item))}${rowContext(controlsOf(item))}>
 ${firstLine(item.triage, item.ticket.title, groupOf(item) === 'done' && !item.ticket.snoozed ? doneTime(item, now) : queued(clockOf(item), item.doneAt, now))}
 <div class="line second"><span class="meta">${playbookLabel(playbookText(item, namespaces))}${ticketLink(item.ticket)}${primary.map(linkBadge).join('')}${returned(item.returned)}</span></div>${thirdLine(
-    `${statusMark(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${approval}${rest.map(linkBadge).join('')}`,
+    `${statusMark(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, toneOf(item, main), false, mainTitle(item, main))}`)}
 </div>`;
 }
