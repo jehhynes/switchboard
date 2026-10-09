@@ -55,3 +55,14 @@ query($owner:String!, $name:String!, $number:Int!, $status:String!){
     }
   }
 }`;
+
+/** A pull request's branch and the issues it closes, to check a reported link (PRD R52). */
+export const PULL_REQUEST_QUERY = `
+query($owner:String!, $name:String!, $number:Int!){
+  repository(owner:$owner, name:$name){
+    pullRequest(number:$number){
+      headRefName
+      closingIssuesReferences(first:50){ pageInfo{ hasNextPage } nodes{ number repository{ nameWithOwner } } }
+    }
+  }
+}`;

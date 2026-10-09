@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseGithubConfig } from '../src/config.js';
 import type { GithubConfig } from '../src/config.js';
 import type { Gh, GhResult } from '../src/gh.js';
-import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY } from '../src/queries.js';
+import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from '../src/queries.js';
 import { GithubSource } from '../src/source.js';
 
 function fixture(name: string): unknown {
@@ -295,5 +295,74 @@ describe('GithubSource.keyOfBranch', () => {
     expect(source.keyOfBranch('15619-fix-foo')).toBe('15619');
     expect(source.keyOfBranch('master')).toBeNull();
     expect(new GithubSource(config({ branchPattern: /^issue-(\d+)$/ }), fakeGh()).keyOfBranch('issue-12')).toBe('12');
+  });
+});
+
+describe('GithubSource.checkLink', () => {
+  const PR = 'https://github.com/acme/widgets/pull/20401';
+
+  /** PR #20401: branch 19953-names-containing-html-run-as-script, closes acme/widgets#19953. */
+  const pullRequest = (patch: { headRefName?: string; closes?: [number, string][]; more?: boolean } = {}): GhResult => {
+    type Answer = { data: { repository: { pullRequest: { headRefName: string; closingIssuesReferences: { pageInfo: { hasNextPage: boolean }; nodes: unknown[] } } } } };
+    const json = fixture('pull-request') as Answer;
+    const pr = json.data.repository.pullRequest;
+    pr.headRefName = patch.headRefName ?? pr.headRefName;
+    pr.closingIssuesReferences.nodes = patch.closes?.map(([number, nameWithOwner]) => ({ number, repository: { nameWithOwner } })) ?? pr.closingIssuesReferences.nodes;
+    pr.closingIssuesReferences.pageInfo.hasNextPage = patch.more ?? false;
+
+    return { json };
+  };
+
+  it('accepts a pull request that closes the issue', async () => {
+    const gh = fakeGh(pullRequest({ headRefName: 'feature-x' }));
+
+    expect(await new GithubSource(config(), gh).checkLink(ticket('19953'), PR)).toEqual({ refused: null });
+    expect(gh).toHaveBeenCalledWith(PULL_REQUEST_QUERY, { owner: 'acme', name: 'widgets', number: 20401 });
+  });
+
+  it('accepts a pull request whose branch names the issue but does not close it, as a stacked one', async () => {
+    const source = new GithubSource(config(), fakeGh(pullRequest({ closes: [] })));
+
+    expect(await source.checkLink(ticket('19953'), 'https://github.com/Acme/Widgets/pull/20401/files')).toEqual({ refused: null });
+  });
+
+  it("refuses a pull request that neither closes the issue nor has the issue's branch, in any spelling of its URL", async () => {
+    const refused = 'Pull request #20401 does not close #20356 and its branch 19953-names-containing-html-run-as-script does not name it. Link only the pull request that delivers this work.';
+
+    for (const target of [PR, 'http://github.com/acme/widgets/pull/20401', 'https://GitHub.com:443/acme/widgets/pull/20401#discussion']) {
+      expect(await new GithubSource(config(), fakeGh(pullRequest())).checkLink(ticket('20356'), target)).toEqual({ refused });
+    }
+  });
+
+  it('refuses a pull request that closes an issue of the same number in another repository', async () => {
+    const source = new GithubSource(config(), fakeGh(pullRequest({ closes: [[20356, 'acme/other']] })));
+
+    expect(await source.checkLink(ticket('20356'), PR)).toMatchObject({ refused: expect.stringContaining('does not close #20356') });
+  });
+
+  it('leaves the link unchecked when the pull request closes more issues than one read lists', async () => {
+    const source = new GithubSource(config(), fakeGh(pullRequest({ more: true })));
+
+    expect(await source.checkLink(ticket('20356'), PR)).toEqual({ error: 'pull request #20401 closes more issues than one read lists' });
+  });
+
+  it('refuses a pull request that does not exist', async () => {
+    // gh's stderr for a missing pull request, recorded 2026-10-09; gh exits 1.
+    const source = new GithubSource(config(), fakeGh({ error: 'gh: Could not resolve to a PullRequest with the number of 99999.' }));
+
+    expect(await source.checkLink(ticket('20356'), 'https://github.com/acme/widgets/pull/99999')).toEqual({ refused: 'Pull request #99999 was not found in acme/widgets.' });
+  });
+
+  it('does not check an issue, another repository or another site', async () => {
+    const source = new GithubSource(config(), fakeGh());
+
+    for (const target of ['https://github.com/acme/widgets/issues/20401', 'https://github.com/acme/other/pull/1', 'https://github.com/acme/widgets-x/pull/1', 'https://example.com/acme/widgets/pull/1', 'https://github.com/acme/widgets/pull/1x', 'not a url']) {
+      expect(await source.checkLink(ticket('20356'), target)).toEqual({ refused: null });
+    }
+  });
+
+  it('returns an error when gh fails or the response is malformed', async () => {
+    expect(await new GithubSource(config(), fakeGh({ error: 'boom' })).checkLink(ticket('20356'), PR)).toEqual({ error: 'boom' });
+    expect(await new GithubSource(config(), fakeGh({ json: { data: { repository: { pullRequest: null } } } })).checkLink(ticket('20356'), PR)).toEqual({ error: 'GitHub returned an unexpected response.' });
   });
 });

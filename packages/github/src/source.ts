@@ -1,8 +1,8 @@
-import type { ContextResult, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
+import type { ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
 import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
-import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY } from './queries.js';
+import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from './queries.js';
 import type { Roles, RolesResult } from './roles.js';
 
 /** Each issue body, comment and review-thread comment is clipped to this many characters (GC). */
@@ -12,6 +12,26 @@ const UNEXPECTED = 'GitHub returned an unexpected response.';
 
 /** A Status field change this long after the last status event has no timeline event of its own. */
 const UNLOGGED_STATUS_MS = 60_000;
+
+const PULL_REQUEST_PATH = /^\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:\/|$)/;
+
+/** gh's stderr for a pull request number the repository does not have. */
+const NO_PULL_REQUEST = /Could not resolve to a PullRequest/;
+
+/** The `owner/name` and number of a GitHub pull request URL, or null for any other URL. */
+function pullRequestOfUrl(target: string): { repo: string; number: number } | null {
+  let url: URL;
+
+  try {
+    url = new URL(target);
+  } catch {
+    return null;
+  }
+
+  const [, repo, number] = /^https?:$/.test(url.protocol) && url.hostname === 'github.com' ? (PULL_REQUEST_PATH.exec(url.pathname) ?? []) : [];
+
+  return repo === undefined ? null : { repo, number: Number(number) };
+}
 
 interface Actor {
   login: string;
@@ -112,6 +132,46 @@ export class GithubSource implements Source {
 
   keyOfBranch(branch: string): string | null {
     return this.config.branchPattern.exec(branch)?.[1] ?? null;
+  }
+
+  /**
+   * Refuses a pull request link in the configured repository unless the pull request closes the issue or its branch names it, as the
+   * branch of a stacked pull request that does not close the issue does (PRD R52). Other links are not checked.
+   */
+  async checkLink(ticket: Ticket, target: string): Promise<LinkCheck> {
+    const pr = pullRequestOfUrl(target);
+
+    if (pr?.repo.toLowerCase() !== this.config.repo.toLowerCase()) {
+      return { refused: null };
+    }
+
+    try {
+      return await this.checkPullRequest(ticket, pr.number);
+    } catch {
+      return { error: UNEXPECTED };
+    }
+  }
+
+  private async checkPullRequest(ticket: Ticket, number: number): Promise<LinkCheck> {
+    const [owner = '', name = ''] = this.config.repo.split('/');
+    const result = await this.gh(PULL_REQUEST_QUERY, { owner, name, number });
+
+    if ('error' in result) {
+      return NO_PULL_REQUEST.test(result.error) ? { refused: `Pull request #${number} was not found in ${this.config.repo}.` } : result;
+    }
+
+    type Closing = { pageInfo: { hasNextPage: boolean }; nodes: { number: number; repository: { nameWithOwner: string } }[] };
+    const pr = (result.json as { data: { repository: { pullRequest: { headRefName: string; closingIssuesReferences: Closing } } } }).data.repository.pullRequest;
+    const closing = pr.closingIssuesReferences;
+    const closes = closing.nodes.some((issue) => String(issue.number) === ticket.sourceKey && issue.repository.nameWithOwner.toLowerCase() === this.config.repo.toLowerCase());
+
+    if (closes || this.keyOfBranch(pr.headRefName) === ticket.sourceKey) {
+      return { refused: null };
+    }
+
+    return closing.pageInfo.hasNextPage
+      ? { error: `pull request #${number} closes more issues than one read lists` }
+      : { refused: `Pull request #${number} does not close ${ticket.ref} and its branch ${pr.headRefName} does not name it. Link only the pull request that delivers this work.` };
   }
 
   /**

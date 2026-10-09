@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { DONE_CHECK_MS, MARKER_MS, MARKER_WATCH_RETRY_MS, QUESTION_READ_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import { REPORT_CHECK_MS, MARKER_MS, MARKER_WATCH_RETRY_MS, QUESTION_READ_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -113,6 +113,7 @@ class FakeSource implements Source {
   gate: Promise<void> | null = null;
   polls = 0;
   context: (ticket: { sourceKey: string }) => Promise<ContextResult> = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text` });
+  checkLink?: NonNullable<Source['checkLink']>;
 
   async poll(): Promise<PollResult> {
     this.polls++;
@@ -164,7 +165,7 @@ function setup(cfg = config(), now = () => T0, service = NO_SERVICE) {
       claudePath: 'claude',
       makeSource: (name) => (name === 'github' ? { source } : null),
       now,
-      sleep: (ms) => (ms === DONE_CHECK_MS ? late.promise : Promise.resolve()),
+      sleep: (ms) => (ms === REPORT_CHECK_MS ? late.promise : Promise.resolve()),
       newSessionId: () => `s${++ids}`,
       claudeSettings: join(home, '.claude', 'settings.json'),
       service,
@@ -761,6 +762,51 @@ describe('Runtime', () => {
 
     store.updateWorkItem(1, { status: 'queued', queuedAt: T0 });
     expect(runtime.snapshot().workItems[0]!.waits).toMatchObject([{ kind: 'session', sessionId: 's1', ownItem: true, playbook: null }]);
+  });
+
+  it("refuses a link report its ticket's source refuses, and logs the refusal in History (PRD R52)", async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    const checked: [string, string][] = [];
+    source.checkLink = async (ticket, target) => {
+      checked.push([ticket.sourceKey, target]);
+      return { refused: target.endsWith('/13') ? 'Pull request #13 does not close #8.' : null };
+    };
+
+    expect(await runtime.report({ sessionId: 's1', kind: 'link', label: 'PR #13', target: 'https://github.com/o/r/pull/13' })).toEqual({ refused: 'Pull request #13 does not close #8.' });
+    expect(await runtime.report({ sessionId: 's1', kind: 'link', label: 'PR #12', target: 'https://github.com/o/r/pull/12' })).toEqual({ refused: null });
+    expect(checked).toEqual([['8', 'https://github.com/o/r/pull/13'], ['8', 'https://github.com/o/r/pull/12']]);
+    expect(store.linksFor(1).map((link) => link.target)).toEqual(['https://github.com/o/r/pull/12']);
+    expect(store.ticketHistory(1)!.events.find((event) => event.refused !== null && event.type === 'report')).toMatchObject({ sessionId: 's1', detail: { kind: 'link', label: 'PR #13', target: 'https://github.com/o/r/pull/13' }, refused: 'Pull request #13 does not close #8.' });
+  });
+
+  it('accepts a link report unchecked when the check fails, throws or outlasts REPORT_CHECK_MS', async () => {
+    const { store, source, runtime, logs, late } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    source.checkLink = async () => ({ error: 'GitHub is down.' });
+    expect(await runtime.report({ sessionId: 's1', kind: 'link', label: 'PR #12', target: 'https://github.com/o/r/pull/12' })).toEqual({ refused: null });
+    source.checkLink = async () => {
+      throw new Error('boom');
+    };
+    expect(await runtime.report({ sessionId: 's1', kind: 'link', label: 'PR #13', target: 'https://github.com/o/r/pull/13' })).toEqual({ refused: null });
+    source.checkLink = () => new Promise(() => {});
+    const report = runtime.report({ sessionId: 's1', kind: 'link', label: 'PR #14', target: 'https://github.com/o/r/pull/14' });
+    late.resolve();
+
+    expect(await report).toEqual({ refused: null });
+    expect(store.linksFor(1).map((link) => link.label)).toEqual(['PR #12', 'PR #13', 'PR #14']);
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        'link report for #8 accepted unchecked: GitHub is down.',
+        'link report for #8 accepted unchecked: the check failed',
+        'link report for #8 accepted unchecked: the github check took over 6 seconds',
+      ]),
+    );
   });
 
   it('records a link report and lists the ticket links and earlier work items on the work item (PRD R51, R52)', async () => {

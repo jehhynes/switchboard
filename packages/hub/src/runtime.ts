@@ -20,8 +20,8 @@ export const WAKE_MS = 60_000;
 const FIXED_TIMERS = 3;
 /** How long the dock lists done work items. */
 export const DONE_DAYS = 7;
-/** How long a done report waits for the source read that checks its ticket (PRD R10). */
-export const DONE_CHECK_MS = 6_000;
+/** How long a done or link report waits for the source read that checks it (PRD R10, R52). */
+export const REPORT_CHECK_MS = 6_000;
 /** The job state can be written after the waiting marker, so the hub reads the question again this long after a session starts waiting (PRD R70). */
 export const QUESTION_READ_MS = 1_000;
 
@@ -441,7 +441,7 @@ export class Runtime {
 
   /**
    * Whether a fresh read lists a task session's ticket as assigned when it reports done (PRD R10). False when the read fails or takes
-   * longer than DONE_CHECK_MS, which keeps the reply inside the report CLI's 10-second timeout.
+   * longer than REPORT_CHECK_MS, which keeps the reply inside the report CLI's 10-second timeout.
    */
   private async stillAssigned(sessionId: string): Promise<boolean> {
     const store = this.deps.store;
@@ -459,14 +459,38 @@ export class Runtime {
       return false;
     }
 
-    const tickets = await Promise.race([this.readAfter(ticket.source, source).catch(() => null), this.deps.sleep(DONE_CHECK_MS).then(() => 'late' as const)]);
+    const tickets = await Promise.race([this.readAfter(ticket.source, source).catch(() => null), this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
 
     if (tickets === 'late') {
-      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the ${ticket.source} read took over ${DONE_CHECK_MS / 1000} seconds`);
+      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`);
       return false;
     }
 
     return tickets?.some((entry) => entry.sourceKey === ticket.sourceKey && entry.assigned) ?? false;
+  }
+
+  /**
+   * Why the ticket's source refuses a link the session reports, or null (PRD R52). A failed check, or one that takes longer than
+   * REPORT_CHECK_MS, accepts the link, so a GitHub outage does not block a session.
+   */
+  private async linkRefusal(sessionId: string, target: string): Promise<string | null> {
+    const store = this.deps.store;
+    const session = store.session(sessionId);
+    const ticket = session === null ? null : store.ticket(store.workItem(session.workItemId)!.ticketId)!;
+    const source = ticket === null ? undefined : this.sources.get(ticket.source);
+
+    if (ticket === null || source?.checkLink === undefined) {
+      return null;
+    }
+
+    const check = await Promise.race([source.checkLink(ticket, target).catch(() => ({ error: 'the check failed' })), this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
+
+    if (check === 'late' || 'error' in check) {
+      this.deps.log(`link report for ${ticket.ref} accepted unchecked: ${check === 'late' ? `the ${ticket.source} check took over ${REPORT_CHECK_MS / 1000} seconds` : check.error}`);
+      return null;
+    }
+
+    return check.refused;
   }
 
   /** Reads the roster and hook markers; a failed read changes nothing. */
@@ -587,6 +611,16 @@ export class Runtime {
       }
 
       return { refused: this.send({ type: 'report', sessionId: body.sessionId, report: { kind: 'worktree', path: worktree.path, branch: worktree.branch } }).refused };
+    }
+
+    if (body.kind === 'link') {
+      const refused = await this.linkRefusal(body.sessionId, body.target);
+
+      if (refused !== null) {
+        this.refuseReport(body.sessionId, { kind: 'link', label: body.label, target: body.target }, refused);
+
+        return { refused };
+      }
     }
 
     const report =
