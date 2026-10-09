@@ -20,8 +20,6 @@ export const WAKE_MS = 60_000;
 const FIXED_TIMERS = 3;
 /** How long the dock lists done work items. */
 export const DONE_DAYS = 7;
-/** How long a pending open waits for a window on its folder. */
-export const OPEN_CLAIM_MS = 2 * 60_000;
 /** How long a done report waits for the source read that checks its ticket (PRD R10). */
 export const DONE_CHECK_MS = 6_000;
 /** The job state can be written after the waiting marker, so the hub reads the question again this long after a session starts waiting (PRD R70). */
@@ -131,9 +129,6 @@ export class Runtime {
   private rosterAgain = false;
   /** The read in flight per source; reads run one at a time, so their results apply in order. */
   private reads = new Map<string, Promise<void>>();
-  private pendingOpens = new Map<string, { sessionId: string; at: number; workspace: string | null }>();
-  private pendingCommands: { id: number; command: Record<string, unknown>; workspace: string | null; at: number }[] = [];
-  private nextCommandId = 1;
   /** Job state reads by short ID, kept while the file's modification time is unchanged. */
   private questions = new Map<string, { mtimeMs: number; question: WorkItemView['question'] }>();
   /** The job state's modification time when the hub sent an answer, by short ID, so a question is answered once (PRD R70). */
@@ -612,63 +607,6 @@ export class Runtime {
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }
 
-  /**
-   * Records that a window or the dock asked to open a session in a window on `cwd`, which that window claims when it connects or gains focus.
-   * With `workspace`, the dock's item window file (PRD R71), only a window on that workspace file claims it, because item windows share folders.
-   */
-  recordOpen(sessionId: string, cwd: string, workspace: string | null = null): void {
-    this.pendingOpens.set(folderKey(cwd), { sessionId, at: this.deps.now(), workspace });
-  }
-
-  /** The session a window on `folder`, opened from `workspace` if any, should open, if one is pending and recent. Claiming removes it. */
-  claimOpen(folder: string, workspace: string | null = null): string | null {
-    const key = folderKey(folder);
-    const pending = this.pendingOpens.get(key);
-
-    if (pending?.workspace != null && (workspace === null || folderKey(workspace) !== folderKey(pending.workspace))) {
-      return null;
-    }
-
-    this.pendingOpens.delete(key);
-
-    return pending !== undefined && this.deps.now() - pending.at <= OPEN_CLAIM_MS ? pending.sessionId : null;
-  }
-
-  /**
-   * Keeps a command for a VS Code window to run when it next claims (PRD R71): the window opened from `workspace`, or with null the first
-   * window that claims, which the dock brings to the front.
-   */
-  recordCommand(command: Record<string, unknown>, workspace: string | null): number {
-    const id = this.nextCommandId++;
-
-    this.pendingCommands.push({ id, command, workspace, at: this.deps.now() });
-
-    return id;
-  }
-
-  /** Drops a command no window has claimed yet, because the dock did not bring its window forward; false when it is gone already. */
-  withdrawCommand(id: number): boolean {
-    const before = this.pendingCommands.length;
-
-    this.pendingCommands = this.pendingCommands.filter((pending) => pending.id !== id);
-
-    return this.pendingCommands.length < before;
-  }
-
-  /**
-   * The commands for a window opened from `workspace` that are pending and recent, oldest first, and when the window is `focused`, those for any
-   * window, which the dock left for the window it brought to the front. Claiming removes them.
-   */
-  claimCommands(workspace: string | null, focused: boolean): Record<string, unknown>[] {
-    const now = this.deps.now();
-    const recent = this.pendingCommands.filter((pending) => now - pending.at <= OPEN_CLAIM_MS);
-    const mine = recent.filter((pending) => (pending.workspace === null ? focused : workspace !== null && folderKey(pending.workspace) === folderKey(workspace)));
-
-    this.pendingCommands = recent.filter((pending) => !mine.includes(pending));
-
-    return mine.map((pending) => pending.command);
-  }
-
   snapshot(): Snapshot {
     const store = this.deps.store;
     const { settings, playbooks, settingsError, playbookErrors } = this.config;
@@ -877,10 +815,6 @@ export class Runtime {
 /** A session running in its background process and waiting on the operator; a released session that is active again runs elsewhere. */
 function waitsInBackground(session: Session): session is Session & { shortId: string } {
   return session.state === 'waiting' && session.shortId !== null && !session.released;
-}
-
-function folderKey(path: string): string {
-  return path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
 }
 
 /** The source's triage context led by the current UTC time, in the form sources use, so triage can judge how recent each event is. */

@@ -19,6 +19,7 @@ import { SOURCE_KINDS, checkPlaybook, checkSettings, deletePlaybook, loadConfig,
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
+import { WindowQueue } from './windowQueue.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 
@@ -177,6 +178,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     ...options.deps,
   };
   const runtime = new Runtime(deps, config);
+  // Kept in a file, because the window the dock is opening may replace this hub before it claims (architecture.md § Claude Code runner).
+  const windowQueue = WindowQueue.load(join(home, 'window-queue.json'), deps.now, deps.log);
   const claudeRoot = dirname(deps.claudeSettings).replaceAll('\\', '/');
   const debriefs = new Debriefs({
     dir: `${claudeRoot}/.wip/debrief`,
@@ -259,7 +262,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?}.' } };
         }
 
-        runtime.recordOpen(body['sessionId'], body['cwd'], body['workspace'] ?? null);
+        if (!windowQueue.recordOpen(body['sessionId'], body['cwd'], body['workspace'] ?? null)) {
+          return { status: 500, body: { error: 'The hub could not save the open; see its log.' } };
+        }
+
+        deps.log(`session ${body['sessionId']} left for ${body['workspace'] ?? body['cwd']}`);
         askToClaim(body['workspace'] ?? null);
 
         return { status: 200, body: { recorded: true } };
@@ -286,12 +293,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         const workspace = body['workspace'] ?? null;
-        const sessionId = runtime.claimOpen(body['folder'], workspace);
-        const commands = runtime.claimCommands(workspace, body['focused'] === true);
+        const sessionId = windowQueue.claimOpen(body['folder'], workspace);
+        const commands = windowQueue.claimCommands(workspace, body['focused'] === true);
+        const claimant = workspace ?? (body['folder'] || 'a window with no folder');
 
         // The log shows whether a window took what the dock left for it (PRD R71).
+        if (sessionId !== null) {
+          deps.log(`session ${sessionId} claimed by ${claimant}`);
+        }
+
         if (commands.length > 0) {
-          deps.log(`window commands claimed by ${workspace ?? (body['folder'] || 'a window with no folder')}: ${commands.map((command) => String(command['type'])).join(', ')}`);
+          deps.log(`window commands claimed by ${claimant}: ${commands.map((command) => String(command['type'])).join(', ')}`);
         }
 
         return { status: 200, body: { sessionId, commands } };
@@ -301,7 +313,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Expected {workspace, command} with a changes, history or openUrl command, or openTabs for a workspace.' } };
         }
 
-        const id = runtime.recordCommand(body['command'], body['workspace'] ?? null);
+        const id = windowQueue.recordCommand(body['command'], body['workspace'] ?? null);
+
+        if (id === null) {
+          return { status: 500, body: { error: 'The hub could not save the command; see its log.' } };
+        }
 
         deps.log(`window command ${id} ${String(body['command']['type'])} left for ${body['workspace'] ?? 'any window'}`);
         askToClaim(body['workspace'] ?? null);
@@ -313,7 +329,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Expected {id}.' } };
         }
 
-        const withdrawn = runtime.withdrawCommand(body['id'] as number);
+        const withdrawn = windowQueue.withdrawCommand(body['id'] as number);
 
         if (withdrawn) {
           deps.log(`window command ${body['id']} withdrawn`);

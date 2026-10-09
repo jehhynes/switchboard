@@ -414,6 +414,28 @@ describe('createHubApp', () => {
     expect(JSON.parse(readFileSync(window.file, 'utf8')).settings['window.title']).toBe(`${window.title}\${separator}\${activeEditorShort}\${separator}sb:${window.name}`);
   });
 
+  it('keeps the session and commands the dock left for a window when another hub replaces this one', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const logs: string[] = [];
+    const file = 'C:/h/windows/gh-7.code-workspace';
+    const first = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+
+    expect(await first.post['/open']!({ sessionId: 'w-native', cwd: 'D:/git/widgets-wt/7-fix', workspace: file })).toMatchObject({ status: 200 });
+    expect(await first.post['/window']!({ workspace: file, command: { type: 'openTabs' } })).toMatchObject({ status: 200 });
+    first.close();
+
+    const second = await start((line) => logs.push(line));
+
+    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: 'w-native', commands: [{ type: 'openTabs' }] } });
+    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: null, commands: [] } });
+    expect(logs.filter((line) => /claimed/.test(line))).toEqual([`session w-native claimed by ${file}`, `window commands claimed by ${file}: openTabs`]);
+
+    // An open or command the hub cannot save is refused, so the dock reports it instead of a window waiting for it.
+    mkdirSync(join(temp.home, '.switchboard', 'window-queue.json.tmp'));
+    expect(await second.post['/open']!({ sessionId: 'x-native', cwd: 'D:/x', workspace: file })).toEqual({ status: 500, body: { error: 'The hub could not save the open; see its log.' } });
+    expect(await second.post['/window']!({ workspace: file, command: { type: 'openTabs' } })).toEqual({ status: 500, body: { error: 'The hub could not save the command; see its log.' } });
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const logs: string[] = [];
@@ -462,6 +484,12 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/window', { workspace: 7, command: { type: 'openUrl', url: 'D:/x.md' } }, 5000)).toMatchObject({ status: 400 });
     expect(await postToHub({ ...record, port: 1 }, '/action', {}, 1000)).toBeNull();
     // The log shows each command left, withdrawn and claimed, and no claim that took nothing.
+    expect(logs.filter((line) => line.startsWith('session'))).toEqual([
+      'session abc-native left for D:\\git\\widgets-wt\\7-fix',
+      'session abc-native claimed by d:/git/widgets-wt/7-fix/',
+      'session w-native left for C:/h/windows/gh-7.code-workspace',
+      'session w-native claimed by C:/h/windows/gh-7.code-workspace',
+    ]);
     expect(logs.filter((line) => line.startsWith('window')).map((line) => line.replace(/\d+/, 'N'))).toEqual([
       'window command N openUrl left for any window',
       'window command N withdrawn',
