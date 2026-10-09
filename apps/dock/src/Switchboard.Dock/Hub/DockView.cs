@@ -34,7 +34,7 @@ public sealed record DockRow(
     string Url,
     RowMark? Mark,
     IReadOnlyList<DockText> Details,
-    Tone? Stripe,
+    [property: JsonConverter(typeof(StripeConverter))] Tone? Stripe,
     DockWindow? Window,
     DockOpen? Open,
     IReadOnlyList<DockControl> Controls,
@@ -89,13 +89,33 @@ public sealed record RowMark(string Kind, string Glyph, string Title);
 
 public sealed record DockText(string Text, string? Title, Tone? Tone);
 
-/// <summary>A text's colour, or a row stripe's: <c>turn</c> and <c>agent</c> mark whose turn it is (PRD R27).</summary>
+/// <summary>A text's colour, or a row stripe's: <c>turn</c> marks the operator's turn (PRD R27).</summary>
 public enum Tone
 {
     Warning,
     Error,
     Turn,
-    Agent,
+}
+
+/// <summary>Reads a stripe, and an unknown one as none, such as the <c>agent</c> stripe an older hub sends.</summary>
+sealed class StripeConverter : JsonConverter<Tone?>
+{
+    public override bool HandleNull => true;
+
+    public override Tone? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.TokenType == JsonTokenType.String && Enum.TryParse<Tone>(reader.GetString(), ignoreCase: true, out var tone) ? tone : null;
+
+    public override void Write(Utf8JsonWriter writer, Tone? value, JsonSerializerOptions options)
+    {
+        if (value is { } tone)
+        {
+            writer.WriteStringValue(JsonNamingPolicy.CamelCase.ConvertName(tone.ToString()));
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
+    }
 }
 
 /// <summary>

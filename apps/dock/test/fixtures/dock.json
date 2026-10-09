@@ -2,196 +2,6 @@
   "notes": [],
   "groups": [
     {
-      "key": "blocked",
-      "title": "Blocked on you",
-      "glyph": "",
-      "empty": null,
-      "yours": null,
-      "rows": [
-        {
-          "key": "item:14",
-          "title": "Issue <14>",
-          "priority": null,
-          "time": {
-            "text": "10m",
-            "title": "In this status since 2026-10-03 11:50 UTC"
-          },
-          "playbook": "dev:develop",
-          "ticket": "gh 114",
-          "source": "github",
-          "url": "https://github.com/o/r/issues/114",
-          "mark": {
-            "kind": "failed",
-            "glyph": "",
-            "title": "Failed"
-          },
-          "details": [
-            {
-              "text": "Setup ended without a worktree.",
-              "title": null,
-              "tone": "warning"
-            }
-          ],
-          "stripe": "error",
-          "turn": "operator",
-          "dim": false,
-          "movable": false,
-          "window": null,
-          "open": {
-            "type": "url",
-            "url": "https://github.com/o/r/issues/114"
-          },
-          "controls": [
-            {
-              "label": "Triage again",
-              "glyph": "",
-              "action": {
-                "type": "retriage",
-                "workItemId": 14
-              }
-            },
-            {
-              "label": "Mark done",
-              "glyph": "",
-              "action": {
-                "type": "mark-done",
-                "workItemId": 14
-              }
-            },
-            {
-              "label": "Snooze",
-              "glyph": "",
-              "action": {
-                "type": "snooze",
-                "ticketId": 14
-              }
-            }
-          ],
-          "main": "Triage again",
-          "mainGlyph": "",
-          "mainTitle": "Triage again",
-          "answers": [],
-          "pastes": [],
-          "commands": [
-            {
-              "label": "History",
-              "glyph": "",
-              "command": {
-                "type": "history",
-                "ticketId": 14,
-                "key": "gh 114"
-              }
-            }
-          ],
-          "search": "Issue <14> · gh 114 · dev:develop · Blocked on you",
-          "links": [],
-          "returned": 0,
-          "band": null
-        },
-        {
-          "key": "item:8",
-          "title": "Issue <8>",
-          "priority": null,
-          "time": {
-            "text": "0m",
-            "title": "Waiting since 2026-10-03 12:00 UTC"
-          },
-          "playbook": "dev:develop",
-          "ticket": "gh 108",
-          "source": "github",
-          "url": "https://github.com/o/r/issues/108",
-          "mark": {
-            "kind": "question",
-            "glyph": "",
-            "title": "Answer a question"
-          },
-          "details": [
-            {
-              "text": "Which branch?",
-              "title": null,
-              "tone": null
-            }
-          ],
-          "stripe": "warning",
-          "turn": "operator",
-          "dim": false,
-          "movable": false,
-          "window": {
-            "name": "gh-108-widgets-655280",
-            "title": "Issue <8>",
-            "folders": [
-              "D:/git/widgets"
-            ],
-            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-108-widgets-655280.code-workspace"
-          },
-          "open": {
-            "type": "question",
-            "workItemId": 8,
-            "sessionId": "aaaa1111-native",
-            "cwd": "D:/git/widgets"
-          },
-          "controls": [
-            {
-              "label": "Stop",
-              "glyph": "",
-              "action": {
-                "type": "stop",
-                "workItemId": 8
-              }
-            },
-            {
-              "label": "Mark done",
-              "glyph": "",
-              "action": {
-                "type": "mark-done",
-                "workItemId": 8
-              }
-            },
-            {
-              "label": "Snooze",
-              "glyph": "",
-              "action": {
-                "type": "snooze",
-                "ticketId": 8
-              }
-            }
-          ],
-          "main": "Open in Claude",
-          "mainGlyph": "",
-          "mainTitle": "Open in Claude",
-          "answers": [
-            {
-              "label": "main",
-              "description": "The default branch",
-              "action": {
-                "type": "answer",
-                "workItemId": 8,
-                "nativeSessionId": "aaaa1111-native",
-                "question": "Which branch?",
-                "answer": "main"
-              }
-            }
-          ],
-          "pastes": [],
-          "commands": [
-            {
-              "label": "History",
-              "glyph": "",
-              "command": {
-                "type": "history",
-                "ticketId": 8,
-                "key": "gh 108"
-              }
-            }
-          ],
-          "search": "Issue <8> · gh 108 · dev:develop · Blocked on you",
-          "links": [],
-          "returned": 0,
-          "band": null
-        }
-      ]
-    },
-    {
       "key": "review",
       "title": "Ready for review",
       "glyph": "",
@@ -222,7 +32,7 @@
               "tone": null
             }
           ],
-          "stripe": "agent",
+          "stripe": null,
           "turn": "agent",
           "dim": true,
           "movable": true,
@@ -549,6 +359,196 @@
             }
           ],
           "search": "Issue <10> · gh 110 · dev:develop · Ready for review",
+          "links": [],
+          "returned": 0,
+          "band": null
+        }
+      ]
+    },
+    {
+      "key": "blocked",
+      "title": "Blocked on you",
+      "glyph": "",
+      "empty": null,
+      "yours": null,
+      "rows": [
+        {
+          "key": "item:14",
+          "title": "Issue <14>",
+          "priority": null,
+          "time": {
+            "text": "10m",
+            "title": "In this status since 2026-10-03 11:50 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 114",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/114",
+          "mark": {
+            "kind": "failed",
+            "glyph": "",
+            "title": "Failed"
+          },
+          "details": [
+            {
+              "text": "Setup ended without a worktree.",
+              "title": null,
+              "tone": "warning"
+            }
+          ],
+          "stripe": "error",
+          "turn": "operator",
+          "dim": false,
+          "movable": false,
+          "window": null,
+          "open": {
+            "type": "url",
+            "url": "https://github.com/o/r/issues/114"
+          },
+          "controls": [
+            {
+              "label": "Triage again",
+              "glyph": "",
+              "action": {
+                "type": "retriage",
+                "workItemId": 14
+              }
+            },
+            {
+              "label": "Mark done",
+              "glyph": "",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 14
+              }
+            },
+            {
+              "label": "Snooze",
+              "glyph": "",
+              "action": {
+                "type": "snooze",
+                "ticketId": 14
+              }
+            }
+          ],
+          "main": "Triage again",
+          "mainGlyph": "",
+          "mainTitle": "Triage again",
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "glyph": "",
+              "command": {
+                "type": "history",
+                "ticketId": 14,
+                "key": "gh 114"
+              }
+            }
+          ],
+          "search": "Issue <14> · gh 114 · dev:develop · Blocked on you",
+          "links": [],
+          "returned": 0,
+          "band": null
+        },
+        {
+          "key": "item:8",
+          "title": "Issue <8>",
+          "priority": null,
+          "time": {
+            "text": "0m",
+            "title": "Waiting since 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 108",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/108",
+          "mark": {
+            "kind": "question",
+            "glyph": "",
+            "title": "Answer a question"
+          },
+          "details": [
+            {
+              "text": "Which branch?",
+              "title": null,
+              "tone": null
+            }
+          ],
+          "stripe": "warning",
+          "turn": "operator",
+          "dim": false,
+          "movable": false,
+          "window": {
+            "name": "gh-108-widgets-655280",
+            "title": "Issue <8>",
+            "folders": [
+              "D:/git/widgets"
+            ],
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-108-widgets-655280.code-workspace"
+          },
+          "open": {
+            "type": "question",
+            "workItemId": 8,
+            "sessionId": "aaaa1111-native",
+            "cwd": "D:/git/widgets"
+          },
+          "controls": [
+            {
+              "label": "Stop",
+              "glyph": "",
+              "action": {
+                "type": "stop",
+                "workItemId": 8
+              }
+            },
+            {
+              "label": "Mark done",
+              "glyph": "",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 8
+              }
+            },
+            {
+              "label": "Snooze",
+              "glyph": "",
+              "action": {
+                "type": "snooze",
+                "ticketId": 8
+              }
+            }
+          ],
+          "main": "Open in Claude",
+          "mainGlyph": "",
+          "mainTitle": "Open in Claude",
+          "answers": [
+            {
+              "label": "main",
+              "description": "The default branch",
+              "action": {
+                "type": "answer",
+                "workItemId": 8,
+                "nativeSessionId": "aaaa1111-native",
+                "question": "Which branch?",
+                "answer": "main"
+              }
+            }
+          ],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "glyph": "",
+              "command": {
+                "type": "history",
+                "ticketId": 8,
+                "key": "gh 108"
+              }
+            }
+          ],
+          "search": "Issue <8> · gh 108 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
           "band": null

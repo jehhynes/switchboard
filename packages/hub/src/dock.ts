@@ -123,8 +123,8 @@ export interface DockRow {
   mark: { kind: Mark; glyph: string; title: string } | null;
   /** Line 3 after the mark: waits, wake time, warning and error, the parent, and the stage, approval summary or question. */
   details: DockText[];
-  /** The left stripe's colour (PRD R27): failed, blocked or asking, the operator's turn, the agent's turn, or none. */
-  stripe: 'error' | 'warning' | 'turn' | 'agent' | null;
+  /** The left stripe's colour (PRD R27): failed, blocked or asking, the operator's turn, or none on the agent's turn. */
+  stripe: 'error' | 'warning' | 'turn' | null;
   /** Whose turn it is on an unsnoozed row in Blocked on you, Ready for review or In progress; null elsewhere. F8 visits `operator` rows (PRD R73). */
   turn: 'operator' | 'agent' | null;
   /** A Ready for review row on the agent's turn, which the dock dims (PRD R27). */
@@ -189,8 +189,8 @@ export interface DockView {
 export function dockView(snapshot: Snapshot, now: number, windows: string): DockView {
   const groups = listGroups(snapshot);
   const keys: RowGroup[] = [
-    ...(groups.blocked.length === 0 ? [] : (['blocked'] as const)),
     'review',
+    ...(groups.blocked.length === 0 ? [] : (['blocked'] as const)),
     'progress',
     'unstarted',
     ...(groups.snoozed.length === 0 ? [] : (['snoozed'] as const)),

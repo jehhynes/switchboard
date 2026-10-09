@@ -416,13 +416,11 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
 }
 
 /**
- * The left stripe of an unsnoozed row in Blocked on you, Ready for review or In progress (PRD R27): `error` when failed, `warning` when
- * blocked or asking a question, `turn` when work waits for the operator's review or approval, `agent` while the agent works; null elsewhere.
+ * The left stripe of an unsnoozed row on the operator's turn (PRD R27): `error` when failed, `warning` when blocked or asking a question,
+ * `turn` when work waits for the operator's review or approval; null on the agent's turn and elsewhere.
  */
-export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | 'agent' | null {
-  const turn = turnOf(item);
-
-  if (item.ticket.snoozed || turn === null) {
+export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | null {
+  if (item.ticket.snoozed || turnOf(item) !== 'operator') {
     return null;
   }
 
@@ -430,7 +428,7 @@ export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | 'ag
     return item.status === 'failed' ? 'error' : 'warning';
   }
 
-  return turn === 'operator' ? 'turn' : 'agent';
+  return 'turn';
 }
 
 /** How long a running session goes without a stage report before the dock colours the stage age (PRD R58). */

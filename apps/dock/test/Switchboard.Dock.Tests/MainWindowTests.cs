@@ -52,7 +52,7 @@ public sealed class MainWindowTests
 
         string[] headers = ["Blocked on you", "Ready for review", "In progress", "Unstarted", "Done", "0", "2", "3", "2 yours"];
 
-        Assert.Equal(["Blocked on you", "2", "Ready for review", "2 yours", "3", "In progress", "0", "Unstarted", "2", "Done", "2"], texts.Where(headers.Contains));
+        Assert.Equal(["Ready for review", "2 yours", "3", "Blocked on you", "2", "In progress", "0", "Unstarted", "2", "Done", "2"], texts.Where(headers.Contains));
         Assert.Contains("Nothing is in progress.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
@@ -262,7 +262,7 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var headers = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("group")).ToList();
 
-        Assert.Equal(["\uEAA2", "\uEA70", "\uEBA6", "\uEB09", "\uEBA4"], headers.Select((header) => header.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("group-icon")).Text));
+        Assert.Equal(["\uEA70", "\uEAA2", "\uEBA6", "\uEB09", "\uEBA4"], headers.Select((header) => header.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("group-icon")).Text));
         var muted = window.FindResource(window.ActualThemeVariant, "DockBadgeZero");
 
         Assert.Equal([false, false, true, false, false], headers.Select((header) => header.GetVisualDescendants().OfType<Border>().Single((badge) => badge.Classes.Contains("badge")).Background == muted));

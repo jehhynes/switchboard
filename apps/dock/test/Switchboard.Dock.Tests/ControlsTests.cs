@@ -159,13 +159,13 @@ public sealed class ControlsTests
 
         window.FindControl<TextBox>("SearchBox")!.Text = "gh 10";
         Dispatcher.UIThread.RunJobs();
-        Assert.Equal(["Issue <8>", "Issue <7>", "Issue <10>", "Issue <9>", "Issue <4>"], VisibleTitles(window));
+        Assert.Equal(["Issue <7>", "Issue <10>", "Issue <8>", "Issue <9>", "Issue <4>"], VisibleTitles(window));
 
         model.Filter = "107-fix";
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(["Issue <7>"], VisibleTitles(window));
         Assert.Equal(["review"], model.Groups.Where((group) => group.IsShown).Select((group) => group.Key));
-        Assert.Equal("1", model.Groups[1].Count);
+        Assert.Equal("1", model.Groups[0].Count);
 
         window.FindControl<TextBox>("SearchBox")!.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
         Dispatcher.UIThread.RunJobs();

@@ -171,10 +171,7 @@
     <Style Selector="Border.stripe.turn">
       <Setter Property="Background" Value="{DynamicResource DockTurn}" />
     </Style>
-    <Style Selector="Border.stripe.agent">
-      <Setter Property="Background" Value="{DynamicResource DockAgent}" />
-    </Style>
-    <!-- A Ready for review row on the agent's turn dims its texts; the stripe and the selection keep full strength. -->
+    <!-- A Ready for review row on the agent's turn dims its texts; the selection keeps full strength. -->
     <Style Selector="Border.row.dim Grid.content">
       <Setter Property="Opacity" Value="0.6" />
     </Style>
@@ -391,8 +388,7 @@
                         <DataTemplate x:DataType="views:RowViewModel">
                           <Border Classes="row" Classes.selected="{Binding IsSelected}" Classes.dim="{Binding IsDim}" Tapped="OnRowTapped" ContextRequested="OnRowContext">
                             <Grid ColumnDefinitions="3,*">
-                              <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" Classes.turn="{Binding StripeTurn}"
-                                      Classes.agent="{Binding StripeAgent}" />
+                              <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" Classes.turn="{Binding StripeTurn}" />
                               <!-- The row's buttons sit beside lines 2 and 3, so they never shorten the title or hide the time. -->
                               <Grid Grid.Column="1" Classes="content" Margin="8,5,8,6" RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
                                 <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">

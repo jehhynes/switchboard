@@ -156,14 +156,14 @@ describe('poolControls', () => {
 });
 
 describe('stripeOf', () => {
-  it("stripes failed rows red, blocked or waiting rows yellow, the operator's turn and the agent's turn, outside Snoozed and the other groups (PRD R27)", () => {
+  it("stripes failed rows red, blocked or waiting rows yellow and the operator's turn, but not the agent's turn, Snoozed or the other groups (PRD R27)", () => {
     expect(stripeOf(item(1, { status: 'failed' }))).toBe('error');
     expect(stripeOf(item(1, { status: 'blocked' }))).toBe('warning');
     expect(stripeOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('warning');
     expect(stripeOf(item(1, { status: 'awaiting-approval' }))).toBe('turn');
     expect(stripeOf(item(1, { status: 'finished' }))).toBe('turn');
-    expect(stripeOf(item(1, { status: 'running', readyAt: NOW, sessions: [session()] }))).toBe('agent');
-    expect(stripeOf(item(1, { status: 'running', sessions: [session()] }))).toBe('agent');
+    expect(stripeOf(item(1, { status: 'running', readyAt: NOW, sessions: [session()] }))).toBeNull();
+    expect(stripeOf(item(1, { status: 'running', sessions: [session()] }))).toBeNull();
     expect(stripeOf(item(1, { status: 'unstarted' }))).toBeNull();
     expect(stripeOf(item(1, { status: 'done' }))).toBeNull();
     expect(stripeOf(item(1, { status: 'failed', ticket: { ...item(1).ticket, snoozed: true } }))).toBeNull();

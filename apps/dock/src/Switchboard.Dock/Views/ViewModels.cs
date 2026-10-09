@@ -629,8 +629,6 @@ public sealed class RowViewModel(DockRow row) : Observable
     /// <summary>The operator's turn in Ready for review (PRD R27).</summary>
     public bool StripeTurn => row.Stripe == Tone.Turn;
 
-    public bool StripeAgent => row.Stripe == Tone.Agent;
-
     /// <summary>A Ready for review row on the agent's turn shows dimmed (PRD R27).</summary>
     public bool IsDim => row.Dim;
 

@@ -10,10 +10,10 @@ public sealed class DockViewTests
     {
         var view = Fixtures.View;
 
-        Assert.Equal(["blocked", "review", "progress", "unstarted", "done"], view.Groups.Select((group) => group.Key));
-        Assert.Equal(["item:14", "item:8"], view.Groups[0].Rows.Select((row) => row.Key));
-        Assert.Equal(["item:13", "item:7", "item:10"], view.Groups[1].Rows.Select((row) => row.Key));
-        Assert.Equal([null, 2, null, null, null], view.Groups.Select((group) => group.Yours));
+        Assert.Equal(["review", "blocked", "progress", "unstarted", "done"], view.Groups.Select((group) => group.Key));
+        Assert.Equal(["item:13", "item:7", "item:10"], view.Groups[0].Rows.Select((row) => row.Key));
+        Assert.Equal(["item:14", "item:8"], view.Groups[1].Rows.Select((row) => row.Key));
+        Assert.Equal([2, null, null, null, null], view.Groups.Select((group) => group.Yours));
         Assert.Equal(7, view.Snooze.Count);
         Assert.Equal(new SnoozeChoice("Indefinitely", "", null), view.Snooze[^1]);
         Assert.Equal(1791093600000, view.Snooze[0].Until);
@@ -84,13 +84,22 @@ public sealed class DockViewTests
     {
         Assert.Equal((Tone.Error, "operator", false, false), Stripe("item:14"));
         Assert.Equal((Tone.Warning, "operator", false, false), Stripe("item:8"));
-        Assert.Equal((Tone.Agent, "agent", true, true), Stripe("item:13"));
+        Assert.Equal((null, "agent", true, true), Stripe("item:13"));
         Assert.Equal((Tone.Turn, "operator", false, true), Stripe("item:10"));
         Assert.Equal((null, null, false, false), Stripe("item:9"));
         Assert.Equal((null, null, false, false), Stripe("ticket:4"));
         Assert.Null(Fixtures.Row("ticket:4").WorkItemId);
 
         static (Tone?, string?, bool, bool) Stripe(string key) => Fixtures.Row(key) is var row ? (row.Stripe, row.Turn, row.Dim, row.Movable) : default;
+    }
+
+    [Fact]
+    public void Parse_OlderHubAgentStripe_ReadsNoStripe()
+    {
+        var view = DockView.Parse(Fixtures.DockJson.Replace("\"stripe\": \"turn\"", "\"stripe\": \"agent\"", StringComparison.Ordinal));
+        var rows = view.Groups.SelectMany((group) => group.Rows).ToDictionary((row) => row.Key);
+
+        Assert.Equal<Tone?>([null, null, Tone.Warning, Tone.Error], [rows["item:7"].Stripe, rows["item:10"].Stripe, rows["item:8"].Stripe, rows["item:14"].Stripe]);
     }
 
     [Fact]

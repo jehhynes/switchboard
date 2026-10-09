@@ -46,7 +46,7 @@ public sealed class ReviewOrderTests
             Dim: dim,
             Movable: movable);
 
-    static DockRow Review(int id, string turn = "operator") => Row(id, turn, movable: true, stripe: turn == "operator" ? Tone.Turn : Tone.Agent, dim: turn == "agent");
+    static DockRow Review(int id, string turn = "operator") => Row(id, turn, movable: true, stripe: turn == "operator" ? Tone.Turn : null, dim: turn == "agent");
 
     static DockGroup Group(string key, params DockRow[] rows) => new(key, key, null, rows, Yours: key == "review" ? rows.Count((row) => row.Turn == "operator") : null);
 
@@ -57,7 +57,7 @@ public sealed class ReviewOrderTests
             [
                 Group("blocked", Row(1, "operator", stripe: Tone.Warning)),
                 Group("review", Review(2), Review(3, "agent"), Review(4), Review(5)),
-                Group("progress", Row(6, "agent", stripe: Tone.Agent)),
+                Group("progress", Row(6, "agent")),
                 Group("snoozed", Row(7)),
                 Group("done", Row(8)),
             ],
@@ -155,13 +155,12 @@ public sealed class ReviewOrderTests
     [InlineData(Tone.Error, "error")]
     [InlineData(Tone.Warning, "warning")]
     [InlineData(Tone.Turn, "turn")]
-    [InlineData(Tone.Agent, "agent")]
     [InlineData(null, null)]
     public void Stripe_EachValue_TakesItsClassAndColour(Tone? tone, string? expected)
     {
         var (window, _) = Open(new DockView([], [Group("progress", Row(1, stripe: tone))], [], [], []));
         var stripe = RowOf(window, "item:1").GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("stripe"));
-        string[] kinds = ["error", "warning", "turn", "agent"];
+        string[] kinds = ["error", "warning", "turn"];
 
         Assert.Equal(expected is null ? [] : [expected], kinds.Where(stripe.Classes.Contains));
         Assert.Equal(
@@ -170,16 +169,15 @@ public sealed class ReviewOrderTests
     }
 
     [AvaloniaFact]
-    public void Stripe_TurnAndAgent_UseTheFocusBlueAndAGrey()
+    public void Stripe_Turn_UsesTheFocusBlue()
     {
         var (window, _) = Open();
 
         Assert.Equal(window.FindResource(window.ActualThemeVariant, "DockFocus")!.ToString(), window.FindResource(window.ActualThemeVariant, "DockTurn")!.ToString());
-        Assert.NotEqual(window.FindResource(window.ActualThemeVariant, "DockTurn")!.ToString(), window.FindResource(window.ActualThemeVariant, "DockAgent")!.ToString());
     }
 
     [AvaloniaFact]
-    public void DimRow_AgentTurnInReview_DimsItsTextsButNotItsStripe()
+    public void DimRow_AgentTurnInReview_DimsItsTextsAndShowsNoStripe()
     {
         var (window, model) = Open();
         var dim = RowOf(window, "item:3");
@@ -191,7 +189,7 @@ public sealed class ReviewOrderTests
         Assert.Contains("dim", dim.Classes);
         Assert.Contains("selected", dim.Classes);
         Assert.Equal(0.6, content.Opacity);
-        Assert.Equal(1, dim.GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("stripe")).Opacity);
+        Assert.Null(dim.GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("stripe")).Background);
         Assert.DoesNotContain("dim", RowOf(window, "item:2").Classes);
         Assert.Equal(1, RowOf(window, "item:2").GetVisualDescendants().OfType<Grid>().Single((grid) => grid.Classes.Contains("content")).Opacity);
     }
@@ -584,6 +582,20 @@ public sealed class ReviewOrderTests
 
         Assert.Equal(["item:1", "item:2", "item:4", "item:5", "item:1"], visited);
         Assert.Equal("item:1", model.Selected);
+    }
+
+    [Fact]
+    public void SelectNextTurn_ReviewAboveBlocked_VisitsReviewThenBlockedAndWraps()
+    {
+        var view = View();
+        var model = Model(view with { Groups = [view.Groups[1], view.Groups[0], .. view.Groups.Skip(2)] });
+
+        model.Selected = "item:4";
+
+        List<string?> visited = [model.SelectNextTurn(backwards: false)?.Key, model.SelectNextTurn(backwards: false)?.Key, model.SelectNextTurn(backwards: false)?.Key];
+
+        Assert.Equal(["item:5", "item:1", "item:2"], visited);
+        Assert.Equal("item:1", model.SelectNextTurn(backwards: true)?.Key);
     }
 
     [Fact]

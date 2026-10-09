@@ -44,8 +44,8 @@ describe('dockView', () => {
     const view = dockView(snapshot([item(1, { status: 'blocked' }), item(2), item(3, { status: 'unstarted' })], { pool: [pool(4)] }), NOW, W);
 
     expect(view.groups.map((group) => [group.key, group.title, group.empty, group.rows.map((entry) => entry.key)])).toEqual([
-      ['blocked', 'Blocked on you', null, ['item:1']],
       ['review', 'Ready for review', 'Nothing is ready for review.', []],
+      ['blocked', 'Blocked on you', null, ['item:1']],
       ['progress', 'In progress', 'Nothing is in progress.', ['item:2']],
       ['unstarted', 'Unstarted', 'Nothing waits to be started.', ['item:3', 'ticket:4']],
       ['done', 'Done', null, []],
@@ -76,17 +76,17 @@ describe('dockView', () => {
     const shown = view.groups.map((group) => [group.key, group.yours, group.rows.map((entry) => [entry.key, entry.turn, entry.dim, entry.movable, entry.stripe])]);
 
     expect(shown).toEqual([
-      ['blocked', null, [['item:5', 'operator', false, false, 'warning']]],
       [
         'review',
         2,
         [
           ['item:1', 'operator', false, true, 'turn'],
-          ['item:2', 'agent', true, true, 'agent'],
+          ['item:2', 'agent', true, true, null],
           ['item:3', 'operator', false, true, 'turn'],
         ],
       ],
-      ['progress', null, [['item:4', 'agent', false, false, 'agent']]],
+      ['blocked', null, [['item:5', 'operator', false, false, 'warning']]],
+      ['progress', null, [['item:4', 'agent', false, false, null]]],
       ['unstarted', null, []],
       ['snoozed', null, [['item:6', null, false, false, null]]],
       ['done', null, []],
