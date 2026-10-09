@@ -15,7 +15,7 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
       `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
       `  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
     ],
-    link: [`- ${REPORT} link ${id} --label <text> --target <url>, for each GitHub issue or pull request you create or find for this work.`],
+    link: [`- ${REPORT} link ${id} --label <text> --target <url>, for each GitHub issue or pull request that tracks or delivers this work, such as one you create, but not a related, base or parent one.`],
     playbook: [`- ${REPORT} playbook ${id} <name>, when you hand the work to the skill of another playbook, such as dev:review-pr.`],
     paste: [
       `- ${REPORT} paste ${id} --label <text> --file <absolute path>, for each drafted text the operator pastes into the ticket by hand, such as --label "Customer reply".`,
