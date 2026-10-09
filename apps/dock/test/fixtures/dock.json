@@ -126,7 +126,13 @@
             "glyph": "",
             "title": "Review the finished turn"
           },
-          "details": [],
+          "details": [
+            {
+              "text": "Review the finished turn",
+              "title": null,
+              "tone": null
+            }
+          ],
           "stripe": "turn",
           "turn": "operator",
           "dim": false,
@@ -733,7 +739,13 @@
             "glyph": "",
             "title": "Finished by the session"
           },
-          "details": [],
+          "details": [
+            {
+              "text": "Finished by the session",
+              "title": null,
+              "tone": null
+            }
+          ],
           "stripe": null,
           "turn": null,
           "dim": false,
@@ -782,7 +794,13 @@
             "glyph": "",
             "title": "Finished by the session"
           },
-          "details": [],
+          "details": [
+            {
+              "text": "Finished by the session",
+              "title": null,
+              "tone": null
+            }
+          ],
           "stripe": null,
           "turn": null,
           "dim": false,

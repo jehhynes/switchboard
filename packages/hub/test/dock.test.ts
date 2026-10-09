@@ -153,6 +153,16 @@ describe('dockView', () => {
     expect(row(item(1, { status: 'queued', waits: [{ kind: 'snoozed' }] })).details).toEqual([{ text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.', tone: null }]);
   });
 
+  it('names the mark in words on line 3 when nothing else is there', () => {
+    expect(row(item(1, { status: 'setup' })).details).toEqual([{ text: 'Setting up', title: null, tone: null }]);
+    expect(row(item(1, { status: 'finished' })).details).toEqual([{ text: 'Review the finished turn', title: null, tone: null }]);
+    expect(row(item(1, { status: 'setup', stage: 'creating the worktree', stageAt: NOW - 60_000, sessions: [session()] })).details).toEqual([
+      { text: 'creating the worktree · 1m', title: null, tone: null },
+    ]);
+    // An Unstarted row has no mark, so line 3 stays empty.
+    expect(row(item(1, { status: 'unstarted' })).details).toEqual([]);
+  });
+
   it('gives a row only the controls the hub runs, with their actions', () => {
     expect(row(item(7, { status: 'awaiting-approval', worktree, pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] })).controls).toEqual([
       { label: 'Approve', glyph: '\u{eab2}', action: { type: 'approve', workItemId: 7 } },
@@ -227,6 +237,7 @@ describe('dockView', () => {
 
     expect(triaging).toMatchObject({ key: 'ticket:4', playbook: 'dev:triage', mark: { kind: 'triaging', glyph: '\u{eb19}', title: 'Triaging' }, window: null, open: { type: 'url', url: 'https://github.com/o/r/issues/104' }, time: null });
     expect(triaging!.controls).toEqual([{ label: 'Snooze', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 4 } }]);
+    expect(triaging!.details).toEqual([{ text: 'Triaging', title: null, tone: null }]);
     expect(triaging!.main).toBeNull();
     expect(triaging!.commands).toEqual([{ label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 4, key: 'gh 104' } }]);
     expect(failed!.main).toBe('Triage again');

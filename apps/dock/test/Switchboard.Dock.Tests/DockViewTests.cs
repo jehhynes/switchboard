@@ -28,7 +28,7 @@ public sealed class DockViewTests
         Assert.Equal(new TimeText("3h", "Ready since 2026-10-03 09:00 UTC"), finished.Time);
         Assert.Equal(("dev:develop", "gh 107", "github"), (finished.Playbook, finished.Ticket, finished.Source));
         Assert.Equal(new RowMark("finished", "\uea70", "Review the finished turn"), finished.Mark);
-        Assert.Empty(finished.Details);
+        Assert.Equal([new DockText("Review the finished turn", null, null)], finished.Details);
         Assert.Equal((Tone.Turn, "operator", false, true), (finished.Stripe, finished.Turn, finished.Dim, finished.Movable));
         Assert.Equal(("gh-107-58c609", "Issue <7>"), (finished.Window!.Name, finished.Window.Title));
         Assert.Equal(["D:/git/widgets/.worktrees/107-fix"], finished.Window.Folders);

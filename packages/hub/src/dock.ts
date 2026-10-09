@@ -238,13 +238,13 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     source: item.ticket.source,
     url: item.ticket.url,
     mark: kind === null ? null : { kind, glyph: MARK_GLYPHS[kind], title: MARK_TITLES[kind] },
-    details: [
+    details: orMarkTitle(kind, [
       ...waitTexts(item).map(({ text, title }) => ({ text, title, tone: null })),
       ...wake(item.ticket),
       ...[item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped(note, CAPS.note, 'warning')),
       ...(item.parent === null ? [] : [{ text: `From ${ticketKey(item.parent)}`, title: item.parent.title, tone: null }]),
       ...progress(item, now),
-    ],
+    ]),
     stripe: stripeOf(item),
     turn,
     dim: order !== null && turn === 'agent',
@@ -268,9 +268,15 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
   };
 }
 
+/** Line 3 with nothing but the mark names the mark in words, so the icon is never alone (PRD R27). */
+function orMarkTitle(kind: Mark | null, details: DockText[]): DockText[] {
+  return kind !== null && details.length === 0 ? [{ text: MARK_TITLES[kind], title: null, tone: null }] : details;
+}
+
 function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
   const { ticket, triage } = entry;
   const { main, controls } = poolControls(entry);
+  const triaging = triage !== null && triage.endedAt === null;
 
   return {
     key: rowKeyOf(entry),
@@ -281,8 +287,8 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     ticket: ticketKey(ticket),
     source: ticket.source,
     url: ticket.url,
-    mark: triage !== null && triage.endedAt === null ? { kind: 'triaging', glyph: MARK_GLYPHS.triaging, title: MARK_TITLES.triaging } : null,
-    details: [...wake(ticket), ...(triage?.error == null ? [] : [clipped(triage.error, CAPS.note, 'warning')])],
+    mark: triaging ? { kind: 'triaging', glyph: MARK_GLYPHS.triaging, title: MARK_TITLES.triaging } : null,
+    details: orMarkTitle(triaging ? 'triaging' : null, [...wake(ticket), ...(triage?.error == null ? [] : [clipped(triage.error, CAPS.note, 'warning')])]),
     stripe: null,
     turn: null,
     dim: false,
