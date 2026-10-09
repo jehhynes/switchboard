@@ -350,7 +350,7 @@ public sealed class ControlsTests
 
         model.Filter = "109";
         Dispatcher.UIThread.RunJobs();
-        window.ShowForeground("sb:gh-107-58c609 · Issue <7>");
+        window.ShowForeground("Issue <7> · sb:gh-107-58c609");
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal("", model.Filter);

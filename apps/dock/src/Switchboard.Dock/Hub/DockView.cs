@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Switchboard.Dock.Hub;
 
@@ -70,21 +71,19 @@ public enum Tone
 }
 
 /// <summary>
-/// A work item's VS Code window: the workspace file's name, the title prefix the dock finds it by, its folders, and the workspace file the hub writes
-/// (PRD R71); a hub older than the dock sends no file.
+/// A work item's VS Code window: the workspace file's name, which the window title ends with as <c>sb:&lt;name&gt;</c>, the ticket title, its folders,
+/// and the workspace file the hub writes (PRD R71); a hub older than the dock sends no file.
 /// </summary>
-public sealed record DockWindow(string Name, string Title, IReadOnlyList<string> Folders, string? File = null)
+public sealed partial record DockWindow(string Name, string Title, IReadOnlyList<string> Folders, string? File = null)
 {
-    /// <summary>Every title VS Code gives the window starts with this, whatever editor is active.</summary>
-    public string TitlePrefix => $"sb:{Name} · ";
+    /// <summary>
+    /// The window name in the last <c>sb:&lt;name&gt;</c> at the start of a title or after <c> · </c>, or null for a window that is not an item window.
+    /// VS Code can add a debugger mark before the title, and the editor state for a screen reader or <c> [Administrator]</c> after it.
+    /// </summary>
+    public static string? NameOf(string title) => NamePattern().Match(title) is { Success: true } match ? match.Groups[1].Value : null;
 
-    /// <summary>The window name a title starts with, as <c>sb:&lt;name&gt; · </c>, or null for a window that is not an item window.</summary>
-    public static string? NameOf(string title)
-    {
-        var end = title.IndexOf(" · ", StringComparison.Ordinal);
-
-        return title.StartsWith("sb:", StringComparison.Ordinal) && end > 3 ? title[3..end] : null;
-    }
+    [GeneratedRegex(@"(?:^| · )sb:([A-Za-z0-9._-]+)(?= |$)", RegexOptions.RightToLeft)]
+    private static partial Regex NamePattern();
 }
 
 public sealed record DockOpen(string Type, int? WorkItemId, string? SessionId, string? Cwd, string? Url);

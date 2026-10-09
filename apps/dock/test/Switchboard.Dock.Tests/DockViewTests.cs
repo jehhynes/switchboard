@@ -27,7 +27,7 @@ public sealed class DockViewTests
         Assert.Equal(new RowMark("blocked", "\uead1", "Blocked"), blocked.Mark);
         Assert.Equal([new DockText("The session finished its turn.", null, Tone.Warning)], blocked.Details);
         Assert.Equal(Tone.Warning, blocked.Stripe);
-        Assert.Equal("sb:gh-107-58c609 · ", blocked.Window!.TitlePrefix);
+        Assert.Equal(("gh-107-58c609", "Issue <7>"), (blocked.Window!.Name, blocked.Window.Title));
         Assert.Equal(["D:/git/widgets/.worktrees/107-fix"], blocked.Window.Folders);
         Assert.Equal(new DockOpen("session", null, "aaaa1111-native", "D:/git/widgets/.worktrees/107-fix", null), blocked.Open);
         Assert.Equal(["Triage again", "Mark done", "Snooze"], blocked.Controls.Select((control) => control.Label));

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using Switchboard.Dock.Hub;
 using Switchboard.Dock.Switching;
 
 namespace Switchboard.Dock.Platform;
@@ -38,14 +39,14 @@ public sealed class Win32Windows : IWindows, IDisposable
         }
     }
 
-    public nint Find(string titlePrefix)
+    public nint Find(string name)
     {
         nint found = 0;
 
         Native.EnumWindows(
             (window, _) =>
             {
-                if (Native.IsWindowVisible(window) && Native.GetWindow(window, Native.GwOwner) == 0 && Native.Title(window).StartsWith(titlePrefix, StringComparison.Ordinal))
+                if (Native.IsWindowVisible(window) && Native.GetWindow(window, Native.GwOwner) == 0 && DockWindow.NameOf(Native.Title(window)) == name && IsVsCode(window))
                 {
                     found = window;
                     return false;
@@ -125,32 +126,33 @@ public sealed class Win32Windows : IWindows, IDisposable
         Native.EnumWindows(
             (window, _) =>
             {
-                if (!Native.IsWindowVisible(window) || Native.GetWindow(window, Native.GwOwner) != 0 || Native.Title(window) == "")
+                if (!Native.IsWindowVisible(window) || Native.GetWindow(window, Native.GwOwner) != 0 || Native.Title(window) == "" || !IsVsCode(window))
                 {
                     return true;
                 }
 
-                Native.GetWindowThreadProcessId(window, out var process);
-
-                try
-                {
-                    using var owner = Process.GetProcessById((int)process);
-
-                    if (owner.ProcessName.Equals("Code", StringComparison.OrdinalIgnoreCase))
-                    {
-                        found = window;
-                        return false;
-                    }
-                }
-                catch (ArgumentException)
-                {
-                }
-
-                return true;
+                found = window;
+                return false;
             },
             0);
 
         return found;
+    }
+
+    static bool IsVsCode(nint window)
+    {
+        Native.GetWindowThreadProcessId(window, out var process);
+
+        try
+        {
+            using var owner = Process.GetProcessById((int)process);
+
+            return owner.ProcessName.Equals("Code", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     public void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();

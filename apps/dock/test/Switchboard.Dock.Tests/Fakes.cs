@@ -86,7 +86,7 @@ sealed class FakeWindows : IWindows
 {
     public List<string> Calls { get; } = [];
 
-    /// <summary>The window each title prefix finds, appearing after that many finds.</summary>
+    /// <summary>The window found for each window name, appearing after that many finds.</summary>
     public Dictionary<string, (nint Window, int After)> Open { get; } = [];
 
     public bool Front { get; set; } = true;
@@ -95,14 +95,14 @@ sealed class FakeWindows : IWindows
 
     readonly Dictionary<string, int> finds = [];
 
-    public nint Find(string titlePrefix)
+    public nint Find(string name)
     {
-        finds[titlePrefix] = finds.GetValueOrDefault(titlePrefix) + 1;
+        finds[name] = finds.GetValueOrDefault(name) + 1;
 
-        return Open.TryGetValue(titlePrefix, out var found) && finds[titlePrefix] > found.After ? found.Window : 0;
+        return Open.TryGetValue(name, out var found) && finds[name] > found.After ? found.Window : 0;
     }
 
-    public int Finds(string titlePrefix) => finds.GetValueOrDefault(titlePrefix);
+    public int Finds(string name) => finds.GetValueOrDefault(name);
 
     /// <summary>The VS Code window nearest the front, or 0 for none.</summary>
     public nint Front0 { get; set; }

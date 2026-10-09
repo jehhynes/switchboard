@@ -166,7 +166,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
     async Task<string?> Switch(DockWindow window, string file, CancellationToken cancel)
     {
-        var handle = windows.Find(window.TitlePrefix);
+        var handle = windows.Find(window.Name);
 
         if (handle == 0)
         {
@@ -188,7 +188,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
                     return null;
                 }
 
-                handle = windows.Find(window.TitlePrefix);
+                handle = windows.Find(window.Name);
             }
 
             if (handle == 0)

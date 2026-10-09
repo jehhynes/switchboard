@@ -242,25 +242,25 @@ describe('windowOf', () => {
   it('opens the latest session folder first, with the worktree second when the session ran elsewhere', () => {
     expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:\\git\\widgets\\.worktrees\\107-fix\\' })] }), W)).toEqual({
       name: 'gh-107-58c609',
-      title: 'sb:gh-107-58c609 · Issue <7>',
+      title: 'Issue <7>',
       folders: ['D:\\git\\widgets\\.worktrees\\107-fix\\'],
       file: `${W}\\gh-107-58c609.code-workspace`,
     });
     expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:/git/widgets' })] }), W)).toEqual({
       name: 'gh-107-widgets-655280',
-      title: 'sb:gh-107-widgets-655280 · Issue <7>',
+      title: 'Issue <7>',
       folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'],
       file: `${W}\\gh-107-widgets-655280.code-workspace`,
     });
     expect(windowOf(item(7, { worktree }), W)).toEqual({
       name: 'gh-107-58c609',
-      title: 'sb:gh-107-58c609 · Issue <7>',
+      title: 'Issue <7>',
       folders: ['D:/git/widgets/.worktrees/107-fix'],
       file: `${W}\\gh-107-58c609.code-workspace`,
     });
     expect(windowOf(item(7, { sessions: [session({ cwd: 'D:/git/support' })], ticket: { ...item(7).ticket, source: 'zoho', sourceKey: '4521/a b' } }), W)).toEqual({
       name: 'zoho-4521-a-b-support-c6262c',
-      title: 'sb:zoho-4521-a-b-support-c6262c · Issue <7>',
+      title: 'Issue <7>',
       folders: ['D:/git/support'],
       file: `${W}\\zoho-4521-a-b-support-c6262c.code-workspace`,
     });
@@ -280,9 +280,9 @@ describe('windowOf', () => {
 });
 
 describe('workspace files', () => {
-  const window = { name: 'gh-107-widgets', title: 'sb:gh-107-widgets · Fix ${x} badge', folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'], file: '' };
+  const window = { name: 'gh-107-widgets', title: 'Fix ${x} badge for $5', folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'], file: '' };
 
-  it('lists the folders and starts the title with the prefix, breaking a ${ in the ticket title', () => {
+  it('lists the folders and ends the title with the window name, replacing each $ in the ticket title', () => {
     expect(workspaceText(window)).toBe(
       [
         '{',
@@ -295,7 +295,8 @@ describe('workspace files', () => {
         '    }',
         '  ],',
         '  "settings": {',
-        '    "window.title": "sb:gh-107-widgets · Fix $ {x} badge · ${activeEditorShort}"',
+        '    "window.title": "Fix ＄{x} badge for ＄5${separator}${activeEditorShort}${separator}sb:gh-107-widgets",',
+        '    "window.titleSeparator": " · "',
         '  }',
         '}',
         '',
@@ -317,7 +318,7 @@ describe('workspace files', () => {
     writeWorkspaceFile({ ...window, file }, new Map());
     expect(statSync(file).mtimeMs).toBe(past.getTime());
 
-    writeWorkspaceFile({ ...window, file, title: 'sb:gh-107-widgets · Renamed' }, written);
+    writeWorkspaceFile({ ...window, file, title: 'Renamed' }, written);
     expect(readFileSync(file, 'utf8')).toContain('Renamed');
   });
 

@@ -11,12 +11,18 @@ namespace Switchboard.Dock.Tests;
 public sealed class ForegroundTests
 {
     [Theory]
+    [InlineData("Issue <7> · render.ts · sb:gh-107-58c609", "gh-107-58c609")]
+    [InlineData("Issue <7> · sb:gh-107-58c609", "gh-107-58c609")]
+    [InlineData("Fix sb:x parsing · sb:gh-107-58c609", "gh-107-58c609")]
+    [InlineData("\U0001F534 Issue <7> · sb:gh-107-58c609 [Administrator]", "gh-107-58c609")]
+    [InlineData("Issue <7> · render.ts · sb:gh-107-58c609 · Dirty", "gh-107-58c609")]
     [InlineData("sb:gh-107-58c609 · Issue <7> · render.ts", "gh-107-58c609")]
-    [InlineData("sb:gh-107-58c609 · ", "gh-107-58c609")]
     [InlineData("render.ts - widgets - Visual Studio Code", null)]
     [InlineData("Visual Studio Code", null)]
-    [InlineData("sb: · x", null)]
-    [InlineData("sb:gh-107", null)]
+    [InlineData("Notes sb:gh-107-58c609 - Notepad", null)]
+    [InlineData("Issue · sb:", null)]
+    [InlineData("Issue · xsb:gh-107", null)]
+    [InlineData("Issue · sb:gh-107/x", null)]
     public void NameOf_Title_ReadsTheItemWindowName(string title, string? name)
     {
         Assert.Equal(name, DockWindow.NameOf(title));
@@ -83,7 +89,7 @@ public sealed class ForegroundTests
 
         model.Show(Fixtures.View);
         window.Show();
-        window.ShowForeground("sb:gh-108-widgets-655280 · Issue <8> · notes.md");
+        window.ShowForeground("Issue <8> · notes.md · sb:gh-108-widgets-655280");
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal("item:8", model.Selected);
@@ -104,7 +110,7 @@ public sealed class ForegroundTests
         model.Show(view);
         window.Show();
         Dispatcher.UIThread.RunJobs();
-        window.ShowForeground("sb:gh-108-widgets-655280 · Issue <8>");
+        window.ShowForeground("Issue <8> · sb:gh-108-widgets-655280");
         Dispatcher.UIThread.RunJobs();
 
         var scroller = window.FindControl<ScrollViewer>("RowScroller")!;

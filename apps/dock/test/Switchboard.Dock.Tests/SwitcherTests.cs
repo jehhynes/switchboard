@@ -19,7 +19,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Click_OpenWindowAndEndedSession_LeavesTheSessionThenBringsTheWindowForward()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
 
         var status = await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken);
 
@@ -32,13 +32,13 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Click_NoWindowYet_OpensTheWorkspaceAndWaitsForTheWindow()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (43, 3);
+        windows.Open["gh-107-58c609"] = (43, 3);
 
         var status = await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken);
 
         Assert.Null(status);
         Assert.Equal(["open gh-107-58c609.code-workspace"], vsCode.Calls);
-        Assert.Equal(4, windows.Finds("sb:gh-107-58c609 · "));
+        Assert.Equal(4, windows.Finds("gh-107-58c609"));
         Assert.Equal(3, waits.Count);
         Assert.Equal(["show 43"], windows.Calls);
     }
@@ -64,7 +64,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Click_WindowsKeepsAnotherWindowInFront_AsksForAnotherClick()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
         windows.Front = false;
 
         Assert.Equal("Windows kept another window in front. Click the row again.", await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
@@ -73,7 +73,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Click_HubRefusesTheOpen_DoesNotSwitch()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
         hub.OpenReply = "Switchboard is not running.";
 
         Assert.Equal("Switchboard is not running.", await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
@@ -86,7 +86,7 @@ public sealed class SwitcherTests
         var question = Fixtures.Row("item:8");
         var stopped = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, [question with { Open = question.Open! with { Type = "session", WorkItemId = null } }])] };
 
-        windows.Open["sb:gh-108-widgets-655280 · "] = (44, 0);
+        windows.Open["gh-108-widgets-655280"] = (44, 0);
         hub.ActReplies.Enqueue(null);
         hub.Ended = stopped;
 
@@ -147,7 +147,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Click_ReplacedByAnotherClick_StopsBeforeTheSwitch()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
 
         using var cancel = new CancellationTokenSource();
 
@@ -179,7 +179,7 @@ public sealed class SwitcherTests
         var switcher = Switcher();
         using var replaced = new CancellationTokenSource();
 
-        windows.Open["sb:gh-108-widgets-655280 · "] = (44, 0);
+        windows.Open["gh-108-widgets-655280"] = (44, 0);
         hub.ActReplies.Enqueue(null);
         hub.Ended = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
         hub.HoldUntil = new TaskCompletionSource();
@@ -211,7 +211,7 @@ public sealed class SwitcherTests
         hub.ActReplies.Enqueue("Switchboard is not running.");
         hub.ActReplies.Enqueue(null);
         hub.Ended = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
-        windows.Open["sb:gh-108-widgets-655280 · "] = (44, 0);
+        windows.Open["gh-108-widgets-655280"] = (44, 0);
 
         Assert.Equal("Switchboard is not running.", await switcher.Click(question, TestContext.Current.CancellationToken));
         Assert.Null(await switcher.Click(question, TestContext.Current.CancellationToken));
@@ -230,7 +230,7 @@ public sealed class SwitcherTests
         });
 
         Assert.Null(await switcher.Click(Fixtures.Row("item:7"), cancel.Token));
-        Assert.Equal(1, windows.Finds("sb:gh-107-58c609 · "));
+        Assert.Equal(1, windows.Finds("gh-107-58c609"));
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Run_RowWithWindow_LeavesTheCommandForItsWorkspaceThenSwitches()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
 
         var status = await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "history", ["ticketId"] = 7, ["key"] = "gh 107" }, TestContext.Current.CancellationToken);
 
@@ -272,7 +272,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Run_HubRefuses_DoesNotSwitch()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
         hub.WindowReply = "Switchboard is not running.";
 
         Assert.Equal("Switchboard is not running.", await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
@@ -282,7 +282,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Run_ReplacedBeforeTheSwitch_DoesNotSwitch()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
 
         using var cancel = new CancellationTokenSource();
 
@@ -315,7 +315,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Run_SwitchWorks_KeepsTheCommandForTheWindow()
     {
-        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        windows.Open["gh-107-58c609"] = (42, 0);
 
         Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
         Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));

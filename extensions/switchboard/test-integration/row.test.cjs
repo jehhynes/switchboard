@@ -154,7 +154,7 @@ describe("A row's click from VS Code: a notification's Open (PRD R65, R70, R71)"
       assert.deepStrictEqual(open, { path: '/open', auth: 'Bearer stub-token', body: { sessionId: 'native-7', cwd: folder, workspace: file } });
       assert.match(file, /gh-7-workspace-[0-9a-f]{6}\.code-workspace$/);
       assert.strictEqual(file.toLowerCase().startsWith(windows.toLowerCase()), true, `${file} is not under ${windows}`);
-      assert.match(JSON.parse(readFileSync(file, 'utf8')).settings['window.title'], /^sb:gh-7-workspace-[0-9a-f]{6} · Issue 7 · /);
+      assert.match(JSON.parse(readFileSync(file, 'utf8')).settings['window.title'], /^Issue 7\$\{separator\}\$\{activeEditorShort\}\$\{separator\}sb:gh-7-workspace-[0-9a-f]{6}$/);
       assert.deepStrictEqual(commands.map(([command, uri, options]) => [command, uri.fsPath.toLowerCase(), options]), [['vscode.openFolder', file.toLowerCase(), { forceNewWindow: true }]]);
       assert.deepStrictEqual(messages, []);
     } finally {

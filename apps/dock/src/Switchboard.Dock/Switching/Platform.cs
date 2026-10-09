@@ -3,8 +3,8 @@ namespace Switchboard.Dock.Switching;
 /// <summary>Finding and showing windows. Only Windows is implemented (PRD R71).</summary>
 public interface IWindows
 {
-    /// <summary>The visible top-level window whose title starts with <paramref name="titlePrefix"/>, or 0.</summary>
-    nint Find(string titlePrefix);
+    /// <summary>The visible top-level item window whose title names <paramref name="name"/> (<c>DockWindow.NameOf</c>), or 0.</summary>
+    nint Find(string name);
 
     /// <summary>Restores the window if minimized, maximizes it and brings it to the front; true when it is then the foreground window.</summary>
     bool Show(nint window);

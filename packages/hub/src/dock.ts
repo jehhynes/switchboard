@@ -44,8 +44,8 @@ export interface DockText {
 }
 
 /**
- * A work item's VS Code window (PRD R71). `name` names the workspace file and starts the window title, as `sb:<name> · `, by which the
- * dock finds the window; `title` is that prefix and the ticket title. The first folder never changes for a name.
+ * A work item's VS Code window (PRD R71). `name` names the workspace file and ends the window title, as `sb:<name>`, by which the
+ * dock finds the window; `title` is the ticket title, which starts it. The first folder never changes for a name.
  */
 export interface DockWindow {
   name: string;
@@ -61,13 +61,13 @@ export function windowsDir(home: string): string {
 }
 
 /**
- * The workspace file's text: the folders, and a `window.title` that starts with the title prefix and the ticket title. It leaves out `${dirty}`,
- * which would put a mark before the prefix, and breaks a `${` in the ticket title, which VS Code would read as a variable.
+ * The workspace file's text: the folders, and a `window.title` of the ticket title, the active editor and `sb:<name>`. VS Code reads every `$` in
+ * a title as the start of a variable and drops the text up to a later `}`, so the ticket title's `$` becomes a fullwidth `＄`.
  */
 export function workspaceText(window: DockWindow): string {
-  const title = `${window.title.replaceAll('${', '$ {')} · \${activeEditorShort}`;
+  const title = `${window.title.replaceAll('$', '＄')}\${separator}\${activeEditorShort}\${separator}sb:${window.name}`;
 
-  return `${JSON.stringify({ folders: window.folders.map((path) => ({ path })), settings: { 'window.title': title } }, null, 2)}\n`;
+  return `${JSON.stringify({ folders: window.folders.map((path) => ({ path })), settings: { 'window.title': title, 'window.titleSeparator': ' · ' } }, null, 2)}\n`;
 }
 
 /** Writes a window's workspace file when its text differs, because VS Code applies any change to an open window; `written` caches what each file holds. */
@@ -330,7 +330,7 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   const key = `${ticketKey(item.ticket).replace(' ', '-')}${inWorktree ? '' : `-${folderName(first)}`}-${hash}`;
   const name = key.replace(/[^A-Za-z0-9._-]+/g, '-');
 
-  return { name, title: `sb:${name} · ${item.ticket.title}`, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };
+  return { name, title: item.ticket.title, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };
 }
 
 /** Open in Claude while the background session waits on a question (PRD R70), else the latest session when it is not running in its background process. */

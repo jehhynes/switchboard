@@ -403,10 +403,10 @@ describe('createHubApp', () => {
     expect(await app.post['/action']!({ type: 'adhoc', prompt: 'Look around', repoRoot: 'D:/scratch' })).toMatchObject({ status: 200 });
     await until(() => ((app.snapshot() as { workItems: { sessions: unknown[] }[] }).workItems[0]?.sessions.length ? true : null));
 
-    const window = (app.dock() as { groups: { rows: { window: { file: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows).find((row) => row.window !== null)!.window!;
+    const window = (app.dock() as { groups: { rows: { window: { name: string; file: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows).find((row) => row.window !== null)!.window!;
 
     expect(window.file.startsWith(join(temp.home, '.switchboard', 'windows'))).toBe(true);
-    expect(JSON.parse(readFileSync(window.file, 'utf8')).settings['window.title']).toBe(`${window.title} · \${activeEditorShort}`);
+    expect(JSON.parse(readFileSync(window.file, 'utf8')).settings['window.title']).toBe(`${window.title}\${separator}\${activeEditorShort}\${separator}sb:${window.name}`);
   });
 
   it('answers posts through the server', async () => {
