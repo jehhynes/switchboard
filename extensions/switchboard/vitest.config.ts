@@ -9,7 +9,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/webview/**/*.ts', 'src/changes.ts', 'src/needs.ts', 'src/toast.ts', 'src/search.ts'],
+      include: ['src/webview/**/*.ts', 'src/changes.ts', 'src/needs.ts', 'src/toast.ts', 'src/search.ts', 'src/tabs.ts'],
       thresholds: { lines: 85, branches: 85, functions: 85, statements: 85 },
     },
   },

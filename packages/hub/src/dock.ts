@@ -354,6 +354,26 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   return { name, title: item.ticket.title, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };
 }
 
+/**
+ * What the item window opened from `file` shows in editor tabs (PRD R72), each once, for every work item whose window it is: `urls`, the tickets,
+ * their other linked tickets and pages, then their pull requests, and `reports`, the approval reports of `awaiting-approval` work items.
+ */
+export function windowTabs(snapshot: Snapshot, file: string, windows: string): { urls: string[]; reports: string[] } {
+  const items = snapshot.workItems.filter((item) => {
+    const window = windowOf(item, windows);
+
+    return window !== null && samePath(window.file, file);
+  });
+  const tickets = items.map((item) => item.ticket.url).filter((url) => url !== '');
+  const links = items.flatMap((item) => item.links.map((link) => link.target).filter((target) => /^https?:\/\//i.test(target)));
+  const reports = items.flatMap((item) => (item.status === 'awaiting-approval' && item.approvalReport !== null ? [item.approvalReport] : []));
+
+  return {
+    urls: [...new Set([...tickets, ...links.filter((link) => linkKind(link) !== 'pr'), ...links.filter((link) => linkKind(link) === 'pr')])],
+    reports: [...new Set(reports)],
+  };
+}
+
 /** Open in Claude while the background session waits on a question (PRD R70), else the latest session when it is not running in its background process. */
 export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   const question = openQuestion(item);

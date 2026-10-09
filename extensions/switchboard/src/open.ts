@@ -33,6 +33,23 @@ export async function openLink(target: string): Promise<void> {
   }
 }
 
+/**
+ * Opens an item window's tab (PRD R72): an http(s) URL in VS Code's integrated browser, reusing a tab already on it, and a file in a pinned
+ * text editor, which the next tab does not replace. The Simple Browser is not used, because it shows one page at a time.
+ */
+export async function openTab(target: string): Promise<void> {
+  if (!/^https?:\/\//i.test(target)) {
+    await vscode.window.showTextDocument(vscode.Uri.file(target), { preview: false });
+    return;
+  }
+
+  try {
+    await vscode.commands.executeCommand('workbench.action.browser.open', { url: target, reuseUrlFilter: target });
+  } catch (error) {
+    throw new Error(`VS Code's integrated browser did not open ${target}: ${(error as Error).message}`);
+  }
+}
+
 function samePath(a: string, b: string): boolean {
   const normal = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
 
@@ -75,7 +92,7 @@ export async function openSession(record: HubRecord | null, sessionId: string, c
 }
 
 /** This window's `.code-workspace` file, or null for a folder window. */
-function workspaceFile(): string | null {
+export function workspaceFile(): string | null {
   return vscode.workspace.workspaceFile?.scheme === 'file' ? vscode.workspace.workspaceFile.fsPath : null;
 }
 
@@ -87,6 +104,15 @@ export async function claimOpen(record: HubRecord, run: (command: WindowCommand)
   const reply = await postToHub(record, '/claim', { folder, workspace: workspaceFile(), focused: vscode.window.state.focused }, ACTION_TIMEOUT_MS);
   const body = reply?.body as { sessionId?: unknown; commands?: unknown } | null | undefined;
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : null;
+  const commands = Array.isArray(body?.commands) ? (body.commands as WindowCommand[]) : [];
+  const runEach = async (list: WindowCommand[]) => {
+    for (const command of list) {
+      await run(command).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
+    }
+  };
+
+  // The window's tabs open before the session, so a session in an editor tab ends up in front (PRD R72).
+  await runEach(commands.filter((command) => command.type === 'openTabs'));
 
   // The hub has already handed over the commands, so a session that fails to open does not keep them from running.
   if (sessionId !== null) {
@@ -94,9 +120,7 @@ export async function claimOpen(record: HubRecord, run: (command: WindowCommand)
   }
 
   // Commands the dock left for this window: Open Changes, History and Open report (PRD R71).
-  for (const command of Array.isArray(body?.commands) ? (body.commands as WindowCommand[]) : []) {
-    await run(command).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
-  }
+  await runEach(commands.filter((command) => command.type !== 'openTabs'));
 
   return sessionId;
 }

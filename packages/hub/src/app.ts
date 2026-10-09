@@ -273,8 +273,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return { status: 200, body: { sessionId: runtime.claimOpen(body['folder'], workspace), commands: runtime.claimCommands(workspace, body['focused'] === true) } };
       },
       '/window': async (body) => {
-        if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'])) {
-          return { status: 400, body: { error: 'Expected {workspace, command} with a changes, history or openUrl command.' } };
+        if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'], body['workspace'] ?? null)) {
+          return { status: 400, body: { error: 'Expected {workspace, command} with a changes, history or openUrl command, or openTabs for a workspace.' } };
         }
 
         return { status: 200, body: { id: runtime.recordCommand(body['command'], body['workspace'] ?? null) } };
@@ -452,7 +452,7 @@ function optionalString(value: unknown): value is string | null | undefined {
 }
 
 /** A command the dock leaves for a VS Code window, with the fields the window's handler reads (PRD R71). */
-function isWindowCommand(value: unknown): value is Record<string, unknown> {
+function isWindowCommand(value: unknown, workspace: string | null): value is Record<string, unknown> {
   if (!isRecord(value)) {
     return false;
   }
@@ -466,6 +466,9 @@ function isWindowCommand(value: unknown): value is Record<string, unknown> {
       return Number.isInteger(value['ticketId']) && text('key');
     case 'openUrl':
       return text('url');
+    // An item window opens its own tabs (PRD R72), so another window cannot take the command.
+    case 'openTabs':
+      return workspace !== null;
     default:
       return false;
   }

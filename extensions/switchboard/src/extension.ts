@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
-import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub } from '@switchboard/hub';
+import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub, windowsDir } from '@switchboard/hub';
 import { showDock } from './dockApp.js';
 import { openChanges } from './git.js';
 import { HistoryPanels } from './historyPanel.js';
@@ -11,9 +11,10 @@ import type { HistoryMessage } from './historyPanel.js';
 import { startHub } from './hubProcess.js';
 import { needsStatus } from './needs.js';
 import { NeedsYouToasts } from './notify.js';
-import { claimOpen, openLink, openRow, openSession, openTarget, openUri } from './open.js';
+import { claimOpen, openLink, openRow, openSession, openTab, openTarget, openUri, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { HubState } from './state.js';
+import { ItemTabs } from './tabs.js';
 
 export interface SwitchboardApi {
   /** The hub this window is connected to, or null. */
@@ -32,13 +33,18 @@ export interface SwitchboardApi {
   openUri(uri: vscode.Uri, waitMs?: number): Promise<string | null>;
   /** Runs a row's click against `hub`, by default the connected one, as a notification's Open does (PRD R65, R71). */
   openRow(key: string, options?: { hub?: HubRecord; waitMs?: number }): Promise<OpenResult>;
-  /** Claims what the dock left for this window from a hub, as focus or a connection does, and runs it (PRD R71). */
-  claim(hub: HubRecord): Promise<string | null>;
+  /** Claims what the dock left for this window from a hub, as focus or a connection does, and runs it, by default with `run` (PRD R71). */
+  claim(hub: HubRecord, run?: (command: WindowCommand) => Promise<unknown>): Promise<string | null>;
   /** Runs a command the dock leaves for a window: Open Changes, History or Open report (PRD R71). */
   run(command: WindowCommand): Promise<unknown>;
+  /** Opens a URL or file as an item window's tab; the suite's window is not an item window (PRD R72). */
+  openTab(target: string): Promise<void>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
+/** How long a window the dock opened waits for the hub's first state before opening its tabs (PRD R72). */
+const TABS_STATE_WAIT_MS = 15_000;
 
 export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   // SWITCHBOARD_HOME points a window at another home, such as live acceptance's; the hub gets it as --home.
@@ -76,6 +82,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   });
 
   const state = new HubState();
+  const tabs = new ItemTabs(workspaceFile(), windowsDir(home), openTab);
   const history = new HistoryPanels(context.extensionUri, () => keeper.current(), (link) => openHistoryLink(link));
   /** Runs a command the dock left for this window (PRD R71). */
   const runCommand = async (command: WindowCommand): Promise<unknown> => {
@@ -86,6 +93,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         return history.open(command as unknown as HistoryMessage);
       case 'openUrl':
         return openLink(String(command['url']));
+      case 'openTabs':
+        return tabs.openAll(await state.first(TABS_STATE_WAIT_MS));
       default:
         return undefined;
     }
@@ -157,6 +166,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
           showStatus();
           history.changed();
           toasts.update(JSON.parse(data));
+          void tabs.update(JSON.parse(data)).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
         } else if (event === 'hello') {
           toasts.connected();
           void claimOpen(record, runCommand).catch(() => {});
@@ -182,8 +192,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     restoreHistory: (saved) => history.restore(saved),
     openUri: (uri, waitMs) => openUri(opening(), uri, waitMs),
     openRow: (key, options = {}) => openRow(opening(options.hub ?? keeper.current(), options.waitMs), key),
-    claim: (hub) => claimOpen(hub, runCommand),
+    claim: (hub, run = runCommand) => claimOpen(hub, run),
     run: runCommand,
+    openTab,
   };
 }
 

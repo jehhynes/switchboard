@@ -110,4 +110,21 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     }
   });
+
+  it("opens the window's tabs before the claimed session, so a session tab is in front, and the other commands after it (PRD R72)", async () => {
+    const hub = await claimingHub([{ type: 'history', ticketId: 7, key: 'gh 7' }, { type: 'openTabs' }], 'native-2');
+    const order = [];
+    const execute = vscode.commands.executeCommand;
+
+    vscode.commands.executeCommand = (command, ...args) => (command.startsWith('claude-vscode.') && order.push('session'), execute(command, ...args));
+
+    try {
+      await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' }, async (command) => order.push(command.type));
+
+      assert.deepStrictEqual(order, ['openTabs', 'session', 'history']);
+    } finally {
+      vscode.commands.executeCommand = execute;
+      hub.server.close();
+    }
+  });
 });

@@ -78,7 +78,22 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
             return cancel.IsCancellationRequested ? null : refused;
         }
 
-        return cancel.IsCancellationRequested ? null : await Switch(window, file, cancel);
+        if (cancel.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        var handle = windows.Find(window.Name);
+
+        if (handle != 0)
+        {
+            return await Switch(window, file, handle, cancel);
+        }
+
+        // A window the click opens shows the ticket, its links and its report in tabs (PRD R72); a hub that refuses only leaves them out.
+        var tabs = await hub.Window(new JsonObject { ["type"] = "openTabs" }, file);
+
+        return await Withdrawn(tabs, cancel.IsCancellationRequested ? null : await Switch(window, file, handle, cancel), cancel);
     }
 
     /// <summary>Open in Claude's stop (PRD R70): asks the hub to stop the session, then waits for the row to offer the ended session; returns why not, or null.</summary>
@@ -114,7 +129,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
                 return cancel.IsCancellationRequested ? null : refused;
             }
 
-            return await Withdrawn(left, cancel.IsCancellationRequested ? null : await Switch(window, file, cancel), cancel);
+            return await Withdrawn(left, cancel.IsCancellationRequested ? null : await Switch(window, file, windows.Find(window.Name), cancel), cancel);
         }
 
         var any = windows.FindVsCode();
@@ -164,10 +179,9 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         }
     }
 
-    async Task<string?> Switch(DockWindow window, string file, CancellationToken cancel)
+    /// <summary>Brings the window forward, opening it from <paramref name="file"/> when <paramref name="handle"/> is 0 because it was not found.</summary>
+    async Task<string?> Switch(DockWindow window, string file, nint handle, CancellationToken cancel)
     {
-        var handle = windows.Find(window.Name);
-
         if (handle == 0)
         {
             try

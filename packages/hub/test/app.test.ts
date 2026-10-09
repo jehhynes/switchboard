@@ -439,7 +439,14 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' } }, 5000)).toMatchObject({ status: 200 });
     expect(await postToHub(record, '/claim', { folder: '', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [] } });
     expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }] } });
-    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }] } });
+    expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 200 });
+    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({
+      status: 200,
+      error: null,
+      body: { sessionId: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }, { type: 'openTabs' }] },
+    });
+    // Only the item window opens its tabs (PRD R72).
+    expect(await postToHub(record, '/window', { workspace: null, command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 400, error: 'Expected {workspace, command} with a changes, history or openUrl command, or openTabs for a workspace.' });
     for (const command of [{ type: 'settings' }, { type: 'sourceControl', path: 'D:/wt' }, { type: 'attach', shortId: 'a' }, { type: 'history', ticketId: 'x', key: 'gh 3' }, { type: 'changes', path: 'D:/wt', key: '' }, { type: 'openUrl' }, null]) {
       expect(await postToHub(record, '/window', { workspace: null, command }, 5000)).toMatchObject({ status: 400 });
     }

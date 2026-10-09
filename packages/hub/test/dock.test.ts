@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dockView, windowOf, windowsDir, workspaceText, writeWorkspaceFile } from '../src/dock.js';
+import { dockView, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
 import { CONTROL_GLYPHS } from '../src/rows.js';
 import type { WorkItemView } from '../src/runtime.js';
@@ -298,6 +298,49 @@ describe('windowOf', () => {
     expect(names[0]).not.toBe(names[1]);
     expect(moved).toMatch(/^gh-107-[0-9a-f]{6}$/);
     expect(moved).not.toBe('gh-107-58c609');
+  });
+});
+
+describe('windowTabs', () => {
+  const file = `${W}\\gh-107-58c609.code-workspace`;
+  const link = (id: number, target: string) => ({ id, ticketId: 7, label: 'Link', target, reportedAt: NOW });
+
+  it("lists the window's ticket, its other links, then its pull requests, then an awaiting-approval report, each once", () => {
+    const links = [
+      link(1, 'https://github.com/o/r/issues/900'),
+      link(2, 'https://github.com/o/r/pull/19002'),
+      link(3, 'https://desk.example.test/tickets/900001'),
+      link(4, 'https://github.com/o/r/pull/19003'),
+      link(5, 'https://forum.example.com/t/forum/t-55'),
+      link(6, 'D:/notes/local.md'),
+    ];
+    const earlier = item(6, { status: 'done', worktree, links, ticket: item(7).ticket });
+    const current = item(7, { status: 'awaiting-approval', approvalReport: 'D:/drafts/reply.md', worktree, links });
+
+    const tabs = {
+      urls: [
+        'https://github.com/o/r/issues/107',
+        'https://github.com/o/r/issues/900',
+        'https://desk.example.test/tickets/900001',
+        'https://forum.example.com/t/forum/t-55',
+        'https://github.com/o/r/pull/19002',
+        'https://github.com/o/r/pull/19003',
+      ],
+      reports: ['D:/drafts/reply.md'],
+    };
+
+    expect(windowTabs(snapshot([earlier, current]), file, W)).toEqual(tabs);
+    // The path compares as Windows does: case, slashes and a trailing separator do not matter.
+    expect(windowTabs(snapshot([current]), `${W.toUpperCase().replaceAll('\\', '/')}/GH-107-58c609.code-workspace/`, W)).toEqual(tabs);
+  });
+
+  it('leaves out a report once its work item no longer awaits approval, another window and an empty ticket URL', () => {
+    const blocked = item(7, { status: 'blocked', approvalReport: 'D:/drafts/reply.md', worktree });
+    const other = item(8, { worktree: { ...worktree, ticketId: 8, path: 'D:/git/widgets/.worktrees/108-fix' } });
+    const noUrl = item(7, { worktree, ticket: { ...item(7).ticket, url: '' } });
+
+    expect(windowTabs(snapshot([blocked, other]), file, W)).toEqual({ urls: ['https://github.com/o/r/issues/107'], reports: [] });
+    expect(windowTabs(snapshot([noUrl]), file, W)).toEqual({ urls: [], reports: [] });
   });
 });
 

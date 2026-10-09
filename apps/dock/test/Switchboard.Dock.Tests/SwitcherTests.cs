@@ -44,13 +44,35 @@ public sealed class SwitcherTests
     }
 
     [Fact]
-    public async Task Click_WindowNeverAppears_SaysSoAfterTheWait()
+    public async Task Click_NoWindowYet_LeavesTheTabsForTheWindowItOpens()
+    {
+        windows.Open["gh-107-58c609"] = (43, 1);
+
+        Assert.Null(await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+        Assert.Equal(["open aaaa1111-native D:/git/widgets/.worktrees/107-fix gh-107-58c609.code-workspace", "window gh-107-58c609.code-workspace {\"type\":\"openTabs\"}"], hub.Calls);
+        Assert.Equal(["open gh-107-58c609.code-workspace"], vsCode.Calls);
+    }
+
+    [Fact]
+    public async Task Click_HubRefusesTheTabs_StillOpensTheWindow()
+    {
+        windows.Open["gh-107-58c609"] = (43, 1);
+        hub.WindowReply = "Expected {workspace, command} with a changes, history or openUrl command.";
+
+        Assert.Null(await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+        Assert.Equal(["show 43"], windows.Calls);
+        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));
+    }
+
+    [Fact]
+    public async Task Click_WindowNeverAppears_SaysSoAfterTheWaitAndWithdrawsTheTabs()
     {
         var status = await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken);
 
         Assert.Equal("VS Code did not open the window for gh-107-58c609 within 20 seconds.", status);
         Assert.Equal(200, waits.Count);
         Assert.Empty(windows.Calls);
+        Assert.Equal("withdraw 42", hub.Calls[^1]);
     }
 
     [Fact]
@@ -231,6 +253,7 @@ public sealed class SwitcherTests
 
         Assert.Null(await switcher.Click(Fixtures.Row("item:7"), cancel.Token));
         Assert.Equal(1, windows.Finds("gh-107-58c609"));
+        Assert.Equal("withdraw 42", hub.Calls[^1]);
     }
 
     [Fact]

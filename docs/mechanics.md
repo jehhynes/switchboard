@@ -298,6 +298,15 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Limits:** multi-monitor app bars, an `ABE_RIGHT` bar and display scaling other than 100% (the dock's own resize was seen at 175% in use, where Avalonia sized it one pixel short) are untested, as is `vscode.openFolder` focusing a window while another app has the last input.
 - **Current use:** the dock and item windows, and the extension's row click for a notification or Open in Switchboard (PRD R65, R69, R71; architecture.md § Dock, § VS Code extension).
 
+## M27. Opening a URL in VS Code's integrated browser
+
+- **Date:** 2026-10-09.
+- **Versions:** VS Code 1.141.0 (`2a59476c`), installed and in the integration suite.
+- **Inspection:** `workbench.desktop.main.js` registers `workbench.action.browser.open` ("Open Integrated Browser"). It takes a URL string or `{url, openToSide, reuseUrlFilter}`. With `reuseUrlFilter`, it looks for an open browser tab whose URL matches the filter's scheme, authority and path, and whose query holds the filter's parameters; it navigates that tab to `url` and shows it instead of opening another. Otherwise it opens a browser editor in the group the integrated browser prefers (`workbench.browser.newTabPlacement`, `activeGroup` by default). The command is not part of the extension API. `workbench.action.browser.openFile` opens a local `.html` file.
+- **Experiment:** [tabs.test.cjs](../extensions/switchboard/test-integration/tabs.test.cjs) opened two pages of a test-owned loopback server, the first again, then a Markdown file. VS Code showed two browser tabs, both loaded, neither in preview, so the next open did not replace them, and the file in a pinned text editor. Without `reuseUrlFilter` the third open added a third browser tab. A browser tab's `Tab.input` is undefined in the extension API.
+- **Not verified:** pages that need the operator's sign-in, such as GitHub and Zoho Desk, in the integrated browser's own storage (`workbench.browser.dataStorage`); the first VS Code version with the command.
+- **Current use:** item window tabs (PRD R72; architecture.md § VS Code extension).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:
