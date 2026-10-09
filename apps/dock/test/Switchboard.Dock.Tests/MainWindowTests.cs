@@ -303,6 +303,34 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Header_IconButtons_AreSquaresOfOneSize()
+    {
+        var (window, _) = Open();
+        var sizes = window.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("header")).Select((button) => button.Bounds.Size).ToList();
+
+        Assert.Equal(6, sizes.Count);
+        Assert.All(sizes, (size) => Assert.Equal(new Size(28, 28), size));
+    }
+
+    [AvaloniaFact]
+    public void Header_IconsAndSeparators_AreCentredOnTheButtons()
+    {
+        var (window, _) = Open();
+        var buttons = window.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("header")).ToList();
+        var separators = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("separator") && border.IsEffectivelyVisible).ToList();
+        // A TextBlock's padding moves its glyph within its bounds, so the middle is taken inside the padding.
+        double Middle(Control control)
+        {
+            var padding = control is TextBlock text ? text.Padding : default;
+            return control.TranslatePoint(new Point(0, padding.Top + (control.Bounds.Height - padding.Top - padding.Bottom) / 2), window)!.Value.Y;
+        }
+
+        Assert.All(buttons, (button) => Assert.Equal(Middle(button), Middle((Control)button.Presenter!.Child!)));
+        Assert.Equal(2, separators.Count);
+        Assert.All(separators, (separator) => Assert.Equal(Middle(buttons[0]), Middle(separator)));
+    }
+
+    [AvaloniaFact]
     public void RowMenu_DockOnEitherEdge_OpensAwayFromTheEdgeAndAdjustsOnlyVertically()
     {
         var vertical = Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY;
