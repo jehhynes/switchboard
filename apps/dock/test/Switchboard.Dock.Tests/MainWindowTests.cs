@@ -331,6 +331,22 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Header_CloseButton_EndsAtTheListEdgeAndSearchKeepsItsInset()
+    {
+        var (window, _) = Open();
+        var panel = window.FindControl<DockPanel>("ListPanel")!;
+        var close = window.FindControl<Button>("CloseButton")!;
+        var search = window.FindControl<TextBox>("SearchBox")!;
+        double Right(Control control) => control.TranslatePoint(new Point(control.Bounds.Width, 0), panel)!.Value.X;
+
+        Tap(window, window.FindControl<Button>("SearchButton")!);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(panel.Bounds.Width, Right(close));
+        Assert.Equal(panel.Bounds.Width - 8, Right(search));
+    }
+
+    [AvaloniaFact]
     public void RowMenu_DockOnEitherEdge_OpensAwayFromTheEdgeAndAdjustsOnlyVertically()
     {
         var vertical = Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY;
