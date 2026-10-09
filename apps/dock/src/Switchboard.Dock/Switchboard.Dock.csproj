@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Switchboard.Dock</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\dock.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The panel's icon font, so the dock draws the same marks (PRD R27). -->
+    <AvaloniaResource Include="..\..\..\..\node_modules\@vscode\codicons\dist\codicon.ttf" Link="Assets\codicon.ttf" />
+    <AvaloniaResource Include="Assets\dock.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Switchboard.Dock.Tests" />
+  </ItemGroup>
+</Project>

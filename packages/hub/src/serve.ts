@@ -13,6 +13,8 @@ import type { Reply } from './server.js';
 export interface HubApp {
   post: Record<string, (body: unknown) => Promise<Reply>>;
   snapshot(): unknown;
+  /** The dock view (PRD R71). */
+  dock(): unknown;
   /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
   snoozedUrls(): string[];
   /** Each ticket's playbook and group, for the Chrome extension (PRD R67). */
@@ -101,10 +103,10 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   const server = await listenHub({
     identity: { hub: HUB_NAME, protocol: PROTOCOL, version, pid: process.pid },
     onShutdown: () => void stop('a client asked it to stop').then(() => exit(0)),
-    ...(app === undefined ? {} : { post: app.post, snapshot: () => app.snapshot() }),
+    ...(app === undefined ? {} : { post: app.post, snapshot: () => app.snapshot(), dock: () => app.dock() }),
   });
 
-  app?.onChange(() => server.broadcast('state', app.snapshot()));
+  app?.onChange(() => server.update());
 
   const browserPort = options.browserPort === undefined ? BROWSER_PORT : options.browserPort;
   let browser: BrowserServer | null = null;

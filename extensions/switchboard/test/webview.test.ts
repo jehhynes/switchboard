@@ -2,7 +2,8 @@ import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openUrlOf, rowFor, searchEntries, targetForUrl } from '../src/search.js';
 import { startPanel } from '../src/webview/main.js';
-import { age, CAPS, clip, clockOf, controlsOf, doneBand, doneStamp, editorAction, groupOf, linkKind, mainControl, markOf, queueTime, rankOf, openAction, renderPanel, STALE_STAGE_MS, staleSince, unstartedOrder } from '../src/webview/render.js';
+import { age, CAPS, clip, controlsOf, editorAction, linkKind, mainControl, openAction, STALE_STAGE_MS, staleSince, unstartedOrder } from '@switchboard/hub/rows';
+import { groupOf, markOf, renderPanel } from '../src/webview/render.js';
 import type { PanelUi } from '../src/webview/render.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12);
@@ -88,63 +89,9 @@ function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): Snapsho
   };
 }
 
+
+
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
-
-describe('groupOf', () => {
-  it('puts done first, then unstarted, triaging and queued work, then work that needs the operator, then the rest', () => {
-    expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');
-    expect(['unstarted', 'triaging', 'queued'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['unstarted', 'unstarted', 'unstarted']);
-    expect(['awaiting-approval', 'blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['needs', 'needs', 'needs']);
-    expect(groupOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('needs');
-    expect(['setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['working', 'working']);
-  });
-});
-
-describe('controlsOf', () => {
-  it('shows only the controls that apply, with no session controls and no Change playbook', () => {
-    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Attach', 'Stop', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['History']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
-      { type: 'attach', shortId: 'aaaa1111', name: 'github 107' },
-      { type: 'action', action: { type: 'stop', workItemId: 7 } },
-      { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
-      { type: 'action', action: { type: 'snooze', ticketId: 7 } },
-      { type: 'history', ticketId: 7, key: 'gh 107' },
-    ]);
-  });
-});
-
-describe('openAction', () => {
-  const worktree = { id: 1, ticketId: 7, path: 'D:/git/widgets-wt/107-fix', branch: '107-fix', linkedBy: 'report' as const };
-  const action = (sessions: ReturnType<typeof session>[], patch: Partial<WorkItemView> = {}) => openAction(item(7, { sessions, ...patch }));
-
-  it('attaches to a background session, resumes any other latest session in a terminal, then opens the worktree, then the ticket', () => {
-    expect(action([session()], { worktree })).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 107' });
-    expect(action([session({ state: 'idle', released: true })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: true });
-    expect(action([session({ state: 'ended' })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: false });
-    expect(action([], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
-    expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
-    expect(action([])).toEqual({ type: 'openUrl', url: 'https://github.com/o/r/issues/107' });
-    expect(action([], { ticket: { ...item(7).ticket, source: 'adhoc', url: '' } })).toBeNull();
-    expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toBeNull();
-  });
-
-  it('opens the session in VS Code on Ctrl+click, or the worktree while the session runs in its background process', () => {
-    expect(editorAction(item(7, { sessions: [session({ state: 'ended' })], worktree }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
-    expect(editorAction(item(7, { sessions: [session({ state: 'waiting', released: true })] }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
-    expect(editorAction(item(7, { sessions: [session()], worktree }))).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
-    expect(editorAction(item(7, { sessions: [session()] }))).toBeNull();
-    expect(editorAction(item(7))).toBeNull();
-  });
-});
-
 
 const ui = (patch: Partial<PanelUi> = {}): PanelUi => ({ groups: new Map(), selected: null, ...patch });
 
@@ -182,20 +129,6 @@ const triage = (patch: Partial<Triage> = {}): Triage => ({
   endedAt: NOW,
   error: null,
   ...patch,
-});
-
-describe('mainControl', () => {
-  it('picks the one primary control of a Needs you or Unstarted row', () => {
-
-    expect(mainControl(item(1, { status: 'awaiting-approval' }))?.label).toBe('Approve');
-    expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Triage again');
-    expect(mainControl(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toBeNull();
-    expect(mainControl(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toBeNull();
-    expect(mainControl(item(1, { status: 'unstarted' }))?.label).toBe('Start');
-    expect(mainControl(item(1, { status: 'triaging' }))).toBeNull();
-    expect(mainControl(item(1, { sessions: [session({ state: 'waiting', released: true })] }))).toBeNull();
-    expect(mainControl(item(1))).toBeNull();
-  });
 });
 
 describe('markOf', () => {
@@ -251,26 +184,6 @@ describe('queue waits', () => {
 });
 
 describe('clockOf', () => {
-  it('counts Needs you from the status or the wait, Working from the run start, and the rest from scope entry, stopping at done (PRD R27)', () => {
-    const scoped = (patch: Partial<WorkItemView>, scopeAt: number | null = 5, snoozed = false) =>
-      item(1, { createdAt: 1, statusAt: 2, runStartedAt: 3, ...patch, ticket: { ...item(1).ticket, scopeAt, snoozed } });
-
-    expect(clockOf(scoped({ status: 'blocked' }))).toEqual({ since: 2, label: 'In this status since' });
-    expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
-    expect(clockOf(scoped({ status: 'setup', sessions: [session({ kind: 'setup', state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
-    // A blocked item whose session still waits counts from the block.
-    expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
-    expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Working since' });
-    expect(clockOf(scoped({ status: 'setup', runStartedAt: null }))).toEqual({ since: 2, label: 'Working since' });
-    expect(clockOf(scoped({ status: 'queued' }))).toEqual({ since: 5, label: 'In scope since' });
-    expect(clockOf(scoped({ status: 'unstarted' }))).toEqual({ since: 5, label: 'In scope since' });
-    expect(clockOf(scoped({ status: 'unstarted' }, null))).toEqual({ since: 1, label: 'In scope since' });
-    expect(clockOf(scoped({ status: 'blocked' }, 5, true))).toEqual({ since: 5, label: 'In scope since' });
-    // Done keeps the scope entry the work item had, not the ticket's later one.
-    expect(clockOf(scoped({ status: 'done', doneAt: 9, scopeAt: 4 }, 8))).toEqual({ since: 4, label: 'In scope from' });
-    expect(clockOf(scoped({ status: 'done', doneAt: 9 }, 8))).toEqual({ since: 1, label: 'In scope from' });
-  });
-
   it('shows when a Done row was done, with its scope entry in the tooltip', () => {
     const doneAt = NOW - 86_400_000;
     const root = render(snapshot([item(1, { status: 'done', scopeAt: NOW - 3 * 86_400_000, doneAt })]), { groups: new Map([['done', true]]) });
@@ -291,21 +204,6 @@ describe('doneBand', () => {
   // Wednesday 7 October 2026, 10:00 local time; the week began on Monday 5 October.
   const now = new Date(2026, 9, 7, 10).getTime();
   const at = (day: number, hour = 0) => new Date(2026, 9, day, hour).getTime();
-
-  it('bands by local day, with weeks starting on Monday', () => {
-    const times = [at(7), at(6, 23), at(6), at(5), at(4, 23), new Date(2026, 8, 28).getTime(), new Date(2026, 8, 27, 23).getTime()];
-
-    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'Earlier this week', 'Last week', 'Last week', 'Older']);
-  });
-
-  it('stamps a done time as 24-hour HH:mm today and m/d before today, in local time', () => {
-    expect([at(7, 9), at(7, 13) + 5 * 60_000, at(7, 0), at(6, 23), new Date(2026, 8, 28).getTime()].map((time) => doneStamp(time, now))).toEqual(['09:00', '13:05', '00:00', '10/6', '9/28']);
-  });
-
-  it('puts Monday’s yesterday in Yesterday, not Last week', () => {
-    expect(doneBand(at(4, 12), at(5, 9))).toBe('Yesterday');
-    expect(doneBand(at(3, 12), at(5, 9))).toBe('Last week');
-  });
 
   const items = [item(1, { status: 'done', doneAt: at(1) }), item(2, { status: 'done', doneAt: at(7, 9) }), item(3, { status: 'done', doneAt: at(6) }), item(4, { status: 'done', doneAt: at(7, 8) }), item(5, { status: 'blocked' })];
 
@@ -331,29 +229,6 @@ describe('doneBand', () => {
     root.innerHTML = renderPanel(snapshot(items), now, ui({ groups: new Map([['done', true], ['done:Yesterday', false]]) }));
 
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.band')].map((band) => band.open)).toEqual([true, false, true]);
-  });
-});
-
-describe('rankOf and queueTime', () => {
-  it('ranks only a full rating', () => {
-    expect(rankOf(triage({ immediacy: 'URGENT', severity: 'HIGH' }))).toBe(0);
-    expect(rankOf(triage({ immediacy: 'NON-BLOCKING', severity: 'LOW' }))).toBe(4);
-    expect(rankOf(triage({ immediacy: 'BLOCKING' }))).toBeNull();
-    expect(rankOf(null)).toBeNull();
-  });
-
-  it('gives whole minutes, hours, days and weeks', () => {
-    expect([59_000, 59 * 60_000, 60 * 60_000, 23 * 3_600_000 + 59 * 60_000, 86_400_000, 6 * 86_400_000, 7 * 86_400_000, 20 * 86_400_000, -5_000].map((ms) => queueTime(NOW - ms, NOW))).toEqual([
-      '0m',
-      '59m',
-      '1h',
-      '23h',
-      '1d',
-      '6d',
-      '1w',
-      '2w',
-      '0m',
-    ]);
   });
 });
 

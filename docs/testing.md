@@ -42,8 +42,9 @@ Do not test type declarations, pass-through property bags, or simple settings re
 | Webview | Vitest/jsdom with an `acquireVsCodeApi` stub | Rendering, controls and messages |
 | Chrome extension | Vitest/jsdom with a recorded board column, a recorded card and its More actions menu, and an injected hub read, snooze and unsnooze | Card marks, the column link, card pills, the card menu's items, the snooze popup, pill clicks, reads, requests and refusals |
 | Extension host | Mocha inside real VS Code | Registration, hub process wiring, terminal and editor calls |
+| Dock | xUnit v3 with Avalonia.Headless, fakes of the hub, windows and VS Code, a test-owned loopback hub, and the recorded dock view in `apps/dock/test/fixtures/dock.json` | Parsing the hub's stream and view, workspace files, the click's requests and switch, refusals, the list, its groups, clicks and menus |
 
-Keep decisions in packages that do not import `vscode`.
+Keep decisions in packages that do not import `vscode`, and the dock's rules in the hub's dock view, so the dock only draws them and moves windows. Win32 calls and the app bar are not covered by automated tests; the operator's live use checks them. Name each C# test `Subject_Action_Assertion`.
 
 ## Live acceptance
 

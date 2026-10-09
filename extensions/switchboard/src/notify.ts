@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { Snapshot } from '@switchboard/hub';
 import { runOpen } from './panel.js';
 import { NeedsYouTracker, toastOf } from './toast.js';
-import { openAction } from './webview/render.js';
+import { openAction } from '@switchboard/hub/rows';
 
 /** Toasts each work item that starts needing the operator, in the focused window only (PRD R65). */
 export class NeedsYouToasts {

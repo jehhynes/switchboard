@@ -1,5 +1,6 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
-import { groupOf, markOf, openAction } from './webview/render.js';
+import { openAction } from '@switchboard/hub/rows';
+import { groupOf, markOf } from './webview/render.js';
 import type { Mark } from './webview/render.js';
 
 function needsYou(item: WorkItemView): boolean {

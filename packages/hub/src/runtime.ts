@@ -131,7 +131,7 @@ export class Runtime {
   private rosterAgain = false;
   /** The read in flight per source; reads run one at a time, so their results apply in order. */
   private reads = new Map<string, Promise<void>>();
-  private pendingOpens = new Map<string, { sessionId: string; at: number }>();
+  private pendingOpens = new Map<string, { sessionId: string; at: number; workspace: string | null }>();
   /** Job state reads by short ID, kept while the file's modification time is unchanged. */
   private questions = new Map<string, { mtimeMs: number; question: WorkItemView['question'] }>();
   /** The job state's modification time when the hub sent an answer, by short ID, so a question is answered once (PRD R70). */
@@ -610,15 +610,22 @@ export class Runtime {
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }
 
-  /** Records that a window asked to open a session in a window on `cwd`, which that window claims when it connects or gains focus. */
-  recordOpen(sessionId: string, cwd: string): void {
-    this.pendingOpens.set(folderKey(cwd), { sessionId, at: this.deps.now() });
+  /**
+   * Records that a window or the dock asked to open a session in a window on `cwd`, which that window claims when it connects or gains focus.
+   * With `workspace`, the dock's item window file (PRD R71), only a window on that workspace file claims it, because item windows share folders.
+   */
+  recordOpen(sessionId: string, cwd: string, workspace: string | null = null): void {
+    this.pendingOpens.set(folderKey(cwd), { sessionId, at: this.deps.now(), workspace });
   }
 
-  /** The session a window on `folder` should open, if one is pending and recent. Claiming removes it. */
-  claimOpen(folder: string): string | null {
+  /** The session a window on `folder`, opened from `workspace` if any, should open, if one is pending and recent. Claiming removes it. */
+  claimOpen(folder: string, workspace: string | null = null): string | null {
     const key = folderKey(folder);
     const pending = this.pendingOpens.get(key);
+
+    if (pending?.workspace != null && (workspace === null || folderKey(workspace) !== folderKey(pending.workspace))) {
+      return null;
+    }
 
     this.pendingOpens.delete(key);
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Card } from '@switchboard/core/group';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REFRESH_MS } from '../src/board.js';
-import { MARK_GLYPHS } from '../src/marks.js';
+import { MARK_GLYPHS } from '@switchboard/core/group';
 import { applyPills, cardsByIssue, readCards, watchPills } from '../src/pills.js';
 
 const COLUMN = readFileSync(join(import.meta.dirname, 'fixtures', 'column.html'), 'utf8');

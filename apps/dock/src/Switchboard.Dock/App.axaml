@@ -1,0 +1,42 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Switchboard.Dock.App"
+             RequestedThemeVariant="Default">
+  <!-- Colours follow the panel's VS Code theme variables; the dock follows Windows' light or dark mode. -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="DockBackground" Color="#F8F8F8" />
+          <SolidColorBrush x:Key="DockForeground" Color="#3B3B3B" />
+          <SolidColorBrush x:Key="DockMuted" Color="#717171" />
+          <SolidColorBrush x:Key="DockHover" Color="#F0F0F0" />
+          <SolidColorBrush x:Key="DockSelected" Color="#E4E6F1" />
+          <SolidColorBrush x:Key="DockBorder" Color="#E5E5E5" />
+          <SolidColorBrush x:Key="DockWarning" Color="#BF8803" />
+          <SolidColorBrush x:Key="DockError" Color="#E51400" />
+          <SolidColorBrush x:Key="DockPriority" Color="#E8820C" />
+          <SolidColorBrush x:Key="DockKeyGithub" Color="#1F2328" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="DockBackground" Color="#181818" />
+          <SolidColorBrush x:Key="DockForeground" Color="#CCCCCC" />
+          <SolidColorBrush x:Key="DockMuted" Color="#9D9D9D" />
+          <SolidColorBrush x:Key="DockHover" Color="#2A2D2E" />
+          <SolidColorBrush x:Key="DockSelected" Color="#04395E" />
+          <SolidColorBrush x:Key="DockBorder" Color="#2B2B2B" />
+          <SolidColorBrush x:Key="DockWarning" Color="#CCA700" />
+          <SolidColorBrush x:Key="DockError" Color="#F14C4C" />
+          <SolidColorBrush x:Key="DockPriority" Color="#E8820C" />
+          <SolidColorBrush x:Key="DockKeyGithub" Color="#F0F6FC" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+      <SolidColorBrush x:Key="DockKeyZoho" Color="#089949" />
+      <SolidColorBrush x:Key="DockKeyForum" Color="#57AE57" />
+      <FontFamily x:Key="Codicons">avares://Switchboard.Dock/Assets/codicon.ttf#codicon</FontFamily>
+    </ResourceDictionary>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+</Application>

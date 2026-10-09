@@ -443,7 +443,9 @@ export async function openQuestion(
 /** Opens a session another window left for this window's folder. Runs when the window connects to the hub or gains focus. */
 export async function claimOpen(record: HubRecord): Promise<string | null> {
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const reply = folder === undefined ? null : await postToHub(record, '/claim', { folder }, ACTION_TIMEOUT_MS);
+  // An item window names its workspace file, so it claims what the dock left for it and nothing left for another item window (PRD R71).
+  const workspace = vscode.workspace.workspaceFile?.scheme === 'file' ? vscode.workspace.workspaceFile.fsPath : null;
+  const reply = folder === undefined ? null : await postToHub(record, '/claim', { folder, workspace }, ACTION_TIMEOUT_MS);
   const sessionId = (reply?.body as { sessionId?: unknown } | null | undefined)?.sessionId;
 
   if (typeof sessionId !== 'string') {

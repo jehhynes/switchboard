@@ -135,22 +135,42 @@ describe('listenHub routes and state', () => {
     expect((await call(server.port, 'POST', '/echo', null, 2000, {}))?.status).toBe(401);
   });
 
-  it('sends the state when a stream opens and broadcasts later events', async () => {
+  it('sends each stream its view when it opens and again on update: the state to /events, the dock view to /dock/events', async () => {
     let state = { n: 1 };
-    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => state });
+    let dock = { d: 1 };
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => state, dock: () => dock });
 
-    const chunks: string[] = [];
-    const outbound = request({ host: '127.0.0.1', port: server.port, path: '/events', headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
-      response.setEncoding('utf8');
-      response.on('data', (chunk: string) => chunks.push(chunk));
-    });
-    outbound.on('error', () => {});
-    outbound.end();
+    const read = (path: string) => {
+      const chunks: string[] = [];
+      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => chunks.push(chunk));
+      });
 
-    await until(() => (chunks.join('').includes('event: state\ndata: {"n":1}') ? true : null));
+      outbound.on('error', () => {});
+      outbound.end();
+
+      return { text: () => chunks.join(''), close: () => outbound.destroy() };
+    };
+    const panel = read('/events');
+    const docked = read('/dock/events');
+
+    await until(() => (panel.text().includes('event: state\ndata: {"n":1}') && docked.text().includes('event: dock\ndata: {"d":1}') ? true : null));
+    expect(server.clients()).toBe(2);
     state = { n: 2 };
-    server.broadcast('state', state);
-    await until(() => (chunks.join('').includes('event: state\ndata: {"n":2}') ? true : null));
-    outbound.destroy();
+    dock = { d: 2 };
+    server.update();
+    await until(() => (panel.text().includes('event: state\ndata: {"n":2}') && docked.text().includes('event: dock\ndata: {"d":2}') ? true : null));
+    expect(panel.text()).not.toContain('event: dock');
+    expect(docked.text()).not.toContain('event: state');
+    expect(docked.text()).toMatch(/^event: hello\ndata: \{"hub":"switchboard"/);
+    panel.close();
+    docked.close();
+  });
+
+  it('refuses the dock stream without the token', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, dock: () => ({}) });
+
+    expect((await call(server.port, 'GET', '/dock/events', null))?.status).toBe(401);
   });
 });

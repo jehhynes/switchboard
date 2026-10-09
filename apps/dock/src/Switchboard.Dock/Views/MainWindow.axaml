@@ -1,0 +1,192 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:Switchboard.Dock.Views"
+        x:Class="Switchboard.Dock.Views.MainWindow"
+        x:DataType="views:DockViewModel"
+        Title="Switchboard"
+        Icon="avares://Switchboard.Dock/Assets/dock.ico"
+        Width="320" Height="800"
+        Background="{DynamicResource DockBackground}"
+        Foreground="{DynamicResource DockForeground}"
+        FontFamily="Segoe UI" FontSize="13"
+        WindowDecorations="None" CanResize="False" ShowInTaskbar="False" Topmost="True">
+  <Window.Styles>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
+    </Style>
+    <Style Selector="TextBlock.icon">
+      <Setter Property="FontFamily" Value="{StaticResource Codicons}" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.header">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="MinHeight" Value="0" />
+    </Style>
+    <Style Selector="Button.header:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DockHover}" />
+    </Style>
+    <Style Selector="Border.group">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="6,5" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Border.group:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockHover}" />
+    </Style>
+    <Style Selector="Border.row">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockBorder}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Border.row:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockHover}" />
+    </Style>
+    <Style Selector="Border.row.selected">
+      <Setter Property="Background" Value="{DynamicResource DockSelected}" />
+    </Style>
+    <Style Selector="Border.stripe.warning">
+      <Setter Property="Background" Value="{DynamicResource DockWarning}" />
+    </Style>
+    <Style Selector="Border.stripe.error">
+      <Setter Property="Background" Value="{DynamicResource DockError}" />
+    </Style>
+    <Style Selector="TextBlock.failed">
+      <Setter Property="Foreground" Value="{DynamicResource DockError}" />
+    </Style>
+    <Style Selector="TextBlock.warning">
+      <Setter Property="Foreground" Value="{DynamicResource DockWarning}" />
+    </Style>
+    <Style Selector="TextBlock.detail">
+      <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
+      <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.detail.warning">
+      <Setter Property="Foreground" Value="{DynamicResource DockWarning}" />
+    </Style>
+    <Style Selector="TextBlock.detail.error">
+      <Setter Property="Foreground" Value="{DynamicResource DockError}" />
+    </Style>
+    <Style Selector="Border.key">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockMuted}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="Padding" Value="6,0" />
+    </Style>
+    <Style Selector="Border.key.github">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockKeyGithub}" />
+    </Style>
+    <Style Selector="Border.key.zoho">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockKeyZoho}" />
+    </Style>
+    <Style Selector="Border.key.forum">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockKeyForum}" />
+    </Style>
+    <Style Selector="TextBlock.spin">
+      <Setter Property="RenderTransform" Value="rotate(0deg)" />
+      <Style.Animations>
+        <Animation Duration="0:0:1.5" IterationCount="INFINITE">
+          <KeyFrame Cue="0%">
+            <Setter Property="RotateTransform.Angle" Value="0" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="RotateTransform.Angle" Value="360" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+  </Window.Styles>
+
+  <Grid ColumnDefinitions="*,Auto">
+    <DockPanel>
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="8,4,4,0">
+        <TextBlock Text="SWITCHBOARD" FontSize="11" FontWeight="SemiBold" Classes="muted" VerticalAlignment="Center" />
+        <Button Name="CloseButton" Grid.Column="1" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock">
+          <TextBlock Classes="icon" Text="&#xEA76;" />
+        </Button>
+      </Grid>
+      <TextBlock Name="StatusLine" DockPanel.Dock="Bottom" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}"
+                 TextWrapping="Wrap" Margin="8" Classes="warning" />
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="0,4,0,8">
+          <TextBlock Name="ConnectionLine" Text="{Binding Connection}" IsVisible="{Binding Connection, Converter={x:Static ObjectConverters.IsNotNull}}"
+                     TextWrapping="Wrap" Margin="8,6" Classes="muted" />
+          <ItemsControl ItemsSource="{Binding Notes}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="8,4" Classes="warning" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <ItemsControl Name="GroupList" ItemsSource="{Binding Groups}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="views:GroupViewModel">
+                <StackPanel>
+                  <Border Classes="group" Tapped="OnGroupTapped">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <TextBlock Classes="icon" Text="{Binding Chevron}" />
+                      <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" Margin="4,0" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="2" Text="{Binding Count}" Classes="muted" VerticalAlignment="Center" />
+                    </Grid>
+                  </Border>
+                  <StackPanel IsVisible="{Binding IsOpen}">
+                    <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="muted" Margin="26,2,8,6" />
+                    <ItemsControl ItemsSource="{Binding Rows}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="views:RowViewModel">
+                          <Border Classes="row" Classes.selected="{Binding IsSelected}" Tapped="OnRowTapped" ContextRequested="OnRowContext">
+                            <Grid ColumnDefinitions="3,*">
+                              <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" />
+                              <StackPanel Grid.Column="1" Margin="8,5,8,6" Spacing="3">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                  <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource DockPriority}"
+                                           IsVisible="{Binding IsPriority}" ToolTip.Tip="{Binding PriorityTitle}" />
+                                  <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
+                                  <TextBlock Grid.Column="2" Text="{Binding Time}" ToolTip.Tip="{Binding TimeTitle}" Classes="muted" Margin="8,0,0,0" />
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                  <TextBlock VerticalAlignment="Center">
+                                    <Run Text="{Binding Namespace}" Foreground="{DynamicResource DockMuted}" /><Run Text="{Binding Name}" />
+                                  </TextBlock>
+                                  <Border Classes="key" Classes.github="{Binding IsGithub}" Classes.zoho="{Binding IsZoho}" Classes.forum="{Binding IsForum}">
+                                    <TextBlock Text="{Binding Ticket}" FontSize="12" />
+                                  </Border>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasThirdLine}" ClipToBounds="True">
+                                  <TextBlock Classes="icon" Classes.failed="{Binding MarkFailed}" Classes.spin="{Binding MarkSpins}" Text="{Binding MarkGlyph}"
+                                             ToolTip.Tip="{Binding MarkTitle}" IsVisible="{Binding HasMark}" />
+                                  <ItemsControl ItemsSource="{Binding Details}">
+                                    <ItemsControl.ItemsPanel>
+                                      <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="6" />
+                                      </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                      <DataTemplate x:DataType="views:DetailViewModel">
+                                        <TextBlock Classes="detail" Classes.warning="{Binding IsWarning}" Classes.error="{Binding IsError}" Text="{Binding Text}" ToolTip.Tip="{Binding Title}" />
+                                      </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                  </ItemsControl>
+                                </StackPanel>
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </DockPanel>
+    <!-- The inner edge: dragging it sets the dock's width. -->
+    <Border Name="Grip" Grid.Column="1" Width="5" Background="Transparent" Cursor="SizeWestEast" BorderBrush="{DynamicResource DockBorder}" BorderThickness="1,0,0,0"
+            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" />
+  </Grid>
+</Window>

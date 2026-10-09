@@ -14,6 +14,7 @@
     "packages/claude",
     "packages/hub",
     "apps/hub",
+    "apps/dock",
     "extensions/switchboard",
     "extensions/chrome"
   ],

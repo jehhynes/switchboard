@@ -1,5 +1,6 @@
 import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
-import { DONE_WORDS, ticketKey } from './render.js';
+import { DONE_WORDS } from '@switchboard/core/group';
+import { ticketKey } from '@switchboard/hub/rows';
 
 /** The filter chips of History (PRD R59). */
 export type Category = 'you' | 'session' | 'report' | 'triage' | 'ticket';

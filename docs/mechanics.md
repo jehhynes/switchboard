@@ -283,6 +283,19 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The tab ran in the operator's default mode (`auto`) both times, not the mode the session started with.
 - **Current use:** Open in Claude (PRD R70).
 
+## M26. Finding, docking beside and switching to VS Code windows
+
+- **Date:** 2026-10-09.
+- **Versions:** Windows 11 Pro 10.0.26200, VS Code 1.141.0, Claude Code extension 2.1.295; a C# .NET 10 probe using Win32 (`.wip/spike-switcher/`), first on one 1920×1200 monitor at 96 DPI, then at the console with three monitors.
+- **Experiment:** isolated VS Code windows opened from `.code-workspace` files, a probe that docked itself as an app bar and brought windows forward 20 times per method, with and without a click on the probe and with another app in front.
+- **Result:**
+  - A `window.title` setting in a `.code-workspace` file applies to that window and is the Win32 title, such as `sb:gh-1001 · <file> - gh-1001 (Workspace)`; without `${dirty}` nothing comes before it, and the active editor changes only the text after it. A new window shows `Visual Studio Code` for about 0.5 s first. All windows of a VS Code instance share one process, so only the title tells item windows apart.
+  - Two workspace files on one folder open as two windows; opening either file again focuses its window. The Claude extension lists the same folder's sessions in both.
+  - After a click on the probe, `SetForegroundWindow` brought a window to the front 20/20 within 15 ms, after `ShowWindow(SW_RESTORE)` for a minimized one; `code <workspace>` worked 20/20 in about 300 ms. While another app had the last input, `SetForegroundWindow` failed 60/60 and only flashed the taskbar button, and VS Code's own focus flag still read true, so the result is checked with `GetForegroundWindow`. `code <workspace>` from the background worked 20/20 at the console with no one typing.
+  - A 300 px `ABE_LEFT` app bar set the work area to start at x = 300 within 0.9 s, moved a window that overlapped it, and a maximized VS Code window filled the rest exactly. `ABM_REMOVE` restored the work area. A placed window needs the DWM frame correction of 7 px.
+- **Limits:** multi-monitor app bars, display scaling other than 100% and Restricted Mode titles are untested.
+- **Current use:** the dock and item windows (PRD R71; architecture.md § Dock).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

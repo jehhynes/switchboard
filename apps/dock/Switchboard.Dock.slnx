@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Switchboard.Dock/Switchboard.Dock.csproj" />
+  <Project Path="test/Switchboard.Dock.Tests/Switchboard.Dock.Tests.csproj" />
+</Solution>

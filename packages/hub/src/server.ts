@@ -13,8 +13,10 @@ export interface HubServerOptions {
   onShutdown(): void;
   /** Handlers for authorized `POST` paths, given the parsed JSON body. */
   post?: Record<string, (body: unknown) => Promise<Reply>>;
-  /** The panel state, sent as a `state` event when a stream opens. */
+  /** The panel state, sent as a `state` event when an `/events` stream opens and on each `update`. */
   snapshot?: () => unknown;
+  /** The dock view, sent as a `dock` event when a `/dock/events` stream opens and on each `update` (PRD R71). */
+  dock?: () => unknown;
   heartbeatMs?: number;
   now?: () => number;
 }
@@ -26,10 +28,12 @@ export interface HubServer {
   clients(): number;
   /** When the last event stream closed, or null while one is open. Starts at listen time. */
   emptySince(): number | null;
-  /** Sends an event to every open stream. */
-  broadcast(event: string, data: unknown): void;
+  /** Sends each open stream its view again: `state` to `/events` streams and `dock` to `/dock/events` streams. */
+  update(): void;
   close(): Promise<void>;
 }
+
+type View = 'panel' | 'dock';
 
 const HEARTBEAT_MS = 15_000;
 const BODY_LIMIT = 1024 * 1024;
@@ -71,7 +75,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const token = randomBytes(32).toString('hex');
   const expected = Buffer.from(`Bearer ${token}`);
   const now = options.now ?? Date.now;
-  const streams = new Set<ServerResponse>();
+  // Each open stream and the view it sends.
+  const streams = new Map<ServerResponse, View>();
 
   let emptySince: number | null = now();
 
@@ -81,15 +86,21 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     return given.length === expected.length && timingSafeEqual(given, expected);
   };
 
-  const openStream = (request: IncomingMessage, response: ServerResponse): void => {
+  const views: Record<View, { event: string; data: (() => unknown) | undefined }> = {
+    panel: { event: 'state', data: options.snapshot },
+    dock: { event: 'dock', data: options.dock },
+  };
+  const message = (view: View): string | null => {
+    const { event, data } = views[view];
+
+    return data === undefined ? null : `event: ${event}\ndata: ${JSON.stringify(data())}\n\n`;
+  };
+
+  const openStream = (request: IncomingMessage, response: ServerResponse, view: View): void => {
     response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     response.write(`event: hello\ndata: ${JSON.stringify(options.identity)}\n\n`);
-
-    if (options.snapshot !== undefined) {
-      response.write(`event: state\ndata: ${JSON.stringify(options.snapshot())}\n\n`);
-    }
-
-    streams.add(response);
+    response.write(message(view) ?? '');
+    streams.set(response, view);
     emptySince = null;
     request.on('close', () => {
       streams.delete(response);
@@ -110,7 +121,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     } else if (request.method === 'GET' && path === '/status') {
       json(response, 200, options.identity);
     } else if (request.method === 'GET' && path === '/events') {
-      openStream(request, response);
+      openStream(request, response, 'panel');
+    } else if (request.method === 'GET' && path === '/dock/events') {
+      openStream(request, response, 'dock');
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();
@@ -131,7 +144,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   });
 
   const heartbeat = setInterval(() => {
-    for (const stream of streams) {
+    for (const stream of streams.keys()) {
       stream.write(': ping\n\n');
     }
   }, options.heartbeatMs ?? HEARTBEAT_MS);
@@ -152,18 +165,23 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         token,
         clients: () => streams.size,
         emptySince: () => emptySince,
-        broadcast: (event, data) => {
-          const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        update: () => {
+          // Each view is built once, and only while a stream shows it.
+          const built = new Map<View, string | null>();
 
-          for (const stream of streams) {
-            stream.write(message);
+          for (const [stream, view] of streams) {
+            if (!built.has(view)) {
+              built.set(view, message(view));
+            }
+
+            stream.write(built.get(view) ?? '');
           }
         },
         close: () =>
           new Promise<void>((done) => {
             clearInterval(heartbeat);
 
-            for (const stream of streams) {
+            for (const stream of streams.keys()) {
               stream.end();
             }
 

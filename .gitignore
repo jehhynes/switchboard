@@ -5,3 +5,5 @@ dist/
 coverage/
 .vscode-test/
 .wip/
+bin/
+obj/

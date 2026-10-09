@@ -1,0 +1,276 @@
+{
+  "notes": [],
+  "groups": [
+    {
+      "key": "needs",
+      "title": "Needs you",
+      "empty": "Nothing needs you.",
+      "rows": [
+        {
+          "key": "item:7",
+          "title": "Issue <7>",
+          "priority": null,
+          "time": {
+            "text": "0m",
+            "title": "In this status since 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 107",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/107",
+          "mark": {
+            "kind": "blocked",
+            "glyph": "",
+            "title": "Blocked"
+          },
+          "details": [
+            {
+              "text": "The session finished its turn.",
+              "title": null,
+              "tone": "warning"
+            }
+          ],
+          "stripe": "warning",
+          "window": {
+            "name": "gh-107-58c609",
+            "title": "sb:gh-107-58c609 · Issue <7>",
+            "folders": [
+              "D:/git/widgets/.worktrees/107-fix"
+            ]
+          },
+          "open": {
+            "type": "session",
+            "sessionId": "aaaa1111-native",
+            "cwd": "D:/git/widgets/.worktrees/107-fix"
+          },
+          "controls": [
+            {
+              "label": "Triage again",
+              "action": {
+                "type": "retriage",
+                "workItemId": 7
+              }
+            },
+            {
+              "label": "Mark done",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 7
+              }
+            },
+            {
+              "label": "Snooze",
+              "action": {
+                "type": "snooze",
+                "ticketId": 7
+              }
+            }
+          ]
+        },
+        {
+          "key": "item:8",
+          "title": "Issue <8>",
+          "priority": null,
+          "time": {
+            "text": "0m",
+            "title": "Waiting since 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 108",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/108",
+          "mark": {
+            "kind": "question",
+            "glyph": "",
+            "title": "Answer a question"
+          },
+          "details": [
+            {
+              "text": "Which branch?",
+              "title": null,
+              "tone": null
+            }
+          ],
+          "stripe": "warning",
+          "window": {
+            "name": "gh-108-widgets-655280",
+            "title": "sb:gh-108-widgets-655280 · Issue <8>",
+            "folders": [
+              "D:/git/widgets"
+            ]
+          },
+          "open": {
+            "type": "question",
+            "workItemId": 8,
+            "sessionId": "aaaa1111-native",
+            "cwd": "D:/git/widgets"
+          },
+          "controls": [
+            {
+              "label": "Stop",
+              "action": {
+                "type": "stop",
+                "workItemId": 8
+              }
+            },
+            {
+              "label": "Mark done",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 8
+              }
+            },
+            {
+              "label": "Snooze",
+              "action": {
+                "type": "snooze",
+                "ticketId": 8
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "working",
+      "title": "Working",
+      "empty": "Nothing is running.",
+      "rows": []
+    },
+    {
+      "key": "unstarted",
+      "title": "Unstarted",
+      "empty": "Nothing waits to be started.",
+      "rows": [
+        {
+          "key": "item:9",
+          "title": "Issue <9>",
+          "priority": "Immediacy: BLOCKING   Severity: MED",
+          "time": {
+            "text": "0m",
+            "title": "In scope since 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 109",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/109",
+          "mark": null,
+          "details": [],
+          "stripe": null,
+          "window": null,
+          "open": {
+            "type": "url",
+            "url": "https://github.com/o/r/issues/109"
+          },
+          "controls": [
+            {
+              "label": "Start",
+              "action": {
+                "type": "start",
+                "workItemId": 9
+              }
+            },
+            {
+              "label": "Triage again",
+              "action": {
+                "type": "retriage",
+                "workItemId": 9
+              }
+            },
+            {
+              "label": "Mark done",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 9
+              }
+            },
+            {
+              "label": "Snooze",
+              "action": {
+                "type": "snooze",
+                "ticketId": 9
+              }
+            }
+          ]
+        },
+        {
+          "key": "ticket:4",
+          "title": "Issue <4>",
+          "priority": null,
+          "time": null,
+          "playbook": "dev:develop",
+          "ticket": "gh 104",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/104",
+          "mark": null,
+          "details": [],
+          "stripe": null,
+          "window": null,
+          "open": {
+            "type": "url",
+            "url": "https://github.com/o/r/issues/104"
+          },
+          "controls": [
+            {
+              "label": "Start",
+              "action": {
+                "type": "pick",
+                "ticketId": 4
+              }
+            },
+            {
+              "label": "Snooze",
+              "action": {
+                "type": "snooze",
+                "ticketId": 4
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "done",
+      "title": "Done",
+      "empty": null,
+      "rows": []
+    }
+  ],
+  "snooze": [
+    {
+      "label": "Tomorrow",
+      "description": "Sun, Oct 4, 6:00 AM",
+      "until": 1791093600000
+    },
+    {
+      "label": "In 2 days",
+      "description": "Mon, Oct 5, 6:00 AM",
+      "until": 1791180000000
+    },
+    {
+      "label": "In 3 days",
+      "description": "Tue, Oct 6, 6:00 AM",
+      "until": 1791266400000
+    },
+    {
+      "label": "Next week",
+      "description": "Mon, Oct 5, 6:00 AM",
+      "until": 1791180000000
+    },
+    {
+      "label": "In 2 weeks",
+      "description": "Mon, Oct 12, 6:00 AM",
+      "until": 1791784800000
+    },
+    {
+      "label": "In 4 weeks",
+      "description": "Mon, Oct 26, 6:00 AM",
+      "until": 1792994400000
+    },
+    {
+      "label": "Indefinitely",
+      "description": "",
+      "until": null
+    }
+  ]
+}

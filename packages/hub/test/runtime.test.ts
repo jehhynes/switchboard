@@ -674,6 +674,17 @@ describe('Runtime', () => {
     expect(runtime.claimOpen('D:/git/widgets-wt/8-fix')).toBeNull();
   });
 
+  it('hands a pending open the dock left for an item window only to the window on that workspace file (PRD R71)', () => {
+    const { runtime } = setup(config());
+    const file = 'C:/Users/me/.switchboard/windows/gh-7-widgets-655280.code-workspace';
+
+    runtime.recordOpen('a-native', 'D:/git/widgets', file);
+    expect(runtime.claimOpen('D:/git/widgets')).toBeNull();
+    expect(runtime.claimOpen('D:/git/widgets', 'C:/Users/me/.switchboard/windows/gh-8-widgets-655280.code-workspace')).toBeNull();
+    expect(runtime.claimOpen('d:\\git\\widgets', 'c:\\users\\me\\.switchboard\\windows\\GH-7-widgets-655280.code-workspace')).toBe('a-native');
+    expect(runtime.claimOpen('D:/git/widgets', file)).toBeNull();
+  });
+
   it('triages the pool, lists it oldest first, and starts the triaged playbook on a pick with fake runners', async () => {
     const { store, cli, source, runtime } = setup(config());
     source.result = { tickets: [{ ...issue('9'), assigned: false, pool: true, sortAt: 20, enteredAt: null }, { ...issue('8'), assigned: false, pool: true, sortAt: 10, enteredAt: null }] };

@@ -1,7 +1,7 @@
 import { urlKey } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
-import { GROUP_TITLES, linkKind, linkNumber, panelGroups, playbookText, rowKeyOf, ticketKey } from './webview/render.js';
-import type { RowGroup } from './webview/render.js';
+import { GROUP_TITLES, linkKind, linkNumber, panelGroups, playbookText, rowKeyOf, ticketKey } from '@switchboard/hub/rows';
+import type { RowGroup } from '@switchboard/hub/rows';
 
 /** A panel row by its work item, or by its pool ticket. */
 export type RowTarget = { workItemId: number } | { ticketId: number };

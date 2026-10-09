@@ -1,8 +1,7 @@
-import { MARK_TITLES } from '@switchboard/core/group';
+import { MARK_GLYPHS, MARK_TITLES } from '@switchboard/core/group';
 import type { Card, Group } from '@switchboard/core/group';
 import { REFRESH_MS, issueKey } from './board.js';
 import { BROWSER_PORT } from './hub.js';
-import { MARK_GLYPHS } from './marks.js';
 
 export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
 

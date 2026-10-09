@@ -11,6 +11,7 @@ import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
+import { dockView } from './dock.js';
 import { isPastePath } from './report.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { loadConfig, playbooksDir, setSourceEnabled } from './config.js';
@@ -227,11 +228,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return refused === null ? { status: 200, body: { recorded: true } } : { status: 409, body: { error: refused } };
       },
       '/open': async (body) => {
-        if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {sessionId, cwd}.' } };
+        if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace'])) {
+          return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?}.' } };
         }
 
-        runtime.recordOpen(body['sessionId'], body['cwd']);
+        runtime.recordOpen(body['sessionId'], body['cwd'], body['workspace'] ?? null);
 
         return { status: 200, body: { recorded: true } };
       },
@@ -252,11 +253,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
       '/claim': async (body) => {
-        if (!isRecord(body) || typeof body['folder'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {folder}.' } };
+        if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace'])) {
+          return { status: 400, body: { error: 'Expected {folder, workspace?}.' } };
         }
 
-        return { status: 200, body: { sessionId: runtime.claimOpen(body['folder']) } };
+        return { status: 200, body: { sessionId: runtime.claimOpen(body['folder'], body['workspace'] ?? null) } };
       },
       '/sources': async (body) => {
         if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['enabled'] !== 'boolean') {
@@ -280,6 +281,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
     },
     snapshot: () => runtime.snapshot(),
+    dock: () => dockView(runtime.snapshot(), deps.now()),
     snoozedUrls: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
     cards: () => cardsOf(runtime.snapshot()),
     snoozeUrl: (url, until) => {
@@ -306,4 +308,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       store.close();
     },
   };
+}
+
+function optionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === 'string';
 }

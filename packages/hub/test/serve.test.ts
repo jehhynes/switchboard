@@ -183,7 +183,7 @@ describe('serveHub', () => {
 
   describe('browser endpoint', () => {
     const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'needs', snoozed: false }];
-    const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null, unsnoozeUrl: HubApp['unsnoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, unsnoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });
+    const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null, unsnoozeUrl: HubApp['unsnoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, unsnoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });
 
     async function freePort(): Promise<number> {
       const probe = createServer();
