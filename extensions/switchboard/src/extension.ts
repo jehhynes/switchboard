@@ -11,6 +11,7 @@ import type { HistoryMessage } from './historyPanel.js';
 import { startHub } from './hubProcess.js';
 import { needsStatus } from './needs.js';
 import { NeedsYouToasts } from './notify.js';
+import { claimIsFor } from './claims.js';
 import { claimOpen, openLink, openRow, openSession, openTab, openTarget, openUri, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { HubState } from './state.js';
@@ -167,6 +168,11 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
           history.changed();
           toasts.update(JSON.parse(data));
           void tabs.update(JSON.parse(data)).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
+        } else if (event === 'claim') {
+          // The dock left something for this window, which may already be in front, so no focus change would claim it (PRD R71).
+          if (claimIsFor(data, workspaceFile())) {
+            void claimOpen(record, runCommand).catch(() => {});
+          }
         } else if (event === 'hello') {
           toasts.connected();
           void claimOpen(record, runCommand).catch(() => {});

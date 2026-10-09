@@ -190,6 +190,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
 
   let sendDock: (event: string, data: unknown) => number = () => 0;
+  let sendWindows: (event: string, data: unknown) => number = () => 0;
+  /**
+   * Tells the window opened from `workspace` to claim what was left for it, because VS Code reports no focus change when the dock brings an open
+   * window forward; a window claims on focus too. Nothing left for any window is announced, because only the window brought forward takes it.
+   */
+  const askToClaim = (workspace: string | null): void => {
+    if (workspace !== null) {
+      sendWindows('claim', { workspace });
+    }
+  };
   /** Why a write from a Settings window that read another config folder is refused, or null; a body without `configDir` names none. */
   const movedFrom = (read: unknown): string | null =>
     typeof read === 'string' && read !== configDir ? `The config folder is now ${configDir}, not ${read}. Settings reads it again; make your change there.` : null;
@@ -244,6 +254,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         runtime.recordOpen(body['sessionId'], body['cwd'], body['workspace'] ?? null);
+        askToClaim(body['workspace'] ?? null);
 
         return { status: 200, body: { recorded: true } };
       },
@@ -269,22 +280,40 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         const workspace = body['workspace'] ?? null;
+        const sessionId = runtime.claimOpen(body['folder'], workspace);
+        const commands = runtime.claimCommands(workspace, body['focused'] === true);
 
-        return { status: 200, body: { sessionId: runtime.claimOpen(body['folder'], workspace), commands: runtime.claimCommands(workspace, body['focused'] === true) } };
+        // The log shows whether a window took what the dock left for it (PRD R71).
+        if (commands.length > 0) {
+          deps.log(`window commands claimed by ${workspace ?? (body['folder'] || 'a window with no folder')}: ${commands.map((command) => String(command['type'])).join(', ')}`);
+        }
+
+        return { status: 200, body: { sessionId, commands } };
       },
       '/window': async (body) => {
         if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'], body['workspace'] ?? null)) {
           return { status: 400, body: { error: 'Expected {workspace, command} with a changes, history or openUrl command, or openTabs for a workspace.' } };
         }
 
-        return { status: 200, body: { id: runtime.recordCommand(body['command'], body['workspace'] ?? null) } };
+        const id = runtime.recordCommand(body['command'], body['workspace'] ?? null);
+
+        deps.log(`window command ${id} ${String(body['command']['type'])} left for ${body['workspace'] ?? 'any window'}`);
+        askToClaim(body['workspace'] ?? null);
+
+        return { status: 200, body: { id } };
       },
       '/window/withdraw': async (body) => {
         if (!isRecord(body) || !Number.isInteger(body['id'])) {
           return { status: 400, body: { error: 'Expected {id}.' } };
         }
 
-        return { status: 200, body: { withdrawn: runtime.withdrawCommand(body['id'] as number) } };
+        const withdrawn = runtime.withdrawCommand(body['id'] as number);
+
+        if (withdrawn) {
+          deps.log(`window command ${body['id']} withdrawn`);
+        }
+
+        return { status: 200, body: { withdrawn } };
       },
       '/sources': async (body) => {
         if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['enabled'] !== 'boolean') {
@@ -384,6 +413,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     attachDock: (send) => {
       sendDock = send;
+    },
+    attachWindows: (send) => {
+      sendWindows = send;
     },
     snoozedUrls: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
     cards: () => cardsOf(runtime.snapshot()),

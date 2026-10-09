@@ -192,8 +192,8 @@ describe('loadConfig', () => {
 });
 
 describe('createHubApp', () => {
-  async function start() {
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+  async function start(log: (line: string) => void = () => {}) {
+    const app = await createHubApp({ home: temp.home, log, deps: { exec: noCli } });
     closers.push(() => app.close());
 
     return app;
@@ -411,7 +411,11 @@ describe('createHubApp', () => {
 
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false } });
-    const app = await start();
+    const logs: string[] = [];
+    const app = await start((line) => logs.push(line));
+    const claims: unknown[] = [];
+
+    app.attachWindows?.((event, data) => claims.push({ event, data }));
     const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
     closers.push(() => server.close());
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', port: server.port, token: server.token, pid: 1, startedAt: '' };
@@ -452,5 +456,21 @@ describe('createHubApp', () => {
     }
     expect(await postToHub(record, '/window', { workspace: 7, command: { type: 'openUrl', url: 'D:/x.md' } }, 5000)).toMatchObject({ status: 400 });
     expect(await postToHub({ ...record, port: 1 }, '/action', {}, 1000)).toBeNull();
+    // The log shows each command left, withdrawn and claimed, and no claim that took nothing.
+    expect(logs.filter((line) => line.startsWith('window')).map((line) => line.replace(/\d+/, 'N'))).toEqual([
+      'window command N openUrl left for any window',
+      'window command N withdrawn',
+      'window command N history left for any window',
+      'window command N changes left for C:/h/w.code-workspace',
+      'window commands claimed by a window with no folder: history',
+      'window command N openTabs left for C:/h/w.code-workspace',
+      'window commands claimed by C:/h/w.code-workspace: changes, openTabs',
+    ]);
+    // A window that is already in front gets no focus change, so each open and command left for a workspace tells that window to claim.
+    expect(claims).toEqual([
+      { event: 'claim', data: { workspace: 'C:/h/windows/gh-7.code-workspace' } },
+      { event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } },
+      { event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } },
+    ]);
   });
 });

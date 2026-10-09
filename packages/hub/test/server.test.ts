@@ -168,6 +168,29 @@ describe('listenHub routes and state', () => {
     docked.close();
   });
 
+  it('sends a window event to the /events streams only, and counts them', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}) });
+
+    expect(server.notifyWindows('claim', {})).toBe(0);
+
+    const chunks: Record<string, string[]> = { '/events': [], '/dock/events': [] };
+
+    for (const path of Object.keys(chunks)) {
+      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => chunks[path]!.push(chunk));
+      });
+
+      outbound.on('error', () => {});
+      outbound.end();
+    }
+
+    await until(() => (server.clients() === 2 ? true : null));
+    expect(server.notifyWindows('claim', { workspace: 'C:/w.code-workspace' })).toBe(1);
+    await until(() => (chunks['/events']!.join('').includes('event: claim\ndata: {"workspace":"C:/w.code-workspace"}\n\n') ? true : null));
+    expect(chunks['/dock/events']!.join('')).not.toContain('event: claim');
+  });
+
   it('sends a dock event to the dock streams only, and counts them', async () => {
     server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}) });
 

@@ -32,6 +32,8 @@ export interface HubServer {
   update(): void;
   /** Sends an event to every `/dock/events` stream, such as `show` or `config`; returns how many streams it reached. */
   notifyDock(event: string, data: unknown): number;
+  /** Sends an event to every `/events` stream, such as `claim`; returns how many streams it reached. */
+  notifyWindows(event: string, data: unknown): number;
   close(): Promise<void>;
 }
 
@@ -145,6 +147,19 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
   });
 
+  const notify = (to: View, event: string, data: unknown): number => {
+    let sent = 0;
+
+    for (const [stream, view] of streams) {
+      if (view === to) {
+        stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        sent++;
+      }
+    }
+
+    return sent;
+  };
+
   const heartbeat = setInterval(() => {
     for (const stream of streams.keys()) {
       stream.write(': ping\n\n');
@@ -179,18 +194,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
             stream.write(built.get(view) ?? '');
           }
         },
-        notifyDock: (event, data) => {
-          let sent = 0;
-
-          for (const [stream, view] of streams) {
-            if (view === 'dock') {
-              stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-              sent++;
-            }
-          }
-
-          return sent;
-        },
+        notifyDock: (event, data) => notify('dock', event, data),
+        notifyWindows: (event, data) => notify('window', event, data),
         close: () =>
           new Promise<void>((done) => {
             clearInterval(heartbeat);
