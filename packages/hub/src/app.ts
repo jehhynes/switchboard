@@ -3,7 +3,7 @@ import { mkdirSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
-import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
+import { claudeService, claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -21,7 +21,7 @@ import type { ReportBody, RuntimeDeps } from './runtime.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the panel may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'snooze', 'restore']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'answer', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task']);
 
@@ -115,6 +115,23 @@ export function parseAction(body: unknown): FlowEvent | null {
     return null;
   }
 
+  // Only the fields the core reads, because a `sessionId` field would make the activity log name another subject.
+  if (body['type'] === 'answer' || body['type'] === 'open-question') {
+    const { workItemId, nativeSessionId } = body;
+
+    if (!Number.isInteger(workItemId) || typeof nativeSessionId !== 'string') {
+      return null;
+    }
+
+    if (body['type'] === 'open-question') {
+      return { type: 'open-question', workItemId: workItemId as number, nativeSessionId };
+    }
+
+    return typeof body['answer'] === 'string' && typeof body['question'] === 'string'
+      ? { type: 'answer', workItemId: workItemId as number, nativeSessionId, question: body['question'], answer: body['answer'] }
+      : null;
+  }
+
   return body as unknown as FlowEvent;
 }
 
@@ -147,6 +164,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     newSessionId: () => randomUUID().slice(0, 8),
     claudeSettings: claudeSettingsPath(homedir(), process.env),
+    service: claudeService,
     log: options.log,
     ...options.deps,
   };
@@ -256,7 +274,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Unknown action.' } };
         }
 
-        const { refused } = runtime.send(event);
+        const { refused } = event.type === 'answer' ? runtime.answer(event) : runtime.send(event);
 
         return refused === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: refused } };
       },

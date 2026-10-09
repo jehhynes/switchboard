@@ -14,7 +14,16 @@ export function mainControl(item: WorkItemView): Control | null {
     return null;
   }
 
-  const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Triage again' : null;
+  // A question the session waits on comes before an approval it reported earlier, as the row's mark does.
+  const wanted = waitsInBackground(activeSession(item))
+    ? 'Open in Claude'
+    : item.status === 'unstarted'
+      ? 'Start'
+      : item.status === 'awaiting-approval'
+        ? 'Approve'
+        : item.status === 'failed'
+          ? 'Triage again'
+          : null;
 
   return controlsOf(item).find((control) => control.label === wanted) ?? null;
 }
@@ -69,8 +78,14 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Copy', icon: 'copy', message: { type: 'copy', pastes: item.pastes.map(({ label, file }) => ({ label, file })) } });
   }
 
+  const question = openQuestion(item);
+
+  if (question !== null) {
+    controls.push({ label: 'Open in Claude', icon: 'comment-discussion', message: question });
+  }
+
   if (isBackground(session)) {
-    controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop') });
+    controls.push({ label: 'Attach', icon: 'terminal', message: { type: 'attach', shortId: session.shortId, name: sessionName(item) } }, { label: 'Stop', icon: 'debug-stop', message: action('stop') });
   }
 
   if (item.status !== 'done' && session === null && !adhoc && item.status !== 'triaging') {
@@ -110,16 +125,39 @@ function isBackground(session: SessionView | null): session is SessionView & { s
   return session !== null && session.state !== 'starting' && session.shortId !== null && !session.released;
 }
 
+/** A session waiting on the operator in its background process, which Open in Claude stops and opens in a Claude tab (PRD R70). */
+function waitsInBackground(session: SessionView | null): session is SessionView & { shortId: string; nativeSessionId: string } {
+  return isBackground(session) && session.state === 'waiting' && session.nativeSessionId !== null;
+}
+
+/** Open in Claude's message: the extension asks the hub to stop the session, then opens it in a Claude tab (PRD R70). */
+function openQuestion(item: WorkItemView): Record<string, unknown> | null {
+  const session = activeSession(item);
+
+  return waitsInBackground(session) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd } : null;
+}
+
+/** The terminal name for the row's session, such as `github 18941`. */
+function sessionName(item: WorkItemView): string {
+  return `${item.ticket.source} ${item.ticket.sourceKey}`;
+}
+
 
 /**
- * What a click on the row opens (PRD R27): the latest session in a terminal, attached while its background process runs and
- * resumed otherwise, else the worktree in VS Code, else, with no session, the ticket. `active` marks a session resumed elsewhere,
- * such as in a VS Code tab. Null when there is nothing to open, as for a session still starting.
+ * What a click on the row opens (PRD R27): Open in Claude while its background session waits on the operator (PRD R70), else the
+ * latest session in a terminal, attached while its background process runs and resumed otherwise, else the worktree in VS Code,
+ * else, with no session, the ticket. `active` marks a session resumed elsewhere, such as in a VS Code tab. Null when there is
+ * nothing to open, as for a session still starting.
  */
 export function openAction(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
   const session = activeSession(item);
-  const name = `${item.ticket.source} ${item.ticket.sourceKey}`;
+  const name = sessionName(item);
+  const question = openQuestion(item);
+
+  if (question !== null) {
+    return question;
+  }
 
   if (isBackground(session)) {
     return { type: 'attach', shortId: session.shortId, name };
@@ -196,7 +234,7 @@ function actionButton(control: Control, primary = false, iconOnly = false, title
 }
 
 /** Character caps for the texts sessions report; the contract asks for less, and a longer text is cut here with its whole in the tooltip. */
-export const CAPS = { stage: 24, approval: 60, note: 80 } as const;
+export const CAPS = { stage: 24, approval: 60, note: 80, question: 80 } as const;
 
 /** The text cut at `max` characters on a word boundary with an ellipsis, and the whole text for the tooltip when it was cut. */
 export function clip(text: string, max: number): { text: string; full: string | null } {
@@ -231,6 +269,8 @@ function actionsColumn(parts: string): string {
 export const ROW_COMMANDS: Record<string, string> = {
   Start: 'start',
   Approve: 'approve',
+  'Open in Claude': 'openQuestion',
+  Attach: 'attach',
   Stop: 'stop',
   'Triage again': 'triageAgain',
   'Mark done': 'markDone',
@@ -585,11 +625,33 @@ function approvalText(item: WorkItemView, summary: string, now: number): string 
   return `<span class="approval"${attributes}>${escape(text)}<span class="since"> · ${age(item.statusAt, now)}</span></span>`;
 }
 
+/**
+ * The question the background session waits on, in place of the stage, and for a one-part question a button per option that
+ * sends its label as the answer (PRD R70). A question with more parts has no buttons, because the reply answers only the first.
+ */
+function questionText(item: WorkItemView, question: NonNullable<WorkItemView['question']>): string {
+  const nativeSessionId = activeSession(item)?.nativeSessionId ?? null;
+  const options =
+    question.parts === 1 && nativeSessionId !== null
+      ? question.options
+          .map((option) => {
+            const message = { type: 'action', action: { type: 'answer', workItemId: item.id, nativeSessionId, question: question.text, answer: option.label } };
+
+            return `<button class="control option" title="${escape(option.description || option.label)}" data-message="${escape(JSON.stringify(message))}">${escape(option.label)}</button>`;
+          })
+          .join('')
+      : '';
+
+  return `${clipped('question', question.text, CAPS.question)}${options}`;
+}
+
 function row(item: WorkItemView, now: number, ui: PanelUi, namespaces: Record<string, string>): string {
   const main = mainControl(item);
   const rowKey = rowKeyOf(item);
   const summary = item.status === 'awaiting-approval' ? item.approvalSummary : null;
-  const stage = summary === null ? stageText(item, now) : approvalText(item, summary, now);
+  // A hub older than PRD R70 sends no question.
+  const question = item.question ?? null;
+  const stage = question !== null ? questionText(item, question) : summary === null ? stageText(item, now) : approvalText(item, summary, now);
   const notes = [item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped('note', note, CAPS.note)).join('');
   const { primary, rest } = splitLinks(item);
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;

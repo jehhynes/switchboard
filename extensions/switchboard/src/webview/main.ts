@@ -14,7 +14,7 @@ interface SelectMessage {
   open: boolean;
 }
 
-const CLIPPED = '.title, .playbook-name, .key, .stage, .approval, .note';
+const CLIPPED = '.title, .playbook-name, .key, .stage, .approval, .note, .question';
 const FOCUSABLE = 'button, a[href]';
 
 /** A button by its tooltip, which names its verb, or a link by its target. */

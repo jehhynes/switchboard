@@ -1,12 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Exec, ExecResult } from '@switchboard/claude';
+import type { Exec, ExecResult, ServiceDeps } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { DONE_CHECK_MS, MARKER_MS, MARKER_WATCH_RETRY_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import { DONE_CHECK_MS, MARKER_MS, MARKER_WATCH_RETRY_MS, QUESTION_READ_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -139,7 +140,15 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-function setup(cfg = config(), now = () => T0) {
+/** A background service that is not running; tests that answer pass their own. */
+const NO_SERVICE: ServiceDeps = {
+  listPipes: () => [],
+  connect: () => {
+    throw new Error('unexpected connect');
+  },
+};
+
+function setup(cfg = config(), now = () => T0, service = NO_SERVICE) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
   const source = new FakeSource();
@@ -158,6 +167,7 @@ function setup(cfg = config(), now = () => T0) {
       sleep: (ms) => (ms === DONE_CHECK_MS ? late.promise : Promise.resolve()),
       newSessionId: () => `s${++ids}`,
       claudeSettings: join(home, '.claude', 'settings.json'),
+      service,
       configDir: join(home, 'cfg'),
       log: (line) => logs.push(line),
     },
@@ -797,5 +807,194 @@ describe('Runtime', () => {
     const { runtime } = setup(cfg);
 
     expect(runtime.snapshot().errors.sources).toEqual({ zoho: 'Switchboard has no source named zoho.' });
+  });
+});
+
+describe('questions (PRD R70)', () => {
+  const ONE = { tempo: 'blocked', block: { questions: [{ question: 'Which tree should I record?', options: [{ label: 'Oak', description: 'sturdy' }, { label: 'Birch', description: 'white bark' }] }] } };
+  const TWO = { tempo: 'blocked', block: { questions: [...ONE.block.questions, { question: 'Which shape?', options: [{ label: 'Circle', description: 'round' }] }] } };
+
+  function jobState(state: unknown, mtime?: number): void {
+    const path = join(home, '.claude', 'jobs', '00000001', 'state.json');
+
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, JSON.stringify(state));
+
+    if (mtime !== undefined) {
+      utimesSync(path, mtime, mtime);
+    }
+  }
+
+  /** A running dev:develop session s1 (short ID 00000001) for ticket 8. */
+  async function started(service?: ServiceDeps) {
+    const context = setup(config(), () => T0, service);
+    context.source.result = { tickets: [issue('8')] };
+    await context.runtime.pollSource('github');
+    await context.runtime.settled();
+
+    return context;
+  }
+
+  const question = (runtime: Runtime) => runtime.snapshot().workItems[0]!.question;
+  const answer = (text: string) => ({ type: 'answer' as const, workItemId: 1, nativeSessionId: '00000001-native', question: 'Which tree should I record?', answer: text });
+
+  it('shows the question only while the session waits in its background process, and reads the job state again only when it changes', async () => {
+    const { store, cli, runtime } = await started();
+
+    jobState(ONE, 1_000);
+    expect(question(runtime)).toBeNull();
+
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+    expect(question(runtime)).toEqual({ text: 'Which tree should I record?', options: [{ label: 'Oak', description: 'sturdy' }, { label: 'Birch', description: 'white bark' }], parts: 1 });
+
+    // Same modification time: the cached read stands.
+    jobState(TWO, 1_000);
+    expect(question(runtime)?.parts).toBe(1);
+
+    jobState(TWO, 2_000);
+    expect(question(runtime)).toMatchObject({ text: 'Which tree should I record?', parts: 2 });
+
+    jobState({ tempo: 'idle' }, 3_000);
+    expect(question(runtime)).toBeNull();
+
+    jobState(ONE, 4_000);
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'running', detail: null });
+    expect(question(runtime)).toBeNull();
+
+    // Resumed in a VS Code tab: the tab asks the question, so the row does not.
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+    Object.assign(cli.roster[0]!, { kind: 'interactive', state: 'blocked' });
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'waiting', released: true });
+    expect(question(runtime)).toBeNull();
+  });
+
+  it('shows no question when the job state is missing', async () => {
+    const { runtime } = await started();
+
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'running', question: null });
+  });
+
+  it('sends the snapshot again once, a second after the session starts waiting', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runtime } = await started();
+      let changes = 0;
+      runtime.onChange(() => changes++);
+
+      runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+      expect(changes).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(QUESTION_READ_MS - 1);
+      expect(changes).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(changes).toBe(2);
+
+      runtime.send({ type: 'tick' });
+      await vi.advanceTimersByTimeAsync(QUESTION_READ_MS * 3);
+      expect(changes).toBe(3);
+
+      // Waiting again after running is a new wait.
+      runtime.send({ type: 'marker', sessionId: 's1', state: 'running', detail: null });
+      runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+      await vi.advanceTimersByTimeAsync(QUESTION_READ_MS);
+      expect(changes).toBe(6);
+
+      // Stopping clears a pending read.
+      runtime.send({ type: 'marker', sessionId: 's1', state: 'running', detail: null });
+      runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+      runtime.stop();
+      await vi.advanceTimersByTimeAsync(QUESTION_READ_MS);
+      expect(changes).toBe(8);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('answers through the background service, and notes a failed answer on the work item', async () => {
+    mkdirSync(join(home, '.claude', 'daemon'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'daemon', 'control.key'), 'key\n');
+    const path = process.platform === 'win32' ? `\\\\.\\pipe\\switchboard-test-${process.pid}-runtime` : join(home, 'control.sock');
+    const frames: string[] = [];
+    const replies = ['{"ok":true,"op":"reply"}\n', '{"ok":false,"error":"no such session"}\n'];
+    const server = createServer((socket) => {
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => {
+        frames.push(chunk);
+        socket.write(replies.shift()!);
+      });
+    });
+    await new Promise<void>((done) => server.listen(path, done));
+
+    try {
+      const { store, runtime } = await started({ listPipes: () => ['cc-daemon-1f-control'], connect: () => connect(path) });
+      jobState(ONE, 1_000);
+      runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+
+      expect(runtime.answer(answer('Birch')).refused).toBeNull();
+      await runtime.settled();
+      expect(frames.map((frame) => JSON.parse(frame))).toEqual([{ proto: 1, op: 'reply', short: '00000001', text: 'Birch', auth: 'key' }]);
+      expect(store.workItem(1)).toMatchObject({ status: 'running', error: null });
+
+      // A second click before the session runs again would become its next prompt (mechanics M24).
+      expect(runtime.answer(answer('Oak'))).toEqual({ actions: [], refused: 'The answer to that question was already sent.' });
+
+      // A new question in the same session can be answered.
+      jobState(ONE, 2_000);
+      expect(runtime.answer(answer('Oak')).refused).toBeNull();
+      await runtime.settled();
+      expect(store.workItem(1)).toMatchObject({ status: 'running', error: 'Answer failed: no such session' });
+      expect(frames).toHaveLength(2);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+
+  it("notes that Claude's background service is not running, and takes the answer again after a failure", async () => {
+    const { store, runtime } = await started();
+    jobState(ONE, 1_000);
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+
+    expect(runtime.answer(answer('Birch')).refused).toBeNull();
+    await runtime.settled();
+    expect(store.workItem(1)?.error).toBe("Answer failed: Claude's background service is not running.");
+
+    expect(runtime.answer(answer('Birch')).refused).toBeNull();
+  });
+
+  it('refuses an answer to a question the job state no longer shows, with no job state, or with several parts, and logs the refusal', async () => {
+    const { store, runtime } = await started();
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+
+    expect(runtime.answer(answer('Birch'))).toEqual({ actions: [], refused: 'The session no longer waits on that question.' });
+    jobState({ tempo: 'blocked', block: { questions: [TWO.block.questions[1]] } }, 1_000);
+    expect(runtime.answer(answer('Birch'))).toEqual({ actions: [], refused: 'The session no longer waits on that question.' });
+    expect(store.ticketHistory(1)!.events.filter((event) => event.type === 'answer').map((event) => event.refused)).toEqual([
+      'The session no longer waits on that question.',
+      'The session no longer waits on that question.',
+    ]);
+    // A call that now has several parts, whose first matches the row's question.
+    jobState(TWO, 2_000);
+    expect(runtime.answer(answer('Birch'))).toEqual({ actions: [], refused: 'The question has several parts; answer it with Open in Claude.' });
+    expect(store.ticketHistory(1)!.events.filter((event) => event.type === 'answer').at(-1)?.refused).toBe('The question has several parts; answer it with Open in Claude.');
+
+    // The core refuses a session other than the row's before the job state is read.
+    expect(runtime.answer({ ...answer('Birch'), nativeSessionId: 'other' }).refused).toBe('The work item has another session now.');
+  });
+
+  it('stops the session for Open in Claude without the release check, and blocks the work item', async () => {
+    const { store, cli, runtime } = await started();
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+    const roster = cli.calls.filter((call) => call[1] === 'agents').length;
+
+    runtime.send({ type: 'open-question', workItemId: 1, nativeSessionId: '00000001-native' });
+    await runtime.settled();
+
+    expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([['claude', 'stop', '00000001']]);
+    expect(cli.calls.filter((call) => call[1] === 'agents')).toHaveLength(roster);
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Opened in Claude to answer.' });
+    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
   });
 });

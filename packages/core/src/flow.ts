@@ -30,6 +30,7 @@ export const MESSAGES = {
   sessionFinished: 'The session ended.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
+  openedToAnswer: 'Opened in Claude to answer.',
 } as const;
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
@@ -61,7 +62,8 @@ export type Report =
   /** A follow-up for a new ad-hoc work item (PRD R68); a null repo or title takes the default. */
   | { kind: 'task'; prompt: string; repo: string | null; title: string | null };
 
-export type StopReason = 'operator' | 'release';
+/** `open`: the operator opens the waiting session in a Claude tab to answer it there (PRD R70). */
+export type StopReason = 'operator' | 'release' | 'open';
 
 export type LiveState = Exclude<SessionState, 'starting' | 'ended'>;
 
@@ -98,9 +100,14 @@ export type FlowEvent =
   | { type: 'report'; sessionId: string; report: Report }
   | { type: 'stop-succeeded'; sessionId: string; reason: StopReason }
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string }
+  | { type: 'reply-failed'; sessionId: string; message: string }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
   | { type: 'start' | 'approve' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
+  /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
+  | { type: 'open-question'; workItemId: number; nativeSessionId: string }
+  /** Answers the question the row showed, which the hub checks against the job state (PRD R70). */
+  | { type: 'answer'; workItemId: number; nativeSessionId: string; question: string; answer: string }
   | { type: 'pick' | 'retriage-pool' | 'restore'; ticketId: number }
   /** Snoozes the ticket until `until`, or indefinitely when null (PRD R49). */
   | { type: 'snooze'; ticketId: number; until: number | null }
@@ -136,7 +143,8 @@ export type FlowAction =
       permissionMode: PermissionMode;
       model: string | null;
     }
-  | { type: 'stop-session'; sessionId: string; shortId: string | null; reason: StopReason };
+  | { type: 'stop-session'; sessionId: string; shortId: string | null; reason: StopReason }
+  | { type: 'reply-session'; sessionId: string; shortId: string; text: string };
 
 export interface FlowContext {
   now: number;
@@ -195,13 +203,13 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'pick', 'retriage-pool', 'restore', 'snooze']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'answer', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
  * roster reads, are logged only when they change a row.
  */
-const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'session-start-failed', 'stop-failed']);
+const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'session-start-failed', 'stop-failed', 'reply-failed']);
 
 function actorOf(type: FlowEvent['type']): Actor {
   if (OPERATOR_EVENTS.has(type)) {
@@ -248,6 +256,10 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { reason: event.reason };
     case 'stop-failed':
       return { reason: event.reason, message: event.message };
+    case 'reply-failed':
+      return { message: event.message };
+    case 'answer':
+      return { answer: event.answer };
     case 'worktree-found':
       return { path: event.path, branch: event.branch };
     case 'adhoc':
@@ -378,6 +390,8 @@ class Flow {
         return this.stopSucceeded(event.sessionId, event.reason);
       case 'stop-failed':
         return this.stopFailed(event.sessionId, event.reason, event.message);
+      case 'reply-failed':
+        return this.replyFailed(event.sessionId, event.message);
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
@@ -392,6 +406,10 @@ class Flow {
         return this.retriage(this.openItem(event.workItemId));
       case 'stop':
         return this.stop(this.knownItem(event.workItemId));
+      case 'answer':
+        return this.answer(this.openItem(event.workItemId), event.nativeSessionId, event.answer);
+      case 'open-question':
+        return this.openQuestion(this.openItem(event.workItemId), event.nativeSessionId);
       case 'pick':
         return this.pick(this.poolTicket(event.ticketId));
       case 'retriage-pool':
@@ -1036,14 +1054,15 @@ class Flow {
     }
 
     // A session that already reported done ends normally, so a finished setup still starts its task.
-    const stopped = reason === 'operator' && session.outcome !== 'done';
+    const stopped = reason !== 'release' && session.outcome !== 'done';
+    const message = reason === 'open' ? MESSAGES.openedToAnswer : MESSAGES.stopped;
 
     this.store.updateSession(sessionId, {
       state: 'ended',
       released: true,
       stateAt: this.now,
       endedAt: this.now,
-      ...(stopped && session.outcome === null ? { outcome: 'stopped' as const, outcomeDetail: MESSAGES.stopped } : {}),
+      ...(stopped && session.outcome === null ? { outcome: 'stopped' as const, outcomeDetail: message } : {}),
     });
 
     if (!stopped) {
@@ -1061,9 +1080,9 @@ class Flow {
       this.done(item, 'unassigned', null);
     } else if (item.approvalHeld || item.status === 'awaiting-approval') {
       // A stop is not a decision on the approval, so Approve stays offered (PRD R40).
-      this.restoreApproval(item, MESSAGES.stopped);
+      this.restoreApproval(item, message);
     } else {
-      this.block(item, MESSAGES.stopped);
+      this.block(item, message);
     }
   }
 
@@ -1073,8 +1092,54 @@ class Flow {
     const item = this.latest(session);
 
     if (item !== null) {
-      this.store.updateWorkItem(item.id, { error: `${reason === 'operator' ? 'Stop' : 'Release'} failed: ${message}` });
+      this.store.updateWorkItem(item.id, { error: `${reason === 'release' ? 'Release' : 'Stop'} failed: ${message}` });
     }
+  }
+
+  /** The session keeps waiting, so the operator can answer again or open it in Claude. */
+  private replyFailed(sessionId: string, message: string): void {
+    const item = this.latest(this.session(sessionId));
+
+    if (item !== null) {
+      this.store.updateWorkItem(item.id, { error: `Answer failed: ${message}` });
+    }
+  }
+
+  /** The work item's active session when it is the row's session, runs in its background process and waits on the operator (PRD R70). */
+  private waitingBackground(item: WorkItem, nativeSessionId: string): Session & { shortId: string } {
+    const session = this.activeSession(item);
+
+    if (session === null || session.state === 'starting' || session.shortId === null || session.released) {
+      throw new Refusal('The work item has no session running in its background process.');
+    }
+
+    if (session.nativeSessionId !== nativeSessionId) {
+      throw new Refusal('The work item has another session now.');
+    }
+
+    if (session.state !== 'waiting') {
+      throw new Refusal('The session is not waiting on a question.');
+    }
+
+    return session as Session & { shortId: string };
+  }
+
+  /** Sends the answer through Claude's background service; the hook marker moves the session to running (PRD R70). */
+  private answer(item: WorkItem, nativeSessionId: string, answer: string): void {
+    if (answer.trim() === '') {
+      throw new Refusal('The answer is empty.');
+    }
+
+    const session = this.waitingBackground(item, nativeSessionId);
+
+    this.actions.push({ type: 'reply-session', sessionId: session.id, shortId: session.shortId, text: answer });
+  }
+
+  /** Stops the background session, so the window can open it in a Claude tab, which asks the question again (PRD R70). */
+  private openQuestion(item: WorkItem, nativeSessionId: string): void {
+    const session = this.waitingBackground(item, nativeSessionId);
+
+    this.actions.push({ type: 'stop-session', sessionId: session.id, shortId: session.shortId, reason: 'open' });
   }
 
   // Operator actions

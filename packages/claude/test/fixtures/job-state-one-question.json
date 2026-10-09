@@ -1,0 +1,57 @@
+{
+  "state": "working",
+  "detail": "starting…",
+  "tempo": "blocked",
+  "output": null,
+  "children": null,
+  "linkScanOffset": 0,
+  "template": "bg",
+  "respawnFlags": [
+    "--permission-mode",
+    "auto",
+    "-n",
+    "mech",
+    "--model",
+    "haiku"
+  ],
+  "providerEnv": {},
+  "intent": "<prompt>",
+  "name": "mech",
+  "nameSource": "user",
+  "sessionId": "d3302c76-71c4-4eb3-9c0e-ebf94b622e57",
+  "resumeSessionId": "d3302c76-71c4-4eb3-9c0e-ebf94b622e57",
+  "daemonShort": "d3302c76",
+  "cwd": "D:\\git\\example",
+  "createdAt": "2026-10-09T11:27:03.401Z",
+  "updatedAt": "2026-10-09T11:27:06.926Z",
+  "firstTerminalAt": null,
+  "backend": "daemon",
+  "inFlight": {
+    "tasks": 0,
+    "queued": 0,
+    "kinds": [],
+    "drainableMonitors": 0
+  },
+  "needs": "answer: Which fruit should I record? (Apple · Mango · Plum)",
+  "block": {
+    "questions": [
+      {
+        "question": "Which fruit should I record?",
+        "options": [
+          {
+            "label": "Apple",
+            "description": "crunchy"
+          },
+          {
+            "label": "Mango",
+            "description": "tropical"
+          },
+          {
+            "label": "Plum",
+            "description": "purple"
+          }
+        ]
+      }
+    ]
+  }
+}

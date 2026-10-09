@@ -65,6 +65,7 @@ function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemView {
     parent: null,
     approvalSends: false,
     waits: [],
+    question: null,
     ...patch,
   };
 }
@@ -103,14 +104,20 @@ describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
     expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Attach', 'Stop', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['History']);
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(controlsOf(item(7, { sessions: [session()] }))[0]?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 7 } });
+    expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
+      { type: 'attach', shortId: 'aaaa1111', name: 'github 107' },
+      { type: 'action', action: { type: 'stop', workItemId: 7 } },
+      { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
+      { type: 'action', action: { type: 'snooze', ticketId: 7 } },
+      { type: 'history', ticketId: 7, key: 'gh 107' },
+    ]);
   });
 });
 
@@ -186,7 +193,7 @@ describe('mainControl', () => {
     expect(mainControl(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toBeNull();
     expect(mainControl(item(1, { status: 'unstarted' }))?.label).toBe('Start');
     expect(mainControl(item(1, { status: 'triaging' }))).toBeNull();
-    expect(mainControl(item(1, { sessions: [session({ state: 'waiting' })] }))).toBeNull();
+    expect(mainControl(item(1, { sessions: [session({ state: 'waiting', released: true })] }))).toBeNull();
     expect(mainControl(item(1))).toBeNull();
   });
 });
@@ -433,7 +440,7 @@ describe('renderPanel', () => {
     expect(closed.querySelector('.more-button, .menu')).toBeNull();
     expect(titles(closed, '[data-item="2"] button.control')).toEqual([]);
 
-    const running = render(snapshot([item(4, { status: 'blocked', sessions: [session({ state: 'waiting' })] })]));
+    const running = render(snapshot([item(4, { sessions: [session()] })]));
 
     expect(titles(running, '[data-item="4"] .actions > *')).toEqual([]);
     expect(JSON.parse(running.querySelector<HTMLElement>('[data-item="4"]')!.dataset['open']!)).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 104' });
@@ -454,7 +461,8 @@ describe('renderPanel', () => {
         history: { type: 'history', ticketId: 1, key: 'gh 101' },
       },
     });
-    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['stop', 'markDone', 'snooze', 'history']);
+    expect(rowMenu(running.querySelector('[data-item="4"]')!).shown).toEqual(['attach', 'stop', 'markDone', 'snooze', 'history']);
+    expect(rowMenu(running.querySelector('[data-item="4"]')!).actions['attach']).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 104' });
     expect(rowMenu(render(snapshot([item(3, { status: 'done', doneAt: NOW })]), { groups: new Map([['done', true]]) }).querySelector('[data-item="3"]')!).shown).toEqual(['history']);
   });
 
@@ -553,7 +561,7 @@ describe('renderPanel', () => {
       ]),
       { groups: new Map([['done', true]]) },
     );
-    expect([5, 6, 7].map((id) => [...others.querySelectorAll<HTMLButtonElement>(`[data-item="${id}"] > .actions > button`)].map((button) => button.title))).toEqual([[], [], ['Approve: runs /push']]);
+    expect([5, 6, 7].map((id) => [...others.querySelectorAll<HTMLButtonElement>(`[data-item="${id}"] > .actions > button`)].map((button) => button.title))).toEqual([[], ['Open in Claude'], ['Approve: runs /push']]);
 
     const done = render(snapshot([item(5, { status: 'done', doneAt: NOW, doneReason: 'session', warning: 'The ticket left the assigned state.', stage: 'review', stageAt: NOW - 60_000, links })])).querySelector('[data-item="5"]')!;
     // The warning note follows its mark, before the stage and the badges.
@@ -1293,5 +1301,113 @@ describe('startPanel select (PRD R63)', () => {
     expect(scrolled).toEqual(['item:1']);
     expect([...root.querySelectorAll('.item.selected')].map((element) => element.getAttribute('data-row'))).toEqual(['item:1']);
     expect(posted).toEqual([]);
+  });
+});
+
+describe('questions (PRD R70)', () => {
+  const OPTIONS = [
+    { label: 'Oak', description: 'sturdy' },
+    { label: 'Birch', description: 'white bark' },
+  ];
+  const LONG = 'Which of the two migration strategies in the plan should the fix use, the backfill or the lazy rewrite on read?';
+  const waitingItem = (id: number, patch: Partial<WorkItemView> = {}) =>
+    item(id, { sessions: [session({ state: 'waiting' })], stage: 'researching', stageAt: NOW, question: { text: 'Which tree should I record?', options: OPTIONS, parts: 1 }, ...patch });
+  const OPEN = (id: number) => ({ type: 'open-question', workItemId: id, sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+
+  it('shows the question in place of the stage, with a button per option that sends its label', () => {
+    const row = render(snapshot([waitingItem(1)])).querySelector('[data-item="1"]')!;
+    const meta = row.querySelector('.line.third .meta')!;
+
+    expect([...meta.children].map((child) => child.className)).toEqual(['mark codicon codicon-question', 'question', 'control option', 'control option']);
+    expect(meta.querySelector('.question')!.textContent).toBe('Which tree should I record?');
+    expect(meta.querySelector('.question')!.hasAttribute('title')).toBe(false);
+    expect(meta.querySelector('.stage')).toBeNull();
+    expect([...meta.querySelectorAll<HTMLButtonElement>('button.option')].map((button) => [button.textContent, button.title, JSON.parse(button.dataset['message']!)])).toEqual([
+      ['Oak', 'sturdy', { type: 'action', action: { type: 'answer', workItemId: 1, nativeSessionId: 'aaaa1111-native', question: 'Which tree should I record?', answer: 'Oak' } }],
+      ['Birch', 'white bark', { type: 'action', action: { type: 'answer', workItemId: 1, nativeSessionId: 'aaaa1111-native', question: 'Which tree should I record?', answer: 'Birch' } }],
+    ]);
+  });
+
+  it('cuts a long question at 80 characters on a word boundary, with the whole question in the tooltip', () => {
+    const question = render(snapshot([waitingItem(1, { question: { text: LONG, options: [{ label: 'Backfill', description: '' }], parts: 1 } })])).querySelector<HTMLElement>('[data-item="1"] .question')!;
+
+    expect(question.textContent).toBe('Which of the two migration strategies in the plan should the fix use, the…');
+    expect([question.title, question.hasAttribute('data-full')]).toEqual([LONG, true]);
+    // An option without a description shows its label as the tooltip.
+    expect(render(snapshot([waitingItem(1, { question: { text: LONG, options: [{ label: 'Backfill', description: '' }], parts: 1 } })])).querySelector<HTMLElement>('button.option')!.title).toBe('Backfill');
+  });
+
+  it('shows no option buttons for a question with more than one part, and only the stage without a question', () => {
+    const root = render(snapshot([waitingItem(1, { question: { text: 'Which color?', options: OPTIONS, parts: 2 } }), waitingItem(2, { question: null })]));
+
+    expect(root.querySelector('[data-item="1"] .question')!.textContent).toBe('Which color?');
+    expect(root.querySelector('[data-item="1"] button.option')).toBeNull();
+    expect(root.querySelector('[data-item="2"] .question')).toBeNull();
+    expect(root.querySelector('[data-item="2"] .stage')!.textContent).toBe('researching · 0s');
+  });
+
+  it('shows the question before an approval summary the session reported earlier', () => {
+    const root = render(snapshot([waitingItem(1, { status: 'awaiting-approval', approvalPrompt: '/push', approvalSummary: 'Post the answer' })]));
+
+    expect(root.querySelector('[data-item="1"] .approval')).toBeNull();
+    expect(root.querySelector('[data-item="1"] .question')!.textContent).toBe('Which tree should I record?');
+    expect(titles(root, '[data-item="1"] .actions > button')).toEqual(['Open in Claude']);
+  });
+
+  it('makes Open in Claude the main control and the click and Enter action of a session waiting in its background process, known question or not', () => {
+    for (const entry of [waitingItem(1), waitingItem(1, { question: null })]) {
+      const row = render(snapshot([entry])).querySelector<HTMLElement>('[data-item="1"]')!;
+
+      expect(titles(row, '.actions > button.control')).toEqual(['Open in Claude']);
+      expect(row.querySelector('.actions > button')!.className).toBe('control action-button');
+      expect(row.querySelector('.actions .codicon')!.className).toBe('codicon codicon-comment-discussion');
+      expect(JSON.parse(row.querySelector<HTMLElement>('.actions > button')!.dataset['message']!)).toEqual(OPEN(1));
+      expect(JSON.parse(row.dataset['open']!)).toEqual(OPEN(1));
+      // Without a worktree, Ctrl+click runs the click action.
+      expect(row.hasAttribute('data-open-editor')).toBe(false);
+      expect(rowMenu(row).shown).toEqual(['openQuestion', 'attach', 'stop', 'markDone', 'snooze', 'history']);
+      expect(rowMenu(row).actions['openQuestion']).toEqual(OPEN(1));
+      expect(rowMenu(row).actions['attach']).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 101' });
+    }
+
+    expect(openAction(waitingItem(1))).toEqual(OPEN(1));
+    expect(editorAction(waitingItem(1))).toBeNull();
+    // Ctrl+click opens the worktree when there is one, as for any session running in its background process (PRD R27).
+    expect(editorAction(waitingItem(1, { worktree: { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' } }))).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/101-fix' });
+  });
+
+  it('keeps the other click actions on rows not waiting in a background process', () => {
+    const tab = waitingItem(1, { sessions: [session({ state: 'waiting', released: true })], question: null });
+    const running = waitingItem(2, { sessions: [session({ state: 'running' })], question: null });
+
+    expect(openAction(tab)).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 101', active: true });
+    expect(labels(tab)).not.toContain('Open in Claude');
+    expect(labels(tab)).not.toContain('Attach');
+    expect(mainControl(tab)).toBeNull();
+    expect(openAction(running)).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 102' });
+    expect(labels(running)).toEqual(['Attach', 'Stop', 'Mark done', 'Snooze', 'History']);
+  });
+
+  it('posts an answer from an option button and Open in Claude from a click, Enter or Ctrl+click on the row', () => {
+    document.body.innerHTML = '<div id="root"></div>';
+    const root = document.getElementById('root')!;
+    const posted: unknown[] = [];
+    startPanel(root, { postMessage: (message) => posted.push(message) }, () => NOW);
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', snapshot: snapshot([waitingItem(1)]) } }));
+    const row = root.querySelector<HTMLElement>('[data-item="1"]')!;
+
+    root.querySelector<HTMLButtonElement>('button.option[title="white bark"]')!.click();
+    root.querySelector<HTMLElement>('[data-item="1"] .question')!.click();
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    root.querySelector<HTMLElement>('[data-item="1"] .title')!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    controlNamed(root, 'Open in Claude').click();
+
+    expect(posted.slice(1)).toEqual([
+      { type: 'action', action: { type: 'answer', workItemId: 1, nativeSessionId: 'aaaa1111-native', question: 'Which tree should I record?', answer: 'Birch' } },
+      OPEN(1),
+      OPEN(1),
+      OPEN(1),
+      OPEN(1),
+    ]);
   });
 });

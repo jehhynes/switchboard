@@ -9,7 +9,7 @@ import { HistoryPanels } from './historyPanel.js';
 import type { HistoryMessage } from './historyPanel.js';
 import { startHub } from './hubProcess.js';
 import { NeedsYouToasts } from './notify.js';
-import { WorkItemsView, attach, claimOpen, copyPaste, dispatch, goTo, openLink, openSession, openUri, openWorktree, resume, setSource, startAdhoc } from './panel.js';
+import { WorkItemsView, attach, claimOpen, copyPaste, dispatch, goTo, openLink, openQuestion, openSession, openUri, openWorktree, resume, runOpen, setSource, startAdhoc } from './panel.js';
 import type { PasteChoice } from './panel.js';
 import type { RowTarget } from './search.js';
 import { SettingsEditor } from './settingsEditor.js';
@@ -32,6 +32,8 @@ export interface SwitchboardApi {
   restoreHistory(state: unknown): Promise<void>;
   /** Runs the URI handler, which the integration suite cannot reach through the OS (PRD R69). */
   openUri(uri: vscode.Uri, waitMs?: number): Promise<RowTarget | null>;
+  /** Runs Open in Claude against `hub`, by default the connected one, so the integration suite can stand in for a hub that accepts it (PRD R70). */
+  openQuestion(workItemId: number, sessionId: string, cwd: string, options?: { waitMs?: number; hub?: HubRecord }): Promise<string>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -118,12 +120,16 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
             return copyPaste(local.pastes);
           case 'history':
             return history.open(row.actions[key] as HistoryMessage);
+          case 'openQuestion':
+          case 'attach':
+            return runOpen(row.actions[key] as { type: string });
           default:
             return dispatch(keeper.current(), row.actions[key]);
         }
       }),
     ),
     vscode.commands.registerCommand('switchboard.attach', (shortId: string, name: string) => attach(shortId, name)),
+    vscode.commands.registerCommand('switchboard.openQuestion', (workItemId: number, sessionId: string, cwd: string) => openQuestion(keeper.current(), view, workItemId, sessionId, cwd)),
     vscode.commands.registerCommand('switchboard.open', (sessionId: string, cwd: string) => openSession(keeper.current(), sessionId, cwd)),
     vscode.commands.registerCommand('switchboard.resume', (sessionId: string, cwd: string, name: string, active: boolean) => resume(keeper.current(), sessionId, cwd, name, active === true)),
     vscode.commands.registerCommand('switchboard.openLink', (target: string) => openLink(target)),
@@ -185,7 +191,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   context.subscriptions.push({ dispose: () => keeper.dispose() });
 
-  return { hub: () => keeper.current(), state: () => view.state(), historyTabs: () => history.shown(), restoreHistory: (state) => history.restore(state), badge: () => view.badge(), show: (state) => view.update(state), openUri: (uri, waitMs) => openUri(view, uri, waitMs) };
+  return { hub: () => keeper.current(), state: () => view.state(), historyTabs: () => history.shown(), restoreHistory: (state) => history.restore(state), badge: () => view.badge(), show: (state) => view.update(state), openUri: (uri, waitMs) => openUri(view, uri, waitMs), openQuestion: (workItemId, sessionId, cwd, options = {}) => openQuestion(options.hub ?? keeper.current(), view, workItemId, sessionId, cwd, options.waitMs) };
 }
 
 export function deactivate(): void {}

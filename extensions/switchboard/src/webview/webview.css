@@ -103,6 +103,9 @@ body.vscode-light .key.github { --hue: #1f2328; }
 a.badge.pr:hover, a.key.github:hover, a.key.zoho:hover, a.key.forum:hover { background: color-mix(in srgb, var(--hue) 32%, transparent); }
 .approval { color: var(--vscode-descriptionForeground); font-style: italic; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .approval .since { font-style: normal; }
+/* A waiting question keeps a few characters beside its option buttons, which clip with an ellipsis on a narrow panel (PRD R70). */
+.meta > .question { flex: 0 1 auto; min-width: 4em; }
+.meta > .option { display: inline-block; flex: 0 1 auto; min-width: 2.5em; font-size: 12px; line-height: 16px; padding: 0 6px; }
 /* Scrollbars like VS Code's own: thin, theme-coloured, and shown only while the scrollable area is hovered. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }

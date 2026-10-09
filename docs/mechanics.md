@@ -257,6 +257,32 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** the operator's branded Chrome (154), which no longer accepts `--load-extension`, so the extension was not loaded there; a page on a public origin such as `https://github.com`, because the experiment's page was on a loopback origin, to which Chrome's local network access rules for public pages do not apply; and GitHub's live board DOM. The experiment ran before the button was limited to cards that `GET /cards` lists; that limit is tested in jsdom only.
 - **Current use:** the hub's `POST /snooze` checks (architecture.md § Hub lifecycle) and the extension's snooze request (architecture.md § Chrome extension).
 
+## M24. The background service's job state and `reply` request
+
+- **Date:** 2026-10-09.
+- **Versions:** Claude Code CLI 2.1.295 (07e8f67), Windows 11.
+- **Inspection:** `claude.exe daemon run` owns every `--bg` session; each runs as an interactive session in a PTY host (`claude.exe --bg-pty-host \\.\pipe\cc-daemon-<hash>-pty-<short> …`). `claude attach` relays that terminal's bytes. The service listens on `\\.\pipe\cc-daemon-<hash>-control` for newline-delimited JSON `{proto: 1, op, …}` (ops include ping, list, reply, kill), authenticated by the text of `<Claude config dir>/daemon/control.key`. Each session also has an authenticated, single-client worker pipe `-rv-<short>` between the service and the session; connecting to it would evict the service.
+- **Experiment:** `haiku` sessions in `.wip/mech`, started with Switchboard's start arguments, each asked an `AskUserQuestion`. While one waited, its roster entry was `kind: background`, `status: waiting`, `state: blocked`, and `<config dir>/jobs/<short>/state.json` held `tempo: "blocked"`, `needs` (a one-line summary of the first question) and `block.questions[]`, each with `question` and `options[{label, description}]`; no `header` or `multiSelect`, which only the transcript's `tool_use` input has. Then `{"proto":1,"op":"reply","short":"<short>","text":"<answer>","auth":"<control.key>"}` on the control pipe.
+- **Result:**
+  - The reply returned `{"ok":true,"op":"reply"}`. The transcript recorded a real `tool_result` (`Your questions have been answered: "<q>"="<label>"`), and the session continued in its background process with the same pid and its earlier context.
+  - A label matches case-insensitively; text matching no option is accepted as free text.
+  - With two questions in one call, the reply answered only the first; the tool returned at once and the second question was lost.
+  - A reply while the session is idle runs as its next prompt; a reply during a running tool is queued and absorbed into that turn.
+- **Limits:** the pipe name, the frame, the key, the job state's shape and how a reply resolves to an answer are undocumented and can change with any CLI update. Only one control pipe was listed; how its hash is derived was not inspected.
+- **Current use:** answering on the row (PRD R70; architecture.md § Claude Code runner).
+
+## M25. Opening a waiting session in a Claude tab
+
+- **Date:** 2026-10-09.
+- **Versions:** Claude Code CLI 2.1.295, Claude Code extension 2.1.295, VS Code 1.141.0, an isolated VS Code instance driven over its debugging port. The operator's Claude settings had `permissions.defaultMode: "auto"`.
+- **Experiment:** a `--bg` session in `.wip/mech` remembered a code word and waited on an `AskUserQuestion`. `claude stop <short>`, then `claude-vscode.primaryEditor.open(<session ID>)` in a window on `.wip/mech`. Repeated with a session started in `--permission-mode default`.
+- **Result:**
+  - After the stop the roster no longer listed the session; `--all` showed `state: "stopped"` with no pid (M5 recorded `done` on 2.1.288). The transcript ended with the unanswered `tool_use`.
+  - The tab showed the history and asked the question again with its options and Other. The roster listed the same session ID as `kind: interactive` with a new pid and no short ID.
+  - On the answer, the CLI recorded a synthetic error `tool_result` ("Tool call interrupted…"), an assistant "No response requested.", then the answer as the user message `Answering your earlier question "<q>": <answer>`. The session used its earlier context and kept its session ID. The hook markers ran in the tab's process.
+  - The tab ran in the operator's default mode (`auto`) both times, not the mode the session started with.
+- **Current use:** Open in Claude (PRD R70).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

@@ -148,6 +148,26 @@ describe('parseReport and reportBody', () => {
     expect(parseAction({ type: 'start', workItemId: 1 })).toEqual({ type: 'start', workItemId: 1 });
     expect(parseAction({ type: 'poll', source: 'github', tickets: [] })).toBeNull();
   });
+
+  it('keeps only the fields of an answer and of Open in Claude, and refuses them without a work item, the session, the question or a text answer (PRD R70)', () => {
+    const answer = { type: 'answer', workItemId: 3, nativeSessionId: 'native-3', question: 'Which tree?', answer: 'Birch' };
+
+    expect(parseAction({ ...answer, sessionId: 's1' })).toEqual(answer);
+    expect(parseAction({ ...answer, answer: '' })).toEqual({ ...answer, answer: '' });
+    expect(parseAction({ type: 'open-question', workItemId: 3, nativeSessionId: 'native-3', sessionId: 's1', cwd: 'D:/wt' })).toEqual({ type: 'open-question', workItemId: 3, nativeSessionId: 'native-3' });
+
+    for (const body of [
+      { ...answer, answer: undefined },
+      { ...answer, answer: 2 },
+      { ...answer, question: undefined },
+      { ...answer, nativeSessionId: undefined },
+      { ...answer, workItemId: '3' },
+      { type: 'open-question', workItemId: 3 },
+      { type: 'open-question', workItemId: 1.5, nativeSessionId: 'native-3' },
+    ]) {
+      expect(parseAction(body), JSON.stringify(body)).toBeNull();
+    }
+  });
 });
 
 describe('loadConfig', () => {
@@ -186,6 +206,9 @@ describe('createHubApp', () => {
     expect(await app.post['/action']!({ type: 'approve', workItemId: 9 })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
     expect(await app.post['/action']!({ type: 'poll' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/action']!({ type: 'retry', workItemId: 1 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
+    expect(await app.post['/action']!({ type: 'answer', workItemId: 9, nativeSessionId: 'n', question: 'Which?', answer: 'Birch' })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
+    expect(await app.post['/action']!({ type: 'open-question', workItemId: 9, nativeSessionId: 'n' })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
+    expect(await app.post['/action']!({ type: 'open-question', workItemId: 'x', nativeSessionId: 'n' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/report']!({ sessionId: 's9', kind: 'stage', stage: 'x' })).toEqual({ status: 409, body: { error: 'Unknown session s9.' } });
     expect(await app.post['/report']!({ kind: 'stage' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' } });
     expect(app.busy()).toBe(false);

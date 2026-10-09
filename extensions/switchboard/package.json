@@ -142,6 +142,16 @@
         "category": "Switchboard"
       },
       {
+        "command": "switchboard.row.openQuestion",
+        "title": "Open in Claude",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.row.attach",
+        "title": "Attach",
+        "category": "Switchboard"
+      },
+      {
         "command": "switchboard.row.stop",
         "title": "Stop",
         "category": "Switchboard"
@@ -278,6 +288,14 @@
           "when": "false"
         },
         {
+          "command": "switchboard.row.openQuestion",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.row.attach",
+          "when": "false"
+        },
+        {
           "command": "switchboard.row.stop",
           "when": "false"
         },
@@ -326,9 +344,19 @@
           "group": "1_run@2"
         },
         {
+          "command": "switchboard.row.openQuestion",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.openQuestion",
+          "group": "1_run@3"
+        },
+        {
+          "command": "switchboard.row.attach",
+          "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.attach",
+          "group": "1_run@4"
+        },
+        {
           "command": "switchboard.row.stop",
           "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.stop",
-          "group": "1_run@4"
+          "group": "1_run@5"
         },
         {
           "command": "switchboard.row.triageAgain",
@@ -363,7 +391,7 @@
         {
           "command": "switchboard.row.copy",
           "when": "webviewId == 'switchboard.workItems' && webviewSection == 'row' && switchboard.row.copy",
-          "group": "1_run@5"
+          "group": "1_run@6"
         },
         {
           "command": "switchboard.row.history",

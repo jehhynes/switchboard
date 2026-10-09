@@ -87,6 +87,8 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   'mark-done': { text: 'You marked it done', icon: 'pass' },
   retriage: { text: 'You asked to triage it again', icon: 'filter' },
   stop: { text: 'You asked to stop the session', icon: 'debug-stop' },
+  answer: { text: 'You answered the question', icon: 'comment' },
+  'open-question': { text: 'You opened the question in Claude', icon: 'comment-discussion' },
   pick: { text: 'You picked it from the pool', icon: 'pin' },
   'retriage-pool': { text: 'You asked to triage the pool ticket again', icon: 'filter' },
   restore: { text: 'You restored it', icon: 'bell' },
@@ -408,6 +410,8 @@ class Builder {
         skip.add('snoozed');
       } else if (event.type === 'stop' && event.sessionId === null) {
         text = 'You asked to stop the session';
+      } else if (event.type === 'answer') {
+        text = `You answered: ${oneLine(str(detail['answer']))}`;
       }
 
       return { category: 'you', icon: operator.icon, text, tone: 'accent' };
@@ -452,10 +456,15 @@ class Builder {
         skip.add('state').add('released');
         return detail['reason'] === 'release'
           ? { category: 'session', icon: 'debug-disconnect', text: `Switchboard released ${session} so it can resume in VS Code` }
-          : { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped` };
+          : detail['reason'] === 'open'
+            ? { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped to open in Claude` }
+            : { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped` };
       case 'stop-failed':
         skip.add('error');
         return { category: 'session', icon: 'error', text: detail['reason'] === 'release' ? 'Releasing the session failed' : 'Stopping the session failed', detail: str(detail['message']), tone: 'error' };
+      case 'reply-failed':
+        skip.add('error');
+        return { category: 'session', icon: 'error', text: 'Sending your answer failed', detail: str(detail['message']), tone: 'error' };
       case 'triage-succeeded': {
         skip.add('playbook');
         const rating = [detail['immediacy'], detail['severity']].filter((part) => part != null).join(' · ');

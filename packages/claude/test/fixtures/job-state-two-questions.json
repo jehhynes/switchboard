@@ -1,0 +1,68 @@
+{
+  "state": "working",
+  "detail": "starting…",
+  "tempo": "blocked",
+  "output": null,
+  "children": null,
+  "linkScanOffset": 0,
+  "template": "bg",
+  "respawnFlags": [
+    "--permission-mode",
+    "auto",
+    "--settings",
+    "{\"worktree\":{\"bgIsolation\":\"none\"}}",
+    "-n",
+    "mech",
+    "--model",
+    "haiku"
+  ],
+  "providerEnv": {},
+  "intent": "<prompt>",
+  "name": "mech",
+  "nameSource": "user",
+  "sessionId": "44ad47cf-365b-4164-934a-339a251bd6d5",
+  "resumeSessionId": "44ad47cf-365b-4164-934a-339a251bd6d5",
+  "daemonShort": "44ad47cf",
+  "cwd": "D:\\git\\example",
+  "createdAt": "2026-10-09T11:31:15.207Z",
+  "updatedAt": "2026-10-09T11:31:18.624Z",
+  "firstTerminalAt": null,
+  "backend": "daemon",
+  "inFlight": {
+    "tasks": 0,
+    "queued": 0,
+    "kinds": [],
+    "drainableMonitors": 0
+  },
+  "needs": "answer: Which color? (Red · Blue)",
+  "block": {
+    "questions": [
+      {
+        "question": "Which color?",
+        "options": [
+          {
+            "label": "Red",
+            "description": "Warm color"
+          },
+          {
+            "label": "Blue",
+            "description": "Cool color"
+          }
+        ]
+      },
+      {
+        "question": "Which shape?",
+        "options": [
+          {
+            "label": "Circle",
+            "description": "Round shape"
+          },
+          {
+            "label": "Square",
+            "description": "Shape with corners"
+          }
+        ]
+      }
+    ]
+  }
+}

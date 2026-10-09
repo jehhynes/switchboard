@@ -24,13 +24,13 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
-  /** Waiting for the first state, such as a URI that started this window (PRD R69). */
+  /** Waiting for a state, such as the first one for a URI that started this window (PRD R69); each checks every new state. */
   private stateWaiters: (() => void)[] = [];
 
   /** The latest `state` event from the hub, as its JSON text. */
   update(state: string): void {
     this.latest = state;
-    this.stateWaiters.splice(0).forEach((resume) => resume());
+    this.stateWaiters.slice().forEach((check) => check());
     this.showBadge();
     void this.view?.webview.postMessage({ type: 'state', snapshot: JSON.parse(state) });
   }
@@ -40,19 +40,34 @@ export class WorkItemsView implements vscode.WebviewViewProvider {
   }
 
   /** The latest state, waiting up to `ms` for the first one; null when none arrives. */
-  async firstState(ms: number): Promise<Snapshot | null> {
-    if (this.latest === null) {
-      await new Promise<void>((resume) => {
-        const timer = setTimeout(resume, ms);
+  firstState(ms: number): Promise<Snapshot | null> {
+    return this.until(() => true, ms);
+  }
 
-        this.stateWaiters.push(() => {
-          clearTimeout(timer);
-          resume();
-        });
-      });
-    }
+  /** The latest state once `wanted` holds for it, waiting up to `ms` for a state where it does; null when none arrives. */
+  until(wanted: (snapshot: Snapshot) => boolean, ms: number): Promise<Snapshot | null> {
+    return new Promise((resolve) => {
+      const check = (): boolean => {
+        const snapshot = this.state() as Snapshot | null;
 
-    return this.state() as Snapshot | null;
+        if (snapshot === null || !wanted(snapshot)) {
+          return false;
+        }
+
+        finish(snapshot);
+        return true;
+      };
+      const finish = (snapshot: Snapshot | null) => {
+        clearTimeout(timer);
+        this.stateWaiters = this.stateWaiters.filter((waiter) => waiter !== check);
+        resolve(snapshot);
+      };
+      const timer = setTimeout(() => finish(null), ms);
+
+      if (!check()) {
+        this.stateWaiters.push(check);
+      }
+    });
   }
 
   /** The activity bar badge, or null before VS Code resolves the view. */
@@ -145,6 +160,9 @@ export async function runOpen(message: { type: string; [key: string]: unknown })
   switch (message.type) {
     case 'attach':
       await vscode.commands.executeCommand('switchboard.attach', message['shortId'], message['name']);
+      return;
+    case 'open-question':
+      await vscode.commands.executeCommand('switchboard.openQuestion', message['workItemId'], message['sessionId'], message['cwd']);
       return;
     case 'resume':
       await vscode.commands.executeCommand('switchboard.resume', message['sessionId'], message['cwd'], message['name'], message['active']);
@@ -389,6 +407,37 @@ export async function openSession(record: HubRecord | null, sessionId: string, c
   }
 
   return 'other-folder';
+}
+
+/** How long Open in Claude waits for the hub to report the stopped session ended; `claude stop` itself times out at 15 seconds. */
+const OPEN_QUESTION_WAIT_MS = 20_000;
+
+/**
+ * Open in Claude (PRD R70): the hub stops the waiting background session, and once a state shows it ended, the session opens in a
+ * Claude tab, which asks the question again. A refusal or a failed stop opens nothing. Resolves to what happened.
+ */
+export async function openQuestion(
+  record: HubRecord | null,
+  view: WorkItemsView,
+  workItemId: number,
+  sessionId: string,
+  cwd: string,
+  waitMs = OPEN_QUESTION_WAIT_MS,
+): Promise<'opened' | 'other-folder' | 'refused' | 'timeout'> {
+  const reply = await act(record, { type: 'open-question', workItemId, nativeSessionId: sessionId });
+
+  if (reply?.status !== 200) {
+    return 'refused';
+  }
+
+  const ended = (snapshot: Snapshot) => snapshot.workItems.some((item) => item.id === workItemId && item.sessions.some((session) => session.nativeSessionId === sessionId && session.state === 'ended'));
+
+  if ((await view.until(ended, waitMs)) === null) {
+    void vscode.window.showWarningMessage(`Switchboard: the session did not stop within ${waitMs / 1000} seconds, so it was not opened in Claude.`);
+    return 'timeout';
+  }
+
+  return openSession(record, sessionId, cwd);
 }
 
 /** Opens a session another window left for this window's folder. Runs when the window connects to the hub or gains focus. */

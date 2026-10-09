@@ -217,7 +217,7 @@ describe('the hub process', () => {
     const commands = await vscode.commands.getCommands(true);
     const menu = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes.menus['webview/context'];
 
-    assert.strictEqual(menu.length, 11);
+    assert.strictEqual(menu.length, 13);
     assert.ok(!menu.some((entry) => entry.command === 'switchboard.row.retry'));
     for (const entry of menu) {
       assert.ok(commands.includes(entry.command), `${entry.command} is not registered`);
