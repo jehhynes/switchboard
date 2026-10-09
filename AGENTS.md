@@ -1,6 +1,6 @@
 # Switchboard
 
-Switchboard is a local software factory for one developer. It ingests tickets assigned to the operator from GitHub, Zoho Desk, Forum and ad-hoc prompts, triages each into a playbook, runs the playbook in a background Claude Code session, and shows the work in a VS Code panel. See [prd.md](docs/prd.md).
+Switchboard is a local software factory for one developer. It ingests tickets assigned to the operator from GitHub, Zoho Desk, Forum and ad-hoc prompts, triages each into a playbook, runs the playbook in a background Claude Code session, and shows the work in the dock, a Windows app beside VS Code that switches to each work item's VS Code window. See [prd.md](docs/prd.md).
 
 Session and triage mechanics come from Ground Control (`D:\git\ground-control`). Read its code and [mechanics.md](../ground-control/docs/mechanics.md) before re-deriving a mechanism it already verified.
 
@@ -90,7 +90,7 @@ For changes to the dock, close the running dock (it holds its files open), then 
 
 Use `type(scope): summary`, adding `(fixes #123)` on the same line when closing an issue.
 
-- Use a conventional type such as `feat`, `fix`, `docs`, `refactor`, `test`, or `chore`, and an area such as `core`, `hub`, `panel`, `github`, `claude` or `docs` as scope.
+- Use a conventional type such as `feat`, `fix`, `docs`, `refactor`, `test`, or `chore`, and an area such as `core`, `hub`, `dock`, `vscode`, `github`, `claude` or `docs` as scope.
 - Write an imperative, lowercase summary under about 70 characters, without a final period.
 - Name the changed identifier and behavior. Use exact settings, flags, message types, and measurements.
 - A trivial change needs only the summary. Otherwise use two to five single-line bullets for non-obvious constraints, measurements, or defects. Omit diff narration, review history, and routine check results.

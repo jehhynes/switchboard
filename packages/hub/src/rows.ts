@@ -2,7 +2,7 @@ import { activeSession, groupOf, triageLabel } from '@switchboard/core/group';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
-// Imports only types and browser-safe core modules, so the panel webview bundles it through `@switchboard/hub/rows`.
+// Imports only types and browser-safe core modules, so the History webview bundles it through `@switchboard/hub/rows`.
 
 /** A short age such as `40s`, `5m`, `2h` or `3d`. */
 export function age(since: number, now: number): string {
@@ -84,7 +84,7 @@ export function controlsOf(item: WorkItemView): Control[] {
   }
 
   if (isBackground(session)) {
-    controls.push({ label: 'Attach', icon: 'terminal', message: { type: 'attach', shortId: session.shortId, name: sessionName(item) } }, { label: 'Stop', icon: 'debug-stop', message: action('stop') });
+    controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop') });
   }
 
   if (item.status !== 'done' && session === null && !adhoc && item.status !== 'triaging') {
@@ -99,14 +99,9 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push(...snoozeControls(item.ticket));
   }
 
-  // These run in the extension, not the hub (PRD R57).
+  // Runs in the item window, not the hub (PRD R57).
   if (item.worktree !== null) {
-    const key = ticketKey(item.ticket);
-
-    controls.push(
-      { label: 'Open Changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key, title: item.ticket.title } },
-      { label: 'Show in Source Control', icon: 'source-control', message: { type: 'sourceControl', path: item.worktree.path } },
-    );
+    controls.push({ label: 'Open Changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key: ticketKey(item.ticket), title: item.ticket.title } });
   }
 
   return [...controls, historyControl(item.ticket)];
@@ -142,67 +137,13 @@ function waitsInBackground(session: SessionView | null): session is SessionView 
   return isBackground(session) && session.state === 'waiting' && session.nativeSessionId !== null;
 }
 
-/** Open in Claude's message: the extension asks the hub to stop the session, then opens it in a Claude tab (PRD R70). */
+/** Open in Claude: the hub stops the session, which then opens in the item window's Claude view (PRD R70). */
 export function openQuestion(item: WorkItemView): { type: 'open-question'; workItemId: number; sessionId: string; cwd: string } | null {
   const session = activeSession(item);
 
   return waitsInBackground(session) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd } : null;
 }
 
-/** The terminal name for the row's session, such as `github 18941`. */
-function sessionName(item: WorkItemView): string {
-  return `${item.ticket.source} ${item.ticket.sourceKey}`;
-}
-
-/**
- * What a click on the row opens (PRD R27): Open in Claude while its background session waits on the operator (PRD R70), else the
- * latest session in a terminal, attached while its background process runs and resumed otherwise, else the worktree in VS Code,
- * else, with no session, the ticket. `active` marks a session resumed elsewhere, such as in a VS Code tab. Null when there is
- * nothing to open, as for a session still starting.
- */
-export function openAction(item: WorkItemView): Record<string, unknown> | null {
-  const latest = item.sessions.at(-1) ?? null;
-  const session = activeSession(item);
-  const name = sessionName(item);
-  const question = openQuestion(item);
-
-  if (question !== null) {
-    return question;
-  }
-
-  if (isBackground(session)) {
-    return { type: 'attach', shortId: session.shortId, name };
-  }
-
-  if (latest?.nativeSessionId != null && (session === null || session.released)) {
-    return { type: 'resume', sessionId: latest.nativeSessionId, cwd: latest.cwd, name, active: session !== null };
-  }
-
-  if (item.worktree !== null) {
-    return { type: 'openFolder', path: item.worktree.path };
-  }
-
-  return item.sessions.length === 0 ? ticketOpen(item.ticket) : null;
-}
-
-/** The ticket in the browser; null for a ticket with no URL, such as an ad-hoc one. */
-export function ticketOpen(ticket: { url: string }): { type: 'openUrl'; url: string } | null {
-  return ticket.url === '' ? null : { type: 'openUrl', url: ticket.url };
-}
-
-/**
- * What a Ctrl+click on the row opens: the session in VS Code when it is not running in its background process, else the
- * worktree in VS Code, because an editor resume of a live background session is refused (M7); otherwise null.
- */
-export function editorAction(item: WorkItemView): Record<string, unknown> | null {
-  const action = openAction(item);
-
-  if (action?.['type'] === 'resume') {
-    return { type: 'open', sessionId: action['sessionId'], cwd: action['cwd'] };
-  }
-
-  return item.worktree === null ? null : { type: 'openFolder', path: item.worktree.path };
-}
 
 /**
  * Snooze for a ticket, and Restore when it is snoozed, so a snoozed ticket can take a new wake time without waking first (PRD R49).
@@ -397,20 +338,6 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
   });
 }
 
-/**
- * Splits a work item's or pool ticket's links: line 2 shows pull requests, and GitHub issues unless the ticket is a GitHub one; the rest go
- * to line 3. A link to the ticket itself is dropped, because the ticket link already shows it (PRD R52).
- */
-export function splitLinks(item: Pick<WorkItemView, 'links' | 'ticket'>): { primary: WorkItemView['links']; rest: WorkItemView['links'] } {
-  const links = item.links.filter((link) => link.target !== item.ticket.url);
-  const primary = [
-    ...links.filter((link) => linkKind(link.target) === 'pr'),
-    ...(item.ticket.source === 'github' ? [] : links.filter((link) => linkKind(link.target) === 'issue')),
-  ];
-
-  return { primary, rest: links.filter((link) => !primary.includes(link)) };
-}
-
 /** Outside Snoozed, a failed row takes the error stripe, and a blocked row or one with a question the warning stripe (PRD R27). */
 export function stripeOf(item: WorkItemView): 'error' | 'warning' | null {
   if (item.ticket.snoozed) {
@@ -424,7 +351,7 @@ export function stripeOf(item: WorkItemView): 'error' | 'warning' | null {
   return item.status === 'blocked' || (groupOf(item) === 'needs' && activeSession(item)?.state === 'waiting') ? 'warning' : null;
 }
 
-/** How long a running session goes without a stage report before the panel colours the stage age (PRD R58). */
+/** How long a running session goes without a stage report before the dock colours the stage age (PRD R58). */
 export const STALE_STAGE_MS = 20 * 60_000;
 
 /**
@@ -489,8 +416,8 @@ export function rowKeyOf(entry: WorkItemView | PoolView): string {
   return 'status' in entry ? `item:${entry.id}` : `ticket:${entry.ticket.id}`;
 }
 
-/** The rows the panel shows, by group, each in panel order (PRD R27, R49). */
-export function panelGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView | PoolView)[]> & { done: WorkItemView[] } {
+/** The rows the dock shows, by group, each in list order (PRD R27, R49). */
+export function listGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView | PoolView)[]> & { done: WorkItemView[] } {
   const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], unstarted: [], done: [] };
   const snoozedPool = snapshot.pool.filter((entry) => entry.ticket.snoozed);
   // A pool row stands for its ticket, whose work items are all done.
@@ -518,27 +445,7 @@ function midnight(time: number, days = 0): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days).getTime();
 }
 
-/** Done's date bands, as in Windows Explorer: Today, Yesterday, Earlier this week, Last week and Older, with weeks starting on Monday (PRD R27). */
-export function doneBand(doneAt: number, now: number): string {
-  const today = midnight(now);
-  const week = midnight(now, -((new Date(now).getDay() + 6) % 7));
-
-  if (doneAt >= today) {
-    return 'Today';
-  }
-
-  if (doneAt >= midnight(now, -1)) {
-    return 'Yesterday';
-  }
-
-  if (doneAt >= week) {
-    return 'Earlier this week';
-  }
-
-  return doneAt >= midnight(week, -7) ? 'Last week' : 'Older';
-}
-
-/** The settings, playbook, hook and source errors the panel lists above the groups (PRD R42). */
+/** The settings, playbook, hook and source errors the dock lists above the groups (PRD R42). */
 export function snapshotErrors(snapshot: Snapshot): string[] {
   return [
     snapshot.errors.settings === null ? null : `Settings: ${snapshot.errors.settings}`,
@@ -554,13 +461,13 @@ export function setupNotes(snapshot: Snapshot): string[] {
     snapshot.sources.length > 0
       ? null
       : snapshot.sourceStates.length > 0
-        ? 'No source is polled. Turn one on in the title bar.'
+        ? 'No source is polled. Turn one on in the header.'
         : `No source is configured. Add one in ${snapshot.configDir}\\settings.json.`,
     snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under ${snapshot.configDir}\\playbooks.` : null,
   ].filter((line): line is string => line !== null);
 }
 
-/** The row's linked GitHub pull requests and issues as `PR #<n>` and `gh <n>`, as the row's badges show them (PRD R52). */
+/** The row's linked GitHub pull requests and issues as `PR #<n>` and `gh <n>`, as the row's menu names them (PRD R52). */
 export function linkedKeys(entry: WorkItemView | PoolView): string[] {
   const keys = entry.links.flatMap((link) => {
     const kind = linkKind(link.target);

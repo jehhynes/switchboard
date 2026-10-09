@@ -73,7 +73,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Date:** 2026-10-03.
 - **Versions:** Windows 11, Node 24, Claude Code CLI 2.1.288.
 - **Observation:** during live acceptance, a hub's first start failed renaming its temporary file over `~/.claude/settings.json` with `EPERM`, because another process had the file open; the next start succeeded. Two hook processes of one session writing the same marker hit the same refusal and left a temporary file.
-- **Current use:** hook installation retries the rename 10 times, 100 ms apart, removes its temporary file when it gives up, and shows the error in the panel instead of stopping the hub. The hook writer removes its temporary file when the rename fails.
+- **Current use:** hook installation retries the rename 10 times, 100 ms apart, removes its temporary file when it gives up, and shows the error in the dock instead of stopping the hub. The hook writer removes its temporary file when the rename fails.
 
 ## M9. Live acceptance, 2026-10-03
 
@@ -140,7 +140,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **1. Open in VS Code from another folder: pass.** Open on a done ad-hoc item opened a `.wip/mech` window in the acceptance instance; the operator's instance kept its own three windows. That window claimed the pending open and showed the item's last session in a Claude tab with its history. A second Open added no window and no tab.
 - **2. Approval report: pass.** The session wrote `approval.txt` (`draft`) and reported approval with a prompt and a summary. The item showed Awaiting approval with the summary and an Approve control. Approve started a second session with the stored prompt; it appended `approved` and reported done, and the item ended Done.
 - **3. Pool and icebox: pass.** The pool listed Zoho 6 and Forum 7, each triaged into `support:case` with a summary, oldest first by `sortAt`, in the same order as the hub's snapshot. Icebox moved a ticket to a collapsed Icebox group (Pool 12, Icebox 1); Restore returned it to its place by `sortAt` (Pool 13). No pick, approval or start ran on a pool ticket.
-- **Current use:** the open and claim path, approval reports, and the pool display (architecture.md § Flow, § Panel).
+- **Current use:** the open and claim path, approval reports, and the pool display (architecture.md § Flow, § Rows).
 
 ## M14. Zoho scope entry from ticket history
 
@@ -173,7 +173,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Versions:** VS Code 1.140.0 (`07f806f9`), `resources/app/out/vs/workbench/contrib/webview/browser/pre/index.html`.
 - **Inspection:** the webview host adds a `click` listener on the webview's window (`handleInnerClick`). For any trusted click whose composed path holds an `<a>` with an `href` that is not a fragment, it posts `did-click-link` with the resolved `href` and VS Code opens it. It does not check `event.defaultPrevented`, so a panel handler that calls `preventDefault` and opens the link itself opens it twice: two identical browser tabs.
 - **Result:** `event.stopPropagation()` in the panel's root `click` handler keeps the event from the window, so only the panel's `openUrl` message opens the link. The panel keeps its own handler because a local file path in `href` resolves against the webview origin, which the host's open would get wrong.
-- **Current use:** the webview's link click handler in `main.ts` (architecture.md § Panel).
+- **Current use:** none since the panel was removed; the History page opens links from buttons, not anchors.
 
 ## M17. A missing or mistyped project status field
 
@@ -229,7 +229,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Versions:** VS Code 1.141.0 (`2a59476c`), the version installed and the one the integration suite runs. Copied from GC M30 (VS Code 1.136.1).
 - **Source (GC M30):** no built-in command combines a branch's commits with uncommitted work, so the caller combines merge base to HEAD, the index and the working tree. `_workbench.openMultiDiffEditor` takes `{multiDiffSourceUri, title, resources}`, each resource an `originalUri` and `modifiedUri` with a missing side undefined; it is a private command. A revision is a `git:` URI whose query is `JSON.stringify({path, ref})`. `git.openRepository` takes a path string and keeps the repository in Source Control for the window's lifetime, with no matching close. A newly opened repository's resource groups are empty until `await repository.status()`. Repository lookup falls back to a prefix match or the window's only repository. `getBranchBase` writes `branch.<name>.vscode-merge-base` to the git config. `Change.originalUri` differs for copies as well as renames. The editor appends the file count to the title, and `TabInputTextMultiDiff.textDiffs` lists only two-sided rows.
 - **Experiment:** [changes.test.cjs](../extensions/switchboard/test-integration/changes.test.cjs) builds a clone with `origin/main` and a worktree holding a committed edit, addition and deletion, an untracked file, a staged edit deleted on disk, and a staged rename. Show in Source Control added the worktree to the Git API's repositories. Open Changes opened one editor titled `gh 18941 Inbox badge — since <base> (5 files)`, whose one two-sided row ran from `kept.txt` at the base (`git:`) to `renamed.txt` on disk (`file:`), both inside the worktree. A plain folder got the no-repository warning and no editor. A second `_workbench.openMultiDiffEditor` call with the same source URI and more resources kept the open editor's title and resources (a Codex probe on this version), so each open uses a new source URI after closing the ticket's earlier tab; reopening after adding a file and changing the title showed one tab with 6 files, and reopening on a worktree with no changes closed it. Conflicted files are in the repository's `mergeChanges` group, not the working-tree group.
-- **Current use:** Open Changes and Show in Source Control (architecture.md § Panel). Re-verify after a VS Code upgrade by running the integration suite.
+- **Current use:** Open Changes (architecture.md § VS Code extension). Re-verify after a VS Code upgrade by running the integration suite.
 
 ## M22. Opening a `vscode://` link from Chrome
 
@@ -242,7 +242,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - `URI.parse` percent-decodes each component, so the handler's `uri.query` is decoded once.
 - **Integration suite:** calling the handler through the extension API with an encoded GitHub issue URL in another case and with `/files`, and with a URL holding `?id=5&x=1`, revealed the matching rows and ran their click actions (`open.test.cjs`).
 - **Not verified:** no `vscode://` link was opened from Chrome, because that would open the operator's own VS Code. Chrome's own documentation and behavior, not checked here, describe an "Open Visual Studio Code?" prompt for an external protocol with an "Always allow github.com to open links of this type" checkbox for an https page; whether it appears every time for the operator is unknown. Whether VS Code brings the receiving window to the front was not observed.
-- **Current use:** Open in Switchboard (architecture.md § Panel, § Chrome extension). The operator can avoid VS Code's prompt with `"extensions.confirmedUriHandlerExtensionIds": ["switchboard.switchboard"]`.
+- **Current use:** Open in Switchboard (architecture.md § VS Code extension, § Chrome extension). The operator can avoid VS Code's prompt with `"extensions.confirmedUriHandlerExtensionIds": ["switchboard.switchboard"]`.
 
 ## M23. Requests from an extension service worker and from a web page to the browser endpoint
 
@@ -290,11 +290,11 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Experiment:** isolated VS Code windows opened from `.code-workspace` files, a probe that docked itself as an app bar and brought windows forward 20 times per method, with and without a click on the probe and with another app in front.
 - **Result:**
   - A `window.title` setting in a `.code-workspace` file applies to that window and is the Win32 title, such as `sb:gh-1001 · <file> - gh-1001 (Workspace)`; without `${dirty}` nothing comes before it, and the active editor changes only the text after it. A new window shows `Visual Studio Code` for about 0.5 s first. All windows of a VS Code instance share one process, so only the title tells item windows apart.
-  - Two workspace files on one folder open as two windows; opening either file again focuses its window. The Claude extension lists the same folder's sessions in both.
+  - Two workspace files on one folder open as two windows; opening either file again, with `code <file>` or with `vscode.openFolder` and `forceNewWindow` from an extension, focuses its window. The Claude extension lists the same folder's sessions in both.
   - After a click on the probe, `SetForegroundWindow` brought a window to the front 20/20 within 15 ms, after `ShowWindow(SW_RESTORE)` for a minimized one; `code <workspace>` worked 20/20 in about 300 ms. While another app had the last input, `SetForegroundWindow` failed 60/60 and only flashed the taskbar button, and VS Code's own focus flag still read true, so the result is checked with `GetForegroundWindow`. `code <workspace>` from the background worked 20/20 at the console with no one typing.
   - A 300 px `ABE_LEFT` app bar set the work area to start at x = 300 within 0.9 s, moved a window that overlapped it, and a maximized VS Code window filled the rest exactly. `ABM_REMOVE` restored the work area. A placed window needs the DWM frame correction of 7 px.
-- **Limits:** multi-monitor app bars, display scaling other than 100% and Restricted Mode titles are untested.
-- **Current use:** the dock and item windows (PRD R71; architecture.md § Dock).
+- **Limits:** multi-monitor app bars, an `ABE_RIGHT` bar, display scaling other than 100% (the dock's own resize was seen at 175% in use, where Avalonia sized it one pixel short) and Restricted Mode titles are untested, as is `vscode.openFolder` focusing a window while another app has the last input.
+- **Current use:** the dock and item windows, and the extension's row click for a notification or Open in Switchboard (PRD R65, R69, R71; architecture.md § Dock, § VS Code extension).
 
 ## Pending verification
 

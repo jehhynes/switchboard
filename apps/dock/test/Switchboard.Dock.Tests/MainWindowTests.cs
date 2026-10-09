@@ -162,13 +162,13 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void MenuOf_Row_ListsHubControlsSnoozeChoicesAndOpenTicket()
+    public void MenuOf_Row_ListsHubControlsSnoozeChoicesOpenTicketAndLinks()
     {
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7"));
         var snooze = (MenuItem)menu[2];
 
-        Assert.Equal(["Triage again", "Mark done", "Snooze", "Open Changes", "History", "", "Open ticket"], menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
+        Assert.Equal(["Triage again", "Mark done", "Snooze", "Open Changes", "History", "", "Open ticket", "Open PR #19002"], menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
         Assert.IsType<Separator>(menu[5]);
         Assert.Equal(7, snooze.ItemsSource!.Cast<MenuItem>().Count());
         Assert.Equal("Indefinitely", snooze.ItemsSource!.Cast<MenuItem>().Last().Header);
@@ -188,11 +188,12 @@ public sealed class MainWindowTests
         snooze[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         actions.UrlReply = "The browser did not open it.";
         ((MenuItem)menu[6]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}", "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}"], hub.Calls);
         Assert.Equal("The browser did not open it.", model.Status);
-        Assert.Equal(["https://github.com/o/r/issues/107"], actions.Urls);
+        Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
 
         actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
         ((MenuItem)menu[4]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
@@ -203,11 +204,22 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void MenuOf_RowWithoutControlsOrUrl_IsEmpty()
+    public void MenuOf_RowWithoutControlsUrlOrLinks_IsEmpty()
     {
         var (window, _) = Open();
 
-        Assert.Empty(window.MenuOf(Fixtures.Row("item:7") with { Controls = [], Commands = [], Url = "" }));
+        Assert.Empty(window.MenuOf(Fixtures.Row("item:7") with { Controls = [], Commands = [], Url = "", Links = [] }));
+    }
+
+    [AvaloniaFact]
+    public void MenuOf_RowWithLinksButNoUrl_ListsTheLinksAfterASeparator()
+    {
+        var (window, _) = Open();
+        var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
+
+        Assert.IsType<Separator>(menu[5]);
+        Assert.Equal("Open PR #19002", ((MenuItem)menu[6]).Header);
+        Assert.Equal(7, menu.Count);
     }
 
     [AvaloniaFact]

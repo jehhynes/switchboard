@@ -1,42 +1,22 @@
 import { urlKey } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from '@switchboard/hub';
-import { panelGroups, rowKeyOf, searchDescription } from '@switchboard/hub/rows';
+import { listGroups, rowKeyOf } from '@switchboard/hub/rows';
 import type { RowGroup } from '@switchboard/hub/rows';
 
-/** A panel row by its work item, or by its pool ticket. */
+/** A row by its work item, or by its pool ticket. */
 export type RowTarget = { workItemId: number } | { ticketId: number };
-
-export interface SearchEntry {
-  /** The ticket's title. */
-  label: string;
-  /** The key, linked pull requests and issues, playbook and group, such as `gh 18941 · PR #19002 · dev:develop · Needs you`. */
-  description: string;
-  /** The worktree's branch, when there is one. */
-  detail?: string;
-  target: RowTarget;
-}
 
 function targetOf(entry: WorkItemView | PoolView): RowTarget {
   return 'status' in entry ? { workItemId: entry.id } : { ticketId: entry.ticket.id };
 }
 
 function rows(snapshot: Snapshot): { group: RowGroup; entry: WorkItemView | PoolView }[] {
-  return Object.entries(panelGroups(snapshot)).flatMap(([group, entries]) => entries.map((entry) => ({ group: group as RowGroup, entry })));
-}
-
-/** A quick pick entry for every row the panel shows, in panel order (PRD R63). */
-export function searchEntries(snapshot: Snapshot): SearchEntry[] {
-  return rows(snapshot).map(({ group, entry }) => {
-    const branch = 'status' in entry ? entry.worktree?.branch : undefined;
-    const description = searchDescription(entry, group, snapshot.namespaces);
-
-    return { label: entry.ticket.title, description, ...(branch ? { detail: branch } : {}), target: targetOf(entry) };
-  });
+  return Object.entries(listGroups(snapshot)).flatMap(([group, entries]) => entries.map((entry) => ({ group: group as RowGroup, entry })));
 }
 
 /**
- * The row Open in Switchboard reveals for a URL (PRD R69): the first row in panel order whose ticket has the URL, else the first
- * row whose ticket has a link to it, such as its pull request (PRD R52). URLs compare by `urlKey`. Null when no row the panel shows has it.
+ * The row Open in Switchboard opens for a URL (PRD R69): the first row in list order whose ticket has the URL, else the first
+ * row whose ticket has a link to it, such as its pull request (PRD R52). URLs compare by `urlKey`. Null when no row the dock shows has it.
  */
 export function targetForUrl(snapshot: Snapshot, url: string): RowTarget | null {
   const key = urlKey(url);
@@ -54,7 +34,7 @@ export function openUrlOf(path: string, query: string): string | null {
 }
 
 /**
- * The key of the row that shows the target, or null when the panel shows none. A work item hidden in Snoozed, where a ticket
+ * The key of the row that shows the target, or null when the dock shows none. A work item hidden in Snoozed, where a ticket
  * shows as one row, finds that ticket's row (PRD R49).
  */
 export function rowFor(snapshot: Snapshot, target: RowTarget): string | null {

@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { switchboardHome } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
@@ -10,10 +13,12 @@ import {
   controlsOf,
   GROUP_EMPTY,
   GROUP_TITLES,
+  linkKind,
+  linkNumber,
   mainControl,
   mainTitle,
   openQuestion,
-  panelGroups,
+  listGroups,
   playbookText,
   poolControls,
   priorityTitle,
@@ -46,6 +51,50 @@ export interface DockWindow {
   name: string;
   title: string;
   folders: string[];
+  /** The window's `.code-workspace` file, `<Switchboard home>/windows/<name>.code-workspace`. */
+  file: string;
+}
+
+/** Where the item windows' workspace files are, `<Switchboard home>/windows`. */
+export function windowsDir(home: string): string {
+  return join(switchboardHome(home), 'windows');
+}
+
+/**
+ * The workspace file's text: the folders, and a `window.title` that starts with the title prefix and the ticket title. It leaves out `${dirty}`,
+ * which would put a mark before the prefix, and breaks a `${` in the ticket title, which VS Code would read as a variable.
+ */
+export function workspaceText(window: DockWindow): string {
+  const title = `${window.title.replaceAll('${', '$ {')} · \${activeEditorShort}`;
+
+  return `${JSON.stringify({ folders: window.folders.map((path) => ({ path })), settings: { 'window.title': title } }, null, 2)}\n`;
+}
+
+/** Writes a window's workspace file when its text differs, because VS Code applies any change to an open window; `written` caches what each file holds. */
+export function writeWorkspaceFile(window: DockWindow, written: Map<string, string> = new Map()): void {
+  const text = workspaceText(window);
+
+  if (written.get(window.file) === text) {
+    return;
+  }
+
+  let current: string | null = null;
+
+  try {
+    current = readFileSync(window.file, 'utf8');
+  } catch {
+    // A missing file is written.
+  }
+
+  if (current !== text) {
+    const temporary = `${window.file}.${process.pid}.tmp`;
+
+    mkdirSync(dirname(window.file), { recursive: true });
+    writeFileSync(temporary, text);
+    renameSync(temporary, window.file);
+  }
+
+  written.set(window.file, text);
 }
 
 /** What a click does besides the switch: Open in Claude first, a session to open in the window's Claude view, or the ticket in the browser for a row with no window. */
@@ -55,7 +104,7 @@ export type DockOpen =
   | { type: 'url'; url: string };
 
 export interface DockRow {
-  /** `item:<work item ID>` or `ticket:<pool ticket ID>`, as the panel's `data-row`. */
+  /** `item:<work item ID>` or `ticket:<pool ticket ID>`. */
   key: string;
   title: string;
   /** The priority dot's tooltip on a priority ticket, else null (PRD R50). */
@@ -76,7 +125,7 @@ export interface DockRow {
   open: DockOpen | null;
   /** The hub controls in the right-click menu, each with the action the dock posts to `/action`; Snooze carries no wake time. */
   controls: { label: string; action: Record<string, unknown> }[];
-  /** The label of the control the row shows as a button, as in the panel, or null (PRD R27). */
+  /** The label of the control the row shows as a button, or null (PRD R27). */
   main: string | null;
   /** The main control's tooltip, which for Approve names the prompt it runs (PRD R27). */
   mainTitle: string | null;
@@ -86,8 +135,12 @@ export interface DockRow {
   pastes: { label: string; file: string }[];
   /** The controls that run in VS Code, each with the message a window runs: Open Changes, History, Open report. */
   commands: { label: string; command: Record<string, unknown> }[];
-  /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch, as Go to Work Item (PRD R63). */
+  /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63, R71). */
   search: string;
+  /** The ticket's links, each named as `PR #19002`, `gh 18941` or by its label, for the right-click menu (PRD R52); a link to the ticket itself is left out. */
+  links: { label: string; url: string }[];
+  /** How many earlier work items with the same playbook were done, for "Returned ×N" on line 2 (PRD R51); 0 when it is not marked. */
+  returned: number;
 }
 
 export interface DockGroup {
@@ -103,7 +156,7 @@ export interface DockView {
   /** Settings, playbook, hook and source errors, then what an unconfigured home lacks. */
   notes: string[];
   groups: DockGroup[];
-  /** Snooze's choices with their wake times, as the panel's picker offers them (PRD R49); the dock posts the chosen `until`. */
+  /** Snooze's choices with their wake times, (PRD R49); the dock posts the chosen `until`. */
   snooze: SnoozeChoice[];
   /** Each configured source but ad-hoc and whether it is polled, for the header's toggles (PRD R3). */
   sources: { name: string; enabled: boolean }[];
@@ -111,14 +164,14 @@ export interface DockView {
   repoRoots: string[];
 }
 
-/** The rows the panel shows, by group and in the panel's order, as texts the dock draws without rules of its own (PRD R27, R71). */
-export function dockView(snapshot: Snapshot, now: number): DockView {
-  const groups = panelGroups(snapshot);
+/** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
+export function dockView(snapshot: Snapshot, now: number, windows: string): DockView {
+  const groups = listGroups(snapshot);
   const keys: RowGroup[] = ['needs', 'working', 'unstarted', 'done', ...(groups.snoozed.length === 0 ? [] : (['snoozed'] as const))];
   const row = (group: RowGroup) => (entry: WorkItemView | PoolView) => {
     const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
 
-    return { ...('status' in entry ? itemRow(entry, now, snapshot.namespaces) : poolRow(entry, now, snapshot.namespaces)), search };
+    return { ...('status' in entry ? itemRow(entry, now, snapshot.namespaces, windows) : poolRow(entry, now, snapshot.namespaces)), search, links: linksOf(entry), returned: entry.returned };
   };
 
   return {
@@ -130,7 +183,7 @@ export function dockView(snapshot: Snapshot, now: number): DockView {
   };
 }
 
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string): Omit<DockRow, 'search' | 'links' | 'returned'> {
   const kind = markOf(item);
   const controls = controlsOf(item);
   const question = item.question ?? null;
@@ -156,8 +209,8 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
       ...progress(item, now),
     ],
     stripe: stripeOf(item),
-    window: windowOf(item),
-    open: openOf(item),
+    window: windowOf(item, windows),
+    open: openOf(item, windows),
     controls: hubControls(controls),
     main: main?.label ?? null,
     mainTitle: main === null ? null : mainTitle(item, main),
@@ -174,7 +227,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
   };
 }
 
-function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search'> {
+function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search' | 'links' | 'returned'> {
   const { ticket, triage } = entry;
   const { main, controls } = poolControls(entry);
 
@@ -201,6 +254,24 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
   };
 }
 
+/** The ticket's links in the order reported, each once, named by its pull request or issue number when it has one (PRD R52). */
+function linksOf(entry: WorkItemView | PoolView): DockRow['links'] {
+  const seen = new Set<string>();
+
+  return entry.links.flatMap((link) => {
+    if (link.target === entry.ticket.url || seen.has(link.target)) {
+      return [];
+    }
+
+    seen.add(link.target);
+
+    const kind = linkKind(link.target);
+    const number = linkNumber(link.target);
+
+    return [{ label: kind === 'url' || number === null ? link.label : kind === 'pr' ? `PR #${number}` : `gh ${number}`, url: link.target }];
+  });
+}
+
 function clipped(text: string, max: number, tone: DockText['tone'] = null): DockText {
   const { text: shown, full } = clip(text, max);
 
@@ -211,7 +282,7 @@ function wake(ticket: { snoozed: boolean; snoozedUntil: number | null }): DockTe
   return ticket.snoozed && ticket.snoozedUntil !== null ? [{ text: `Wakes ${wakeText(ticket.snoozedUntil)}`, title: null, tone: null }] : [];
 }
 
-/** The question, else the approval summary, else the stage, each with its age, as the panel's line 3 shows them (PRD R27, R58, R70). */
+/** The question, else the approval summary, else the stage, each with its age, for line 3 (PRD R27, R58, R70). */
 function progress(item: WorkItemView, now: number): DockText[] {
   const question = item.question ?? null;
 
@@ -245,7 +316,7 @@ function progress(item: WorkItemView, now: number): DockText[] {
  * The work item's window: the latest session's folder first, else the worktree, with the worktree second when the session ran
  * elsewhere; null with neither. The name is the ticket key, the first folder's name when that folder is not the worktree, and a hash of the first folder.
  */
-export function windowOf(item: WorkItemView): DockWindow | null {
+export function windowOf(item: WorkItemView, windows: string): DockWindow | null {
   const first = item.sessions.at(-1)?.cwd ?? item.worktree?.path ?? null;
 
   if (first === null || first === '') {
@@ -259,11 +330,11 @@ export function windowOf(item: WorkItemView): DockWindow | null {
   const key = `${ticketKey(item.ticket).replace(' ', '-')}${inWorktree ? '' : `-${folderName(first)}`}-${hash}`;
   const name = key.replace(/[^A-Za-z0-9._-]+/g, '-');
 
-  return { name, title: `sb:${name} · ${item.ticket.title}`, folders: worktree === null || inWorktree ? [first] : [first, worktree] };
+  return { name, title: `sb:${name} · ${item.ticket.title}`, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };
 }
 
 /** Open in Claude while the background session waits on a question (PRD R70), else the latest session when it is not running in its background process. */
-function openOf(item: WorkItemView): DockOpen | null {
+export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   const question = openQuestion(item);
 
   if (question !== null) {
@@ -277,11 +348,11 @@ function openOf(item: WorkItemView): DockOpen | null {
     return { type: 'session', sessionId: latest.nativeSessionId, cwd: latest.cwd };
   }
 
-  // A row with no window opens its ticket, as the panel's click does (PRD R27).
-  return windowOf(item) === null && item.ticket.url !== '' ? { type: 'url', url: item.ticket.url } : null;
+  // A row with no window opens its ticket (PRD R71).
+  return windowOf(item, windows) === null && item.ticket.url !== '' ? { type: 'url', url: item.ticket.url } : null;
 }
 
-/** The controls the hub runs; the panel's extension-run controls stay in the panel for now (PRD R71). */
+/** The controls the hub runs; Copy and the VS Code controls are in `pastes` and `commands` (PRD R71). */
 function hubControls(controls: Control[]): DockRow['controls'] {
   return controls.flatMap((control) => (control.message['type'] === 'action' ? [{ label: control.label, action: control.message['action'] as Record<string, unknown> }] : []));
 }

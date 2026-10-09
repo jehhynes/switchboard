@@ -144,13 +144,6 @@ async function openRepository(path: string): Promise<GitRepository | null> {
   return repository;
 }
 
-/** Adds a work item's worktree to the Source Control view and shows the view (PRD R57). */
-export async function showInSourceControl(path: string): Promise<void> {
-  if ((await openRepository(path)) !== null) {
-    await vscode.commands.executeCommand('workbench.view.scm');
-  }
-}
-
 function sideUri(side: DiffSide | null): vscode.Uri | undefined {
   if (side === null) {
     return undefined;

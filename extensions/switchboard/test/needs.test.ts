@@ -1,6 +1,6 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { describe, expect, it } from 'vitest';
-import { needsBadge, needsCount } from '../src/badge.js';
+import { needsCount, needsStatus } from '../src/needs.js';
 
 type Session = WorkItemView['sessions'][number];
 
@@ -103,13 +103,14 @@ describe('needsCount (PRD R64)', () => {
   });
 });
 
-describe('needsBadge (PRD R64)', () => {
+describe('needsStatus (PRD R64)', () => {
   it('shows the count with a singular or plural tooltip', () => {
-    expect(needsBadge(snapshot([item(1, 'failed')]))).toEqual({ value: 1, tooltip: '1 needs you' });
-    expect(needsBadge(snapshot([item(1, 'failed'), item(2, 'blocked')]))).toEqual({ value: 2, tooltip: '2 need you' });
+    expect(needsStatus(snapshot([item(1, 'failed')]))).toEqual({ text: '$(checklist) 1', tooltip: 'Switchboard: 1 needs you. Click to show the dock.' });
+    expect(needsStatus(snapshot([item(1, 'failed'), item(2, 'blocked')]))).toEqual({ text: '$(checklist) 2', tooltip: 'Switchboard: 2 need you. Click to show the dock.' });
   });
 
-  it('clears the badge when nothing needs the operator', () => {
-    expect(needsBadge(snapshot([item(1, 'running'), item(2, 'failed', { snoozed: true })]))).toBeUndefined();
+  it('shows no count when nothing needs the operator or no hub has answered', () => {
+    expect(needsStatus(snapshot([item(1, 'running'), item(2, 'failed', { snoozed: true })]))).toEqual({ text: '$(checklist)', tooltip: 'Switchboard: Nothing needs you. Click to show the dock.' });
+    expect(needsStatus(null).text).toBe('$(checklist)');
   });
 });

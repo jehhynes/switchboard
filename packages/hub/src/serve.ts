@@ -9,7 +9,7 @@ import { holdLock, releaseLock } from './lock.js';
 import { listenHub } from './server.js';
 import type { Reply } from './server.js';
 
-/** What the hub serves beyond its lifecycle: the panel state, requests, and the sessions that keep it running. */
+/** What the hub serves beyond its lifecycle: the snapshot and the dock view, requests, and the sessions that keep it running. */
 export interface HubApp {
   post: Record<string, (body: unknown) => Promise<Reply>>;
   snapshot(): unknown;
@@ -24,6 +24,8 @@ export interface HubApp {
   /** Ends a ticket's snooze by URL for the Chrome extension (PRD R66). */
   unsnoozeUrl: UnsnoozeByUrl;
   onChange(listener: () => void): void;
+  /** Gives the app the way to send an event to the dock's streams, which answers how many it reached. */
+  attachDock?(send: (event: string, data: unknown) => number): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
   busy(): boolean;
   close(): void;
@@ -107,6 +109,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   });
 
   app?.onChange(() => server.update());
+  app?.attachDock?.((event, data) => server.notifyDock(event, data));
 
   const browserPort = options.browserPort === undefined ? BROWSER_PORT : options.browserPort;
   let browser: BrowserServer | null = null;

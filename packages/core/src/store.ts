@@ -163,7 +163,7 @@ export const MIGRATIONS = [
   );`,
   // A session's task report records the work item it came from (PRD R68).
   `ALTER TABLE workItems ADD COLUMN parentId INTEGER REFERENCES workItems(id);`,
-  // A work item that never had a session is deleted when its ticket leaves (PRD R10), so IDs must not be reused: the panel can act on a stale one.
+  // A work item that never had a session is deleted when its ticket leaves (PRD R10), so IDs must not be reused: the dock can act on a stale one.
   `CREATE TABLE workItemsNew (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticketId INTEGER NOT NULL REFERENCES tickets(id),

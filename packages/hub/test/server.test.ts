@@ -168,6 +168,29 @@ describe('listenHub routes and state', () => {
     docked.close();
   });
 
+  it('sends a dock event to the dock streams only, and counts them', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}) });
+
+    expect(server.notifyDock('show', {})).toBe(0);
+
+    const chunks: Record<string, string[]> = { '/events': [], '/dock/events': [] };
+
+    for (const path of Object.keys(chunks)) {
+      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => chunks[path]!.push(chunk));
+      });
+
+      outbound.on('error', () => {});
+      outbound.end();
+    }
+
+    await until(() => (server.clients() === 2 ? true : null));
+    expect(server.notifyDock('show', { a: 1 })).toBe(1);
+    await until(() => (chunks['/dock/events']!.join('').includes('event: show\ndata: {"a":1}\n\n') ? true : null));
+    expect(chunks['/events']!.join('')).not.toContain('event: show');
+  });
+
   it('refuses the dock stream without the token', async () => {
     server = await listenHub({ identity, onShutdown: () => {}, dock: () => ({}) });
 

@@ -54,7 +54,7 @@
       <Setter Property="Padding" Value="8,2" />
       <Setter Property="MinHeight" Value="0" />
     </Style>
-    <!-- The row's buttons show only while it is hovered or selected, as in the panel (PRD R27). -->
+    <!-- The row's buttons show only while it is hovered or selected (PRD R27). -->
     <Style Selector="Border.row StackPanel.actions">
       <Setter Property="IsVisible" Value="False" />
     </Style>
@@ -134,11 +134,16 @@
     </Style>
   </Window.Styles>
 
-  <Grid ColumnDefinitions="*,Auto">
-    <DockPanel>
+  <Grid ColumnDefinitions="Auto,*,Auto">
+    <!-- The inner edge of a dock on the right: dragging it sets the dock's width. -->
+    <Border Name="GripLeft" Width="5" Background="Transparent" Cursor="SizeWestEast" BorderBrush="{DynamicResource DockBorder}" BorderThickness="0,0,1,0"
+            IsVisible="{Binding GripOnLeft}" PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" PointerCaptureLost="OnGripCaptureLost" />
+    <DockPanel Name="ListPanel" Grid.Column="1">
       <StackPanel DockPanel.Dock="Top" Margin="8,4,4,4" Spacing="4">
         <Grid ColumnDefinitions="*,Auto,Auto,Auto">
-          <TextBlock Text="SWITCHBOARD" FontSize="11" FontWeight="SemiBold" Classes="muted" VerticalAlignment="Center" />
+          <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor it is dropped on. -->
+          <TextBlock Name="MoveHandle" Text="SWITCHBOARD" FontSize="11" FontWeight="SemiBold" Classes="muted" VerticalAlignment="Center" Cursor="SizeAll" Background="Transparent"
+                     ToolTip.Tip="Drag to the left or right edge of a monitor" PointerPressed="OnMovePressed" PointerReleased="OnMoveReleased" PointerCaptureLost="OnMoveCaptureLost" />
           <Button Name="AdhocButton" Grid.Column="1" Classes="header" Click="OnAdhocClicked" ToolTip.Tip="New Ad-hoc Session…">
             <TextBlock Classes="icon" Text="&#xEA60;" />
           </Button>
@@ -219,6 +224,8 @@
                                   <Border Classes="key" Classes.github="{Binding IsGithub}" Classes.zoho="{Binding IsZoho}" Classes.forum="{Binding IsForum}">
                                     <TextBlock Text="{Binding Ticket}" FontSize="12" />
                                   </Border>
+                                  <TextBlock Text="{Binding ReturnedText}" IsVisible="{Binding HasReturned}" Classes="muted" FontSize="12" VerticalAlignment="Center"
+                                             ToolTip.Tip="Earlier work items with this playbook were done for this ticket" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasThirdLine}" ClipToBounds="True">
                                   <TextBlock Classes="icon" Classes.failed="{Binding MarkFailed}" Classes.spin="{Binding MarkSpins}" Text="{Binding MarkGlyph}"
@@ -273,8 +280,8 @@
         </StackPanel>
       </ScrollViewer>
     </DockPanel>
-    <!-- The inner edge: dragging it sets the dock's width. -->
-    <Border Name="Grip" Grid.Column="1" Width="5" Background="Transparent" Cursor="SizeWestEast" BorderBrush="{DynamicResource DockBorder}" BorderThickness="1,0,0,0"
-            PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" />
+    <!-- The inner edge of a dock on the left: dragging it sets the dock's width. -->
+    <Border Name="Grip" Grid.Column="2" Width="5" Background="Transparent" Cursor="SizeWestEast" BorderBrush="{DynamicResource DockBorder}" BorderThickness="1,0,0,0"
+            IsVisible="{Binding GripOnRight}" PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" PointerCaptureLost="OnGripCaptureLost" />
   </Grid>
 </Window>

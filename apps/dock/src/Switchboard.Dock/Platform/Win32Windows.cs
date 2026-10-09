@@ -26,6 +26,9 @@ public sealed class Win32Windows : IWindows, IDisposable
         foregroundHook = Native.SetWinEventHook(Native.EventSystemForeground, Native.EventSystemForeground, 0, foregroundProc, 0, 0, Native.WinEventOutOfContext);
     }
 
+    /// <summary>The monitor the dock is docked on, where item windows are placed; 0 places them on the primary monitor.</summary>
+    public nint DockMonitor { get; set; }
+
     public void Dispose()
     {
         if (foregroundHook != 0)
@@ -87,21 +90,21 @@ public sealed class Win32Windows : IWindows, IDisposable
     }
 
     /// <summary>
-    /// Moves a window on another monitor into the work area of the primary monitor, where the dock is, so maximizing fills the space beside the dock.
+    /// Moves a window on another monitor into the work area of the dock's monitor, so maximizing fills the space beside the dock.
     /// VS Code opens a new window on the monitor of the VS Code window used last.
     /// </summary>
-    static void MoveToDockMonitor(nint window)
+    void MoveToDockMonitor(nint window)
     {
-        var primary = Native.MonitorFromPoint(new System.Drawing.Point(0, 0), Native.MonitorDefaultToPrimary);
+        var target = DockMonitor == 0 ? Native.PrimaryMonitor() : DockMonitor;
 
-        if (Native.MonitorFromWindow(window, Native.MonitorDefaultToNearest) == primary)
+        if (Native.MonitorFromWindow(window, Native.MonitorDefaultToNearest) == target)
         {
             return;
         }
 
         var monitor = new Native.MonitorInfo { Size = System.Runtime.InteropServices.Marshal.SizeOf<Native.MonitorInfo>() };
 
-        Native.GetMonitorInfo(primary, ref monitor);
+        Native.GetMonitorInfo(target, ref monitor);
 
         // A maximized window stays on its monitor; restored, it moves, and maximizing then fills the new monitor's work area.
         if (Native.IsZoomed(window))

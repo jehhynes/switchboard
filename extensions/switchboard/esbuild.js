@@ -21,9 +21,9 @@ const options = {
   logLevel: 'info',
 };
 
-// The panel, settings editor and History scripts run in webviews, a browser.
+// The History script runs in a webview, a browser.
 const webview = {
-  entryPoints: { webview: 'src/webview/main.ts', settings: 'src/webview/settingsMain.ts', history: 'src/webview/historyMain.ts' },
+  entryPoints: { history: 'src/webview/historyMain.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -42,12 +42,12 @@ function copyAssets() {
     fs.copyFileSync(path.join(codicons, file), path.join('dist/codicons', file));
   }
 
-  fs.copyFileSync('src/webview/webview.css', 'dist/webview.css');
-  fs.copyFileSync('src/webview/settings.css', 'dist/settings.css');
   fs.copyFileSync('src/webview/history.css', 'dist/history.css');
 }
 
 async function main() {
+  // A file left from an earlier build, such as a removed webview, would ship in the package.
+  fs.rmSync('dist', { recursive: true, force: true });
   copyAssets();
 
   if (process.argv.includes('--watch')) {

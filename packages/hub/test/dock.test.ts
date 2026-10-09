@@ -1,12 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dockView, windowOf } from '../src/dock.js';
+import { dockView, windowOf, windowsDir, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
 import type { WorkItemView } from '../src/runtime.js';
 import { item, NOW, pool, session, snapshot, triage } from './views.js';
 
+/** Where the tests' item windows keep their workspace files. */
+const W = 'C:\\Users\\op\\.switchboard\\windows';
 const worktree = { id: 1, ticketId: 7, path: 'D:/git/widgets/.worktrees/107-fix', branch: '107-fix', linkedBy: 'report' as const };
-const row = (entry: WorkItemView): DockRow => dockView(snapshot([entry]), NOW).groups.flatMap((group) => group.rows)[0]!;
+const row = (entry: WorkItemView): DockRow => dockView(snapshot([entry]), NOW, W).groups.flatMap((group) => group.rows)[0]!;
 
 describe('dockView', () => {
   // Wake times are local; the recorded message is in UTC.
@@ -24,7 +28,7 @@ describe('dockView', () => {
   });
 
   it('offers the snooze choices with their wake times', () => {
-    expect(dockView(snapshot([]), NOW).snooze.map((choice) => [choice.label, choice.description, choice.until])).toEqual([
+    expect(dockView(snapshot([]), NOW, W).snooze.map((choice) => [choice.label, choice.description, choice.until])).toEqual([
       ['Tomorrow', 'Sun, Oct 4, 6:00 AM', Date.UTC(2026, 9, 4, 6)],
       ['In 2 days', 'Mon, Oct 5, 6:00 AM', Date.UTC(2026, 9, 5, 6)],
       ['In 3 days', 'Tue, Oct 6, 6:00 AM', Date.UTC(2026, 9, 6, 6)],
@@ -36,7 +40,7 @@ describe('dockView', () => {
   });
 
   it('lists the panel groups in panel order, with Snoozed only when it has rows', () => {
-    const view = dockView(snapshot([item(1, { status: 'blocked' }), item(2), item(3, { status: 'unstarted' })], { pool: [pool(4)] }), NOW);
+    const view = dockView(snapshot([item(1, { status: 'blocked' }), item(2), item(3, { status: 'unstarted' })], { pool: [pool(4)] }), NOW, W);
 
     expect(view.groups.map((group) => [group.key, group.title, group.empty, group.rows.map((entry) => entry.key)])).toEqual([
       ['needs', 'Needs you', 'Nothing needs you.', ['item:1']],
@@ -44,13 +48,13 @@ describe('dockView', () => {
       ['unstarted', 'Unstarted', 'Nothing waits to be started.', ['item:3', 'ticket:4']],
       ['done', 'Done', null, []],
     ]);
-    expect(dockView(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: true } })]), NOW).groups.at(-1)?.rows.map((entry) => entry.key)).toEqual(['item:5']);
+    expect(dockView(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: true } })]), NOW, W).groups.at(-1)?.rows.map((entry) => entry.key)).toEqual(['item:5']);
   });
 
   it('lists configuration errors, then what an unconfigured home lacks', () => {
-    expect(dockView(snapshot([], { sources: [], errors: { settings: 'bad JSON', playbooks: [], hooks: null, sources: {} } }), NOW).notes).toEqual([
+    expect(dockView(snapshot([], { sources: [], errors: { settings: 'bad JSON', playbooks: [], hooks: null, sources: {} } }), NOW, W).notes).toEqual([
       'Settings: bad JSON',
-      'No source is polled. Turn one on in the title bar.',
+      'No source is polled. Turn one on in the header.',
     ]);
   });
 
@@ -158,14 +162,14 @@ describe('dockView', () => {
   });
 
   it('lists the sources and repo roots for the header', () => {
-    const view = dockView(snapshot([], { sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] }), NOW);
+    const view = dockView(snapshot([], { sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] }), NOW, W);
 
     expect(view.sources).toEqual([{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }]);
     expect(view.repoRoots).toEqual(['D:/git/widgets', 'D:/git/support']);
   });
 
   it('gives a pool row its ticket, its triage state and its pool controls, and no window', () => {
-    const view = dockView(snapshot([], { pool: [pool(4, { triage: triage({ playbook: null, endedAt: null }) }), pool(5, { triage: triage({ playbook: null, error: 'timed out' }) })] }), NOW);
+    const view = dockView(snapshot([], { pool: [pool(4, { triage: triage({ playbook: null, endedAt: null }) }), pool(5, { triage: triage({ playbook: null, error: 'timed out' }) })] }), NOW, W);
     const [triaging, failed] = view.groups.find((group) => group.key === 'unstarted')!.rows;
 
     expect(triaging).toMatchObject({ key: 'ticket:4', playbook: 'dev:triage', mark: { kind: 'triaging', glyph: '\u{eb19}', title: 'Triaging' }, window: null, open: { type: 'url', url: 'https://github.com/o/r/issues/104' }, time: null });
@@ -177,12 +181,42 @@ describe('dockView', () => {
     expect(failed!.controls.map((control) => control.action)).toEqual([{ type: 'retriage-pool', ticketId: 5 }, { type: 'snooze', ticketId: 5 }]);
   });
 
+  it('names each link once by its pull request or issue number, else its label, leaving out the ticket itself, and carries Returned', () => {
+    const link = (id: number, label: string, target: string) => ({ id, ticketId: 7, label, target, reportedAt: NOW });
+    const shown = row(
+      item(7, {
+        links: [
+          link(1, 'Pull request', 'https://github.com/o/r/pull/19002'),
+          link(2, 'Issue', 'https://github.com/o/r/issues/18941'),
+          link(3, 'Design doc', 'https://example.test/doc'),
+          link(4, 'Again', 'https://github.com/o/r/pull/19002'),
+          link(5, 'Itself', 'https://github.com/o/r/issues/107'),
+        ],
+        returned: 3,
+      }),
+    );
+
+    expect(shown.links).toEqual([
+      { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002' },
+      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941' },
+      { label: 'Design doc', url: 'https://example.test/doc' },
+    ]);
+    expect(shown.returned).toBe(3);
+  });
+
   it('matches the recorded dock message the dock app reads', () => {
     const recorded = JSON.parse(readFileSync(new URL('../../../apps/dock/test/fixtures/dock.json', import.meta.url), 'utf8')) as unknown;
     const view = dockView(
       snapshot(
         [
-          item(7, { status: 'blocked', error: 'The session finished its turn.', worktree, sessions: [session({ state: 'ended', cwd: worktree.path })] }),
+          item(7, {
+            status: 'blocked',
+            error: 'The session finished its turn.',
+            worktree,
+            sessions: [session({ state: 'ended', cwd: worktree.path })],
+            links: [{ id: 1, ticketId: 7, label: 'Pull request', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW }],
+            returned: 2,
+          }),
           item(8, { sessions: [session({ state: 'waiting', cwd: 'D:/git/widgets' })], question: { text: 'Which branch?', options: [{ label: 'main', description: 'The default branch' }], parts: 1 } }),
           item(9, { status: 'unstarted', triage: triage({ immediacy: 'BLOCKING', severity: 'MED' }) }),
           item(10, {
@@ -197,6 +231,7 @@ describe('dockView', () => {
         { pool: [pool(4)], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] },
       ),
       NOW,
+      W,
     );
 
     expect(view).toEqual(recorded);
@@ -205,33 +240,93 @@ describe('dockView', () => {
 
 describe('windowOf', () => {
   it('opens the latest session folder first, with the worktree second when the session ran elsewhere', () => {
-    expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:\\git\\widgets\\.worktrees\\107-fix\\' })] }))).toEqual({
+    expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:\\git\\widgets\\.worktrees\\107-fix\\' })] }), W)).toEqual({
       name: 'gh-107-58c609',
       title: 'sb:gh-107-58c609 · Issue <7>',
       folders: ['D:\\git\\widgets\\.worktrees\\107-fix\\'],
+      file: `${W}\\gh-107-58c609.code-workspace`,
     });
-    expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:/git/widgets' })] }))).toEqual({
+    expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:/git/widgets' })] }), W)).toEqual({
       name: 'gh-107-widgets-655280',
       title: 'sb:gh-107-widgets-655280 · Issue <7>',
       folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'],
+      file: `${W}\\gh-107-widgets-655280.code-workspace`,
     });
-    expect(windowOf(item(7, { worktree }))).toEqual({ name: 'gh-107-58c609', title: 'sb:gh-107-58c609 · Issue <7>', folders: ['D:/git/widgets/.worktrees/107-fix'] });
-    expect(windowOf(item(7, { sessions: [session({ cwd: 'D:/git/support' })], ticket: { ...item(7).ticket, source: 'zoho', sourceKey: '4521/a b' } }))).toEqual({
+    expect(windowOf(item(7, { worktree }), W)).toEqual({
+      name: 'gh-107-58c609',
+      title: 'sb:gh-107-58c609 · Issue <7>',
+      folders: ['D:/git/widgets/.worktrees/107-fix'],
+      file: `${W}\\gh-107-58c609.code-workspace`,
+    });
+    expect(windowOf(item(7, { sessions: [session({ cwd: 'D:/git/support' })], ticket: { ...item(7).ticket, source: 'zoho', sourceKey: '4521/a b' } }), W)).toEqual({
       name: 'zoho-4521-a-b-support-c6262c',
       title: 'sb:zoho-4521-a-b-support-c6262c · Issue <7>',
       folders: ['D:/git/support'],
+      file: `${W}\\zoho-4521-a-b-support-c6262c.code-workspace`,
     });
-    expect(windowOf(item(7))).toBeNull();
+    expect(windowOf(item(7), W)).toBeNull();
   });
 
   it('gives each first folder its own name, so a window never changes its first folder', () => {
-    const names = ['D:/one/review', 'D:/two/review'].map((cwd) => windowOf(item(7, { sessions: [session({ cwd })] }))!.name);
-    const moved = windowOf(item(7, { worktree: { ...worktree, path: 'E:/wt/107-fix' } }))!.name;
+    const names = ['D:/one/review', 'D:/two/review'].map((cwd) => windowOf(item(7, { sessions: [session({ cwd })] }), W)!.name);
+    const moved = windowOf(item(7, { worktree: { ...worktree, path: 'E:/wt/107-fix' } }), W)!.name;
 
     expect(names[0]).toMatch(/^gh-107-review-[0-9a-f]{6}$/);
     expect(names[1]).toMatch(/^gh-107-review-[0-9a-f]{6}$/);
     expect(names[0]).not.toBe(names[1]);
     expect(moved).toMatch(/^gh-107-[0-9a-f]{6}$/);
     expect(moved).not.toBe('gh-107-58c609');
+  });
+});
+
+describe('workspace files', () => {
+  const window = { name: 'gh-107-widgets', title: 'sb:gh-107-widgets · Fix ${x} badge', folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'], file: '' };
+
+  it('lists the folders and starts the title with the prefix, breaking a ${ in the ticket title', () => {
+    expect(workspaceText(window)).toBe(
+      [
+        '{',
+        '  "folders": [',
+        '    {',
+        '      "path": "D:/git/widgets"',
+        '    },',
+        '    {',
+        '      "path": "D:/git/widgets/.worktrees/107-fix"',
+        '    }',
+        '  ],',
+        '  "settings": {',
+        '    "window.title": "sb:gh-107-widgets · Fix $ {x} badge · ${activeEditorShort}"',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('is under the Switchboard home', () => {
+    expect(windowsDir('C:/Users/op')).toBe(join('C:/Users/op', '.switchboard', 'windows'));
+  });
+
+  it('writes a file only when its text changed', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'switchboard-windows-')), 'windows', 'gh-107-widgets.code-workspace');
+    const written = new Map<string, string>();
+    const past = new Date(Date.now() - 3_600_000);
+
+    writeWorkspaceFile({ ...window, file }, written);
+    utimesSync(file, past, past);
+    writeWorkspaceFile({ ...window, file }, new Map());
+    expect(statSync(file).mtimeMs).toBe(past.getTime());
+
+    writeWorkspaceFile({ ...window, file, title: 'sb:gh-107-widgets · Renamed' }, written);
+    expect(readFileSync(file, 'utf8')).toContain('Renamed');
+  });
+
+  it('rewrites a file changed on disk when no cache holds it', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'switchboard-windows-')), 'gh-107-widgets.code-workspace');
+
+    writeWorkspaceFile({ ...window, file });
+    writeFileSync(file, 'edited');
+    writeWorkspaceFile({ ...window, file });
+    expect(readFileSync(file, 'utf8')).toBe(workspaceText(window));
   });
 });

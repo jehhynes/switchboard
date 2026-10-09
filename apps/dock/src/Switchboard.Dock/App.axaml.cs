@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Switchboard.Dock.Hub;
@@ -21,11 +22,14 @@ public sealed class App : Application
         {
             var hub = new HubClient(SwitchboardHome);
             var windows = new Win32Windows();
-            var switcher = new Switcher(SwitchboardHome, hub, windows, new VsCodeInstall());
+            var switcher = new Switcher(hub, windows, new VsCodeInstall());
             var model = new DockViewModel(DockSettings.Load(SwitchboardHome), (settings) => settings.Save(SwitchboardHome));
-            var window = new MainWindow(model, hub, hub, switcher, docked: true);
+            var window = new MainWindow(model, hub, hub, switcher, docked: true, config: hub);
 
             desktop.MainWindow = window;
+            // Closing the dock ends it, even with the Settings window open.
+            desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
+            window.DockedOn += (monitor) => windows.DockMonitor = monitor;
             windows.WatchForeground(window.ShowForeground);
             desktop.Exit += (_, _) =>
             {

@@ -47,27 +47,43 @@ function item(id, status, snoozed = false) {
   };
 }
 
-describe('the activity bar badge (PRD R64)', () => {
-  it('counts the Needs you work items on the resolved view, leaves out snoozed ones, and clears at 0', async () => {
+describe('the status bar item (PRD R64, R71)', () => {
+  it('counts the Needs you work items, leaving out snoozed ones, and shows no count at 0', async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
-    const hubState = await until(() => extension.state(), 'the panel never received the hub state');
+    const hubState = await until(() => extension.state(), 'the window never received the hub state');
     const show = (workItems) => extension.show(JSON.stringify({ ...hubState, workItems }));
 
     try {
-      // Shown before the view may be resolved, so resolving it shows the badge of the latest state.
       show([item(1, 'failed'), item(2, 'blocked', true), item(3, 'unstarted')]);
-      await vscode.commands.executeCommand('switchboard.workItems.focus');
-      await until(() => extension.badge() !== null, 'VS Code never resolved the view');
-      assert.deepStrictEqual(extension.badge(), { value: 1, tooltip: '1 needs you' });
+      assert.deepStrictEqual(extension.status(), { text: '$(checklist) 1', tooltip: 'Switchboard: 1 needs you. Click to show the dock.' });
 
       show([item(1, 'failed'), item(4, 'awaiting-approval')]);
-      assert.deepStrictEqual(extension.badge(), { value: 2, tooltip: '2 need you' });
+      assert.strictEqual(extension.status().text, '$(checklist) 2');
 
       show([item(3, 'unstarted')]);
-      assert.strictEqual(extension.badge(), undefined);
+      assert.strictEqual(extension.status().text, '$(checklist)');
     } finally {
       // The hub sends state only on a change, so later tests see its state again only through this.
       extension.show(JSON.stringify(hubState));
     }
+  });
+
+  it('shows the dock, and says it is not installed when the hub has no dock connected and the home has none', async () => {
+    await vscode.extensions.getExtension('switchboard.switchboard').activate();
+    const realWarning = vscode.window.showWarningMessage;
+    const warned = [];
+
+    vscode.window.showWarningMessage = (...args) => (warned.push(args[0]), Promise.resolve(undefined));
+    try {
+      assert.strictEqual(await vscode.commands.executeCommand('switchboard.showDock'), 'missing');
+      assert.match(warned[0], /^Switchboard: the dock is not installed at .*\\.switchboard\\dock\\Switchboard\.Dock\.exe\.$/);
+    } finally {
+      vscode.window.showWarningMessage = realWarning;
+    }
+
+    const contributes = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
+
+    assert.deepStrictEqual(contributes.commands.map((entry) => entry.command), ['switchboard.showDock']);
+    assert.strictEqual(contributes.views, undefined, 'the panel view is gone');
   });
 });

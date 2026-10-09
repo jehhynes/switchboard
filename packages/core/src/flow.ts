@@ -1379,7 +1379,7 @@ class Flow {
 
   /**
    * Starts queued work items in order while slots are free, skipping a ticket that already has an active session (PRD R17, R38).
-   * A session holds a slot only while its row is in the panel's Working group, so Needs you, Done and Snoozed do not stall the queue.
+   * A session holds a slot only while its row is in the Working group, so Needs you, Done and Snoozed do not stall the queue.
    */
   private scheduleStarts(): void {
     const queued = this.store.workItemsWithStatus('queued').sort((a, b) => a.queuedAt! - b.queuedAt! || a.id - b.id);

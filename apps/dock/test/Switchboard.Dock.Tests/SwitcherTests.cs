@@ -5,13 +5,12 @@ namespace Switchboard.Dock.Tests;
 
 public sealed class SwitcherTests
 {
-    readonly string home = Fixtures.TempFolder();
     readonly FakeHub hub = new();
     readonly FakeWindows windows = new();
     readonly FakeVsCode vsCode = new();
     readonly List<TimeSpan> waits = [];
 
-    Switcher Switcher() => new(home, hub, windows, vsCode, (span) =>
+    Switcher Switcher() => new(hub, windows, vsCode, (span) =>
     {
         waits.Add(span);
         return Task.CompletedTask;
@@ -28,7 +27,6 @@ public sealed class SwitcherTests
         Assert.Equal(["open aaaa1111-native D:/git/widgets/.worktrees/107-fix gh-107-58c609.code-workspace"], hub.Calls);
         Assert.Equal(["show 42"], windows.Calls);
         Assert.Empty(vsCode.Calls);
-        Assert.True(File.Exists(Path.Combine(home, "windows", "gh-107-58c609.code-workspace")));
     }
 
     [Fact]
@@ -136,13 +134,12 @@ public sealed class SwitcherTests
     }
 
     [Fact]
-    public async Task Click_WorkspaceFileCannotBeWritten_SaysWhyAndSendsNothing()
+    public async Task Click_HubNamesNoWorkspaceFile_SaysToReloadAndSendsNothing()
     {
-        File.WriteAllText(Path.Combine(home, "windows"), "a file where the folder goes");
+        var row = Fixtures.Row("item:7");
+        var status = await Switcher().Click(row with { Window = row.Window! with { File = null } }, TestContext.Current.CancellationToken);
 
-        var status = await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken);
-
-        Assert.StartsWith("The workspace file for gh-107-58c609 could not be written: ", status);
+        Assert.Equal("The hub names no workspace file for this window. Reload a VS Code window to update the hub.", status);
         Assert.Empty(hub.Calls);
         Assert.Empty(vsCode.Calls);
     }
@@ -226,7 +223,7 @@ public sealed class SwitcherTests
     public async Task Click_ReplacedWhileTheWindowOpens_StopsLooking()
     {
         using var cancel = new CancellationTokenSource();
-        var switcher = new Switcher(home, hub, windows, vsCode, (_) =>
+        var switcher = new Switcher(hub, windows, vsCode, (_) =>
         {
             cancel.Cancel();
             return Task.CompletedTask;
@@ -268,7 +265,7 @@ public sealed class SwitcherTests
     [Fact]
     public async Task Run_NoVsCodeWindow_SaysSoAndLeavesNothing()
     {
-        Assert.Equal("Open a VS Code window first; this runs in VS Code.", await Switcher().Run(null, new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
+        Assert.Equal("Open a VS Code window first; this runs in VS Code.", await Switcher().Run(null, new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
         Assert.Empty(hub.Calls);
     }
 
@@ -278,7 +275,7 @@ public sealed class SwitcherTests
         windows.Open["sb:gh-107-58c609 · "] = (42, 0);
         hub.WindowReply = "Switchboard is not running.";
 
-        Assert.Equal("Switchboard is not running.", await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
+        Assert.Equal("Switchboard is not running.", await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
         Assert.Empty(windows.Calls);
     }
 
@@ -291,8 +288,8 @@ public sealed class SwitcherTests
 
         cancel.Cancel();
 
-        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, cancel.Token));
-        Assert.Equal(["window gh-107-58c609.code-workspace {\"type\":\"settings\"}", "withdraw 41"], hub.Calls);
+        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, cancel.Token));
+        Assert.Equal(["window gh-107-58c609.code-workspace {\"type\":\"openUrl\",\"url\":\"D:/drafts/reply.md\"}", "withdraw 41"], hub.Calls);
         Assert.Empty(windows.Calls);
     }
 
@@ -302,14 +299,14 @@ public sealed class SwitcherTests
         windows.Front0 = 77;
         windows.Front = false;
 
-        Assert.Equal("Windows kept another window in front. Try again.", await Switcher().Run(null, new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
-        Assert.Equal(["window any {\"type\":\"settings\"}", "withdraw 41"], hub.Calls);
+        Assert.Equal("Windows kept another window in front. Try again.", await Switcher().Run(null, new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
+        Assert.Equal(["window any {\"type\":\"openUrl\",\"url\":\"D:/drafts/reply.md\"}", "withdraw 41"], hub.Calls);
     }
 
     [Fact]
     public async Task Run_ItemWindowNeverOpens_WithdrawsTheCommand()
     {
-        var status = await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken);
+        var status = await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken);
 
         Assert.Equal("VS Code did not open the window for gh-107-58c609 within 20 seconds.", status);
         Assert.Equal("withdraw 41", hub.Calls[^1]);
@@ -320,7 +317,7 @@ public sealed class SwitcherTests
     {
         windows.Open["sb:gh-107-58c609 · "] = (42, 0);
 
-        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
+        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
         Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));
     }
 }

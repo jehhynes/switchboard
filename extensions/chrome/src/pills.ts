@@ -81,8 +81,8 @@ function pill(doc: Document, card: Card): HTMLElement {
 }
 
 /**
- * Puts a pill after the issue reference in each loaded card's header, with the panel row's mark and the playbook Switchboard
- * chose, coloured by the panel group (PRD R67). A pill that matches its card is left alone, so a pass that changes nothing makes no mutation.
+ * Puts a pill after the issue reference in each loaded card's header, with the dock row's mark and the playbook Switchboard
+ * chose, coloured by the dock's group (PRD R67). A pill that matches its card is left alone, so a pass that changes nothing makes no mutation.
  */
 export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): void {
   for (const element of root.querySelectorAll<HTMLElement>('[data-board-column] [data-board-card-id]')) {

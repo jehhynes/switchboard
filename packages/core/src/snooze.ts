@@ -35,7 +35,7 @@ export function mondaysFrom(now: Date, weeks: number): Date {
   return daysFrom(now, untilMonday + 7 * (weeks - 1));
 }
 
-/** The wake time as the picker and the panel show it, such as `Mon, Oct 12, 6:00 AM`. */
+/** The wake time as the snooze choices and the dock show it, such as `Mon, Oct 12, 6:00 AM`. */
 export function wakeText(time: number): string {
   return new Date(time).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }

@@ -16,7 +16,7 @@ async function until(what, why, within = 30_000) {
   }
 }
 
-/** A blocked work item whose session ended, so its click action resumes that session in a terminal. */
+/** A blocked work item whose session ended, so its click leaves the session for its item window and brings that window forward. */
 function item(id, url, cwd) {
   return {
     id,
@@ -60,28 +60,25 @@ function item(id, url, cwd) {
 const uri = (url) => vscode.Uri.parse(`vscode://switchboard.switchboard/open?url=${encodeURIComponent(url)}`);
 
 describe('Open in Switchboard (PRD R69)', () => {
-  const realCreate = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
+  const realExecute = vscode.commands.executeCommand;
   const realInformation = vscode.window.showInformationMessage;
   const realWarning = vscode.window.showWarningMessage;
   let extension;
   let hubState;
-  let resumed;
+  let opened;
   let messages;
 
   before(async () => {
     extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     hubState = await until(() => extension.state(), 'the panel never received the hub state');
-    // Stand-ins, so no Claude process starts and no message waits for a click.
-    Object.defineProperty(vscode.window, 'createTerminal', {
-      configurable: true,
-      value: (options) => (resumed.push(options.shellArgs), { exitStatus: undefined, show: () => {} }),
-    });
+    // Stand-ins, so no window opens and no message waits for a click.
+    vscode.commands.executeCommand = (command, ...args) => (command === 'vscode.openFolder' ? (opened.push(args[0].fsPath), Promise.resolve()) : realExecute.call(vscode.commands, command, ...args));
     vscode.window.showInformationMessage = (...args) => (messages.push(args[0]), Promise.resolve(undefined));
     vscode.window.showWarningMessage = (...args) => (messages.push(args[0]), Promise.resolve(undefined));
   });
 
   after(() => {
-    Object.defineProperty(vscode.window, 'createTerminal', realCreate);
+    vscode.commands.executeCommand = realExecute;
     vscode.window.showInformationMessage = realInformation;
     vscode.window.showWarningMessage = realWarning;
     // The hub sends state only on a change, so later tests see its state again only through this.
@@ -89,7 +86,7 @@ describe('Open in Switchboard (PRD R69)', () => {
   });
 
   beforeEach(() => {
-    resumed = [];
+    opened = [];
     messages = [];
   });
 
@@ -99,21 +96,20 @@ describe('Open in Switchboard (PRD R69)', () => {
     assert.ok(events.includes('onUri'), `activationEvents ${JSON.stringify(events)} lack onUri`);
   });
 
-  it("reveals the work item with the URI's ticket URL and runs its click action, through the panel", async () => {
+  it("runs the click of the work item with the URI's ticket URL, bringing its item window forward", async () => {
     const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const desk = 'https://desk.example.test/t?id=5&x=1';
 
     extension.show(JSON.stringify({ ...hubState, workItems: [item(7, 'https://github.com/o/r/issues/7', folder), item(8, desk, folder)] }));
 
-    assert.deepStrictEqual(await extension.openUri(uri('https://github.com/O/R/issues/7/files')), { workItemId: 7 });
-    // The webview selects the row and posts its click action, which resumes the ended session in a terminal.
-    await until(() => resumed.length === 1, 'the click action never ran');
-    assert.deepStrictEqual(resumed, [['--resume', 'native-7']]);
+    assert.strictEqual(await extension.openUri(uri('https://github.com/O/R/issues/7/files')), 'item:7');
+    await until(() => opened.length === 1, 'the click never ran');
+    assert.match(opened[0], /gh-7-workspace-[0-9a-f]{6}\.code-workspace$/);
 
     // A ticket URL with its own query survives VS Code's decoding of the URI.
-    assert.deepStrictEqual(await extension.openUri(uri(desk)), { workItemId: 8 });
-    await until(() => resumed.length === 2, 'the second click action never ran');
-    assert.deepStrictEqual(resumed[1], ['--resume', 'native-8']);
+    assert.strictEqual(await extension.openUri(uri(desk)), 'item:8');
+    await until(() => opened.length === 2, 'the second click never ran');
+    assert.match(opened[1], /gh-8-workspace-[0-9a-f]{6}\.code-workspace$/);
     assert.deepStrictEqual(messages, []);
   });
 
@@ -123,6 +119,6 @@ describe('Open in Switchboard (PRD R69)', () => {
     assert.strictEqual(await extension.openUri(uri('https://github.com/o/r/issues/999')), null);
     assert.strictEqual(await extension.openUri(vscode.Uri.parse('vscode://switchboard.switchboard/close?url=x')), null);
     assert.deepStrictEqual(messages, ['Switchboard has no work item for https://github.com/o/r/issues/999', 'Switchboard cannot open vscode://switchboard.switchboard/close?url=x.']);
-    assert.deepStrictEqual(resumed, []);
+    assert.deepStrictEqual(opened, []);
   });
 });

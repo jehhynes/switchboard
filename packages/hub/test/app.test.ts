@@ -338,6 +338,77 @@ describe('createHubApp', () => {
     expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {ticketId, revision?}.' } });
   });
 
+  it('shows the dock only while a dock stream is connected, and tells it when the config files change', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const app = await start();
+    const sent: string[] = [];
+
+    expect(await app.post['/dock/show']!({})).toEqual({ status: 409, body: { error: 'The dock is not running.' } });
+    app.attachDock!((event) => {
+      sent.push(event);
+      return 1;
+    });
+    expect(await app.post['/dock/show']!({})).toEqual({ status: 200, body: { shown: true } });
+    expect(sent).toEqual(['show']);
+
+    writeSettings({ sessions: { installHooks: false, concurrency: 3 } });
+    await until(() => (sent.includes('config') ? true : null));
+  });
+
+  it('reads, checks, saves and deletes settings and playbooks for the Settings window, refusing a stale version', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const app = await start();
+    const playbook = { description: 'Build it', kind: 'task', autoStart: false, requiresWorktree: false, permissionMode: null, model: null, workdir: 'worktree', reports: ['done'], approvalSends: false, rates: false, template: 'Build {{ticket.title}}.' };
+    const read = async () => (await app.post['/config/read']!({})).body as { settings: { version: string | null; value: unknown }; playbooks: { name: string; version: string }[]; permissionModes: string[]; sourceKinds: string[]; inUse: Record<string, number> };
+
+    const first = await read();
+
+    expect(first.settings.value).toEqual({ sessions: { installHooks: false } });
+    expect(first.playbooks).toEqual([]);
+    expect(first.sourceKinds).toEqual(['github', 'zoho', 'forum']);
+    expect(first.permissionModes).toContain('auto');
+    expect(first.inUse).toEqual({});
+    expect((first as unknown as { configDir: string }).configDir).toBe(join(temp.home, '.switchboard'));
+
+    expect(await app.post['/config/check']!({ target: 'settings', settings: { sessions: { concurrency: 11 } } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('sessions.concurrency')] } });
+    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, template: '{{nope}}' } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('nope')] } });
+    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook })).toEqual({ status: 200, body: { errors: [] } });
+    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, kind: 'other' } })).toMatchObject({ status: 400 });
+
+    expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: 'stale' })).toEqual({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Reload to see the change.'] } });
+    expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: first.settings.version })).toEqual({ status: 200, body: { saved: true } });
+    expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).sessions.concurrency).toBe(3);
+
+    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook, version: null })).toEqual({ status: 200, body: { saved: true } });
+    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook, version: null })).toEqual({ status: 409, body: { errors: ['A playbook named dev:develop already exists.'] } });
+    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, reports: ['nope'] }, version: null })).toMatchObject({ status: 400 });
+
+    const saved = (await read()).playbooks.find((entry) => entry.name === 'dev:develop')!;
+
+    expect(await app.post['/config/delete']!({ name: 'dev:develop', version: 'stale' })).toMatchObject({ status: 409 });
+    expect(await app.post['/config/delete']!({ name: 'dev:develop', version: saved.version })).toEqual({ status: 200, body: { deleted: true } });
+    expect((await read()).playbooks).toEqual([]);
+    expect(await app.post['/config/delete']!({ name: 'dev:develop' })).toEqual({ status: 400, body: { error: 'Expected {name, version}.' } });
+    expect(await app.post['/config/save']!({ target: 'settings', value: {}, version: null, configDir: 'D:/old' })).toEqual({
+      status: 409,
+      body: { errors: [`The config folder is now ${join(temp.home, '.switchboard')}, not D:/old. Settings reads it again; make your change there.`] },
+    });
+    expect(await app.post['/config/delete']!({ name: 'dev:develop', version: 'v', configDir: 'D:/old' })).toMatchObject({ status: 409 });
+  });
+
+  it('writes each item window\'s workspace file when it builds the dock view', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const app = await start();
+
+    expect(await app.post['/action']!({ type: 'adhoc', prompt: 'Look around', repoRoot: 'D:/scratch' })).toMatchObject({ status: 200 });
+    await until(() => ((app.snapshot() as { workItems: { sessions: unknown[] }[] }).workItems[0]?.sessions.length ? true : null));
+
+    const window = (app.dock() as { groups: { rows: { window: { file: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows).find((row) => row.window !== null)!.window!;
+
+    expect(window.file.startsWith(join(temp.home, '.switchboard', 'windows'))).toBe(true);
+    expect(JSON.parse(readFileSync(window.file, 'utf8')).settings['window.title']).toBe(`${window.title} · \${activeEditorShort}`);
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
@@ -359,7 +430,7 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/open', { sessionId: 'x', cwd: 'D:/x', workspace: 3 }, 5000)).toMatchObject({ status: 400 });
     expect(await postToHub(record, '/claim', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {folder, workspace?, focused?}.' });
     expect(await postToHub(record, '/claim', { folder: '', focused: 'yes' }, 5000)).toMatchObject({ status: 400 });
-    const settings = await postToHub(record, '/window', { workspace: null, command: { type: 'settings' } }, 5000);
+    const settings = await postToHub(record, '/window', { workspace: null, command: { type: 'openUrl', url: 'D:/drafts/reply.md' } }, 5000);
 
     expect(settings).toMatchObject({ status: 200, body: { id: expect.any(Number) } });
     expect(await postToHub(record, '/window/withdraw', { id: (settings!.body as { id: number }).id }, 5000)).toMatchObject({ status: 200, body: { withdrawn: true } });
@@ -369,10 +440,10 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/claim', { folder: '', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [] } });
     expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }] } });
     expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }] } });
-    for (const command of [{ type: 'sourceControl', path: 'D:/wt' }, { type: 'attach', shortId: 'a' }, { type: 'history', ticketId: 'x', key: 'gh 3' }, { type: 'changes', path: 'D:/wt', key: '' }, { type: 'openUrl' }, null]) {
+    for (const command of [{ type: 'settings' }, { type: 'sourceControl', path: 'D:/wt' }, { type: 'attach', shortId: 'a' }, { type: 'history', ticketId: 'x', key: 'gh 3' }, { type: 'changes', path: 'D:/wt', key: '' }, { type: 'openUrl' }, null]) {
       expect(await postToHub(record, '/window', { workspace: null, command }, 5000)).toMatchObject({ status: 400 });
     }
-    expect(await postToHub(record, '/window', { workspace: 7, command: { type: 'settings' } }, 5000)).toMatchObject({ status: 400 });
+    expect(await postToHub(record, '/window', { workspace: 7, command: { type: 'openUrl', url: 'D:/x.md' } }, 5000)).toMatchObject({ status: 400 });
     expect(await postToHub({ ...record, port: 1 }, '/action', {}, 1000)).toBeNull();
   });
 });

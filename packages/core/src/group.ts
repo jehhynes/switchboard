@@ -1,6 +1,6 @@
 import type { DoneReason, Session, WorkItem } from './model.js';
 
-// Imports only types, so the panel webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
+// Imports only types, so the History webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
 
 export type Group = 'needs' | 'working' | 'unstarted' | 'done';
 
@@ -47,7 +47,7 @@ export const MARK_TITLES: Record<Mark, string> = {
   'done-unassigned': DONE_WORDS.unassigned,
 };
 
-/** Each mark's codicon glyph in codicon.ttf, as the panel draws it, for the Chrome extension's pills and the dock; Queued's `clock` is an alias of `history`. */
+/** Each mark's codicon glyph in codicon.ttf, for the dock and the Chrome extension's pills; Queued's `clock` is an alias of `history`. */
 export const MARK_GLYPHS: Record<Mark, string> = {
   question: '\u{eb32}',
   send: '\u{ec0f}',
@@ -113,10 +113,10 @@ export function urlKey(url: string): string {
 /** A ticket on the browser endpoint's `GET /cards` (PRD R67). `url` is the ticket's URL as stored. */
 export interface Card {
   url: string;
-  /** The playbook the panel shows, `<namespace>:triage` during triage, or null before triage chooses one. */
+  /** The playbook the dock shows, `<namespace>:triage` during triage, or null before triage chooses one. */
   playbook: string | null;
   group: Group;
-  /** The panel row's mark (PRD R27), or null when the row shows none. A hub older than this field sends none. */
+  /** The row's mark (PRD R27), or null when the row shows none. A hub older than this field sends none. */
   mark?: Mark | null;
   snoozed: boolean;
   /** The URLs of the ticket's links (PRD R52), so a pull request page finds its ticket (PRD R69). A hub older than R69 sends none. */

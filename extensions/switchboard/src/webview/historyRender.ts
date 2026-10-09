@@ -1,6 +1,10 @@
 import { CATEGORIES, durationText, timeText } from './historyModel.js';
 import type { Category, Entry, EntryLink, HistoryView, Section } from './historyModel.js';
-import { escape } from './render.js';
+
+/** Text safe inside HTML text and quoted attributes. */
+function escape(text: string): string {
+  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
 
 /** What the operator set on the page; the webview keeps it across reloads. */
 export interface HistoryUi {

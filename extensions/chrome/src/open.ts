@@ -1,6 +1,6 @@
 import { PILL } from './pills.js';
 
-/** The VS Code URI whose handler reveals the ticket's row in the Switchboard panel and runs its click action (PRD R69). */
+/** The VS Code URI whose handler runs the click of the ticket's row, bringing its item window forward (PRD R69). */
 export function openUri(ticketUrl: string): string {
   return `vscode://switchboard.switchboard/open?url=${encodeURIComponent(ticketUrl)}`;
 }

@@ -15,7 +15,7 @@ export const CATEGORIES: readonly { key: Category; label: string; icon: string }
 
 export type Tone = 'error' | 'warning' | 'success' | 'accent' | null;
 
-/** Something an entry names that the operator can open; `open` is a message `runOpen` takes. */
+/** Something an entry names that the operator can open; `open` is a message the extension's History link handler takes. */
 export interface EntryLink {
   label: string;
   icon: string;
@@ -132,13 +132,13 @@ function oneLine(text: string): string {
 
 const str = (value: unknown): string => (value === null || value === undefined ? '' : String(value));
 
-/** What a click on a session opens: attached while its background process runs, else resumed; null while it has neither. */
-export function sessionOpen(session: Session, name: string): Record<string, unknown> | null {
+/** What a click on a session opens: the session in Claude, unless it runs in its background process or has no native ID yet; then null. */
+export function sessionOpen(session: Session): Record<string, unknown> | null {
   if (session.state !== 'starting' && session.state !== 'ended' && session.shortId !== null && !session.released) {
-    return { type: 'attach', shortId: session.shortId, name };
+    return null;
   }
 
-  return session.nativeSessionId === null ? null : { type: 'resume', sessionId: session.nativeSessionId, cwd: session.cwd, name, active: session.state !== 'ended' };
+  return session.nativeSessionId === null ? null : { type: 'open', sessionId: session.nativeSessionId, cwd: session.cwd };
 }
 
 /** A link to open a reported URL or file. */
@@ -151,11 +151,8 @@ class Builder {
   readonly sessions = new Map<string, Session>();
   /** Each session's state as of the event being worded, so a change of the question alone keeps its state. */
   readonly states = new Map<string, string>();
-  readonly name: string;
 
   constructor(readonly history: TicketHistory) {
-    this.name = `${history.ticket.source} ${history.ticket.sourceKey}`;
-
     for (const item of history.workItems) {
       for (const session of item.sessions) {
         this.sessions.set(session.id, session);
@@ -175,9 +172,9 @@ class Builder {
 
   sessionLink(sessionId: string | null): EntryLink[] {
     const session = sessionId === null ? undefined : this.sessions.get(sessionId);
-    const open = session === undefined ? null : sessionOpen(session, this.name);
+    const open = session === undefined ? null : sessionOpen(session);
 
-    return open === null ? [] : [{ label: open['type'] === 'attach' ? 'Attach' : 'Resume', icon: 'terminal', title: `Open ${this.sessionName(sessionId)} in a terminal`, open }];
+    return open === null ? [] : [{ label: 'Open in Claude', icon: 'comment-discussion', title: `Open ${this.sessionName(sessionId)} in Claude`, open }];
   }
 
   /** One line per logged field of a change, in plain words; fields in `skip` are already in the entry's text. */

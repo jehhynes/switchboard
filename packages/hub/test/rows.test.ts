@@ -3,11 +3,8 @@ import { groupOf } from '@switchboard/core/group';
 import {
   clockOf,
   controlsOf,
-  doneBand,
   doneStamp,
-  editorAction,
   mainControl,
-  openAction,
   poolControls,
   priorityTitle,
   queueTime,
@@ -37,7 +34,7 @@ describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
     expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Attach', 'Stop', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'History']);
@@ -45,7 +42,6 @@ describe('controlsOf', () => {
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
-      { type: 'attach', shortId: 'aaaa1111', name: 'github 107' },
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
       { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
       { type: 'action', action: { type: 'snooze', ticketId: 7 } },
@@ -54,29 +50,6 @@ describe('controlsOf', () => {
   });
 });
 
-describe('openAction', () => {
-  const worktree = { id: 1, ticketId: 7, path: 'D:/git/widgets-wt/107-fix', branch: '107-fix', linkedBy: 'report' as const };
-  const action = (sessions: ReturnType<typeof session>[], patch: Partial<WorkItemView> = {}) => openAction(item(7, { sessions, ...patch }));
-
-  it('attaches to a background session, resumes any other latest session in a terminal, then opens the worktree, then the ticket', () => {
-    expect(action([session()], { worktree })).toEqual({ type: 'attach', shortId: 'aaaa1111', name: 'github 107' });
-    expect(action([session({ state: 'idle', released: true })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: true });
-    expect(action([session({ state: 'ended' })], { worktree })).toEqual({ type: 'resume', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'github 107', active: false });
-    expect(action([], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
-    expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })], { worktree })).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
-    expect(action([])).toEqual({ type: 'openUrl', url: 'https://github.com/o/r/issues/107' });
-    expect(action([], { ticket: { ...item(7).ticket, source: 'adhoc', url: '' } })).toBeNull();
-    expect(action([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toBeNull();
-  });
-
-  it('opens the session in VS Code on Ctrl+click, or the worktree while the session runs in its background process', () => {
-    expect(editorAction(item(7, { sessions: [session({ state: 'ended' })], worktree }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
-    expect(editorAction(item(7, { sessions: [session({ state: 'waiting', released: true })] }))).toEqual({ type: 'open', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
-    expect(editorAction(item(7, { sessions: [session()], worktree }))).toEqual({ type: 'openFolder', path: 'D:/git/widgets-wt/107-fix' });
-    expect(editorAction(item(7, { sessions: [session()] }))).toBeNull();
-    expect(editorAction(item(7))).toBeNull();
-  });
-});
 describe('mainControl', () => {
   it('picks the one primary control of a Needs you or Unstarted row', () => {
 
@@ -113,25 +86,15 @@ describe('clockOf', () => {
   });
 });
 
-describe('doneBand', () => {
-  // Wednesday 7 October 2026, 10:00 local time; the week began on Monday 5 October.
+describe('doneStamp', () => {
+  // Wednesday 7 October 2026, 10:00 local time.
   const now = new Date(2026, 9, 7, 10).getTime();
   const at = (day: number, hour = 0) => new Date(2026, 9, day, hour).getTime();
-
-  it('bands by local day, with weeks starting on Monday', () => {
-    const times = [at(7), at(6, 23), at(6), at(5), at(4, 23), new Date(2026, 8, 28).getTime(), new Date(2026, 8, 27, 23).getTime()];
-
-    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'Earlier this week', 'Last week', 'Last week', 'Older']);
-  });
 
   it('stamps a done time as 24-hour HH:mm today and m/d before today, in local time', () => {
     expect([at(7, 9), at(7, 13) + 5 * 60_000, at(7, 0), at(6, 23), new Date(2026, 8, 28).getTime()].map((time) => doneStamp(time, now))).toEqual(['09:00', '13:05', '00:00', '10/6', '9/28']);
   });
 
-  it('puts Monday’s yesterday in Yesterday, not Last week', () => {
-    expect(doneBand(at(4, 12), at(5, 9))).toBe('Yesterday');
-    expect(doneBand(at(3, 12), at(5, 9))).toBe('Last week');
-  });
 });
 
 describe('rankOf and queueTime', () => {
@@ -233,7 +196,7 @@ describe('snapshotErrors and setupNotes', () => {
     expect(snapshotErrors(snapshot([]))).toEqual([]);
     expect(setupNotes(snapshot([]))).toEqual([]);
     expect(setupNotes(snapshot([], { sources: [], playbooks: [] }))).toEqual([
-      'No source is polled. Turn one on in the title bar.',
+      'No source is polled. Turn one on in the header.',
       'No task playbooks are loaded. Add them under C:\\Users\\me\\.claude\\switchboard\\playbooks.',
     ]);
     expect(setupNotes(snapshot([], { sources: [], sourceStates: [] }))).toEqual(['No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.']);

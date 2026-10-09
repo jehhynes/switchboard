@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Switchboard.Dock.Settings;
 
 namespace Switchboard.Dock.Hub;
 
@@ -19,7 +20,7 @@ public enum Connection
 /// Holds the running hub's dock stream (<c>GET /dock/events</c>), connecting again whenever it ends, and sends the click's requests.
 /// The dock never starts the hub; a VS Code window with Switchboard does (PRD R71).
 /// </summary>
-public sealed class HubClient(string switchboardHome) : IHub, IDisposable
+public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IDisposable
 {
     static readonly TimeSpan Retry = TimeSpan.FromSeconds(2);
     static readonly TimeSpan HeadersTimeout = TimeSpan.FromSeconds(5);
@@ -36,6 +37,15 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
 
     /// <summary>Raised on the stream's thread after the view or the connection changes.</summary>
     public event Action? Changed;
+
+    /// <summary>Raised on the stream's thread when the hub says the settings or playbook files changed on disk (PRD R54).</summary>
+    public event Action? ConfigChanged;
+
+    /// <summary>Raised on the stream's thread when a VS Code window's status bar item asks the dock to show its list (PRD R71).</summary>
+    public event Action? ShowRequested;
+
+    /// <summary>Raised on the stream's thread with the first view of each connection, such as to a hub started on another config folder.</summary>
+    public event Action? Connected;
 
     public void Start() => _ = Run(stop.Token);
 
@@ -97,9 +107,20 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
 
         while (await reader.ReadLineAsync(token) is { } line)
         {
-            if (stream.Read(line) is { Name: "dock" } dock)
+            var read = stream.Read(line);
+
+            // Events the dock does not know, such as ones from a newer hub, are skipped.
+            if (read is { Name: "dock" })
             {
-                Show(DockView.Parse(dock.Data));
+                Show(DockView.Parse(read.Data));
+            }
+            else if (read is { Name: "config" })
+            {
+                ConfigChanged?.Invoke();
+            }
+            else if (read is { Name: "show" })
+            {
+                ShowRequested?.Invoke();
             }
         }
 
@@ -118,9 +139,11 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
     void Show(DockView view)
     {
         List<TaskCompletionSource<DockView?>> passed = [];
+        bool connected;
 
         lock (gate)
         {
+            connected = Connection != Connection.Connected;
             View = view;
             Connection = Connection.Connected;
 
@@ -132,6 +155,11 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
         }
 
         Changed?.Invoke();
+
+        if (connected)
+        {
+            Connected?.Invoke();
+        }
 
         foreach (var done in passed)
         {
@@ -183,12 +211,45 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
 
     async Task<string?> Post(string path, JsonObject body) => (await PostFor(path, body)).Error;
 
-    /// <summary>Posts a request; returns the refusal or failure, or null and the reply's body.</summary>
-    async Task<(string? Error, JsonNode? Body)> PostFor(string path, JsonObject body)
+    public async Task<(EditorConfig? Config, string? Error)> ReadConfig()
+    {
+        var (error, body) = await PostFor("/config/read", []);
+
+        return body is null ? (null, error ?? "The hub sent no settings.") : (EditorConfig.Parse(body), null);
+    }
+
+    public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject body)
+    {
+        var (_, reply, _) = await Send("/config/check", body);
+
+        return reply?["errors"] is JsonArray errors ? Strings(errors) : null;
+    }
+
+    public Task<IReadOnlyList<string>> SaveConfig(JsonObject body) => Written("/config/save", body);
+
+    public Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir) => Written("/config/delete", new JsonObject { ["name"] = name, ["version"] = version, ["configDir"] = configDir });
+
+    /// <summary>A write's refusal: the <c>errors</c> of a 409, else the failure; empty when the hub wrote the file.</summary>
+    async Task<IReadOnlyList<string>> Written(string path, JsonObject body)
+    {
+        var (status, reply, failure) = await Send(path, body);
+
+        if (status == HttpStatusCode.OK)
+        {
+            return [];
+        }
+
+        return reply?["errors"] is JsonArray errors ? Strings(errors) : [failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}."];
+    }
+
+    static IReadOnlyList<string> Strings(JsonArray list) => list.Select((entry) => entry?.GetValue<string>() ?? "").ToList();
+
+    /// <summary>Posts a request; returns the status and body, or null and why the hub did not answer.</summary>
+    async Task<(HttpStatusCode? Status, JsonNode? Body, string? Failure)> Send(string path, JsonObject body)
     {
         if (HubRecord.Read(switchboardHome) is not { } record)
         {
-            return ("Switchboard is not running.", null);
+            return (null, null, "Switchboard is not running.");
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{record.Port}{path}") { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
@@ -199,14 +260,26 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
         {
             using var timeout = new CancellationTokenSource(RequestTimeout);
             using var response = await http.SendAsync(request, timeout.Token);
-            var text = await response.Content.ReadAsStringAsync(timeout.Token);
 
-            return response.StatusCode == HttpStatusCode.OK ? (null, ParseOrNull(text)) : (RefusalOf(text) ?? $"The hub answered {(int)response.StatusCode}.", null);
+            return (response.StatusCode, ParseOrNull(await response.Content.ReadAsStringAsync(timeout.Token)), null);
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException)
         {
-            return ("Switchboard is not running.", null);
+            return (null, null, "Switchboard is not running.");
         }
+    }
+
+    /// <summary>Posts a request; returns the refusal or failure, or null and the reply's body.</summary>
+    async Task<(string? Error, JsonNode? Body)> PostFor(string path, JsonObject body)
+    {
+        var (status, reply, failure) = await Send(path, body);
+
+        if (failure is not null)
+        {
+            return (failure, null);
+        }
+
+        return status == HttpStatusCode.OK ? (null, reply) : (RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null);
     }
 
     static JsonNode? ParseOrNull(string text)

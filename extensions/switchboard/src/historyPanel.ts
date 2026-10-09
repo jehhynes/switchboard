@@ -2,7 +2,6 @@ import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import { postToHub } from '@switchboard/hub';
-import { runOpen } from './panel.js';
 
 const TIMEOUT_MS = 10_000;
 /** Stream states arrive on every change; an open History reads the hub at most this often. */
@@ -45,6 +44,8 @@ export class HistoryPanels implements vscode.WebviewPanelSerializer {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly hub: () => HubRecord | null,
+    /** Opens what an entry links: a session, a worktree, a URL or a file. */
+    private readonly openLink: (action: { type: string; [key: string]: unknown }) => Promise<unknown>,
   ) {}
 
   register(): vscode.Disposable {
@@ -149,7 +150,7 @@ export class HistoryPanels implements vscode.WebviewPanelSerializer {
       } else if (incoming.type === 'shown') {
         tab.shown = incoming.revision;
       } else if (incoming.type === 'open') {
-        void runOpen(incoming.action);
+        void this.openLink(incoming.action);
       }
     });
     panel.onDidChangeViewState(() => {

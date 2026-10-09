@@ -222,9 +222,9 @@ public sealed class HubClientTests
         using var server = new LoopbackHub((start, _, stream) => LoopbackHub.Reply(stream, 200, start.StartsWith("POST /window/withdraw") ? "{\"withdrawn\":true}" : "{\"id\":5}"));
         using var client = new HubClient(HomeFor(server));
 
-        Assert.Equal(new WindowReply(null, 5), await client.Window(new JsonObject { ["type"] = "settings" }, null));
+        Assert.Equal(new WindowReply(null, 5), await client.Window(new JsonObject { ["type"] = "openUrl", ["url"] = "D:/r.md" }, null));
         Assert.Null(await client.Withdraw(5));
-        Assert.Contains("POST /window HTTP/1.1 {\"workspace\":null,\"command\":{\"type\":\"settings\"}}", server.Requests);
+        Assert.Contains("POST /window HTTP/1.1 {\"workspace\":null,\"command\":{\"type\":\"openUrl\",\"url\":\"D:/r.md\"}}", server.Requests);
         Assert.Contains("POST /window/withdraw HTTP/1.1 {\"id\":5}", server.Requests);
     }
 
@@ -235,5 +235,57 @@ public sealed class HubClientTests
         using var client = new HubClient(HomeFor(server));
 
         Assert.Equal(new WindowReply("Expected {workspace, command}.", null), await client.Window(new JsonObject { ["type"] = "attach" }, null));
+    }
+    [Fact]
+    public async Task ReadConfig_HubAnswers_ParsesTheFilesAndChoices()
+    {
+        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, SettingsConfigs.Basic().ToJsonString()));
+        using var client = new HubClient(HomeFor(server));
+        var (config, error) = await client.ReadConfig();
+
+        Assert.Null(error);
+        Assert.Equal("v1", config!.Settings.Version);
+        Assert.Equal(["dev:develop", "dev:review", "triage:github"], config.Playbooks.Select((playbook) => playbook.Name));
+        Assert.Equal(["done"], config.Playbooks[0].Playbook!.Reports);
+        Assert.Equal(2, config.InUse["dev:develop"]);
+        Assert.Contains("POST /config/read HTTP/1.1 {}", server.Requests);
+    }
+
+    [Fact]
+    public async Task SaveConfig_HubRefusesOrFails_ReturnsTheErrors()
+    {
+        using var server = new LoopbackHub((start, _, stream) =>
+            start.StartsWith("POST /config/save") ? LoopbackHub.Reply(stream, 409, "{\"errors\":[\"a\",\"b\"]}") : start.StartsWith("POST /config/delete") ? LoopbackHub.Reply(stream, 200, "{\"deleted\":true}") : LoopbackHub.Reply(stream, 400, "{\"error\":\"Expected {target}.\"}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(["a", "b"], await client.SaveConfig(new JsonObject { ["target"] = "settings" }));
+        Assert.Empty(await client.DeletePlaybook("dev:x", "p1", "C:/cfg"));
+        Assert.Null(await client.CheckConfig(new JsonObject()));
+        Assert.Contains("POST /config/delete HTTP/1.1 {\"name\":\"dev:x\",\"version\":\"p1\",\"configDir\":\"C:/cfg\"}", server.Requests);
+        Assert.Equal(["Switchboard is not running."], await new HubClient(Fixtures.TempFolder()).SaveConfig([]));
+    }
+
+    [Fact]
+    public async Task Start_HubSendsShowConfigAndUnknownEvents_RaisesEachAndKeepsReading()
+    {
+        using var server = new LoopbackHub(async (_, _, stream) =>
+        {
+            var json = Fixtures.DockJson.ReplaceLineEndings(" ");
+
+            await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"));
+            await stream.WriteAsync(Encoding.UTF8.GetBytes($"event: show\ndata: {{}}\n\nevent: later\ndata: {{}}\n\nevent: config\ndata: {{}}\n\nevent: dock\ndata: {json}\n\n"));
+            await Task.Delay(5000);
+        });
+        using var client = new HubClient(HomeFor(server));
+        var changed = 0;
+        var shown = 0;
+
+        client.ConfigChanged += () => Interlocked.Increment(ref changed);
+        client.ShowRequested += () => Interlocked.Increment(ref shown);
+        client.Start();
+
+        await Until(() => client.View);
+        Assert.Equal(1, changed);
+        Assert.Equal(1, shown);
     }
 }

@@ -21,7 +21,7 @@ export interface Playbook {
   workdir: 'worktree' | 'repoRoot';
   /** Empty by default: the session's turn then ends in Needs you. */
   reports: PlaybookReport[];
-  /** Approve sends the session's work, such as posting a reply or pushing a branch; the panel marks the approval row `send`, else `eye` (PRD R27). */
+  /** Approve sends the session's work, such as posting a reply or pushing a branch; the dock marks the approval row `send`, else `review` (PRD R27). */
   approvalSends: boolean;
   /** A triage playbook's classifier rates immediacy and severity (PRD R50); without it, triage stores neither. */
   rates: boolean;

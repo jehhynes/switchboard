@@ -68,6 +68,9 @@ public sealed class DockViewTests
         Assert.Equal("Approve", approval.Main);
         Assert.Equal([new DockPaste("Customer reply", "D:/drafts/reply.md")], approval.Pastes);
         Assert.Equal(["History", "Open report"], approval.Commands.Select((command) => command.Label));
-        Assert.Equal("Issue <7> · gh 107 · dev:develop · Needs you · 107-fix", Fixtures.Row("item:7").Search);
+        Assert.Equal("Issue <7> · gh 107 · PR #19002 · dev:develop · Needs you · 107-fix", Fixtures.Row("item:7").Search);
+        Assert.Equal([new DockLink("PR #19002", "https://github.com/o/r/pull/19002")], Fixtures.Row("item:7").Links);
+        Assert.Equal(2, Fixtures.Row("item:7").Returned);
+        Assert.Equal(@"C:\Users\op\.switchboard\windows\gh-107-58c609.code-workspace", Fixtures.Row("item:7").Window!.File);
     }
 }

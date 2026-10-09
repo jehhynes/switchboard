@@ -36,7 +36,8 @@
             "title": "sb:gh-107-58c609 · Issue <7>",
             "folders": [
               "D:/git/widgets/.worktrees/107-fix"
-            ]
+            ],
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-107-58c609.code-workspace"
           },
           "open": {
             "type": "session",
@@ -89,7 +90,14 @@
               }
             }
           ],
-          "search": "Issue <7> · gh 107 · dev:develop · Needs you · 107-fix"
+          "search": "Issue <7> · gh 107 · PR #19002 · dev:develop · Needs you · 107-fix",
+          "links": [
+            {
+              "label": "PR #19002",
+              "url": "https://github.com/o/r/pull/19002"
+            }
+          ],
+          "returned": 2
         },
         {
           "key": "item:8",
@@ -121,7 +129,8 @@
             "title": "sb:gh-108-widgets-655280 · Issue <8>",
             "folders": [
               "D:/git/widgets"
-            ]
+            ],
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-108-widgets-655280.code-workspace"
           },
           "open": {
             "type": "question",
@@ -178,7 +187,9 @@
               }
             }
           ],
-          "search": "Issue <8> · gh 108 · dev:develop · Needs you"
+          "search": "Issue <8> · gh 108 · dev:develop · Needs you",
+          "links": [],
+          "returned": 0
         },
         {
           "key": "item:10",
@@ -210,7 +221,8 @@
             "title": "sb:gh-110-support-c6262c · Issue <10>",
             "folders": [
               "D:/git/support"
-            ]
+            ],
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-110-support-c6262c.code-workspace"
           },
           "open": {
             "type": "session",
@@ -273,7 +285,9 @@
               }
             }
           ],
-          "search": "Issue <10> · gh 110 · dev:develop · Needs you"
+          "search": "Issue <10> · gh 110 · dev:develop · Needs you",
+          "links": [],
+          "returned": 0
         }
       ]
     },
@@ -352,7 +366,9 @@
               }
             }
           ],
-          "search": "Issue <9> · gh 109 · dev:develop · Unstarted"
+          "search": "Issue <9> · gh 109 · dev:develop · Unstarted",
+          "links": [],
+          "returned": 0
         },
         {
           "key": "ticket:4",
@@ -401,7 +417,9 @@
               }
             }
           ],
-          "search": "Issue <4> · gh 104 · dev:develop · Unstarted"
+          "search": "Issue <4> · gh 104 · dev:develop · Unstarted",
+          "links": [],
+          "returned": 0
         }
       ]
     },

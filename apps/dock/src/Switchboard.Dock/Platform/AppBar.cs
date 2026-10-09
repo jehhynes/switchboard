@@ -1,10 +1,9 @@
-using System.Drawing;
 using System.Runtime.Versioning;
 
 namespace Switchboard.Dock.Platform;
 
 /// <summary>
-/// Reserves a strip at the left edge of the primary monitor as a Windows app bar, so maximized windows fill the rest (switcher spike Q3).
+/// Reserves a strip at the left or right edge of a monitor as a Windows app bar, so maximized windows fill the rest (switcher spike Q3).
 /// Registering moves every window on the monitor. Explorer forgets app bars when it restarts, so the bar registers again on <c>TaskbarCreated</c>.
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -15,7 +14,8 @@ internal sealed class AppBar : IDisposable
     readonly uint taskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
     // Kept in a field so the delegate outlives every call Windows makes to it.
     readonly Native.SubclassProc subclass;
-    int width;
+    DockEdge edge;
+    nint monitor;
 
     /// <summary>
     /// The strip the window must keep, in physical pixels, or null before the first placement. Any move or resize, Avalonia's own included,
@@ -23,8 +23,11 @@ internal sealed class AppBar : IDisposable
     /// </summary>
     public Native.Rect? Strip { get; set; }
 
-    /// <summary>Raised with the strip's bounds in physical pixels whenever the bar has to be placed again, such as after another app bar moved.</summary>
-    public event Action<Native.Rect>? Placed;
+    /// <summary>
+    /// Raised when the bar has to be placed again: another app bar moved, Explorer restarted, or the displays changed, which can remove the monitor
+    /// the bar was on, so the owner resolves its monitor again and calls <see cref="Dock"/>.
+    /// </summary>
+    public event Action? Moved;
 
     /// <summary>Raised with true while a full-screen app covers the monitor, when the bar should not stay on top.</summary>
     public event Action<bool>? FullScreen;
@@ -44,23 +47,33 @@ internal sealed class AppBar : IDisposable
         Native.SHAppBarMessage(Native.AbmNew, ref data);
     }
 
-    Native.AppBarData Data() => new() { Size = System.Runtime.InteropServices.Marshal.SizeOf<Native.AppBarData>(), Window = window, CallbackMessage = callback, Edge = Native.AbeLeft };
+    Native.AppBarData Data() => new() { Size = System.Runtime.InteropServices.Marshal.SizeOf<Native.AppBarData>(), Window = window, CallbackMessage = callback, Edge = edge == DockEdge.Left ? Native.AbeLeft : Native.AbeRight };
 
-    /// <summary>Reserves a strip <paramref name="widthPixels"/> wide and returns its bounds, which the window takes.</summary>
-    public Native.Rect Dock(int widthPixels)
+    /// <summary>The monitor the strip is on, where item windows are placed.</summary>
+    public nint Monitor => monitor;
+
+    /// <summary>Reserves a strip <paramref name="widthPixels"/> wide at <paramref name="at"/> of <paramref name="on"/> and returns its bounds, which the window takes.</summary>
+    public Native.Rect Dock(DockEdge at, nint on, int widthPixels)
     {
-        width = widthPixels;
+        edge = at;
+        monitor = on;
 
-        var monitor = new Native.MonitorInfo { Size = System.Runtime.InteropServices.Marshal.SizeOf<Native.MonitorInfo>() };
-
-        Native.GetMonitorInfo(Native.MonitorFromPoint(new Point(0, 0), Native.MonitorDefaultToPrimary), ref monitor);
-
+        var proposed = DockPlacement.Strip(edge, Native.Bounds(monitor), widthPixels);
         var data = Data();
 
-        data.Bounds = new Native.Rect { Left = monitor.Monitor.Left, Top = monitor.Monitor.Top, Right = monitor.Monitor.Left + widthPixels, Bottom = monitor.Monitor.Bottom };
-        // Windows moves the proposed strip off a taskbar on the same edge; the width is then set again from where it starts.
+        data.Bounds = new Native.Rect { Left = proposed.Left, Top = proposed.Top, Right = proposed.Right, Bottom = proposed.Bottom };
+        // Windows moves the proposed strip off a taskbar on the same edge; the width is then set again from the outer edge it keeps.
         Native.SHAppBarMessage(Native.AbmQueryPos, ref data);
-        data.Bounds.Right = data.Bounds.Left + widthPixels;
+
+        if (edge == DockEdge.Left)
+        {
+            data.Bounds.Right = data.Bounds.Left + widthPixels;
+        }
+        else
+        {
+            data.Bounds.Left = data.Bounds.Right - widthPixels;
+        }
+
         Native.SHAppBarMessage(Native.AbmSetPos, ref data);
 
         return data.Bounds;
@@ -81,7 +94,7 @@ internal sealed class AppBar : IDisposable
         {
             if (wParam == Native.AbnPosChanged)
             {
-                Placed?.Invoke(Dock(width));
+                Moved?.Invoke();
             }
             else if (wParam == Native.AbnFullScreenApp)
             {
@@ -91,7 +104,11 @@ internal sealed class AppBar : IDisposable
         else if (message == taskbarCreated)
         {
             Register();
-            Placed?.Invoke(Dock(width));
+            Moved?.Invoke();
+        }
+        else if (message == Native.WmDisplayChange)
+        {
+            Moved?.Invoke();
         }
         else if (message == Native.WmActivate || message == Native.WmWindowPosChanged)
         {

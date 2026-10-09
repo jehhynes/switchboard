@@ -1,7 +1,7 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
-import { openAction } from '@switchboard/hub/rows';
-import { groupOf, markOf } from './webview/render.js';
-import type { Mark } from './webview/render.js';
+import { windowOf } from '@switchboard/hub';
+import { groupOf, MARK_TITLES, markOf } from '@switchboard/core/group';
+import type { Mark } from '@switchboard/core/group';
 
 function needsYou(item: WorkItemView): boolean {
   return groupOf(item) === 'needs' && !item.ticket.snoozed;
@@ -45,8 +45,9 @@ export class NeedsYouTracker {
 
 /** The toast text, such as `Switchboard: Fix the inbox badge — Approve to send`, and whether it offers Open. */
 export function toastOf(item: WorkItemView): { message: string; open: boolean } {
-  // A Needs you item always has a mark; only Unstarted rows show the priority dot instead.
+  // A Needs you item always has a mark; only Unstarted rows can have none.
   const mark = markOf(item) as Mark;
 
-  return { message: `Switchboard: ${item.ticket.title} — ${mark.title}`, open: openAction(item) !== null };
+  // Open runs the row's click: its item window, or its ticket for a row with none (PRD R71).
+  return { message: `Switchboard: ${item.ticket.title} — ${MARK_TITLES[mark]}`, open: windowOf(item, '') !== null || item.ticket.url !== '' };
 }

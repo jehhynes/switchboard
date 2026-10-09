@@ -151,7 +151,7 @@ describe('NeedsYouTracker', () => {
 });
 
 describe('toastOf', () => {
-  it('names the ticket and what the operator must do, and offers Open when the row has an open action', () => {
+  it('names the ticket and what the operator must do, and offers Open when the row has an item window', () => {
     const ended = session({ state: 'ended', endedAt: NOW, released: true });
 
     expect(toastOf(item(1, 'awaiting-approval', { sessions: [ended] }))).toEqual({ message: 'Switchboard: Issue 1 — Review, then approve', open: true });
@@ -159,11 +159,12 @@ describe('toastOf', () => {
     expect(toastOf(item(3, 'blocked', { sessions: [ended] }))).toEqual({ message: 'Switchboard: Issue 3 — Blocked', open: true });
   });
 
-  it('offers no Open when the row has nothing to open, such as a failed ad-hoc start', () => {
-    const adhoc = item(4, 'failed', { sessions: [session({ nativeSessionId: null, shortId: null, state: 'ended', released: true })] });
+  it('offers no Open when the row has no item window and no ticket URL, and Open for a failed ad-hoc start, whose window is its repo', () => {
+    const adhoc = item(4, 'failed', { sessions: [] });
 
     adhoc.ticket = { ...adhoc.ticket, source: 'adhoc', url: '', title: 'Tidy the logs' };
 
     expect(toastOf(adhoc)).toEqual({ message: 'Switchboard: Tidy the logs — Failed', open: false });
+    expect(toastOf({ ...adhoc, sessions: [session({ nativeSessionId: null, shortId: null, state: 'ended', released: true })] }).open).toBe(true);
   });
 });

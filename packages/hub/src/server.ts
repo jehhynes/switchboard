@@ -13,7 +13,7 @@ export interface HubServerOptions {
   onShutdown(): void;
   /** Handlers for authorized `POST` paths, given the parsed JSON body. */
   post?: Record<string, (body: unknown) => Promise<Reply>>;
-  /** The panel state, sent as a `state` event when an `/events` stream opens and on each `update`. */
+  /** The snapshot, sent as a `state` event when an `/events` stream opens and on each `update`. */
   snapshot?: () => unknown;
   /** The dock view, sent as a `dock` event when a `/dock/events` stream opens and on each `update` (PRD R71). */
   dock?: () => unknown;
@@ -30,10 +30,12 @@ export interface HubServer {
   emptySince(): number | null;
   /** Sends each open stream its view again: `state` to `/events` streams and `dock` to `/dock/events` streams. */
   update(): void;
+  /** Sends an event to every `/dock/events` stream, such as `show` or `config`; returns how many streams it reached. */
+  notifyDock(event: string, data: unknown): number;
   close(): Promise<void>;
 }
 
-type View = 'panel' | 'dock';
+type View = 'window' | 'dock';
 
 const HEARTBEAT_MS = 15_000;
 const BODY_LIMIT = 1024 * 1024;
@@ -87,7 +89,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   };
 
   const views: Record<View, { event: string; data: (() => unknown) | undefined }> = {
-    panel: { event: 'state', data: options.snapshot },
+    window: { event: 'state', data: options.snapshot },
     dock: { event: 'dock', data: options.dock },
   };
   const message = (view: View): string | null => {
@@ -121,7 +123,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     } else if (request.method === 'GET' && path === '/status') {
       json(response, 200, options.identity);
     } else if (request.method === 'GET' && path === '/events') {
-      openStream(request, response, 'panel');
+      openStream(request, response, 'window');
     } else if (request.method === 'GET' && path === '/dock/events') {
       openStream(request, response, 'dock');
     } else if (request.method === 'POST' && path === '/shutdown') {
@@ -176,6 +178,18 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
             stream.write(built.get(view) ?? '');
           }
+        },
+        notifyDock: (event, data) => {
+          let sent = 0;
+
+          for (const [stream, view] of streams) {
+            if (view === 'dock') {
+              stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+              sent++;
+            }
+          }
+
+          return sent;
         },
         close: () =>
           new Promise<void>((done) => {

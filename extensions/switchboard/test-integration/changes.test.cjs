@@ -6,10 +6,10 @@ const { join } = require('node:path');
 const vscode = require('vscode');
 
 /**
- * The private Git and workbench calls behind a row's Open Changes and Show in Source Control (PRD R57, mechanics M21), against a
+ * The private Git and workbench calls behind a row's Open Changes (PRD R57, mechanics M21), against a
  * scratch clone and worktree. changesPlan's decisions are tested in test/changes.test.ts.
  */
-describe('a worktree row\'s Open Changes and Show in Source Control', () => {
+describe('a worktree row\'s Open Changes', () => {
   let scratch;
   let clone;
   let worktree;
@@ -21,9 +21,7 @@ describe('a worktree row\'s Open Changes and Show in Source Control', () => {
     return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
   }
 
-  const row = (key, message) => ({ actions: { [key]: message } });
-  const changes = (path, title = 'Inbox badge') => vscode.commands.executeCommand('switchboard.row.changes', row('changes', { type: 'changes', path, key: 'gh 18941', title }));
-  const repositories = () => vscode.extensions.getExtension('vscode.git').exports.getAPI(1).repositories.map((repository) => repository.rootUri.fsPath.toLowerCase());
+  const changes = async (path, title = 'Inbox badge') => (await vscode.extensions.getExtension('switchboard.switchboard').activate()).run({ type: 'changes', path, key: 'gh 18941', title });
 
   before(async function () {
     this.timeout(60_000);
@@ -81,17 +79,6 @@ describe('a worktree row\'s Open Changes and Show in Source Control', () => {
 
   beforeEach(() => {
     warned = [];
-  });
-
-  it('adds the worktree to Source Control and shows the view', async function () {
-    this.timeout(60_000);
-
-    assert.ok(!repositories().includes(worktree.toLowerCase()), 'the worktree was already open');
-
-    await vscode.commands.executeCommand('switchboard.row.sourceControl', row('sourceControl', { type: 'sourceControl', path: worktree }));
-
-    assert.deepStrictEqual(warned, []);
-    assert.ok(repositories().includes(worktree.toLowerCase()), `the worktree is not in Source Control: ${repositories().join(', ')}`);
   });
 
   it('opens one editor with the committed and uncommitted changes since the merge base', async function () {

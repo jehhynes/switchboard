@@ -124,7 +124,7 @@ describe('History model', () => {
     expect(item!.entries.at(-1)!.links).toEqual([{ label: 'PR 12', icon: 'link-external', title: 'https://github.com/o/r/pull/12', open: { type: 'openUrl', url: 'https://github.com/o/r/pull/12' } }]);
   });
 
-  it('marks reconstructed entries, and opens a session by attaching to its background process or resuming it', () => {
+  it('marks reconstructed entries, and opens a session in Claude unless it runs in its background process', () => {
     const run = approvedRun();
     const history = run.history();
     const fact: HistoryEvent = { id: 0, at: T0 - MINUTE, type: 'reconstructed', actor: 'hub', ticketId: 1, workItemId: 1, sessionId: null, detail: { fact: 'stage', stage: 'old stage' }, refused: null, changes: [] };
@@ -133,10 +133,10 @@ describe('History model', () => {
 
     expect(view.reconstructed).toBe(true);
     expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'Stage: old stage', reconstructed: true, category: 'report' });
-    expect(sessionOpen({ ...session, state: 'running' }, 'github 77')).toEqual({ type: 'attach', shortId: 'abc12345', name: 'github 77' });
-    expect(sessionOpen({ ...session, state: 'idle', released: true }, 'github 77')).toEqual({ type: 'resume', sessionId: 'native-1', cwd: 'D:/git/widgets', name: 'github 77', active: true });
-    expect(sessionOpen({ ...session, state: 'ended', released: true }, 'github 77')).toMatchObject({ type: 'resume', active: false });
-    expect(sessionOpen({ ...session, state: 'ended', nativeSessionId: null }, 'github 77')).toBeNull();
+    expect(sessionOpen({ ...session, state: 'running' })).toBeNull();
+    expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets' });
+    expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets' });
+    expect(sessionOpen({ ...session, state: 'ended', nativeSessionId: null })).toBeNull();
   });
 
   it('words every event, report and reconstructed fact, and every logged field', () => {
@@ -172,6 +172,21 @@ describe('History model', () => {
       [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [5, null], warning: [null, 'Odd'], stage: ['a', 'b'], approvalSummary: [null, 'Ship'], custom: [1, 2] })], null), { text: 'Assigned to you again', lines: ['Warning: Odd', 'Stage: b', 'Approval: Ship', 'custom: 1 → 2'] }],
       [event('pick', 'operator', null, [change('triage', 'update', { workItemId: [null, 1] }), change('triage', 'delete', {}, { workItemId: null })], null), { text: 'You picked it from the pool', lines: ['Pool triage attached to the work item', 'Pool triage discarded'] }],
       [event('tick', 'hub', null, [change('triage', 'insert', { startedAt: [null, 1] })], null), { text: 'Triage started', category: 'triage' }],
+      [
+        event('roster', 'hub', null, [
+          change('session', 'update', { outcome: [null, 'done'] }, { sessionId: 's1' }),
+          change('triage', 'update', { playbook: [null, 'dev:x'], error: [null, 'Bad'] }),
+          change('worktree', 'update', { path: ['a', 'b'] }),
+          change('link', 'update', { label: ['L1', 'L2'] }),
+          change('paste', 'update', { file: ['a', 'b'] }),
+          change('session', 'update', { state: ['running', 'waiting'], stateDetail: [null, 'Why?'] }, { sessionId: 's1' }),
+        ]),
+        { text: 'Session abc12345 is waiting for you', detail: 'Why?', lines: ['Outcome: done', 'Triage chose dev:x', 'Triage error: Bad', 'Worktree: b', 'Link renamed: L1 → L2', 'Draft replaced: b'] },
+      ],
+      [event('snooze', 'operator', { until: T0 + 24 * 60 * MINUTE }, [], null), { text: `You snoozed it until ${timeText(T0 + 24 * 60 * MINUTE)}`, category: 'you' }],
+      [event('snooze', 'operator', { until: null }, [], null), { text: 'You snoozed it indefinitely' }],
+      [event('restore', 'operator', null, [], null), { text: 'You restored it', lines: [] }],
+      [event('stop', 'operator', null, [], null), { text: 'You asked to stop the session' }],
       [event('reconstructed', 'hub', { fact: 'created', playbook: 'dev:question' }), { text: 'Work item created: dev:question', reconstructed: true }],
       [event('reconstructed', 'hub', { fact: 'triageStarted' }), { text: 'Triage started' }],
       [event('reconstructed', 'hub', { fact: 'triageEnded', playbook: 'dev:question' }), { text: 'Triage chose dev:question' }],
@@ -214,7 +229,7 @@ describe('History model', () => {
     expect(ticket.entries[0]).toMatchObject({ text: 'Switchboard first saw the ticket, in the pool', lines: ['No longer assigned to you', 'Entered the pool', 'Title: A → B', 'Snoozed indefinitely', 'Snooze ended', 'Left the pool'] });
   });
 
-  it('shows a new question asked while the session was already waiting, with its session link', () => {
+  it('shows a new question asked while the session was already waiting, with no session link while it runs in its background process', () => {
     const run = approvedRun();
 
     run.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: 'First question?' });
@@ -226,7 +241,7 @@ describe('History model', () => {
       ['Session abc12345 is waiting for you', 'First question?', 'warning'],
       ['Session abc12345 is waiting for you', 'Second question?', 'warning'],
     ]);
-    expect(entries[1]!.links.map((link) => link.label)).toEqual(['Attach']);
+    expect(entries[1]!.links).toEqual([]);
   });
 
   it('keeps the waiting state of a session from before the log began when only its question changes', () => {
@@ -247,7 +262,6 @@ describe('History model', () => {
     const entries = historyView({ ...base, events: [started, asked] }, T0).sections[0]!.entries;
 
     expect(entries[1]).toMatchObject({ text: 'Session abc12345 is waiting for you', detail: 'New?', tone: 'warning' });
-    expect(entries[1]!.links).toHaveLength(1);
   });
 
   it("words work another work item's event caused from its own changes, without that event's headline or refusal", () => {

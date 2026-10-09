@@ -16,7 +16,7 @@ describe('a row\'s History', () => {
   let warned = [];
   const original = vscode.window.showWarningMessage;
 
-  const history = (ticketId) => vscode.commands.executeCommand('switchboard.row.history', { actions: { history: { type: 'history', ticketId, key: 'gh 77' } } });
+  const history = (ticketId) => extension.run({ type: 'history', ticketId, key: 'gh 77' });
   const tabs = () => extension.historyTabs().filter((tab) => tab.ticketId === TICKET);
   const editorTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => tab.label === 'gh 77 History');
 

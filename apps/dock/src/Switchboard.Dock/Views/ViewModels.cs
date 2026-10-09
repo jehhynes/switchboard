@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Switchboard.Dock.Hub;
+using Switchboard.Dock.Platform;
 
 namespace Switchboard.Dock.Views;
 
@@ -38,6 +39,26 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
     public DockSettings Settings => settings;
 
+    /// <summary>The resize grip is on the inner edge.</summary>
+    public bool GripOnLeft => settings.DockEdge == DockEdge.Right;
+
+    public bool GripOnRight => settings.DockEdge == DockEdge.Left;
+
+    /// <summary>Docks at another edge or monitor, and keeps the choice; a null monitor is the primary one.</summary>
+    public void SetPlacement(DockEdge edge, string? monitor)
+    {
+        settings.Edge = edge == DockEdge.Right ? "right" : "left";
+        settings.Monitor = monitor;
+        SaveSettings();
+        Placed();
+    }
+
+    void Placed()
+    {
+        Changed(nameof(GripOnLeft));
+        Changed(nameof(GripOnRight));
+    }
+
     public ObservableCollection<GroupViewModel> Groups { get; } = [];
 
     public ObservableCollection<string> Notes { get; } = [];
@@ -62,6 +83,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
             {
                 group.Filter(filter);
             }
+
         }
     }
 
@@ -184,6 +206,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
             model.Show(group, selected, filter);
             Groups.Add(model);
         }
+
     }
 
     void Toggled(GroupViewModel group)
@@ -385,6 +408,11 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public bool HasThirdLine => row.Mark is not null || row.Details.Count > 0;
 
+    /// <summary>How many times the same work came back (PRD R51), on line 2.</summary>
+    public string ReturnedText => row.Returned > 0 ? $"Returned ×{row.Returned}" : "";
+
+    public bool HasReturned => row.Returned > 0;
+
     public bool HasMain => row.Main is not null;
 
     public string Main => row.Main ?? "";
@@ -392,7 +420,7 @@ public sealed class RowViewModel(DockRow row) : Observable
     /// <summary>For Approve, the prompt it runs (PRD R27).</summary>
     public string? MainTitle => row.MainTitle;
 
-    /// <summary>Approve takes the accent colour, as in the panel (PRD R27).</summary>
+    /// <summary>Approve takes the accent colour (PRD R27).</summary>
     public bool MainIsApprove => row.Main == "Approve";
 
     public IReadOnlyList<DockAnswer> Answers => row.Answers;

@@ -8,11 +8,12 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Switchboard.Dock.Hub;
 using Switchboard.Dock.Platform;
+using Switchboard.Dock.Settings;
 using Switchboard.Dock.Switching;
 
 namespace Switchboard.Dock.Views;
 
-/// <summary>The dock (PRD R71): the list, docked to the left edge of the primary monitor as an app bar when <c>docked</c>.</summary>
+/// <summary>The dock (PRD R71): the list, docked to the left or right edge of a monitor as an app bar when <c>docked</c>.</summary>
 public sealed partial class MainWindow : Window
 {
     readonly DockViewModel model;
@@ -20,6 +21,8 @@ public sealed partial class MainWindow : Window
     readonly IHub hub;
     readonly IDockActions actions;
     readonly bool docked;
+    readonly IConfigHub? config;
+    SettingsWindow? settingsWindow;
     AppBar? appBar;
     // The strip the docked window last took, in physical pixels.
     Native.Rect? placed;
@@ -28,6 +31,10 @@ public sealed partial class MainWindow : Window
     double? dragged;
     // The click that is running, which a click on another row replaces.
     (string Key, CancellationTokenSource Cancel)? running;
+    bool moving;
+
+    /// <summary>Raised with the monitor the dock docked on, where item windows are placed.</summary>
+    public event Action<nint>? DockedOn;
 
     /// <summary>For the XAML previewer only.</summary>
     public MainWindow()
@@ -35,20 +42,31 @@ public sealed partial class MainWindow : Window
     {
     }
 
-    public MainWindow(DockViewModel model, HubClient? stream, IHub hub, IDockActions actions, bool docked)
+    public MainWindow(DockViewModel model, HubClient? stream, IHub hub, IDockActions actions, bool docked, IConfigHub? config = null)
     {
+        this.config = config;
         this.model = model;
         this.stream = stream;
         this.hub = hub;
         this.actions = actions;
         this.docked = docked;
         DataContext = model;
-        Width = model.Settings.Width;
         InitializeComponent();
+        // After the XAML, whose width is the default.
+        Width = model.Settings.Width;
 
         if (stream is not null)
         {
             stream.Changed += () => Dispatcher.UIThread.Post(Refresh);
+            // A VS Code window's status bar item asks for the dock (PRD R71).
+            stream.ShowRequested += () => Dispatcher.UIThread.Post(Activate);
+        }
+
+        // Hidden until it is in its strip, so it does not show at Avalonia's first size and position and then jump (the window exists before it is shown).
+        if (docked && OperatingSystem.IsWindows() && TryGetPlatformHandle() is { } handle)
+        {
+            Native.NoTransitions(handle.Handle);
+            Native.Cloak(handle.Handle, true);
         }
     }
 
@@ -71,9 +89,14 @@ public sealed partial class MainWindow : Window
         if (docked && OperatingSystem.IsWindows() && TryGetPlatformHandle() is { } handle)
         {
             appBar = new AppBar(handle.Handle);
-            appBar.Placed += Place;
+            // Dispatched, because the bar raises it from inside its window procedure.
+            appBar.Moved += () => Dispatcher.UIThread.Post(Dock);
             appBar.FullScreen += (full) => Topmost = !full;
             Dock();
+            // Shown after it has drawn a frame at the strip's size.
+            RequestAnimationFrame((_) => RequestAnimationFrame((_) => Native.Cloak(handle.Handle, false)));
+            // Shown regardless after a second, in case no frame is drawn, so the dock never stays hidden.
+            DispatcherTimer.RunOnce(() => Native.Cloak(handle.Handle, false), TimeSpan.FromSeconds(1));
         }
     }
 
@@ -87,22 +110,34 @@ public sealed partial class MainWindow : Window
         base.OnClosed(e);
     }
 
+    /// <summary>Reserves the strip at the kept edge and monitor, at the kept width (PRD R71).</summary>
     void Dock()
     {
         if (OperatingSystem.IsWindows() && appBar is not null)
         {
-            Place(appBar.Dock((int)Math.Round(model.Settings.Width * RenderScaling)));
+            var monitor = Native.MonitorNamed(model.Settings.Monitor);
+            Place(appBar.Dock(model.Settings.DockEdge, monitor, DockPlacement.Pixels(model.Settings.Width, Native.Scale(monitor))));
+            DockedOn?.Invoke(appBar.Monitor);
+        }
+        else
+        {
+            Width = model.Settings.Width;
         }
     }
 
-    /// <summary>
-    /// Places the docked window in its strip with Win32, because Avalonia moves a window it resizes into the monitor's work area, which starts
-    /// at the dock's own right edge.
-    /// </summary>
+    /// <summary>Places the docked window in its reserved strip.</summary>
     void Place(Native.Rect bounds)
     {
         placed = bounds;
+        Hold(bounds);
+    }
 
+    /// <summary>
+    /// Moves and sizes the docked window with Win32, and holds it there, because Avalonia moves a window it resizes into the monitor's work area,
+    /// which starts at the dock's own inner edge.
+    /// </summary>
+    void Hold(Native.Rect bounds)
+    {
         if (OperatingSystem.IsWindows() && TryGetPlatformHandle() is { } handle)
         {
             if (appBar is not null)
@@ -111,6 +146,48 @@ public sealed partial class MainWindow : Window
             }
 
             Native.SetWindowPos(handle.Handle, 0, bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, Native.SwpNoZOrder | Native.SwpNoActivate);
+        }
+    }
+
+    void OnMovePressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            moving = true;
+            e.Pointer.Capture(sender as IInputElement);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Another window took the pointer during a drag of the title, so no release comes: the drag ends where it is.</summary>
+    void OnMoveCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        moving = false;
+    }
+
+    /// <summary>Docks at the nearer left or right edge of the monitor the title is dropped on, and keeps it (PRD R71).</summary>
+    void OnMoveReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!moving)
+        {
+            return;
+        }
+
+        moving = false;
+        e.Pointer.Capture(null);
+
+        if (OperatingSystem.IsWindows() && appBar is not null)
+        {
+            var drop = this.PointToScreen(e.GetPosition(this));
+            var monitor = Native.MonitorFromPoint(new System.Drawing.Point(drop.X, drop.Y), Native.MonitorDefaultToNearest);
+            var edge = DockPlacement.EdgeAt(drop.X, Native.Bounds(monitor));
+            var name = monitor == Native.PrimaryMonitor() ? null : Native.MonitorName(monitor);
+
+            if (edge != model.Settings.DockEdge || name != model.Settings.Monitor)
+            {
+                model.SetPlacement(edge, name);
+                Dock();
+            }
         }
     }
 
@@ -201,9 +278,7 @@ public sealed partial class MainWindow : Window
         model.Selected = row.Key;
         e.Handled = true;
 
-        var menu = new ContextMenu { ItemsSource = MenuOf(row.Row) };
-
-        menu.Open(target);
+        new ContextMenu { ItemsSource = MenuOf(row.Row) }.Open(target);
     }
 
     /// <summary>The row's hub controls, Snooze with its choices, then Open ticket (PRD R71).</summary>
@@ -243,16 +318,19 @@ public sealed partial class MainWindow : Window
             items.Add(Item(command.Label, () => Run(row, command.Command)));
         }
 
-        if (row.Url != "")
-        {
-            if (items.Count > 0)
-            {
-                items.Add(new Separator());
-            }
+        // The ticket, then its links, such as its pull request (PRD R52), open in the browser.
+        var opens = (row.Url == "" ? [] : new[] { ("Open ticket", row.Url) }).Concat(row.Links.Select((link) => ($"Open {link.Label}", link.Url))).ToList();
 
-            items.Add(Item("Open ticket", () =>
+        if (opens.Count > 0 && items.Count > 0)
+        {
+            items.Add(new Separator());
+        }
+
+        foreach (var (label, url) in opens)
+        {
+            items.Add(Item(label, () =>
             {
-                model.Status = actions.OpenUrl(row.Url);
+                model.Status = actions.OpenUrl(url);
                 return Task.CompletedTask;
             }));
         }
@@ -440,7 +518,51 @@ public sealed partial class MainWindow : Window
 
     void OnAdhocCancel(object? sender, RoutedEventArgs e) => model.AdhocOpen = false;
 
-    async void OnSettingsClicked(object? sender, RoutedEventArgs e) => await Run(null, new JsonObject { ["type"] = "settings" });
+    /// <summary>Opens the Settings window (PRD R54), or brings the open one forward.</summary>
+    async void OnSettingsClicked(object? sender, RoutedEventArgs e)
+    {
+        if (settingsWindow is not null)
+        {
+            settingsWindow.Activate();
+            return;
+        }
+
+        if (config is null)
+        {
+            model.Status = "Settings need the hub.";
+            return;
+        }
+
+        var editor = new SettingsEditor(config);
+        var window = new SettingsWindow(editor, actions);
+        // The hub says when the files change on disk, so the window reads them again.
+        Action reload = () => Dispatcher.UIThread.Post(() => _ = editor.Load());
+
+        settingsWindow = window;
+
+        if (stream is not null)
+        {
+            stream.ConfigChanged += reload;
+            // A hub started on another config folder connects as a new stream.
+            stream.Connected += reload;
+        }
+
+        window.Closed += (_, _) =>
+        {
+            settingsWindow = null;
+
+            if (stream is not null)
+            {
+                stream.ConfigChanged -= reload;
+                stream.Connected -= reload;
+            }
+        };
+        window.Show();
+        await editor.Load();
+    }
+
+    /// <summary>The open Settings window, or null.</summary>
+    internal SettingsWindow? Settings => settingsWindow;
 
     void OnSearchKey(object? sender, KeyEventArgs e)
     {
@@ -463,30 +585,44 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var width = Math.Clamp(e.GetPosition(this).X, DockSettings.MinWidth, DockSettings.MaxWidth);
-
-        dragged = width;
-
-        // The left edge stays where it is; only the strip's width follows the pointer.
-        if (placed is { } bounds)
+        // The outer edge stays where it is; only the strip's width follows the pointer.
+        if (OperatingSystem.IsWindows() && appBar is not null && placed is { } bounds)
         {
-            Place(bounds with { Right = bounds.Left + (int)Math.Round(width * RenderScaling) });
+            var strip = Native.Pixels(bounds);
+            var scale = Native.Scale(appBar.Monitor);
+            var width = Math.Clamp(DockPlacement.WidthAt(model.Settings.DockEdge, strip, this.PointToScreen(e.GetPosition(this)).X) / scale, DockSettings.MinWidth, DockSettings.MaxWidth);
+
+            dragged = width;
+            Hold(Native.RectOf(DockPlacement.Strip(model.Settings.DockEdge, strip, DockPlacement.Pixels(width, scale))));
         }
         else
         {
-            Width = width;
+            dragged = Math.Clamp(e.GetPosition(this).X, DockSettings.MinWidth, DockSettings.MaxWidth);
+            Width = dragged.Value;
         }
     }
 
     void OnGripReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (!resizing)
+        if (resizing)
         {
-            return;
+            e.Pointer.Capture(null);
+            EndResize();
         }
+    }
 
+    /// <summary>Another window took the pointer during a drag of the inner edge, so no release comes: the width it reached is kept.</summary>
+    void OnGripCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (resizing)
+        {
+            EndResize();
+        }
+    }
+
+    void EndResize()
+    {
         resizing = false;
-        e.Pointer.Capture(null);
         model.Settings.Width = dragged ?? model.Settings.Width;
         dragged = null;
         model.SaveSettings();

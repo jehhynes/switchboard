@@ -18,13 +18,13 @@ export const MARKER_WATCH_RETRY_MS = 1_000;
 export const WAKE_MS = 60_000;
 /** The roster, marker and wake timers `start` sets before the poll timers. */
 const FIXED_TIMERS = 3;
-/** How long the panel lists done work items. */
+/** How long the dock lists done work items. */
 export const DONE_DAYS = 7;
 /** How long a pending open waits for a window on its folder. */
 export const OPEN_CLAIM_MS = 2 * 60_000;
 /** How long a done report waits for the source read that checks its ticket (PRD R10). */
 export const DONE_CHECK_MS = 6_000;
-/** The job state can be written after the waiting marker, so the panel reads the question again this long after a session starts waiting (PRD R70). */
+/** The job state can be written after the waiting marker, so the hub reads the question again this long after a session starts waiting (PRD R70). */
 export const QUESTION_READ_MS = 1_000;
 
 export interface RuntimeDeps {
@@ -55,7 +55,7 @@ export interface WorkItemView extends WorkItem {
   links: Link[];
   /** Drafted texts the operator copies into the source (PRD R60). */
   pastes: Paste[];
-  /** Earlier started work items for the same ticket; above 0 the panel marks the work item Returned (PRD R51). */
+  /** Earlier started work items for the same ticket; above 0 the dock marks the work item Returned (PRD R51). */
   returned: number;
   /** The ticket of the work item whose session reported this one as a task (PRD R68). */
   parent: Ticket | null;
@@ -76,14 +76,14 @@ export interface PoolView {
   triage: Triage | null;
   /** The ticket's links, such as a GitHub issue its thread names (PRD R52, R61). */
   links: Link[];
-  /** Started done work items for the ticket; above 0 the panel marks it Returned (PRD R51). */
+  /** Started done work items for the ticket; above 0 the dock marks it Returned (PRD R51). */
   returned: number;
 }
 
-/** Everything the panel shows, sent whole on each change. */
+/** Everything a window and the dock show, sent whole on each change. */
 export interface Snapshot {
   workItems: WorkItemView[];
-  /** Oldest first by the source's sort time; the panel orders it with the unstarted work items (PRD R27). */
+  /** Oldest first by the source's sort time; the dock orders it with the unstarted work items (PRD R27). */
   pool: PoolView[];
   playbooks: { name: string; description: string }[];
   /** Repos an ad-hoc prompt can run in: each source's repo root, the first being the default. */

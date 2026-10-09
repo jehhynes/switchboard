@@ -189,3 +189,115 @@ sealed class FakeActions : IDockActions
         return UrlReply;
     }
 }
+
+/// <summary>The hub's config requests for the Settings window: answers from <see cref="Config"/> and the queued replies, and records each request.</summary>
+sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
+{
+    public JsonObject Config { get; set; } = SettingsConfigs.Basic();
+
+    public List<string> Calls { get; } = [];
+
+    /// <summary>Each check's errors; an empty queue answers no errors.</summary>
+    public Queue<string[]> CheckReplies { get; } = new();
+
+    /// <summary>When set, each check waits for the task this returns for it before answering.</summary>
+    public Func<int, Task>? HoldCheck { get; set; }
+
+    public Queue<string[]> SaveReplies { get; } = new();
+
+    public string[] DeleteReply { get; set; } = [];
+
+    /// <summary>When set, the next read answers with the config as it was when asked, once the task this returns ends.</summary>
+    public Func<Task>? HoldRead { get; set; }
+
+    public async Task<(Switchboard.Dock.Settings.EditorConfig? Config, string? Error)> ReadConfig()
+    {
+        Calls.Add("read");
+
+        var config = Switchboard.Dock.Settings.EditorConfig.Parse(Config.DeepClone());
+
+        if (HoldRead is { } hold)
+        {
+            HoldRead = null;
+            await hold();
+        }
+
+        return (config, null);
+    }
+
+    public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject body)
+    {
+        Calls.Add($"check {body.ToJsonString()}");
+
+        var reply = CheckReplies.Count > 0 ? CheckReplies.Dequeue() : [];
+
+        if (HoldCheck is not null)
+        {
+            await HoldCheck(Calls.Count((call) => call.StartsWith("check", StringComparison.Ordinal)));
+        }
+
+        return reply;
+    }
+
+    public Task<IReadOnlyList<string>> SaveConfig(JsonObject body)
+    {
+        Calls.Add($"save {body.ToJsonString()}");
+
+        return Task.FromResult<IReadOnlyList<string>>(SaveReplies.Count > 0 ? SaveReplies.Dequeue() : []);
+    }
+
+    public Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir)
+    {
+        Calls.Add($"delete {name} {version}");
+
+        return Task.FromResult<IReadOnlyList<string>>(DeleteReply);
+    }
+}
+
+/// <summary>Config replies as <c>POST /config/read</c> answers them.</summary>
+static class SettingsConfigs
+{
+    public static JsonObject Playbook(string kind = "task", string template = "Do {{ticket.title}}.", params string[] reports) =>
+        new()
+        {
+            ["description"] = "Build it",
+            ["kind"] = kind,
+            ["autoStart"] = false,
+            ["requiresWorktree"] = false,
+            ["permissionMode"] = null,
+            ["model"] = null,
+            ["workdir"] = "worktree",
+            ["reports"] = new JsonArray(reports.Select((report) => (JsonNode)JsonValue.Create(report)).ToArray()),
+            ["approvalSends"] = false,
+            ["rates"] = false,
+            ["template"] = template,
+        };
+
+    /// <summary>Settings with GitHub on and Zoho off, playbooks dev:develop, dev:review and triage:github, and dev:develop used by two open work items.</summary>
+    public static JsonObject Basic() =>
+        new()
+        {
+            ["settings"] = new JsonObject
+            {
+                ["path"] = "C:/cfg/settings.json",
+                ["version"] = "v1",
+                ["value"] = new JsonObject
+                {
+                    ["sessions"] = new JsonObject { ["concurrency"] = 2 },
+                    ["sources"] = new JsonObject { ["github"] = new JsonObject { ["enabled"] = true, ["repo"] = "acme/widgets" }, ["zoho"] = new JsonObject { ["enabled"] = false } },
+                },
+                ["error"] = null,
+            },
+            ["playbooks"] = new JsonArray(
+                new JsonObject { ["name"] = "dev:develop", ["path"] = "C:/cfg/playbooks/dev/develop.md", ["version"] = "p1", ["playbook"] = Playbook(reports: ["done"]), ["error"] = null },
+                new JsonObject { ["name"] = "dev:review", ["path"] = "C:/cfg/playbooks/dev/review.md", ["version"] = "p2", ["playbook"] = Playbook(), ["error"] = null },
+                new JsonObject { ["name"] = "triage:github", ["path"] = "C:/cfg/playbooks/triage/github.md", ["version"] = "p3", ["playbook"] = Playbook("triage", "Choose."), ["error"] = null }),
+            ["permissionModes"] = new JsonArray("acceptEdits", "auto", "plan"),
+            ["templateVariables"] = new JsonArray("ticket.title", "report"),
+            ["sourceKinds"] = new JsonArray("github", "zoho", "forum"),
+            ["inUse"] = new JsonObject { ["dev:develop"] = 2 },
+            ["configDir"] = "C:/cfg",
+        };
+
+    public static Switchboard.Dock.Settings.EditorState State(JsonObject? config = null) => new(Switchboard.Dock.Settings.EditorConfig.Parse(config ?? Basic()));
+}

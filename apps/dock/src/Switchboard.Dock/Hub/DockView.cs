@@ -41,7 +41,12 @@ public sealed record DockRow(
     IReadOnlyList<DockAnswer> Answers,
     IReadOnlyList<DockPaste> Pastes,
     IReadOnlyList<DockCommand> Commands,
-    string Search);
+    string Search,
+    IReadOnlyList<DockLink> Links,
+    int Returned);
+
+/// <summary>A ticket's link, named as <c>PR #19002</c>, <c>gh 18941</c> or by its label (PRD R52).</summary>
+public sealed record DockLink(string Label, string Url);
 
 /// <summary>A one-part question's option and the <c>answer</c> action it posts (PRD R70).</summary>
 public sealed record DockAnswer(string Label, string Description, JsonObject Action);
@@ -64,8 +69,11 @@ public enum Tone
     Error,
 }
 
-/// <summary>A work item's VS Code window: the workspace file's name, the title prefix the dock finds it by, and its folders (PRD R71).</summary>
-public sealed record DockWindow(string Name, string Title, IReadOnlyList<string> Folders)
+/// <summary>
+/// A work item's VS Code window: the workspace file's name, the title prefix the dock finds it by, its folders, and the workspace file the hub writes
+/// (PRD R71); a hub older than the dock sends no file.
+/// </summary>
+public sealed record DockWindow(string Name, string Title, IReadOnlyList<string> Folders, string? File = null)
 {
     /// <summary>Every title VS Code gives the window starts with this, whatever editor is active.</summary>
     public string TitlePrefix => $"sb:{Name} · ";

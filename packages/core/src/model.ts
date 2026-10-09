@@ -128,7 +128,7 @@ export interface Link {
 export interface Paste {
   id: number;
   workItemId: number;
-  /** Names the text in the panel, such as `Customer reply`; a later paste with the same label replaces it. */
+  /** Names the text in the dock, such as `Customer reply`; a later paste with the same label replaces it. */
   label: string;
   /** An absolute path, read when the operator copies it. */
   file: string;

@@ -15,11 +15,12 @@ public sealed class ControlsTests
 {
     readonly FakeHub hub = new();
     readonly FakeActions actions = new();
+    readonly FakeConfigHub config = new();
 
     (MainWindow Window, DockViewModel Model) Open(DockView? view = null)
     {
         var model = new DockViewModel(new DockSettings(), (_) => { });
-        var window = new MainWindow(model, null, hub, actions, docked: false) { Height = 1200 };
+        var window = new MainWindow(model, null, hub, actions, docked: false, config) { Height = 1200 };
 
         model.Show(view ?? Fixtures.View);
         window.Show();
@@ -258,13 +259,23 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void Settings_Clicked_RunsSettingsInVsCode()
+    public void Settings_ClickedTwice_OpensOneSettingsWindowWithTheFiles()
     {
         var (window, _) = Open();
 
         Click(window.FindControl<Button>("SettingsButton")!);
+        var first = window.Settings;
+        Click(window.FindControl<Button>("SettingsButton")!);
 
-        Assert.Equal(["none {\"type\":\"settings\"}"], actions.Runs);
+        Assert.NotNull(first);
+        Assert.Same(first, window.Settings);
+        Assert.True(first.IsVisible);
+        Assert.Equal(["read"], config.Calls.Where((call) => call == "read"));
+        Assert.Empty(actions.Runs);
+
+        first.Close();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(window.Settings);
     }
 
     [AvaloniaFact]
@@ -324,7 +335,8 @@ public sealed class ControlsTests
         window.MouseDown(point, MouseButton.Left);
         window.MouseUp(point, MouseButton.Left);
         Dispatcher.UIThread.RunJobs();
-        Click(window.FindControl<Button>("SettingsButton")!);
+        // Open report runs in VS Code.
+        Click(RowOf(window, "item:10").GetVisualDescendants().OfType<Button>().Single((button) => ToolTip.GetTip(button) as string == "reply.md"));
 
         Assert.Equal(["item:7"], actions.Clicked.Select((row) => row.Key));
         Assert.True(actions.Cancels[0].IsCancellationRequested);

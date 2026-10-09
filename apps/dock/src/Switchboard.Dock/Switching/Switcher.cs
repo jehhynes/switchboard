@@ -4,7 +4,7 @@ using Switchboard.Dock.Hub;
 namespace Switchboard.Dock.Switching;
 
 /// <summary>What a click on a row does (PRD R71): the session first, then the item window to the front, opened when it is not open.</summary>
-public sealed class Switcher(string switchboardHome, IHub hub, IWindows windows, IVsCode vsCode, Func<TimeSpan, Task>? delay = null) : IDockActions
+public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<TimeSpan, Task>? delay = null) : IDockActions
 {
     /// <summary>How long Open in Claude waits for the stopped session to end; <c>claude stop</c> itself times out at 15 seconds.</summary>
     public static readonly TimeSpan StopWait = TimeSpan.FromSeconds(20);
@@ -30,15 +30,9 @@ public sealed class Switcher(string switchboardHome, IHub hub, IWindows windows,
             return row.Open is { Type: "url", Url: { } url } ? OpenUrl(windows, url) : null;
         }
 
-        string file;
-
-        try
+        if (FileOf(window) is not { } file)
         {
-            file = WorkspaceFile.Write(switchboardHome, window);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
-            return $"The workspace file for {window.Name} could not be written: {error.Message}";
+            return Older;
         }
 
         var open = row.Open;
@@ -108,15 +102,9 @@ public sealed class Switcher(string switchboardHome, IHub hub, IWindows windows,
     {
         if (row?.Window is { } window)
         {
-            string file;
-
-            try
+            if (FileOf(window) is not { } file)
             {
-                file = WorkspaceFile.Write(switchboardHome, window);
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            {
-                return $"The workspace file for {window.Name} could not be written: {error.Message}";
+                return Older;
             }
 
             var left = await hub.Window(command, file);
@@ -211,6 +199,11 @@ public sealed class Switcher(string switchboardHome, IHub hub, IWindows windows,
 
         return windows.Show(handle) ? null : "Windows kept another window in front. Click the row again.";
     }
+
+    const string Older = "The hub names no workspace file for this window. Reload a VS Code window to update the hub.";
+
+    /// <summary>The window's workspace file, which the hub writes before it sends the view (architecture.md § Dock).</summary>
+    static string? FileOf(DockWindow window) => string.IsNullOrEmpty(window.File) ? null : window.File;
 
     public static DockRow? RowOf(DockView view, string key) => view.Groups.SelectMany((group) => group.Rows).FirstOrDefault((row) => row.Key == key);
 }
