@@ -11,15 +11,48 @@ sealed class FakeHub : IHub
 
     public Queue<string?> ActReplies { get; } = new();
 
+    /// <summary>When set, each action waits for it before answering.</summary>
+    public TaskCompletionSource? HoldAct { get; set; }
+
     public string? OpenReply { get; set; }
 
     public DockView? Ended { get; set; }
 
-    public Task<string?> Act(JsonObject action)
+    public async Task<string?> Act(JsonObject action)
     {
         Calls.Add($"act {action.ToJsonString()}");
 
-        return Task.FromResult(ActReplies.Count > 0 ? ActReplies.Dequeue() : throw new InvalidOperationException($"Unexpected action {action.ToJsonString()}"));
+        var reply = ActReplies.Count > 0 ? ActReplies.Dequeue() : throw new InvalidOperationException($"Unexpected action {action.ToJsonString()}");
+
+        if (HoldAct is not null)
+        {
+            await HoldAct.Task;
+        }
+
+        return reply;
+    }
+
+    public string? WindowReply { get; set; }
+
+    public Task<WindowReply> Window(JsonObject command, string? workspace)
+    {
+        Calls.Add($"window {(workspace is null ? "any" : Path.GetFileName(workspace))} {command.ToJsonString()}");
+
+        return Task.FromResult(WindowReply is null ? new WindowReply(null, 40 + Calls.Count) : new WindowReply(WindowReply, null));
+    }
+
+    public Task<string?> Withdraw(int id)
+    {
+        Calls.Add($"withdraw {id}");
+
+        return Task.FromResult<string?>(null);
+    }
+
+    public Task<string?> SetSource(string name, bool enabled)
+    {
+        Calls.Add($"source {name} {enabled}");
+
+        return Task.FromResult<string?>(null);
     }
 
     public Task<string?> Open(string sessionId, string cwd, string workspace)
@@ -71,6 +104,11 @@ sealed class FakeWindows : IWindows
 
     public int Finds(string titlePrefix) => finds.GetValueOrDefault(titlePrefix);
 
+    /// <summary>The VS Code window nearest the front, or 0 for none.</summary>
+    public nint Front0 { get; set; }
+
+    public nint FindVsCode() => Front0;
+
     public bool Show(nint window)
     {
         Calls.Add($"show {window}");
@@ -103,5 +141,51 @@ sealed class FakeVsCode : IVsCode
         {
             throw Fails;
         }
+    }
+}
+
+/// <summary>Records what the dock asked to run, and answers with the given replies.</summary>
+sealed class FakeActions : IDockActions
+{
+    public List<DockRow> Clicked { get; } = [];
+
+    public List<CancellationToken> Cancels { get; } = [];
+
+    public List<string> Runs { get; } = [];
+
+    public List<string> Urls { get; } = [];
+
+    public string? ClickReply { get; set; }
+
+    public string? RunReply { get; set; }
+
+    public string? UrlReply { get; set; }
+
+    /// <summary>When set, the first click waits for it.</summary>
+    public TaskCompletionSource<string?>? Pending { get; set; }
+
+    public Task<string?> Click(DockRow row, CancellationToken cancel)
+    {
+        Clicked.Add(row);
+        Cancels.Add(cancel);
+
+        return Pending is { } first && Clicked.Count == 1 ? first.Task : Task.FromResult(ClickReply);
+    }
+
+    public List<CancellationToken> RunCancels { get; } = [];
+
+    public Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel)
+    {
+        Runs.Add($"{row?.Key ?? "none"} {command.ToJsonString()}");
+        RunCancels.Add(cancel);
+
+        return Task.FromResult(RunReply);
+    }
+
+    public string? OpenUrl(string url)
+    {
+        Urls.Add(url);
+
+        return UrlReply;
     }
 }

@@ -52,6 +52,11 @@ export function mainControl(item: WorkItemView): Control | null {
   return controlsOf(item).find((control) => control.label === wanted) ?? null;
 }
 
+/** The main control's tooltip: Approve names the prompt it runs, so the operator can read the exact command before approving (PRD R27). */
+export function mainTitle(item: WorkItemView, control: Control): string {
+  return control.label === 'Approve' && item.approvalPrompt !== null ? `Approve: runs ${item.approvalPrompt}` : control.label;
+}
+
 /** The controls that apply to a work item (PRD R27). */
 export function controlsOf(item: WorkItemView): Control[] {
   const controls: Control[] = [];
@@ -553,4 +558,22 @@ export function setupNotes(snapshot: Snapshot): string[] {
         : `No source is configured. Add one in ${snapshot.configDir}\\settings.json.`,
     snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under ${snapshot.configDir}\\playbooks.` : null,
   ].filter((line): line is string => line !== null);
+}
+
+/** The row's linked GitHub pull requests and issues as `PR #<n>` and `gh <n>`, as the row's badges show them (PRD R52). */
+export function linkedKeys(entry: WorkItemView | PoolView): string[] {
+  const keys = entry.links.flatMap((link) => {
+    const kind = linkKind(link.target);
+    const number = linkNumber(link.target);
+
+    return kind === 'url' || number === null ? [] : [kind === 'pr' ? `PR #${number}` : `gh ${number}`];
+  });
+
+  // A link to the ticket itself repeats its key.
+  return [...new Set(keys)].filter((key) => key !== ticketKey(entry.ticket));
+}
+
+/** What Go to Work Item matches besides the title and branch: the key, linked pull requests and issues, playbook and group (PRD R63). */
+export function searchDescription(entry: WorkItemView | PoolView, group: RowGroup, namespaces: Record<string, string>): string {
+  return [ticketKey(entry.ticket), ...linkedKeys(entry), playbookText(entry, namespaces), GROUP_TITLES[group]].filter((part) => part !== '').join(' · ');
 }

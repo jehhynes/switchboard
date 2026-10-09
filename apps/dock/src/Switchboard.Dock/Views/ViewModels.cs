@@ -30,6 +30,11 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     string? status;
     string? connection = "Connecting to Switchboard…";
     string? selected;
+    string filter = "";
+    bool adhocOpen;
+    string adhocPrompt = "";
+    string? adhocRepo;
+    bool adhocBusy;
 
     public DockSettings Settings => settings;
 
@@ -38,6 +43,62 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     public ObservableCollection<string> Notes { get; } = [];
 
     public IReadOnlyList<SnoozeChoice> Snooze { get; private set; } = [];
+
+    /// <summary>The header's toggles, one per configured source (PRD R3).</summary>
+    public ObservableCollection<SourceViewModel> Sources { get; } = [];
+
+    /// <summary>The repos an ad-hoc prompt can run in, the first being the default (PRD R6).</summary>
+    public ObservableCollection<string> RepoRoots { get; } = [];
+
+    /// <summary>The search box's text: only rows whose search text holds every word show, and every group with one shows open (PRD R71).</summary>
+    public string Filter
+    {
+        get => filter;
+        set
+        {
+            Set(ref filter, value ?? "");
+
+            foreach (var group in Groups)
+            {
+                group.Filter(filter);
+            }
+        }
+    }
+
+    /// <summary>Whether the New Ad-hoc Session form shows.</summary>
+    public bool AdhocOpen
+    {
+        get => adhocOpen;
+        set => Set(ref adhocOpen, value);
+    }
+
+    public string AdhocPrompt
+    {
+        get => adhocPrompt;
+        set => Set(ref adhocPrompt, value ?? "");
+    }
+
+    public string? AdhocRepo
+    {
+        get => adhocRepo;
+        set => Set(ref adhocRepo, value);
+    }
+
+    /// <summary>True while a Start waits for the hub, so a second click cannot start a second session.</summary>
+    public bool AdhocBusy
+    {
+        get => adhocBusy;
+        set
+        {
+            Set(ref adhocBusy, value);
+            Changed(nameof(AdhocIdle));
+        }
+    }
+
+    public bool AdhocIdle => !adhocBusy;
+
+    /// <summary>The form asks for the repo only when there is more than one (PRD R6).</summary>
+    public bool AdhocChoosesRepo => RepoRoots.Count > 1;
 
     /// <summary>What the last click could not do, shown until the next click.</summary>
     public string? Status
@@ -60,7 +121,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         {
             Set(ref selected, value);
 
-            foreach (var row in Groups.SelectMany((group) => group.Rows))
+            foreach (var row in Groups.SelectMany((group) => group.AllRows))
             {
                 row.IsSelected = row.Key == value;
             }
@@ -82,6 +143,29 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         Show(Hub.Connection.Connected);
         Snooze = view.Snooze;
 
+        if (!Sources.Select((source) => (source.Name, source.Enabled)).SequenceEqual(view.Sources.Select((source) => (source.Name, source.Enabled))))
+        {
+            Sources.Clear();
+
+            foreach (var source in view.Sources)
+            {
+                Sources.Add(new SourceViewModel(source.Name, source.Enabled));
+            }
+        }
+
+        if (!RepoRoots.SequenceEqual(view.RepoRoots))
+        {
+            RepoRoots.Clear();
+
+            foreach (var repo in view.RepoRoots)
+            {
+                RepoRoots.Add(repo);
+            }
+
+            AdhocRepo = RepoRoots.Contains(AdhocRepo ?? "") ? AdhocRepo : RepoRoots.FirstOrDefault();
+            Changed(nameof(AdhocChoosesRepo));
+        }
+
         Notes.Clear();
 
         foreach (var note in view.Notes)
@@ -97,7 +181,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         {
             var model = kept.GetValueOrDefault(group.Key) ?? new GroupViewModel(group.Key, settings.Groups.TryGetValue(group.Key, out var open) ? open : OpenByDefault.Contains(group.Key), Toggled);
 
-            model.Show(group, selected);
+            model.Show(group, selected, filter);
             Groups.Add(model);
         }
     }
@@ -129,8 +213,14 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     {
         foreach (var group in Groups)
         {
-            if (group.Rows.FirstOrDefault((row) => row.Row.Window?.Name == name) is { } row)
+            if (group.AllRows.FirstOrDefault((row) => row.Row.Window?.Name == name) is { } row)
             {
+                // The search box would hide the row the operator brought to the front.
+                if (!group.Rows.Contains(row))
+                {
+                    Filter = "";
+                }
+
                 if (!group.IsOpen)
                 {
                     group.Toggle();
@@ -145,7 +235,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         return null;
     }
 
-    public RowViewModel? Row(string key) => Groups.SelectMany((group) => group.Rows).FirstOrDefault((row) => row.Key == key);
+    public RowViewModel? Row(string key) => Groups.SelectMany((group) => group.AllRows).FirstOrDefault((row) => row.Key == key);
 }
 
 public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel> toggled) : Observable
@@ -153,6 +243,8 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     bool isOpen = open;
     string title = "";
     string? empty;
+    string filter = "";
+    IReadOnlyList<RowViewModel> all = [];
     IReadOnlyList<RowViewModel> rows = [];
 
     public string Key => key;
@@ -163,20 +255,32 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
         private set => Set(ref title, value);
     }
 
+    /// <summary>The operator's choice, kept across runs.</summary>
     public bool IsOpen
     {
         get => isOpen;
         private set => Set(ref isOpen, value);
     }
 
-    /// <summary>The codicon of the group's open or closed state.</summary>
-    public string Chevron => IsOpen ? "" : "";
+    bool Filtering => filter.Trim() != "";
 
+    /// <summary>Open by the operator's choice, or while the search box filters.</summary>
+    public bool ShowsRows => IsOpen || Filtering;
+
+    /// <summary>Hidden while the search box filters out all its rows.</summary>
+    public bool IsShown => !Filtering || Rows.Count > 0;
+
+    /// <summary>The codicon of the group's open or closed state.</summary>
+    public string Chevron => ShowsRows ? "\uEAB4" : "\uEAB6";
+
+    /// <summary>The rows the search box lets through.</summary>
     public IReadOnlyList<RowViewModel> Rows
     {
         get => rows;
         private set => Set(ref rows, value);
     }
+
+    public IReadOnlyList<RowViewModel> AllRows => all;
 
     public string Count => Rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
@@ -186,23 +290,50 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
         private set => Set(ref empty, value);
     }
 
-    public bool ShowEmpty => Rows.Count == 0 && Empty is not null;
+    public bool ShowEmpty => Rows.Count == 0 && Empty is not null && !Filtering;
 
-    public void Show(DockGroup group, string? selected)
+    public void Show(DockGroup group, string? selected, string filtering)
     {
         Title = group.Title;
         Empty = group.Empty;
-        Rows = group.Rows.Select((row) => new RowViewModel(row) { IsSelected = row.Key == selected }).ToList();
+        all = group.Rows.Select((row) => new RowViewModel(row) { IsSelected = row.Key == selected }).ToList();
+        Filter(filtering);
+    }
+
+    public void Filter(string text)
+    {
+        filter = text;
+        Rows = all.Where((row) => Matches(row.Row.Search, text)).ToList();
         Changed(nameof(Count));
         Changed(nameof(ShowEmpty));
+        Changed(nameof(ShowsRows));
+        Changed(nameof(IsShown));
+        Changed(nameof(Chevron));
     }
+
+    /// <summary>Whether the search text holds every word of the filter, ignoring case.</summary>
+    public static bool Matches(string search, string filter) =>
+        filter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).All((word) => search.Contains(word, StringComparison.CurrentCultureIgnoreCase));
 
     public void Toggle()
     {
         IsOpen = !IsOpen;
+        Changed(nameof(ShowsRows));
         Changed(nameof(Chevron));
         toggled(this);
     }
+}
+
+/// <summary>A source's on/off toggle in the header (PRD R3), labelled as its key pills are, such as <c>gh</c>.</summary>
+public sealed class SourceViewModel(string name, bool enabled)
+{
+    public string Name => name;
+
+    public bool Enabled => enabled;
+
+    public string Label => name == "github" ? "gh" : name;
+
+    public string Tip => $"{name}: {(enabled ? "polled. Click to stop polling it." : "not polled. Click to poll it.")}";
 }
 
 /// <summary>One row's texts, as the hub sent them.</summary>
@@ -253,6 +384,30 @@ public sealed class RowViewModel(DockRow row) : Observable
     public bool IsForum => row.Source == "forum";
 
     public bool HasThirdLine => row.Mark is not null || row.Details.Count > 0;
+
+    public bool HasMain => row.Main is not null;
+
+    public string Main => row.Main ?? "";
+
+    /// <summary>For Approve, the prompt it runs (PRD R27).</summary>
+    public string? MainTitle => row.MainTitle;
+
+    /// <summary>Approve takes the accent colour, as in the panel (PRD R27).</summary>
+    public bool MainIsApprove => row.Main == "Approve";
+
+    public IReadOnlyList<DockAnswer> Answers => row.Answers;
+
+    public bool HasAnswers => row.Answers.Count > 0;
+
+    public bool HasCopy => row.Pastes.Count > 0;
+
+    public string CopyTitle => row.Pastes.Count == 1 ? $"Copy {row.Pastes[0].Label}" : "Copy…";
+
+    public DockCommand? Report => row.Commands.FirstOrDefault((command) => command.Label == "Open report");
+
+    public bool HasReport => Report is not null;
+
+    public string ReportTitle => Report?.Command["url"]?.GetValue<string>() is { } file ? Path.GetFileName(file) : "";
 
     public bool StripeWarning => row.Stripe == Tone.Warning;
 

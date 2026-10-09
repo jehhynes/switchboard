@@ -79,7 +79,7 @@ public sealed class ForegroundTests
     public void ShowForeground_ItemWindowTitle_SelectsItsRowInTheDock()
     {
         var model = new DockViewModel(new DockSettings(), (_) => { });
-        var window = new MainWindow(model, null, new FakeHub(), (_, _) => Task.FromResult<string?>(null), (_) => null, docked: false);
+        var window = new MainWindow(model, null, new FakeHub(), new FakeActions(), docked: false);
 
         model.Show(Fixtures.View);
         window.Show();
@@ -99,7 +99,7 @@ public sealed class ForegroundTests
         var filler = Enumerable.Range(1, 20).Select((n) => Fixtures.Row("item:9") with { Key = $"item:{100 + n}", Title = $"Filler {n}" }).ToList();
         var view = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, filler), new DockGroup("unstarted", "Unstarted", null, [Fixtures.Row("item:8")])] };
         var model = new DockViewModel(new DockSettings { Groups = { ["unstarted"] = false } }, (_) => { });
-        var window = new MainWindow(model, null, new FakeHub(), (_, _) => Task.FromResult<string?>(null), (_) => null, docked: false) { Height = 300 };
+        var window = new MainWindow(model, null, new FakeHub(), new FakeActions(), docked: false) { Height = 300 };
 
         model.Show(view);
         window.Show();
@@ -107,7 +107,7 @@ public sealed class ForegroundTests
         window.ShowForeground("sb:gh-108-widgets-655280 · Issue <8>");
         Dispatcher.UIThread.RunJobs();
 
-        var scroller = window.GetVisualDescendants().OfType<ScrollViewer>().First();
+        var scroller = window.FindControl<ScrollViewer>("RowScroller")!;
         var row = window.GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel { Key: "item:8" });
         var top = row.TranslatePoint(new Point(0, 0), scroller)!.Value.Y;
 

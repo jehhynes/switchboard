@@ -23,7 +23,7 @@ public sealed class App : Application
             var windows = new Win32Windows();
             var switcher = new Switcher(SwitchboardHome, hub, windows, new VsCodeInstall());
             var model = new DockViewModel(DockSettings.Load(SwitchboardHome), (settings) => settings.Save(SwitchboardHome));
-            var window = new MainWindow(model, hub, hub, switcher.Click, (url) => Switcher.OpenUrl(windows, url), docked: true);
+            var window = new MainWindow(model, hub, hub, switcher, docked: true);
 
             desktop.MainWindow = window;
             windows.WatchForeground(window.ShowForeground);

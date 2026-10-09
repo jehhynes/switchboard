@@ -441,18 +441,25 @@ export async function openQuestion(
 }
 
 /** Opens a session another window left for this window's folder. Runs when the window connects to the hub or gains focus. */
-export async function claimOpen(record: HubRecord): Promise<string | null> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+export async function claimOpen(record: HubRecord, run: (command: { type: string; [key: string]: unknown }) => Promise<unknown> = async () => {}): Promise<string | null> {
+  // A window with no folder claims only the dock's commands for any window, such as Settings.
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   // An item window names its workspace file, so it claims what the dock left for it and nothing left for another item window (PRD R71).
   const workspace = vscode.workspace.workspaceFile?.scheme === 'file' ? vscode.workspace.workspaceFile.fsPath : null;
-  const reply = folder === undefined ? null : await postToHub(record, '/claim', { folder, workspace }, ACTION_TIMEOUT_MS);
-  const sessionId = (reply?.body as { sessionId?: unknown } | null | undefined)?.sessionId;
+  // Only the focused window takes the dock's commands for any window, so a window reconnecting in the background does not (PRD R71).
+  const reply = await postToHub(record, '/claim', { folder, workspace, focused: vscode.window.state.focused }, ACTION_TIMEOUT_MS);
+  const body = reply?.body as { sessionId?: unknown; commands?: unknown } | null | undefined;
+  const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : null;
 
-  if (typeof sessionId !== 'string') {
-    return null;
+  // The hub has already handed over the commands, so a session that fails to open does not keep them from running.
+  if (sessionId !== null) {
+    await showInClaude(sessionId).then(undefined, (error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
   }
 
-  await showInClaude(sessionId);
+  // Commands the dock left for this window: Open Changes, History, Open report and Settings (PRD R71).
+  for (const command of Array.isArray(body?.commands) ? (body.commands as { type: string }[]) : []) {
+    await run(command).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
+  }
 
   return sessionId;
 }

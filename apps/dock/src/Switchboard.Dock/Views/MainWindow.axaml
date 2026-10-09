@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="using:Switchboard.Dock.Views"
+        xmlns:hub="using:Switchboard.Dock.Hub"
         x:Class="Switchboard.Dock.Views.MainWindow"
         x:DataType="views:DockViewModel"
         Title="Switchboard"
@@ -26,6 +27,39 @@
     </Style>
     <Style Selector="Button.header:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource DockHover}" />
+    </Style>
+    <Style Selector="Button.source">
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="MinHeight" Value="20" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockMuted}" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.source.off">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+    <Style Selector="Button.option">
+      <Setter Property="Padding" Value="8,1" />
+      <Setter Property="Margin" Value="0,2,4,0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Button.icon-button">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="MinHeight" Value="0" />
+    </Style>
+    <Style Selector="Button.main">
+      <Setter Property="Padding" Value="8,2" />
+      <Setter Property="MinHeight" Value="0" />
+    </Style>
+    <!-- The row's buttons show only while it is hovered or selected, as in the panel (PRD R27). -->
+    <Style Selector="Border.row StackPanel.actions">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Border.row:pointerover StackPanel.actions, Border.row.selected StackPanel.actions">
+      <Setter Property="IsVisible" Value="True" />
     </Style>
     <Style Selector="Border.group">
       <Setter Property="Background" Value="Transparent" />
@@ -102,15 +136,46 @@
 
   <Grid ColumnDefinitions="*,Auto">
     <DockPanel>
-      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="8,4,4,0">
-        <TextBlock Text="SWITCHBOARD" FontSize="11" FontWeight="SemiBold" Classes="muted" VerticalAlignment="Center" />
-        <Button Name="CloseButton" Grid.Column="1" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock">
-          <TextBlock Classes="icon" Text="&#xEA76;" />
-        </Button>
-      </Grid>
+      <StackPanel DockPanel.Dock="Top" Margin="8,4,4,4" Spacing="4">
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+          <TextBlock Text="SWITCHBOARD" FontSize="11" FontWeight="SemiBold" Classes="muted" VerticalAlignment="Center" />
+          <Button Name="AdhocButton" Grid.Column="1" Classes="header" Click="OnAdhocClicked" ToolTip.Tip="New Ad-hoc Session…">
+            <TextBlock Classes="icon" Text="&#xEA60;" />
+          </Button>
+          <Button Name="SettingsButton" Grid.Column="2" Classes="header" Click="OnSettingsClicked" ToolTip.Tip="Open Settings">
+            <TextBlock Classes="icon" Text="&#xEB51;" />
+          </Button>
+          <Button Name="CloseButton" Grid.Column="3" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock">
+            <TextBlock Classes="icon" Text="&#xEA76;" />
+          </Button>
+        </Grid>
+        <ItemsControl Name="SourceList" ItemsSource="{Binding Sources}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="4" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="views:SourceViewModel">
+              <Button Classes="source" Classes.off="{Binding !Enabled}" Click="OnSourceClicked" ToolTip.Tip="{Binding Tip}">
+                <TextBlock Text="{Binding Label}" FontSize="12" />
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBox Name="SearchBox" Text="{Binding Filter}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,4,0" />
+        <StackPanel Name="AdhocForm" IsVisible="{Binding AdhocOpen}" Spacing="4" Margin="0,0,4,0">
+          <ComboBox Name="AdhocRepoBox" ItemsSource="{Binding RepoRoots}" SelectedItem="{Binding AdhocRepo}" IsVisible="{Binding AdhocChoosesRepo}" HorizontalAlignment="Stretch" />
+          <TextBox Name="AdhocPromptBox" Text="{Binding AdhocPrompt}" PlaceholderText="Prompt for a new session" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
+          <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+            <Button Name="AdhocCancel" Click="OnAdhocCancel">Cancel</Button>
+            <Button Name="AdhocStart" Classes="accent" IsEnabled="{Binding AdhocIdle}" Click="OnAdhocStart">Start</Button>
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
       <TextBlock Name="StatusLine" DockPanel.Dock="Bottom" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}"
                  TextWrapping="Wrap" Margin="8" Classes="warning" />
-      <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+      <ScrollViewer Name="RowScroller" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="0,4,0,8">
           <TextBlock Name="ConnectionLine" Text="{Binding Connection}" IsVisible="{Binding Connection, Converter={x:Static ObjectConverters.IsNotNull}}"
                      TextWrapping="Wrap" Margin="8,6" Classes="muted" />
@@ -124,7 +189,7 @@
           <ItemsControl Name="GroupList" ItemsSource="{Binding Groups}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="views:GroupViewModel">
-                <StackPanel>
+                <StackPanel IsVisible="{Binding IsShown}">
                   <Border Classes="group" Tapped="OnGroupTapped">
                     <Grid ColumnDefinitions="Auto,*,Auto">
                       <TextBlock Classes="icon" Text="{Binding Chevron}" />
@@ -132,13 +197,13 @@
                       <TextBlock Grid.Column="2" Text="{Binding Count}" Classes="muted" VerticalAlignment="Center" />
                     </Grid>
                   </Border>
-                  <StackPanel IsVisible="{Binding IsOpen}">
+                  <StackPanel IsVisible="{Binding ShowsRows}">
                     <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="muted" Margin="26,2,8,6" />
                     <ItemsControl ItemsSource="{Binding Rows}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="views:RowViewModel">
                           <Border Classes="row" Classes.selected="{Binding IsSelected}" Tapped="OnRowTapped" ContextRequested="OnRowContext">
-                            <Grid ColumnDefinitions="3,*">
+                            <Grid ColumnDefinitions="3,*,Auto">
                               <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" />
                               <StackPanel Grid.Column="1" Margin="8,5,8,6" Spacing="3">
                                 <Grid ColumnDefinitions="Auto,*,Auto">
@@ -171,6 +236,29 @@
                                     </ItemsControl.ItemTemplate>
                                   </ItemsControl>
                                 </StackPanel>
+                                <WrapPanel IsVisible="{Binding HasAnswers}">
+                                  <ItemsControl ItemsSource="{Binding Answers}">
+                                    <ItemsControl.ItemsPanel>
+                                      <ItemsPanelTemplate>
+                                        <WrapPanel />
+                                      </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                      <DataTemplate x:DataType="hub:DockAnswer">
+                                        <Button Classes="option" Content="{Binding Label}" ToolTip.Tip="{Binding Description}" Click="OnAnswerClicked" />
+                                      </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                  </ItemsControl>
+                                </WrapPanel>
+                              </StackPanel>
+                              <StackPanel Grid.Column="2" Classes="actions" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <Button Classes="icon-button" IsVisible="{Binding HasCopy}" ToolTip.Tip="{Binding CopyTitle}" Click="OnCopyClicked">
+                                  <TextBlock Classes="icon" Text="&#xEBCC;" />
+                                </Button>
+                                <Button Classes="icon-button" IsVisible="{Binding HasReport}" ToolTip.Tip="{Binding ReportTitle}" Click="OnReportClicked">
+                                  <TextBlock Classes="icon" Text="&#xEA7B;" />
+                                </Button>
+                                <Button Classes="main" Classes.accent="{Binding MainIsApprove}" IsVisible="{Binding HasMain}" Content="{Binding Main}" ToolTip.Tip="{Binding MainTitle}" Click="OnMainClicked" />
                               </StackPanel>
                             </Grid>
                           </Border>

@@ -132,6 +132,8 @@ export class Runtime {
   /** The read in flight per source; reads run one at a time, so their results apply in order. */
   private reads = new Map<string, Promise<void>>();
   private pendingOpens = new Map<string, { sessionId: string; at: number; workspace: string | null }>();
+  private pendingCommands: { id: number; command: Record<string, unknown>; workspace: string | null; at: number }[] = [];
+  private nextCommandId = 1;
   /** Job state reads by short ID, kept while the file's modification time is unchanged. */
   private questions = new Map<string, { mtimeMs: number; question: WorkItemView['question'] }>();
   /** The job state's modification time when the hub sent an answer, by short ID, so a question is answered once (PRD R70). */
@@ -630,6 +632,41 @@ export class Runtime {
     this.pendingOpens.delete(key);
 
     return pending !== undefined && this.deps.now() - pending.at <= OPEN_CLAIM_MS ? pending.sessionId : null;
+  }
+
+  /**
+   * Keeps a command for a VS Code window to run when it next claims (PRD R71): the window opened from `workspace`, or with null the first
+   * window that claims, which the dock brings to the front.
+   */
+  recordCommand(command: Record<string, unknown>, workspace: string | null): number {
+    const id = this.nextCommandId++;
+
+    this.pendingCommands.push({ id, command, workspace, at: this.deps.now() });
+
+    return id;
+  }
+
+  /** Drops a command no window has claimed yet, because the dock did not bring its window forward; false when it is gone already. */
+  withdrawCommand(id: number): boolean {
+    const before = this.pendingCommands.length;
+
+    this.pendingCommands = this.pendingCommands.filter((pending) => pending.id !== id);
+
+    return this.pendingCommands.length < before;
+  }
+
+  /**
+   * The commands for a window opened from `workspace` that are pending and recent, oldest first, and when the window is `focused`, those for any
+   * window, which the dock left for the window it brought to the front. Claiming removes them.
+   */
+  claimCommands(workspace: string | null, focused: boolean): Record<string, unknown>[] {
+    const now = this.deps.now();
+    const recent = this.pendingCommands.filter((pending) => now - pending.at <= OPEN_CLAIM_MS);
+    const mine = recent.filter((pending) => (pending.workspace === null ? focused : workspace !== null && folderKey(pending.workspace) === folderKey(workspace)));
+
+    this.pendingCommands = recent.filter((pending) => !mine.includes(pending));
+
+    return mine.map((pending) => pending.command);
   }
 
   snapshot(): Snapshot {

@@ -14,27 +14,13 @@ namespace Switchboard.Dock.Tests;
 public sealed class MainWindowTests
 {
     readonly FakeHub hub = new();
-    readonly List<DockRow> clicked = [];
-    readonly List<string> urls = [];
+    readonly FakeActions actions = new();
     readonly List<string> saved = [];
-    readonly List<CancellationToken> cancels = [];
-    string? clickReply;
-    string? urlReply;
-    TaskCompletionSource<string?>? pending;
 
     (MainWindow Window, DockViewModel Model) Open(DockSettings? settings = null)
     {
         var model = new DockViewModel(settings ?? new DockSettings(), (kept) => saved.Add(string.Join(",", kept.Groups.Select((group) => $"{group.Key}={group.Value}"))));
-        var window = new MainWindow(model, null, hub, (row, cancel) =>
-        {
-            clicked.Add(row);
-            cancels.Add(cancel);
-            return pending is { } first && clicked.Count == 1 ? first.Task : Task.FromResult(clickReply);
-        }, (url) =>
-        {
-            urls.Add(url);
-            return urlReply;
-        }, docked: false);
+        var window = new MainWindow(model, null, hub, actions, docked: false);
 
         model.Show(Fixtures.View);
         window.Show();
@@ -64,7 +50,7 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var texts = VisibleTexts(window);
 
-        Assert.Equal(["Needs you", "2", "Working", "0", "Unstarted", "2", "Done", "0"], texts.Where((text) => text is "Needs you" or "Working" or "Unstarted" or "Done" or "0" or "2"));
+        Assert.Equal(["Needs you", "3", "Working", "0", "Unstarted", "2", "Done", "0"], texts.Where((text) => text is "Needs you" or "Working" or "Unstarted" or "Done" or "0" or "2" or "3"));
         Assert.Contains("Nothing is running.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
@@ -108,7 +94,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void TapRow_WhileAnotherRowSwitches_CancelsTheFirstAndKeepsOnlyTheLatestStatus()
     {
-        pending = new TaskCompletionSource<string?>();
+        actions.Pending = new TaskCompletionSource<string?>();
 
         var (window, model) = Open();
 
@@ -116,11 +102,11 @@ public sealed class MainWindowTests
         Tap(window, RowNamed(window, "Issue <8>"));
         Tap(window, RowNamed(window, "Issue <7>"));
 
-        Assert.Equal(["item:8", "item:7"], clicked.Select((row) => row.Key));
-        Assert.True(cancels[0].IsCancellationRequested);
-        Assert.False(cancels[1].IsCancellationRequested);
+        Assert.Equal(["item:8", "item:7"], actions.Clicked.Select((row) => row.Key));
+        Assert.True(actions.Cancels[0].IsCancellationRequested);
+        Assert.False(actions.Cancels[1].IsCancellationRequested);
 
-        pending.SetResult("The first click's late answer.");
+        actions.Pending!.SetResult("The first click's late answer.");
         Dispatcher.UIThread.RunJobs();
 
         Assert.Null(model.Status);
@@ -130,8 +116,8 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void TapRow_ClickThrows_ShowsTheFailureInsteadOfClosing()
     {
-        pending = new TaskCompletionSource<string?>();
-        pending.SetException(new IOException("disk full"));
+        actions.Pending = new TaskCompletionSource<string?>();
+        actions.Pending!.SetException(new IOException("disk full"));
 
         var (window, model) = Open();
 
@@ -143,17 +129,17 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void TapRow_Row_SelectsItRunsTheClickAndShowsItsStatus()
     {
-        clickReply = "Windows kept another window in front. Click the row again.";
+        actions.ClickReply = "Windows kept another window in front. Click the row again.";
 
         var (window, model) = Open();
 
         Tap(window, RowNamed(window, "Issue <8>"));
 
-        Assert.Equal(["item:8"], clicked.Select((row) => row.Key));
+        Assert.Equal(["item:8"], actions.Clicked.Select((row) => row.Key));
         Assert.Equal("item:8", model.Selected);
         Assert.Contains("selected", RowNamed(window, "Issue <8>").Classes);
         Assert.DoesNotContain("selected", RowNamed(window, "Issue <7>").Classes);
-        Assert.Equal(clickReply, window.FindControl<TextBlock>("StatusLine")!.Text);
+        Assert.Equal(actions.ClickReply, window.FindControl<TextBlock>("StatusLine")!.Text);
         Assert.True(window.FindControl<TextBlock>("StatusLine")!.IsVisible);
     }
 
@@ -167,7 +153,7 @@ public sealed class MainWindowTests
 
         Assert.DoesNotContain("Issue <7>", VisibleTexts(window));
         Assert.Equal(["needs=False"], saved);
-        Assert.Empty(clicked);
+        Assert.Empty(actions.Clicked);
 
         model.Show(Fixtures.View);
         Dispatcher.UIThread.RunJobs();
@@ -182,8 +168,8 @@ public sealed class MainWindowTests
         var menu = window.MenuOf(Fixtures.Row("item:7"));
         var snooze = (MenuItem)menu[2];
 
-        Assert.Equal(["Triage again", "Mark done", "Snooze", "", "Open ticket"], menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
-        Assert.IsType<Separator>(menu[3]);
+        Assert.Equal(["Triage again", "Mark done", "Snooze", "Open Changes", "History", "", "Open ticket"], menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
+        Assert.IsType<Separator>(menu[5]);
         Assert.Equal(7, snooze.ItemsSource!.Cast<MenuItem>().Count());
         Assert.Equal("Indefinitely", snooze.ItemsSource!.Cast<MenuItem>().Last().Header);
         Assert.StartsWith("Tomorrow · ", (string)snooze.ItemsSource!.Cast<MenuItem>().First().Header!);
@@ -200,13 +186,20 @@ public sealed class MainWindowTests
         hub.ActReplies.Enqueue("A wake time that has passed.");
         ((MenuItem)menu[1]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         snooze[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        urlReply = "The browser did not open it.";
-        ((MenuItem)menu[4]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        actions.UrlReply = "The browser did not open it.";
+        ((MenuItem)menu[6]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}", "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}"], hub.Calls);
         Assert.Equal("The browser did not open it.", model.Status);
-        Assert.Equal(["https://github.com/o/r/issues/107"], urls);
+        Assert.Equal(["https://github.com/o/r/issues/107"], actions.Urls);
+
+        actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
+        ((MenuItem)menu[4]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["item:7 {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}"], actions.Runs);
+        Assert.Equal(actions.RunReply, model.Status);
     }
 
     [AvaloniaFact]
@@ -214,7 +207,7 @@ public sealed class MainWindowTests
     {
         var (window, _) = Open();
 
-        Assert.Empty(window.MenuOf(Fixtures.Row("item:7") with { Controls = [], Url = "" }));
+        Assert.Empty(window.MenuOf(Fixtures.Row("item:7") with { Controls = [], Commands = [], Url = "" }));
     }
 
     [AvaloniaFact]
@@ -244,6 +237,6 @@ public sealed class MainWindowTests
         Tap(window, window.FindControl<Button>("CloseButton")!);
 
         Assert.True(closed);
-        Assert.Empty(clicked);
+        Assert.Empty(actions.Clicked);
     }
 }

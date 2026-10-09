@@ -10,7 +10,7 @@ public sealed class DockViewTests
         var view = Fixtures.View;
 
         Assert.Equal(["needs", "working", "unstarted", "done"], view.Groups.Select((group) => group.Key));
-        Assert.Equal(["item:7", "item:8"], view.Groups[0].Rows.Select((row) => row.Key));
+        Assert.Equal(["item:7", "item:8", "item:10"], view.Groups[0].Rows.Select((row) => row.Key));
         Assert.Equal(7, view.Snooze.Count);
         Assert.Equal(new SnoozeChoice("Indefinitely", "", null), view.Snooze[^1]);
         Assert.Equal(1791093600000, view.Snooze[0].Until);
@@ -51,5 +51,23 @@ public sealed class DockViewTests
     public void Parse_NullView_Throws()
     {
         Assert.Throws<System.Text.Json.JsonException>(() => DockView.Parse("null"));
+    }
+
+    [Fact]
+    public void Parse_RecordedMessage_ReadsControlsAnswersPastesCommandsAndHeader()
+    {
+        var view = Fixtures.View;
+        var question = Fixtures.Row("item:8");
+        var approval = Fixtures.Row("item:10");
+
+        Assert.Equal([new SourceState("github", true), new SourceState("zoho", false)], view.Sources);
+        Assert.Equal(["D:/git/widgets", "D:/git/support"], view.RepoRoots);
+        Assert.Equal("Open in Claude", question.Main);
+        Assert.Equal("main", question.Answers.Single().Label);
+        Assert.Equal("{\"type\":\"answer\",\"workItemId\":8,\"nativeSessionId\":\"aaaa1111-native\",\"question\":\"Which branch?\",\"answer\":\"main\"}", question.Answers.Single().Action.ToJsonString());
+        Assert.Equal("Approve", approval.Main);
+        Assert.Equal([new DockPaste("Customer reply", "D:/drafts/reply.md")], approval.Pastes);
+        Assert.Equal(["History", "Open report"], approval.Commands.Select((command) => command.Label));
+        Assert.Equal("Issue <7> · gh 107 · dev:develop · Needs you · 107-fix", Fixtures.Row("item:7").Search);
     }
 }

@@ -168,13 +168,27 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
 
     public Task<string?> Act(JsonObject action) => Post("/action", action);
 
+    public async Task<WindowReply> Window(JsonObject command, string? workspace)
+    {
+        var (error, body) = await PostFor("/window", new JsonObject { ["workspace"] = workspace, ["command"] = command.DeepClone() });
+
+        return new WindowReply(error, body?["id"]?.GetValueKind() == JsonValueKind.Number ? body["id"]!.GetValue<int>() : null);
+    }
+
+    public Task<string?> Withdraw(int id) => Post("/window/withdraw", new JsonObject { ["id"] = id });
+
+    public Task<string?> SetSource(string name, bool enabled) => Post("/sources", new JsonObject { ["name"] = name, ["enabled"] = enabled });
+
     public Task<string?> Open(string sessionId, string cwd, string workspace) => Post("/open", new JsonObject { ["sessionId"] = sessionId, ["cwd"] = cwd, ["workspace"] = workspace });
 
-    async Task<string?> Post(string path, JsonObject body)
+    async Task<string?> Post(string path, JsonObject body) => (await PostFor(path, body)).Error;
+
+    /// <summary>Posts a request; returns the refusal or failure, or null and the reply's body.</summary>
+    async Task<(string? Error, JsonNode? Body)> PostFor(string path, JsonObject body)
     {
         if (HubRecord.Read(switchboardHome) is not { } record)
         {
-            return "Switchboard is not running.";
+            return ("Switchboard is not running.", null);
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{record.Port}{path}") { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
@@ -187,11 +201,23 @@ public sealed class HubClient(string switchboardHome) : IHub, IDisposable
             using var response = await http.SendAsync(request, timeout.Token);
             var text = await response.Content.ReadAsStringAsync(timeout.Token);
 
-            return response.StatusCode == HttpStatusCode.OK ? null : RefusalOf(text) ?? $"The hub answered {(int)response.StatusCode}.";
+            return response.StatusCode == HttpStatusCode.OK ? (null, ParseOrNull(text)) : (RefusalOf(text) ?? $"The hub answered {(int)response.StatusCode}.", null);
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException)
         {
-            return "Switchboard is not running.";
+            return ("Switchboard is not running.", null);
+        }
+    }
+
+    static JsonNode? ParseOrNull(string text)
+    {
+        try
+        {
+            return JsonNode.Parse(text);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

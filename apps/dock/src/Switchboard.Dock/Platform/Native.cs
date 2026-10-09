@@ -59,6 +59,9 @@ static partial class Native
     public static extern nint GetWindow(nint window, uint command);
 
     [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(nint window, out uint process);
+
+    [DllImport("user32.dll")]
     public static extern bool IsIconic(nint window);
 
     [DllImport("user32.dll")]

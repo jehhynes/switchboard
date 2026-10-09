@@ -12,6 +12,7 @@ import {
   linkKind,
   linkNumber,
   mainControl,
+  mainTitle,
   openAction,
   panelGroups,
   playbookText,
@@ -306,11 +307,6 @@ ${firstLine(item.triage, item.ticket.title, timeSpan(rowTime(item, now)))}
     `${statusMark(item)}${waits(item)}${wake(item.ticket)}${notes}${fromParent(item)}${stage}${rest.map(linkBadge).join('')}`,
   )}${actionsColumn(`${copyButton}${reportButton}${main === null ? '' : actionButton(main, main.label === 'Approve', false, mainTitle(item, main))}`)}
 </div>`;
-}
-
-/** Approve's tooltip names the prompt it runs, so the operator can read the exact command before approving. */
-function mainTitle(item: WorkItemView, control: Control): string {
-  return control.label === 'Approve' && item.approvalPrompt !== null ? `Approve: runs ${item.approvalPrompt}` : control.label;
 }
 
 function errors(snapshot: Snapshot): string {

@@ -2,11 +2,13 @@ using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Switchboard.Dock.Hub;
 using Switchboard.Dock.Platform;
+using Switchboard.Dock.Switching;
 
 namespace Switchboard.Dock.Views;
 
@@ -16,8 +18,7 @@ public sealed partial class MainWindow : Window
     readonly DockViewModel model;
     readonly HubClient? stream;
     readonly IHub hub;
-    readonly Func<DockRow, CancellationToken, Task<string?>> click;
-    readonly Func<string, string?> openUrl;
+    readonly IDockActions actions;
     readonly bool docked;
     AppBar? appBar;
     // The strip the docked window last took, in physical pixels.
@@ -30,17 +31,16 @@ public sealed partial class MainWindow : Window
 
     /// <summary>For the XAML previewer only.</summary>
     public MainWindow()
-        : this(new DockViewModel(new DockSettings(), (_) => { }), null, new NoHub(), (_, _) => Task.FromResult<string?>(null), (_) => null, docked: false)
+        : this(new DockViewModel(new DockSettings(), (_) => { }), null, new NoHub(), new NoActions(), docked: false)
     {
     }
 
-    public MainWindow(DockViewModel model, HubClient? stream, IHub hub, Func<DockRow, CancellationToken, Task<string?>> click, Func<string, string?> openUrl, bool docked)
+    public MainWindow(DockViewModel model, HubClient? stream, IHub hub, IDockActions actions, bool docked)
     {
         this.model = model;
         this.stream = stream;
         this.hub = hub;
-        this.click = click;
-        this.openUrl = openUrl;
+        this.actions = actions;
         this.docked = docked;
         DataContext = model;
         Width = model.Settings.Width;
@@ -140,11 +140,18 @@ public sealed partial class MainWindow : Window
 
     async void OnRowTapped(object? sender, TappedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is not RowViewModel row)
+        // A button on the row runs its own control, not the row's click.
+        if ((sender as Control)?.DataContext is not RowViewModel row || (e.Source as Visual)?.FindAncestorOfType<Button>(includeSelf: true) is not null)
         {
             return;
         }
 
+        await Open(row);
+    }
+
+    /// <summary>The row's click (PRD R71): its session and its item window; a click on another row replaces a click still running.</summary>
+    async Task Open(RowViewModel row)
+    {
         model.Selected = row.Key;
 
         // A second click on the row being switched to would stop its session twice; a click on another row replaces the first click.
@@ -165,7 +172,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            status = await click(row.Row, cancel.Token);
+            status = await actions.Click(row.Row, cancel.Token);
         }
         catch (Exception error)
         {
@@ -204,6 +211,12 @@ public sealed partial class MainWindow : Window
     {
         List<Control> items = [];
 
+        // Open in Claude is the click itself on a row whose session waits on a question (PRD R70).
+        if (row.Open is { Type: "question" } && model.Row(row.Key) is { } shown)
+        {
+            items.Add(Item("Open in Claude", () => Open(shown)));
+        }
+
         foreach (var control in row.Controls)
         {
             if (control.Label == "Snooze")
@@ -216,6 +229,20 @@ public sealed partial class MainWindow : Window
             }
         }
 
+        if (row.Pastes.Count == 1)
+        {
+            items.Add(Item($"Copy {row.Pastes[0].Label}", () => Copy(row.Pastes[0])));
+        }
+        else if (row.Pastes.Count > 1)
+        {
+            items.Add(new MenuItem { Header = "Copy", ItemsSource = row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() });
+        }
+
+        foreach (var command in row.Commands)
+        {
+            items.Add(Item(command.Label, () => Run(row, command.Command)));
+        }
+
         if (row.Url != "")
         {
             if (items.Count > 0)
@@ -225,7 +252,7 @@ public sealed partial class MainWindow : Window
 
             items.Add(Item("Open ticket", () =>
             {
-                model.Status = openUrl(row.Url);
+                model.Status = actions.OpenUrl(row.Url);
                 return Task.CompletedTask;
             }));
         }
@@ -255,6 +282,172 @@ public sealed partial class MainWindow : Window
     {
         model.Status = null;
         model.Status = await hub.Act(action.DeepClone().AsObject());
+    }
+
+    /// <summary>A control that runs in VS Code; like a click, it replaces a click or control still switching windows.</summary>
+    async Task Run(DockRow? row, JsonObject command)
+    {
+        running?.Cancel.Cancel();
+
+        using var cancel = new CancellationTokenSource();
+        var mine = ("", cancel);
+
+        running = mine;
+        model.Status = null;
+
+        string? status;
+
+        try
+        {
+            status = await actions.Run(row, command, cancel.Token);
+        }
+        catch (Exception error)
+        {
+            status = $"The command failed: {error.Message}";
+        }
+
+        if (!cancel.IsCancellationRequested)
+        {
+            model.Status = status;
+        }
+
+        if (running == mine)
+        {
+            running = null;
+        }
+    }
+
+    /// <summary>Copy (PRD R60): the draft as it is on disk now, on the clipboard.</summary>
+    async Task Copy(DockPaste paste)
+    {
+        try
+        {
+            var text = Paste.Read(paste.File);
+
+            if (Clipboard is null)
+            {
+                model.Status = "The clipboard is not available.";
+                return;
+            }
+
+            await Clipboard.SetTextAsync(text);
+            model.Status = $"Copied {paste.Label}.";
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            model.Status = $"{paste.Label} could not be read: {error.Message}";
+        }
+    }
+
+    async void OnMainClicked(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not RowViewModel row)
+        {
+            return;
+        }
+
+        model.Selected = row.Key;
+
+        if (row.Main == "Open in Claude")
+        {
+            await Open(row);
+        }
+        else if (row.Row.Controls.FirstOrDefault((control) => control.Label == row.Main) is { } control)
+        {
+            await Act(control.Action);
+        }
+    }
+
+    async void OnAnswerClicked(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is DockAnswer answer)
+        {
+            await Act(answer.Action);
+        }
+    }
+
+    async void OnCopyClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control button || button.DataContext is not RowViewModel row)
+        {
+            return;
+        }
+
+        if (row.Row.Pastes.Count == 1)
+        {
+            await Copy(row.Row.Pastes[0]);
+        }
+        else
+        {
+            new ContextMenu { ItemsSource = row.Row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() }.Open(button);
+        }
+    }
+
+    async void OnReportClicked(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is RowViewModel { Report: { } report } row)
+        {
+            await Run(row.Row, report.Command);
+        }
+    }
+
+    async void OnSourceClicked(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is SourceViewModel source)
+        {
+            model.Status = await hub.SetSource(source.Name, !source.Enabled);
+        }
+    }
+
+    void OnAdhocClicked(object? sender, RoutedEventArgs e)
+    {
+        if (model.RepoRoots.Count == 0)
+        {
+            model.Status = "Set a repoRoot on a source to start an ad-hoc session.";
+            return;
+        }
+
+        model.AdhocOpen = !model.AdhocOpen;
+    }
+
+    /// <summary>Starts the ad-hoc session (PRD R6); a refusal keeps the form and its prompt.</summary>
+    async void OnAdhocStart(object? sender, RoutedEventArgs e)
+    {
+        var prompt = model.AdhocPrompt.Trim();
+
+        if (prompt == "" || model.AdhocRepo is not { } repo || model.AdhocBusy)
+        {
+            return;
+        }
+
+        model.AdhocBusy = true;
+
+        try
+        {
+            model.Status = await hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = model.AdhocPrompt, ["repoRoot"] = repo });
+        }
+        finally
+        {
+            model.AdhocBusy = false;
+        }
+
+        if (model.Status is null)
+        {
+            model.AdhocPrompt = "";
+            model.AdhocOpen = false;
+        }
+    }
+
+    void OnAdhocCancel(object? sender, RoutedEventArgs e) => model.AdhocOpen = false;
+
+    async void OnSettingsClicked(object? sender, RoutedEventArgs e) => await Run(null, new JsonObject { ["type"] = "settings" });
+
+    void OnSearchKey(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            model.Filter = "";
+        }
     }
 
     void OnGripPressed(object? sender, PointerPressedEventArgs e)
@@ -301,9 +494,24 @@ public sealed partial class MainWindow : Window
         Dock();
     }
 
+    sealed class NoActions : IDockActions
+    {
+        public Task<string?> Click(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
+
+        public Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel) => Task.FromResult<string?>(null);
+
+        public string? OpenUrl(string url) => null;
+    }
+
     sealed class NoHub : IHub
     {
         public Task<string?> Act(JsonObject action) => Task.FromResult<string?>(null);
+
+        public Task<WindowReply> Window(JsonObject command, string? workspace) => Task.FromResult(new WindowReply(null, null));
+
+        public Task<string?> Withdraw(int id) => Task.FromResult<string?>(null);
+
+        public Task<string?> SetSource(string name, bool enabled) => Task.FromResult<string?>(null);
 
         public Task<string?> Open(string sessionId, string cwd, string workspace) => Task.FromResult<string?>(null);
 

@@ -215,4 +215,25 @@ public sealed class HubClientTests
 
         Assert.Null(await client.Until((_) => true, TimeSpan.FromMilliseconds(50)));
     }
+
+    [Fact]
+    public async Task Window_HubKeepsTheCommand_ReturnsItsIdForWithdraw()
+    {
+        using var server = new LoopbackHub((start, _, stream) => LoopbackHub.Reply(stream, 200, start.StartsWith("POST /window/withdraw") ? "{\"withdrawn\":true}" : "{\"id\":5}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(new WindowReply(null, 5), await client.Window(new JsonObject { ["type"] = "settings" }, null));
+        Assert.Null(await client.Withdraw(5));
+        Assert.Contains("POST /window HTTP/1.1 {\"workspace\":null,\"command\":{\"type\":\"settings\"}}", server.Requests);
+        Assert.Contains("POST /window/withdraw HTTP/1.1 {\"id\":5}", server.Requests);
+    }
+
+    [Fact]
+    public async Task Window_HubRefuses_ReturnsTheRefusalAndNoId()
+    {
+        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 400, "{\"error\":\"Expected {workspace, command}.\"}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(new WindowReply("Expected {workspace, command}.", null), await client.Window(new JsonObject { ["type"] = "attach" }, null));
+    }
 }

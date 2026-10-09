@@ -10,6 +10,8 @@ import {
   controlsOf,
   GROUP_EMPTY,
   GROUP_TITLES,
+  mainControl,
+  mainTitle,
   openQuestion,
   panelGroups,
   playbookText,
@@ -18,6 +20,7 @@ import {
   queuedTime,
   rowKeyOf,
   rowTime,
+  searchDescription,
   setupNotes,
   snapshotErrors,
   staleSince,
@@ -73,6 +76,18 @@ export interface DockRow {
   open: DockOpen | null;
   /** The hub controls in the right-click menu, each with the action the dock posts to `/action`; Snooze carries no wake time. */
   controls: { label: string; action: Record<string, unknown> }[];
+  /** The label of the control the row shows as a button, as in the panel, or null (PRD R27). */
+  main: string | null;
+  /** The main control's tooltip, which for Approve names the prompt it runs (PRD R27). */
+  mainTitle: string | null;
+  /** A one-part question's options, each with the `answer` action it posts (PRD R70); empty otherwise. */
+  answers: { label: string; description: string; action: Record<string, unknown> }[];
+  /** The drafted texts Copy offers on an `awaiting-approval` row (PRD R60); empty otherwise. */
+  pastes: { label: string; file: string }[];
+  /** The controls that run in VS Code, each with the message a window runs: Open Changes, History, Open report. */
+  commands: { label: string; command: Record<string, unknown> }[];
+  /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch, as Go to Work Item (PRD R63). */
+  search: string;
 }
 
 export interface DockGroup {
@@ -90,23 +105,38 @@ export interface DockView {
   groups: DockGroup[];
   /** Snooze's choices with their wake times, as the panel's picker offers them (PRD R49); the dock posts the chosen `until`. */
   snooze: SnoozeChoice[];
+  /** Each configured source but ad-hoc and whether it is polled, for the header's toggles (PRD R3). */
+  sources: { name: string; enabled: boolean }[];
+  /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
+  repoRoots: string[];
 }
 
 /** The rows the panel shows, by group and in the panel's order, as texts the dock draws without rules of its own (PRD R27, R71). */
 export function dockView(snapshot: Snapshot, now: number): DockView {
   const groups = panelGroups(snapshot);
   const keys: RowGroup[] = ['needs', 'working', 'unstarted', 'done', ...(groups.snoozed.length === 0 ? [] : (['snoozed'] as const))];
-  const row = (entry: WorkItemView | PoolView) => ('status' in entry ? itemRow(entry, now, snapshot.namespaces) : poolRow(entry, now, snapshot.namespaces));
+  const row = (group: RowGroup) => (entry: WorkItemView | PoolView) => {
+    const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
+
+    return { ...('status' in entry ? itemRow(entry, now, snapshot.namespaces) : poolRow(entry, now, snapshot.namespaces)), search };
+  };
 
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
-    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row) })),
+    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
     snooze: snoozeChoices(new Date(now)),
+    sources: snapshot.sourceStates,
+    repoRoots: snapshot.repoRoots,
   };
 }
 
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>): DockRow {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search'> {
   const kind = markOf(item);
+  const controls = controlsOf(item);
+  const question = item.question ?? null;
+  const sessionId = activeSession(item)?.nativeSessionId ?? null;
+  const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
+  const main = mainControl(item);
 
   return {
     key: rowKeyOf(item),
@@ -128,12 +158,25 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     stripe: stripeOf(item),
     window: windowOf(item),
     open: openOf(item),
-    controls: hubControls(controlsOf(item)),
+    controls: hubControls(controls),
+    main: main?.label ?? null,
+    mainTitle: main === null ? null : mainTitle(item, main),
+    answers:
+      question !== null && question.parts === 1 && sessionId !== null
+        ? question.options.map((option) => ({
+            label: option.label,
+            description: option.description,
+            action: { type: 'answer', workItemId: item.id, nativeSessionId: sessionId, question: question.text, answer: option.label },
+          }))
+        : [],
+    pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],
+    commands: [...windowCommands(controls), ...(report === null ? [] : [{ label: 'Open report', command: { type: 'openUrl', url: report } }])],
   };
 }
 
-function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): DockRow {
+function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search'> {
   const { ticket, triage } = entry;
+  const { main, controls } = poolControls(entry);
 
   return {
     key: rowKeyOf(entry),
@@ -149,7 +192,12 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     stripe: null,
     window: null,
     open: ticket.url === '' ? null : { type: 'url', url: ticket.url },
-    controls: hubControls(poolControls(entry).controls),
+    controls: hubControls(controls),
+    main: main?.label ?? null,
+    mainTitle: main?.label ?? null,
+    answers: [],
+    pastes: [],
+    commands: windowCommands(controls),
   };
 }
 
@@ -240,6 +288,14 @@ function hubControls(controls: Control[]): DockRow['controls'] {
 
 function normalPath(path: string): string {
   return path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * The controls a VS Code window runs (PRD R57, R59). Copy runs in the dock, from the row's pastes; Show in Source Control is left out, because the
+ * item window's Source Control view already holds the worktree (PRD R71).
+ */
+function windowCommands(controls: Control[]): DockRow['commands'] {
+  return controls.flatMap((control) => (['changes', 'history'].includes(String(control.message['type'])) ? [{ label: control.label, command: control.message }] : []));
 }
 
 function samePath(a: string, b: string): boolean {

@@ -10,6 +10,9 @@ public interface IWindows
     bool Show(nint window);
 
     void OpenUrl(string url);
+
+    /// <summary>The VS Code window nearest the front, item windows included, or 0 when none is open.</summary>
+    nint FindVsCode();
 }
 
 /// <summary>The VS Code installation that item windows open in.</summary>

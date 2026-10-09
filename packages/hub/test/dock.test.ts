@@ -119,12 +119,60 @@ describe('dockView', () => {
     expect(row(item(7, { status: 'unstarted', ticket: { ...item(7).ticket, source: 'adhoc', url: '' } })).open).toBeNull();
   });
 
+  it('gives a row its main control, answers, pastes, VS Code commands and search text', () => {
+    const waiting = row(
+      item(7, {
+        worktree,
+        sessions: [session({ state: 'waiting' })],
+        question: { text: 'Which fruit?', options: [{ label: 'Apple', description: 'red' }, { label: 'Plum', description: '' }], parts: 1 },
+        links: [{ id: 1, ticketId: 7, label: 'PR', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW }],
+      }),
+    );
+
+    expect(waiting.main).toBe('Open in Claude');
+    expect(waiting.mainTitle).toBe('Open in Claude');
+    expect(waiting.answers).toEqual([
+      { label: 'Apple', description: 'red', action: { type: 'answer', workItemId: 7, nativeSessionId: 'aaaa1111-native', question: 'Which fruit?', answer: 'Apple' } },
+      { label: 'Plum', description: '', action: { type: 'answer', workItemId: 7, nativeSessionId: 'aaaa1111-native', question: 'Which fruit?', answer: 'Plum' } },
+    ]);
+    expect(waiting.commands).toEqual([
+      { label: 'Open Changes', command: { type: 'changes', path: 'D:/git/widgets/.worktrees/107-fix', key: 'gh 107', title: 'Issue <7>' } },
+      { label: 'History', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
+    ]);
+    expect(waiting.search).toBe('Issue <7> · gh 107 · PR #19002 · dev:develop · Needs you · 107-fix');
+    expect(row(item(7, { sessions: [session({ state: 'waiting' })], question: { text: 'Two parts', options: [{ label: 'A', description: '' }], parts: 2 } })).answers).toEqual([]);
+
+    const approval = row(item(7, { status: 'awaiting-approval', approvalReport: 'D:/drafts/reply.md', pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] }));
+
+    expect(approval.main).toBe('Approve');
+    expect(approval.mainTitle).toBe('Approve');
+    expect(row(item(7, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish' })).mainTitle).toBe('Approve: runs /review-pr pr:123 publish');
+    expect(approval.pastes).toEqual([{ label: 'Reply', file: 'D:/r.md' }]);
+    expect(approval.commands).toEqual([
+      { label: 'History', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
+      { label: 'Open report', command: { type: 'openUrl', url: 'D:/drafts/reply.md' } },
+    ]);
+    expect(row(item(7, { status: 'blocked', pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] })).pastes).toEqual([]);
+    expect(row(item(7)).main).toBeNull();
+    expect(row(item(7)).mainTitle).toBeNull();
+  });
+
+  it('lists the sources and repo roots for the header', () => {
+    const view = dockView(snapshot([], { sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] }), NOW);
+
+    expect(view.sources).toEqual([{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }]);
+    expect(view.repoRoots).toEqual(['D:/git/widgets', 'D:/git/support']);
+  });
+
   it('gives a pool row its ticket, its triage state and its pool controls, and no window', () => {
     const view = dockView(snapshot([], { pool: [pool(4, { triage: triage({ playbook: null, endedAt: null }) }), pool(5, { triage: triage({ playbook: null, error: 'timed out' }) })] }), NOW);
     const [triaging, failed] = view.groups.find((group) => group.key === 'unstarted')!.rows;
 
     expect(triaging).toMatchObject({ key: 'ticket:4', playbook: 'dev:triage', mark: { kind: 'triaging', glyph: '\u{eb19}', title: 'Triaging' }, window: null, open: { type: 'url', url: 'https://github.com/o/r/issues/104' }, time: null });
     expect(triaging!.controls).toEqual([{ label: 'Snooze', action: { type: 'snooze', ticketId: 4 } }]);
+    expect(triaging!.main).toBeNull();
+    expect(triaging!.commands).toEqual([{ label: 'History', command: { type: 'history', ticketId: 4, key: 'gh 104' } }]);
+    expect(failed!.main).toBe('Triage again');
     expect(failed!.details).toEqual([{ text: 'timed out', title: null, tone: 'warning' }]);
     expect(failed!.controls.map((control) => control.action)).toEqual([{ type: 'retriage-pool', ticketId: 5 }, { type: 'snooze', ticketId: 5 }]);
   });
@@ -135,10 +183,18 @@ describe('dockView', () => {
       snapshot(
         [
           item(7, { status: 'blocked', error: 'The session finished its turn.', worktree, sessions: [session({ state: 'ended', cwd: worktree.path })] }),
-          item(8, { sessions: [session({ state: 'waiting', cwd: 'D:/git/widgets' })], question: { text: 'Which branch?', options: [], parts: 1 } }),
+          item(8, { sessions: [session({ state: 'waiting', cwd: 'D:/git/widgets' })], question: { text: 'Which branch?', options: [{ label: 'main', description: 'The default branch' }], parts: 1 } }),
           item(9, { status: 'unstarted', triage: triage({ immediacy: 'BLOCKING', severity: 'MED' }) }),
+          item(10, {
+            status: 'awaiting-approval',
+            approvalPrompt: '/support-release #4521',
+            approvalSummary: 'post the reply',
+            approvalReport: 'D:/drafts/reply.md',
+            pastes: [{ id: 1, workItemId: 10, label: 'Customer reply', file: 'D:/drafts/reply.md', reportedAt: NOW }],
+            sessions: [session({ state: 'ended', cwd: 'D:/git/support' })],
+          }),
         ],
-        { pool: [pool(4)] },
+        { pool: [pool(4)], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] },
       ),
       NOW,
     );

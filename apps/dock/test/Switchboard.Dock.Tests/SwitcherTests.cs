@@ -242,4 +242,85 @@ public sealed class SwitcherTests
         Assert.Null(await Switcher().Click(Fixtures.Row("ticket:4") with { Open = null }, TestContext.Current.CancellationToken));
         Assert.Empty(windows.Calls);
     }
+
+    [Fact]
+    public async Task Run_RowWithWindow_LeavesTheCommandForItsWorkspaceThenSwitches()
+    {
+        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+
+        var status = await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "history", ["ticketId"] = 7, ["key"] = "gh 107" }, TestContext.Current.CancellationToken);
+
+        Assert.Null(status);
+        Assert.Equal(["window gh-107-58c609.code-workspace {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}"], hub.Calls);
+        Assert.Equal(["show 42"], windows.Calls);
+    }
+
+    [Fact]
+    public async Task Run_RowWithoutWindow_LeavesTheCommandForAnyWindowAndShowsTheFrontVsCodeWindow()
+    {
+        windows.Front0 = 77;
+
+        Assert.Null(await Switcher().Run(Fixtures.Row("ticket:4"), new System.Text.Json.Nodes.JsonObject { ["type"] = "history", ["ticketId"] = 4, ["key"] = "gh 104" }, TestContext.Current.CancellationToken));
+        Assert.Equal(["window any {\"type\":\"history\",\"ticketId\":4,\"key\":\"gh 104\"}"], hub.Calls);
+        Assert.Equal(["show 77"], windows.Calls);
+    }
+
+    [Fact]
+    public async Task Run_NoVsCodeWindow_SaysSoAndLeavesNothing()
+    {
+        Assert.Equal("Open a VS Code window first; this runs in VS Code.", await Switcher().Run(null, new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
+        Assert.Empty(hub.Calls);
+    }
+
+    [Fact]
+    public async Task Run_HubRefuses_DoesNotSwitch()
+    {
+        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+        hub.WindowReply = "Switchboard is not running.";
+
+        Assert.Equal("Switchboard is not running.", await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
+        Assert.Empty(windows.Calls);
+    }
+
+    [Fact]
+    public async Task Run_ReplacedBeforeTheSwitch_DoesNotSwitch()
+    {
+        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+
+        using var cancel = new CancellationTokenSource();
+
+        cancel.Cancel();
+
+        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, cancel.Token));
+        Assert.Equal(["window gh-107-58c609.code-workspace {\"type\":\"settings\"}", "withdraw 41"], hub.Calls);
+        Assert.Empty(windows.Calls);
+    }
+
+    [Fact]
+    public async Task Run_ForegroundRefused_WithdrawsTheCommandAndSaysSo()
+    {
+        windows.Front0 = 77;
+        windows.Front = false;
+
+        Assert.Equal("Windows kept another window in front. Try again.", await Switcher().Run(null, new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
+        Assert.Equal(["window any {\"type\":\"settings\"}", "withdraw 41"], hub.Calls);
+    }
+
+    [Fact]
+    public async Task Run_ItemWindowNeverOpens_WithdrawsTheCommand()
+    {
+        var status = await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken);
+
+        Assert.Equal("VS Code did not open the window for gh-107-58c609 within 20 seconds.", status);
+        Assert.Equal("withdraw 41", hub.Calls[^1]);
+    }
+
+    [Fact]
+    public async Task Run_SwitchWorks_KeepsTheCommandForTheWindow()
+    {
+        windows.Open["sb:gh-107-58c609 · "] = (42, 0);
+
+        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "settings" }, TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));
+    }
 }

@@ -6,12 +6,15 @@ namespace Switchboard.Dock.Hub;
 
 // The hub's dock view (architecture.md § Dock), built by `dockView` in packages/hub/src/dock.ts; the dock adds no rules of its own.
 
-public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze)
+public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceState> Sources, IReadOnlyList<string> RepoRoots)
 {
     static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 
     public static DockView Parse(string json) => JsonSerializer.Deserialize<DockView>(json, Options) ?? throw new JsonException("The dock view is null.");
 }
+
+/// <summary>A configured source and whether it is polled (PRD R3).</summary>
+public sealed record SourceState(string Name, bool Enabled);
 
 /// <summary>A snooze choice: its wake time as epoch milliseconds, or null to snooze until restored (PRD R49).</summary>
 public sealed record SnoozeChoice(string Label, string Description, long? Until);
@@ -32,7 +35,22 @@ public sealed record DockRow(
     Tone? Stripe,
     DockWindow? Window,
     DockOpen? Open,
-    IReadOnlyList<DockControl> Controls);
+    IReadOnlyList<DockControl> Controls,
+    string? Main,
+    string? MainTitle,
+    IReadOnlyList<DockAnswer> Answers,
+    IReadOnlyList<DockPaste> Pastes,
+    IReadOnlyList<DockCommand> Commands,
+    string Search);
+
+/// <summary>A one-part question's option and the <c>answer</c> action it posts (PRD R70).</summary>
+public sealed record DockAnswer(string Label, string Description, JsonObject Action);
+
+/// <summary>A drafted text Copy puts on the clipboard (PRD R60).</summary>
+public sealed record DockPaste(string Label, string File);
+
+/// <summary>A control a VS Code window runs, with the message the window's handler reads (PRD R71).</summary>
+public sealed record DockCommand(string Label, JsonObject Command);
 
 public sealed record TimeText(string Text, string Title);
 

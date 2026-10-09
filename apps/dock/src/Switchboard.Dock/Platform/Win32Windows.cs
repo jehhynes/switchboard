@@ -114,5 +114,41 @@ public sealed class Win32Windows : IWindows, IDisposable
         Native.SetWindowPos(window, 0, work.Left, work.Top, work.Right - work.Left, work.Bottom - work.Top, Native.SwpNoZOrder | Native.SwpNoActivate);
     }
 
+    public nint FindVsCode()
+    {
+        nint found = 0;
+
+        // EnumWindows lists top-level windows from the front.
+        Native.EnumWindows(
+            (window, _) =>
+            {
+                if (!Native.IsWindowVisible(window) || Native.GetWindow(window, Native.GwOwner) != 0 || Native.Title(window) == "")
+                {
+                    return true;
+                }
+
+                Native.GetWindowThreadProcessId(window, out var process);
+
+                try
+                {
+                    using var owner = Process.GetProcessById((int)process);
+
+                    if (owner.ProcessName.Equals("Code", StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = window;
+                        return false;
+                    }
+                }
+                catch (ArgumentException)
+                {
+                }
+
+                return true;
+            },
+            0);
+
+        return found;
+    }
+
     public void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
 }

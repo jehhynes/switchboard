@@ -253,11 +253,27 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
       '/claim': async (body) => {
-        if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace'])) {
-          return { status: 400, body: { error: 'Expected {folder, workspace?}.' } };
+        if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean')) {
+          return { status: 400, body: { error: 'Expected {folder, workspace?, focused?}.' } };
         }
 
-        return { status: 200, body: { sessionId: runtime.claimOpen(body['folder'], body['workspace'] ?? null) } };
+        const workspace = body['workspace'] ?? null;
+
+        return { status: 200, body: { sessionId: runtime.claimOpen(body['folder'], workspace), commands: runtime.claimCommands(workspace, body['focused'] === true) } };
+      },
+      '/window': async (body) => {
+        if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'])) {
+          return { status: 400, body: { error: 'Expected {workspace, command} with a changes, history, openUrl or settings command.' } };
+        }
+
+        return { status: 200, body: { id: runtime.recordCommand(body['command'], body['workspace'] ?? null) } };
+      },
+      '/window/withdraw': async (body) => {
+        if (!isRecord(body) || !Number.isInteger(body['id'])) {
+          return { status: 400, body: { error: 'Expected {id}.' } };
+        }
+
+        return { status: 200, body: { withdrawn: runtime.withdrawCommand(body['id'] as number) } };
       },
       '/sources': async (body) => {
         if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['enabled'] !== 'boolean') {
@@ -312,4 +328,26 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
 function optionalString(value: unknown): value is string | null | undefined {
   return value === undefined || value === null || typeof value === 'string';
+}
+
+/** A command the dock leaves for a VS Code window, with the fields the window's handler reads (PRD R71). */
+function isWindowCommand(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const text = (key: string) => typeof value[key] === 'string' && value[key] !== '';
+
+  switch (value['type']) {
+    case 'changes':
+      return text('path') && text('key') && typeof value['title'] === 'string';
+    case 'history':
+      return Number.isInteger(value['ticketId']) && text('key');
+    case 'openUrl':
+      return text('url');
+    case 'settings':
+      return true;
+    default:
+      return false;
+  }
 }

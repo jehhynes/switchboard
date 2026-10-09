@@ -4,7 +4,7 @@ using Switchboard.Dock.Hub;
 namespace Switchboard.Dock.Switching;
 
 /// <summary>What a click on a row does (PRD R71): the session first, then the item window to the front, opened when it is not open.</summary>
-public sealed class Switcher(string switchboardHome, IHub hub, IWindows windows, IVsCode vsCode, Func<TimeSpan, Task>? delay = null)
+public sealed class Switcher(string switchboardHome, IHub hub, IWindows windows, IVsCode vsCode, Func<TimeSpan, Task>? delay = null) : IDockActions
 {
     /// <summary>How long Open in Claude waits for the stopped session to end; <c>claude stop</c> itself times out at 15 seconds.</summary>
     public static readonly TimeSpan StopWait = TimeSpan.FromSeconds(20);
@@ -100,7 +100,69 @@ public sealed class Switcher(string switchboardHome, IHub hub, IWindows windows,
         return ended is null ? $"The session did not stop within {StopWait.TotalSeconds:0} seconds, so it was not opened in Claude." : null;
     }
 
+    /// <summary>
+    /// Runs a control in VS Code (PRD R71): the hub keeps the command for the row's item window, which is brought forward or opened and runs it
+    /// when it gains focus; for no row, or a row without a window, the VS Code window nearest the front runs it. Returns why not, or null.
+    /// </summary>
+    public async Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel = default)
+    {
+        if (row?.Window is { } window)
+        {
+            string file;
+
+            try
+            {
+                file = WorkspaceFile.Write(switchboardHome, window);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                return $"The workspace file for {window.Name} could not be written: {error.Message}";
+            }
+
+            var left = await hub.Window(command, file);
+
+            if (left.Error is { } refused)
+            {
+                return cancel.IsCancellationRequested ? null : refused;
+            }
+
+            return await Withdrawn(left, cancel.IsCancellationRequested ? null : await Switch(window, file, cancel), cancel);
+        }
+
+        var any = windows.FindVsCode();
+
+        if (any == 0)
+        {
+            return "Open a VS Code window first; this runs in VS Code.";
+        }
+
+        var forAny = await hub.Window(command, null);
+
+        if (forAny.Error is { } failed)
+        {
+            return cancel.IsCancellationRequested ? null : failed;
+        }
+
+        return await Withdrawn(forAny, cancel.IsCancellationRequested || windows.Show(any) ? null : "Windows kept another window in front. Try again.", cancel);
+    }
+
+    /// <summary>
+    /// After a cancelled or failed switch, withdraws the command, so the window that comes to the front next does not run it; returns the failure,
+    /// or null for a switch that worked or was cancelled.
+    /// </summary>
+    async Task<string?> Withdrawn(WindowReply left, string? failure, CancellationToken cancel)
+    {
+        if ((failure is not null || cancel.IsCancellationRequested) && left.Id is { } id)
+        {
+            await hub.Withdraw(id);
+        }
+
+        return cancel.IsCancellationRequested ? null : failure;
+    }
+
     /// <summary>Opens a URL in the browser; returns why it could not, or null.</summary>
+    public string? OpenUrl(string url) => OpenUrl(windows, url);
+
     public static string? OpenUrl(IWindows windows, string url)
     {
         try

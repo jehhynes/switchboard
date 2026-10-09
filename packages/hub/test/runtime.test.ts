@@ -674,6 +674,31 @@ describe('Runtime', () => {
     expect(runtime.claimOpen('D:/git/widgets-wt/8-fix')).toBeNull();
   });
 
+  it('hands commands the dock left to the window on their workspace file, or to the first window for any, within two minutes (PRD R71)', () => {
+    let now = T0;
+    const { runtime } = setup(config(), () => now);
+    const file = 'C:/h/windows/gh-7-58c609.code-workspace';
+
+    runtime.recordCommand({ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }, file);
+    runtime.recordCommand({ type: 'settings' }, null);
+    // A window in the background, such as one reconnecting, takes only its own workspace's commands.
+    expect(runtime.claimCommands('C:/h/windows/gh-8-000000.code-workspace', false)).toEqual([]);
+    expect(runtime.claimCommands('C:/h/windows/gh-8-000000.code-workspace', true)).toEqual([{ type: 'settings' }]);
+    expect(runtime.claimCommands(null, true)).toEqual([]);
+    expect(runtime.claimCommands('c:\\h\\windows\\GH-7-58c609.code-workspace', false)).toEqual([{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }]);
+    expect(runtime.claimCommands(file, true)).toEqual([]);
+
+    const withdrawn = runtime.recordCommand({ type: 'settings' }, null);
+
+    expect(runtime.withdrawCommand(withdrawn)).toBe(true);
+    expect(runtime.withdrawCommand(withdrawn)).toBe(false);
+    expect(runtime.claimCommands(null, true)).toEqual([]);
+
+    runtime.recordCommand({ type: 'settings' }, null);
+    now += 2 * 60_000 + 1;
+    expect(runtime.claimCommands(null, true)).toEqual([]);
+  });
+
   it('hands a pending open the dock left for an item window only to the window on that workspace file (PRD R71)', () => {
     const { runtime } = setup(config());
     const file = 'C:/Users/me/.switchboard/windows/gh-7-widgets-655280.code-workspace';

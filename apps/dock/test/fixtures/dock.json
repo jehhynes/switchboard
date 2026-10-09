@@ -65,7 +65,31 @@
                 "ticketId": 7
               }
             }
-          ]
+          ],
+          "main": null,
+          "mainTitle": null,
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "Open Changes",
+              "command": {
+                "type": "changes",
+                "path": "D:/git/widgets/.worktrees/107-fix",
+                "key": "gh 107",
+                "title": "Issue <7>"
+              }
+            },
+            {
+              "label": "History",
+              "command": {
+                "type": "history",
+                "ticketId": 7,
+                "key": "gh 107"
+              }
+            }
+          ],
+          "search": "Issue <7> · gh 107 · dev:develop · Needs you · 107-fix"
         },
         {
           "key": "item:8",
@@ -127,7 +151,129 @@
                 "ticketId": 8
               }
             }
-          ]
+          ],
+          "main": "Open in Claude",
+          "mainTitle": "Open in Claude",
+          "answers": [
+            {
+              "label": "main",
+              "description": "The default branch",
+              "action": {
+                "type": "answer",
+                "workItemId": 8,
+                "nativeSessionId": "aaaa1111-native",
+                "question": "Which branch?",
+                "answer": "main"
+              }
+            }
+          ],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "command": {
+                "type": "history",
+                "ticketId": 8,
+                "key": "gh 108"
+              }
+            }
+          ],
+          "search": "Issue <8> · gh 108 · dev:develop · Needs you"
+        },
+        {
+          "key": "item:10",
+          "title": "Issue <10>",
+          "priority": null,
+          "time": {
+            "text": "0m",
+            "title": "In this status since 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 110",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/110",
+          "mark": {
+            "kind": "review",
+            "glyph": "",
+            "title": "Review, then approve"
+          },
+          "details": [
+            {
+              "text": "Post the reply · 0s",
+              "title": null,
+              "tone": null
+            }
+          ],
+          "stripe": null,
+          "window": {
+            "name": "gh-110-support-c6262c",
+            "title": "sb:gh-110-support-c6262c · Issue <10>",
+            "folders": [
+              "D:/git/support"
+            ]
+          },
+          "open": {
+            "type": "session",
+            "sessionId": "aaaa1111-native",
+            "cwd": "D:/git/support"
+          },
+          "controls": [
+            {
+              "label": "Approve",
+              "action": {
+                "type": "approve",
+                "workItemId": 10
+              }
+            },
+            {
+              "label": "Triage again",
+              "action": {
+                "type": "retriage",
+                "workItemId": 10
+              }
+            },
+            {
+              "label": "Mark done",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 10
+              }
+            },
+            {
+              "label": "Snooze",
+              "action": {
+                "type": "snooze",
+                "ticketId": 10
+              }
+            }
+          ],
+          "main": "Approve",
+          "mainTitle": "Approve: runs /support-release #4521",
+          "answers": [],
+          "pastes": [
+            {
+              "label": "Customer reply",
+              "file": "D:/drafts/reply.md"
+            }
+          ],
+          "commands": [
+            {
+              "label": "History",
+              "command": {
+                "type": "history",
+                "ticketId": 10,
+                "key": "gh 110"
+              }
+            },
+            {
+              "label": "Open report",
+              "command": {
+                "type": "openUrl",
+                "url": "D:/drafts/reply.md"
+              }
+            }
+          ],
+          "search": "Issue <10> · gh 110 · dev:develop · Needs you"
         }
       ]
     },
@@ -191,7 +337,22 @@
                 "ticketId": 9
               }
             }
-          ]
+          ],
+          "main": "Start",
+          "mainTitle": "Start",
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "command": {
+                "type": "history",
+                "ticketId": 9,
+                "key": "gh 109"
+              }
+            }
+          ],
+          "search": "Issue <9> · gh 109 · dev:develop · Unstarted"
         },
         {
           "key": "ticket:4",
@@ -225,7 +386,22 @@
                 "ticketId": 4
               }
             }
-          ]
+          ],
+          "main": "Start",
+          "mainTitle": "Start",
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "command": {
+                "type": "history",
+                "ticketId": 4,
+                "key": "gh 104"
+              }
+            }
+          ],
+          "search": "Issue <4> · gh 104 · dev:develop · Unstarted"
         }
       ]
     },
@@ -272,5 +448,19 @@
       "description": "",
       "until": null
     }
+  ],
+  "sources": [
+    {
+      "name": "github",
+      "enabled": true
+    },
+    {
+      "name": "zoho",
+      "enabled": false
+    }
+  ],
+  "repoRoots": [
+    "D:/git/widgets",
+    "D:/git/support"
   ]
 }

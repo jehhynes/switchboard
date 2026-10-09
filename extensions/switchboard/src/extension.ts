@@ -33,6 +33,8 @@ export interface SwitchboardApi {
   /** Runs the URI handler, which the integration suite cannot reach through the OS (PRD R69). */
   openUri(uri: vscode.Uri, waitMs?: number): Promise<RowTarget | null>;
   /** Runs Open in Claude against `hub`, by default the connected one, so the integration suite can stand in for a hub that accepts it (PRD R70). */
+  /** Claims what the dock left for this window from a hub, as focus or a connection does, and runs it (PRD R71). */
+  claim(hub: HubRecord): Promise<string | null>;
   openQuestion(workItemId: number, sessionId: string, cwd: string, options?: { waitMs?: number; hub?: HubRecord }): Promise<string>;
 }
 
@@ -101,6 +103,21 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   const view = new WorkItemsView(context.extensionUri);
   const settings = new SettingsEditor(context.extensionUri, configDir, () => openPlaybooks(view.state() as Snapshot | null));
   const history = new HistoryPanels(context.extensionUri, () => keeper.current());
+  /** Runs a command the dock left for this window with the panel's own handler (PRD R71). */
+  const runCommand = async (command: { type: string; [key: string]: unknown }): Promise<unknown> => {
+    switch (command.type) {
+      case 'changes':
+        return openChanges(String(command['path']), String(command['key']), String(command['title']));
+      case 'history':
+        return history.open(command as unknown as HistoryMessage);
+      case 'openUrl':
+        return openLink(String(command['url']));
+      case 'settings':
+        return settings.show();
+      default:
+        return undefined;
+    }
+  };
 
   context.subscriptions.push(
     history.register(),
@@ -147,7 +164,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.claim', () => {
       const record = keeper.current();
 
-      return record === null ? null : claimOpen(record);
+      return record === null ? null : claimOpen(record, runCommand);
     }),
     vscode.window.onDidChangeWindowState((state) => state.focused && void vscode.commands.executeCommand('switchboard.claim').then(undefined, () => {})),
     vscode.workspace.onDidChangeConfiguration((event) => {
@@ -180,7 +197,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
           toasts.update(JSON.parse(data) as Snapshot);
         } else if (event === 'hello') {
           toasts.connected();
-          void claimOpen(record).catch(() => {});
+          void claimOpen(record, runCommand).catch(() => {});
           history.connected(record);
         }
       }),
@@ -191,7 +208,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   context.subscriptions.push({ dispose: () => keeper.dispose() });
 
-  return { hub: () => keeper.current(), state: () => view.state(), historyTabs: () => history.shown(), restoreHistory: (state) => history.restore(state), badge: () => view.badge(), show: (state) => view.update(state), openUri: (uri, waitMs) => openUri(view, uri, waitMs), openQuestion: (workItemId, sessionId, cwd, options = {}) => openQuestion(options.hub ?? keeper.current(), view, workItemId, sessionId, cwd, options.waitMs) };
+  return { hub: () => keeper.current(), state: () => view.state(), historyTabs: () => history.shown(), restoreHistory: (state) => history.restore(state), badge: () => view.badge(), show: (state) => view.update(state), openUri: (uri, waitMs) => openUri(view, uri, waitMs), claim: (hub: HubRecord) => claimOpen(hub, runCommand), openQuestion: (workItemId, sessionId, cwd, options = {}) => openQuestion(options.hub ?? keeper.current(), view, workItemId, sessionId, cwd, options.waitMs) };
 }
 
 export function deactivate(): void {}
