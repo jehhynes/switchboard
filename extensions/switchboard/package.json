@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "private": true,
   "publisher": "switchboard",
+  "icon": "assets/icon.png",
   "description": "Opens Switchboard's sessions and changes in each work item's VS Code window, and starts the hub and the dock.",
   "engines": {
     "vscode": "^1.104.0"
@@ -18,6 +19,15 @@
     "onWebviewPanel:switchboard.history"
   ],
   "contributes": {
+    "icons": {
+      "switchboard-logo": {
+        "description": "Switchboard patch panel",
+        "default": {
+          "fontPath": "assets/switchboard.woff",
+          "fontCharacter": "\\E001"
+        }
+      }
+    },
     "configuration": {
       "title": "Switchboard",
       "properties": {

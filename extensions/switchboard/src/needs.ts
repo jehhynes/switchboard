@@ -11,5 +11,5 @@ export function needsStatus(snapshot: Snapshot | null): { text: string; tooltip:
   const count = snapshot === null ? 0 : needsCount(snapshot);
   const needs = count === 0 ? 'Nothing needs you' : `${count} ${count === 1 ? 'needs' : 'need'} you`;
 
-  return { text: count === 0 ? '$(checklist)' : `$(checklist) ${count}`, tooltip: `Switchboard: ${needs}. Click to show the dock.` };
+  return { text: count === 0 ? '$(switchboard-logo)' : `$(switchboard-logo) ${count}`, tooltip: `Switchboard: ${needs}. Click to show the dock.` };
 }

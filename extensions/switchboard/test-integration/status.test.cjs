@@ -55,13 +55,13 @@ describe('the status bar item (PRD R64, R71)', () => {
 
     try {
       show([item(1, 'failed'), item(2, 'blocked', true), item(3, 'unstarted')]);
-      assert.deepStrictEqual(extension.status(), { text: '$(checklist) 1', tooltip: 'Switchboard: 1 needs you. Click to show the dock.' });
+      assert.deepStrictEqual(extension.status(), { text: '$(switchboard-logo) 1', tooltip: 'Switchboard: 1 needs you. Click to show the dock.' });
 
       show([item(1, 'failed'), item(4, 'awaiting-approval')]);
-      assert.strictEqual(extension.status().text, '$(checklist) 2');
+      assert.strictEqual(extension.status().text, '$(switchboard-logo) 2');
 
       show([item(3, 'unstarted')]);
-      assert.strictEqual(extension.status().text, '$(checklist)');
+      assert.strictEqual(extension.status().text, '$(switchboard-logo)');
     } finally {
       // The hub sends state only on a change, so later tests see its state again only through this.
       extension.show(JSON.stringify(hubState));

@@ -11,6 +11,10 @@ for (const file of ['manifest.json', 'content.css']) {
 
 copyFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.ttf'), 'dist/codicon.ttf');
 
+for (const size of [16, 32, 48, 128]) {
+  copyFileSync(`assets/icon-${size}.png`, `dist/icon-${size}.png`);
+}
+
 await build({
   entryPoints: { content: 'src/main.ts', background: 'src/background.ts' },
   bundle: true,

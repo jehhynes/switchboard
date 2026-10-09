@@ -105,12 +105,12 @@ describe('needsCount (PRD R64)', () => {
 
 describe('needsStatus (PRD R64)', () => {
   it('shows the count with a singular or plural tooltip', () => {
-    expect(needsStatus(snapshot([item(1, 'failed')]))).toEqual({ text: '$(checklist) 1', tooltip: 'Switchboard: 1 needs you. Click to show the dock.' });
-    expect(needsStatus(snapshot([item(1, 'failed'), item(2, 'blocked')]))).toEqual({ text: '$(checklist) 2', tooltip: 'Switchboard: 2 need you. Click to show the dock.' });
+    expect(needsStatus(snapshot([item(1, 'failed')]))).toEqual({ text: '$(switchboard-logo) 1', tooltip: 'Switchboard: 1 needs you. Click to show the dock.' });
+    expect(needsStatus(snapshot([item(1, 'failed'), item(2, 'blocked')]))).toEqual({ text: '$(switchboard-logo) 2', tooltip: 'Switchboard: 2 need you. Click to show the dock.' });
   });
 
   it('shows no count when nothing needs the operator or no hub has answered', () => {
-    expect(needsStatus(snapshot([item(1, 'running'), item(2, 'failed', { snoozed: true })]))).toEqual({ text: '$(checklist)', tooltip: 'Switchboard: Nothing needs you. Click to show the dock.' });
-    expect(needsStatus(null).text).toBe('$(checklist)');
+    expect(needsStatus(snapshot([item(1, 'running'), item(2, 'failed', { snoozed: true })]))).toEqual({ text: '$(switchboard-logo)', tooltip: 'Switchboard: Nothing needs you. Click to show the dock.' });
+    expect(needsStatus(null).text).toBe('$(switchboard-logo)');
   });
 });
