@@ -122,13 +122,14 @@ describe('pick (PRD R48)', () => {
     expect(h.item(2).status).toBe('unstarted');
   });
 
-  it('blocks a picked work item whose session ends without a report, and Triage again leads to a new task session', () => {
+  it('finishes a picked work item whose session ends without a report, and Triage again clears its readiness and leads to a new task session', () => {
     const h = new Harness({ playbooks: MANUAL });
     h.started(only(h.act({ type: 'pick', ticketId: pooled(h) }), 'start-session'));
 
     h.act({ type: 'roster', sessions: [] });
-    expect(h.item(1)).toMatchObject({ status: 'blocked' });
+    expect(h.item(1)).toMatchObject({ status: 'finished', error: null, readyAt: h.now });
     const triage = only(h.act({ type: 'retriage', workItemId: 1 }), 'triage');
+    expect(h.item(1)).toMatchObject({ status: 'triaging', readyAt: null, orderAt: null });
     expect(h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'support:case', immediacy: null, severity: null, model: null })).toEqual([]);
     expect(h.item(1).status).toBe('unstarted');
     expect(only(h.act({ type: 'start', workItemId: 1 }), 'start-session')).toMatchObject({ kind: 'task', sessionId: 's2' });

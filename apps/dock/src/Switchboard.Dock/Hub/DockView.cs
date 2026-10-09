@@ -20,8 +20,8 @@ public sealed record SourceState(string Name, bool Enabled);
 /// <summary>A snooze choice: its wake time as epoch milliseconds, or null to snooze until restored (PRD R49).</summary>
 public sealed record SnoozeChoice(string Label, string Description, long? Until);
 
-/// <summary>A group of rows, with its codicon glyph.</summary>
-public sealed record DockGroup(string Key, string Title, string? Empty, IReadOnlyList<DockRow> Rows, string Glyph = "");
+/// <summary>A group of rows, with its codicon glyph and, for Ready for review, how many of its rows are on the operator's turn.</summary>
+public sealed record DockGroup(string Key, string Title, string? Empty, IReadOnlyList<DockRow> Rows, string Glyph = "", int? Yours = null);
 
 public sealed record DockRow(
     string Key,
@@ -47,7 +47,15 @@ public sealed record DockRow(
     IReadOnlyList<DockLink> Links,
     int Returned,
     string? Band = null,
-    string? MainGlyph = null);
+    string? MainGlyph = null,
+    string? Turn = null,
+    bool Dim = false,
+    bool Movable = false)
+{
+    /// <summary>The work item ID of an <c>item:&lt;id&gt;</c> row, or null for a pool row.</summary>
+    [JsonIgnore]
+    public int? WorkItemId => Key.StartsWith("item:", StringComparison.Ordinal) && int.TryParse(Key.AsSpan(5), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : null;
+}
 
 /// <summary>A ticket's link, named as <c>PR #19002</c>, <c>gh 18941</c> or by its label (PRD R52).</summary>
 public sealed record DockLink(string Label, string Url, string Kind = "url", string? Badge = null, string? Glyph = null)
@@ -81,10 +89,13 @@ public sealed record RowMark(string Kind, string Glyph, string Title);
 
 public sealed record DockText(string Text, string? Title, Tone? Tone);
 
+/// <summary>A text's colour, or a row stripe's: <c>turn</c> and <c>agent</c> mark whose turn it is (PRD R27).</summary>
 public enum Tone
 {
     Warning,
     Error,
+    Turn,
+    Agent,
 }
 
 /// <summary>

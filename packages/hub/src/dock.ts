@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf } from '@switchboard/core/group';
+import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
@@ -19,6 +19,7 @@ import {
   linkNumber,
   mainControl,
   mainTitle,
+  moveControls,
   openQuestion,
   listGroups,
   playbookText,
@@ -122,7 +123,14 @@ export interface DockRow {
   mark: { kind: Mark; glyph: string; title: string } | null;
   /** Line 3 after the mark: waits, wake time, warning and error, the parent, and the stage, approval summary or question. */
   details: DockText[];
-  stripe: 'error' | 'warning' | null;
+  /** The left stripe's colour (PRD R27): failed, blocked or asking, the operator's turn, the agent's turn, or none. */
+  stripe: 'error' | 'warning' | 'turn' | 'agent' | null;
+  /** Whose turn it is on an unsnoozed row in Blocked on you, Ready for review or In progress; null elsewhere. F8 visits `operator` rows (PRD R73). */
+  turn: 'operator' | 'agent' | null;
+  /** A Ready for review row on the agent's turn, which the dock dims (PRD R27). */
+  dim: boolean;
+  /** Ready for review rows can be dragged to a new place (PRD R73). */
+  movable: boolean;
   window: DockWindow | null;
   open: DockOpen | null;
   /** The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time. */
@@ -159,6 +167,8 @@ export interface DockGroup {
   glyph: string;
   /** What the group says when it has no rows, or null. */
   empty: string | null;
+  /** Ready for review's rows on the operator's turn, which its header shows; null for the other groups. */
+  yours: number | null;
   rows: DockRow[];
 }
 
@@ -178,28 +188,41 @@ export interface DockView {
 /** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
 export function dockView(snapshot: Snapshot, now: number, windows: string): DockView {
   const groups = listGroups(snapshot);
-  const keys: RowGroup[] = ['needs', 'working', 'unstarted', ...(groups.snoozed.length === 0 ? [] : (['snoozed'] as const)), 'done'];
+  const keys: RowGroup[] = [
+    ...(groups.blocked.length === 0 ? [] : (['blocked'] as const)),
+    'review',
+    'progress',
+    'unstarted',
+    ...(groups.snoozed.length === 0 ? [] : (['snoozed'] as const)),
+    'done',
+  ];
+  const order = groups.review.map((entry) => (entry as WorkItemView).id);
   const row = (group: RowGroup) => (entry: WorkItemView | PoolView) => {
     const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
 
     // Done is sorted newest first, so each band's rows are consecutive.
     const band = group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null;
 
-    return { ...('status' in entry ? itemRow(entry, now, snapshot.namespaces, windows) : poolRow(entry, now, snapshot.namespaces)), search, links: linksOf(entry), returned: entry.returned, band };
+    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null) : poolRow(entry, now, snapshot.namespaces);
+
+    return { ...shown, search, links: linksOf(entry), returned: entry.returned, band };
   };
+  const yours = (key: RowGroup) => (key === 'review' ? groups.review.filter((entry) => 'status' in entry && turnOf(entry) === 'operator').length : null);
 
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
-    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
+    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, yours: yours(key), rows: groups[key].map(row(key)) })),
     snooze: snoozeChoices(new Date(now)),
     sources: snapshot.sourceStates,
     repoRoots: snapshot.repoRoots,
   };
 }
 
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
+/** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
   const kind = markOf(item);
-  const controls = controlsOf(item);
+  const controls = order === null ? controlsOf(item) : [...controlsOf(item), ...moveControls(item, order)];
+  const turn = item.ticket.snoozed ? null : turnOf(item);
   const question = item.question ?? null;
   const sessionId = activeSession(item)?.nativeSessionId ?? null;
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
@@ -223,6 +246,9 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
       ...progress(item, now),
     ],
     stripe: stripeOf(item),
+    turn,
+    dim: order !== null && turn === 'agent',
+    movable: order !== null,
     window: windowOf(item, windows),
     open: openOf(item, windows),
     controls: hubControls(controls),
@@ -258,6 +284,9 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     mark: triage !== null && triage.endedAt === null ? { kind: 'triaging', glyph: MARK_GLYPHS.triaging, title: MARK_TITLES.triaging } : null,
     details: [...wake(ticket), ...(triage?.error == null ? [] : [clipped(triage.error, CAPS.note, 'warning')])],
     stripe: null,
+    turn: null,
+    dim: false,
+    movable: false,
     window: null,
     open: ticket.url === '' ? null : { type: 'url', url: ticket.url },
     controls: hubControls(controls),
@@ -402,8 +431,8 @@ function hubControls(controls: Control[]): DockRow['controls'] {
 const PULL_REQUEST_GLYPH = '\u{ea64}';
 const LINK_GLYPH = '\u{eb15}';
 
-/** Each group's glyph: bell, play-circle, inbox, pass and clockface, as in the VS Code panel. */
-const GROUP_GLYPHS: Record<RowGroup, string> = { needs: '\u{eaa2}', working: '\u{eba6}', unstarted: '\u{eb09}', done: '\u{eba4}', snoozed: '\u{ec75}' };
+/** Each group's glyph: bell, eye, play-circle, inbox, pass and clockface. */
+const GROUP_GLYPHS: Record<RowGroup, string> = { blocked: '\u{eaa2}', review: '\u{ea70}', progress: '\u{eba6}', unstarted: '\u{eb09}', done: '\u{eba4}', snoozed: '\u{ec75}' };
 
 function normalPath(path: string): string {
   return path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();

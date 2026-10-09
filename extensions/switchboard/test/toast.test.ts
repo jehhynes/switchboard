@@ -48,6 +48,8 @@ function item(id: number, status: WorkItemView['status'], patch: Partial<WorkIte
     createdAt: NOW,
     statusAt: NOW,
     runStartedAt: NOW,
+    readyAt: status === 'awaiting-approval' || status === 'finished' ? NOW : null,
+    orderAt: null,
     scopeAt: null,
     doneAt: null,
     doneReason: null,
@@ -88,14 +90,21 @@ describe('newlyNeeding', () => {
     expect(newlyNeeding(null, snapshot([item(1, 'blocked'), item(2, 'awaiting-approval')]))).toEqual([]);
   });
 
-  it('returns each item that entered Needs you since the previous snapshot, and not one that was already there', () => {
-    const before = snapshot([item(1, 'blocked'), item(2, 'running'), item(3, 'running'), item(4, 'queued')]);
-    const after = snapshot([item(1, 'blocked'), item(2, 'awaiting-approval'), item(3, 'running', { sessions: [session({ state: 'waiting' })] }), item(4, 'running'), item(5, 'failed')]);
+  it("returns each item that became the operator's turn since the previous snapshot, and not one that was already there", () => {
+    const before = snapshot([item(1, 'blocked'), item(2, 'running'), item(3, 'running'), item(4, 'queued'), item(6, 'running')]);
+    const after = snapshot([
+      item(1, 'blocked'),
+      item(2, 'awaiting-approval'),
+      item(3, 'running', { sessions: [session({ state: 'waiting' })] }),
+      item(4, 'running'),
+      item(5, 'failed'),
+      item(6, 'finished'),
+    ]);
 
-    expect(ids(newlyNeeding(before, after))).toEqual([2, 3, 5]);
+    expect(ids(newlyNeeding(before, after))).toEqual([2, 3, 5, 6]);
   });
 
-  it('returns an item again when it leaves Needs you and returns', () => {
+  it("returns an item again when its turn leaves the operator and returns", () => {
     const first = snapshot([item(1, 'blocked')]);
     const left = snapshot([item(1, 'running')]);
     const back = snapshot([item(1, 'awaiting-approval')]);

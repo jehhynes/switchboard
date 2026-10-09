@@ -19,7 +19,7 @@ export interface Playbook {
   model: string | null;
   /** `worktree`: the ticket's worktree when one exists, else the repo root. `repoRoot`: always the source's repo root. */
   workdir: 'worktree' | 'repoRoot';
-  /** Empty by default: the session's turn then ends in Needs you. */
+  /** Empty by default: the session's turn then ends finished, in Ready for review. */
   reports: PlaybookReport[];
   /** Approve sends the session's work, such as posting a reply or pushing a branch; the dock marks the approval row `send`, else `review` (PRD R27). */
   approvalSends: boolean;

@@ -2,7 +2,10 @@ import type { DoneReason, Session, WorkItem } from './model.js';
 
 // Imports only types, so the History webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
 
-export type Group = 'needs' | 'working' | 'unstarted' | 'done';
+/** Dock groups (PRD R27): Blocked on you, Ready for review, In progress, Unstarted and Done; Snoozed is the dock's own. */
+export type Group = 'blocked' | 'review' | 'progress' | 'unstarted' | 'done';
+
+type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: Pick<Session, 'state'>[] };
 
 /** The latest session while it has not ended; an earlier session left open idle in VS Code is not the work item's (PRD R17). */
 export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions: S[] }): S | null {
@@ -11,8 +14,11 @@ export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions
   return latest !== undefined && latest.state !== 'ended' ? latest : null;
 }
 
-/** PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Needs you, then queued starts in Unstarted, then Working. */
-export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state'>[] }): Group {
+/**
+ * PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Blocked on you, then Ready for review for a work
+ * item that has been ready, then queued starts in Unstarted, then In progress.
+ */
+export function groupOf(item: Grouped): Group {
   if (item.status === 'done') {
     return 'done';
   }
@@ -21,16 +27,55 @@ export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Sessio
     return 'unstarted';
   }
 
-  if (item.status === 'awaiting-approval' || item.status === 'blocked' || item.status === 'failed' || activeSession(item)?.state === 'waiting') {
-    return 'needs';
+  if (item.status === 'blocked' || item.status === 'failed' || activeSession(item)?.state === 'waiting') {
+    return 'blocked';
+  }
+
+  // An approved work item queued for a slot keeps its place in Ready for review.
+  if (item.readyAt !== null) {
+    return 'review';
   }
 
   // A queued item waits for a slot or for another session of its ticket to end its turn (queueWaits).
-  return item.status === 'queued' ? 'unstarted' : 'working';
+  return item.status === 'queued' ? 'unstarted' : 'progress';
+}
+
+/** Whose turn it is in the three active groups (PRD R27): the operator's in Blocked on you and on work ready for review, else the agent's. */
+export function turnOf(item: Grouped): 'operator' | 'agent' | null {
+  switch (groupOf(item)) {
+    case 'blocked':
+      return 'operator';
+    case 'review':
+    case 'progress':
+      return item.status === 'awaiting-approval' || item.status === 'finished' ? 'operator' : 'agent';
+    case 'unstarted':
+    case 'done':
+      return null;
+  }
+}
+
+/** An unsnoozed work item waiting on the operator, which the status bar counts and notifies (PRD R64, R65). */
+export function needsYou(item: Grouped & { ticket: { snoozed: boolean } }): boolean {
+  return !item.ticket.snoozed && turnOf(item) === 'operator';
+}
+
+/** A session whose work item is running and not waiting on a question holds a concurrency slot (PRD R38). */
+export function holdsSlot(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state'>[] }): boolean {
+  return (item.status === 'setup' || item.status === 'running') && activeSession(item)?.state !== 'waiting';
+}
+
+/** Ready for review's sort key: the operator's position, else when the work item became ready (PRD R27, R73). */
+export function reviewKey(item: Pick<WorkItem, 'readyAt' | 'orderAt'>): number {
+  return item.orderAt ?? item.readyAt ?? Infinity;
+}
+
+/** Ready for review's order: by `reviewKey`, then by ID. */
+export function reviewOrder(a: Pick<WorkItem, 'id' | 'readyAt' | 'orderAt'>, b: Pick<WorkItem, 'id' | 'readyAt' | 'orderAt'>): number {
+  return reviewKey(a) - reviewKey(b) || a.id - b.id;
 }
 
 /** What differs between rows of one group (PRD R27): what the operator must do, the working phase, or how the work ended. */
-export type Mark = 'question' | 'send' | 'review' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
+export type Mark = 'question' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
 
 export const DONE_WORDS: Record<DoneReason, string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
@@ -39,6 +84,7 @@ export const MARK_TITLES: Record<Mark, string> = {
   question: 'Answer a question',
   send: 'Approve to send',
   review: 'Review, then approve',
+  finished: 'Review the finished turn',
   blocked: 'Blocked',
   failed: 'Failed',
   queued: 'Queued',
@@ -55,6 +101,7 @@ export const MARK_GLYPHS: Record<Mark, string> = {
   question: '\u{eb32}',
   send: '\u{ec0f}',
   review: '\u{ea70}', // eye
+  finished: '\u{ea70}', // eye
   blocked: '\u{ead1}', // debug-pause
   failed: '\u{ea87}', // error
   queued: '\u{ea82}', // clock
@@ -67,20 +114,21 @@ export const MARK_GLYPHS: Record<Mark, string> = {
 };
 
 /** The work item's mark, or null for an Unstarted item that is neither triaged nor queued, which shows its priority instead. A snoozed item has its group's mark. */
-export function markOf(item: Pick<WorkItem, 'status' | 'doneReason'> & { sessions: Pick<Session, 'state'>[]; approvalSends: boolean }): Mark | null {
+export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approvalSends: boolean }): Mark | null {
   switch (groupOf(item)) {
-    case 'needs':
+    case 'blocked':
       if (activeSession(item)?.state === 'waiting') {
         return 'question';
       }
 
+      return item.status === 'failed' ? 'failed' : 'blocked';
+    case 'review':
+    case 'progress':
       if (item.status === 'awaiting-approval') {
         return item.approvalSends ? 'send' : 'review';
       }
 
-      return item.status === 'failed' ? 'failed' : 'blocked';
-    case 'working':
-      return item.status === 'setup' ? 'setup' : 'running';
+      return item.status === 'finished' ? 'finished' : item.status === 'queued' ? 'queued' : item.status === 'setup' ? 'setup' : 'running';
     case 'unstarted':
       return item.status === 'triaging' ? 'triaging' : item.status === 'queued' ? 'queued' : null;
     case 'done':

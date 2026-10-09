@@ -48,7 +48,7 @@ function item(id, status, snoozed = false) {
 }
 
 describe('the status bar item (PRD R64, R71)', () => {
-  it('counts the Needs you work items, leaving out snoozed ones, and shows no count at 0', async () => {
+  it("counts the work items on the operator's turn, leaving out snoozed ones, and shows no count at 0", async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const hubState = await until(() => extension.state(), 'the window never received the hub state');
     const show = (workItems) => extension.show(JSON.stringify({ ...hubState, workItems }));

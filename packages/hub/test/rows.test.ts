@@ -3,6 +3,8 @@ import { groupOf } from '@switchboard/core/group';
 import {
   clockOf,
   controlsOf,
+  listGroups,
+  moveControls,
   doneBand,
   doneStamp,
   mainControl,
@@ -22,12 +24,14 @@ import { item, NOW, pool, session, snapshot, triage } from './views.js';
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
 
 describe('groupOf', () => {
-  it('puts done first, then unstarted, triaging and queued work, then work that needs the operator, then the rest', () => {
+  it('puts done first, then unstarted, triaging and queued work, then work blocked on the operator, then ready work, then the rest', () => {
     expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');
     expect(['unstarted', 'triaging', 'queued'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['unstarted', 'unstarted', 'unstarted']);
-    expect(['awaiting-approval', 'blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['needs', 'needs', 'needs']);
-    expect(groupOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('needs');
-    expect(['setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['working', 'working']);
+    expect(['blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'], readyAt: NOW })))).toEqual(['blocked', 'blocked']);
+    expect(groupOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('blocked');
+    expect(['awaiting-approval', 'finished'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['review', 'review']);
+    expect(groupOf(item(1, { readyAt: NOW, sessions: [session()] }))).toBe('review');
+    expect(['setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['progress', 'progress']);
   });
 });
 
@@ -52,7 +56,7 @@ describe('controlsOf', () => {
 });
 
 describe('mainControl', () => {
-  it('picks the one primary control of a Needs you or Unstarted row', () => {
+  it('picks the one primary control of a Blocked on you, Ready for review or Unstarted row', () => {
 
     expect(mainControl(item(1, { status: 'awaiting-approval' }))?.label).toBe('Approve');
     expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Triage again');
@@ -66,7 +70,7 @@ describe('mainControl', () => {
 });
 
 describe('clockOf', () => {
-  it('counts Needs you from the status or the wait, Working from the run start, and the rest from scope entry, stopping at done (PRD R27)', () => {
+  it('counts Blocked on you from the status or the wait, Ready for review from readyAt, In progress from the run start, and the rest from scope entry, stopping at done (PRD R27)', () => {
     const scoped = (patch: Partial<WorkItemView>, scopeAt: number | null = 5, snoozed = false) =>
       item(1, { createdAt: 1, statusAt: 2, runStartedAt: 3, ...patch, ticket: { ...item(1).ticket, scopeAt, snoozed } });
 
@@ -75,6 +79,9 @@ describe('clockOf', () => {
     expect(clockOf(scoped({ status: 'setup', sessions: [session({ kind: 'setup', state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     // A blocked item whose session still waits counts from the block.
     expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
+    expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6, sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
+    expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
+    expect(clockOf(scoped({ status: 'running', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
     expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Working since' });
     expect(clockOf(scoped({ status: 'setup', runStartedAt: null }))).toEqual({ since: 2, label: 'Working since' });
     expect(clockOf(scoped({ status: 'queued' }))).toEqual({ since: 5, label: 'In scope since' });
@@ -149,12 +156,71 @@ describe('poolControls', () => {
 });
 
 describe('stripeOf', () => {
-  it('stripes failed rows red and blocked or waiting rows yellow, outside Snoozed', () => {
+  it("stripes failed rows red, blocked or waiting rows yellow, the operator's turn and the agent's turn, outside Snoozed and the other groups (PRD R27)", () => {
     expect(stripeOf(item(1, { status: 'failed' }))).toBe('error');
     expect(stripeOf(item(1, { status: 'blocked' }))).toBe('warning');
     expect(stripeOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('warning');
-    expect(stripeOf(item(1, { status: 'awaiting-approval' }))).toBeNull();
+    expect(stripeOf(item(1, { status: 'awaiting-approval' }))).toBe('turn');
+    expect(stripeOf(item(1, { status: 'finished' }))).toBe('turn');
+    expect(stripeOf(item(1, { status: 'running', readyAt: NOW, sessions: [session()] }))).toBe('agent');
+    expect(stripeOf(item(1, { status: 'running', sessions: [session()] }))).toBe('agent');
+    expect(stripeOf(item(1, { status: 'unstarted' }))).toBeNull();
+    expect(stripeOf(item(1, { status: 'done' }))).toBeNull();
     expect(stripeOf(item(1, { status: 'failed', ticket: { ...item(1).ticket, snoozed: true } }))).toBeNull();
+  });
+});
+
+describe('listGroups', () => {
+  it("orders Blocked on you by wait, Ready for review by the operator's place or readyAt, and In progress by run start (PRD R27)", () => {
+    const groups = listGroups(
+      snapshot([
+        item(1, { status: 'awaiting-approval', readyAt: NOW - 3000 }),
+        item(2, { status: 'running', readyAt: NOW - 5000, sessions: [session()] }),
+        item(3, { status: 'finished', readyAt: NOW - 1000, orderAt: NOW - 9000 }),
+        item(4, { status: 'blocked', statusAt: NOW - 100 }),
+        item(5, { status: 'failed', statusAt: NOW - 200 }),
+        item(6, { status: 'running', runStartedAt: NOW - 10, sessions: [session()] }),
+        item(7, { status: 'setup', runStartedAt: NOW - 20, sessions: [session()] }),
+      ]),
+    );
+    const ids = (rows: unknown[]) => rows.map((row) => (row as WorkItemView).id);
+
+    expect([ids(groups.blocked), ids(groups.review), ids(groups.progress)]).toEqual([
+      [5, 4],
+      [3, 2, 1],
+      [7, 6],
+    ]);
+  });
+
+  it('keeps a Ready for review row in its place while its turn changes', () => {
+    const rows = (first: Partial<WorkItemView>) =>
+      listGroups(snapshot([item(1, { readyAt: NOW - 3000, ...first }), item(2, { status: 'awaiting-approval', readyAt: NOW - 2000 }), item(3, { status: 'finished', readyAt: NOW - 1000 })])).review.map(
+        (row) => (row as WorkItemView).id,
+      );
+
+    expect(rows({ status: 'awaiting-approval', statusAt: NOW })).toEqual([1, 2, 3]);
+    expect(rows({ status: 'running', statusAt: NOW, sessions: [session()] })).toEqual([1, 2, 3]);
+    expect(rows({ status: 'queued', statusAt: NOW })).toEqual([1, 2, 3]);
+  });
+});
+
+describe('moveControls', () => {
+  it("offers Move to top, Move up and Move down from the row's neighbours, and Reset position once moved (PRD R73)", () => {
+    const moves = (id: number, orderAt: number | null = null) =>
+      moveControls(item(id, { status: 'awaiting-approval', orderAt }), [4, 7, 9]).map((control) => [control.label, control.message['action']]);
+
+    expect(moves(4)).toEqual([['Move down', { type: 'move', workItemId: 4, after: 7 }]]);
+    expect(moves(7)).toEqual([
+      ['Move to top', { type: 'move', workItemId: 7, after: null }],
+      ['Move up', { type: 'move', workItemId: 7, after: null }],
+      ['Move down', { type: 'move', workItemId: 7, after: 9 }],
+    ]);
+    expect(moves(9, NOW)).toEqual([
+      ['Move to top', { type: 'move', workItemId: 9, after: null }],
+      ['Move up', { type: 'move', workItemId: 9, after: 4 }],
+      ['Reset position', { type: 'reset-position', workItemId: 9 }],
+    ]);
+    expect(moves(5)).toEqual([]);
   });
 });
 
@@ -172,7 +238,7 @@ describe('waitTexts', () => {
         }),
       ),
     ).toEqual([
-      { text: 'Waits for a slot · 2/2 in use', title: '2 sessions are in Working; sessions.concurrency is 2.' },
+      { text: 'Waits for a slot · 2/2 in use', title: '2 sessions are running; sessions.concurrency is 2.' },
       { text: "Waits for the ad-hoc session's turn to end", title: 'Session s2 on this ticket is running or waiting on a question. This starts when its turn ends.' },
       { text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.' },
     ]);

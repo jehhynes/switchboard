@@ -46,14 +46,14 @@ public sealed class DockSettingsTests
     public void Save_ThenLoad_KeepsWidthAndGroups()
     {
         var home = Fixtures.TempFolder();
-        var settings = new DockSettings { Width = 410, Groups = { ["done"] = true, ["needs"] = false } };
+        var settings = new DockSettings { Width = 410, Groups = { ["done"] = true, ["blocked"] = false } };
 
         settings.Save(home);
 
         var loaded = DockSettings.Load(home);
 
         Assert.Equal(410, loaded.Width);
-        Assert.Equal(new Dictionary<string, bool> { ["done"] = true, ["needs"] = false }, loaded.Groups);
+        Assert.Equal(new Dictionary<string, bool> { ["done"] = true, ["blocked"] = false }, loaded.Groups);
         Assert.Equal(["dock.json"], Directory.GetFiles(home).Select(Path.GetFileName));
     }
 

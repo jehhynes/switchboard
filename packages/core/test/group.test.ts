@@ -1,36 +1,101 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, groupOf, markOf, triageLabel, urlKey } from '../src/group.js';
+import { activeSession, groupOf, holdsSlot, markOf, needsYou, reviewOrder, triageLabel, turnOf, urlKey } from '../src/group.js';
 import type { DoneReason, SessionState, WorkItemStatus } from '../src/model.js';
 
-const item = (status: WorkItemStatus, ...states: SessionState[]) => ({ status, sessions: states.map((state) => ({ state })) });
+const item = (status: WorkItemStatus, ...states: SessionState[]) => ({ status, readyAt: null as number | null, sessions: states.map((state) => ({ state })) });
+const ready = (status: WorkItemStatus, ...states: SessionState[]) => ({ ...item(status, ...states), readyAt: 1000 });
 
 describe('groupOf', () => {
-  it('checks Done, then Unstarted, then Needs you, then Working (PRD R27)', () => {
+  it('checks Done, then Unstarted, then Blocked on you, then Ready for review, then In progress (PRD R27)', () => {
     expect(groupOf(item('done', 'waiting'))).toBe('done');
+    expect(groupOf(ready('done'))).toBe('done');
     expect(groupOf(item('triaging'))).toBe('unstarted');
     expect(groupOf(item('unstarted'))).toBe('unstarted');
     expect(groupOf(item('queued'))).toBe('unstarted');
-    expect(['awaiting-approval', 'blocked', 'failed'].map((status) => groupOf(item(status as WorkItemStatus)))).toEqual(['needs', 'needs', 'needs']);
-    expect(groupOf(item('running', 'ended', 'waiting'))).toBe('needs');
-    expect(groupOf(item('queued', 'waiting'))).toBe('needs');
-    expect(['setup', 'running'].map((status) => groupOf(item(status as WorkItemStatus, 'ended', 'running')))).toEqual(['working', 'working']);
+    expect(['blocked', 'failed'].map((status) => groupOf(ready(status as WorkItemStatus)))).toEqual(['blocked', 'blocked']);
+    expect(groupOf(item('running', 'ended', 'waiting'))).toBe('blocked');
+    expect(groupOf(ready('awaiting-approval', 'waiting'))).toBe('blocked');
+    expect(groupOf(item('queued', 'waiting'))).toBe('blocked');
+    expect(['awaiting-approval', 'finished', 'running', 'setup', 'queued'].map((status) => groupOf(ready(status as WorkItemStatus, 'running')))).toEqual([
+      'review',
+      'review',
+      'review',
+      'review',
+      'review',
+    ]);
+    expect(['setup', 'running'].map((status) => groupOf(item(status as WorkItemStatus, 'ended', 'running')))).toEqual(['progress', 'progress']);
+  });
+});
+
+describe('turnOf', () => {
+  it("is the operator's in Blocked on you and on work awaiting review, else the agent's, and none outside the active groups (PRD R27)", () => {
+    expect(turnOf(item('failed'))).toBe('operator');
+    expect(turnOf(item('running', 'waiting'))).toBe('operator');
+    expect(turnOf(ready('awaiting-approval'))).toBe('operator');
+    expect(turnOf(ready('finished'))).toBe('operator');
+    expect(turnOf(ready('running', 'running'))).toBe('agent');
+    expect(turnOf(ready('queued'))).toBe('agent');
+    expect(turnOf(item('running', 'running'))).toBe('agent');
+    expect(turnOf(item('unstarted'))).toBeNull();
+    expect(turnOf(ready('done'))).toBeNull();
+  });
+
+  it('needsYou leaves out a snoozed work item (PRD R64)', () => {
+    expect(needsYou({ ...ready('awaiting-approval'), ticket: { snoozed: false } })).toBe(true);
+    expect(needsYou({ ...ready('awaiting-approval'), ticket: { snoozed: true } })).toBe(false);
+    expect(needsYou({ ...ready('running', 'running'), ticket: { snoozed: false } })).toBe(false);
+  });
+});
+
+describe('holdsSlot', () => {
+  it('holds a slot only while the work item runs and its session is not waiting (PRD R38)', () => {
+    expect(holdsSlot(item('running', 'running'))).toBe(true);
+    expect(holdsSlot(item('setup', 'running'))).toBe(true);
+    expect(holdsSlot(item('running', 'waiting'))).toBe(false);
+    expect(['queued', 'awaiting-approval', 'finished', 'blocked', 'failed', 'done'].map((status) => holdsSlot(item(status as WorkItemStatus, 'idle')))).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+});
+
+describe('reviewOrder', () => {
+  it("sorts by the operator's position, else readyAt, then by ID (PRD R73)", () => {
+    const rows = [
+      { id: 1, readyAt: 300, orderAt: null },
+      { id: 2, readyAt: 100, orderAt: null },
+      { id: 3, readyAt: 500, orderAt: 50 },
+      { id: 4, readyAt: 100, orderAt: null },
+    ];
+
+    expect(rows.sort(reviewOrder).map((row) => row.id)).toEqual([3, 2, 4, 1]);
   });
 });
 
 describe('markOf', () => {
-  const marked = (status: WorkItemStatus, states: SessionState[] = [], patch: { approvalSends?: boolean; doneReason?: DoneReason | null } = {}) =>
+  const marked = (status: WorkItemStatus, states: SessionState[] = [], patch: { approvalSends?: boolean; doneReason?: DoneReason | null; readyAt?: number | null } = {}) =>
     markOf({ ...item(status, ...states), approvalSends: false, doneReason: null, ...patch });
 
-  it('gives what the operator must do in Needs you, a question first (PRD R27)', () => {
-    expect(marked('awaiting-approval')).toBe('review');
-    expect(marked('awaiting-approval', [], { approvalSends: true })).toBe('send');
-    expect(marked('awaiting-approval', ['waiting'], { approvalSends: true })).toBe('question');
+  it('gives what the operator must do in Blocked on you, a question first (PRD R27)', () => {
+    expect(marked('awaiting-approval', ['waiting'], { approvalSends: true, readyAt: 1 })).toBe('question');
     expect(marked('running', ['ended', 'waiting'])).toBe('question');
     expect(marked('blocked')).toBe('blocked');
     expect(marked('failed')).toBe('failed');
   });
 
-  it('gives the phase in Working, Triaging or none in Unstarted, and how Done ended', () => {
+  it('gives the review to do or the phase in Ready for review (PRD R27)', () => {
+    expect(marked('awaiting-approval', [], { readyAt: 1 })).toBe('review');
+    expect(marked('awaiting-approval', [], { approvalSends: true, readyAt: 1 })).toBe('send');
+    expect(marked('finished', ['idle'], { readyAt: 1 })).toBe('finished');
+    expect(marked('running', ['running'], { readyAt: 1 })).toBe('running');
+    expect(marked('queued', [], { readyAt: 1 })).toBe('queued');
+  });
+
+  it('gives the phase in In progress, Triaging or none in Unstarted, and how Done ended', () => {
     expect(['setup', 'running'].map((status) => marked(status as WorkItemStatus, ['running']))).toEqual(['setup', 'running']);
     expect(marked('queued')).toBe('queued');
     expect(marked('queued', ['waiting'])).toBe('question');

@@ -72,7 +72,7 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
   }
 
-  it('runs in Working with the approval held and Approve refused, then waits for approval again when the turn ends', () => {
+  it('runs in Ready for review with the approval held and Approve refused, then waits for approval again when the turn ends', () => {
     const h = harness();
     const { item, session } = awaitingApproval(h);
 

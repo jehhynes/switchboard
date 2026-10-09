@@ -50,11 +50,13 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var texts = VisibleTexts(window);
 
-        Assert.Equal(["Needs you", "3", "Working", "0", "Unstarted", "2", "Done", "2"], texts.Where((text) => text is "Needs you" or "Working" or "Unstarted" or "Done" or "0" or "2" or "3"));
-        Assert.Contains("Nothing is running.", texts);
+        string[] headers = ["Blocked on you", "Ready for review", "In progress", "Unstarted", "Done", "0", "2", "3", "2 yours"];
+
+        Assert.Equal(["Blocked on you", "2", "Ready for review", "2 yours", "3", "In progress", "0", "Unstarted", "2", "Done", "2"], texts.Where(headers.Contains));
+        Assert.Contains("Nothing is in progress.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
-        Assert.Contains("The session finished its turn.", texts);
+        Assert.Contains("Setup ended without a worktree.", texts);
         Assert.Contains("Which branch?", texts);
         Assert.DoesNotContain("Nothing waits to be started.", texts);
     }
@@ -62,9 +64,10 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void Show_GroupClosedBefore_KeepsItClosedAndOthersAtTheirDefault()
     {
-        var (window, model) = Open(new DockSettings { Groups = { ["needs"] = false } });
+        var (window, model) = Open(new DockSettings { Groups = { ["review"] = false } });
 
         Assert.DoesNotContain("Issue <7>", VisibleTexts(window));
+        Assert.Contains("Issue <8>", VisibleTexts(window));
         Assert.Contains("Issue <9>", VisibleTexts(window));
         Assert.False(model.Groups.Single((group) => group.Key == "done").IsOpen);
     }
@@ -147,12 +150,12 @@ public sealed class MainWindowTests
     public void TapGroup_OpenGroup_ClosesItAndKeepsTheChoice()
     {
         var (window, model) = Open();
-        var header = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("group") && border.DataContext is GroupViewModel { Key: "needs" });
+        var header = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("group") && border.DataContext is GroupViewModel { Key: "review" });
 
         Tap(window, header);
 
         Assert.DoesNotContain("Issue <7>", VisibleTexts(window));
-        Assert.Equal(["needs=False"], saved);
+        Assert.Equal(["review=False"], saved);
         Assert.Empty(actions.Clicked);
 
         model.Show(Fixtures.View);
@@ -168,8 +171,10 @@ public sealed class MainWindowTests
         var menu = window.MenuOf(Fixtures.Row("item:7"));
         var snooze = (MenuItem)menu[2];
 
-        Assert.Equal(["Triage again", "Mark done", "Snooze", "Open Changes", "History", "", "Open ticket", "Open PR #19002"], menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
-        Assert.IsType<Separator>(menu[5]);
+        Assert.Equal(
+            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "History", "", "Open ticket", "Open PR #19002"],
+            menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
+        Assert.IsType<Separator>(menu[8]);
         Assert.Equal(7, snooze.ItemsSource!.Cast<MenuItem>().Count());
         Assert.Equal("Indefinitely", snooze.ItemsSource!.Cast<MenuItem>().Last().Header);
         Assert.StartsWith("Tomorrow · ", (string)snooze.ItemsSource!.Cast<MenuItem>().First().Header!);
@@ -187,8 +192,8 @@ public sealed class MainWindowTests
         ((MenuItem)menu[1]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         snooze[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         actions.UrlReply = "The browser did not open it.";
-        ((MenuItem)menu[6]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[9]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[10]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}", "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}"], hub.Calls);
@@ -196,7 +201,7 @@ public sealed class MainWindowTests
         Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
 
         actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
-        ((MenuItem)menu[4]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["item:7 {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}"], actions.Runs);
@@ -217,9 +222,9 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
 
-        Assert.IsType<Separator>(menu[5]);
-        Assert.Equal("Open PR #19002", ((MenuItem)menu[6]).Header);
-        Assert.Equal(7, menu.Count);
+        Assert.IsType<Separator>(menu[8]);
+        Assert.Equal("Open PR #19002", ((MenuItem)menu[9]).Header);
+        Assert.Equal(10, menu.Count);
     }
 
     [AvaloniaFact]
@@ -257,16 +262,21 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var headers = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("group")).ToList();
 
-        Assert.Equal(["\uEAA2", "\uEBA6", "\uEB09", "\uEBA4"], headers.Select((header) => header.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("group-icon")).Text));
+        Assert.Equal(["\uEAA2", "\uEA70", "\uEBA6", "\uEB09", "\uEBA4"], headers.Select((header) => header.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("group-icon")).Text));
         var muted = window.FindResource(window.ActualThemeVariant, "DockBadgeZero");
 
-        Assert.Equal([false, true, false, false], headers.Select((header) => header.GetVisualDescendants().OfType<Border>().Single((badge) => badge.Classes.Contains("badge")).Background == muted));
+        Assert.Equal([false, false, true, false, false], headers.Select((header) => header.GetVisualDescendants().OfType<Border>().Single((badge) => badge.Classes.Contains("badge")).Background == muted));
     }
 
     [AvaloniaFact]
     public void OpenDone_RecordedView_ShowsTodayOpenAndOlderClosedUntilTapped()
     {
         var (window, _) = Open(new DockSettings { Groups = { ["done"] = true } });
+
+        // Tall enough that the Older band is on screen to tap.
+        window.Height = 1400;
+        Dispatcher.UIThread.RunJobs();
+
         var bands = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("band") && border.IsEffectivelyVisible).ToList();
 
         Assert.Equal(["Today", "Older"], bands.Select((band) => ((BandViewModel)band.DataContext!).Title));

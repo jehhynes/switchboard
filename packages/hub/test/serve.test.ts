@@ -182,7 +182,7 @@ describe('serveHub', () => {
   });
 
   describe('browser endpoint', () => {
-    const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'needs', snoozed: false }];
+    const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'blocked', snoozed: false }];
     const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null, unsnoozeUrl: HubApp['unsnoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, unsnoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });
 
     async function freePort(): Promise<number> {
@@ -205,7 +205,7 @@ describe('serveHub', () => {
       expect(reply?.status).toBe(200);
       expect(JSON.parse(reply!.body)).toEqual({ urls: ['https://github.com/o/r/issues/1'] });
       expect(JSON.parse((await call(browserPort, 'GET', '/cards', null))!.body)).toEqual({
-        cards: [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'needs', snoozed: false }],
+        cards: [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'blocked', snoozed: false }],
       });
 
       await hub.stop('test');

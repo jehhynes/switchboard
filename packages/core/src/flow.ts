@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { activeSession } from './group.js';
+import { activeSession, groupOf, reviewKey } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { repoRoots } from './settings.js';
 import type { PermissionMode, Settings } from './settings.js';
@@ -15,6 +15,9 @@ export const ADHOC_SOURCE = 'adhoc';
 /** The statuses of a run; entering one from another status starts the Working clock (PRD R27). */
 const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['setup', 'running']);
 
+/** The statuses that put a work item in Ready for review for good (PRD R27). */
+const READY_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['awaiting-approval', 'finished']);
+
 /** A ticket that leaves the source's scope stops being snoozed, so it leaves the Snoozed group (PRD R49). */
 const UNSNOOZED = { snoozed: false, snoozedUntil: null } as const;
 
@@ -27,8 +30,6 @@ export const MESSAGES = {
   sessionEnded: 'The session ended without a done report.',
   turnEndedWithoutApproval: 'The turn ended without an approval report.',
   sessionEndedWithoutApproval: 'The session ended without an approval report.',
-  turnFinished: 'The session finished its turn.',
-  sessionFinished: 'The session ended.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
   openedToAnswer: 'Opened in Claude to answer.',
@@ -112,6 +113,10 @@ export type FlowEvent =
   | { type: 'pick' | 'retriage-pool' | 'restore'; ticketId: number }
   /** Snoozes the ticket until `until`, or indefinitely when null (PRD R49). */
   | { type: 'snooze'; ticketId: number; until: number | null }
+  /** Places a Ready for review work item after `after`, or first when null (PRD R73). */
+  | { type: 'move'; workItemId: number; after: number | null }
+  /** Returns a moved work item to its place by readyAt (PRD R73). */
+  | { type: 'reset-position'; workItemId: number }
   | { type: 'tick' };
 
 export interface TriageChoice {
@@ -177,17 +182,13 @@ function sessionReports(kind: SessionKind, approved: boolean, playbook: Playbook
   return playbook === null ? REPORT_KINDS.filter((entry) => entry !== 'playbook') : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || entry === 'task' || (playbook.reports as readonly string[]).includes(entry));
 }
 
-/** Why a task session's turn or process ended without finishing, naming only a report its prompt offered. */
+/** Why a task session's turn or process ended without the done or approval report its prompt offered. */
 function endedMessage(session: Session, turn: boolean): string {
   if (session.reports.includes('done')) {
     return turn ? MESSAGES.turnEnded : MESSAGES.sessionEnded;
   }
 
-  if (session.reports.includes('approval')) {
-    return turn ? MESSAGES.turnEndedWithoutApproval : MESSAGES.sessionEndedWithoutApproval;
-  }
-
-  return turn ? MESSAGES.turnFinished : MESSAGES.sessionFinished;
+  return turn ? MESSAGES.turnEndedWithoutApproval : MESSAGES.sessionEndedWithoutApproval;
 }
 
 const TURN_ENDED: readonly SessionState[] = ['idle', 'failed'];
@@ -204,7 +205,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'answer', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'answer', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -267,6 +268,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { repoRoot: event.repoRoot };
     case 'snooze':
       return { until: event.until };
+    case 'move':
+      return { after: event.after };
     default:
       return null;
   }
@@ -419,6 +422,10 @@ class Flow {
         return this.snooze(event.ticketId, event.until);
       case 'restore':
         return this.restore(event.ticketId);
+      case 'move':
+        return this.move(this.reviewItem(event.workItemId), event.after);
+      case 'reset-position':
+        return this.store.updateWorkItem(this.reviewItem(event.workItemId).id, { orderAt: null });
     }
   }
 
@@ -527,6 +534,8 @@ class Flow {
       approvalHeld: false,
       createdAt: this.now,
       statusAt: this.now,
+      readyAt: null,
+      orderAt: null,
       runStartedAt: this.now,
       scopeAt: null,
       doneAt: null,
@@ -656,6 +665,8 @@ class Flow {
       approvalHeld: false,
       createdAt: this.now,
       statusAt: this.now,
+      readyAt: null,
+      orderAt: null,
       runStartedAt: queued ? this.now : null,
       scopeAt: null,
       doneAt: null,
@@ -895,10 +906,12 @@ class Flow {
         this.done(item, 'unassigned', null);
       } else if (item.approvalHeld) {
         this.restoreApproval(item, cause);
+      } else if (cause === null) {
+        this.endRun(item, current, true);
       } else {
-        this.block(item, cause ?? endedMessage(current, true));
+        this.block(item, cause);
       }
-    } else if (resumed && item.status === 'blocked') {
+    } else if (resumed && (item.status === 'blocked' || item.status === 'finished')) {
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
       this.setStatus(item.id, { status: 'running', error: null });
     } else if (state === 'running' && item.status === 'awaiting-approval') {
@@ -948,7 +961,7 @@ class Flow {
       if (item.approvalHeld) {
         this.restoreApproval(item, null);
       } else {
-        this.block(item, endedMessage(session, false));
+        this.endRun(item, session, false);
       }
     }
   }
@@ -1165,6 +1178,51 @@ class Flow {
     return item;
   }
 
+  /** A work item in Ready for review: open, ready, not snoozed and not blocked on the operator (PRD R73). */
+  private reviewItem(workItemId: number): WorkItem {
+    const item = this.openItem(workItemId);
+
+    if (this.store.ticket(item.ticketId)!.snoozed || groupOf({ ...item, sessions: this.store.sessionsFor(item.id) }) !== 'review') {
+      throw new Refusal('The work item is not in Ready for review.');
+    }
+
+    return item;
+  }
+
+  /**
+   * Sets `orderAt` between `after` and the next work item in Ready for review's order, or first when `after` is null. The order holds every
+   * ready work item, snoozed and blocked ones too, so they return to their places, and stays before now, so a newly ready one comes last.
+   */
+  private move(item: WorkItem, after: number | null): void {
+    if (after === item.id) {
+      throw new Refusal('A work item cannot move after itself.');
+    }
+
+    if (after !== null) {
+      this.reviewItem(after);
+    }
+
+    let order = this.store.readyWorkItems().filter((entry) => entry.id !== item.id);
+    let index = after === null ? 0 : order.findIndex((entry) => entry.id === after) + 1;
+    const gap = () => {
+      const before = index === 0 ? null : reviewKey(order[index - 1]!);
+      const next = index === order.length ? this.now : reviewKey(order[index]!);
+
+      return { before, next };
+    };
+    let { before, next } = gap();
+
+    if (before !== null && next - before < 2) {
+      // Too close to place between: respace the whole order 1s apart, ending before now, which keeps every work item's place.
+      order.forEach((entry, position) => this.store.updateWorkItem(entry.id, { orderAt: this.now - (order.length - position) * 1000 }));
+      order = this.store.readyWorkItems().filter((entry) => entry.id !== item.id);
+      index = after === null ? 0 : order.findIndex((entry) => entry.id === after) + 1;
+      ({ before, next } = gap());
+    }
+
+    this.store.updateWorkItem(item.id, { orderAt: before === null ? next - 60_000 : Math.floor((before + next) / 2) });
+  }
+
   /** PRD R49: local only; a snoozed ticket gets no automatic triage or start until `until` passes, or until restored when `until` is null. */
   private snooze(ticketId: number, until: number | null): void {
     if (until !== null && until <= this.now) {
@@ -1228,6 +1286,8 @@ class Flow {
       approvalHeld: false,
       createdAt: this.now,
       statusAt: this.now,
+      readyAt: null,
+      orderAt: null,
       runStartedAt: this.now,
       scopeAt: null,
       doneAt: null,
@@ -1279,7 +1339,7 @@ class Flow {
       throw new Refusal('Triage is already running.');
     }
 
-    this.setStatus(item.id, { status: 'triaging', error: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null });
+    this.setStatus(item.id, { status: 'triaging', error: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, readyAt: null, orderAt: null });
   }
 
   private requireNoSession(item: WorkItem): void {
@@ -1290,12 +1350,13 @@ class Flow {
 
   // Status changes
 
-  /** Every status change comes here, so statusAt and runStartedAt stay true (PRD R27). */
+  /** Every status change comes here, so statusAt, runStartedAt and readyAt stay true (PRD R27). */
   private setStatus(id: number, patch: Partial<NewWorkItem> & { status: WorkItemStatus }): void {
-    const before = this.store.workItem(id)!.status;
+    const { status: before, readyAt } = this.store.workItem(id)!;
     const run = RUN_STATUSES.has(patch.status) && !RUN_STATUSES.has(before) ? { runStartedAt: this.now } : {};
+    const ready = readyAt === null && READY_STATUSES.has(patch.status) ? { readyAt: this.now } : {};
 
-    this.store.updateWorkItem(id, before === patch.status ? patch : { approvalHeld: false, ...patch, statusAt: this.now, ...run });
+    this.store.updateWorkItem(id, before === patch.status ? patch : { approvalHeld: false, ...patch, statusAt: this.now, ...run, ...ready });
   }
 
   /** A run or stop ended without a report: the earlier approval waits again, with the cause when the run did not finish. */
@@ -1319,6 +1380,15 @@ class Flow {
 
   private block(item: WorkItem, cause: string): void {
     this.setStatus(item.id, { status: 'blocked', error: cause });
+  }
+
+  /** A run that ended without a report: `finished` for review when the prompt offered neither done nor approval, else blocked (PRD R23). */
+  private endRun(item: WorkItem, session: Session, turn: boolean): void {
+    if (session.reports.includes('done') || session.reports.includes('approval')) {
+      this.block(item, endedMessage(session, turn));
+    } else {
+      this.setStatus(item.id, { status: 'finished', error: null });
+    }
   }
 
   /** The session's work item when the session is its latest and it is not done (PRD R45). */
@@ -1380,7 +1450,7 @@ class Flow {
 
   /**
    * Starts queued work items in order while slots are free, skipping a ticket with another session in a turn (PRD R17, R38).
-   * A session holds a slot only while its row is in the Working group, so Needs you, Done and Snoozed do not stall the queue.
+   * A session holds a slot only while its work item runs, so a question, an approval, a block, Done and Snoozed do not stall the queue.
    */
   private scheduleStarts(): void {
     const queued = this.store.workItemsWithStatus('queued').sort((a, b) => a.queuedAt! - b.queuedAt! || a.id - b.id);

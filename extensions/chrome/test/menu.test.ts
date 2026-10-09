@@ -52,7 +52,7 @@ describe('watchCardMenus', () => {
   });
 
   it('adds Open in Switchboard and Snooze after a divider at the bottom, styled as GitHub\'s items', async () => {
-    start(card('needs'));
+    start(card('blocked'));
     await openMenu();
 
     expect(labels()).toEqual(['Open in new tab', 'Copy link', 'Copy link in project', '---', 'Move to top', 'Move to bottom', 'Move to column', '---', 'Archive', 'Remove from project', '---', 'Open in Switchboard', 'Snooze in Switchboard…']);
@@ -87,7 +87,7 @@ describe('watchCardMenus', () => {
   });
 
   it('adds its items once while GitHub keeps changing the page', async () => {
-    start(card('needs'));
+    start(card('blocked'));
     await openMenu();
 
     const before = [...list().children];
@@ -99,7 +99,7 @@ describe('watchCardMenus', () => {
   });
 
   it('follows a card that becomes snoozed, or that a failed read drops, while its menu is open', async () => {
-    let found: Card | undefined = card('needs');
+    let found: Card | undefined = card('blocked');
     const change = async (next: Card | undefined) => {
       found = next;
       // A new cards read changes the card's pill.
@@ -111,7 +111,7 @@ describe('watchCardMenus', () => {
     await openMenu();
     expect(labels().slice(-3)).toEqual(['---', 'Open in Switchboard', 'Snooze in Switchboard…']);
 
-    await change(card('needs', true));
+    await change(card('blocked', true));
     expect(labels().slice(-4)).toEqual(['Remove from project', '---', 'Open in Switchboard', 'Unsnooze in Switchboard']);
     item('Unsnooze in Switchboard').click();
     expect(snooze.unsnooze).toHaveBeenCalledExactlyOnceWith(ISSUE, kebab());
@@ -126,7 +126,7 @@ describe('watchCardMenus', () => {
     const keys: string[] = [];
     const reachedGitHub = vi.fn();
 
-    start(card('needs'));
+    start(card('blocked'));
     await openMenu();
     list().addEventListener('keydown', (event) => keys.push(event.key));
     document.body.addEventListener('click', reachedGitHub);
@@ -141,7 +141,7 @@ describe('watchCardMenus', () => {
   });
 
   it('runs an item on Enter or Space, and ignores other keys', async () => {
-    start(card('working', true));
+    start(card('progress', true));
     await openMenu();
 
     const unsnooze = item('Unsnooze in Switchboard');

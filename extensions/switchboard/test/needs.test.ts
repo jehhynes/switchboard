@@ -25,7 +25,7 @@ function session(state: Session['state']): Session {
   };
 }
 
-function item(id: number, status: WorkItemView['status'], patch: { snoozed?: boolean; sessions?: Session[] } = {}): WorkItemView {
+function item(id: number, status: WorkItemView['status'], patch: { snoozed?: boolean; sessions?: Session[]; readyAt?: number } = {}): WorkItemView {
   return {
     id,
     ticketId: id,
@@ -45,6 +45,8 @@ function item(id: number, status: WorkItemView['status'], patch: { snoozed?: boo
     createdAt: 0,
     statusAt: 0,
     runStartedAt: 0,
+    readyAt: patch.readyAt ?? (status === 'awaiting-approval' || status === 'finished' ? 0 : null),
+    orderAt: null,
     scopeAt: null,
     doneAt: null,
     doneReason: null,
@@ -78,9 +80,11 @@ function snapshot(workItems: WorkItemView[]): Snapshot {
 }
 
 describe('needsCount (PRD R64)', () => {
-  it('counts approvals, blocks, failures and waiting sessions, and nothing in another group', () => {
+  it("counts approvals, finished turns, blocks, failures and waiting sessions, and no work on the agent's turn or in another group", () => {
     const items = [
       item(1, 'awaiting-approval'),
+      item(10, 'finished'),
+      item(11, 'running', { sessions: [session('running')], readyAt: 0 }),
       item(2, 'blocked'),
       item(3, 'failed'),
       item(4, 'running', { sessions: [session('waiting')] }),
@@ -91,7 +95,7 @@ describe('needsCount (PRD R64)', () => {
       item(9, 'done'),
     ];
 
-    expect(needsCount(snapshot(items))).toBe(4);
+    expect(needsCount(snapshot(items))).toBe(5);
   });
 
   it('leaves out a snoozed work item that would need the operator', () => {

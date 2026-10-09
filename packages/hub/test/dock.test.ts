@@ -44,18 +44,61 @@ describe('dockView', () => {
     const view = dockView(snapshot([item(1, { status: 'blocked' }), item(2), item(3, { status: 'unstarted' })], { pool: [pool(4)] }), NOW, W);
 
     expect(view.groups.map((group) => [group.key, group.title, group.empty, group.rows.map((entry) => entry.key)])).toEqual([
-      ['needs', 'Needs you', 'Nothing needs you.', ['item:1']],
-      ['working', 'Working', 'Nothing is running.', ['item:2']],
+      ['blocked', 'Blocked on you', null, ['item:1']],
+      ['review', 'Ready for review', 'Nothing is ready for review.', []],
+      ['progress', 'In progress', 'Nothing is in progress.', ['item:2']],
       ['unstarted', 'Unstarted', 'Nothing waits to be started.', ['item:3', 'ticket:4']],
       ['done', 'Done', null, []],
     ]);
+    // Blocked on you is left out when empty, as Snoozed is.
     expect(dockView(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: true } })]), NOW, W).groups.map((group) => [group.key, group.rows.map((entry) => entry.key)])).toEqual([
-      ['needs', []],
-      ['working', []],
+      ['review', []],
+      ['progress', []],
       ['unstarted', []],
       ['snoozed', ['item:5']],
       ['done', []],
     ]);
+  });
+
+  it("counts Ready for review's rows on the operator's turn, and gives each row its turn, dimming and Move controls (PRD R27, R73)", () => {
+    const view = dockView(
+      snapshot([
+        item(1, { status: 'awaiting-approval', readyAt: NOW - 3000 }),
+        item(2, { status: 'running', readyAt: NOW - 2000, sessions: [session()] }),
+        item(3, { status: 'finished', readyAt: NOW - 1000 }),
+        item(4, { status: 'running', sessions: [session()] }),
+        item(5, { status: 'blocked' }),
+        item(6, { status: 'awaiting-approval', ticket: { ...item(6).ticket, snoozed: true } }),
+      ]),
+      NOW,
+      W,
+    );
+    const shown = view.groups.map((group) => [group.key, group.yours, group.rows.map((entry) => [entry.key, entry.turn, entry.dim, entry.movable, entry.stripe])]);
+
+    expect(shown).toEqual([
+      ['blocked', null, [['item:5', 'operator', false, false, 'warning']]],
+      [
+        'review',
+        2,
+        [
+          ['item:1', 'operator', false, true, 'turn'],
+          ['item:2', 'agent', true, true, 'agent'],
+          ['item:3', 'operator', false, true, 'turn'],
+        ],
+      ],
+      ['progress', null, [['item:4', 'agent', false, false, 'agent']]],
+      ['unstarted', null, []],
+      ['snoozed', null, [['item:6', null, false, false, null]]],
+      ['done', null, []],
+    ]);
+
+    const second = view.groups.find((group) => group.key === 'review')!.rows[1]!;
+    expect(second.controls.filter((control) => control.action['type'] === 'move')).toEqual([
+      { label: 'Move to top', glyph: '\u{ebff}', action: { type: 'move', workItemId: 2, after: null } },
+      { label: 'Move up', glyph: '\u{eaa1}', action: { type: 'move', workItemId: 2, after: null } },
+      { label: 'Move down', glyph: '\u{ea9a}', action: { type: 'move', workItemId: 2, after: 3 } },
+    ]);
+    expect(view.groups.find((group) => group.key === 'progress')!.rows[0]!.controls.some((control) => control.action['type'] === 'move')).toBe(false);
   });
 
   it('lists configuration errors, then what an unconfigured home lacks', () => {
@@ -151,7 +194,7 @@ describe('dockView', () => {
       { label: 'Open Changes', glyph: '\u{ec23}', command: { type: 'changes', path: 'D:/git/widgets/.worktrees/107-fix', key: 'gh 107', title: 'Issue <7>' } },
       { label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
     ]);
-    expect(waiting.search).toBe('Issue <7> · gh 107 · PR #19002 · dev:develop · Needs you · 107-fix');
+    expect(waiting.search).toBe('Issue <7> · gh 107 · PR #19002 · dev:develop · Blocked on you · 107-fix');
     expect(row(item(7, { sessions: [session({ state: 'waiting' })], question: { text: 'Two parts', options: [{ label: 'A', description: '' }], parts: 2 } })).answers).toEqual([]);
 
     const approval = row(item(7, { status: 'awaiting-approval', approvalReport: 'D:/drafts/reply.md', pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] }));
@@ -220,8 +263,8 @@ describe('dockView', () => {
       snapshot(
         [
           item(7, {
-            status: 'blocked',
-            error: 'The session finished its turn.',
+            status: 'finished',
+            readyAt: NOW - 3 * 3_600_000,
             worktree,
             sessions: [session({ state: 'ended', cwd: worktree.path })],
             links: [{ id: 1, ticketId: 7, label: 'Pull request', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW }],
@@ -237,6 +280,8 @@ describe('dockView', () => {
             pastes: [{ id: 1, workItemId: 10, label: 'Customer reply', file: 'D:/drafts/reply.md', reportedAt: NOW }],
             sessions: [session({ state: 'ended', cwd: 'D:/git/support' })],
           }),
+          item(13, { status: 'running', readyAt: NOW - 5 * 3_600_000, orderAt: NOW - 6 * 3_600_000, stage: 'posting', stageAt: NOW - 60_000, sessions: [session({ cwd: 'D:/git/widgets' })] }),
+          item(14, { status: 'failed', error: 'Setup ended without a worktree.', statusAt: NOW - 600_000 }),
           // Done rows carry their date band; 12:00 UTC less a minute is the same local day in any zone within ±11 hours.
           item(11, { status: 'done', doneAt: NOW - 60_000 }),
           item(12, { status: 'done', doneAt: NOW - 30 * 86_400_000 }),

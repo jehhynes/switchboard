@@ -14,7 +14,7 @@ function session(state: Session['state']): Session {
 function item(id: number, owner: Ticket, status: WorkItemView['status'], playbook: string | null, sessions: Session[] = []): WorkItemView {
   return {
     id, ticketId: owner.id, playbook, status, stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null,
-    approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: 0, statusAt: 0, runStartedAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null,
+    approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: 0, statusAt: 0, runStartedAt: null, readyAt: status === 'awaiting-approval' || status === 'finished' ? 0 : null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null,
     ticket: owner, triage: null, sessions, worktree: null, links: [], pastes: [], returned: 0, parent: null, approvalSends: false, waits: [], question: null,
   };
 }
@@ -47,12 +47,12 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:review-pr', group: 'needs', mark: 'review', snoozed: false, links: [] },
-      { url: issue(2), playbook: 'dev:qa-failure', group: 'needs', mark: 'question', snoozed: false, links: [] },
-      { url: issue(3), playbook: 'dev:new-dev', group: 'working', mark: 'running', snoozed: true, links: [] },
+      { url: issue(1), playbook: 'dev:review-pr', group: 'review', mark: 'review', snoozed: false, links: [] },
+      { url: issue(2), playbook: 'dev:qa-failure', group: 'blocked', mark: 'question', snoozed: false, links: [] },
+      { url: issue(3), playbook: 'dev:new-dev', group: 'progress', mark: 'running', snoozed: true, links: [] },
       { url: issue(4), playbook: 'dev:triage', group: 'unstarted', mark: 'triaging', snoozed: false, links: [] },
       { url: issue(5), playbook: 'dev:other', group: 'done', mark: 'done-session', snoozed: false, links: [] },
-      { url: issue(6), playbook: null, group: 'needs', mark: 'failed', snoozed: false, links: [] },
+      { url: issue(6), playbook: null, group: 'blocked', mark: 'failed', snoozed: false, links: [] },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe('cardsOf', () => {
       ),
     );
 
-    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'working', mark: 'running', snoozed: false, links: [] }]);
+    expect(cards).toEqual([{ url: issue(1), playbook: 'dev:new-dev', group: 'progress', mark: 'running', snoozed: false, links: [] }]);
   });
 
   it('shows a pool ticket as Unstarted with its triage\'s playbook, over its done work items', () => {
@@ -133,7 +133,7 @@ describe('cardsOf', () => {
     );
 
     expect(cards).toEqual([
-      { url: issue(1), playbook: 'dev:develop', group: 'working', mark: 'running', snoozed: false, links: ['https://github.com/o/r/pull/7', 'https://example.test/doc'] },
+      { url: issue(1), playbook: 'dev:develop', group: 'progress', mark: 'running', snoozed: false, links: ['https://github.com/o/r/pull/7', 'https://example.test/doc'] },
       { url: 'https://desk.example.test/2', playbook: 'support:case', group: 'unstarted', mark: null, snoozed: false, links: ['https://github.com/o/r/issues/9'] },
     ]);
   });

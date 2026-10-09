@@ -137,7 +137,7 @@ public sealed class HubClientTests
         var view = await Until(() => client.View);
 
         Assert.Equal(Connection.Connected, client.Connection);
-        Assert.Equal(4, view.Groups.Count);
+        Assert.Equal(5, view.Groups.Count);
         Assert.True(changes >= 1);
         Assert.Contains("Authorization: Bearer t0k", server.Requests);
         Assert.Contains(server.Requests, (request) => request.StartsWith("GET /dock/events HTTP/1.1"));

@@ -25,9 +25,12 @@ public abstract class Observable : INotifyPropertyChanged
 /// <summary>The dock's list: the hub's groups and rows, the groups the operator opened or closed, the selected row, and the status line.</summary>
 public sealed class DockViewModel(DockSettings settings, Action<DockSettings> save) : Observable
 {
-    /// <summary>Needs you, Working and Unstarted start open; Done and Snoozed start closed (PRD R27).</summary>
+    /// <summary>Blocked on you, Ready for review, In progress and Unstarted start open; Done and Snoozed start closed (PRD R27).</summary>
     // Done's older date bands start closed, so the recent ones show first (PRD R27).
-    static readonly HashSet<string> OpenByDefault = ["needs", "working", "unstarted", "done:Today", "done:Yesterday"];
+    static readonly HashSet<string> OpenByDefault = ["blocked", "review", "progress", "unstarted", "done:Today", "done:Yesterday"];
+
+    /// <summary>The groups whose operator-turn rows F8 visits (PRD R73).</summary>
+    static readonly HashSet<string> TurnGroups = ["blocked", "review"];
 
     string? status;
     string? connection = "Connecting to Switchboard…";
@@ -263,29 +266,64 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         {
             if (group.AllRows.FirstOrDefault((row) => row.Row.Window?.Name == name) is { } row)
             {
-                // The search box would hide the row the operator brought to the front.
-                if (!group.Rows.Contains(row))
-                {
-                    Filter = "";
-                }
-
-                if (!group.IsOpen)
-                {
-                    group.Toggle();
-                }
-
-                if (group.Bands.FirstOrDefault((band) => band.Rows.Contains(row)) is { IsOpen: false } closed)
-                {
-                    closed.Toggle();
-                }
-
-                Selected = row.Key;
+                Reveal(group, row);
 
                 return row.Key;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Selects the next row on the operator's turn in Blocked on you and Ready for review, in list order after the selection and wrapping, or the
+    /// previous one when <paramref name="backwards"/>; returns it, or null when there is none (PRD R73).
+    /// </summary>
+    public RowViewModel? SelectNextTurn(bool backwards)
+    {
+        var rows = Groups.SelectMany((group) => group.AllRows.Select((row) => (Group: group, Row: row))).ToList();
+        var count = rows.Count;
+        var start = rows.FindIndex((entry) => entry.Row.Key == selected);
+
+        if (start < 0)
+        {
+            start = backwards ? count : -1;
+        }
+
+        for (var step = 1; step <= count; step++)
+        {
+            var (group, row) = rows[(((start + (backwards ? -step : step)) % count) + count) % count];
+
+            if (row.Row.Turn == "operator" && TurnGroups.Contains(group.Key))
+            {
+                Reveal(group, row);
+
+                return row;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Selects a row and shows it: clears a search that hides it and opens its group and date band.</summary>
+    void Reveal(GroupViewModel group, RowViewModel row)
+    {
+        if (!group.Rows.Contains(row))
+        {
+            Filter = "";
+        }
+
+        if (!group.IsOpen)
+        {
+            group.Toggle();
+        }
+
+        if (group.Bands.FirstOrDefault((band) => band.Rows.Contains(row)) is { IsOpen: false } closed)
+        {
+            closed.Toggle();
+        }
+
+        Selected = row.Key;
     }
 
     public RowViewModel? Row(string key) => Groups.SelectMany((group) => group.AllRows).FirstOrDefault((row) => row.Key == key);
@@ -350,6 +388,7 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     IReadOnlyList<BandViewModel> bands = [];
     string title = "";
     string? empty;
+    bool countsYours;
     string filter = "";
     IReadOnlyList<RowViewModel> all = [];
     IReadOnlyList<RowViewModel> rows = [];
@@ -401,7 +440,7 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     /// <summary>An empty group's badge is muted, as in the VS Code panel.</summary>
     public bool IsZero => Rows.Count == 0;
 
-    /// <summary>The group's codicon, such as a bell for Needs you.</summary>
+    /// <summary>The group's codicon, such as an eye for Ready for review.</summary>
     public string Glyph
     {
         get => glyph;
@@ -416,9 +455,18 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
 
     public bool ShowEmpty => Rows.Count == 0 && Empty is not null && !Filtering;
 
+    /// <summary>Ready for review's shown rows on the operator's turn, such as <c>2 yours</c>, or empty when there are none (PRD R27).</summary>
+    public string Yours => HasYours ? $"{YoursCount} yours" : "";
+
+    public bool HasYours => YoursCount > 0;
+
+    // The hub sends a count only for Ready for review; the dock counts the rows the search box lets through, as the badge does.
+    int YoursCount => countsYours ? Rows.Count((row) => row.Row.Turn == "operator") : 0;
+
     public void Show(DockGroup group, string? selected, string filtering)
     {
         Title = group.Title;
+        countsYours = group.Yours is not null;
         Glyph = group.Glyph;
         Empty = group.Empty;
         all = group.Rows.Select((row) => new RowViewModel(row) { IsSelected = row.Key == selected }).ToList();
@@ -431,6 +479,8 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
         Rows = all.Where((row) => Matches(row.Row.Search, text)).ToList();
         Bands = Rows.GroupBy((row) => row.Row.Band).Select((rows) => BandOf(rows.Key, rows.ToList())).ToList();
         Changed(nameof(Count));
+        Changed(nameof(Yours));
+        Changed(nameof(HasYours));
         Changed(nameof(IsZero));
         Changed(nameof(ShowEmpty));
         Changed(nameof(ShowsRows));
@@ -575,6 +625,14 @@ public sealed class RowViewModel(DockRow row) : Observable
     public bool StripeWarning => row.Stripe == Tone.Warning;
 
     public bool StripeError => row.Stripe == Tone.Error;
+
+    /// <summary>The operator's turn in Ready for review (PRD R27).</summary>
+    public bool StripeTurn => row.Stripe == Tone.Turn;
+
+    public bool StripeAgent => row.Stripe == Tone.Agent;
+
+    /// <summary>A Ready for review row on the agent's turn shows dimmed (PRD R27).</summary>
+    public bool IsDim => row.Dim;
 
     public bool IsSelected
     {

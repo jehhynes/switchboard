@@ -72,13 +72,14 @@ export const STATUS_WORDS: Record<WorkItemStatus, string> = {
   setup: 'Setting up',
   running: 'Running',
   'awaiting-approval': 'Awaiting approval',
+  finished: 'Finished its turn',
   blocked: 'Blocked',
   failed: 'Failed',
   done: 'Done',
 };
 
 /** Statuses that wait for the operator. */
-const NEEDS_YOU: ReadonlySet<string> = new Set(['unstarted', 'awaiting-approval', 'blocked', 'failed']);
+const NEEDS_YOU: ReadonlySet<string> = new Set(['unstarted', 'awaiting-approval', 'finished', 'blocked', 'failed']);
 
 const OPERATOR: Record<string, { text: string; icon: string }> = {
   adhoc: { text: 'You created the ad-hoc prompt', icon: 'add' },
@@ -94,6 +95,8 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   'retriage-pool': { text: 'You asked to triage the pool ticket again', icon: 'filter' },
   restore: { text: 'You restored it', icon: 'bell' },
   snooze: { text: 'You snoozed it', icon: 'bell-slash' },
+  move: { text: 'You moved it in Ready for review', icon: 'list-ordered' },
+  'reset-position': { text: 'You reset its place in Ready for review', icon: 'list-ordered' },
 };
 
 /** A local time such as `2026-10-07 14:02`. */
@@ -373,7 +376,7 @@ class Builder {
     entry.tone =
       entry.refused !== null || status === 'failed' || state === 'failed'
         ? 'error'
-        : (entry.tone ?? (status === 'blocked' || state === 'waiting' ? 'warning' : status === 'done' ? 'success' : status === 'awaiting-approval' ? 'accent' : null));
+        : (entry.tone ?? (status === 'blocked' || state === 'waiting' ? 'warning' : status === 'done' ? 'success' : status === 'awaiting-approval' || status === 'finished' ? 'accent' : null));
 
     // Only a session's start and its questions link to it, so the timeline does not repeat the same button.
     if (entry.links.length === 0 && entry.shortId !== null && (event.type === 'session-started' || state === 'waiting' || event.detail?.['fact'] === 'sessionStarted')) {

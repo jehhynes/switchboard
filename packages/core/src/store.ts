@@ -254,6 +254,11 @@ export const MIGRATIONS = [
   `ALTER TABLE workItems DROP COLUMN failedStep;
   UPDATE workItems SET error = 'Pick sessions were removed. Triage again triages the ticket, and its task claims it.'
     WHERE error = 'Pick sessions were removed. Retry starts the playbook, which claims the ticket.';`,
+  // A turn that ended on a playbook offering neither done nor approval is finished, for review; Ready for review sorts by readyAt (PRD R27).
+  `ALTER TABLE workItems ADD COLUMN readyAt INTEGER;
+  ALTER TABLE workItems ADD COLUMN orderAt INTEGER;
+  UPDATE workItems SET status = 'finished', error = NULL WHERE status = 'blocked' AND error IN ('The session finished its turn.', 'The session ended.');
+  UPDATE workItems SET readyAt = statusAt WHERE status IN ('awaiting-approval', 'finished');`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'approvalHeld']);
@@ -393,7 +398,7 @@ export interface TicketHistory {
 /** Fields that change on every poll or status change; their change alone is not activity, and the event's time already says when. */
 const UNLOGGED: Record<string, ReadonlySet<string>> = {
   tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt']),
-  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt']),
+  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt']),
   sessions: new Set(['stateAt']),
   triages: new Set(),
   worktrees: new Set(),
@@ -708,6 +713,11 @@ export class Store {
   /** Work items created by task reports from the sessions of `parentId` (PRD R68). */
   workItemsWithParent(parentId: number): WorkItem[] {
     return this.#all('SELECT * FROM workItems WHERE parentId = ? ORDER BY id', parentId);
+  }
+
+  /** Open work items that have been ready for review, snoozed and blocked ones included, in Ready for review's order (PRD R27, R73). */
+  readyWorkItems(): WorkItem[] {
+    return this.#all("SELECT * FROM workItems WHERE status <> 'done' AND readyAt IS NOT NULL ORDER BY COALESCE(orderAt, readyAt), id");
   }
 
   workItemsWithStatus(status: WorkItemStatus): WorkItem[] {

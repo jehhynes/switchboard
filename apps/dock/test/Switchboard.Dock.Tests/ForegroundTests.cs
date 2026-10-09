@@ -61,12 +61,12 @@ public sealed class ForegroundTests
     [Fact]
     public void SelectWindow_RowInClosedGroup_OpensTheGroupAndKeepsThatChoice()
     {
-        var settings = new DockSettings { Groups = { ["needs"] = false } };
+        var settings = new DockSettings { Groups = { ["review"] = false } };
         var model = Model(Fixtures.View, settings);
 
         Assert.Equal("item:7", model.SelectWindow("gh-107-58c609"));
-        Assert.True(model.Groups.Single((group) => group.Key == "needs").IsOpen);
-        Assert.True(settings.Groups["needs"]);
+        Assert.True(model.Groups.Single((group) => group.Key == "review").IsOpen);
+        Assert.True(settings.Groups["review"]);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class ForegroundTests
         var open = Fixtures.Row("item:7");
         var view = Fixtures.View with
         {
-            Groups = [new DockGroup("needs", "Needs you", null, [open]), new DockGroup("done", "Done", null, [open with { Key = "item:3" }])],
+            Groups = [new DockGroup("blocked", "Blocked on you", null, [open]), new DockGroup("done", "Done", null, [open with { Key = "item:3" }])],
         };
 
         Assert.Equal("item:7", Model(view).SelectWindow("gh-107-58c609"));
@@ -103,7 +103,7 @@ public sealed class ForegroundTests
     public void ShowForeground_RowBelowTheFoldInClosedGroup_OpensTheGroupAndScrollsTheRowIntoView()
     {
         var filler = Enumerable.Range(1, 20).Select((n) => Fixtures.Row("item:9") with { Key = $"item:{100 + n}", Title = $"Filler {n}" }).ToList();
-        var view = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, filler), new DockGroup("unstarted", "Unstarted", null, [Fixtures.Row("item:8")])] };
+        var view = Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, filler), new DockGroup("unstarted", "Unstarted", null, [Fixtures.Row("item:8")])] };
         var model = new DockViewModel(new DockSettings { Groups = { ["unstarted"] = false } }, (_) => { });
         var window = new MainWindow(model, null, new FakeHub(), new FakeActions(), docked: false) { Height = 300 };
 

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Switchboard.Dock.Hub;
 
 namespace Switchboard.Dock.Tests;
@@ -9,8 +10,10 @@ public sealed class DockViewTests
     {
         var view = Fixtures.View;
 
-        Assert.Equal(["needs", "working", "unstarted", "done"], view.Groups.Select((group) => group.Key));
-        Assert.Equal(["item:7", "item:8", "item:10"], view.Groups[0].Rows.Select((row) => row.Key));
+        Assert.Equal(["blocked", "review", "progress", "unstarted", "done"], view.Groups.Select((group) => group.Key));
+        Assert.Equal(["item:14", "item:8"], view.Groups[0].Rows.Select((row) => row.Key));
+        Assert.Equal(["item:13", "item:7", "item:10"], view.Groups[1].Rows.Select((row) => row.Key));
+        Assert.Equal([null, 2, null, null, null], view.Groups.Select((group) => group.Yours));
         Assert.Equal(7, view.Snooze.Count);
         Assert.Equal(new SnoozeChoice("Indefinitely", "", null), view.Snooze[^1]);
         Assert.Equal(1791093600000, view.Snooze[0].Until);
@@ -19,19 +22,21 @@ public sealed class DockViewTests
     [Fact]
     public void Parse_RecordedMessage_ReadsEveryRowField()
     {
-        var blocked = Fixtures.Row("item:7");
+        var finished = Fixtures.Row("item:7");
 
-        Assert.Equal("Issue <7>", blocked.Title);
-        Assert.Equal(new TimeText("0m", "In this status since 2026-10-03 12:00 UTC"), blocked.Time);
-        Assert.Equal(("dev:develop", "gh 107", "github"), (blocked.Playbook, blocked.Ticket, blocked.Source));
-        Assert.Equal(new RowMark("blocked", "\uead1", "Blocked"), blocked.Mark);
-        Assert.Equal([new DockText("The session finished its turn.", null, Tone.Warning)], blocked.Details);
-        Assert.Equal(Tone.Warning, blocked.Stripe);
-        Assert.Equal(("gh-107-58c609", "Issue <7>"), (blocked.Window!.Name, blocked.Window.Title));
-        Assert.Equal(["D:/git/widgets/.worktrees/107-fix"], blocked.Window.Folders);
-        Assert.Equal(new DockOpen("session", null, "aaaa1111-native", "D:/git/widgets/.worktrees/107-fix", null), blocked.Open);
-        Assert.Equal(["Triage again", "Mark done", "Snooze"], blocked.Controls.Select((control) => control.Label));
-        Assert.Equal("{\"type\":\"retriage\",\"workItemId\":7}", blocked.Controls[0].Action.ToJsonString());
+        Assert.Equal("Issue <7>", finished.Title);
+        Assert.Equal(new TimeText("3h", "Ready since 2026-10-03 09:00 UTC"), finished.Time);
+        Assert.Equal(("dev:develop", "gh 107", "github"), (finished.Playbook, finished.Ticket, finished.Source));
+        Assert.Equal(new RowMark("finished", "\uea70", "Review the finished turn"), finished.Mark);
+        Assert.Empty(finished.Details);
+        Assert.Equal((Tone.Turn, "operator", false, true), (finished.Stripe, finished.Turn, finished.Dim, finished.Movable));
+        Assert.Equal(("gh-107-58c609", "Issue <7>"), (finished.Window!.Name, finished.Window.Title));
+        Assert.Equal(["D:/git/widgets/.worktrees/107-fix"], finished.Window.Folders);
+        Assert.Equal(new DockOpen("session", null, "aaaa1111-native", "D:/git/widgets/.worktrees/107-fix", null), finished.Open);
+        Assert.Equal(["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down"], finished.Controls.Select((control) => control.Label));
+        Assert.Equal("{\"type\":\"retriage\",\"workItemId\":7}", finished.Controls[0].Action.ToJsonString());
+        Assert.Equal("{\"type\":\"move\",\"workItemId\":7,\"after\":10}", finished.Controls[5].Action.ToJsonString());
+        Assert.Equal(7, finished.WorkItemId);
     }
 
     [Fact]
@@ -68,10 +73,49 @@ public sealed class DockViewTests
         Assert.Equal("Approve", approval.Main);
         Assert.Equal([new DockPaste("Customer reply", "D:/drafts/reply.md")], approval.Pastes);
         Assert.Equal(["History", "Open report"], approval.Commands.Select((command) => command.Label));
-        Assert.Equal("Issue <7> · gh 107 · PR #19002 · dev:develop · Needs you · 107-fix", Fixtures.Row("item:7").Search);
+        Assert.Equal("Issue <7> · gh 107 · PR #19002 · dev:develop · Ready for review · 107-fix", Fixtures.Row("item:7").Search);
         Assert.Equal([new DockLink("PR #19002", "https://github.com/o/r/pull/19002", "pr", "19002", "\uEA64")], Fixtures.Row("item:7").Links);
         Assert.Equal(2, Fixtures.Row("item:7").Returned);
         Assert.Equal(@"C:\Users\op\.switchboard\windows\gh-107-58c609.code-workspace", Fixtures.Row("item:7").Window!.File);
+    }
+
+    [Fact]
+    public void Parse_RecordedMessage_ReadsStripesTurnsDimAndMovable()
+    {
+        Assert.Equal((Tone.Error, "operator", false, false), Stripe("item:14"));
+        Assert.Equal((Tone.Warning, "operator", false, false), Stripe("item:8"));
+        Assert.Equal((Tone.Agent, "agent", true, true), Stripe("item:13"));
+        Assert.Equal((Tone.Turn, "operator", false, true), Stripe("item:10"));
+        Assert.Equal((null, null, false, false), Stripe("item:9"));
+        Assert.Equal((null, null, false, false), Stripe("ticket:4"));
+        Assert.Null(Fixtures.Row("ticket:4").WorkItemId);
+
+        static (Tone?, string?, bool, bool) Stripe(string key) => Fixtures.Row(key) is var row ? (row.Stripe, row.Turn, row.Dim, row.Movable) : default;
+    }
+
+    [Fact]
+    public void Parse_ViewFromAnOlderHub_DefaultsTheNewFields()
+    {
+        var json = JsonNode.Parse(Fixtures.DockJson)!.AsObject();
+
+        foreach (var group in json["groups"]!.AsArray())
+        {
+            group!.AsObject().Remove("yours");
+
+            foreach (var row in group["rows"]!.AsArray())
+            {
+                row!.AsObject().Remove("turn");
+                row.AsObject().Remove("dim");
+                row.AsObject().Remove("movable");
+            }
+        }
+
+        var view = DockView.Parse(json.ToJsonString());
+        var rows = view.Groups.SelectMany((group) => group.Rows).ToList();
+
+        Assert.Equal(9, rows.Count);
+        Assert.All(view.Groups, (group) => Assert.Null(group.Yours));
+        Assert.All(rows, (row) => Assert.Equal((null, false, false), (row.Turn, row.Dim, row.Movable)));
     }
 
     [Fact]

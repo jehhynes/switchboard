@@ -36,6 +36,15 @@ public sealed partial class MainWindow : Window
     // The click that is running, which a click on another row replaces.
     (string Key, CancellationTokenSource Cancel)? running;
     bool moving;
+    // A press on a movable row, which becomes a drag of that row once the pointer moves more than DragStart vertically (PRD R73).
+    (string Key, Point Start, IPointer Pointer)? press;
+    // The key of the row being dragged; rows are rebuilt on each hub update, so the row is found again by its key.
+    string? dragging;
+    // Where the pointer last was during the drag, in window coordinates, which stay put while the list scrolls or moves under a still pointer.
+    Point dragAt;
+    // A drag ended on this press, so the row's tap does not run its click.
+    bool rowDragged;
+    const double DragStart = 4;
 
     /// <summary>Raised with the monitor the dock docked on, where item windows are placed.</summary>
     public event Action<nint>? DockedOn;
@@ -60,6 +69,15 @@ public sealed partial class MainWindow : Window
         Width = model.Settings.Width;
         AddHandler(PointerMovedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerPressedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
+        // A pressed button handles the press, so it starts no drag.
+        GroupList.AddHandler(PointerPressedEvent, OnListPressed);
+        GroupList.AddHandler(PointerMovedEvent, OnListMoved, handledEventsToo: true);
+        GroupList.AddHandler(PointerReleasedEvent, OnListReleased, handledEventsToo: true);
+        GroupList.AddHandler(PointerCaptureLostEvent, OnListCaptureLost);
+        // A hub update, a note above the list or a scroll moves the rows under a still pointer, so the drop line is placed again after each layout.
+        LayoutUpdated += (_, _) => RedrawDrop();
+        RowScroller.ScrollChanged += (_, _) => RedrawDrop();
 
         if (stream is not null)
         {
@@ -205,9 +223,194 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        ScrollTo(key);
+    }
+
+    /// <summary>Scrolls the row into view once a group or band it opened has drawn its rows.</summary>
+    void ScrollTo(string key) =>
         Dispatcher.UIThread.Post(
             () => this.GetVisualDescendants().OfType<Border>().FirstOrDefault((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel row && row.Key == key)?.BringIntoView(),
             DispatcherPriority.Loaded);
+
+    async void OnKey(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && dragging is not null)
+        {
+            e.Handled = true;
+            CancelDrag();
+        }
+        else if (e.Key == Key.F8 && (e.KeyModifiers & ~KeyModifiers.Shift) == KeyModifiers.None)
+        {
+            e.Handled = true;
+            await NextTurn(backwards: e.KeyModifiers == KeyModifiers.Shift);
+        }
+        else if (e.KeyModifiers == KeyModifiers.Alt && e.Key is Key.Up or Key.Down && model.Selected is { } key && model.Row(key) is { Row.Movable: true } row
+            && row.Row.Controls.FirstOrDefault((control) => control.Label == (e.Key == Key.Up ? "Move up" : "Move down")) is { } move)
+        {
+            e.Handled = true;
+            await Act(move.Action);
+        }
+    }
+
+    /// <summary>F8: the next row on the operator's turn, selected, shown and clicked as a tap would (PRD R73); Shift+F8 the previous.</summary>
+    async Task NextTurn(bool backwards)
+    {
+        if (model.SelectNextTurn(backwards) is not { } row)
+        {
+            return;
+        }
+
+        ScrollTo(row.Key);
+        await Open(row);
+    }
+
+    void OnListPressed(object? sender, PointerPressedEventArgs e)
+    {
+        rowDragged = false;
+        press = null;
+
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
+            && (e.Source as Visual)?.GetSelfAndVisualAncestors().OfType<Border>().FirstOrDefault((border) => border.Classes.Contains("row")) is { DataContext: RowViewModel { Row.Movable: true } row })
+        {
+            press = (row.Key, e.GetPosition(GroupList), e.Pointer);
+        }
+    }
+
+    void OnListMoved(object? sender, PointerEventArgs e)
+    {
+        if (press is not { } pressed)
+        {
+            return;
+        }
+
+        var at = e.GetPosition(GroupList);
+
+        if (dragging is null)
+        {
+            if (Math.Abs(at.Y - pressed.Start.Y) <= DragStart)
+            {
+                return;
+            }
+
+            if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            {
+                press = null;
+                return;
+            }
+
+            dragging = pressed.Key;
+            rowDragged = true;
+            e.Pointer.Capture(GroupList);
+        }
+
+        dragAt = e.GetPosition(this);
+        ShowDrop(DropAt(at));
+    }
+
+    async void OnListReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (dragging is null)
+        {
+            press = null;
+            return;
+        }
+
+        var drop = DropAt(e.GetPosition(GroupList));
+
+        CancelDrag();
+
+        if (drop is { } move)
+        {
+            await Act(new JsonObject { ["type"] = "move", ["workItemId"] = move.WorkItemId, ["after"] = move.After });
+        }
+    }
+
+    /// <summary>Another window took the pointer, so no release comes: the drag ends without a move.</summary>
+    void OnListCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (dragging is not null)
+        {
+            CancelDrag();
+        }
+    }
+
+    void RedrawDrop()
+    {
+        if (dragging is not null && this.TranslatePoint(dragAt, GroupList) is { } at)
+        {
+            ShowDrop(DropAt(at));
+        }
+    }
+
+    void CancelDrag()
+    {
+        var held = press?.Pointer;
+
+        dragging = null;
+        press = null;
+        ShowDrop(null);
+        held?.Capture(null);
+    }
+
+    /// <summary>
+    /// The move a drop at <paramref name="at"/>, in the group list's coordinates, makes: the dragged row's ID, the ID of the Ready for review row
+    /// above the drop point or null for the top, and the row edge the drop line marks. Null outside Ready for review's rows or the list's visible
+    /// part, at the row's own place, or when the dragged row is no longer a movable Ready for review row.
+    /// </summary>
+    (int WorkItemId, int? After, Border Edge, bool Below)? DropAt(Point at)
+    {
+        if (dragging is not { } key || model.Groups.FirstOrDefault((group) => group.Key == "review") is not { ShowsRows: true } review)
+        {
+            return null;
+        }
+
+        var borders = GroupList.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("row") && border.IsEffectivelyVisible).ToList();
+        var rows = review.Rows.Select((row) => (Row: row.Row, Border: borders.FirstOrDefault((border) => ReferenceEquals(border.DataContext, row)))).Where((entry) => entry.Border is not null).ToList();
+        var from = rows.FindIndex((entry) => entry.Row.Key == key);
+
+        if (from < 0 || !rows[from].Row.Movable || rows[from].Row.WorkItemId is not { } id)
+        {
+            return null;
+        }
+
+        double Top(int index) => rows[index].Border!.TranslatePoint(default, GroupList)!.Value.Y;
+
+        var left = rows[0].Border!.TranslatePoint(default, GroupList)!.Value.X;
+
+        if (at.Y < Top(0) || at.Y > Top(rows.Count - 1) + rows[^1].Border!.Bounds.Height || at.X < left || at.X > left + rows[0].Border!.Bounds.Width)
+        {
+            return null;
+        }
+
+        // Under capture the pointer can be past the scrolled-out part of the list or outside the window.
+        if (GroupList.TranslatePoint(at, RowScroller) is not { } seen || !new Rect(RowScroller.Bounds.Size).Contains(seen))
+        {
+            return null;
+        }
+
+        var to = Enumerable.Range(0, rows.Count).Count((index) => Top(index) + (rows[index].Border!.Bounds.Height / 2) < at.Y);
+
+        if (to == from || to == from + 1)
+        {
+            return null;
+        }
+
+        return to == rows.Count ? (id, rows[^1].Row.WorkItemId, rows[^1].Border!, true) : (id, to == 0 ? null : rows[to - 1].Row.WorkItemId, rows[to].Border!, false);
+    }
+
+    /// <summary>Draws the drop line on the top edge of the row below the drop point, or the bottom edge of the last row; null hides it.</summary>
+    void ShowDrop((int WorkItemId, int? After, Border Edge, bool Below)? drop)
+    {
+        if (drop is not { } shown || shown.Edge.TranslatePoint(new Point(0, shown.Below ? shown.Edge.Bounds.Height : 0), DropLayer) is not { } corner)
+        {
+            DropLine.IsVisible = false;
+            return;
+        }
+
+        Canvas.SetLeft(DropLine, corner.X);
+        Canvas.SetTop(DropLine, corner.Y - 1);
+        DropLine.Width = shown.Edge.Bounds.Width;
+        DropLine.IsVisible = true;
     }
 
     /// <summary>Closes the dock, which removes its strip, so other windows take the full screen again.</summary>
@@ -241,8 +444,8 @@ public sealed partial class MainWindow : Window
 
     async void OnRowTapped(object? sender, TappedEventArgs e)
     {
-        // A button on the row runs its own control, not the row's click.
-        if ((sender as Control)?.DataContext is not RowViewModel row || (e.Source as Visual)?.FindAncestorOfType<Button>(includeSelf: true) is not null)
+        // A button on the row runs its own control, not the row's click, and a drag of the row only moves it.
+        if ((sender as Control)?.DataContext is not RowViewModel row || (e.Source as Visual)?.FindAncestorOfType<Button>(includeSelf: true) is not null || rowDragged)
         {
             return;
         }

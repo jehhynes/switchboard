@@ -142,6 +142,11 @@ describe('parseReport and reportBody', () => {
     expect(parseAction({ type: 'snooze', ticketId: 1, until: 'tomorrow' })).toBeNull();
     expect(parseAction({ type: 'icebox', ticketId: 1 })).toBeNull();
     expect(parseAction({ type: 'restore', ticketId: 1 })).toEqual({ type: 'restore', ticketId: 1 });
+    expect(parseAction({ type: 'move', workItemId: 2, after: 5, sessionId: 's1' })).toEqual({ type: 'move', workItemId: 2, after: 5 });
+    expect(parseAction({ type: 'move', workItemId: 2, after: null })).toEqual({ type: 'move', workItemId: 2, after: null });
+    expect(parseAction({ type: 'move', workItemId: 2 })).toBeNull();
+    expect(parseAction({ type: 'move', workItemId: 2, after: '5' })).toBeNull();
+    expect(parseAction({ type: 'reset-position', workItemId: 2 })).toEqual({ type: 'reset-position', workItemId: 2 });
     expect(parseReport({ kind: 'stage', stage: 'x' })).toBeNull();
     expect(parseReport('text')).toBeNull();
     expect(parseAction({ type: 'approve', workItemId: 1 })).toEqual({ type: 'approve', workItemId: 1 });

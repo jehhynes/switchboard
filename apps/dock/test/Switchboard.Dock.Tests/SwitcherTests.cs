@@ -106,7 +106,7 @@ public sealed class SwitcherTests
     public async Task Click_QuestionRow_StopsTheSessionWaitsForItToEndThenOpensIt()
     {
         var question = Fixtures.Row("item:8");
-        var stopped = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, [question with { Open = question.Open! with { Type = "session", WorkItemId = null } }])] };
+        var stopped = Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [question with { Open = question.Open! with { Type = "session", WorkItemId = null } }])] };
 
         windows.Open["gh-108-widgets-655280"] = (44, 0);
         hub.ActReplies.Enqueue(null);
@@ -186,7 +186,7 @@ public sealed class SwitcherTests
         using var cancel = new CancellationTokenSource();
 
         hub.ActReplies.Enqueue(null);
-        hub.Ended = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
+        hub.Ended = Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
         hub.OnUntil = cancel.Cancel;
 
         Assert.Null(await Switcher().Click(question, cancel.Token));
@@ -203,7 +203,7 @@ public sealed class SwitcherTests
 
         windows.Open["gh-108-widgets-655280"] = (44, 0);
         hub.ActReplies.Enqueue(null);
-        hub.Ended = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
+        hub.Ended = Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
         hub.HoldUntil = new TaskCompletionSource();
 
         var first = switcher.Click(question, replaced.Token);
@@ -232,7 +232,7 @@ public sealed class SwitcherTests
 
         hub.ActReplies.Enqueue("Switchboard is not running.");
         hub.ActReplies.Enqueue(null);
-        hub.Ended = Fixtures.View with { Groups = [new DockGroup("needs", "Needs you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
+        hub.Ended = Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [question with { Open = question.Open! with { Type = "session" } }])] };
         windows.Open["gh-108-widgets-655280"] = (44, 0);
 
         Assert.Equal("Switchboard is not running.", await switcher.Click(question, TestContext.Current.CancellationToken));

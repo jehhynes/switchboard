@@ -1,5 +1,5 @@
 /** Work item statuses (PRD R34). */
-export type WorkItemStatus = 'triaging' | 'unstarted' | 'queued' | 'setup' | 'running' | 'awaiting-approval' | 'blocked' | 'failed' | 'done';
+export type WorkItemStatus = 'triaging' | 'unstarted' | 'queued' | 'setup' | 'running' | 'awaiting-approval' | 'finished' | 'blocked' | 'failed' | 'done';
 
 export type DoneReason = 'session' | 'operator' | 'unassigned';
 
@@ -79,10 +79,14 @@ export interface WorkItem {
   /** A resumed session runs on an approval report; the run ending without a report returns the work item to `awaiting-approval` (PRD R23). */
   approvalHeld: boolean;
   createdAt: number;
-  /** When the status last changed; Needs you counts from it (PRD R27). */
+  /** When the status last changed; Blocked on you counts from it (PRD R27). */
   statusAt: number;
-  /** When the work item last entered a working status from another; Working counts from it (PRD R27). */
+  /** When the work item last entered a working status from another; In progress counts from it (PRD R27). */
   runStartedAt: number | null;
+  /** When the work item first became `awaiting-approval` or `finished`; Ready for review sorts and counts from it (PRD R27). */
+  readyAt: number | null;
+  /** The operator's position in Ready for review, which replaces `readyAt` in the sort (PRD R73). */
+  orderAt: number | null;
   /** The ticket's scopeAt, kept when the work item is done, so Done shows the time from entering scope to done (PRD R27). */
   scopeAt: number | null;
   doneAt: number | null;

@@ -1,4 +1,4 @@
-import { activeSession, groupOf, triageLabel } from '@switchboard/core/group';
+import { activeSession, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf } from '@switchboard/core/group';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
@@ -25,10 +25,14 @@ export function age(since: number, now: number): string {
 
 /** Each control icon's codicon glyph in codicon.ttf, which the dock draws; `symbol-file` is Open report's. */
 export const CONTROL_GLYPHS = {
+  'arrow-circle-up': '\u{ebff}',
+  'arrow-down': '\u{ea9a}',
+  'arrow-up': '\u{eaa1}',
   check: '\u{eab2}',
   clockface: '\u{ec75}',
   'comment-discussion': '\u{eac7}',
   copy: '\u{ebcc}',
+  discard: '\u{eae2}',
   'debug-restart': '\u{ead2}',
   'debug-stop': '\u{ead7}',
   'diff-multiple': '\u{ec23}',
@@ -49,11 +53,11 @@ export interface Control {
   message: Record<string, unknown>;
 }
 
-/** The one control a Needs you or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
+/** The one control a Blocked on you, Ready for review or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
 export function mainControl(item: WorkItemView): Control | null {
   const group = groupOf(item);
 
-  if (group !== 'needs' && group !== 'unstarted') {
+  if (group === 'progress' || group === 'done') {
     return null;
   }
 
@@ -124,6 +128,35 @@ export function controlsOf(item: WorkItemView): Control[] {
   }
 
   return [...controls, historyControl(item.ticket)];
+}
+
+/**
+ * Move to top, Move up and Move down for a Ready for review row, from its neighbours in `order`, the group's IDs in list order, and
+ * Reset position when the operator has moved it (PRD R73).
+ */
+export function moveControls(item: WorkItemView, order: number[]): Control[] {
+  const index = order.indexOf(item.id);
+  const move = (after: number | null) => ({ type: 'action', action: { type: 'move', workItemId: item.id, after } });
+  const controls: Control[] = [];
+
+  if (index < 0) {
+    return controls;
+  }
+
+  if (index > 0) {
+    controls.push({ label: 'Move to top', icon: 'arrow-circle-up', message: move(null) });
+    controls.push({ label: 'Move up', icon: 'arrow-up', message: move(index > 1 ? order[index - 2]! : null) });
+  }
+
+  if (index < order.length - 1) {
+    controls.push({ label: 'Move down', icon: 'arrow-down', message: move(order[index + 1]!) });
+  }
+
+  if (item.orderAt !== null) {
+    controls.push({ label: 'Reset position', icon: 'discard', message: { type: 'action', action: { type: 'reset-position', workItemId: item.id } } });
+  }
+
+  return controls;
 }
 
 /**
@@ -223,8 +256,9 @@ export interface Clock {
 }
 
 /**
- * The row's time, by group (PRD R27): Needs you since the work item entered its status or its session began to wait, Working since the run
- * started, and Unstarted, Snoozed and Done since the ticket entered the source's scope, stopping at done. A Done row shows its done time instead, with this in the tooltip.
+ * The row's time, by group (PRD R27): Blocked on you since the work item entered its status or its session began to wait, Ready for review
+ * since it became ready, In progress since the run started, and Unstarted, Snoozed and Done since the ticket entered the source's scope,
+ * stopping at done. A Done row shows its done time instead, with this in the tooltip.
  */
 export function clockOf(item: WorkItemView): Clock {
   const group = groupOf(item);
@@ -239,10 +273,14 @@ export function clockOf(item: WorkItemView): Clock {
     return { since: item.ticket.scopeAt ?? item.createdAt, label: 'In scope since' };
   }
 
-  if (group === 'needs') {
-    const byStatus = item.status === 'awaiting-approval' || item.status === 'blocked' || item.status === 'failed';
+  if (group === 'blocked') {
+    const byStatus = item.status === 'blocked' || item.status === 'failed';
 
     return !byStatus && session?.state === 'waiting' ? { since: session.stateAt, label: 'Waiting since' } : { since: item.statusAt, label: 'In this status since' };
+  }
+
+  if (group === 'review') {
+    return { since: item.readyAt!, label: 'Ready since' };
   }
 
   return { since: item.runStartedAt ?? item.statusAt, label: 'Working since' };
@@ -365,7 +403,7 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
   return item.waits.map((wait) => {
     switch (wait.kind) {
       case 'slot':
-        return { text: `Waits for a slot · ${wait.used}/${wait.limit} in use`, title: `${wait.used} sessions are in Working; sessions.concurrency is ${wait.limit}.` };
+        return { text: `Waits for a slot · ${wait.used}/${wait.limit} in use`, title: `${wait.used} sessions are running; sessions.concurrency is ${wait.limit}.` };
       case 'session': {
         const owner = wait.ownItem ? 'its session' : `the ${wait.playbook ?? 'ad-hoc'} session`;
 
@@ -377,30 +415,35 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
   });
 }
 
-/** Outside Snoozed, a failed row takes the error stripe, and a blocked row or one with a question the warning stripe (PRD R27). */
-export function stripeOf(item: WorkItemView): 'error' | 'warning' | null {
-  if (item.ticket.snoozed) {
+/**
+ * The left stripe of an unsnoozed row in Blocked on you, Ready for review or In progress (PRD R27): `error` when failed, `warning` when
+ * blocked or asking a question, `turn` when work waits for the operator's review or approval, `agent` while the agent works; null elsewhere.
+ */
+export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | 'agent' | null {
+  const turn = turnOf(item);
+
+  if (item.ticket.snoozed || turn === null) {
     return null;
   }
 
-  if (item.status === 'failed') {
-    return 'error';
+  if (groupOf(item) === 'blocked') {
+    return item.status === 'failed' ? 'error' : 'warning';
   }
 
-  return item.status === 'blocked' || (groupOf(item) === 'needs' && activeSession(item)?.state === 'waiting') ? 'warning' : null;
+  return turn === 'operator' ? 'turn' : 'agent';
 }
 
 /** How long a running session goes without a stage report before the dock colours the stage age (PRD R58). */
 export const STALE_STAGE_MS = 20 * 60_000;
 
 /**
- * When a Working row's running session last reported a stage, or began running if it has reported none since: null unless the row is
+ * When a running work item's session last reported a stage, or began running if it has reported none since: null unless the row is
  * stale (PRD R58). A stage from before a new session or a wait does not count against the current run.
  */
 export function staleSince(item: WorkItemView, now: number): number | null {
   const session = activeSession(item);
 
-  if (groupOf(item) !== 'working' || item.ticket.snoozed || session?.state !== 'running') {
+  if (!holdsSlot(item) || item.ticket.snoozed || session?.state !== 'running') {
     return null;
   }
 
@@ -445,19 +488,29 @@ function snoozedRows(items: WorkItemView[]): WorkItemView[] {
 
 export type RowGroup = Group | 'snoozed';
 
-export const GROUP_TITLES: Record<RowGroup, string> = { needs: 'Needs you', working: 'Working', unstarted: 'Unstarted', done: 'Done', snoozed: 'Snoozed' };
+export const GROUP_TITLES: Record<RowGroup, string> = {
+  blocked: 'Blocked on you',
+  review: 'Ready for review',
+  progress: 'In progress',
+  unstarted: 'Unstarted',
+  done: 'Done',
+  snoozed: 'Snoozed',
+};
 
-/** What an empty group says; Done and Snoozed say nothing. */
-export const GROUP_EMPTY: Partial<Record<RowGroup, string>> = { needs: 'Nothing needs you.', working: 'Nothing is running.', unstarted: 'Nothing waits to be started.' };
+/** What an empty group says; Blocked on you is hidden when empty, and Done and Snoozed say nothing. */
+export const GROUP_EMPTY: Partial<Record<RowGroup, string>> = { review: 'Nothing is ready for review.', progress: 'Nothing is in progress.', unstarted: 'Nothing waits to be started.' };
 
 /** A row's `data-row` key: `item:<work item ID>` or `ticket:<pool ticket ID>`. */
 export function rowKeyOf(entry: WorkItemView | PoolView): string {
   return 'status' in entry ? `item:${entry.id}` : `ticket:${entry.ticket.id}`;
 }
 
-/** The rows the dock shows, by group, each in list order (PRD R27, R49). */
+/**
+ * The rows the dock shows, by group, each in list order (PRD R27, R49): Blocked on you oldest wait first, Ready for review by the
+ * operator's position or readyAt, In progress oldest run first.
+ */
 export function listGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView | PoolView)[]> & { done: WorkItemView[] } {
-  const groups: Record<Group, WorkItemView[]> = { needs: [], working: [], unstarted: [], done: [] };
+  const groups: Record<Group, WorkItemView[]> = { blocked: [], review: [], progress: [], unstarted: [], done: [] };
   const snoozedPool = snapshot.pool.filter((entry) => entry.ticket.snoozed);
   // A pool row stands for its ticket, whose work items are all done.
   const pooledTickets = new Set(snoozedPool.map((entry) => entry.ticket.id));
@@ -471,6 +524,9 @@ export function listGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView |
 
   return {
     ...groups,
+    blocked: groups.blocked.sort((a, b) => clockOf(a).since - clockOf(b).since || a.id - b.id),
+    review: groups.review.sort(reviewOrder),
+    progress: groups.progress.sort((a, b) => clockOf(a).since - clockOf(b).since || a.id - b.id),
     done: groups.done.sort((a, b) => (b.doneAt ?? b.createdAt) - (a.doneAt ?? a.createdAt) || b.id - a.id),
     unstarted: unstartedOrder(groups.unstarted, snapshot.pool.filter((entry) => !entry.ticket.snoozed)),
     snoozed: [...snoozedItems, ...snoozedPool],

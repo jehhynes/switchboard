@@ -213,8 +213,8 @@ describe('the hub process', () => {
 });
 
 // After the hub process tests, which expect a store with no work items. The decisions are tested in test/toast.test.ts.
-describe('the Needs you toast (PRD R65)', () => {
-  // An ad-hoc prompt for a folder that does not exist fails at spawn, so no Claude process starts and the item enters Needs you.
+describe("the notification of work on the operator's turn (PRD R65)", () => {
+  // An ad-hoc prompt for a folder that does not exist fails at spawn, so no Claude process starts and the item enters Blocked on you.
   const missingRepo = join(process.env.SWITCHBOARD_TEST_HOME, 'no-such-repo');
   const originalMessage = vscode.window.showInformationMessage;
   const originalState = Object.getOwnPropertyDescriptor(vscode.window, 'state');

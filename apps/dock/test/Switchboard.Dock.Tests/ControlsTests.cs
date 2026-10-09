@@ -159,19 +159,19 @@ public sealed class ControlsTests
 
         window.FindControl<TextBox>("SearchBox")!.Text = "gh 10";
         Dispatcher.UIThread.RunJobs();
-        Assert.Equal(["Issue <7>", "Issue <8>", "Issue <10>", "Issue <9>", "Issue <4>"], VisibleTitles(window));
+        Assert.Equal(["Issue <8>", "Issue <7>", "Issue <10>", "Issue <9>", "Issue <4>"], VisibleTitles(window));
 
         model.Filter = "107-fix";
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(["Issue <7>"], VisibleTitles(window));
-        Assert.Equal(["needs"], model.Groups.Where((group) => group.IsShown).Select((group) => group.Key));
-        Assert.Equal("1", model.Groups[0].Count);
+        Assert.Equal(["review"], model.Groups.Where((group) => group.IsShown).Select((group) => group.Key));
+        Assert.Equal("1", model.Groups[1].Count);
 
         window.FindControl<TextBox>("SearchBox")!.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
         Dispatcher.UIThread.RunJobs();
         Assert.Equal("", model.Filter);
         Assert.False(window.FindControl<TextBox>("SearchBox")!.IsVisible);
-        Assert.Equal(5, VisibleTitles(window).Count);
+        Assert.Equal(7, VisibleTitles(window).Count);
     }
 
     [AvaloniaFact]
@@ -191,7 +191,7 @@ public sealed class ControlsTests
         Click(window.FindControl<Button>("SearchButton")!);
         Assert.False(box.IsVisible);
         Assert.Equal("", model.Filter);
-        Assert.Equal(5, VisibleTitles(window).Count);
+        Assert.Equal(7, VisibleTitles(window).Count);
     }
 
     [AvaloniaFact]
@@ -307,10 +307,10 @@ public sealed class ControlsTests
         var headers = (DockRow row) => window.MenuOf(row).Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList();
 
         Assert.Equal(["Open in Claude", "Stop", "Mark done", "Snooze", "History", "", "Open ticket"], headers(Fixtures.Row("item:8")));
-        Assert.Equal(["Approve", "Triage again", "Mark done", "Snooze", "Copy Customer reply", "History", "Open report", "", "Open ticket"], headers(Fixtures.Row("item:10")));
+        Assert.Equal(["Approve", "Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Copy Customer reply", "History", "Open report", "", "Open ticket"], headers(Fixtures.Row("item:10")));
 
         var two = Fixtures.Row("item:10") with { Pastes = [new DockPaste("Customer reply", "a.md"), new DockPaste("Private note", "b.md")] };
-        var copy = (MenuItem)window.MenuOf(two)[4];
+        var copy = (MenuItem)window.MenuOf(two)[6];
 
         Assert.Equal("Copy", copy.Header);
         Assert.Equal(["Customer reply", "Private note"], copy.ItemsSource!.Cast<MenuItem>().Select((item) => (string)item.Header!));

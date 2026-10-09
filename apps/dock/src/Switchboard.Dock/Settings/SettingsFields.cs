@@ -39,7 +39,7 @@ public static partial class SettingsFields
 
     static readonly (string Kind, string Label, string Help)[] ReportFields =
     [
-        ("done", "Session can report done", "The session closes the work item. Off, its turn ends in Needs you for you to review."),
+        ("done", "Session can report done", "The session closes the work item. Off, its turn ends in Ready for review."),
         ("approval", "Session can report approval", "The session can leave a prompt for you to approve, such as one that posts its draft."),
         ("worktree", "Session can report a worktree", "The session can link a worktree it creates. Branch names link worktrees without it."),
         ("playbook", "Session can change the playbook", "The session can hand its work item to another playbook in the namespace, whose skill it runs."),

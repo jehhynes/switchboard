@@ -479,7 +479,7 @@ describe('sessions', () => {
     expect(h.report(other.session, { kind: 'playbook', playbook: 'dev:develop' }).refused).toBe("This session's prompt does not offer the playbook report.");
   });
 
-  it('refuses a report the session was not offered, and ends a session that cannot finish in Needs you without a done fault', () => {
+  it('refuses a report the session was not offered, and ends a session that cannot report done or approval as finished, for review', () => {
     const h = new Harness();
     const a = running(h, '1');
 
@@ -493,19 +493,37 @@ describe('sessions', () => {
     h.act({ type: 'marker', sessionId: a.session, state: 'idle', detail: null });
     expect(h.item(a.item)).toMatchObject({ status: 'blocked', error: 'The turn ended without an approval report.' });
 
-    // A playbook with no reports: its turn ending is the normal finish.
+    expect(h.item(a.item).readyAt).toBeNull();
+
+    // A playbook with no reports: its turn ending is the normal finish, ready for review.
     const read = () => new Harness({ playbooks: playbooks(undefined, { 'dev:read': '---\ndescription: Read it\n---\nRead {{ticket.sourceKey}}.' }) });
     const g = read();
     const b = running(g, '2', 'dev:read');
 
     expect(g.store.session(b.session)?.reports).toEqual(['stage', 'link', 'task']);
+    g.now += 1000;
     g.act({ type: 'marker', sessionId: b.session, state: 'idle', detail: null });
-    expect(g.item(b.item)).toMatchObject({ status: 'blocked', error: 'The session finished its turn.' });
+    expect(g.item(b.item)).toMatchObject({ status: 'finished', error: null, readyAt: g.now });
+
+    // Resumed in VS Code, it runs again and finishes again, keeping when it first became ready.
+    const readyAt = g.now;
+    g.now += 1000;
+    g.act({ type: 'marker', sessionId: b.session, state: 'running', detail: null });
+    expect(g.item(b.item)).toMatchObject({ status: 'running', readyAt });
+    g.now += 1000;
+    g.act({ type: 'marker', sessionId: b.session, state: 'idle', detail: null });
+    expect(g.item(b.item)).toMatchObject({ status: 'finished', readyAt });
 
     const k = read();
     const c = running(k, '3', 'dev:read');
     k.act({ type: 'roster', sessions: [] });
-    expect(k.item(c.item)).toMatchObject({ status: 'blocked', error: 'The session ended.' });
+    expect(k.item(c.item)).toMatchObject({ status: 'finished', error: null, readyAt: k.now });
+
+    // A failed turn is a block, not a finish.
+    const f = read();
+    const d = running(f, '4', 'dev:read');
+    f.act({ type: 'marker', sessionId: d.session, state: 'failed', detail: 'overloaded' });
+    expect(f.item(d.item)).toMatchObject({ status: 'blocked', error: 'The turn failed: overloaded.', readyAt: null });
   });
 
   it('refuses a report for an unknown session', () => {
@@ -748,7 +766,7 @@ describe('limits and the one-session-in-a-turn rule', () => {
     expect(h.store.session(second)!.state).not.toBe('ended');
   });
 
-  it('frees the slot when an approval report moves the work item to Needs you while its session stays live', () => {
+  it('frees the slot when an approval report moves the work item to Ready for review while its session stays live', () => {
     const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
     const triages = h.poll(issue('1'), issue('2'));
     h.triaged(triages[0], 'dev:question');

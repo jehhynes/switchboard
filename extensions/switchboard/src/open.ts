@@ -171,7 +171,7 @@ function rowOf(snapshot: Snapshot, key: string, home: string): DockRow | null {
 }
 
 /**
- * Runs a row's click as the dock does (PRD R71), for a Needs you notification's Open and Open in Switchboard (PRD R65, R69): Open in Claude's
+ * Runs a row's click as the dock does (PRD R71), for a notification's Open and Open in Switchboard (PRD R65, R69): Open in Claude's
  * stop first, then the session left for the item window, which VS Code brings to the front or opens. VS Code may bring its own window forward,
  * because it holds the foreground, where Windows would refuse the dock (mechanics M26). A row with no item window opens its ticket.
  */

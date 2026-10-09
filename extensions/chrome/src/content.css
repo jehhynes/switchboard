@@ -70,7 +70,7 @@
   color: var(--fgColor-muted, #59636e);
 }
 
-.switchboard-pill[data-switchboard-group="needs"] {
+.switchboard-pill[data-switchboard-yours] {
   border-color: var(--borderColor-attention-emphasis, #9a6700);
   background: var(--bgColor-attention-muted, #fff8c5);
   color: var(--fgColor-attention, #9a6700);

@@ -30,6 +30,8 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     createdAt: NOW,
     statusAt: NOW,
     runStartedAt: NOW,
+    readyAt: patch.status === 'awaiting-approval' || patch.status === 'finished' ? NOW : null,
+    orderAt: null,
     scopeAt: null,
     doneAt: null,
     doneReason: null,

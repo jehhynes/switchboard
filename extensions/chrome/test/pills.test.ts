@@ -21,8 +21,8 @@ const pills = () =>
     title: pill.title,
   }));
 
-const needs: Card = { url: 'https://github.com/GitHub/Roadmap/issues/1035', playbook: 'dev:review-pr', group: 'needs', snoozed: false };
-const working: Card = { url: 'https://github.com/github/roadmap/issues/1090', playbook: 'dev:new-dev', group: 'working', snoozed: false };
+const needs: Card = { url: 'https://github.com/GitHub/Roadmap/issues/1035', playbook: 'dev:review-pr', group: 'blocked', snoozed: false };
+const working: Card = { url: 'https://github.com/github/roadmap/issues/1090', playbook: 'dev:new-dev', group: 'progress', snoozed: false };
 
 describe('readCards', () => {
   const body = JSON.stringify({ cards: [needs, { url: 'https://desk.example.test/1', playbook: null, group: 'unstarted', snoozed: true }] });
@@ -69,24 +69,30 @@ describe('applyPills', () => {
     document.body.innerHTML = COLUMN;
   });
 
-  it('puts a pill after the issue reference of each matching card, warning-coloured only for Needs you', () => {
+  it('puts a pill after the issue reference of each matching card, warning-coloured only for Blocked on you', () => {
     applyPills(document, cardsByIssue([needs, working, { url: 'https://github.com/github/roadmap/issues/1153', playbook: null, group: 'unstarted', snoozed: true }]));
 
     expect(pills()).toEqual([
-      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr', group: 'needs', title: 'Switchboard: Needs you. Click to open in VS Code.' },
-      { card: '94970044', after: 'board-card-header-title-94970044', namespace: 'dev:', text: 'dev:new-dev', group: 'working', title: 'Switchboard: Working. Click to open in VS Code.' },
+      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr', group: 'blocked', title: 'Switchboard: Blocked on you. Click to open in VS Code.' },
+      { card: '94970044', after: 'board-card-header-title-94970044', namespace: 'dev:', text: 'dev:new-dev', group: 'progress', title: 'Switchboard: In progress. Click to open in VS Code.' },
       { card: '126571572', after: 'board-card-header-title-126571572', namespace: '', text: 'Unstarted', group: 'snoozed', title: 'Switchboard: Snoozed. Click to open in VS Code.' },
     ]);
   });
 
-  it('colours a Needs you pill with content.css and leaves others the default colour', () => {
+  it("colours a Blocked on you pill and a Ready for review pill awaiting the operator with content.css, and leaves others the default colour", () => {
     document.head.innerHTML = `<style>${readFileSync(join(import.meta.dirname, '..', 'src', 'content.css'), 'utf8')}</style>`;
-    applyPills(document, cardsByIssue([needs, working]));
+    const ready: Card = { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:review-pr', group: 'review', mark: 'send', snoozed: false };
+    applyPills(document, cardsByIssue([needs, working, ready]));
 
     const colour = (id: string) => getComputedStyle(card(id).querySelector('.switchboard-pill')!).color;
 
     expect(colour('88050488')).toBe('var(--fgColor-attention, #9a6700)');
     expect(colour('94970044')).toBe('var(--fgColor-default, #1f2328)');
+    expect(colour('126571572')).toBe('var(--fgColor-attention, #9a6700)');
+
+    applyPills(document, cardsByIssue([{ ...ready, mark: 'running' }, { ...needs, snoozed: true }]));
+    expect(colour('126571572')).toBe('var(--fgColor-default, #1f2328)');
+    expect(colour('88050488')).toBe('var(--fgColor-default, #1f2328)');
     document.head.innerHTML = '';
   });
 
@@ -94,7 +100,7 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([
       { ...needs, mark: 'question' },
       { ...working, group: 'unstarted', mark: 'queued' },
-      { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:gc-plan', group: 'needs', mark: 'blocked', snoozed: true },
+      { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:gc-plan', group: 'blocked', mark: 'blocked', snoozed: true },
     ]));
 
     const marks = [...document.querySelectorAll('.switchboard-pill')].map((pill) => {
@@ -104,7 +110,7 @@ describe('applyPills', () => {
     });
 
     expect(marks).toEqual([
-      ['SPAN', 'switchboard-mark', 'question', 'true', '\u{eb32}dev:review-pr', 'Switchboard: Needs you · Answer a question. Click to open in VS Code.'],
+      ['SPAN', 'switchboard-mark', 'question', 'true', '\u{eb32}dev:review-pr', 'Switchboard: Blocked on you · Answer a question. Click to open in VS Code.'],
       ['SPAN', 'switchboard-mark', 'queued', 'true', '\u{ea82}dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in VS Code.'],
       ['SPAN', 'switchboard-mark', 'blocked', 'true', '\u{ead1}dev:gc-plan', 'Switchboard: Snoozed · Blocked. Click to open in VS Code.'],
     ]);
@@ -113,7 +119,7 @@ describe('applyPills', () => {
   it('draws each mark with the codicon the panel shows for it', () => {
     const css = readFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.css'), 'utf8');
     const glyph = (name: string) => String.fromCodePoint(parseInt(new RegExp(`\\.codicon-${name}:before \\{ content: "\\\\(\\w+)" \\}`).exec(css)![1]!, 16));
-    const panel = { question: 'question', send: 'send', review: 'eye', blocked: 'debug-pause', failed: 'error', queued: 'clock', setup: 'tools', running: 'loading', triaging: 'loading', 'done-session': 'check', 'done-operator': 'account', 'done-unassigned': 'sign-out' };
+    const panel = { question: 'question', send: 'send', review: 'eye', finished: 'eye', blocked: 'debug-pause', failed: 'error', queued: 'clock', setup: 'tools', running: 'loading', triaging: 'loading', 'done-session': 'check', 'done-operator': 'account', 'done-unassigned': 'sign-out' };
 
     expect(MARK_GLYPHS).toEqual(Object.fromEntries(Object.entries(panel).map(([mark, name]) => [mark, glyph(name)])));
   });
@@ -122,7 +128,7 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([{ ...needs, mark: null }, working]));
 
     expect(document.querySelectorAll('.switchboard-mark')).toHaveLength(0);
-    expect(pills().map((pill) => pill.title)).toEqual(['Switchboard: Needs you. Click to open in VS Code.', 'Switchboard: Working. Click to open in VS Code.']);
+    expect(pills().map((pill) => pill.title)).toEqual(['Switchboard: Blocked on you. Click to open in VS Code.', 'Switchboard: In progress. Click to open in VS Code.']);
   });
 
   it('colours a Failed mark with content.css and spins Running and Triaging', () => {
@@ -154,10 +160,10 @@ describe('applyPills', () => {
 
   it('replaces a pill whose card changed and removes pills whose card is gone', () => {
     applyPills(document, cardsByIssue([needs, working]));
-    applyPills(document, cardsByIssue([{ ...needs, playbook: 'dev:review-pr-followup', group: 'working' }]));
+    applyPills(document, cardsByIssue([{ ...needs, playbook: 'dev:review-pr-followup', group: 'progress' }]));
 
     expect(pills()).toEqual([
-      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr-followup', group: 'working', title: 'Switchboard: Working. Click to open in VS Code.' },
+      { card: '88050488', after: 'board-card-header-title-88050488', namespace: 'dev:', text: 'dev:review-pr-followup', group: 'progress', title: 'Switchboard: In progress. Click to open in VS Code.' },
     ]);
 
     applyPills(document, new Map());

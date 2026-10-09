@@ -2,48 +2,44 @@
   "notes": [],
   "groups": [
     {
-      "key": "needs",
-      "title": "Needs you",
+      "key": "blocked",
+      "title": "Blocked on you",
       "glyph": "",
-      "empty": "Nothing needs you.",
+      "empty": null,
+      "yours": null,
       "rows": [
         {
-          "key": "item:7",
-          "title": "Issue <7>",
+          "key": "item:14",
+          "title": "Issue <14>",
           "priority": null,
           "time": {
-            "text": "0m",
-            "title": "In this status since 2026-10-03 12:00 UTC"
+            "text": "10m",
+            "title": "In this status since 2026-10-03 11:50 UTC"
           },
           "playbook": "dev:develop",
-          "ticket": "gh 107",
+          "ticket": "gh 114",
           "source": "github",
-          "url": "https://github.com/o/r/issues/107",
+          "url": "https://github.com/o/r/issues/114",
           "mark": {
-            "kind": "blocked",
-            "glyph": "",
-            "title": "Blocked"
+            "kind": "failed",
+            "glyph": "",
+            "title": "Failed"
           },
           "details": [
             {
-              "text": "The session finished its turn.",
+              "text": "Setup ended without a worktree.",
               "title": null,
               "tone": "warning"
             }
           ],
-          "stripe": "warning",
-          "window": {
-            "name": "gh-107-58c609",
-            "title": "Issue <7>",
-            "folders": [
-              "D:/git/widgets/.worktrees/107-fix"
-            ],
-            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-107-58c609.code-workspace"
-          },
+          "stripe": "error",
+          "turn": "operator",
+          "dim": false,
+          "movable": false,
+          "window": null,
           "open": {
-            "type": "session",
-            "sessionId": "aaaa1111-native",
-            "cwd": "D:/git/widgets/.worktrees/107-fix"
+            "type": "url",
+            "url": "https://github.com/o/r/issues/114"
           },
           "controls": [
             {
@@ -51,7 +47,7 @@
               "glyph": "",
               "action": {
                 "type": "retriage",
-                "workItemId": 7
+                "workItemId": 14
               }
             },
             {
@@ -59,7 +55,7 @@
               "glyph": "",
               "action": {
                 "type": "mark-done",
-                "workItemId": 7
+                "workItemId": 14
               }
             },
             {
@@ -67,47 +63,29 @@
               "glyph": "",
               "action": {
                 "type": "snooze",
-                "ticketId": 7
+                "ticketId": 14
               }
             }
           ],
-          "main": null,
-          "mainGlyph": null,
-          "mainTitle": null,
+          "main": "Triage again",
+          "mainGlyph": "",
+          "mainTitle": "Triage again",
           "answers": [],
           "pastes": [],
           "commands": [
-            {
-              "label": "Open Changes",
-              "glyph": "",
-              "command": {
-                "type": "changes",
-                "path": "D:/git/widgets/.worktrees/107-fix",
-                "key": "gh 107",
-                "title": "Issue <7>"
-              }
-            },
             {
               "label": "History",
               "glyph": "",
               "command": {
                 "type": "history",
-                "ticketId": 7,
-                "key": "gh 107"
+                "ticketId": 14,
+                "key": "gh 114"
               }
             }
           ],
-          "search": "Issue <7> · gh 107 · PR #19002 · dev:develop · Needs you · 107-fix",
-          "links": [
-            {
-              "label": "PR #19002",
-              "url": "https://github.com/o/r/pull/19002",
-              "kind": "pr",
-              "badge": "19002",
-              "glyph": ""
-            }
-          ],
-          "returned": 2,
+          "search": "Issue <14> · gh 114 · dev:develop · Blocked on you",
+          "links": [],
+          "returned": 0,
           "band": null
         },
         {
@@ -135,6 +113,9 @@
             }
           ],
           "stripe": "warning",
+          "turn": "operator",
+          "dim": false,
+          "movable": false,
           "window": {
             "name": "gh-108-widgets-655280",
             "title": "Issue <8>",
@@ -203,9 +184,246 @@
               }
             }
           ],
-          "search": "Issue <8> · gh 108 · dev:develop · Needs you",
+          "search": "Issue <8> · gh 108 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
+          "band": null
+        }
+      ]
+    },
+    {
+      "key": "review",
+      "title": "Ready for review",
+      "glyph": "",
+      "empty": "Nothing is ready for review.",
+      "yours": 2,
+      "rows": [
+        {
+          "key": "item:13",
+          "title": "Issue <13>",
+          "priority": null,
+          "time": {
+            "text": "5h",
+            "title": "Ready since 2026-10-03 07:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 113",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/113",
+          "mark": {
+            "kind": "running",
+            "glyph": "",
+            "title": "Running"
+          },
+          "details": [
+            {
+              "text": "posting · 1m",
+              "title": null,
+              "tone": null
+            }
+          ],
+          "stripe": "agent",
+          "turn": "agent",
+          "dim": true,
+          "movable": true,
+          "window": {
+            "name": "gh-113-widgets-655280",
+            "title": "Issue <13>",
+            "folders": [
+              "D:/git/widgets"
+            ],
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-113-widgets-655280.code-workspace"
+          },
+          "open": null,
+          "controls": [
+            {
+              "label": "Stop",
+              "glyph": "",
+              "action": {
+                "type": "stop",
+                "workItemId": 13
+              }
+            },
+            {
+              "label": "Mark done",
+              "glyph": "",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 13
+              }
+            },
+            {
+              "label": "Snooze",
+              "glyph": "",
+              "action": {
+                "type": "snooze",
+                "ticketId": 13
+              }
+            },
+            {
+              "label": "Move down",
+              "glyph": "",
+              "action": {
+                "type": "move",
+                "workItemId": 13,
+                "after": 7
+              }
+            },
+            {
+              "label": "Reset position",
+              "glyph": "",
+              "action": {
+                "type": "reset-position",
+                "workItemId": 13
+              }
+            }
+          ],
+          "main": null,
+          "mainGlyph": null,
+          "mainTitle": null,
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "glyph": "",
+              "command": {
+                "type": "history",
+                "ticketId": 13,
+                "key": "gh 113"
+              }
+            }
+          ],
+          "search": "Issue <13> · gh 113 · dev:develop · Ready for review",
+          "links": [],
+          "returned": 0,
+          "band": null
+        },
+        {
+          "key": "item:7",
+          "title": "Issue <7>",
+          "priority": null,
+          "time": {
+            "text": "3h",
+            "title": "Ready since 2026-10-03 09:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 107",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/107",
+          "mark": {
+            "kind": "finished",
+            "glyph": "",
+            "title": "Review the finished turn"
+          },
+          "details": [],
+          "stripe": "turn",
+          "turn": "operator",
+          "dim": false,
+          "movable": true,
+          "window": {
+            "name": "gh-107-58c609",
+            "title": "Issue <7>",
+            "folders": [
+              "D:/git/widgets/.worktrees/107-fix"
+            ],
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-107-58c609.code-workspace"
+          },
+          "open": {
+            "type": "session",
+            "sessionId": "aaaa1111-native",
+            "cwd": "D:/git/widgets/.worktrees/107-fix"
+          },
+          "controls": [
+            {
+              "label": "Triage again",
+              "glyph": "",
+              "action": {
+                "type": "retriage",
+                "workItemId": 7
+              }
+            },
+            {
+              "label": "Mark done",
+              "glyph": "",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 7
+              }
+            },
+            {
+              "label": "Snooze",
+              "glyph": "",
+              "action": {
+                "type": "snooze",
+                "ticketId": 7
+              }
+            },
+            {
+              "label": "Move to top",
+              "glyph": "",
+              "action": {
+                "type": "move",
+                "workItemId": 7,
+                "after": null
+              }
+            },
+            {
+              "label": "Move up",
+              "glyph": "",
+              "action": {
+                "type": "move",
+                "workItemId": 7,
+                "after": null
+              }
+            },
+            {
+              "label": "Move down",
+              "glyph": "",
+              "action": {
+                "type": "move",
+                "workItemId": 7,
+                "after": 10
+              }
+            }
+          ],
+          "main": null,
+          "mainGlyph": null,
+          "mainTitle": null,
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "Open Changes",
+              "glyph": "",
+              "command": {
+                "type": "changes",
+                "path": "D:/git/widgets/.worktrees/107-fix",
+                "key": "gh 107",
+                "title": "Issue <7>"
+              }
+            },
+            {
+              "label": "History",
+              "glyph": "",
+              "command": {
+                "type": "history",
+                "ticketId": 7,
+                "key": "gh 107"
+              }
+            }
+          ],
+          "search": "Issue <7> · gh 107 · PR #19002 · dev:develop · Ready for review · 107-fix",
+          "links": [
+            {
+              "label": "PR #19002",
+              "url": "https://github.com/o/r/pull/19002",
+              "kind": "pr",
+              "badge": "19002",
+              "glyph": ""
+            }
+          ],
+          "returned": 2,
           "band": null
         },
         {
@@ -214,7 +432,7 @@
           "priority": null,
           "time": {
             "text": "0m",
-            "title": "In this status since 2026-10-03 12:00 UTC"
+            "title": "Ready since 2026-10-03 12:00 UTC"
           },
           "playbook": "dev:develop",
           "ticket": "gh 110",
@@ -232,7 +450,10 @@
               "tone": null
             }
           ],
-          "stripe": null,
+          "stripe": "turn",
+          "turn": "operator",
+          "dim": false,
+          "movable": true,
           "window": {
             "name": "gh-110-support-c6262c",
             "title": "Issue <10>",
@@ -278,6 +499,24 @@
                 "type": "snooze",
                 "ticketId": 10
               }
+            },
+            {
+              "label": "Move to top",
+              "glyph": "",
+              "action": {
+                "type": "move",
+                "workItemId": 10,
+                "after": null
+              }
+            },
+            {
+              "label": "Move up",
+              "glyph": "",
+              "action": {
+                "type": "move",
+                "workItemId": 10,
+                "after": 13
+              }
             }
           ],
           "main": "Approve",
@@ -309,7 +548,7 @@
               }
             }
           ],
-          "search": "Issue <10> · gh 110 · dev:develop · Needs you",
+          "search": "Issue <10> · gh 110 · dev:develop · Ready for review",
           "links": [],
           "returned": 0,
           "band": null
@@ -317,10 +556,11 @@
       ]
     },
     {
-      "key": "working",
-      "title": "Working",
+      "key": "progress",
+      "title": "In progress",
       "glyph": "",
-      "empty": "Nothing is running.",
+      "empty": "Nothing is in progress.",
+      "yours": null,
       "rows": []
     },
     {
@@ -328,6 +568,7 @@
       "title": "Unstarted",
       "glyph": "",
       "empty": "Nothing waits to be started.",
+      "yours": null,
       "rows": [
         {
           "key": "item:9",
@@ -344,6 +585,9 @@
           "mark": null,
           "details": [],
           "stripe": null,
+          "turn": null,
+          "dim": false,
+          "movable": false,
           "window": null,
           "open": {
             "type": "url",
@@ -416,6 +660,9 @@
           "mark": null,
           "details": [],
           "stripe": null,
+          "turn": null,
+          "dim": false,
+          "movable": false,
           "window": null,
           "open": {
             "type": "url",
@@ -467,6 +714,7 @@
       "title": "Done",
       "glyph": "",
       "empty": null,
+      "yours": null,
       "rows": [
         {
           "key": "item:11",
@@ -487,6 +735,9 @@
           },
           "details": [],
           "stripe": null,
+          "turn": null,
+          "dim": false,
+          "movable": false,
           "window": null,
           "open": {
             "type": "url",
@@ -533,6 +784,9 @@
           },
           "details": [],
           "stripe": null,
+          "turn": null,
+          "dim": false,
+          "movable": false,
           "window": null,
           "open": {
             "type": "url",

@@ -168,6 +168,22 @@
     <Style Selector="Border.stripe.error">
       <Setter Property="Background" Value="{DynamicResource DockError}" />
     </Style>
+    <Style Selector="Border.stripe.turn">
+      <Setter Property="Background" Value="{DynamicResource DockTurn}" />
+    </Style>
+    <Style Selector="Border.stripe.agent">
+      <Setter Property="Background" Value="{DynamicResource DockAgent}" />
+    </Style>
+    <!-- A Ready for review row on the agent's turn dims its texts; the stripe and the selection keep full strength. -->
+    <Style Selector="Border.row.dim Grid.content">
+      <Setter Property="Opacity" Value="0.6" />
+    </Style>
+    <!-- Where a dragged Ready for review row will drop. -->
+    <Style Selector="Border#DropLine">
+      <Setter Property="Height" Value="2" />
+      <Setter Property="Background" Value="{DynamicResource DockTurn}" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+    </Style>
     <Style Selector="TextBlock.failed">
       <Setter Property="Foreground" Value="{DynamicResource DockError}" />
     </Style>
@@ -329,7 +345,8 @@
       <TextBlock Name="StatusLine" DockPanel.Dock="Bottom" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}"
                  TextWrapping="Wrap" Margin="8" Classes="warning" />
       <ScrollViewer Name="RowScroller" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Margin="0,4,0,8">
+        <Panel>
+        <StackPanel Name="ListContent" Margin="0,4,0,8">
           <TextBlock Name="ConnectionLine" Text="{Binding Connection}" IsVisible="{Binding Connection, Converter={x:Static ObjectConverters.IsNotNull}}"
                      TextWrapping="Wrap" Margin="8,6" Classes="muted" />
           <ItemsControl ItemsSource="{Binding Notes}">
@@ -344,11 +361,13 @@
               <DataTemplate x:DataType="views:GroupViewModel">
                 <StackPanel IsVisible="{Binding IsShown}">
                   <Border Classes="group" Tapped="OnGroupTapped">
-                    <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                       <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
                       <TextBlock Grid.Column="1" Classes="icon group-icon" Text="{Binding Glyph}" Margin="0,0,6,0" />
                       <TextBlock Grid.Column="2" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
-                      <Border Grid.Column="3" Classes="badge" Classes.zero="{Binding IsZero}">
+                      <TextBlock Grid.Column="3" Classes="muted yours" Text="{Binding Yours}" IsVisible="{Binding HasYours}" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                 ToolTip.Tip="Rows on your turn" />
+                      <Border Grid.Column="4" Classes="badge" Classes.zero="{Binding IsZero}">
                         <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
                       </Border>
                     </Grid>
@@ -370,11 +389,12 @@
                     <ItemsControl ItemsSource="{Binding Rows}" IsVisible="{Binding ShowsRows}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="views:RowViewModel">
-                          <Border Classes="row" Classes.selected="{Binding IsSelected}" Tapped="OnRowTapped" ContextRequested="OnRowContext">
+                          <Border Classes="row" Classes.selected="{Binding IsSelected}" Classes.dim="{Binding IsDim}" Tapped="OnRowTapped" ContextRequested="OnRowContext">
                             <Grid ColumnDefinitions="3,*">
-                              <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" />
+                              <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" Classes.turn="{Binding StripeTurn}"
+                                      Classes.agent="{Binding StripeAgent}" />
                               <!-- The row's buttons sit beside lines 2 and 3, so they never shorten the title or hide the time. -->
-                              <Grid Grid.Column="1" Margin="8,5,8,6" RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                              <Grid Grid.Column="1" Classes="content" Margin="8,5,8,6" RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
                                 <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
                                   <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource DockPriority}"
                                            IsVisible="{Binding IsPriority}" ToolTip.Tip="{Binding PriorityTitle}" />
@@ -475,6 +495,10 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
         </StackPanel>
+        <Canvas Name="DropLayer" IsHitTestVisible="False">
+          <Border Name="DropLine" IsVisible="False" />
+        </Canvas>
+        </Panel>
       </ScrollViewer>
     </DockPanel>
     <!-- The inner edge of a dock on the left: dragging it sets the dock's width. -->

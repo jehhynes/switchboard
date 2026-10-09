@@ -282,6 +282,33 @@ describe('Store', () => {
     store.close();
   });
 
+  it('makes a version 19 turn that finished without a done or approval report finished, and gives ready work items their readyAt', () => {
+    const path = join(dir, 'v19.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, MIGRATIONS.length - 1).join(';'));
+    raw.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
+    raw.exec(
+      `INSERT INTO workItems (id, ticketId, status, error, createdAt, statusAt, approvalPrompt) VALUES
+        (1, 1, 'blocked', 'The session finished its turn.', 1, 10, NULL), (2, 1, 'blocked', 'The session ended.', 1, 20, NULL),
+        (3, 1, 'blocked', 'Stopped by you.', 1, 30, NULL), (4, 1, 'awaiting-approval', NULL, 1, 40, '/publish'),
+        (5, 1, 'running', NULL, 1, 50, '/publish'), (6, 1, 'done', NULL, 1, 60, '/publish')`,
+    );
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([1, 2, 3, 4, 5, 6].map((id) => [store.workItem(id)?.status, store.workItem(id)?.error, store.workItem(id)?.readyAt, store.workItem(id)?.orderAt])).toEqual([
+      ['finished', null, 10, null],
+      ['finished', null, 20, null],
+      ['blocked', 'Stopped by you.', null, null],
+      ['awaiting-approval', null, 40, null],
+      ['running', null, null, null],
+      ['done', null, null, null],
+    ]);
+    store.close();
+  });
+
   it('keeps version 15 work items with their sessions, triages, pastes and parents, deletes sessionless childless ones done as unassigned, never reuses a deleted ID, and enforces foreign keys after', () => {
     const path = join(dir, 'v15.db');
     const raw = new DatabaseSync(path);
@@ -402,7 +429,7 @@ describe('Store', () => {
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
     const store = Store.open(':memory:');
     const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
-    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
+    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
     const first = store.insertWorkItem(item(1));
     const second = store.insertWorkItem(item(2));
 

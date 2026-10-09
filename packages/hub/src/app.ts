@@ -23,7 +23,7 @@ import type { ReportBody, RuntimeDeps } from './runtime.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the dock may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'answer', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'answer', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task']);
 
@@ -132,6 +132,12 @@ export function parseAction(body: unknown): FlowEvent | null {
     return typeof body['answer'] === 'string' && typeof body['question'] === 'string'
       ? { type: 'answer', workItemId: workItemId as number, nativeSessionId, question: body['question'], answer: body['answer'] }
       : null;
+  }
+
+  if (body['type'] === 'move') {
+    const { workItemId, after } = body;
+
+    return Number.isInteger(workItemId) && (after === null || Number.isInteger(after)) ? { type: 'move', workItemId: workItemId as number, after: after as number | null } : null;
   }
 
   return body as unknown as FlowEvent;

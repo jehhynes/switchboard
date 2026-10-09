@@ -26,7 +26,7 @@ describe('watchPillClicks', () => {
     const reachedGitHub = vi.fn();
 
     document.body.innerHTML = COLUMN;
-    applyPills(document, cardsByIssue([{ url: 'https://github.com/github/roadmap/issues/1035', playbook: 'dev:review-pr', group: 'needs', snoozed: false }]));
+    applyPills(document, cardsByIssue([{ url: 'https://github.com/github/roadmap/issues/1035', playbook: 'dev:review-pr', group: 'blocked', snoozed: false }]));
     watch = watchPillClicks(document, (uri) => opened.push(uri));
     document.body.addEventListener('click', reachedGitHub);
 
@@ -48,7 +48,7 @@ describe('watchPillClicks', () => {
     const reachedGitHub = vi.fn();
 
     document.body.innerHTML = COLUMN;
-    applyPills(document, cardsByIssue([{ url: 'https://github.com/github/roadmap/issues/1035', playbook: 'dev:review-pr', group: 'needs', snoozed: false }]));
+    applyPills(document, cardsByIssue([{ url: 'https://github.com/github/roadmap/issues/1035', playbook: 'dev:review-pr', group: 'blocked', snoozed: false }]));
     watch = watchPillClicks(document, (uri) => opened.push(uri));
     document.body.addEventListener('keydown', reachedGitHub);
 

@@ -28,6 +28,9 @@
           <SolidColorBrush x:Key="DockBadge" Color="#CCCCCC" />
           <SolidColorBrush x:Key="DockLink" Color="#005FB8" />
           <SolidColorBrush x:Key="DockFocus" Color="#005FB8" />
+          <!-- Row stripes for whose turn it is: the focus blue for the operator's, a grey for the agent's (PRD R27). -->
+          <SolidColorBrush x:Key="DockTurn" Color="#005FB8" />
+          <SolidColorBrush x:Key="DockAgent" Color="#B4B4B4" />
           <SolidColorBrush x:Key="DockActionButton" Color="#1F3B3B3B" />
           <SolidColorBrush x:Key="DockActionButtonHover" Color="#333B3B3B" />
           <SolidColorBrush x:Key="DockGroupBar" Color="#40005FB8" />
@@ -88,6 +91,8 @@
           <SolidColorBrush x:Key="DockBadge" Color="#616161" />
           <SolidColorBrush x:Key="DockLink" Color="#4DAAFC" />
           <SolidColorBrush x:Key="DockFocus" Color="#0078D4" />
+          <SolidColorBrush x:Key="DockTurn" Color="#0078D4" />
+          <SolidColorBrush x:Key="DockAgent" Color="#5A5A5A" />
           <SolidColorBrush x:Key="DockActionButton" Color="#1FCCCCCC" />
           <SolidColorBrush x:Key="DockActionButtonHover" Color="#33CCCCCC" />
           <SolidColorBrush x:Key="DockGroupBar" Color="#400078D4" />

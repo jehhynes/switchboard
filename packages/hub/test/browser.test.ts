@@ -46,7 +46,7 @@ describe('listenBrowser', () => {
 
   it('lists the cards on each request, with no CORS header', async () => {
     let cards: Card[] = [
-      { url: 'https://github.com/o/r/issues/1', playbook: 'dev:review-pr', group: 'needs', snoozed: false, links: ['https://github.com/o/r/pull/3'] },
+      { url: 'https://github.com/o/r/issues/1', playbook: 'dev:review-pr', group: 'blocked', snoozed: false, links: ['https://github.com/o/r/pull/3'] },
       { url: 'https://github.com/o/r/issues/2', playbook: null, group: 'unstarted', snoozed: true, links: [] },
     ];
 
@@ -57,7 +57,7 @@ describe('listenBrowser', () => {
     expect(first.status).toBe(200);
     expect(JSON.parse(first.body)).toEqual({
       cards: [
-        { url: 'https://github.com/o/r/issues/1', playbook: 'dev:review-pr', group: 'needs', snoozed: false, links: ['https://github.com/o/r/pull/3'] },
+        { url: 'https://github.com/o/r/issues/1', playbook: 'dev:review-pr', group: 'blocked', snoozed: false, links: ['https://github.com/o/r/pull/3'] },
         { url: 'https://github.com/o/r/issues/2', playbook: null, group: 'unstarted', snoozed: true, links: [] },
       ],
     });
