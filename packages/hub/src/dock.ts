@@ -11,6 +11,8 @@ import {
   CAPS,
   clip,
   controlsOf,
+  CONTROL_GLYPHS,
+  doneBand,
   GROUP_EMPTY,
   GROUP_TITLES,
   linkKind,
@@ -123,10 +125,12 @@ export interface DockRow {
   stripe: 'error' | 'warning' | null;
   window: DockWindow | null;
   open: DockOpen | null;
-  /** The hub controls in the right-click menu, each with the action the dock posts to `/action`; Snooze carries no wake time. */
-  controls: { label: string; action: Record<string, unknown> }[];
+  /** The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time. */
+  controls: { label: string; glyph: string; action: Record<string, unknown> }[];
   /** The label of the control the row shows as a button, or null (PRD R27). */
   main: string | null;
+  /** The main control's codicon glyph, shown before its label, or null. */
+  mainGlyph: string | null;
   /** The main control's tooltip, which for Approve names the prompt it runs (PRD R27). */
   mainTitle: string | null;
   /** A one-part question's options, each with the `answer` action it posts (PRD R70); empty otherwise. */
@@ -134,18 +138,25 @@ export interface DockRow {
   /** The drafted texts Copy offers on an `awaiting-approval` row (PRD R60); empty otherwise. */
   pastes: { label: string; file: string }[];
   /** The controls that run in VS Code, each with the message a window runs: Open Changes, History, Open report. */
-  commands: { label: string; command: Record<string, unknown> }[];
+  commands: { label: string; glyph: string; command: Record<string, unknown> }[];
   /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63, R71). */
   search: string;
-  /** The ticket's links, each named as `PR #19002`, `gh 18941` or by its label, for the right-click menu (PRD R52); a link to the ticket itself is left out. */
-  links: { label: string; url: string }[];
+  /**
+   * The ticket's links (PRD R52), a link to the ticket itself left out: `label` names it in the right-click menu (`PR #19002`, `gh 18941` or its
+   * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon.
+   */
+  links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null }[];
   /** How many earlier work items with the same playbook were done, for "Returned ×N" on line 2 (PRD R51); 0 when it is not marked. */
   returned: number;
+  /** A Done row's date band, such as `Today` or `Last week` (PRD R27); null in the other groups. */
+  band: string | null;
 }
 
 export interface DockGroup {
   key: RowGroup;
   title: string;
+  /** The group's codicon glyph, as the VS Code panel showed it. */
+  glyph: string;
   /** What the group says when it has no rows, or null. */
   empty: string | null;
   rows: DockRow[];
@@ -167,23 +178,26 @@ export interface DockView {
 /** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
 export function dockView(snapshot: Snapshot, now: number, windows: string): DockView {
   const groups = listGroups(snapshot);
-  const keys: RowGroup[] = ['needs', 'working', 'unstarted', 'done', ...(groups.snoozed.length === 0 ? [] : (['snoozed'] as const))];
+  const keys: RowGroup[] = ['needs', 'working', 'unstarted', ...(groups.snoozed.length === 0 ? [] : (['snoozed'] as const)), 'done'];
   const row = (group: RowGroup) => (entry: WorkItemView | PoolView) => {
     const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
 
-    return { ...('status' in entry ? itemRow(entry, now, snapshot.namespaces, windows) : poolRow(entry, now, snapshot.namespaces)), search, links: linksOf(entry), returned: entry.returned };
+    // Done is sorted newest first, so each band's rows are consecutive.
+    const band = group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null;
+
+    return { ...('status' in entry ? itemRow(entry, now, snapshot.namespaces, windows) : poolRow(entry, now, snapshot.namespaces)), search, links: linksOf(entry), returned: entry.returned, band };
   };
 
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
-    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
+    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
     snooze: snoozeChoices(new Date(now)),
     sources: snapshot.sourceStates,
     repoRoots: snapshot.repoRoots,
   };
 }
 
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string): Omit<DockRow, 'search' | 'links' | 'returned'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
   const kind = markOf(item);
   const controls = controlsOf(item);
   const question = item.question ?? null;
@@ -213,6 +227,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     open: openOf(item, windows),
     controls: hubControls(controls),
     main: main?.label ?? null,
+    mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main === null ? null : mainTitle(item, main),
     answers:
       question !== null && question.parts === 1 && sessionId !== null
@@ -223,11 +238,11 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
           }))
         : [],
     pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],
-    commands: [...windowCommands(controls), ...(report === null ? [] : [{ label: 'Open report', command: { type: 'openUrl', url: report } }])],
+    commands: [...windowCommands(controls), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
   };
 }
 
-function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search' | 'links' | 'returned'> {
+function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
   const { ticket, triage } = entry;
   const { main, controls } = poolControls(entry);
 
@@ -247,6 +262,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     open: ticket.url === '' ? null : { type: 'url', url: ticket.url },
     controls: hubControls(controls),
     main: main?.label ?? null,
+    mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main?.label ?? null,
     answers: [],
     pastes: [],
@@ -258,7 +274,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
 function linksOf(entry: WorkItemView | PoolView): DockRow['links'] {
   const seen = new Set<string>();
 
-  return entry.links.flatMap((link) => {
+  return entry.links.flatMap((link): DockRow['links'] => {
     if (link.target === entry.ticket.url || seen.has(link.target)) {
       return [];
     }
@@ -267,8 +283,13 @@ function linksOf(entry: WorkItemView | PoolView): DockRow['links'] {
 
     const kind = linkKind(link.target);
     const number = linkNumber(link.target);
+    if (kind === 'url' || number === null) {
+      return [{ label: link.label, url: link.target, kind: 'url', badge: link.label, glyph: LINK_GLYPH }];
+    }
 
-    return [{ label: kind === 'url' || number === null ? link.label : kind === 'pr' ? `PR #${number}` : `gh ${number}`, url: link.target }];
+    return kind === 'pr'
+      ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH }]
+      : [{ label: `gh ${number}`, url: link.target, kind, badge: `gh ${number}`, glyph: null }];
   });
 }
 
@@ -354,8 +375,15 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
 
 /** The controls the hub runs; Copy and the VS Code controls are in `pastes` and `commands` (PRD R71). */
 function hubControls(controls: Control[]): DockRow['controls'] {
-  return controls.flatMap((control) => (control.message['type'] === 'action' ? [{ label: control.label, action: control.message['action'] as Record<string, unknown> }] : []));
+  return controls.flatMap((control) => (control.message['type'] === 'action' ? [{ label: control.label, glyph: CONTROL_GLYPHS[control.icon], action: control.message['action'] as Record<string, unknown> }] : []));
 }
+
+/** The codicons of a pull request badge (git-pull-request) and of another link's badge (link). */
+const PULL_REQUEST_GLYPH = '\u{ea64}';
+const LINK_GLYPH = '\u{eb15}';
+
+/** Each group's glyph: bell, play-circle, inbox, pass and clockface, as in the VS Code panel. */
+const GROUP_GLYPHS: Record<RowGroup, string> = { needs: '\u{eaa2}', working: '\u{eba6}', unstarted: '\u{eb09}', done: '\u{eba4}', snoozed: '\u{ec75}' };
 
 function normalPath(path: string): string {
   return path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
@@ -366,7 +394,7 @@ function normalPath(path: string): string {
  * item window's Source Control view already holds the worktree (PRD R71).
  */
 function windowCommands(controls: Control[]): DockRow['commands'] {
-  return controls.flatMap((control) => (['changes', 'history'].includes(String(control.message['type'])) ? [{ label: control.label, command: control.message }] : []));
+  return controls.flatMap((control) => (['changes', 'history'].includes(String(control.message['type'])) ? [{ label: control.label, glyph: CONTROL_GLYPHS[control.icon], command: control.message }] : []));
 }
 
 function samePath(a: string, b: string): boolean {

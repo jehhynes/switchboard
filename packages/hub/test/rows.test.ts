@@ -3,6 +3,7 @@ import { groupOf } from '@switchboard/core/group';
 import {
   clockOf,
   controlsOf,
+  doneBand,
   doneStamp,
   mainControl,
   poolControls,
@@ -86,10 +87,21 @@ describe('clockOf', () => {
   });
 });
 
-describe('doneStamp', () => {
-  // Wednesday 7 October 2026, 10:00 local time.
+describe('doneStamp and doneBand', () => {
+  // Wednesday 7 October 2026, 10:00 local time; the week began on Monday 5 October.
   const now = new Date(2026, 9, 7, 10).getTime();
   const at = (day: number, hour = 0) => new Date(2026, 9, day, hour).getTime();
+
+  it('bands by local day, with weeks starting on Monday', () => {
+    const times = [at(7), at(6, 23), at(6), at(5), at(4, 23), new Date(2026, 8, 28).getTime(), new Date(2026, 8, 27, 23).getTime()];
+
+    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'Earlier this week', 'Last week', 'Last week', 'Older']);
+  });
+
+  it('puts Monday’s yesterday in Yesterday, not Last week', () => {
+    expect(doneBand(at(4, 12), at(5, 9))).toBe('Yesterday');
+    expect(doneBand(at(3, 12), at(5, 9))).toBe('Last week');
+  });
 
   it('stamps a done time as 24-hour HH:mm today and m/d before today, in local time', () => {
     expect([at(7, 9), at(7, 13) + 5 * 60_000, at(7, 0), at(6, 23), new Date(2026, 8, 28).getTime()].map((time) => doneStamp(time, now))).toEqual(['09:00', '13:05', '00:00', '10/6', '9/28']);

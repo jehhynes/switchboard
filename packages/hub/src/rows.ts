@@ -23,9 +23,28 @@ export function age(since: number, now: number): string {
   return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 }
 
+/** Each control icon's codicon glyph in codicon.ttf, which the dock draws; `symbol-file` is Open report's. */
+export const CONTROL_GLYPHS = {
+  check: '\u{eab2}',
+  clockface: '\u{ec75}',
+  'comment-discussion': '\u{eac7}',
+  copy: '\u{ebcc}',
+  'debug-restart': '\u{ead2}',
+  'debug-stop': '\u{ead7}',
+  'diff-multiple': '\u{ec23}',
+  'symbol-file': '\u{ea7b}',
+  history: '\u{ea82}',
+  pass: '\u{eba4}',
+  play: '\u{eb2c}',
+  search: '\u{ea6d}',
+} as const;
+
+/** A codicon name a control may use; a new one needs its glyph in `CONTROL_GLYPHS`, or the build fails. */
+export type ControlIcon = keyof typeof CONTROL_GLYPHS;
+
 export interface Control {
   label: string;
-  icon: string;
+  icon: ControlIcon;
   /** The message the button posts. */
   message: Record<string, unknown>;
 }
@@ -242,6 +261,26 @@ export function queuedTime(clock: Clock | null, until: number | null, now: numbe
   const title = until === null ? `${clock.label} ${utcText(clock.since)}` : `${clock.label} ${utcText(clock.since)} to ${utcText(until)}`;
 
   return { text: queueTime(clock.since, until ?? now), title };
+}
+
+/** Done's date bands, as in Windows Explorer: Today, Yesterday, Earlier this week, Last week and Older, with weeks starting on Monday (PRD R27). */
+export function doneBand(doneAt: number, now: number): string {
+  const today = midnight(now);
+  const week = midnight(now, -((new Date(now).getDay() + 6) % 7));
+
+  if (doneAt >= today) {
+    return 'Today';
+  }
+
+  if (doneAt >= midnight(now, -1)) {
+    return 'Yesterday';
+  }
+
+  if (doneAt >= week) {
+    return 'Earlier this week';
+  }
+
+  return doneAt >= midnight(week, -7) ? 'Last week' : 'Older';
 }
 
 /** When a Done row was done, in local time: 24-hour `HH:mm` today, else `m/d` (PRD R27). */

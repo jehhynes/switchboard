@@ -139,8 +139,8 @@ public sealed class ControlsTests
         var (window, _) = Open();
         var toggles = window.FindControl<ItemsControl>("SourceList")!.GetVisualDescendants().OfType<Button>().ToList();
 
-        Assert.Equal(["gh", "zoho"], toggles.Select((button) => ((SourceViewModel)button.DataContext!).Label));
-        Assert.Contains("off", toggles[1].Classes);
+        Assert.Equal(["github", "zoho"], toggles.Select((button) => ((SourceViewModel)button.DataContext!).Name));
+        Assert.Equal([false, true], toggles.Select((toggle) => toggle.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single((logo) => logo.IsVisible).Classes.Contains("off")));
         Click(toggles[0]);
         Click(toggles[1]);
 
@@ -152,6 +152,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
+        Click(window.FindControl<Button>("SearchButton")!);
         window.FindControl<TextBox>("SearchBox")!.Text = "branch 108";
         Dispatcher.UIThread.RunJobs();
         Assert.Empty(VisibleTitles(window));
@@ -168,6 +169,27 @@ public sealed class ControlsTests
 
         window.FindControl<TextBox>("SearchBox")!.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
         Dispatcher.UIThread.RunJobs();
+        Assert.Equal("", model.Filter);
+        Assert.False(window.FindControl<TextBox>("SearchBox")!.IsVisible);
+        Assert.Equal(5, VisibleTitles(window).Count);
+    }
+
+    [AvaloniaFact]
+    public void SearchButton_ClickedTwice_ShowsTheBoxThenHidesItAndClearsTheSearch()
+    {
+        var (window, model) = Open();
+        var box = window.FindControl<TextBox>("SearchBox")!;
+
+        Assert.False(box.IsVisible);
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        Assert.True(box.IsVisible);
+        box.Text = "107-fix";
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["Issue <7>"], VisibleTitles(window));
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        Assert.False(box.IsVisible);
         Assert.Equal("", model.Filter);
         Assert.Equal(5, VisibleTitles(window).Count);
     }

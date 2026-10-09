@@ -15,65 +15,137 @@
     <Style Selector="TextBlock.muted">
       <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
     </Style>
+    <!-- Codicon glyphs fill their em box above the baseline, while Segoe UI's capitals sit low in a taller line box, so centred icons sit about
+         1px above the text's middle; 2px of top padding moves a centred icon down 1px. -->
     <Style Selector="TextBlock.icon">
       <Setter Property="FontFamily" Value="{StaticResource Codicons}" />
       <Setter Property="FontSize" Value="14" />
       <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Padding" Value="0,2,0,0" />
     </Style>
     <Style Selector="Button.header">
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Padding" Value="4" />
-      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="3" />
+      <Setter Property="CornerRadius" Value="5" />
     </Style>
     <Style Selector="Button.header:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource DockHover}" />
     </Style>
-    <Style Selector="Button.source">
-      <Setter Property="Padding" Value="8,0" />
-      <Setter Property="MinHeight" Value="20" />
-      <Setter Property="CornerRadius" Value="9" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="BorderBrush" Value="{DynamicResource DockMuted}" />
-      <Setter Property="Background" Value="Transparent" />
+    <Style Selector="Border.separator">
+      <Setter Property="Width" Value="1" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Margin" Value="4,0" />
+      <Setter Property="Background" Value="{DynamicResource DockMuted}" />
+      <Setter Property="Opacity" Value="0.5" />
+      <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <Style Selector="Button.source.off">
-      <Setter Property="Opacity" Value="0.45" />
+    <!-- Each logo fits 16px and is centred; the wide Forum logo may be 24px wide, so it is not drawn smaller than the others. -->
+    <!-- The list's scroll bar shows only while the pointer is over the list. -->
+    <Style Selector="ScrollViewer#RowScroller /template/ ScrollBar">
+      <Setter Property="Opacity" Value="0" />
+    </Style>
+    <Style Selector="ScrollViewer#RowScroller:pointerover /template/ ScrollBar">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="Path.source">
+      <Setter Property="MaxWidth" Value="16" />
+      <Setter Property="MaxHeight" Value="16" />
+      <Setter Property="Stretch" Value="Uniform" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Path.source.github">
+      <Setter Property="Fill" Value="{DynamicResource DockSourceGithub}" />
+    </Style>
+    <Style Selector="Path.source.forum">
+      <Setter Property="MaxWidth" Value="24" />
+      <Setter Property="Fill" Value="{DynamicResource DockKeyForum}" />
+    </Style>
+    <Style Selector="Path.source.zoho">
+      <Setter Property="Stroke" Value="{DynamicResource DockKeyZoho}" />
+      <Setter Property="StrokeThickness" Value="1.3" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+    </Style>
+    <!-- A source that is not polled shows its logo in grey. -->
+    <Style Selector="Path.source.off">
+      <Setter Property="Fill" Value="{DynamicResource DockSourceOff}" />
+    </Style>
+    <Style Selector="Path.source.zoho.off">
+      <Setter Property="Fill" Value="{x:Null}" />
+      <Setter Property="Stroke" Value="{DynamicResource DockSourceOff}" />
     </Style>
     <Style Selector="Button.option">
       <Setter Property="Padding" Value="8,1" />
       <Setter Property="Margin" Value="0,2,4,0" />
-      <Setter Property="MinHeight" Value="0" />
       <Setter Property="FontSize" Value="12" />
     </Style>
-    <Style Selector="Button.icon-button">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Padding" Value="4" />
-      <Setter Property="MinHeight" Value="0" />
+    <!-- A row's buttons are VS Code-sized, 26px tall with a 16px icon, as the VS Code panel's were: Approve in the button colour, the others
+         in a light tint of the text colour. -->
+    <Style Selector="Button.main, Button.icon-button">
+      <Setter Property="Height" Value="26" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
     <Style Selector="Button.main">
-      <Setter Property="Padding" Value="8,2" />
-      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="8,0" />
     </Style>
-    <!-- The row's buttons show only while it is hovered or selected (PRD R27). -->
+    <Style Selector="Button.icon-button">
+      <Setter Property="Padding" Value="5,0" />
+    </Style>
+    <Style Selector="Button.main TextBlock.icon, Button.icon-button TextBlock.icon">
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+    <Style Selector="Button.main:not(.accent), Button.icon-button">
+      <Setter Property="Background" Value="{DynamicResource DockActionButton}" />
+    </Style>
+    <Style Selector="Button.main:not(.accent):pointerover /template/ ContentPresenter, Button.icon-button:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DockActionButtonHover}" />
+    </Style>
+    <!-- The row's buttons show only while it is selected (PRD R27). -->
     <Style Selector="Border.row StackPanel.actions">
       <Setter Property="IsVisible" Value="False" />
     </Style>
-    <Style Selector="Border.row:pointerover StackPanel.actions, Border.row.selected StackPanel.actions">
+    <Style Selector="Border.row.selected StackPanel.actions">
       <Setter Property="IsVisible" Value="True" />
     </Style>
+    <!-- After the selected style, so a row with no buttons does not give their margin's width away from lines 2 and 3. -->
+    <Style Selector="Border.row StackPanel.actions.empty">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <!-- Group headings are a tinted bar of the focus blue, and Done's date bands a lighter tint with a left accent, as in the VS Code panel. -->
     <Style Selector="Border.group">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Padding" Value="6,5" />
+      <Setter Property="Background" Value="{DynamicResource DockGroupBar}" />
+      <Setter Property="Padding" Value="6,5,8,5" />
+      <Setter Property="Margin" Value="0,8,0,0" />
       <Setter Property="Cursor" Value="Hand" />
     </Style>
     <Style Selector="Border.group:pointerover">
-      <Setter Property="Background" Value="{DynamicResource DockHover}" />
+      <Setter Property="Background" Value="{DynamicResource DockGroupBarHover}" />
     </Style>
+    <Style Selector="TextBlock.group-icon">
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+    <Style Selector="Border.band">
+      <Setter Property="Background" Value="{DynamicResource DockBandBar}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockFocus}" />
+      <Setter Property="BorderThickness" Value="3,0,0,0" />
+      <Setter Property="Padding" Value="5,3,8,3" />
+      <Setter Property="Margin" Value="0,6,0,0" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Border.band:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockBandBarHover}" />
+    </Style>
+    <!-- A rule across the top of each row after the first in its band. -->
     <Style Selector="Border.row">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderBrush" Value="{DynamicResource DockBorder}" />
       <Setter Property="BorderThickness" Value="0,1,0,0" />
       <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ContentPresenter:nth-child(1) > Border.row">
+      <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style Selector="Border.row:pointerover">
       <Setter Property="Background" Value="{DynamicResource DockHover}" />
@@ -97,6 +169,7 @@
       <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
       <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,6,0" />
     </Style>
     <Style Selector="TextBlock.detail.warning">
       <Setter Property="Foreground" Value="{DynamicResource DockWarning}" />
@@ -104,20 +177,75 @@
     <Style Selector="TextBlock.detail.error">
       <Setter Property="Foreground" Value="{DynamicResource DockError}" />
     </Style>
-    <Style Selector="Border.key">
-      <Setter Property="BorderBrush" Value="{DynamicResource DockMuted}" />
+    <Style Selector="Border.badge">
+      <Setter Property="Background" Value="{DynamicResource DockCountBadge}" />
+      <Setter Property="TextElement.Foreground" Value="{DynamicResource DockCountBadgeForeground}" />
+      <Setter Property="CornerRadius" Value="9" />
+      <Setter Property="MinWidth" Value="18" />
+      <Setter Property="Padding" Value="5,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- After Border.badge, so an empty group's muted badge wins. -->
+    <Style Selector="Border.badge.zero">
+      <Setter Property="Background" Value="{DynamicResource DockBadgeZero}" />
+      <Setter Property="TextElement.Foreground" Value="{DynamicResource DockMuted}" />
+    </Style>
+    <!-- Ticket keys, link badges and Returned are outlined pills with a muted fill, in the source's or a pull request's colour as in the VS Code
+         panel; a pill with a link opens it. -->
+    <Style Selector="Border.pill">
       <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockMuted}" />
+      <Setter Property="Background" Value="{DynamicResource DockPillFill}" />
       <Setter Property="CornerRadius" Value="9" />
       <Setter Property="Padding" Value="6,0" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="TextElement.FontSize" Value="12" />
     </Style>
-    <Style Selector="Border.key.github">
+    <Style Selector="Border.pill > TextBlock, Border.pill StackPanel > TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.pill-icon">
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="Border.pill:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockPillFillHover}" />
+    </Style>
+    <Style Selector="Border.pill.github">
       <Setter Property="BorderBrush" Value="{DynamicResource DockKeyGithub}" />
+      <Setter Property="Background" Value="{DynamicResource DockKeyGithubFill}" />
     </Style>
-    <Style Selector="Border.key.zoho">
+    <Style Selector="Border.pill.github:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockKeyGithubHover}" />
+    </Style>
+    <Style Selector="Border.pill.zoho">
       <Setter Property="BorderBrush" Value="{DynamicResource DockKeyZoho}" />
+      <Setter Property="Background" Value="{DynamicResource DockKeyZohoFill}" />
     </Style>
-    <Style Selector="Border.key.forum">
+    <Style Selector="Border.pill.zoho:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockKeyZohoHover}" />
+    </Style>
+    <Style Selector="Border.pill.forum">
       <Setter Property="BorderBrush" Value="{DynamicResource DockKeyForum}" />
+      <Setter Property="Background" Value="{DynamicResource DockKeyForumFill}" />
+    </Style>
+    <Style Selector="Border.pill.forum:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockKeyForumHover}" />
+    </Style>
+    <Style Selector="Border.pill.pr">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockPullRequest}" />
+      <Setter Property="Background" Value="{DynamicResource DockPullRequestFill}" />
+    </Style>
+    <Style Selector="Border.pill.pr:pointerover">
+      <Setter Property="Background" Value="{DynamicResource DockPullRequestHover}" />
+    </Style>
+    <!-- Returned asks for attention, so it takes the warning colour, and opens nothing. -->
+    <Style Selector="Border.pill.returned">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockWarning}" />
+      <Setter Property="Background" Value="{DynamicResource DockWarningFill}" />
+      <Setter Property="TextElement.Foreground" Value="{DynamicResource DockWarning}" />
+      <Setter Property="Cursor" Value="Arrow" />
     </Style>
     <Style Selector="TextBlock.spin">
       <Setter Property="RenderTransform" Value="rotate(0deg)" />
@@ -139,36 +267,48 @@
     <Border Name="GripLeft" Width="5" Background="Transparent" Cursor="SizeWestEast" BorderBrush="{DynamicResource DockBorder}" BorderThickness="0,0,1,0"
             IsVisible="{Binding GripOnLeft}" PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" PointerCaptureLost="OnGripCaptureLost" />
     <DockPanel Name="ListPanel" Grid.Column="1">
-      <StackPanel DockPanel.Dock="Top" Margin="8,4,4,4" Spacing="4">
-        <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+      <StackPanel DockPanel.Dock="Top" Margin="8,0,4,4" Spacing="4">
+        <!-- 35px, the height of VS Code's title bar on Windows. -->
+        <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor it is dropped on. -->
-          <TextBlock Name="MoveHandle" Text="SWITCHBOARD" FontSize="11" FontWeight="SemiBold" Classes="muted" VerticalAlignment="Center" Cursor="SizeAll" Background="Transparent"
+          <TextBlock Name="MoveHandle" Text="Switchboard" FontSize="12" Classes="muted" VerticalAlignment="Center" Cursor="SizeAll" Background="Transparent"
                      ToolTip.Tip="Drag to the left or right edge of a monitor" PointerPressed="OnMovePressed" PointerReleased="OnMoveReleased" PointerCaptureLost="OnMoveCaptureLost" />
-          <Button Name="AdhocButton" Grid.Column="1" Classes="header" Click="OnAdhocClicked" ToolTip.Tip="New Ad-hoc Session…">
+          <ItemsControl Name="SourceList" Grid.Column="1" ItemsSource="{Binding Sources}" VerticalAlignment="Center">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="views:SourceViewModel">
+                <Button Classes="header" Click="OnSourceClicked" ToolTip.Tip="{Binding Tip}" AutomationProperties.Name="{Binding Name}">
+                  <!-- The top margin lines the logos up with the codicons, which sit 1px low (see TextBlock.icon). -->
+                  <Panel MinWidth="16" Height="16" Margin="0,3,0,0">
+                    <Path Classes="source github" Classes.off="{Binding !Enabled}" IsVisible="{Binding IsGithub}" Data="{StaticResource SourceGithub}" />
+                    <Path Classes="source zoho" Classes.off="{Binding !Enabled}" IsVisible="{Binding IsZoho}" Data="{StaticResource SourceZoho}" />
+                    <Path Classes="source forum" Classes.off="{Binding !Enabled}" IsVisible="{Binding IsForum}" Data="{StaticResource SourceForum}" />
+                  </Panel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Grid.Column="2" Classes="separator" IsVisible="{Binding !!Sources.Count}" />
+          <Button Name="SearchButton" Grid.Column="3" Classes="header" Click="OnSearchClicked" ToolTip.Tip="Search" AutomationProperties.Name="Search">
+            <TextBlock Classes="icon" Text="&#xEA6D;" />
+          </Button>
+          <Button Name="AdhocButton" Grid.Column="4" Classes="header" Click="OnAdhocClicked" ToolTip.Tip="New Ad-hoc Session…" AutomationProperties.Name="New Ad-hoc Session">
             <TextBlock Classes="icon" Text="&#xEA60;" />
           </Button>
-          <Button Name="SettingsButton" Grid.Column="2" Classes="header" Click="OnSettingsClicked" ToolTip.Tip="Open Settings">
+          <Button Name="SettingsButton" Grid.Column="5" Classes="header" Click="OnSettingsClicked" ToolTip.Tip="Open Settings" AutomationProperties.Name="Open Settings">
             <TextBlock Classes="icon" Text="&#xEB51;" />
           </Button>
-          <Button Name="CloseButton" Grid.Column="3" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock">
+          <!-- Set apart, so Close is not clicked by mistake for Settings. -->
+          <Border Grid.Column="6" Classes="separator" Margin="6,0" />
+          <Button Name="CloseButton" Grid.Column="7" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock" AutomationProperties.Name="Close the dock">
             <TextBlock Classes="icon" Text="&#xEA76;" />
           </Button>
         </Grid>
-        <ItemsControl Name="SourceList" ItemsSource="{Binding Sources}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <StackPanel Orientation="Horizontal" Spacing="4" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="views:SourceViewModel">
-              <Button Classes="source" Classes.off="{Binding !Enabled}" Click="OnSourceClicked" ToolTip.Tip="{Binding Tip}">
-                <TextBlock Text="{Binding Label}" FontSize="12" />
-              </Button>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-        <TextBox Name="SearchBox" Text="{Binding Filter}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,4,0" />
+        <TextBox Name="SearchBox" Text="{Binding Filter}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,4,0" FontSize="13" />
         <StackPanel Name="AdhocForm" IsVisible="{Binding AdhocOpen}" Spacing="4" Margin="0,0,4,0">
           <ComboBox Name="AdhocRepoBox" ItemsSource="{Binding RepoRoots}" SelectedItem="{Binding AdhocRepo}" IsVisible="{Binding AdhocChoosesRepo}" HorizontalAlignment="Stretch" />
           <TextBox Name="AdhocPromptBox" Text="{Binding AdhocPrompt}" PlaceholderText="Prompt for a new session" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
@@ -196,44 +336,81 @@
               <DataTemplate x:DataType="views:GroupViewModel">
                 <StackPanel IsVisible="{Binding IsShown}">
                   <Border Classes="group" Tapped="OnGroupTapped">
-                    <Grid ColumnDefinitions="Auto,*,Auto">
-                      <TextBlock Classes="icon" Text="{Binding Chevron}" />
-                      <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" Margin="4,0" VerticalAlignment="Center" />
-                      <TextBlock Grid.Column="2" Text="{Binding Count}" Classes="muted" VerticalAlignment="Center" />
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                      <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
+                      <TextBlock Grid.Column="1" Classes="icon group-icon" Text="{Binding Glyph}" Margin="0,0,6,0" />
+                      <TextBlock Grid.Column="2" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <Border Grid.Column="3" Classes="badge" Classes.zero="{Binding IsZero}">
+                        <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                      </Border>
                     </Grid>
                   </Border>
                   <StackPanel IsVisible="{Binding ShowsRows}">
                     <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="muted" Margin="26,2,8,6" />
-                    <ItemsControl ItemsSource="{Binding Rows}">
+                    <ItemsControl ItemsSource="{Binding Bands}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="views:BandViewModel">
+                          <StackPanel>
+                            <!-- Done's date bands (PRD R27); other groups have one band with no heading. -->
+                            <Border Classes="band" IsVisible="{Binding HasTitle}" Tapped="OnBandTapped">
+                              <Grid ColumnDefinitions="Auto,Auto,*">
+                                <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
+                                <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="12" Classes="muted" Margin="6,0,0,0" VerticalAlignment="Center" />
+                              </Grid>
+                            </Border>
+                    <ItemsControl ItemsSource="{Binding Rows}" IsVisible="{Binding ShowsRows}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="views:RowViewModel">
                           <Border Classes="row" Classes.selected="{Binding IsSelected}" Tapped="OnRowTapped" ContextRequested="OnRowContext">
-                            <Grid ColumnDefinitions="3,*,Auto">
+                            <Grid ColumnDefinitions="3,*">
                               <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" />
-                              <StackPanel Grid.Column="1" Margin="8,5,8,6" Spacing="3">
-                                <Grid ColumnDefinitions="Auto,*,Auto">
+                              <!-- The row's buttons sit beside lines 2 and 3, so they never shorten the title or hide the time. -->
+                              <Grid Grid.Column="1" Margin="8,5,8,6" RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                                <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
                                   <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource DockPriority}"
                                            IsVisible="{Binding IsPriority}" ToolTip.Tip="{Binding PriorityTitle}" />
                                   <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
                                   <TextBlock Grid.Column="2" Text="{Binding Time}" ToolTip.Tip="{Binding TimeTitle}" Classes="muted" Margin="8,0,0,0" />
                                 </Grid>
-                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                <StackPanel Grid.Row="1" Margin="0,3,0,0" Spacing="3">
+                                <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">
                                   <TextBlock VerticalAlignment="Center">
                                     <Run Text="{Binding Namespace}" Foreground="{DynamicResource DockMuted}" /><Run Text="{Binding Name}" />
                                   </TextBlock>
-                                  <Border Classes="key" Classes.github="{Binding IsGithub}" Classes.zoho="{Binding IsZoho}" Classes.forum="{Binding IsForum}">
-                                    <TextBlock Text="{Binding Ticket}" FontSize="12" />
+                                  <Border Classes="pill" Classes.github="{Binding IsGithub}" Classes.zoho="{Binding IsZoho}" Classes.forum="{Binding IsForum}"
+                                          Tag="{Binding Url}" ToolTip.Tip="{Binding Url}" Tapped="OnPillTapped">
+                                    <TextBlock Text="{Binding Ticket}" />
                                   </Border>
-                                  <TextBlock Text="{Binding ReturnedText}" IsVisible="{Binding HasReturned}" Classes="muted" FontSize="12" VerticalAlignment="Center"
-                                             ToolTip.Tip="Earlier work items with this playbook were done for this ticket" />
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasThirdLine}" ClipToBounds="True">
-                                  <TextBlock Classes="icon" Classes.failed="{Binding MarkFailed}" Classes.spin="{Binding MarkSpins}" Text="{Binding MarkGlyph}"
-                                             ToolTip.Tip="{Binding MarkTitle}" IsVisible="{Binding HasMark}" />
-                                  <ItemsControl ItemsSource="{Binding Details}">
+                                  <ItemsControl ItemsSource="{Binding Links}">
                                     <ItemsControl.ItemsPanel>
                                       <ItemsPanelTemplate>
                                         <StackPanel Orientation="Horizontal" Spacing="6" />
+                                      </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                      <DataTemplate x:DataType="hub:DockLink">
+                                        <Border Classes="pill" Classes.pr="{Binding IsPullRequest}" Classes.github="{Binding IsIssue}" Tag="{Binding Url}" ToolTip.Tip="{Binding Url}" Tapped="OnPillTapped">
+                                          <StackPanel Orientation="Horizontal" Spacing="3">
+                                            <TextBlock Classes="icon pill-icon" Text="{Binding Glyph}" IsVisible="{Binding HasGlyph}" />
+                                            <TextBlock Text="{Binding Text}" />
+                                          </StackPanel>
+                                        </Border>
+                                      </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                  </ItemsControl>
+                                  <Border Classes="pill returned" IsVisible="{Binding HasReturned}" ToolTip.Tip="Earlier work items with this playbook were done for this ticket">
+                                    <TextBlock Text="{Binding ReturnedText}" />
+                                  </Border>
+                                </StackPanel>
+                                <!-- The last detail takes the remaining width and ends in an ellipsis. -->
+                                <DockPanel IsVisible="{Binding HasThirdLine}" ClipToBounds="True">
+                                  <TextBlock DockPanel.Dock="Left" Classes="icon" Classes.failed="{Binding MarkFailed}" Classes.spin="{Binding MarkSpins}" Text="{Binding MarkGlyph}"
+                                             ToolTip.Tip="{Binding MarkTitle}" IsVisible="{Binding HasMark}" Margin="0,0,6,0" />
+                                  <ItemsControl ItemsSource="{Binding Details}">
+                                    <ItemsControl.ItemsPanel>
+                                      <ItemsPanelTemplate>
+                                        <DockPanel LastChildFill="True" />
                                       </ItemsPanelTemplate>
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
@@ -242,8 +419,9 @@
                                       </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                   </ItemsControl>
+                                </DockPanel>
                                 </StackPanel>
-                                <WrapPanel IsVisible="{Binding HasAnswers}">
+                                <WrapPanel Grid.Row="2" Grid.ColumnSpan="2" IsVisible="{Binding HasAnswers}">
                                   <ItemsControl ItemsSource="{Binding Answers}">
                                     <ItemsControl.ItemsPanel>
                                       <ItemsPanelTemplate>
@@ -257,18 +435,29 @@
                                     </ItemsControl.ItemTemplate>
                                   </ItemsControl>
                                 </WrapPanel>
-                              </StackPanel>
-                              <StackPanel Grid.Column="2" Classes="actions" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <!-- The negative margins let the 26px buttons reach into the gap above line 2 and the row's padding, so a two-line row keeps its height. -->
+                                <StackPanel Grid.Row="1" Grid.Column="1" Classes="actions" Classes.empty="{Binding !HasActions}" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,-3,0,-5">
                                 <Button Classes="icon-button" IsVisible="{Binding HasCopy}" ToolTip.Tip="{Binding CopyTitle}" Click="OnCopyClicked">
                                   <TextBlock Classes="icon" Text="&#xEBCC;" />
                                 </Button>
                                 <Button Classes="icon-button" IsVisible="{Binding HasReport}" ToolTip.Tip="{Binding ReportTitle}" Click="OnReportClicked">
                                   <TextBlock Classes="icon" Text="&#xEA7B;" />
                                 </Button>
-                                <Button Classes="main" Classes.accent="{Binding MainIsApprove}" IsVisible="{Binding HasMain}" Content="{Binding Main}" ToolTip.Tip="{Binding MainTitle}" Click="OnMainClicked" />
-                              </StackPanel>
+                                <Button Classes="main" Classes.accent="{Binding MainIsApprove}" IsVisible="{Binding HasMain}" ToolTip.Tip="{Binding MainTitle}" Click="OnMainClicked"
+                                        AutomationProperties.Name="{Binding Main}">
+                                  <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Classes="icon" Text="{Binding MainGlyph}" />
+                                    <TextBlock Text="{Binding Main}" VerticalAlignment="Center" />
+                                  </StackPanel>
+                                </Button>
+                                </StackPanel>
+                              </Grid>
                             </Grid>
                           </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                          </StackPanel>
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>

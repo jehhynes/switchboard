@@ -37,7 +37,7 @@ public sealed class MainWindowTests
 
     static void Tap(Window window, Control control)
     {
-        var point = control.TranslatePoint(new Point(20, 8), window)!.Value;
+        var point = control.TranslatePoint(new Point(Math.Min(20, control.Bounds.Width / 2), Math.Min(8, control.Bounds.Height / 2)), window)!.Value;
 
         window.MouseDown(point, MouseButton.Left);
         window.MouseUp(point, MouseButton.Left);
@@ -50,7 +50,7 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var texts = VisibleTexts(window);
 
-        Assert.Equal(["Needs you", "3", "Working", "0", "Unstarted", "2", "Done", "0"], texts.Where((text) => text is "Needs you" or "Working" or "Unstarted" or "Done" or "0" or "2" or "3"));
+        Assert.Equal(["Needs you", "3", "Working", "0", "Unstarted", "2", "Done", "2"], texts.Where((text) => text is "Needs you" or "Working" or "Unstarted" or "Done" or "0" or "2" or "3"));
         Assert.Contains("Nothing is running.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
@@ -250,5 +250,115 @@ public sealed class MainWindowTests
 
         Assert.True(closed);
         Assert.Empty(actions.Clicked);
+    }
+    [AvaloniaFact]
+    public void Show_RecordedView_GivesEachGroupItsGlyphAndMutesAnEmptyCount()
+    {
+        var (window, _) = Open();
+        var headers = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("group")).ToList();
+
+        Assert.Equal(["\uEAA2", "\uEBA6", "\uEB09", "\uEBA4"], headers.Select((header) => header.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("group-icon")).Text));
+        var muted = window.FindResource(window.ActualThemeVariant, "DockBadgeZero");
+
+        Assert.Equal([false, true, false, false], headers.Select((header) => header.GetVisualDescendants().OfType<Border>().Single((badge) => badge.Classes.Contains("badge")).Background == muted));
+    }
+
+    [AvaloniaFact]
+    public void OpenDone_RecordedView_ShowsTodayOpenAndOlderClosedUntilTapped()
+    {
+        var (window, _) = Open(new DockSettings { Groups = { ["done"] = true } });
+        var bands = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("band") && border.IsEffectivelyVisible).ToList();
+
+        Assert.Equal(["Today", "Older"], bands.Select((band) => ((BandViewModel)band.DataContext!).Title));
+        Assert.Contains("Issue <11>", VisibleTexts(window));
+        Assert.DoesNotContain("Issue <12>", VisibleTexts(window));
+
+        Tap(window, bands[1]);
+
+        Assert.Contains("Issue <12>", VisibleTexts(window));
+        Assert.Contains("done:Older=True", saved.Last().Split(','));
+    }
+
+    [AvaloniaFact]
+    public void SelectRow_TwoLineRowWithButton_KeepsTheRowHeight()
+    {
+        var (window, model) = Open();
+        var row = window.GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel { Key: "item:9" });
+        var before = row.Bounds.Height;
+
+        model.Selected = "item:9";
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(row.GetVisualDescendants().OfType<Button>().Single((button) => button.Classes.Contains("main")).IsEffectivelyVisible);
+        Assert.Equal(before, row.Bounds.Height);
+    }
+
+    [AvaloniaFact]
+    public void Header_IconButtons_HaveAccessibleNames()
+    {
+        var (window, _) = Open();
+        var names = window.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("header")).Select((button) => Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(button).GetName());
+
+        Assert.Equal(["github", "zoho", "Search", "New Ad-hoc Session", "Open Settings", "Close the dock"], names);
+    }
+
+    [AvaloniaFact]
+    public void RowMenu_DockOnEitherEdge_OpensAwayFromTheEdgeAndAdjustsOnlyVertically()
+    {
+        var vertical = Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY;
+
+        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight, MainWindow.RowMenu([], dockOnRight: false, new Point(30, 40)).PlacementGravity);
+        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomLeft, MainWindow.RowMenu([], dockOnRight: true, new Point(30, 40)).PlacementGravity);
+        Assert.Equal(vertical, MainWindow.RowMenu([], dockOnRight: true, new Point(30, 40)).PlacementConstraintAdjustment);
+        Assert.Equal(new Rect(30, 40, 1, 1), MainWindow.RowMenu([], dockOnRight: true, new Point(30, 40)).PlacementRect);
+    }
+
+    [AvaloniaFact]
+    public void TapPill_KeyAndPullRequest_OpenTheirLinksWithoutTheRowClick()
+    {
+        var (window, _) = Open();
+        var pills = RowNamed(window, "Issue <7>").GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("pill") && border.IsEffectivelyVisible).ToList();
+
+        Assert.Equal(["gh 107", "19002", "Returned ×2"], pills.Select((pill) => pill.GetVisualDescendants().OfType<TextBlock>().Last().Text));
+        Assert.Contains("pr", pills[1].Classes);
+
+        Tap(window, pills[0]);
+        Tap(window, pills[1]);
+        Tap(window, pills[2]);
+
+        Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
+        Assert.Empty(actions.Clicked);
+    }
+
+    [AvaloniaFact]
+    public void SelectRow_NoButtons_KeepsLineThreeItsFullWidth()
+    {
+        var (window, model) = Open();
+        var row = window.GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel { Key: "item:7" });
+        var line = row.GetVisualDescendants().OfType<DockPanel>().First((panel) => panel.IsVisible);
+        var before = line.Bounds.Width;
+
+        model.Selected = "item:7";
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(row.GetVisualDescendants().OfType<StackPanel>().Single((panel) => panel.Classes.Contains("actions")).IsVisible);
+        Assert.Equal(before, line.Bounds.Width);
+    }
+
+    [AvaloniaFact]
+    public void HoverRow_WithButton_ShowsItOnlyOnceSelected()
+    {
+        var (window, model) = Open();
+        var row = window.GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel { Key: "item:9" });
+        var actions = row.GetVisualDescendants().OfType<StackPanel>().Single((panel) => panel.Classes.Contains("actions"));
+
+        window.MouseMove(row.TranslatePoint(new Point(20, 8), window)!.Value);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(row.IsPointerOver);
+        Assert.False(actions.IsVisible);
+
+        model.Selected = "item:9";
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(actions.IsVisible);
     }
 }

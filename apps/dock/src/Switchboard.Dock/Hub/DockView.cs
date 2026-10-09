@@ -20,7 +20,8 @@ public sealed record SourceState(string Name, bool Enabled);
 /// <summary>A snooze choice: its wake time as epoch milliseconds, or null to snooze until restored (PRD R49).</summary>
 public sealed record SnoozeChoice(string Label, string Description, long? Until);
 
-public sealed record DockGroup(string Key, string Title, string? Empty, IReadOnlyList<DockRow> Rows);
+/// <summary>A group of rows, with its codicon glyph.</summary>
+public sealed record DockGroup(string Key, string Title, string? Empty, IReadOnlyList<DockRow> Rows, string Glyph = "");
 
 public sealed record DockRow(
     string Key,
@@ -44,10 +45,26 @@ public sealed record DockRow(
     IReadOnlyList<DockCommand> Commands,
     string Search,
     IReadOnlyList<DockLink> Links,
-    int Returned);
+    int Returned,
+    string? Band = null,
+    string? MainGlyph = null);
 
 /// <summary>A ticket's link, named as <c>PR #19002</c>, <c>gh 18941</c> or by its label (PRD R52).</summary>
-public sealed record DockLink(string Label, string Url);
+public sealed record DockLink(string Label, string Url, string Kind = "url", string? Badge = null, string? Glyph = null)
+{
+    [JsonIgnore]
+    public bool IsPullRequest => Kind == "pr";
+
+    [JsonIgnore]
+    public bool IsIssue => Kind == "issue";
+
+    [JsonIgnore]
+    public bool HasGlyph => Glyph is not null;
+
+    /// <summary>The pill's text: the badge, or the menu name from a hub older than badges.</summary>
+    [JsonIgnore]
+    public string Text => Badge ?? Label;
+}
 
 /// <summary>A one-part question's option and the <c>answer</c> action it posts (PRD R70).</summary>
 public sealed record DockAnswer(string Label, string Description, JsonObject Action);
@@ -56,7 +73,7 @@ public sealed record DockAnswer(string Label, string Description, JsonObject Act
 public sealed record DockPaste(string Label, string File);
 
 /// <summary>A control a VS Code window runs, with the message the window's handler reads (PRD R71).</summary>
-public sealed record DockCommand(string Label, JsonObject Command);
+public sealed record DockCommand(string Label, JsonObject Command, string Glyph = "");
 
 public sealed record TimeText(string Text, string Title);
 
@@ -89,4 +106,4 @@ public sealed partial record DockWindow(string Name, string Title, IReadOnlyList
 public sealed record DockOpen(string Type, int? WorkItemId, string? SessionId, string? Cwd, string? Url);
 
 /// <summary>A hub control in the row's menu, with the action posted to <c>/action</c> as the hub sent it.</summary>
-public sealed record DockControl(string Label, JsonObject Action);
+public sealed record DockControl(string Label, JsonObject Action, string Glyph = "");

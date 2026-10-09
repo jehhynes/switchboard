@@ -176,7 +176,7 @@ public sealed class SettingsWindow : Window
 
         if (view.FilePath is { } path)
         {
-            var open = new Button { Name = "OpenFile", Content = path, Padding = new Thickness(0), Background = Brushes.Transparent, Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
+            var open = new Button { Name = "OpenFile", Content = path, Classes = { "link" } };
 
             ToolTip.SetTip(open, "Open the file in VS Code");
             open.Click += async (_, _) => Status = await actions.Run(null, new JsonObject { ["type"] = "openUrl", ["url"] = path }, CancellationToken.None);

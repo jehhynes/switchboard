@@ -1,9 +1,11 @@
 using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Switchboard.Dock.Hub;
@@ -27,6 +29,8 @@ public sealed partial class MainWindow : Window
     // The strip the docked window last took, in physical pixels.
     Native.Rect? placed;
     bool resizing;
+    /// <summary>Where the pointer last moved or pressed, in window coordinates; a row's menu opens there.</summary>
+    Point pointer;
     // The width the pointer has dragged to, in device-independent pixels, before rounding to physical pixels.
     double? dragged;
     // The click that is running, which a click on another row replaces.
@@ -54,6 +58,8 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         // After the XAML, whose width is the default.
         Width = model.Settings.Width;
+        AddHandler(PointerMovedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerPressedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
 
         if (stream is not null)
         {
@@ -215,6 +221,24 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    void OnBandTapped(object? sender, TappedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is BandViewModel band)
+        {
+            band.Toggle();
+        }
+    }
+
+    /// <summary>A pill with a link, the ticket's key or a link badge, opens it in the browser instead of running the row's click (PRD R52).</summary>
+    void OnPillTapped(object? sender, TappedEventArgs e)
+    {
+        if ((sender as Control)?.Tag is string { Length: > 0 } url)
+        {
+            e.Handled = true;
+            model.Status = actions.OpenUrl(url);
+        }
+    }
+
     async void OnRowTapped(object? sender, TappedEventArgs e)
     {
         // A button on the row runs its own control, not the row's click.
@@ -278,8 +302,26 @@ public sealed partial class MainWindow : Window
         model.Selected = row.Key;
         e.Handled = true;
 
-        new ContextMenu { ItemsSource = MenuOf(row.Row) }.Open(target);
+        // The event's own position can be wrong for a right-click, so the menu opens where the pointer last was; one opened from the keyboard,
+        // which has no position, opens at the row's corner.
+        var at = e.TryGetPosition(this, out _) ? pointer : target.TranslatePoint(default, this) ?? default;
+
+        RowMenu(MenuOf(row.Row), model.GripOnLeft, at).Open(this);
     }
+
+    /// <summary>
+    /// A row's menu at the pointer, opening away from the screen edge the dock is on. Popups are kept inside the monitor's working area, which
+    /// leaves out the dock's app bar strip, so a horizontal adjustment would move the menu beside the dock; only vertical ones are allowed.
+    /// </summary>
+    internal static ContextMenu RowMenu(List<Control> items, bool dockOnRight, Point at) => new()
+    {
+        ItemsSource = items,
+        Placement = PlacementMode.AnchorAndGravity,
+        PlacementRect = new Rect(at, new Size(1, 1)),
+        PlacementAnchor = PopupAnchor.TopLeft,
+        PlacementGravity = dockOnRight ? PopupGravity.BottomLeft : PopupGravity.BottomRight,
+        PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.FlipY | PopupPositionerConstraintAdjustment.SlideY,
+    };
 
     /// <summary>The row's hub controls, Snooze with its choices, then Open ticket (PRD R71).</summary>
     internal List<Control> MenuOf(DockRow row)
@@ -289,33 +331,33 @@ public sealed partial class MainWindow : Window
         // Open in Claude is the click itself on a row whose session waits on a question (PRD R70).
         if (row.Open is { Type: "question" } && model.Row(row.Key) is { } shown)
         {
-            items.Add(Item("Open in Claude", () => Open(shown)));
+            items.Add(Item("Open in Claude", () => Open(shown), row.MainGlyph));
         }
 
         foreach (var control in row.Controls)
         {
             if (control.Label == "Snooze")
             {
-                items.Add(new MenuItem { Header = "Snooze", ItemsSource = model.Snooze.Select((choice) => Item(choice.Description == "" ? choice.Label : $"{choice.Label} · {choice.Description}", () => Act(Snoozed(control.Action, choice.Until)))).ToList() });
+                items.Add(new MenuItem { Header = "Snooze", Icon = Glyph(control.Glyph), ItemsSource = model.Snooze.Select((choice) => Item(choice.Description == "" ? choice.Label : $"{choice.Label} · {choice.Description}", () => Act(Snoozed(control.Action, choice.Until)))).ToList() });
             }
             else
             {
-                items.Add(Item(control.Label, () => Act(control.Action)));
+                items.Add(Item(control.Label, () => Act(control.Action), control.Glyph));
             }
         }
 
         if (row.Pastes.Count == 1)
         {
-            items.Add(Item($"Copy {row.Pastes[0].Label}", () => Copy(row.Pastes[0])));
+            items.Add(Item($"Copy {row.Pastes[0].Label}", () => Copy(row.Pastes[0]), CopyGlyph));
         }
         else if (row.Pastes.Count > 1)
         {
-            items.Add(new MenuItem { Header = "Copy", ItemsSource = row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() });
+            items.Add(new MenuItem { Header = "Copy", Icon = Glyph(CopyGlyph), ItemsSource = row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() });
         }
 
         foreach (var command in row.Commands)
         {
-            items.Add(Item(command.Label, () => Run(row, command.Command)));
+            items.Add(Item(command.Label, () => Run(row, command.Command), command.Glyph));
         }
 
         // The ticket, then its links, such as its pull request (PRD R52), open in the browser.
@@ -332,20 +374,28 @@ public sealed partial class MainWindow : Window
             {
                 model.Status = actions.OpenUrl(url);
                 return Task.CompletedTask;
-            }));
+            }, LinkGlyph));
         }
 
         return items;
     }
 
-    static MenuItem Item(string header, Func<Task> run)
+    // Codicons the dock draws itself: copy and link-external.
+    const string CopyGlyph = "\uEBCC";
+    const string LinkGlyph = "\uEB14";
+
+    static MenuItem Item(string header, Func<Task> run, string? glyph = null)
     {
-        var item = new MenuItem { Header = header };
+        var item = new MenuItem { Header = header, Icon = Glyph(glyph) };
 
         item.Click += async (_, _) => await run();
 
         return item;
     }
+
+    /// <summary>A menu item's codicon, or null for none.</summary>
+    static TextBlock? Glyph(string? glyph) =>
+        string.IsNullOrEmpty(glyph) ? null : new TextBlock { Text = glyph, FontFamily = (FontFamily)Application.Current!.FindResource("Codicons")!, FontSize = 14, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
 
     static JsonObject Snoozed(JsonObject action, long? until)
     {
@@ -568,7 +618,17 @@ public sealed partial class MainWindow : Window
     {
         if (e.Key == Key.Escape)
         {
-            model.Filter = "";
+            model.SearchOpen = false;
+        }
+    }
+
+    void OnSearchClicked(object? sender, RoutedEventArgs e)
+    {
+        model.SearchOpen = !model.SearchOpen;
+
+        if (model.SearchOpen)
+        {
+            Dispatcher.UIThread.Post(() => SearchBox.Focus());
         }
     }
 

@@ -4,6 +4,7 @@
     {
       "key": "needs",
       "title": "Needs you",
+      "glyph": "",
       "empty": "Nothing needs you.",
       "rows": [
         {
@@ -47,6 +48,7 @@
           "controls": [
             {
               "label": "Triage again",
+              "glyph": "",
               "action": {
                 "type": "retriage",
                 "workItemId": 7
@@ -54,6 +56,7 @@
             },
             {
               "label": "Mark done",
+              "glyph": "",
               "action": {
                 "type": "mark-done",
                 "workItemId": 7
@@ -61,6 +64,7 @@
             },
             {
               "label": "Snooze",
+              "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 7
@@ -68,12 +72,14 @@
             }
           ],
           "main": null,
+          "mainGlyph": null,
           "mainTitle": null,
           "answers": [],
           "pastes": [],
           "commands": [
             {
               "label": "Open Changes",
+              "glyph": "",
               "command": {
                 "type": "changes",
                 "path": "D:/git/widgets/.worktrees/107-fix",
@@ -83,6 +89,7 @@
             },
             {
               "label": "History",
+              "glyph": "",
               "command": {
                 "type": "history",
                 "ticketId": 7,
@@ -94,10 +101,14 @@
           "links": [
             {
               "label": "PR #19002",
-              "url": "https://github.com/o/r/pull/19002"
+              "url": "https://github.com/o/r/pull/19002",
+              "kind": "pr",
+              "badge": "19002",
+              "glyph": ""
             }
           ],
-          "returned": 2
+          "returned": 2,
+          "band": null
         },
         {
           "key": "item:8",
@@ -141,6 +152,7 @@
           "controls": [
             {
               "label": "Stop",
+              "glyph": "",
               "action": {
                 "type": "stop",
                 "workItemId": 8
@@ -148,6 +160,7 @@
             },
             {
               "label": "Mark done",
+              "glyph": "",
               "action": {
                 "type": "mark-done",
                 "workItemId": 8
@@ -155,6 +168,7 @@
             },
             {
               "label": "Snooze",
+              "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 8
@@ -162,6 +176,7 @@
             }
           ],
           "main": "Open in Claude",
+          "mainGlyph": "",
           "mainTitle": "Open in Claude",
           "answers": [
             {
@@ -180,6 +195,7 @@
           "commands": [
             {
               "label": "History",
+              "glyph": "",
               "command": {
                 "type": "history",
                 "ticketId": 8,
@@ -189,7 +205,8 @@
           ],
           "search": "Issue <8> · gh 108 · dev:develop · Needs you",
           "links": [],
-          "returned": 0
+          "returned": 0,
+          "band": null
         },
         {
           "key": "item:10",
@@ -232,6 +249,7 @@
           "controls": [
             {
               "label": "Approve",
+              "glyph": "",
               "action": {
                 "type": "approve",
                 "workItemId": 10
@@ -239,6 +257,7 @@
             },
             {
               "label": "Triage again",
+              "glyph": "",
               "action": {
                 "type": "retriage",
                 "workItemId": 10
@@ -246,6 +265,7 @@
             },
             {
               "label": "Mark done",
+              "glyph": "",
               "action": {
                 "type": "mark-done",
                 "workItemId": 10
@@ -253,6 +273,7 @@
             },
             {
               "label": "Snooze",
+              "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 10
@@ -260,6 +281,7 @@
             }
           ],
           "main": "Approve",
+          "mainGlyph": "",
           "mainTitle": "Approve: runs /support-release #4521",
           "answers": [],
           "pastes": [
@@ -271,6 +293,7 @@
           "commands": [
             {
               "label": "History",
+              "glyph": "",
               "command": {
                 "type": "history",
                 "ticketId": 10,
@@ -279,6 +302,7 @@
             },
             {
               "label": "Open report",
+              "glyph": "",
               "command": {
                 "type": "openUrl",
                 "url": "D:/drafts/reply.md"
@@ -287,19 +311,22 @@
           ],
           "search": "Issue <10> · gh 110 · dev:develop · Needs you",
           "links": [],
-          "returned": 0
+          "returned": 0,
+          "band": null
         }
       ]
     },
     {
       "key": "working",
       "title": "Working",
+      "glyph": "",
       "empty": "Nothing is running.",
       "rows": []
     },
     {
       "key": "unstarted",
       "title": "Unstarted",
+      "glyph": "",
       "empty": "Nothing waits to be started.",
       "rows": [
         {
@@ -325,6 +352,7 @@
           "controls": [
             {
               "label": "Start",
+              "glyph": "",
               "action": {
                 "type": "start",
                 "workItemId": 9
@@ -332,6 +360,7 @@
             },
             {
               "label": "Triage again",
+              "glyph": "",
               "action": {
                 "type": "retriage",
                 "workItemId": 9
@@ -339,6 +368,7 @@
             },
             {
               "label": "Mark done",
+              "glyph": "",
               "action": {
                 "type": "mark-done",
                 "workItemId": 9
@@ -346,6 +376,7 @@
             },
             {
               "label": "Snooze",
+              "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 9
@@ -353,12 +384,14 @@
             }
           ],
           "main": "Start",
+          "mainGlyph": "",
           "mainTitle": "Start",
           "answers": [],
           "pastes": [],
           "commands": [
             {
               "label": "History",
+              "glyph": "",
               "command": {
                 "type": "history",
                 "ticketId": 9,
@@ -368,7 +401,8 @@
           ],
           "search": "Issue <9> · gh 109 · dev:develop · Unstarted",
           "links": [],
-          "returned": 0
+          "returned": 0,
+          "band": null
         },
         {
           "key": "ticket:4",
@@ -390,6 +424,7 @@
           "controls": [
             {
               "label": "Start",
+              "glyph": "",
               "action": {
                 "type": "pick",
                 "ticketId": 4
@@ -397,6 +432,7 @@
             },
             {
               "label": "Snooze",
+              "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 4
@@ -404,12 +440,14 @@
             }
           ],
           "main": "Start",
+          "mainGlyph": "",
           "mainTitle": "Start",
           "answers": [],
           "pastes": [],
           "commands": [
             {
               "label": "History",
+              "glyph": "",
               "command": {
                 "type": "history",
                 "ticketId": 4,
@@ -419,15 +457,110 @@
           ],
           "search": "Issue <4> · gh 104 · dev:develop · Unstarted",
           "links": [],
-          "returned": 0
+          "returned": 0,
+          "band": null
         }
       ]
     },
     {
       "key": "done",
       "title": "Done",
+      "glyph": "",
       "empty": null,
-      "rows": []
+      "rows": [
+        {
+          "key": "item:11",
+          "title": "Issue <11>",
+          "priority": null,
+          "time": {
+            "text": "11:59",
+            "title": "Done 2026-10-03 11:59 UTC; in scope from 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 111",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/111",
+          "mark": {
+            "kind": "done-session",
+            "glyph": "",
+            "title": "Finished by the session"
+          },
+          "details": [],
+          "stripe": null,
+          "window": null,
+          "open": {
+            "type": "url",
+            "url": "https://github.com/o/r/issues/111"
+          },
+          "controls": [],
+          "main": null,
+          "mainGlyph": null,
+          "mainTitle": null,
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "glyph": "",
+              "command": {
+                "type": "history",
+                "ticketId": 11,
+                "key": "gh 111"
+              }
+            }
+          ],
+          "search": "Issue <11> · gh 111 · dev:develop · Done",
+          "links": [],
+          "returned": 0,
+          "band": "Today"
+        },
+        {
+          "key": "item:12",
+          "title": "Issue <12>",
+          "priority": null,
+          "time": {
+            "text": "9/3",
+            "title": "Done 2026-09-03 12:00 UTC; in scope from 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 112",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/112",
+          "mark": {
+            "kind": "done-session",
+            "glyph": "",
+            "title": "Finished by the session"
+          },
+          "details": [],
+          "stripe": null,
+          "window": null,
+          "open": {
+            "type": "url",
+            "url": "https://github.com/o/r/issues/112"
+          },
+          "controls": [],
+          "main": null,
+          "mainGlyph": null,
+          "mainTitle": null,
+          "answers": [],
+          "pastes": [],
+          "commands": [
+            {
+              "label": "History",
+              "glyph": "",
+              "command": {
+                "type": "history",
+                "ticketId": 12,
+                "key": "gh 112"
+              }
+            }
+          ],
+          "search": "Issue <12> · gh 112 · dev:develop · Done",
+          "links": [],
+          "returned": 0,
+          "band": "Older"
+        }
+      ]
     }
   ],
   "snooze": [

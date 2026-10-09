@@ -26,12 +26,14 @@ public abstract class Observable : INotifyPropertyChanged
 public sealed class DockViewModel(DockSettings settings, Action<DockSettings> save) : Observable
 {
     /// <summary>Needs you, Working and Unstarted start open; Done and Snoozed start closed (PRD R27).</summary>
-    static readonly HashSet<string> OpenByDefault = ["needs", "working", "unstarted"];
+    // Done's older date bands start closed, so the recent ones show first (PRD R27).
+    static readonly HashSet<string> OpenByDefault = ["needs", "working", "unstarted", "done:Today", "done:Yesterday"];
 
     string? status;
     string? connection = "Connecting to Switchboard…";
     string? selected;
     string filter = "";
+    bool searchOpen;
     bool adhocOpen;
     string adhocPrompt = "";
     string? adhocRepo;
@@ -84,6 +86,21 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
                 group.Filter(filter);
             }
 
+        }
+    }
+
+    /// <summary>Whether the search box shows; hiding it clears the search.</summary>
+    public bool SearchOpen
+    {
+        get => searchOpen;
+        set
+        {
+            Set(ref searchOpen, value);
+
+            if (!value)
+            {
+                Filter = "";
+            }
         }
     }
 
@@ -201,7 +218,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
         foreach (var group in view.Groups)
         {
-            var model = kept.GetValueOrDefault(group.Key) ?? new GroupViewModel(group.Key, settings.Groups.TryGetValue(group.Key, out var open) ? open : OpenByDefault.Contains(group.Key), Toggled);
+            var model = kept.GetValueOrDefault(group.Key) ?? new GroupViewModel(group.Key, IsOpen(group.Key), Toggled, IsOpen, BandToggled);
 
             model.Show(group, selected, filter);
             Groups.Add(model);
@@ -209,9 +226,17 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
     }
 
+    bool IsOpen(string key) => settings.Groups.TryGetValue(key, out var open) ? open : OpenByDefault.Contains(key);
+
     void Toggled(GroupViewModel group)
     {
         settings.Groups[group.Key] = group.IsOpen;
+        SaveSettings();
+    }
+
+    void BandToggled(BandViewModel band)
+    {
+        settings.Groups[band.Key] = band.IsOpen;
         SaveSettings();
     }
 
@@ -249,6 +274,11 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
                     group.Toggle();
                 }
 
+                if (group.Bands.FirstOrDefault((band) => band.Rows.Contains(row)) is { IsOpen: false } closed)
+                {
+                    closed.Toggle();
+                }
+
                 Selected = row.Key;
 
                 return row.Key;
@@ -261,9 +291,63 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     public RowViewModel? Row(string key) => Groups.SelectMany((group) => group.AllRows).FirstOrDefault((row) => row.Key == key);
 }
 
-public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel> toggled) : Observable
+/// <summary>
+/// A group's rows under one date band of Done, such as <c>Today</c>, or all of another group's rows under no heading (PRD R27). A band's open
+/// state is kept under <c>done:&lt;band&gt;</c>.
+/// </summary>
+public sealed class BandViewModel(string key, string? title, bool open, Action<BandViewModel> toggled) : Observable
 {
     bool isOpen = open;
+    bool filtering;
+    IReadOnlyList<RowViewModel> rows = [];
+
+    public string Key => key;
+
+    public string? Title => title;
+
+    public bool HasTitle => title is not null;
+
+    public bool IsOpen
+    {
+        get => isOpen;
+        private set => Set(ref isOpen, value);
+    }
+
+    /// <summary>Open by the operator's choice or while the search box filters; rows under no heading always show.</summary>
+    public bool ShowsRows => !HasTitle || IsOpen || filtering;
+
+    public string Chevron => ShowsRows ? "\uEAB4" : "\uEAB6";
+
+    public IReadOnlyList<RowViewModel> Rows => rows;
+
+    public string Count => rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    public void Show(IReadOnlyList<RowViewModel> shown, bool filtered)
+    {
+        rows = shown;
+        filtering = filtered;
+        Changed(nameof(Rows));
+        Changed(nameof(Count));
+        Changed(nameof(ShowsRows));
+        Changed(nameof(Chevron));
+    }
+
+    public void Toggle()
+    {
+        IsOpen = !IsOpen;
+        Changed(nameof(ShowsRows));
+        Changed(nameof(Chevron));
+        toggled(this);
+    }
+}
+
+public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel> toggled, Func<string, bool>? bandOpen = null, Action<BandViewModel>? bandToggled = null)
+    : Observable
+{
+    readonly Dictionary<string, BandViewModel> kept = [];
+    bool isOpen = open;
+    string glyph = "";
+    IReadOnlyList<BandViewModel> bands = [];
     string title = "";
     string? empty;
     string filter = "";
@@ -305,7 +389,24 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
 
     public IReadOnlyList<RowViewModel> AllRows => all;
 
+    /// <summary>The shown rows by date band, in list order; Done's rows are sorted newest first, so each band's rows are consecutive.</summary>
+    public IReadOnlyList<BandViewModel> Bands
+    {
+        get => bands;
+        private set => Set(ref bands, value);
+    }
+
     public string Count => Rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>An empty group's badge is muted, as in the VS Code panel.</summary>
+    public bool IsZero => Rows.Count == 0;
+
+    /// <summary>The group's codicon, such as a bell for Needs you.</summary>
+    public string Glyph
+    {
+        get => glyph;
+        private set => Set(ref glyph, value);
+    }
 
     public string? Empty
     {
@@ -318,6 +419,7 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     public void Show(DockGroup group, string? selected, string filtering)
     {
         Title = group.Title;
+        Glyph = group.Glyph;
         Empty = group.Empty;
         all = group.Rows.Select((row) => new RowViewModel(row) { IsSelected = row.Key == selected }).ToList();
         Filter(filtering);
@@ -327,11 +429,28 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     {
         filter = text;
         Rows = all.Where((row) => Matches(row.Row.Search, text)).ToList();
+        Bands = Rows.GroupBy((row) => row.Row.Band).Select((rows) => BandOf(rows.Key, rows.ToList())).ToList();
         Changed(nameof(Count));
+        Changed(nameof(IsZero));
         Changed(nameof(ShowEmpty));
         Changed(nameof(ShowsRows));
         Changed(nameof(IsShown));
         Changed(nameof(Chevron));
+    }
+
+    BandViewModel BandOf(string? title, IReadOnlyList<RowViewModel> rows)
+    {
+        var bandKey = title is null ? key : $"{key}:{title}";
+
+        if (!kept.TryGetValue(bandKey, out var band))
+        {
+            band = new BandViewModel(bandKey, title, bandOpen?.Invoke(bandKey) ?? true, (changed) => bandToggled?.Invoke(changed));
+            kept[bandKey] = band;
+        }
+
+        band.Show(rows, Filtering);
+
+        return band;
     }
 
     /// <summary>Whether the search text holds every word of the filter, ignoring case.</summary>
@@ -354,7 +473,11 @@ public sealed class SourceViewModel(string name, bool enabled)
 
     public bool Enabled => enabled;
 
-    public string Label => name == "github" ? "gh" : name;
+    public bool IsGithub => name == "github";
+
+    public bool IsZoho => name == "zoho";
+
+    public bool IsForum => name == "forum";
 
     public string Tip => $"{name}: {(enabled ? "polled. Click to stop polling it." : "not polled. Click to poll it.")}";
 }
@@ -413,9 +536,18 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public bool HasReturned => row.Returned > 0;
 
+    /// <summary>The ticket's URL, which its key pill opens; empty for an ad-hoc ticket.</summary>
+    public string Url => row.Url;
+
+    /// <summary>The ticket's links, as badges after its key on line 2 (PRD R52).</summary>
+    public IReadOnlyList<DockLink> Links => row.Links;
+
     public bool HasMain => row.Main is not null;
 
     public string Main => row.Main ?? "";
+
+    /// <summary>The main control's codicon, before its label.</summary>
+    public string MainGlyph => row.MainGlyph ?? "";
 
     /// <summary>For Approve, the prompt it runs (PRD R27).</summary>
     public string? MainTitle => row.MainTitle;
@@ -434,6 +566,9 @@ public sealed class RowViewModel(DockRow row) : Observable
     public DockCommand? Report => row.Commands.FirstOrDefault((command) => command.Label == "Open report");
 
     public bool HasReport => Report is not null;
+
+    /// <summary>Whether the row has any button, so a row without one keeps its full width on hover.</summary>
+    public bool HasActions => HasMain || HasCopy || HasReport;
 
     public string ReportTitle => Report?.Command["url"]?.GetValue<string>() is { } file ? Path.GetFileName(file) : "";
 

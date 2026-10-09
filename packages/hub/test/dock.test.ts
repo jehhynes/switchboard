@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dockView, windowOf, windowsDir, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
+import { CONTROL_GLYPHS } from '../src/rows.js';
 import type { WorkItemView } from '../src/runtime.js';
 import { item, NOW, pool, session, snapshot, triage } from './views.js';
 
@@ -39,7 +40,7 @@ describe('dockView', () => {
     ]);
   });
 
-  it('lists the panel groups in panel order, with Snoozed only when it has rows', () => {
+  it('lists the groups in order, with Snoozed before Done and only when it has rows', () => {
     const view = dockView(snapshot([item(1, { status: 'blocked' }), item(2), item(3, { status: 'unstarted' })], { pool: [pool(4)] }), NOW, W);
 
     expect(view.groups.map((group) => [group.key, group.title, group.empty, group.rows.map((entry) => entry.key)])).toEqual([
@@ -48,7 +49,13 @@ describe('dockView', () => {
       ['unstarted', 'Unstarted', 'Nothing waits to be started.', ['item:3', 'ticket:4']],
       ['done', 'Done', null, []],
     ]);
-    expect(dockView(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: true } })]), NOW, W).groups.at(-1)?.rows.map((entry) => entry.key)).toEqual(['item:5']);
+    expect(dockView(snapshot([item(5, { ticket: { ...item(5).ticket, snoozed: true } })]), NOW, W).groups.map((group) => [group.key, group.rows.map((entry) => entry.key)])).toEqual([
+      ['needs', []],
+      ['working', []],
+      ['unstarted', []],
+      ['snoozed', ['item:5']],
+      ['done', []],
+    ]);
   });
 
   it('lists configuration errors, then what an unconfigured home lacks', () => {
@@ -105,10 +112,10 @@ describe('dockView', () => {
 
   it('gives a row only the controls the hub runs, with their actions', () => {
     expect(row(item(7, { status: 'awaiting-approval', worktree, pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] })).controls).toEqual([
-      { label: 'Approve', action: { type: 'approve', workItemId: 7 } },
-      { label: 'Triage again', action: { type: 'retriage', workItemId: 7 } },
-      { label: 'Mark done', action: { type: 'mark-done', workItemId: 7 } },
-      { label: 'Snooze', action: { type: 'snooze', ticketId: 7 } },
+      { label: 'Approve', glyph: '\u{eab2}', action: { type: 'approve', workItemId: 7 } },
+      { label: 'Triage again', glyph: '\u{ea6d}', action: { type: 'retriage', workItemId: 7 } },
+      { label: 'Mark done', glyph: '\u{eba4}', action: { type: 'mark-done', workItemId: 7 } },
+      { label: 'Snooze', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 7 } },
     ]);
     expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop', 'Mark done', 'Snooze']);
   });
@@ -135,13 +142,14 @@ describe('dockView', () => {
 
     expect(waiting.main).toBe('Open in Claude');
     expect(waiting.mainTitle).toBe('Open in Claude');
+    expect(waiting.mainGlyph).toBe('\u{eac7}');
     expect(waiting.answers).toEqual([
       { label: 'Apple', description: 'red', action: { type: 'answer', workItemId: 7, nativeSessionId: 'aaaa1111-native', question: 'Which fruit?', answer: 'Apple' } },
       { label: 'Plum', description: '', action: { type: 'answer', workItemId: 7, nativeSessionId: 'aaaa1111-native', question: 'Which fruit?', answer: 'Plum' } },
     ]);
     expect(waiting.commands).toEqual([
-      { label: 'Open Changes', command: { type: 'changes', path: 'D:/git/widgets/.worktrees/107-fix', key: 'gh 107', title: 'Issue <7>' } },
-      { label: 'History', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
+      { label: 'Open Changes', glyph: '\u{ec23}', command: { type: 'changes', path: 'D:/git/widgets/.worktrees/107-fix', key: 'gh 107', title: 'Issue <7>' } },
+      { label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
     ]);
     expect(waiting.search).toBe('Issue <7> · gh 107 · PR #19002 · dev:develop · Needs you · 107-fix');
     expect(row(item(7, { sessions: [session({ state: 'waiting' })], question: { text: 'Two parts', options: [{ label: 'A', description: '' }], parts: 2 } })).answers).toEqual([]);
@@ -150,15 +158,17 @@ describe('dockView', () => {
 
     expect(approval.main).toBe('Approve');
     expect(approval.mainTitle).toBe('Approve');
+    expect(approval.mainGlyph).toBe('\u{eab2}');
     expect(row(item(7, { status: 'awaiting-approval', approvalPrompt: '/review-pr pr:123 publish' })).mainTitle).toBe('Approve: runs /review-pr pr:123 publish');
     expect(approval.pastes).toEqual([{ label: 'Reply', file: 'D:/r.md' }]);
     expect(approval.commands).toEqual([
-      { label: 'History', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
-      { label: 'Open report', command: { type: 'openUrl', url: 'D:/drafts/reply.md' } },
+      { label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
+      { label: 'Open report', glyph: '\u{ea7b}', command: { type: 'openUrl', url: 'D:/drafts/reply.md' } },
     ]);
     expect(row(item(7, { status: 'blocked', pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] })).pastes).toEqual([]);
     expect(row(item(7)).main).toBeNull();
     expect(row(item(7)).mainTitle).toBeNull();
+    expect(row(item(7)).mainGlyph).toBeNull();
   });
 
   it('lists the sources and repo roots for the header', () => {
@@ -173,9 +183,9 @@ describe('dockView', () => {
     const [triaging, failed] = view.groups.find((group) => group.key === 'unstarted')!.rows;
 
     expect(triaging).toMatchObject({ key: 'ticket:4', playbook: 'dev:triage', mark: { kind: 'triaging', glyph: '\u{eb19}', title: 'Triaging' }, window: null, open: { type: 'url', url: 'https://github.com/o/r/issues/104' }, time: null });
-    expect(triaging!.controls).toEqual([{ label: 'Snooze', action: { type: 'snooze', ticketId: 4 } }]);
+    expect(triaging!.controls).toEqual([{ label: 'Snooze', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 4 } }]);
     expect(triaging!.main).toBeNull();
-    expect(triaging!.commands).toEqual([{ label: 'History', command: { type: 'history', ticketId: 4, key: 'gh 104' } }]);
+    expect(triaging!.commands).toEqual([{ label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 4, key: 'gh 104' } }]);
     expect(failed!.main).toBe('Triage again');
     expect(failed!.details).toEqual([{ text: 'timed out', title: null, tone: 'warning' }]);
     expect(failed!.controls.map((control) => control.action)).toEqual([{ type: 'retriage-pool', ticketId: 5 }, { type: 'snooze', ticketId: 5 }]);
@@ -197,9 +207,9 @@ describe('dockView', () => {
     );
 
     expect(shown.links).toEqual([
-      { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002' },
-      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941' },
-      { label: 'Design doc', url: 'https://example.test/doc' },
+      { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}' },
+      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941', kind: 'issue', badge: 'gh 18941', glyph: null },
+      { label: 'Design doc', url: 'https://example.test/doc', kind: 'url', badge: 'Design doc', glyph: '\u{eb15}' },
     ]);
     expect(shown.returned).toBe(3);
   });
@@ -227,6 +237,9 @@ describe('dockView', () => {
             pastes: [{ id: 1, workItemId: 10, label: 'Customer reply', file: 'D:/drafts/reply.md', reportedAt: NOW }],
             sessions: [session({ state: 'ended', cwd: 'D:/git/support' })],
           }),
+          // Done rows carry their date band; 12:00 UTC less a minute is the same local day in any zone within ±11 hours.
+          item(11, { status: 'done', doneAt: NOW - 60_000 }),
+          item(12, { status: 'done', doneAt: NOW - 30 * 86_400_000 }),
         ],
         { pool: [pool(4)], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] },
       ),
@@ -235,6 +248,15 @@ describe('dockView', () => {
     );
 
     expect(view).toEqual(recorded);
+  });
+});
+
+describe('CONTROL_GLYPHS', () => {
+  it('matches the codepoints of @vscode/codicons for every control icon', () => {
+    const csv = readFileSync(new URL('../../../node_modules/@vscode/codicons/dist/codicon.csv', import.meta.url), 'utf8');
+    const codepoints = new Map(csv.split('\n').slice(1).map((line) => line.split(',')).map(([name, , hex]) => [name!, hex?.trim().toLowerCase()]));
+
+    expect(Object.entries(CONTROL_GLYPHS).map(([name, glyph]) => [name, glyph.codePointAt(0)!.toString(16)])).toEqual(Object.keys(CONTROL_GLYPHS).map((name) => [name, codepoints.get(name)]));
   });
 });
 
