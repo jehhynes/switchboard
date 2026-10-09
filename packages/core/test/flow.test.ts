@@ -662,7 +662,7 @@ describe('setup', () => {
   });
 });
 
-describe('limits and the one-active-session rule', () => {
+describe('limits and the one-session-in-a-turn rule', () => {
   it('ends only the sessions a roster read looked for, so a start confirmed during the read survives it', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
@@ -792,7 +792,7 @@ describe('limits and the one-active-session rule', () => {
     expect(h.item(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.', warning: null });
   });
 
-  it('holds a reassigned ticket’s new work item while the done work item’s session is still active', () => {
+  it('holds a reassigned ticket’s new work item while the done work item’s session is still in its turn', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
@@ -803,9 +803,9 @@ describe('limits and the one-active-session rule', () => {
     expect(h.triaged(again, 'support:defect')).toEqual([]);
     expect(h.status(2)).toBe('queued');
 
-    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
-    const next = only(h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' }), 'start-session');
-    expect(next.workItemId).toBe(2);
+    // The turn's end starts it, before the release stops the earlier session.
+    const actions = h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(actions.find((action) => action.type === 'start-session')).toMatchObject({ workItemId: 2 });
   });
 
   it('finishes a deferred unassignment without a warning when the session ends its turn, fails to start, or is stopped', () => {

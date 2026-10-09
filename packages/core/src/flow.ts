@@ -1,4 +1,5 @@
 import type { Playbook } from './playbook.js';
+import { activeSession } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { repoRoots } from './settings.js';
 import type { PermissionMode, Settings } from './settings.js';
@@ -1329,7 +1330,7 @@ class Flow {
   }
 
   private activeSession(item: WorkItem): Session | null {
-    return this.store.sessionsFor(item.id).find((session) => session.state !== 'ended') ?? null;
+    return activeSession({ sessions: this.store.sessionsFor(item.id) });
   }
 
   // Scheduling
@@ -1378,7 +1379,7 @@ class Flow {
   }
 
   /**
-   * Starts queued work items in order while slots are free, skipping a ticket that already has an active session (PRD R17, R38).
+   * Starts queued work items in order while slots are free, skipping a ticket with another session in a turn (PRD R17, R38).
    * A session holds a slot only while its row is in the Working group, so Needs you, Done and Snoozed do not stall the queue.
    */
   private scheduleStarts(): void {

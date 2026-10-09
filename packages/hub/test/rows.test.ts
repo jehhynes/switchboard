@@ -173,7 +173,7 @@ describe('waitTexts', () => {
       ),
     ).toEqual([
       { text: 'Waits for a slot · 2/2 in use', title: '2 sessions are in Working; sessions.concurrency is 2.' },
-      { text: 'Waits for the ad-hoc session to end', title: 'Session s2 on this ticket is still open, such as in a VS Code tab. Close or stop it to start.' },
+      { text: "Waits for the ad-hoc session's turn to end", title: 'Session s2 on this ticket is running or waiting on a question. This starts when its turn ends.' },
       { text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.' },
     ]);
   });

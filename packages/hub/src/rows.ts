@@ -369,7 +369,7 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
       case 'session': {
         const owner = wait.ownItem ? 'its session' : `the ${wait.playbook ?? 'ad-hoc'} session`;
 
-        return { text: `Waits for ${owner} to end`, title: `Session ${wait.shortId ?? wait.sessionId} on this ticket is still open, such as in a VS Code tab. Close or stop it to start.` };
+        return { text: `Waits for ${owner}'s turn to end`, title: `Session ${wait.shortId ?? wait.sessionId} on this ticket is running or waiting on a question. This starts when its turn ends.` };
       }
       case 'snoozed':
         return { text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.' };

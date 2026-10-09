@@ -83,10 +83,8 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false, error: null, ...APPROVAL });
 
-    // Approve waits for the resumed session to end, then runs the held prompt.
-    expect(h.act({ type: 'approve', workItemId: item })).toEqual([]);
-    expect(h.item(item).status).toBe('queued');
-    expect(only(h.act({ type: 'roster', sessions: [] }), 'start-session').prompt.startsWith('/publish\n\n')).toBe(true);
+    // The resumed session stays open idle in VS Code; Approve runs the held prompt without waiting for it to close (PRD R17).
+    expect(only(h.act({ type: 'approve', workItemId: item }), 'start-session').prompt.startsWith('/publish\n\n')).toBe(true);
   });
 
   it('runs again when the operator answers a question the session asked after its approval report', () => {

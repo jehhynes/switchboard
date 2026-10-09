@@ -20,7 +20,7 @@ Test behavior that types cannot establish:
 
 - Parsing source data and CLI output, malformed payloads, and clipping.
 - Assigned-state transitions: first run, entering, leaving, and reassignment creating a new work item.
-- The one-active-session rule, approval gates, and `requiresWorktree` handling.
+- The one-session-in-a-turn-per-ticket rule (R17), approval gates, and `requiresWorktree` handling.
 - A failed or incomplete poll leaving every ticket's assigned state unchanged.
 - Unassignment during an active session deferring the done decision, and unassignment deleting a work item that never had a session.
 - Work item status transitions, the concurrency limit, and `queued`.

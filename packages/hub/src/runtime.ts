@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { classify, entryFor, installHooks, jobStatePath, markerState, observe, readJobQuestion, readMarkers, readRoster, replyToSession, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, JobQuestion, Marker, ServiceDeps } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, QueueWait, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { ADHOC_SOURCE, handle, heldSlots, queueWaits, recordRefusal, repoRoots, switchboardHome } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, handle, heldSlots, queueWaits, recordRefusal, repoRoots, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -210,7 +210,7 @@ export class Runtime {
    */
   answer(event: Extract<FlowEvent, { type: 'answer' }>): FlowResult {
     const store = this.deps.store;
-    const session = store.sessionsFor(event.workItemId).find((entry) => entry.state !== 'ended') ?? null;
+    const session = activeSession({ sessions: store.sessionsFor(event.workItemId) });
 
     if (session === null || !waitsInBackground(session) || session.nativeSessionId !== event.nativeSessionId) {
       return this.send(event);
@@ -691,7 +691,7 @@ export class Runtime {
         parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
         approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
         waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
-        question: item.status === 'done' ? null : this.questionOf(store.sessionsFor(item.id).find((session) => session.state !== 'ended') ?? null),
+        question: item.status === 'done' ? null : this.questionOf(activeSession({ sessions: store.sessionsFor(item.id) })),
       })),
       pool: store
         .poolTickets()

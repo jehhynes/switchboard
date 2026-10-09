@@ -44,9 +44,12 @@ describe('markOf', () => {
 });
 
 describe('activeSession', () => {
-  it('returns the first session that has not ended, or null', () => {
+  it('returns the latest session while it has not ended, or null, ignoring an earlier session left open', () => {
+    const latest = { state: 'running' as const };
+    expect(activeSession({ sessions: [{ state: 'idle' as const }, latest] })).toBe(latest);
     expect(activeSession(item('running', 'ended', 'idle'))).toEqual({ state: 'idle' });
-    expect(activeSession(item('blocked', 'ended'))).toBeNull();
+    expect(activeSession(item('blocked', 'idle', 'ended'))).toBeNull();
+    expect(activeSession(item('unstarted'))).toBeNull();
   });
 });
 

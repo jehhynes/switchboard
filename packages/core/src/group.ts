@@ -4,8 +4,11 @@ import type { DoneReason, Session, WorkItem } from './model.js';
 
 export type Group = 'needs' | 'working' | 'unstarted' | 'done';
 
+/** The latest session while it has not ended; an earlier session left open idle in VS Code is not the work item's (PRD R17). */
 export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions: S[] }): S | null {
-  return item.sessions.find((session) => session.state !== 'ended') ?? null;
+  const latest = item.sessions.at(-1);
+
+  return latest !== undefined && latest.state !== 'ended' ? latest : null;
 }
 
 /** PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Needs you, then queued starts in Unstarted, then Working. */
@@ -22,7 +25,7 @@ export function groupOf(item: Pick<WorkItem, 'status'> & { sessions: Pick<Sessio
     return 'needs';
   }
 
-  // A queued item waits for a slot or for a live session of its ticket (queueWaits).
+  // A queued item waits for a slot or for another session of its ticket to end its turn (queueWaits).
   return item.status === 'queued' ? 'unstarted' : 'working';
 }
 

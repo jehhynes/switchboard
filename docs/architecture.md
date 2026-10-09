@@ -6,9 +6,9 @@ Session and triage mechanics come from Ground Control (`D:\git\ground-control`),
 
 ## Packages
 
-The application icon is a patch panel with four sockets and a blue connection, with transparency outside its rounded tile. `extensions/switchboard/assets/icon.png` supplies the VS Code extension listing at 256 pixels. The dock executable, main window and Settings window use `apps/dock/src/Switchboard.Dock/Assets/dock.ico`, containing 16, 20, 24, 32, 40, 48, 64, 128 and 256 pixel versions of that artwork. Chrome's extension icon uses 16, 32, 48 and 128 pixel PNGs in `extensions/chrome/assets`, copied into its unpacked build.
+The application icon is a patch panel with four thick socket rings and a bold bright cyan connection, on a rose-to-plum gradient tile that stays visible against a dark taskbar, with transparency outside its rounded tile. `extensions/switchboard/assets/icon.png` supplies the VS Code extension listing at 256 pixels. The dock executable, main window and Settings window use `apps/dock/src/Switchboard.Dock/Assets/dock.ico`, containing 16, 20, 24, 32, 40, 48, 64, 128 and 256 pixel versions of that artwork. Chrome's extension icon uses 16, 32, 48 and 128 pixel PNGs in `extensions/chrome/assets`, copied into its unpacked build.
 
-History tabs use light and dark monochrome SVGs of the patch panel; the status bar uses the `switchboard-logo` product icon from `assets/switchboard.woff`. Their vector source is `extensions/switchboard/assets/mark.svg`. Run `python tools/build-icon-font.py` with `fonttools` installed to regenerate the font, the History SVGs and the colour vector counterpart `apps/dock/src/Switchboard.Dock/Assets/dock.svg`. For future raster exports, use `extensions/switchboard/assets/icon.png`: resize it with bicubic interpolation and preserve alpha for each listed Chrome PNG size and each PNG frame in the dock ICO. The vector generator does not rewrite these raster files.
+History tabs use light and dark monochrome SVGs of the patch panel; the status bar uses the `switchboard-logo` product icon from `assets/switchboard.woff`. Their vector source is `extensions/switchboard/assets/mark.svg`. Run `python tools/build-icon-font.py` with `fonttools` installed to regenerate the font, the History SVGs and a simplified colour vector variant `apps/dock/src/Switchboard.Dock/Assets/dock.svg`. For future raster exports, use `extensions/switchboard/assets/icon.png`: resize it with bicubic interpolation and preserve alpha for each listed Chrome PNG size and each PNG frame in the dock ICO. The vector generator does not rewrite these raster files.
 
 npm workspaces, TypeScript strict, Node ≥ 22.13, Vitest, esbuild and vsce, following Ground Control's layout. Only `extensions/switchboard` imports `vscode`. Implemented so far: `packages/core`, `packages/github`, `packages/zoho`, `packages/forum`, `packages/claude`, `packages/hub`, `apps/hub`, `apps/dock`, `extensions/switchboard` and `extensions/chrome`. `apps/dock` is C# on .NET 10 with Avalonia 12; its workspace scripts run `dotnet build` and `dotnet test`, so `npm run verify` covers it.
 
@@ -31,7 +31,7 @@ The ad-hoc source is local and lives in `packages/hub`. State, the hub bundle, i
 
 | Component | Responsibility |
 |---|---|
-| Hub | Separate Node process that runs the core: polls sources, creates work items, runs triage, starts setup and task sessions, enforces one active session per work item, serves the windows, the dock and the report command. |
+| Hub | Separate Node process that runs the core: polls sources, creates work items, runs triage, starts setup and task sessions, enforces one session in a turn per ticket (PRD R17), serves the windows, the dock and the report command. |
 | Source plugins | Supply tickets, decide whether each is in the assigned state, and build each ticket's triage context: GitHub, Zoho Desk, Forum, ad-hoc. |
 | Playbook loader | Reads playbook files and renders their templates. |
 | Classifier | Runs one-shot triage and returns structured output. |
@@ -198,7 +198,7 @@ Triage follows Ground Control's classifier (GC R38, M31).
 2. The classifier runs `claude -p --output-format json --json-schema <schema> --no-session-persistence --setting-sources "" --tools "" --strict-mcp-config --system-prompt <triage playbook with the playbook descriptions rendered in>`, with the context on stdin. Stdin avoids the Windows 32,767-character command-line limit (M31).
 3. The schema is `{playbook: enum of the source namespace's task playbook names}`, plus `immediacy?: URGENT | BLOCKING | NON-BLOCKING` and `severity?: HIGH | MED | LOW` when the triage playbook has `rates: true` (PRD R50). The classifier reads `structured_output`. Without `rates`, it discards any rating the model returns; a value outside the enum is stored as empty.
 
-Triage has no tools, settings, MCP servers or saved transcript, so it is not a session and does not count toward the one-active-session rule. The hub runs at most one triage per work item at a time, at most `triage.concurrency` at once (default 2), with a `triage.timeoutSeconds` limit (default 180).
+Triage has no tools, settings, MCP servers or saved transcript, so it is not a session and does not count toward the one-session-in-a-turn rule (PRD R17). The hub runs at most one triage per work item at a time, at most `triage.concurrency` at once (default 2), with a `triage.timeoutSeconds` limit (default 180).
 
 A classifier error, an unparsable result, a timeout, or a playbook name outside the enum fails the work item with that error (PRD R37). A triage interrupted by a hub shutdown is not a failure: the work item stays `triaging`, and triage runs again when the hub starts.
 
@@ -221,7 +221,7 @@ Pool tickets (PRD R47, R48):
 
 An ad-hoc prompt creates a ticket and work item and goes straight to step 5, with the typed prompt as the task prompt and the chosen repo root as the working directory (PRD R6). A `task` report creates the same ticket and work item, but `unstarted`, with its `parentId` set; Start then goes to step 5 (PRD R68).
 
-Steps 4 and 5 start a session only when no session for the ticket is active and a slot is free; otherwise the work item is `queued` (PRD R38).
+Steps 4 and 5 start a session only when no other session of the ticket is `starting`, `running` or `waiting` and a slot is free; otherwise the work item is `queued` (PRD R17, R38). An `idle` or `failed` session, such as the approval session kept open in the VS Code Claude view, holds nothing back, so a work item can have several live sessions. Its active session is its latest session while that has not ended; only the active session holds a slot, and only the latest session changes the work item's status.
 
 ## Core decisions
 
@@ -239,7 +239,7 @@ Steps 4 and 5 start a session only when no session for the ticket is active and 
 | `worktree-found` | The branch convention. It links a worktree only to a ticket that has none. |
 | `adhoc`, `start`, `approve`, `mark-done`, `retriage`, `stop`, `answer`, `open-question`, `pick`, `retriage-pool`, `snooze`, `restore`, `tick` | The dock; `tick` re-runs scheduling after settings or playbooks change, and every minute wakes due snoozes. `answer` and `open-question` apply only while the active session is the one the row showed (its native session ID), runs in its background process (started, with a short ID, not released) and is `waiting`, and `answer` refuses an empty answer (PRD R70). |
 
-Actions are `triage`, `start-session`, `stop-session` and `reply-session`. `answer` gives `reply-session` with the answer text; its success changes nothing, because the hook marker moves the session to `running`. `open-question` gives `stop-session` with reason `open`. After every event the core starts triage for `triaging` work items, then pool triage for pool tickets without a result, up to `triage.concurrency` in all; then it starts `queued` work items in queue order while fewer than `sessions.concurrency` active sessions hold a slot (a session holds one while its work item's `groupOf` group is Working and its ticket is not snoozed), skipping a ticket that already has an active session. A task that follows a setup session starts when the setup session ends, without waiting for a slot.
+Actions are `triage`, `start-session`, `stop-session` and `reply-session`. `answer` gives `reply-session` with the answer text; its success changes nothing, because the hook marker moves the session to `running`. `open-question` gives `stop-session` with reason `open`. After every event the core starts triage for `triaging` work items, then pool triage for pool tickets without a result, up to `triage.concurrency` in all; then it starts `queued` work items in queue order while fewer than `sessions.concurrency` active sessions hold a slot (a session holds one while its work item's `groupOf` group is Working and its ticket is not snoozed), skipping a ticket that has another session `starting`, `running` or `waiting` (PRD R17). A task that follows a setup session starts when the setup session ends, without waiting for a slot.
 
 ## Claude Code runner
 
