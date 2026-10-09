@@ -56,7 +56,7 @@ export const MARK_GLYPHS: Record<Mark, string> = {
   failed: '\u{ea87}', // error
   queued: '\u{ea82}', // clock
   setup: '\u{eb6d}', // tools
-  running: '\u{ea77}', // sync
+  running: '\u{eb19}', // loading
   triaging: '\u{eb19}', // loading
   'done-session': '\u{eab2}', // check
   'done-operator': '\u{eb99}', // account
