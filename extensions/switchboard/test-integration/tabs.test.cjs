@@ -43,19 +43,27 @@ describe("Item window tabs (PRD R72)", () => {
     server.close();
   });
 
-  it('opens each URL in its own pinned integrated browser tab, reusing the tab of a URL opened again, and a file in a pinned editor', async function () {
+  it('opens each URL in its own pinned integrated browser tab, reusing the tab of a URL opened again, a Markdown report in its preview and another file in a pinned editor', async function () {
     this.timeout(120_000);
 
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
-    const report = join(mkdtempSync(join(tmpdir(), 'switchboard-tabs-')), 'reply.md');
+    const folder = mkdtempSync(join(tmpdir(), 'switchboard-tabs-'));
+    const report = join(folder, 'reply.md');
+    const second = join(folder, 'second.md');
+    const other = join(folder, 'note.txt');
 
     writeFileSync(report, '# Reply\n');
+    writeFileSync(second, '# Second\n');
+    writeFileSync(other, 'Note\n');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
     await extension.openTab(`${base}/issue`);
     await extension.openTab(`${base}/pull`);
     await extension.openTab(`${base}/issue`);
     await extension.openTab(report);
+    await extension.openTab(second);
+    await extension.openTab(report);
+    await extension.openTab(other);
 
     await until(() => requests.includes('/issue') && requests.includes('/pull'), `the browser never loaded both pages: ${JSON.stringify(requests)}`);
 
@@ -64,12 +72,33 @@ describe("Item window tabs (PRD R72)", () => {
 
       return found.length >= 2 && found;
     }, `two browser tabs never opened: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
-    const file = tabs().find((tab) => tab.input instanceof vscode.TabInputText);
+    const texts = tabs().filter((tab) => tab.input instanceof vscode.TabInputText);
+    const previews = tabs().filter((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'vscode.markdown.preview.editor');
 
     assert.strictEqual(browserTabs.length, 2, `tabs: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
     assert.deepStrictEqual(browserTabs.map((tab) => tab.isPreview), [false, false]);
-    assert.strictEqual(file?.input.uri.fsPath.toLowerCase(), report.toLowerCase());
-    assert.strictEqual(file.isPreview, false);
+    assert.deepStrictEqual(texts.map((tab) => tab.input.uri.fsPath.toLowerCase()), [other.toLowerCase()]);
+    assert.strictEqual(texts[0].isPreview, false);
+    // Each report keeps its own preview tab, and opening one again does not add another.
+    assert.strictEqual(previews.length, 2, `tabs: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
+    assert.ok(previews.some((tab) => tab.label.includes('reply.md')) && previews.some((tab) => tab.label.includes('second.md')), JSON.stringify(previews.map((tab) => tab.label)));
+    assert.deepStrictEqual(previews.map((tab) => tab.isPreview), [false, false]);
+  });
+
+  it('turns a Markdown report into its text editor in the same tab with Toggle Preview, so editing adds no tab', async () => {
+    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
+    const report = join(mkdtempSync(join(tmpdir(), 'switchboard-tabs-')), 'draft.md');
+
+    writeFileSync(report, '# Draft\n');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await extension.openTab(report);
+    await vscode.commands.executeCommand('markdown.togglePreview');
+
+    const text = await until(() => tabs().find((tab) => tab.input instanceof vscode.TabInputText), `the report never became a text editor: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
+
+    assert.strictEqual(text.input.uri.fsPath.toLowerCase(), report.toLowerCase());
+    assert.strictEqual(tabs().length, 1, JSON.stringify(tabs().map((tab) => tab.label)));
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
 
   it('says which URL did not open when the integrated browser is missing', async () => {

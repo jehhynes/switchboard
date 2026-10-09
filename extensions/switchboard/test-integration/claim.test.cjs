@@ -25,6 +25,27 @@ async function claimingHub(commands, sessionId = null) {
   return { server, claims, port: server.address().port };
 }
 
+async function until(what, why, within = 15_000) {
+  const deadline = Date.now() + within;
+
+  for (;;) {
+    const answer = await what();
+
+    if (answer) {
+      return answer;
+    }
+
+    assert.ok(Date.now() < deadline, why);
+    await new Promise((done) => setTimeout(done, 200));
+  }
+}
+
+const tabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs);
+const tabLabels = () => tabs().map((tab) => tab.label);
+
+/** The Markdown preview tab of a file name, or undefined. */
+const markdownPreview = (name) => tabs().find((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'vscode.markdown.preview.editor' && tab.input.uri.fsPath.endsWith(name));
+
 describe('Commands the dock leaves for a window (PRD R71)', () => {
   const realError = vscode.window.showErrorMessage;
   const realExecute = vscode.commands.executeCommand;
@@ -64,11 +85,15 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
 
     const hub = await claimingHub([{ type: 'openUrl', url: report }, { type: 'unknown' }]);
 
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
     try {
       await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' });
 
       assert.deepStrictEqual(hub.claims, [{ path: '/claim', body: { folder: vscode.workspace.workspaceFolders[0].uri.fsPath, workspace: null, focused: vscode.window.state.focused } }]);
-      assert.strictEqual(vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase(), report.toLowerCase());
+      // A Markdown report opens in the Markdown preview, not as text.
+      await until(() => markdownPreview('reply.md'), `no Markdown preview of reply.md: ${JSON.stringify(tabLabels())}`);
+      assert.strictEqual(vscode.window.activeTextEditor, undefined);
       assert.deepStrictEqual(errors, []);
     } finally {
       hub.server.close();
@@ -77,16 +102,24 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
   });
 
   it('shows a command that fails and runs the rest', async () => {
-    const report = join(mkdtempSync(join(tmpdir(), 'switchboard-claim-')), 'note.md');
+    const folder = mkdtempSync(join(tmpdir(), 'switchboard-claim-'));
+    const report = join(folder, 'note.txt');
 
     writeFileSync(report, 'Note');
 
-    const hub = await claimingHub([{ type: 'openUrl', url: join(tmpdir(), 'cannot-open.md') }, { type: 'openUrl', url: report }]);
+    const hub = await claimingHub([
+      { type: 'openUrl', url: join(tmpdir(), 'cannot-open.txt') },
+      { type: 'openUrl', url: join(folder, 'missing.md') },
+      { type: 'openUrl', url: report },
+    ]);
 
     try {
       await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' });
 
-      assert.deepStrictEqual(errors, ['Switchboard: Error: The file cannot be opened.']);
+      assert.strictEqual(errors.length, 2, JSON.stringify(errors));
+      assert.strictEqual(errors[0], 'Switchboard: Error: The file cannot be opened.');
+      assert.match(errors[1], /^Switchboard: .*missing\.md/);
+      assert.strictEqual(markdownPreview('missing.md'), undefined);
       assert.strictEqual(vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase(), report.toLowerCase());
     } finally {
       hub.server.close();
@@ -95,7 +128,7 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
   });
 
   it('runs the claimed commands when the claimed session fails to open', async () => {
-    const report = join(mkdtempSync(join(tmpdir(), 'switchboard-claim-')), 'after.md');
+    const report = join(mkdtempSync(join(tmpdir(), 'switchboard-claim-')), 'after.txt');
 
     writeFileSync(report, 'After');
 

@@ -29,17 +29,34 @@ export async function openLink(target: string): Promise<void> {
   if (/^https?:\/\//i.test(target)) {
     await vscode.env.openExternal(vscode.Uri.parse(target));
   } else {
-    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
+    await openFile(target, () => vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target)));
   }
 }
 
 /**
- * Opens an item window's tab (PRD R72): an http(s) URL in VS Code's integrated browser, reusing a tab already on it, and a file in a pinned
- * text editor, which the next tab does not replace. The Simple Browser is not used, because it shows one page at a time.
+ * Opens a reported file: Markdown, such as a report's draft, in VS Code's Markdown preview editor, and anything else with `other`. A missing
+ * Markdown file fails with its path instead of opening an empty preview.
+ */
+async function openFile(path: string, other: () => Thenable<unknown>): Promise<void> {
+  const uri = vscode.Uri.file(path);
+
+  if (!/\.(md|markdown)$/i.test(path)) {
+    await other();
+    return;
+  }
+
+  await vscode.workspace.fs.stat(uri);
+  // The preview editor shows the file in its own tab, which Toggle Preview turns into the text editor in place, so editing adds no second tab.
+  await vscode.commands.executeCommand('vscode.openWith', uri, 'vscode.markdown.preview.editor', { preview: false });
+}
+
+/**
+ * Opens an item window's tab (PRD R72): an http(s) URL in VS Code's integrated browser, reusing a tab already on it, and a file as `openLink` does,
+ * any but Markdown in a pinned editor, which the next tab does not replace. The Simple Browser is not used, because it shows one page at a time.
  */
 export async function openTab(target: string): Promise<void> {
   if (!/^https?:\/\//i.test(target)) {
-    await vscode.window.showTextDocument(vscode.Uri.file(target), { preview: false });
+    await openFile(target, () => vscode.window.showTextDocument(vscode.Uri.file(target), { preview: false }));
     return;
   }
 

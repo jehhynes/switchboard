@@ -172,14 +172,20 @@ describe('the hub process', () => {
     }
   });
 
-  it("opens an approval's report file in an editor", async () => {
+  it("opens an approval's Markdown report in the Markdown preview", async () => {
     await api();
     const file = join(process.env.SWITCHBOARD_TEST_HOME, 'case.md');
     require('node:fs').writeFileSync(file, '# Case\n');
 
     await (await api()).run({ type: 'openUrl', url: file });
 
-    assert.strictEqual(vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase(), file.toLowerCase());
+    const preview = () =>
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .find((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'vscode.markdown.preview.editor' && tab.input.uri.fsPath.toLowerCase() === file.toLowerCase());
+
+    await until(preview, 'case.md never opened in the Markdown preview');
+    assert.strictEqual(vscode.window.activeTextEditor?.document.uri.fsPath.toLowerCase() === file.toLowerCase(), false);
   });
 
   it('replaces the hub with one on the new folder when switchboard.configDir changes, and the window follows it', async () => {
