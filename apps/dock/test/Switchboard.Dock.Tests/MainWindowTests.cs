@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.LogicalTree;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Switchboard.Dock.Hub;
@@ -266,6 +267,21 @@ public sealed class MainWindowTests
         var muted = window.FindResource(window.ActualThemeVariant, "DockBadgeZero");
 
         Assert.Equal([false, false, true, false, false], headers.Select((header) => header.GetVisualDescendants().OfType<Border>().Single((badge) => badge.Classes.Contains("badge")).Background == muted));
+    }
+
+    [AvaloniaFact]
+    public void Show_EmptyGroup_ShowsItsMessageItalicMutedPaddedAndAlignedWithRowText()
+    {
+        var (window, _) = Open();
+        var empty = window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Text == "Nothing is in progress.");
+        var rowText = window.GetVisualDescendants().OfType<TextBlock>().First((text) => text.Text == "Issue <7>");
+
+        Assert.True(empty.IsEffectivelyVisible);
+        Assert.Equal(FontStyle.Italic, empty.FontStyle);
+        Assert.Equal(1, empty.Opacity);
+        Assert.Equal(window.FindResource(window.ActualThemeVariant, "DockMuted"), empty.Foreground);
+        Assert.Equal(new Thickness(11, 8, 8, 8), empty.Margin);
+        Assert.Equal(rowText.TranslatePoint(default, window)!.Value.X, empty.TranslatePoint(default, window)!.Value.X);
     }
 
     [AvaloniaFact]

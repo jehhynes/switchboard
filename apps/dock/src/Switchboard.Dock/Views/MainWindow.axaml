@@ -15,6 +15,12 @@
     <Style Selector="TextBlock.muted">
       <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
     </Style>
+    <!-- An empty group's message starts where a row's text does (3px stripe, 8px padding); italic, not faded, so it keeps the muted colour's contrast. -->
+    <Style Selector="TextBlock.empty-state">
+      <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
+      <Setter Property="FontStyle" Value="Italic" />
+      <Setter Property="Margin" Value="11,8,8,8" />
+    </Style>
     <!-- Codicon glyphs fill their em box above the baseline, while Segoe UI's capitals sit low in a taller line box, so centred icons sit about
          1px above the text's middle; 2px of top padding moves a centred icon down 1px. -->
     <Style Selector="TextBlock.icon">
@@ -370,7 +376,7 @@
                     </Grid>
                   </Border>
                   <StackPanel IsVisible="{Binding ShowsRows}">
-                    <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="muted" Margin="26,2,8,6" />
+                    <TextBlock Text="{Binding Empty}" IsVisible="{Binding ShowEmpty}" Classes="empty-state" />
                     <ItemsControl ItemsSource="{Binding Bands}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="views:BandViewModel">
