@@ -67,6 +67,34 @@ export async function openTab(target: string): Promise<void> {
   }
 }
 
+/** Terminals this window opened sessions in, by `attach:` or `resume:` and session ID, so an attach left open is not shown for a resume. */
+const terminals = new Map<string, vscode.Terminal>();
+
+/**
+ * Open in terminal (PRD R28): shows the terminal this window already opened the session in while it runs, else opens `claude attach <short ID>`
+ * for a session in its background process, or `claude --resume <session ID>` in its directory. A session `active` elsewhere, such as in a
+ * VS Code tab, opens there instead, because resuming a live session starts a copy (mechanics M18). Closing an attach leaves the session running (M7, M9).
+ */
+export async function openTerminal(record: HubRecord | null, sessionId: string, cwd: string, name: string, shortId: string | null, active: boolean): Promise<void> {
+  const key = `${shortId === null ? 'resume' : 'attach'}:${sessionId}`;
+  const existing = terminals.get(key);
+
+  if (existing !== undefined && existing.exitStatus === undefined && vscode.window.terminals.includes(existing)) {
+    existing.show();
+    return;
+  }
+
+  if (active) {
+    await openSession(record, sessionId, cwd);
+    return;
+  }
+
+  const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: 'claude', shellArgs: shortId === null ? ['--resume', sessionId] : ['attach', shortId], cwd });
+
+  terminals.set(key, terminal);
+  terminal.show();
+}
+
 function samePath(a: string, b: string): boolean {
   const normal = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
 

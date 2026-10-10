@@ -145,7 +145,7 @@ export interface DockRow {
   answers: { label: string; description: string; action: Record<string, unknown> }[];
   /** The drafted texts Copy offers on an `awaiting-approval` row (PRD R60); empty otherwise. */
   pastes: { label: string; file: string }[];
-  /** The controls that run in VS Code, each with the message a window runs: Open Changes, History, Open report. */
+  /** The controls that run in VS Code, each with the message a window runs: Open Changes, Open in terminal, History, Open report. */
   commands: { label: string; glyph: string; command: Record<string, unknown> }[];
   /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63, R71). */
   search: string;
@@ -449,7 +449,7 @@ function normalPath(path: string): string {
  * item window's Source Control view already holds the worktree (PRD R71).
  */
 function windowCommands(controls: Control[]): DockRow['commands'] {
-  return controls.flatMap((control) => (['changes', 'history'].includes(String(control.message['type'])) ? [{ label: control.label, glyph: CONTROL_GLYPHS[control.icon], command: control.message }] : []));
+  return controls.flatMap((control) => (['changes', 'terminal', 'history'].includes(String(control.message['type'])) ? [{ label: control.label, glyph: CONTROL_GLYPHS[control.icon], command: control.message }] : []));
 }
 
 function samePath(a: string, b: string): boolean {

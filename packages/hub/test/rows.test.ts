@@ -39,19 +39,35 @@ describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
     expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'Open in terminal', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'Open in terminal', 'History']);
     expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['History']);
+    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Open in terminal', 'History']);
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
       { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
       { type: 'action', action: { type: 'snooze', ticketId: 7 } },
+      { type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false },
       { type: 'history', ticketId: 7, key: 'gh 107' },
     ]);
+  });
+
+  it('attaches a terminal to a background session, resumes the latest ended session, shows one the operator resumed, and offers none while a session starts (PRD R28)', () => {
+    const terminal = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Open in terminal')?.message ?? null;
+    const waiting = item(7, { sessions: [session({ state: 'waiting' })] });
+
+    expect(terminal(waiting)).toEqual({ type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false });
+    expect(labels(waiting)).toContain('Open in Claude');
+    expect(terminal(item(7, { sessions: [session({ nativeSessionId: null })] }))).toMatchObject({ sessionId: 'aaaa1111', shortId: 'aaaa1111' });
+    expect(terminal(item(7, { sessions: [session({ id: 's0', nativeSessionId: 'old-native', state: 'ended' }), session({ state: 'ended', cwd: 'D:/wt' })] }))).toEqual({ type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/wt', name: 'gh 107', shortId: null, active: false });
+    // Released and not ended: the roster lists it as interactive, as for a terminal or a VS Code tab.
+    expect(terminal(item(7, { sessions: [session({ state: 'idle', released: true })] }))).toEqual({ type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: null, active: true });
+    expect(terminal(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).toBeNull();
+    expect(terminal(item(7, { sessions: [session({ state: 'ended', nativeSessionId: null })] }))).toBeNull();
+    expect(terminal(item(7))).toBeNull();
   });
 });
 

@@ -173,9 +173,9 @@ public sealed class MainWindowTests
         var snooze = (MenuItem)menu[2];
 
         Assert.Equal(
-            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "History", "", "Open ticket", "Open PR #19002"],
+            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Open ticket", "Open PR #19002"],
             menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
-        Assert.IsType<Separator>(menu[8]);
+        Assert.IsType<Separator>(menu[9]);
         Assert.Equal(7, snooze.ItemsSource!.Cast<MenuItem>().Count());
         Assert.Equal("Indefinitely", snooze.ItemsSource!.Cast<MenuItem>().Last().Header);
         Assert.StartsWith("Tomorrow · ", (string)snooze.ItemsSource!.Cast<MenuItem>().First().Header!);
@@ -193,8 +193,8 @@ public sealed class MainWindowTests
         ((MenuItem)menu[1]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         snooze[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         actions.UrlReply = "The browser did not open it.";
-        ((MenuItem)menu[9]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         ((MenuItem)menu[10]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[11]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}", "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}"], hub.Calls);
@@ -204,8 +204,15 @@ public sealed class MainWindowTests
         actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
         ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
+        ((MenuItem)menu[8]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal(["item:7 {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}"], actions.Runs);
+        Assert.Equal(
+            [
+                "item:7 {\"type\":\"terminal\",\"sessionId\":\"aaaa1111-native\",\"cwd\":\"D:/git/widgets/.worktrees/107-fix\",\"name\":\"gh 107\",\"shortId\":null,\"active\":false}",
+                "item:7 {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}",
+            ],
+            actions.Runs);
         Assert.Equal(actions.RunReply, model.Status);
     }
 
@@ -223,9 +230,9 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
 
-        Assert.IsType<Separator>(menu[8]);
-        Assert.Equal("Open PR #19002", ((MenuItem)menu[9]).Header);
-        Assert.Equal(10, menu.Count);
+        Assert.IsType<Separator>(menu[9]);
+        Assert.Equal("Open PR #19002", ((MenuItem)menu[10]).Header);
+        Assert.Equal(11, menu.Count);
     }
 
     [AvaloniaFact]

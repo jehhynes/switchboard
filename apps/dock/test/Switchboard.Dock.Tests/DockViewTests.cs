@@ -72,7 +72,7 @@ public sealed class DockViewTests
         Assert.Equal("{\"type\":\"answer\",\"workItemId\":8,\"nativeSessionId\":\"aaaa1111-native\",\"question\":\"Which branch?\",\"answer\":\"main\"}", question.Answers.Single().Action.ToJsonString());
         Assert.Equal("Approve", approval.Main);
         Assert.Equal([new DockPaste("Customer reply", "D:/drafts/reply.md")], approval.Pastes);
-        Assert.Equal(["History", "Open report"], approval.Commands.Select((command) => command.Label));
+        Assert.Equal(["Open in terminal", "History", "Open report"], approval.Commands.Select((command) => command.Label));
         Assert.Equal("Issue <7> · gh 107 · PR #19002 · dev:develop · Ready for review · 107-fix", Fixtures.Row("item:7").Search);
         Assert.Equal([new DockLink("PR #19002", "https://github.com/o/r/pull/19002", "pr", "19002", "\uEA64")], Fixtures.Row("item:7").Links);
         Assert.Equal(2, Fixtures.Row("item:7").Returned);

@@ -41,6 +41,7 @@ export const CONTROL_GLYPHS = {
   pass: '\u{eba4}',
   play: '\u{eb2c}',
   search: '\u{ea6d}',
+  terminal: '\u{ea85}',
 } as const;
 
 /** A codicon name a control may use; a new one needs its glyph in `CONTROL_GLYPHS`, or the build fails. */
@@ -127,7 +128,33 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Open Changes', icon: 'diff-multiple', message: { type: 'changes', path: item.worktree.path, key: ticketKey(item.ticket), title: item.ticket.title } });
   }
 
+  const terminal = terminalCommand(item);
+
+  if (terminal !== null) {
+    controls.push({ label: 'Open in terminal', icon: 'terminal', message: terminal });
+  }
+
   return [...controls, historyControl(item.ticket)];
+}
+
+/**
+ * Open in terminal (PRD R28): `claude attach` while the session runs in its background process, else `claude --resume` once it has ended. `active`
+ * marks a session the operator resumed, in a terminal or a VS Code tab, which is shown rather than resumed again. Null while it starts.
+ */
+function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
+  const latest = item.sessions.at(-1) ?? null;
+  const session = activeSession(item);
+  const name = ticketKey(item.ticket);
+
+  if (isBackground(session)) {
+    return { type: 'terminal', sessionId: session.nativeSessionId ?? session.shortId, cwd: session.cwd, name, shortId: session.shortId, active: false };
+  }
+
+  if (latest?.nativeSessionId == null || (session !== null && (session.state === 'starting' || !session.released))) {
+    return null;
+  }
+
+  return { type: 'terminal', sessionId: latest.nativeSessionId, cwd: latest.cwd, name, shortId: null, active: session !== null };
 }
 
 /**

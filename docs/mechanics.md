@@ -66,7 +66,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Result:**
   - The resumed session is listed under the same `sessionId` with `kind: interactive`, a pid, `status: busy` and no short `id` until it ends. VS Code tab sessions are listed the same way, as `kind: interactive` with a pid. Matching by session ID prefix therefore sees a resumed session.
   - `claude attach` drew its terminal UI ("Attaching…") and exited 0 when stdin closed. The session stayed listed with its pid. Interactive use was not driven; live acceptance checks it.
-- **Current use:** the roster read covers every started session so a resume is seen (PRD R17); Attach and Open in VS Code (architecture.md § Claude Code runner).
+- **Current use:** the roster read covers every started session so a resume is seen (PRD R17); Open in terminal and Open in VS Code (architecture.md § Claude Code runner).
 
 ## M8. Writing Claude's settings.json on Windows
 
@@ -197,7 +197,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - After `claude stop` and `claude rm`, the resume kept the session ID and short ID. The roster listed it with the worktree as `cwd` and `kind: background`. The transcript stayed in the original directory's project directory, with each entry's `cwd` set to the directory it ran in.
   - A `--bg` session in `.wip/mech` under `auto` wrote and then edited a file in a sibling folder outside its working directory, with no prompt. Support relies on this: its sessions stay in `D:\git\support` and `/support-fix` works in its widgets worktree by absolute path.
 - **Ground Control:** GC never entered a worktree inside a session. A worktree run went first, and the action then started as a new session in the worktree it reported (GC R46).
-- **Current use:** Switchboard sessions do not call EnterWorktree or resume in another directory. `dev:develop`, `dev:qa-failure` and `dev:qa-question` require a worktree, so a setup session creates it and the skill starts inside it, as in GC. `/gc-route` creates a worktree when its own work changes code and edits it by absolute path, as `/support-fix` does.
+- **Current use:** Switchboard sessions do not call EnterWorktree or resume in another directory. `dev:develop`, `dev:qa-failure` and `dev:qa-question` require a worktree, so a setup session creates it and the skill starts inside it, as in GC. `/gc-route` creates a worktree when its own work changes code and edits it by absolute path, as `/support-fix` does. Because resuming a live session starts a copy, Open in terminal never resumes a session that is still live (architecture.md § Claude Code runner); a session live in a VS Code tab was not tested.
 
 ## M19. Forking a session for a friction debrief
 

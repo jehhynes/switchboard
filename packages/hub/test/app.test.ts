@@ -476,9 +476,31 @@ describe('createHubApp', () => {
       error: null,
       body: { sessionId: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }, { type: 'openTabs' }] },
     });
+    for (const [shortId, active] of [['abcd0007', false], [null, true]]) {
+      const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId, active };
+
+      expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: terminal }, 5000)).toMatchObject({ status: 200 });
+      expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toMatchObject({ body: { commands: [terminal] } });
+    }
     // Only the item window opens its tabs (PRD R72).
-    expect(await postToHub(record, '/window', { workspace: null, command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 400, error: 'Expected {workspace, command} with a changes, history or openUrl command, or openTabs for a workspace.' });
-    for (const command of [{ type: 'settings' }, { type: 'sourceControl', path: 'D:/wt' }, { type: 'attach', shortId: 'a' }, { type: 'history', ticketId: 'x', key: 'gh 3' }, { type: 'changes', path: 'D:/wt', key: '' }, { type: 'openUrl' }, null]) {
+    expect(await postToHub(record, '/window', { workspace: null, command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 400, error: 'Expected {workspace, command} with a changes, terminal, history or openUrl command, or openTabs for a workspace.' });
+    const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId: null, active: false };
+    for (const command of [
+      { type: 'settings' },
+      { type: 'sourceControl', path: 'D:/wt' },
+      { type: 'attach', shortId: 'a' },
+      { ...terminal, sessionId: '' },
+      { ...terminal, cwd: undefined },
+      { ...terminal, name: 7 },
+      { ...terminal, shortId: '' },
+      { ...terminal, shortId: undefined },
+      { ...terminal, active: 'yes' },
+      { ...terminal, active: undefined },
+      { type: 'history', ticketId: 'x', key: 'gh 3' },
+      { type: 'changes', path: 'D:/wt', key: '' },
+      { type: 'openUrl' },
+      null,
+    ]) {
       expect(await postToHub(record, '/window', { workspace: null, command }, 5000)).toMatchObject({ status: 400 });
     }
     expect(await postToHub(record, '/window', { workspace: 7, command: { type: 'openUrl', url: 'D:/x.md' } }, 5000)).toMatchObject({ status: 400 });
@@ -498,12 +520,15 @@ describe('createHubApp', () => {
       'window commands claimed by a window with no folder: history',
       'window command N openTabs left for C:/h/w.code-workspace',
       'window commands claimed by C:/h/w.code-workspace: changes, openTabs',
+      'window command N terminal left for C:/h/w.code-workspace',
+      'window commands claimed by C:/h/w.code-workspace: terminal',
+      'window command N terminal left for C:/h/w.code-workspace',
+      'window commands claimed by C:/h/w.code-workspace: terminal',
     ]);
     // A window that is already in front gets no focus change, so each open and command left for a workspace tells that window to claim.
     expect(claims).toEqual([
       { event: 'claim', data: { workspace: 'C:/h/windows/gh-7.code-workspace' } },
-      { event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } },
-      { event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } },
+      ...Array.from({ length: 4 }, () => ({ event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } })),
     ]);
   });
 });

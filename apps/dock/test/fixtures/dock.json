@@ -95,6 +95,18 @@
           "pastes": [],
           "commands": [
             {
+              "label": "Open in terminal",
+              "glyph": "",
+              "command": {
+                "type": "terminal",
+                "sessionId": "aaaa1111-native",
+                "cwd": "D:/git/widgets",
+                "name": "gh 113",
+                "shortId": "aaaa1111",
+                "active": false
+              }
+            },
+            {
               "label": "History",
               "glyph": "",
               "command": {
@@ -217,6 +229,18 @@
                 "path": "D:/git/widgets/.worktrees/107-fix",
                 "key": "gh 107",
                 "title": "Issue <7>"
+              }
+            },
+            {
+              "label": "Open in terminal",
+              "glyph": "",
+              "command": {
+                "type": "terminal",
+                "sessionId": "aaaa1111-native",
+                "cwd": "D:/git/widgets/.worktrees/107-fix",
+                "name": "gh 107",
+                "shortId": null,
+                "active": false
               }
             },
             {
@@ -346,6 +370,18 @@
             }
           ],
           "commands": [
+            {
+              "label": "Open in terminal",
+              "glyph": "",
+              "command": {
+                "type": "terminal",
+                "sessionId": "aaaa1111-native",
+                "cwd": "D:/git/support",
+                "name": "gh 110",
+                "shortId": null,
+                "active": false
+              }
+            },
             {
               "label": "History",
               "glyph": "",
@@ -544,6 +580,18 @@
           ],
           "pastes": [],
           "commands": [
+            {
+              "label": "Open in terminal",
+              "glyph": "",
+              "command": {
+                "type": "terminal",
+                "sessionId": "aaaa1111-native",
+                "cwd": "D:/git/widgets",
+                "name": "gh 108",
+                "shortId": "aaaa1111",
+                "active": false
+              }
+            },
             {
               "label": "History",
               "glyph": "",
