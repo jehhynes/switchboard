@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -515,16 +516,38 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// A row's menu at the pointer, opening away from the screen edge the dock is on. Popups are kept inside the monitor's working area, which
     /// leaves out the dock's app bar strip, so a horizontal adjustment would move the menu beside the dock; only vertical ones are allowed.
+    /// Submenus follow the same rule.
     /// </summary>
-    internal static ContextMenu RowMenu(List<Control> items, bool dockOnRight, Point at) => new()
+    internal static ContextMenu RowMenu(List<Control> items, bool dockOnRight, Point at)
     {
-        ItemsSource = items,
-        Placement = PlacementMode.AnchorAndGravity,
-        PlacementRect = new Rect(at, new Size(1, 1)),
-        PlacementAnchor = PopupAnchor.TopLeft,
-        PlacementGravity = dockOnRight ? PopupGravity.BottomLeft : PopupGravity.BottomRight,
-        PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.FlipY | PopupPositionerConstraintAdjustment.SlideY,
-    };
+        foreach (var item in items.OfType<MenuItem>().Where((item) => item.ItemsSource is not null))
+        {
+            item.TemplateApplied += (_, e) =>
+            {
+                if (e.NameScope.Find<Popup>("PART_Popup") is { } popup)
+                {
+                    popup.Placement = dockOnRight ? PlacementMode.LeftEdgeAlignedTop : PlacementMode.RightEdgeAlignedTop;
+                    popup.PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.FlipY | PopupPositionerConstraintAdjustment.SlideY;
+
+                    // The theme's offset overlaps the submenu with its item on the right; mirror it so a left submenu overlaps too.
+                    if (dockOnRight)
+                    {
+                        popup.HorizontalOffset = -popup.HorizontalOffset;
+                    }
+                }
+            };
+        }
+
+        return new()
+        {
+            ItemsSource = items,
+            Placement = PlacementMode.AnchorAndGravity,
+            PlacementRect = new Rect(at, new Size(1, 1)),
+            PlacementAnchor = PopupAnchor.TopLeft,
+            PlacementGravity = dockOnRight ? PopupGravity.BottomLeft : PopupGravity.BottomRight,
+            PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.FlipY | PopupPositionerConstraintAdjustment.SlideY,
+        };
+    }
 
     /// <summary>The row's hub controls, Snooze with its choices, then Open ticket (PRD R71).</summary>
     internal List<Control> MenuOf(DockRow row)

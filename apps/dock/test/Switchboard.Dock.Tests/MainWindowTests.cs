@@ -390,6 +390,24 @@ public sealed class MainWindowTests
         Assert.Equal(new Rect(30, 40, 1, 1), MainWindow.RowMenu([], dockOnRight: true, new Point(30, 40)).PlacementRect);
     }
 
+    [AvaloniaTheory]
+    [InlineData(false, PlacementMode.RightEdgeAlignedTop, -4)]
+    [InlineData(true, PlacementMode.LeftEdgeAlignedTop, 4)]
+    public void RowMenu_Submenu_OpensAwayFromTheEdgeOverlapsItsItemAndAdjustsOnlyVertically(bool dockOnRight, PlacementMode placement, double offset)
+    {
+        var (window, _) = Open();
+        var submenu = new MenuItem { Header = "Snooze", ItemsSource = new List<string> { "Tomorrow" } };
+
+        MainWindow.RowMenu([submenu], dockOnRight, new Point(30, 40)).Open(window);
+        Dispatcher.UIThread.RunJobs();
+
+        var popup = submenu.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.Popup>().Single((popup) => popup.Name == "PART_Popup");
+
+        Assert.Equal(placement, popup.Placement);
+        Assert.Equal(offset, popup.HorizontalOffset);
+        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY, popup.PlacementConstraintAdjustment);
+    }
+
     [AvaloniaFact]
     public void TapPill_KeyAndPullRequest_OpenTheirLinksWithoutTheRowClick()
     {
