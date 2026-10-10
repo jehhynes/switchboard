@@ -275,6 +275,15 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         return null;
     }
 
+    /// <summary>Clears the selection when the selected row's item window closed.</summary>
+    public void WindowClosed(string name)
+    {
+        if (selected is { } key && Row(key)?.Row.Window?.Name == name)
+        {
+            Selected = null;
+        }
+    }
+
     /// <summary>
     /// Selects the next row on the operator's turn in Blocked on you and Ready for review, in list order after the selection and wrapping, or the
     /// previous one when <paramref name="backwards"/>; returns it, or null when there is none (PRD R73).

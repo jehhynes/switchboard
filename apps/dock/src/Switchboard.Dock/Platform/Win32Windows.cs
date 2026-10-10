@@ -16,6 +16,10 @@ public sealed class Win32Windows : IWindows, IDisposable
     // Kept in a field so the delegate outlives every call Windows makes to it.
     Native.WinEventProc? foregroundProc;
     nint foregroundHook;
+    Native.WinEventProc? windowProc;
+    nint nameHook;
+    nint destroyHook;
+    readonly WindowNames names = new();
 
     /// <summary>
     /// Calls <paramref name="changed"/> with the title of each window that comes to the front, however it got there: the taskbar, Alt+Tab or a click.
@@ -27,29 +31,66 @@ public sealed class Win32Windows : IWindows, IDisposable
         foregroundHook = Native.SetWinEventHook(Native.EventSystemForeground, Native.EventSystemForeground, 0, foregroundProc, 0, 0, Native.WinEventOutOfContext);
     }
 
+    /// <summary>
+    /// Calls <paramref name="closed"/> with the name of each item window that is destroyed, keeping each window's name from its title as it changes,
+    /// because a destroyed window's title can no longer be read. Windows calls it on this thread.
+    /// </summary>
+    public void WatchClosed(Action<string> closed)
+    {
+        foreach (var (window, name) in ItemWindows())
+        {
+            names.Set(window, name);
+        }
+
+        windowProc = (_, eventType, window, objectId, childId, _, _) =>
+        {
+            if (objectId != Native.ObjIdWindow || childId != Native.ChildIdSelf)
+            {
+                return;
+            }
+
+            if (eventType == Native.EventObjectNameChange)
+            {
+                names.Set(window, ItemName(window, Native.Title(window)));
+            }
+            else if (names.Destroyed(window) is { } name)
+            {
+                closed(name);
+            }
+        };
+        nameHook = Native.SetWinEventHook(Native.EventObjectNameChange, Native.EventObjectNameChange, 0, windowProc, 0, 0, Native.WinEventOutOfContext);
+        destroyHook = Native.SetWinEventHook(Native.EventObjectDestroy, Native.EventObjectDestroy, 0, windowProc, 0, 0, Native.WinEventOutOfContext);
+    }
+
     /// <summary>The monitor the dock is docked on, where item windows are placed; 0 places them on the primary monitor.</summary>
     public nint DockMonitor { get; set; }
 
     public void Dispose()
     {
-        if (foregroundHook != 0)
+        foreach (var hook in new[] { foregroundHook, nameHook, destroyHook })
         {
-            Native.UnhookWinEvent(foregroundHook);
-            foregroundHook = 0;
+            if (hook != 0)
+            {
+                Native.UnhookWinEvent(hook);
+            }
         }
+
+        foregroundHook = nameHook = destroyHook = 0;
     }
 
-    public nint Find(string name)
+    public nint Find(string name) => ItemWindows().FirstOrDefault((entry) => entry.Name == name).Window;
+
+    /// <summary>The visible top-level VS Code windows whose titles name an item window, from the front.</summary>
+    static List<(nint Window, string Name)> ItemWindows()
     {
-        nint found = 0;
+        var found = new List<(nint Window, string Name)>();
 
         Native.EnumWindows(
             (window, _) =>
             {
-                if (Native.IsWindowVisible(window) && Native.GetWindow(window, Native.GwOwner) == 0 && DockWindow.NameOf(Native.Title(window)) == name && IsVsCode(window))
+                if (Native.IsWindowVisible(window) && Native.GetWindow(window, Native.GwOwner) == 0 && ItemName(window, Native.Title(window)) is { } name)
                 {
-                    found = window;
-                    return false;
+                    found.Add((window, name));
                 }
 
                 return true;
@@ -58,6 +99,9 @@ public sealed class Win32Windows : IWindows, IDisposable
 
         return found;
     }
+
+    /// <summary>The item window name in a VS Code window's title, or null; the process is looked up only for a title that names one.</summary>
+    static string? ItemName(nint window, string title) => DockWindow.NameOf(title) is { } name && IsVsCode(window) ? name : null;
 
     public bool Show(nint window)
     {

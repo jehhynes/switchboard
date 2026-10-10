@@ -81,6 +81,30 @@ public sealed class ForegroundTests
         Assert.Equal("item:7", Model(view).SelectWindow("gh-107-58c609"));
     }
 
+    [Fact]
+    public void WindowClosed_SelectedRowsWindow_ClearsTheSelection()
+    {
+        var model = Model(Fixtures.View);
+
+        model.SelectWindow("gh-108-widgets-655280");
+        model.WindowClosed("gh-108-widgets-655280");
+
+        Assert.Null(model.Selected);
+        Assert.False(model.Row("item:8")!.IsSelected);
+    }
+
+    [Fact]
+    public void WindowClosed_OtherRowsWindow_KeepsTheSelection()
+    {
+        var model = Model(Fixtures.View);
+
+        model.Selected = "item:8";
+        model.WindowClosed("gh-107-58c609");
+
+        Assert.Equal("item:8", model.Selected);
+        Assert.True(model.Row("item:8")!.IsSelected);
+    }
+
     [AvaloniaFact]
     public void ShowForeground_ItemWindowTitle_SelectsItsRowInTheDock()
     {

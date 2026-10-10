@@ -31,6 +31,7 @@ public sealed class App : Application
             desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
             window.DockedOn += (monitor) => windows.DockMonitor = monitor;
             windows.WatchForeground(window.ShowForeground);
+            windows.WatchClosed(model.WindowClosed);
             desktop.Exit += (_, _) =>
             {
                 windows.Dispose();

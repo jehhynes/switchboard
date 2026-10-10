@@ -159,7 +159,8 @@ static partial class Native
     public const uint GwOwner = 4;
     public const uint MonitorDefaultToPrimary = 1, MonitorDefaultToNearest = 2;
     public const uint SwpNoSize = 0x1, SwpNoMove = 0x2, SwpNoZOrder = 0x4, SwpNoActivate = 0x10;
-    public const uint EventSystemForeground = 3, WinEventOutOfContext = 0;
+    public const uint EventSystemForeground = 3, EventObjectDestroy = 0x8001, EventObjectNameChange = 0x800C, WinEventOutOfContext = 0;
+    public const int ObjIdWindow = 0, ChildIdSelf = 0;
     public const uint AbmNew = 0, AbmRemove = 1, AbmQueryPos = 2, AbmSetPos = 3, AbmActivate = 6, AbmWindowPosChanged = 9;
     public const uint AbeLeft = 0, AbeRight = 2;
     public const int AbnPosChanged = 1, AbnFullScreenApp = 2;
