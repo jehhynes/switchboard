@@ -307,6 +307,22 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** pages that need the operator's sign-in, such as GitHub and Zoho Desk, in the integrated browser's own storage (`workbench.browser.dataStorage`); the first VS Code version with the command.
 - **Current use:** item window tabs (PRD R72; architecture.md § VS Code extension).
 
+## M28. The Switchboard tab group for links the dock opens
+
+- **Date:** 2026-10-10.
+- **Versions:** Playwright's Chromium 151.0.7922.34 (`ms-playwright/chromium-1234`), headless, through playwright-core from `@playwright/cli`.
+- **Experiment:** the built extension (`extensions/chrome/dist`) was loaded with `--load-extension`, and the context routed every request to a stub page, counting requests, so nothing reached the network. From an unmarked pull request tab, a page's `window.open` opened each link in a new tab, as Chrome creates one for a link from Windows: a pull request with `#switchboard-tab`, an issue with `?switchboard-tab=1#issuecomment-1`, then, after `ServiceWorker.stopAllWorkers`, a second pull request with `#switchboard-tab`. The script then went back in the second pull request's tab, opened an issue with `#switchboard-tab`, and reloaded the pull request tab, reading every tab's index, group and URL from the service worker after each step. Earlier scripts read the group's title and colour, `history.length` after the bookmark's removal, and loaded `https://x.test/a` from `https://x.test/a#b` with `tabs.update`.
+- **Result:**
+  - The first marked link created a group titled Switchboard, coloured cyan, after the unmarked tab, with the tab at `…/pull/2#`; its page was requested once and got a `hashchange` to the bare `#`.
+  - The query-marked issue joined the group as `…/issues/3#issuecomment-1`; it was requested twice, with and then without the parameter, because removing the parameter restarts the load.
+  - After the worker was stopped, the second pull request woke it, joined the group, took the first pull request's index, and the first closed. The unmarked pull request tab stayed outside the group throughout.
+  - Removing the bookmark adds a history entry: Back showed `…/pull/4#switchboard-tab`. The reload there removed the bookmark again and placed nothing, and the marked issue replaced the grouped issue.
+  - Loading `https://x.test/a` from `https://x.test/a#b` requested the page again, so removing the bookmark keeps a bare `#`.
+  - With the network on and no Zoho sign-in, a marked `desk.zoho.com/agent/acme/acme-inc/tickets/details/<id>` link was redirected to `desk.zoho.com/support/login.sas?serviceurl=…`, so a kind read from the tab's address no longer matched the next Zoho link, and the operator saw a second Zoho tab in their Chrome. With the kind recorded in `chrome.storage.session`, a second link opened after `ServiceWorker.stopAllWorkers` replaced the first tab, and session storage held only the new tab's `placedKind:<id>` key.
+  - A link opened in the first moments after the extension was installed, before its worker had started, was not placed.
+- **Not verified:** a link from the dock through Windows' URL handler to Chrome; the operator's branded Chrome, which no longer accepts `--load-extension` (M23); how GitHub, Zoho Desk and Forum treat the marks when the extension is missing; whether Chrome warns before an extension closes a tab with unsaved changes; where Zoho Desk takes a signed-in agent's link; Duplicate, Reopen closed tab or session restore of a tab whose current entry still has the bookmark, as after Back to it, which would be placed again.
+- **Current use:** the Switchboard tab group (PRD R74; architecture.md § Chrome extension).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

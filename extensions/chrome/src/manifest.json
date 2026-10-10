@@ -3,7 +3,7 @@
   "name": "Switchboard",
   "version": "0.0.1",
   "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
-  "description": "Shows Switchboard's playbook on GitHub project board cards, hides cards for tickets snoozed in Switchboard, with a link at the bottom of each column to show them, and adds Open in Switchboard, Snooze and Unsnooze to each card's More actions menu.",
+  "description": "Shows Switchboard's playbook on GitHub project board cards, hides cards for tickets snoozed in Switchboard, with a link at the bottom of each column to show them, adds Open in Switchboard, Snooze and Unsnooze to each card's More actions menu, and keeps the links the Switchboard dock opens in a Switchboard tab group, one tab per kind of page.",
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
@@ -14,5 +14,6 @@
     }
   ],
   "web_accessible_resources": [{ "resources": ["codicon.ttf"], "matches": ["https://github.com/*"] }],
+  "permissions": ["storage", "tabs", "tabGroups", "webNavigation"],
   "host_permissions": ["http://127.0.0.1:47615/*"]
 }
