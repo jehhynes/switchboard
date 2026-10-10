@@ -277,6 +277,16 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Show_SearchClosed_PutsTheFirstGroupDirectlyBelowTheTitleBar()
+    {
+        var (window, _) = Open();
+        var titleBar = (Control)window.FindControl<TextBlock>("MoveHandle")!.Parent!;
+        var first = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("group"));
+
+        Assert.Equal(titleBar.TranslatePoint(new Point(0, titleBar.Bounds.Height), window)!.Value.Y, first.TranslatePoint(default, window)!.Value.Y);
+    }
+
+    [AvaloniaFact]
     public void Show_EmptyGroup_ShowsItsMessageItalicMutedPaddedAndAlignedWithRowText()
     {
         var (window, _) = Open();

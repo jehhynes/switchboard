@@ -132,7 +132,6 @@
     <Style Selector="Border.group">
       <Setter Property="Background" Value="{DynamicResource DockGroupBar}" />
       <Setter Property="Padding" Value="6,5,8,5" />
-      <Setter Property="Margin" Value="0,8,0,0" />
       <Setter Property="Cursor" Value="Hand" />
     </Style>
     <Style Selector="Border.group:pointerover">
@@ -295,7 +294,7 @@
     <Border Name="GripLeft" Width="5" Background="Transparent" Cursor="SizeWestEast" BorderBrush="{DynamicResource DockBorder}" BorderThickness="0,0,1,0"
             IsVisible="{Binding GripOnLeft}" PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" PointerCaptureLost="OnGripCaptureLost" />
     <DockPanel Name="ListPanel" Grid.Column="1">
-      <StackPanel DockPanel.Dock="Top" Margin="8,0,0,4" Spacing="4">
+      <StackPanel DockPanel.Dock="Top" Margin="8,0,0,0" Spacing="4">
         <!-- 35px, the height of VS Code's title bar on Windows. -->
         <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor it is dropped on. -->
@@ -335,8 +334,8 @@
             <TextBlock Classes="icon" Text="&#xEA76;" />
           </Button>
         </Grid>
-        <TextBox Name="SearchBox" Text="{Binding Filter}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,0" FontSize="13" />
-        <StackPanel Name="AdhocForm" IsVisible="{Binding AdhocOpen}" Spacing="4" Margin="0,0,8,0">
+        <TextBox Name="SearchBox" Text="{Binding Filter}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,8" FontSize="13" />
+        <StackPanel Name="AdhocForm" IsVisible="{Binding AdhocOpen}" Spacing="4" Margin="0,0,8,8">
           <ComboBox Name="AdhocRepoBox" ItemsSource="{Binding RepoRoots}" SelectedItem="{Binding AdhocRepo}" IsVisible="{Binding AdhocChoosesRepo}" HorizontalAlignment="Stretch" />
           <TextBox Name="AdhocPromptBox" Text="{Binding AdhocPrompt}" PlaceholderText="Prompt for a new session" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
           <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
@@ -349,7 +348,7 @@
                  TextWrapping="Wrap" Margin="8" Classes="warning" />
       <ScrollViewer Name="RowScroller" HorizontalScrollBarVisibility="Disabled">
         <Panel>
-        <StackPanel Name="ListContent" Margin="0,4,0,8">
+        <StackPanel Name="ListContent">
           <TextBlock Name="ConnectionLine" Text="{Binding Connection}" IsVisible="{Binding Connection, Converter={x:Static ObjectConverters.IsNotNull}}"
                      TextWrapping="Wrap" Margin="8,6" Classes="muted" />
           <ItemsControl ItemsSource="{Binding Notes}">
@@ -362,7 +361,7 @@
           <ItemsControl Name="GroupList" ItemsSource="{Binding Groups}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="views:GroupViewModel">
-                <StackPanel IsVisible="{Binding IsShown}">
+                <StackPanel IsVisible="{Binding IsShown}" Margin="0,0,0,8">
                   <Border Classes="group" Tapped="OnGroupTapped">
                     <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                       <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
