@@ -225,9 +225,20 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
         return (config, null);
     }
 
+    /// <summary>When set, checks get no answer, as when the hub stopped.</summary>
+    public bool Silent { get; set; }
+
+    /// <summary>When set, a saved playbook is stored as this returns it, as the hub normalizes the file it writes.</summary>
+    public Func<JsonObject, JsonObject>? Normalize { get; set; }
+
     public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject body)
     {
         Calls.Add($"check {body.ToJsonString()}");
+
+        if (Silent)
+        {
+            return null;
+        }
 
         var reply = CheckReplies.Count > 0 ? CheckReplies.Dequeue() : [];
 
@@ -239,11 +250,42 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
         return reply;
     }
 
-    public Task<IReadOnlyList<string>> SaveConfig(JsonObject body)
+    /// <summary>When set, each save waits for the task this returns before answering.</summary>
+    public Func<Task>? HoldSave { get; set; }
+
+    int saves;
+
+    /// <summary>Answers the next <see cref="SaveReplies"/> entry; with none, writes the value into <see cref="Config"/> under a new version <c>s&lt;n&gt;</c>.</summary>
+    public async Task<Switchboard.Dock.Settings.SaveReply> SaveConfig(JsonObject body)
     {
         Calls.Add($"save {body.ToJsonString()}");
 
-        return Task.FromResult<IReadOnlyList<string>>(SaveReplies.Count > 0 ? SaveReplies.Dequeue() : []);
+        if (HoldSave is { } hold)
+        {
+            await hold();
+        }
+
+        if (SaveReplies.Count > 0 && SaveReplies.Dequeue() is { Length: > 0 } errors)
+        {
+            return new(errors, null);
+        }
+
+        var version = $"s{++saves}";
+
+        if (body["target"]?.GetValue<string>() == "settings")
+        {
+            Config["settings"]!["value"] = body["value"]!.DeepClone();
+            Config["settings"]!["version"] = version;
+        }
+        else if (Config["playbooks"]!.AsArray().FirstOrDefault((entry) => entry!["name"]!.GetValue<string>() == body["name"]!.GetValue<string>()) is { } entry)
+        {
+            var playbook = body["playbook"]!.DeepClone().AsObject();
+
+            entry["playbook"] = Normalize is null ? playbook : Normalize(playbook);
+            entry["version"] = version;
+        }
+
+        return new([], version);
     }
 
     public Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir)

@@ -16,9 +16,10 @@ public enum FieldKind
 public sealed record FieldOption(string Value, string Label);
 
 /// <summary>
-/// A setting or playbook field. <see cref="Path"/> is a dotted path from the settings root, or a playbook field name. <see cref="Placeholder"/> is
-/// the value that applies when the field is empty; <see cref="Fallback"/> a checkbox's value when the key is absent; <see cref="ListDefault"/>
-/// a list whose default is not empty, so an absent key shows the default and an emptied list is saved as <c>[]</c>.
+/// A setting or playbook field. <see cref="Path"/> is a dotted path from the settings root, or a playbook field name. <see cref="Help"/> shows in
+/// the label's tooltip; empty shows none. <see cref="Placeholder"/> is the value that applies when the field is empty; <see cref="Fallback"/> a
+/// checkbox's value when the key is absent; <see cref="ListDefault"/> a list whose default is not empty, so an absent key shows the default and an
+/// emptied list is saved as <c>[]</c>. Adjacent checkboxes with the same <see cref="Group"/> share one row under that label.
 /// </summary>
 public sealed record Field(
     string Path,
@@ -28,23 +29,37 @@ public sealed record Field(
     string? Placeholder = null,
     IReadOnlyList<FieldOption>? Options = null,
     bool? Fallback = null,
-    IReadOnlyList<string>? ListDefault = null);
+    IReadOnlyList<string>? ListDefault = null,
+    string? Group = null);
 
-public sealed record Section(string Heading, IReadOnlyList<Field> Fields);
+/// <summary>A page section; an <see cref="Advanced"/> section starts collapsed.</summary>
+public sealed record Section(string Heading, IReadOnlyList<Field> Fields, bool Advanced = false);
+
+/// <summary>A column of a namespace's playbook table: a playbook field path, its header and tooltip, and the header it sits under.</summary>
+public sealed record TableColumn(string Path, string Label, string Help, string? Group);
+
+public sealed record TableCell(bool Checked, bool Enabled);
 
 /// <summary>The fields the Settings window shows and the rules that turn its inputs into settings and playbooks (PRD R54).</summary>
 public static partial class SettingsFields
 {
     public static readonly IReadOnlyDictionary<string, string> SourceLabels = new Dictionary<string, string> { ["github"] = "GitHub", ["zoho"] = "Zoho Desk", ["forum"] = "Forum" };
 
-    static readonly (string Kind, string Label, string Help)[] ReportFields =
+    /// <summary>The reports a task session can send, as checkbox labels and tooltips.</summary>
+    public static readonly IReadOnlyList<(string Kind, string Label, string Help)> ReportFields =
     [
-        ("done", "Session can report done", "The session closes the work item. Off, its turn ends in Ready for review."),
-        ("approval", "Session can report approval", "The session can leave a prompt for you to approve, such as one that posts its draft."),
-        ("worktree", "Session can report a worktree", "The session can link a worktree it creates. Branch names link worktrees without it."),
-        ("playbook", "Session can change the playbook", "The session can hand its work item to another playbook in the namespace, whose skill it runs."),
-        ("paste", "Session can report pastes", "The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row."),
+        ("done", "Done", "The session closes the work item. Off, its turn ends in Ready for review."),
+        ("approval", "Approval", "The session can leave a prompt for you to approve, such as one that posts its draft."),
+        ("worktree", "Worktree", "The session can link a worktree it creates. Branch names link worktrees without it."),
+        ("playbook", "Playbook", "The session can hand its work item to another playbook in the namespace, whose skill it runs."),
+        ("paste", "Paste", "The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row."),
     ];
+
+    public const string AutoStartHelp = "Start the session after triage. Off, the work item waits in Unstarted for you to start it.";
+    public const string RequiresWorktreeHelp = "Run the source’s setup prompt first when the ticket has no worktree.";
+    public const string ApprovalSendsHelp = "Approve posts or pushes the session’s work. Off, you send it yourself, such as by pasting a reply, and Approve finishes up.";
+    public const string RatesHelp = "Triage stores immediacy and severity, which these instructions must define. Off, it stores neither.";
+    public const string RepoRootHelp = "The session always runs in the source’s repo root. Off, it runs in the ticket’s worktree, else the repo root.";
 
     [GeneratedRegex("^[a-z0-9][a-z0-9-]*$")]
     private static partial Regex Segment();
@@ -142,13 +157,61 @@ public static partial class SettingsFields
             "permissionMode" => playbook with { PermissionMode = text == "" ? null : text },
             "model" => playbook with { Model = text == "" ? null : text },
             // A task playbook's file cannot hold rates, so keeping it would leave the saved draft unlike the file.
-            "kind" => text == "triage" ? playbook with { Kind = "triage" } : playbook with { Kind = "task", Rates = false },
+            // The file holds reports only for a task playbook and rates only for a triage one, so the draft drops what the file would.
+            "kind" => text == "triage" ? playbook with { Kind = "triage", Reports = [], ApprovalSends = false } : playbook with { Kind = "task", Rates = false },
             "workdir" => playbook with { Workdir = text == "repoRoot" ? "repoRoot" : "worktree" },
             "description" => playbook with { Description = text },
             "template" => playbook with { Template = text },
             _ => playbook,
         };
     }
+
+    /// <summary>The checkbox columns of a namespace's playbook table: the task columns when it has a task playbook, Rates when it has a triage one.</summary>
+    public static IReadOnlyList<TableColumn> TableColumns(IEnumerable<PlaybookFields> playbooks)
+    {
+        var kinds = playbooks.Select((playbook) => playbook.Kind).ToHashSet(StringComparer.Ordinal);
+        List<TableColumn> columns = [];
+
+        if (kinds.Contains("task"))
+        {
+            columns.Add(new("autoStart", "Auto", AutoStartHelp, "Start"));
+            columns.Add(new("requiresWorktree", "Needs worktree", RequiresWorktreeHelp, "Start"));
+
+            foreach (var (kind, label, help) in ReportFields)
+            {
+                columns.Add(new($"reports.{kind}", label, help, "Reports"));
+
+                if (kind == "approval")
+                {
+                    columns.Add(new("approvalSends", "Sends", ApprovalSendsHelp, "Reports"));
+                }
+            }
+
+            columns.Add(new("workdir", "Repo root", RepoRootHelp, null));
+        }
+
+        if (kinds.Contains("triage"))
+        {
+            columns.Add(new("rates", "Rates", RatesHelp, null));
+        }
+
+        return columns;
+    }
+
+    /// <summary>A playbook's checkbox in a table column, or null when the column does not apply to its kind. Sends is enabled only with Approval.</summary>
+    public static TableCell? Cell(PlaybookFields playbook, string path) =>
+        (path, playbook.Kind) switch
+        {
+            ("rates", "triage") => new(playbook.Rates, true),
+            ("rates", _) or (_, "triage") => null,
+            ("workdir", _) => new(playbook.Workdir == "repoRoot", true),
+            ("approvalSends", _) => new(playbook.ApprovalSends, playbook.Reports.Contains("approval")),
+            _ => new(PlaybookFieldValue(playbook, path) is JsonValue flag && flag.TryGetValue<bool>(out var on) && on, true),
+        };
+
+    /// <summary>A playbook with a table checkbox changed; Repo root sets the working directory.</summary>
+    public static PlaybookFields ApplyPlaybookCell(PlaybookFields playbook, string path, bool isChecked) =>
+        path == "workdir" ? ApplyPlaybookField(playbook, "workdir", isChecked ? "repoRoot" : "worktree") : ApplyPlaybookField(playbook, path, "", isChecked);
 
     /// <summary>A playbook field's value; a <c>reports.&lt;kind&gt;</c> field is whether the playbook lists that report.</summary>
     public static JsonNode? PlaybookFieldValue(PlaybookFields playbook, string path) =>
@@ -167,53 +230,53 @@ public static partial class SettingsFields
             new Section("Sessions",
             [
                 new Field("sessions.concurrency", "Concurrency", FieldKind.Integer, "Sessions that run at once, 1 to 10. A start with no free slot waits as queued.", "2"),
-                new Field("sessions.permissionMode", "Permission mode", FieldKind.Select, "Claude Code permission mode for sessions. A playbook can set its own.", "auto", modes),
-                new Field("sessions.model", "Model", FieldKind.Text, "The model for sessions. A playbook can set its own.", "Claude's default"),
+                new Field("sessions.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own.", "auto", modes),
+                new Field("sessions.model", "Model", FieldKind.Text, "A playbook can set its own.", "Claude's default"),
                 new Field("sessions.installHooks", "Install hooks", FieldKind.Boolean, "Add Switchboard’s hooks to your Claude settings, so the dock shows when a session waits for you. Off, the session list alone decides state.", Fallback: true),
                 new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
             ]),
             new Section("Triage",
             [
-                new Field("triage.model", "Model", FieldKind.Text, "The model that triages work items and pool tickets.", "Claude's default"),
+                new Field("triage.model", "Model", FieldKind.Text, "", "Claude's default"),
                 new Field("triage.concurrency", "Concurrency", FieldKind.Integer, "Triages that run at once.", "2"),
-                new Field("triage.timeoutSeconds", "Timeout (seconds)", FieldKind.Integer, "A triage that runs longer fails.", "180"),
+                new Field("triage.timeoutSeconds", "Timeout (seconds)", FieldKind.Integer, "", "180"),
             ]),
         ];
     }
 
-    static readonly IReadOnlyDictionary<string, (string Key, Field Field)[]> OptionFields = new Dictionary<string, (string, Field)[]>
+    static readonly IReadOnlyDictionary<string, (string Key, Field Field, bool Advanced)[]> OptionFields = new Dictionary<string, (string, Field, bool)[]>
     {
         ["github"] =
         [
-            ("repo", new Field("", "Repository", FieldKind.Text, "The repository whose issues are yours.", "owner/name")),
-            ("logins", new Field("", "Logins", FieldKind.List, "GitHub logins, one per line. An issue assigned to any of them is yours.")),
-            ("project.owner", new Field("", "Project owner", FieldKind.Text, "The owner of the project board.")),
-            ("project.number", new Field("", "Project number", FieldKind.Integer, "The project board number.")),
-            ("project.statusField", new Field("", "Status field", FieldKind.Text, "The project field that holds the status.", "Status")),
-            ("assignedStatuses", new Field("", "Assigned statuses", FieldKind.List, "Project statuses that make an issue yours, one per line.")),
-            ("branchPattern", new Field("", "Branch pattern", FieldKind.Text, "A regular expression whose first group is the issue number a worktree branch names.", "^(\\d+)-")),
-            ("ghPath", new Field("", "gh path", FieldKind.Text, "The gh executable.", "gh")),
-            ("maxPages", new Field("", "Page limit", FieldKind.Integer, "A poll that needs more pages of 100 issues fails.", "5")),
-            ("rolesFile", new Field("", "Roles file", FieldKind.Text, "A JSON file of {\"login\": {\"roles\": [\"tester\"]}}. Triage shows each comment author's roles. Starts with ~ or is absolute.")),
+            ("repo", new Field("", "Repository", FieldKind.Text, "", "owner/name"), false),
+            ("logins", new Field("", "Logins", FieldKind.List, "One per line. An issue assigned to any of them is yours."), false),
+            ("project.owner", new Field("", "Project owner", FieldKind.Text, ""), false),
+            ("project.number", new Field("", "Project number", FieldKind.Integer, ""), false),
+            ("project.statusField", new Field("", "Status field", FieldKind.Text, "", "Status"), false),
+            ("assignedStatuses", new Field("", "Assigned statuses", FieldKind.List, "One per line. An issue in one of these project statuses is yours."), false),
+            ("rolesFile", new Field("", "Roles file", FieldKind.Text, "A JSON file of {\"login\": {\"roles\": [\"tester\"]}}. Triage shows each comment author's roles. Starts with ~ or is absolute."), true),
+            ("branchPattern", new Field("", "Branch pattern", FieldKind.Text, "A regular expression whose first group is the issue number a worktree branch names.", "^(\\d+)-"), true),
+            ("ghPath", new Field("", "gh path", FieldKind.Text, "", "gh"), true),
+            ("maxPages", new Field("", "Page limit", FieldKind.Integer, "A poll that needs more pages of 100 issues fails.", "5"), true),
         ],
         ["zoho"] =
         [
-            ("orgId", new Field("", "Organization ID", FieldKind.Text, "The Desk organization ID.")),
-            ("agentId", new Field("", "Agent ID", FieldKind.Text, "Your Zoho agent ID.")),
-            ("tokenCommand", new Field("", "Token command", FieldKind.Text, "Prints a Desk access token. Runs in Git Bash.", "bash ~/.claude/scripts/desk-token.sh")),
-            ("apiBase", new Field("", "API base", FieldKind.Text, "The Desk REST API.", "https://desk.zoho.com/api/v1")),
-            ("escalationField", new Field("", "Escalation field", FieldKind.Text, "The custom field that holds the escalation tier.", "cf_queue")),
-            ("escalationValue", new Field("", "Escalation value", FieldKind.Text, "The escalation tier that puts a ticket in scope.", "Support")),
-            ("automationAgentIds", new Field("", "Automation agent IDs", FieldKind.List, "Agents whose hold on a ticket is not a claim, one per line. Empty means none.", ListDefault: ["8000000000000000002", "8000000000000000003"])),
-            ("maxPages", new Field("", "Page limit", FieldKind.Integer, "A poll that needs more pages fails.", "20")),
+            ("orgId", new Field("", "Organization ID", FieldKind.Text, ""), false),
+            ("agentId", new Field("", "Agent ID", FieldKind.Text, "Your Zoho agent ID."), false),
+            ("escalationField", new Field("", "Escalation field", FieldKind.Text, "The custom field that holds the escalation tier.", "cf_queue"), true),
+            ("escalationValue", new Field("", "Escalation value", FieldKind.Text, "The escalation tier that puts a ticket in scope.", "Support"), true),
+            ("automationAgentIds", new Field("", "Automation agent IDs", FieldKind.List, "One per line. Agents whose hold on a ticket is not a claim. Empty means none.", ListDefault: ["8000000000000000002", "8000000000000000003"]), true),
+            ("tokenCommand", new Field("", "Token command", FieldKind.Text, "Prints a Desk access token. Runs in Git Bash.", "bash ~/.claude/scripts/desk-token.sh"), true),
+            ("apiBase", new Field("", "API base", FieldKind.Text, "", "https://desk.zoho.com/api/v1"), true),
+            ("maxPages", new Field("", "Page limit", FieldKind.Integer, "A poll that needs more pages fails.", "20"), true),
         ],
         ["forum"] =
         [
-            ("userId", new Field("", "User ID", FieldKind.Text, "Your forum user ID.")),
-            ("forumId", new Field("", "Forum ID", FieldKind.Integer, "The Forum forum ID.", "11")),
-            ("queryCommand", new Field("", "Query command", FieldKind.Text, "Runs SQL from stdin against the forum database. Runs in Git Bash.", "bash ~/.claude/scripts/run-forum-sql.sh")),
-            ("maxRows", new Field("", "Row limit", FieldKind.Integer, "A poll that returns this many open topics is incomplete.", "500")),
-            ("auditDatabase", new Field("", "Audit database", FieldKind.Text, "The change-history database on the same host.", "audit")),
+            ("userId", new Field("", "User ID", FieldKind.Text, "Your forum user ID."), false),
+            ("forumId", new Field("", "Forum ID", FieldKind.Integer, "", "11"), true),
+            ("queryCommand", new Field("", "Query command", FieldKind.Text, "Runs SQL from stdin against the forum database. Runs in Git Bash.", "bash ~/.claude/scripts/run-forum-sql.sh"), true),
+            ("maxRows", new Field("", "Row limit", FieldKind.Integer, "A poll that returns this many open topics is incomplete.", "500"), true),
+            ("auditDatabase", new Field("", "Audit database", FieldKind.Text, "The change-history database on the same host.", "audit"), true),
         ],
     };
 
@@ -224,18 +287,29 @@ public static partial class SettingsFields
         var triage = state.Config.Playbooks.Where((entry) => entry.Playbook?.Kind == "triage").Select((entry) => new FieldOption(entry.Name, entry.Name));
         List<Field> common =
         [
-            new Field($"{path}.enabled", "Poll this source", FieldKind.Boolean, "A disabled source is not polled and its pool is hidden. Its work items stay.", Fallback: false),
+            new Field($"{path}.enabled", "Enabled", FieldKind.Boolean, "A disabled source is not polled and its pool is hidden. Its work items stay.", Fallback: false),
             new Field($"{path}.pollIntervalSeconds", "Poll interval (seconds)", FieldKind.Integer, "At least 10.", "300"),
             new Field($"{path}.repoRoot", "Repo root", FieldKind.Text, "The repository sessions run in when the ticket has no worktree."),
             new Field($"{path}.namespace", "Namespace", FieldKind.Select, "Triage chooses among this namespace’s task playbooks.",
                 Options: WithCurrent([new FieldOption("", "Every namespace"), .. state.Namespaces.Select((entry) => new FieldOption(entry, entry))], GetAt(value, $"{path}.namespace"))),
-            new Field($"{path}.triagePlaybook", "Triage playbook", FieldKind.Select, "The classifier’s instructions for this source.",
+            new Field($"{path}.triagePlaybook", "Triage playbook", FieldKind.Select, "",
                 Options: WithCurrent([new FieldOption("", "None"), .. triage], GetAt(value, $"{path}.triagePlaybook"))),
             new Field($"{path}.setupPrompt", "Setup prompt", FieldKind.Prompt, "Runs before a playbook that requires a worktree, when the ticket has none."),
         ];
-        var options = OptionFields.TryGetValue(name, out var fields) ? fields.Select((entry) => entry.Field with { Path = $"{path}.{entry.Key}" }).ToList() : [];
+        var options = OptionFields.TryGetValue(name, out var fields) ? fields.Select((entry) => (Field: entry.Field with { Path = $"{path}.{entry.Key}" }, entry.Advanced)).ToList() : [];
+        List<Section> sections = [new Section("Source", common)];
 
-        return options.Count == 0 ? [new Section("Source", common)] : [new Section("Source", common), new Section(SourceLabel(name), options)];
+        if (options.Any((entry) => !entry.Advanced))
+        {
+            sections.Add(new Section(SourceLabel(name), [.. options.Where((entry) => !entry.Advanced).Select((entry) => entry.Field)]));
+        }
+
+        if (options.Any((entry) => entry.Advanced))
+        {
+            sections.Add(new Section("Advanced", [.. options.Where((entry) => entry.Advanced).Select((entry) => entry.Field)], Advanced: true));
+        }
+
+        return sections;
     }
 
     public static IReadOnlyList<Field> PlaybookFieldsOf(EditorState state, PlaybookFields playbook)
@@ -251,29 +325,25 @@ public static partial class SettingsFields
 
         if (playbook.Kind == "triage")
         {
-            fields.Add(new Field("rates", "Rates importance", FieldKind.Boolean, "Triage stores immediacy and severity, which these instructions must define. Off, it stores neither."));
+            fields.Add(new Field("rates", "Rates importance", FieldKind.Boolean, RatesHelp));
         }
 
         if (playbook.Kind == "task")
         {
-            fields.Add(new Field("autoStart", "Start automatically", FieldKind.Boolean, "Start the session after triage. Off, the work item waits in Unstarted for you to start it."));
-            fields.Add(new Field("requiresWorktree", "Requires a worktree", FieldKind.Boolean, "Run the source’s setup prompt first when the ticket has no worktree."));
+            fields.Add(new Field("autoStart", "Automatically", FieldKind.Boolean, AutoStartHelp, Group: "Start"));
+            fields.Add(new Field("requiresWorktree", "Needs a worktree", FieldKind.Boolean, RequiresWorktreeHelp, Group: "Start"));
+            fields.AddRange(ReportFields.Select((report) => new Field($"reports.{report.Kind}", report.Label, FieldKind.Boolean, report.Help, Group: "Reports")));
 
-            foreach (var (kind, label, help) in ReportFields)
+            if (playbook.Reports.Contains("approval"))
             {
-                fields.Add(new Field($"reports.{kind}", label, FieldKind.Boolean, help));
-
-                if (kind == "approval" && playbook.Reports.Contains("approval"))
-                {
-                    fields.Add(new Field("approvalSends", "Approve sends the work", FieldKind.Boolean, "Approve posts or pushes the session’s work. Off, you send it yourself, such as by pasting a reply, and Approve finishes up."));
-                }
+                fields.Add(new Field("approvalSends", "Approve sends the work", FieldKind.Boolean, ApprovalSendsHelp));
             }
 
-            fields.Add(new Field("workdir", "Working directory", FieldKind.Select, "Where the session runs.",
+            fields.Add(new Field("workdir", "Working directory", FieldKind.Select, "",
                 Options: [new FieldOption("worktree", "The ticket’s worktree, else the repo root"), new FieldOption("repoRoot", "Always the source’s repo root")]));
-            fields.Add(new Field("permissionMode", "Permission mode", FieldKind.Select, "Claude Code permission mode for this playbook’s sessions.",
+            fields.Add(new Field("permissionMode", "Permission mode", FieldKind.Select, "",
                 Options: [new FieldOption("", $"Sessions setting ({mode ?? "auto"})"), .. state.Config.PermissionModes.Select((entry) => new FieldOption(entry, entry))]));
-            fields.Add(new Field("model", "Model", FieldKind.Text, "The model for this playbook’s sessions.", $"Sessions setting ({model ?? "Claude’s default"})"));
+            fields.Add(new Field("model", "Model", FieldKind.Text, "", $"Sessions setting ({model ?? "Claude’s default"})"));
         }
 
         fields.Add(new Field(
@@ -282,7 +352,7 @@ public static partial class SettingsFields
             FieldKind.Prompt,
             playbook.Kind == "triage"
                 ? "The classifier’s system prompt. {{playbooks}} inserts the task playbooks as “- name: description” lines; without it, triage appends them."
-                : $"Variables: {string.Join(' ', state.Config.TemplateVariables.Select((name) => $"{{{{{name}}}}}"))}. Switchboard adds the commands for the reports checked above, with stage and link."));
+                : $"Variables: {string.Join(' ', state.Config.TemplateVariables.Select((name) => $"{{{{{name}}}}}"))}. Switchboard adds the commands for the checked reports, with stage and link."));
 
         return fields;
     }

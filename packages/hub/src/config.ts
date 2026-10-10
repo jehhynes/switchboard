@@ -188,21 +188,27 @@ export function readConfigFiles(configDir: string): ConfigFiles {
   return { settings, playbooks };
 }
 
+/** A save's refusal, or the version of the text it wrote, so the editor can keep editing over it. */
+export type SaveResult = { errors: string[]; version: string | null };
+
 /** Writes settings.json as formatted JSON. Refuses when the file changed since `version` was read, or with the errors of {@link checkSettings}. */
-export function saveSettings(configDir: string, value: unknown, version: string | null): string[] {
+export function saveSettings(configDir: string, value: unknown, version: string | null): SaveResult {
   const path = settingsPath(configDir);
 
   if (fileVersion(readText(path)) !== version) {
-    return [changed('settings.json')];
+    return { errors: [changed('settings.json')], version: null };
   }
 
   const errors = checkSettings(value);
 
-  if (errors.length === 0) {
-    writeAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
+  if (errors.length > 0) {
+    return { errors, version: null };
   }
 
-  return errors;
+  const text = `${JSON.stringify(value, null, 2)}\n`;
+
+  writeAtomic(path, text);
+  return { errors: [], version: fileVersion(text) };
 }
 
 function playbookPath(configDir: string, name: string): string {
@@ -215,25 +221,26 @@ function playbookPath(configDir: string, name: string): string {
  * Writes a playbook. `version` null creates it, and refuses when the file exists. Refuses when the file changed since
  * `version` was read, or when the hub would leave the playbook out.
  */
-export function savePlaybook(configDir: string, name: string, playbook: PlaybookFields, version: string | null): string[] {
+export function savePlaybook(configDir: string, name: string, playbook: PlaybookFields, version: string | null): SaveResult {
   if (!isPlaybookName(name)) {
-    return ['The name must be namespace:name, in lowercase letters, digits and hyphens.'];
+    return { errors: ['The name must be namespace:name, in lowercase letters, digits and hyphens.'], version: null };
   }
 
   const path = playbookPath(configDir, name);
   const current = fileVersion(readText(path));
 
   if (current !== version) {
-    return [version === null ? `A playbook named ${name} already exists.` : changed(name)];
+    return { errors: [version === null ? `A playbook named ${name} already exists.` : changed(name)], version: null };
   }
 
   const checked = checkPlaybook(name, playbook);
 
-  if ('text' in checked) {
-    writeAtomic(path, checked.text);
+  if ('errors' in checked) {
+    return { errors: checked.errors, version: null };
   }
 
-  return 'errors' in checked ? checked.errors : [];
+  writeAtomic(path, checked.text);
+  return { errors: [], version: fileVersion(checked.text) };
 }
 
 /** The file text for a playbook, or every error the hub would report for it, including unknown template variables. */

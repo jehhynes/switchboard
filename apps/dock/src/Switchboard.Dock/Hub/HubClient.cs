@@ -225,21 +225,27 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IDispo
         return reply?["errors"] is JsonArray errors ? Strings(errors) : null;
     }
 
-    public Task<IReadOnlyList<string>> SaveConfig(JsonObject body) => Written("/config/save", body);
+    public async Task<SaveReply> SaveConfig(JsonObject body)
+    {
+        var (errors, reply) = await Written("/config/save", body);
 
-    public Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir) => Written("/config/delete", new JsonObject { ["name"] = name, ["version"] = version, ["configDir"] = configDir });
+        return new SaveReply(errors, reply?["version"] is JsonValue version && version.TryGetValue<string>(out var text) ? text : null);
+    }
 
-    /// <summary>A write's refusal: the <c>errors</c> of a 409, else the failure; empty when the hub wrote the file.</summary>
-    async Task<IReadOnlyList<string>> Written(string path, JsonObject body)
+    public async Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir) =>
+        (await Written("/config/delete", new JsonObject { ["name"] = name, ["version"] = version, ["configDir"] = configDir })).Errors;
+
+    /// <summary>A write's refusal: the <c>errors</c> of a 409, else the failure; empty, with the reply, when the hub wrote the file.</summary>
+    async Task<(IReadOnlyList<string> Errors, JsonNode? Reply)> Written(string path, JsonObject body)
     {
         var (status, reply, failure) = await Send(path, body);
 
         if (status == HttpStatusCode.OK)
         {
-            return [];
+            return ([], reply);
         }
 
-        return reply?["errors"] is JsonArray errors ? Strings(errors) : [failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}."];
+        return (reply?["errors"] is JsonArray errors ? Strings(errors) : [failure ?? RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}."], null);
     }
 
     static IReadOnlyList<string> Strings(JsonArray list) => list.Select((entry) => entry?.GetValue<string>() ?? "").ToList();

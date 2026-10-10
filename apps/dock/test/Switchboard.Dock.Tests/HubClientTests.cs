@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
 using Switchboard.Dock.Hub;
+using Switchboard.Dock.Settings;
 
 namespace Switchboard.Dock.Tests;
 
@@ -258,11 +259,23 @@ public sealed class HubClientTests
             start.StartsWith("POST /config/save") ? LoopbackHub.Reply(stream, 409, "{\"errors\":[\"a\",\"b\"]}") : start.StartsWith("POST /config/delete") ? LoopbackHub.Reply(stream, 200, "{\"deleted\":true}") : LoopbackHub.Reply(stream, 400, "{\"error\":\"Expected {target}.\"}"));
         using var client = new HubClient(HomeFor(server));
 
-        Assert.Equal(["a", "b"], await client.SaveConfig(new JsonObject { ["target"] = "settings" }));
+        Assert.Equal(["a", "b"], (await client.SaveConfig(new JsonObject { ["target"] = "settings" })).Errors);
         Assert.Empty(await client.DeletePlaybook("dev:x", "p1", "C:/cfg"));
         Assert.Null(await client.CheckConfig(new JsonObject()));
         Assert.Contains("POST /config/delete HTTP/1.1 {\"name\":\"dev:x\",\"version\":\"p1\",\"configDir\":\"C:/cfg\"}", server.Requests);
-        Assert.Equal(["Switchboard is not running."], await new HubClient(Fixtures.TempFolder()).SaveConfig([]));
+        Assert.Equal(["Switchboard is not running."], (await new HubClient(Fixtures.TempFolder()).SaveConfig([])).Errors);
+    }
+
+    [Fact]
+    public async Task SaveConfig_HubWrites_ReturnsTheVersionWritten()
+    {
+        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, "{\"saved\":true,\"version\":\"abc\"}"));
+        using var client = new HubClient(HomeFor(server));
+
+        var reply = await client.SaveConfig(new JsonObject { ["target"] = "settings" });
+
+        Assert.Empty(reply.Errors);
+        Assert.Equal("abc", reply.Version);
     }
 
     [Fact]

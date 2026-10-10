@@ -15,7 +15,7 @@ import { cardsOf } from './cards.js';
 import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
 import { isPastePath } from './report.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
-import { SOURCE_KINDS, checkPlaybook, checkSettings, deletePlaybook, loadConfig, playbooksDir, readConfigFiles, savePlaybook, saveSettings, setSourceEnabled } from './config.js';
+import { type SaveResult, SOURCE_KINDS, checkPlaybook, checkSettings, deletePlaybook, loadConfig, playbooksDir, readConfigFiles, savePlaybook, saveSettings, setSourceEnabled } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
@@ -379,17 +379,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 409, body: { errors: [moved] } };
         }
 
-        let errors: string[];
+        let result: SaveResult;
 
         if (body['target'] === 'settings') {
-          errors = saveSettings(configDir, body['value'], version);
+          result = saveSettings(configDir, body['value'], version);
         } else if (body['target'] === 'playbook' && typeof body['name'] === 'string' && isPlaybookFields(body['playbook'])) {
-          errors = savePlaybook(configDir, body['name'], body['playbook'], version);
+          result = savePlaybook(configDir, body['name'], body['playbook'], version);
         } else {
           return { status: 400, body: { error: 'Expected {target: settings, value, version} or {target: playbook, name, playbook, version}.' } };
         }
 
-        return errors.length === 0 ? { status: 200, body: { saved: true } } : { status: 409, body: { errors } };
+        return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
       },
       '/config/delete': async (body) => {
         if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['version'] !== 'string') {

@@ -382,10 +382,10 @@ describe('createHubApp', () => {
     expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, kind: 'other' } })).toMatchObject({ status: 400 });
 
     expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: 'stale' })).toEqual({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Reload to see the change.'] } });
-    expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: first.settings.version })).toEqual({ status: 200, body: { saved: true } });
+    expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: first.settings.version })).toEqual({ status: 200, body: { saved: true, version: (await read()).settings.version ?? 'unread' } });
     expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).sessions.concurrency).toBe(3);
 
-    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook, version: null })).toEqual({ status: 200, body: { saved: true } });
+    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook, version: null })).toEqual({ status: 200, body: { saved: true, version: (await read()).playbooks.find((entry) => entry.name === 'dev:develop')?.version } });
     expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook, version: null })).toEqual({ status: 409, body: { errors: ['A playbook named dev:develop already exists.'] } });
     expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, reports: ['nope'] }, version: null })).toMatchObject({ status: 400 });
 

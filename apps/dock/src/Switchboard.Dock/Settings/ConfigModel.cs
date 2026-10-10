@@ -107,6 +107,9 @@ public sealed record EditorConfig(
     }
 }
 
+/// <summary>A save's refusal, or no errors and the written file's version, null from a hub that does not send it.</summary>
+public sealed record SaveReply(IReadOnlyList<string> Errors, string? Version);
+
 /// <summary>The hub's config requests for the Settings window (PRD R54).</summary>
 public interface IConfigHub
 {
@@ -116,8 +119,8 @@ public interface IConfigHub
     /// <summary>Every error the hub would report for a draft, or null when the hub did not answer.</summary>
     Task<IReadOnlyList<string>?> CheckConfig(JsonObject body);
 
-    /// <summary>Writes settings.json or a playbook; returns the refusal's errors, empty when it saved.</summary>
-    Task<IReadOnlyList<string>> SaveConfig(JsonObject body);
+    /// <summary>Writes settings.json or a playbook; returns the refusal's errors, or none and the version of the file written.</summary>
+    Task<SaveReply> SaveConfig(JsonObject body);
 
     /// <summary>Deletes a playbook file read from <paramref name="configDir"/>; returns the refusal's errors, empty when it deleted.</summary>
     Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir);

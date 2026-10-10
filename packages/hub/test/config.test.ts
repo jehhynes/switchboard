@@ -92,44 +92,44 @@ describe('readConfigFiles', () => {
 
 describe('saveSettings', () => {
   it('writes formatted JSON over the version it was read at, and creates a missing file', () => {
-    expect(saveSettings(configDir(), { sessions: { concurrency: 1 } }, null)).toEqual([]);
+    expect(saveSettings(configDir(), { sessions: { concurrency: 1 } }, null)).toEqual({ errors: [], version: readConfigFiles(configDir()).settings.version });
     expect(readFileSync(settingsFile(), 'utf8')).toBe('{\n  "sessions": {\n    "concurrency": 1\n  }\n}\n');
 
     const version = readConfigFiles(configDir()).settings.version;
 
-    expect(saveSettings(configDir(), { sources: { github: GITHUB } }, version)).toEqual([]);
+    expect(saveSettings(configDir(), { sources: { github: GITHUB } }, version)).toEqual({ errors: [], version: readConfigFiles(configDir()).settings.version });
     expect(JSON.parse(readFileSync(settingsFile(), 'utf8'))).toEqual({ sources: { github: GITHUB } });
   });
 
   it('refuses a file changed since it was read, and invalid settings, leaving the file alone', () => {
     write(settingsFile(), '{}');
 
-    expect(saveSettings(configDir(), { triage: {} }, fileVersion('{"old": 1}'))).toEqual(['settings.json changed on disk after the editor read it. Reload to see the change.']);
-    expect(saveSettings(configDir(), { triage: {} }, null)).toEqual(['settings.json changed on disk after the editor read it. Reload to see the change.']);
-    expect(saveSettings(configDir(), { triage: { timeoutSeconds: 0 } }, fileVersion('{}'))).toEqual(['triage.timeoutSeconds must be a whole number of at least 1.']);
+    expect(saveSettings(configDir(), { triage: {} }, fileVersion('{"old": 1}'))).toEqual({ errors: ['settings.json changed on disk after the editor read it. Reload to see the change.'], version: null });
+    expect(saveSettings(configDir(), { triage: {} }, null)).toEqual({ errors: ['settings.json changed on disk after the editor read it. Reload to see the change.'], version: null });
+    expect(saveSettings(configDir(), { triage: { timeoutSeconds: 0 } }, fileVersion('{}'))).toEqual({ errors: ['triage.timeoutSeconds must be a whole number of at least 1.'], version: null });
     expect(readFileSync(settingsFile(), 'utf8')).toBe('{}');
   });
 });
 
 describe('savePlaybook and deletePlaybook', () => {
   it('creates a playbook, refuses to create it again, and updates it over its version', () => {
-    expect(savePlaybook(configDir(), 'dev:develop', TASK, null)).toEqual([]);
+    expect(savePlaybook(configDir(), 'dev:develop', TASK, null)).toEqual({ errors: [], version: readConfigFiles(configDir()).playbooks[0]!.version });
     expect(readFileSync(playbookFile('dev', 'develop'), 'utf8')).toBe('---\ndescription: Develop it\nautoStart: false\nrequiresWorktree: true\n---\n/gc-plan {{ticket.sourceKey}}\n');
-    expect(savePlaybook(configDir(), 'dev:develop', TASK, null)).toEqual(['A playbook named dev:develop already exists.']);
+    expect(savePlaybook(configDir(), 'dev:develop', TASK, null)).toEqual({ errors: ['A playbook named dev:develop already exists.'], version: null });
 
     const version = readConfigFiles(configDir()).playbooks[0]!.version;
 
-    expect(savePlaybook(configDir(), 'dev:develop', { ...TASK, autoStart: true }, version)).toEqual([]);
+    expect(savePlaybook(configDir(), 'dev:develop', { ...TASK, autoStart: true }, version)).toEqual({ errors: [], version: readConfigFiles(configDir()).playbooks[0]!.version });
     expect(readConfigFiles(configDir()).playbooks[0]!.playbook).toEqual({ ...TASK, autoStart: true });
-    expect(savePlaybook(configDir(), 'dev:develop', TASK, version)).toEqual(['dev:develop changed on disk after the editor read it. Reload to see the change.']);
+    expect(savePlaybook(configDir(), 'dev:develop', TASK, version)).toEqual({ errors: ['dev:develop changed on disk after the editor read it. Reload to see the change.'], version: null });
   });
 
   it('refuses a bad name, a playbook the hub would leave out, and unknown template variables, writing nothing', () => {
-    expect(savePlaybook(configDir(), '../x:y', TASK, null)).toEqual(['The name must be namespace:name, in lowercase letters, digits and hyphens.']);
-    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, description: '' }, null)).toEqual(['description is required.']);
-    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, description: 'a\nb' }, null)).toEqual(['description must be one line.']);
-    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, template: '{{nope}}' }, null)).toEqual(['Unknown template variable: nope.']);
-    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, template: ' ' }, null)).toEqual(['The prompt template is empty.']);
+    expect(savePlaybook(configDir(), '../x:y', TASK, null)).toEqual({ errors: ['The name must be namespace:name, in lowercase letters, digits and hyphens.'], version: null });
+    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, description: '' }, null)).toEqual({ errors: ['description is required.'], version: null });
+    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, description: 'a\nb' }, null)).toEqual({ errors: ['description must be one line.'], version: null });
+    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, template: '{{nope}}' }, null)).toEqual({ errors: ['Unknown template variable: nope.'], version: null });
+    expect(savePlaybook(configDir(), 'dev:x', { ...TASK, template: ' ' }, null)).toEqual({ errors: ['The prompt template is empty.'], version: null });
     expect(existsSync(playbookFile('dev', 'x'))).toBe(false);
   });
 
