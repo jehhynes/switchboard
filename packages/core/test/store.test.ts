@@ -340,7 +340,13 @@ describe('Store', () => {
     expect(store.triagesFor(3)).toEqual([]);
     const { id: _, ...base } = store.workItem(2)!;
     expect(store.insertWorkItem({ ...base, parentId: null }).id).toBe(8);
-    expect(() => store.deleteWorkItem(1)).toThrow(/FOREIGN KEY/);
+    const kept = store.sessionsFor(1)[0]!;
+    store.deleteWorkItem(1);
+    expect(store.workItem(1)).toBeNull();
+    expect(store.session('s1')).toBeNull();
+    expect(store.pastesFor(1)).toEqual([]);
+    expect(store.workItem(2)?.parentId).toBeNull();
+    expect(() => store.insertSession({ ...kept, id: 's2', workItemId: 99 })).toThrow(/FOREIGN KEY/);
     store.close();
   });
 

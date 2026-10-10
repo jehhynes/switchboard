@@ -560,7 +560,7 @@ public sealed partial class MainWindow : Window
             items.Add(Item("Open in Claude", () => Open(shown), row.MainGlyph));
         }
 
-        foreach (var control in row.Controls)
+        foreach (var control in row.Controls.Where((control) => control.Confirm is null))
         {
             if (control.Label == "Snooze")
             {
@@ -568,7 +568,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                items.Add(Item(control.Label, () => Act(control.Action), control.Glyph));
+                items.Add(Item(control.Label, () => Act(control), control.Glyph));
             }
         }
 
@@ -584,6 +584,19 @@ public sealed partial class MainWindow : Window
         foreach (var command in row.Commands)
         {
             items.Add(Item(command.Label, () => Run(row, command.Command), command.Glyph));
+        }
+
+        // Controls that ask first, such as Delete, come last, apart from the rest.
+        var asking = row.Controls.Where((control) => control.Confirm is not null).ToList();
+
+        if (asking.Count > 0 && items.Count > 0)
+        {
+            items.Add(new Separator());
+        }
+
+        foreach (var control in asking)
+        {
+            items.Add(Item(control.Label, () => Act(control), control.Glyph));
         }
 
         // The ticket, then its links, such as its pull request (PRD R52), open in the browser.
@@ -630,6 +643,17 @@ public sealed partial class MainWindow : Window
         copy["until"] = until;
 
         return copy;
+    }
+
+    /// <summary>Posts the control's action, after the operator confirms it when the hub sent a question.</summary>
+    async Task Act(DockControl control)
+    {
+        if (control.Confirm is { } confirm && !await ConfirmDialog.Ask(this, confirm.Question, confirm.Detail, confirm.Action))
+        {
+            return;
+        }
+
+        await Act(control.Action);
     }
 
     async Task Act(JsonObject action)
@@ -708,7 +732,7 @@ public sealed partial class MainWindow : Window
         }
         else if (row.Row.Controls.FirstOrDefault((control) => control.Label == row.Main) is { } control)
         {
-            await Act(control.Action);
+            await Act(control);
         }
     }
 

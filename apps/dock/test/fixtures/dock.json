@@ -71,6 +71,19 @@
               }
             },
             {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 13
+              },
+              "confirm": {
+                "question": "Delete gh 113?",
+                "detail": "Its running session is stopped. Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
+              }
+            },
+            {
               "label": "Move down",
               "glyph": "",
               "action": {
@@ -185,6 +198,19 @@
               "action": {
                 "type": "snooze",
                 "ticketId": 7
+              }
+            },
+            {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 7
+              },
+              "confirm": {
+                "question": "Delete gh 107?",
+                "detail": "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
               }
             },
             {
@@ -341,6 +367,19 @@
               }
             },
             {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 10
+              },
+              "confirm": {
+                "question": "Delete gh 110?",
+                "detail": "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
+              }
+            },
+            {
               "label": "Move to top",
               "glyph": "",
               "action": {
@@ -471,6 +510,19 @@
                 "type": "snooze",
                 "ticketId": 14
               }
+            },
+            {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 14
+              },
+              "confirm": {
+                "question": "Delete gh 114?",
+                "detail": "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
+              }
             }
           ],
           "main": "Triage again",
@@ -559,6 +611,19 @@
               "action": {
                 "type": "snooze",
                 "ticketId": 8
+              }
+            },
+            {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 8
+              },
+              "confirm": {
+                "question": "Delete gh 108?",
+                "detail": "Its running session is stopped. Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
               }
             }
           ],
@@ -678,6 +743,19 @@
               "action": {
                 "type": "snooze",
                 "ticketId": 9
+              }
+            },
+            {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 9
+              },
+              "confirm": {
+                "question": "Delete gh 109?",
+                "detail": "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
               }
             }
           ],
@@ -803,7 +881,21 @@
             "type": "url",
             "url": "https://github.com/o/r/issues/111"
           },
-          "controls": [],
+          "controls": [
+            {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 11
+              },
+              "confirm": {
+                "question": "Delete gh 111?",
+                "detail": "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
+              }
+            }
+          ],
           "main": null,
           "mainGlyph": null,
           "mainTitle": null,
@@ -858,7 +950,21 @@
             "type": "url",
             "url": "https://github.com/o/r/issues/112"
           },
-          "controls": [],
+          "controls": [
+            {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 12
+              },
+              "confirm": {
+                "question": "Delete gh 112?",
+                "detail": "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
+              }
+            }
+          ],
           "main": null,
           "mainGlyph": null,
           "mainTitle": null,

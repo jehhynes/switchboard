@@ -105,6 +105,17 @@ describe('History model', () => {
     expect(texts(ticket!.entries)).toEqual(['Switchboard first saw the ticket, assigned to you']);
   });
 
+  it('shows a deleted work item only as the delete in the Ticket section (PRD R76)', () => {
+    const run = approvedRun();
+
+    run.send({ type: 'delete', workItemId: 1 });
+
+    const sections = historyView(run.history(), run.now).sections;
+
+    expect(sections.map((section) => section.key)).toEqual(['ticket']);
+    expect(sections[0]!.entries.at(-1)).toMatchObject({ text: 'You deleted a work item', icon: 'trash', category: 'you', lines: [], refused: null });
+  });
+
   it('shows a refusal, a snooze and its end, a reported link and a failed stop with their words and tones', () => {
     const run = approvedRun();
 

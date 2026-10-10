@@ -623,6 +623,21 @@ describe('Runtime', () => {
     expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
   });
 
+  it('logs a failed stop of a deleted work item, which has no row to show it (PRD R76)', async () => {
+    const { store, cli, source, runtime, logs } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    const [session] = store.sessionsFor(1);
+
+    cli.stopResult = fail('No such agent');
+    runtime.send({ type: 'delete', workItemId: 1 });
+    await runtime.settled();
+
+    expect(store.workItem(1)).toBeNull();
+    expect(logs).toContain(`stop of deleted session ${session!.id} (${session!.shortId}) failed; it may still be running: No such agent`);
+  });
+
   it('reconciles at startup and installs hooks when enabled', async () => {
     const { store, runtime } = setup(config({ installHooks: true }));
     store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });

@@ -105,7 +105,7 @@ export type FlowEvent =
   | { type: 'reply-failed'; sessionId: string; message: string }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
-  | { type: 'start' | 'approve' | 'mark-done' | 'retriage' | 'stop'; workItemId: number }
+  | { type: 'start' | 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
   /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
   /** Answers the question the row showed, which the hub checks against the job state (PRD R70). */
@@ -205,7 +205,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'answer', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'answer', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -270,6 +270,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { until: event.until };
     case 'move':
       return { after: event.after };
+    case 'delete':
+      return { workItemId: event.workItemId };
     default:
       return null;
   }
@@ -286,6 +288,11 @@ function subjectOf(store: Store, event: FlowEvent): Pick<EventRecord, 'ticketId'
   if ('sessionId' in event) {
     const session = store.session(event.sessionId);
     return session === null ? none : ofItem(session.workItemId, session.id);
+  }
+
+  // The ticket's log keeps the delete, because the work item's own log is deleted with it (PRD R76).
+  if (event.type === 'delete') {
+    return { ...none, ticketId: store.workItem(event.workItemId)?.ticketId ?? null };
   }
 
   if ('workItemId' in event) {
@@ -410,6 +417,8 @@ class Flow {
         return this.retriage(this.openItem(event.workItemId));
       case 'stop':
         return this.stop(this.knownItem(event.workItemId));
+      case 'delete':
+        return this.delete(this.knownItem(event.workItemId));
       case 'answer':
         return this.answer(this.openItem(event.workItemId), event.nativeSessionId, event.answer);
       case 'open-question':
@@ -1058,6 +1067,31 @@ class Flow {
     }
 
     this.actions.push({ type: 'stop-session', sessionId: session.id, shortId: session.shortId, reason: 'operator' });
+  }
+
+  /**
+   * PRD R76: stops a session running in its background process, then deletes the work item. A starting session has no short ID to stop yet; a
+   * session the operator resumed is theirs, so it keeps running, and its later reports are refused as from an unknown session.
+   */
+  private delete(item: WorkItem): void {
+    const session = this.activeSession(item);
+
+    if (session?.state === 'starting') {
+      throw new Refusal('The session is starting. Delete the work item once it has started.');
+    }
+
+    if (session !== null && !session.released) {
+      this.actions.push({ type: 'stop-session', sessionId: session.id, shortId: session.shortId, reason: 'operator' });
+    }
+
+    this.store.deleteWorkItem(item.id);
+
+    // A snoozed ticket with no row left would stay hidden on GitHub boards (PRD R56) until it left scope.
+    const ticket = this.store.ticket(item.ticketId)!;
+
+    if (ticket.snoozed && !ticket.pool && this.store.workItemsForTicket(ticket.id).length === 0) {
+      this.store.updateTicket(ticket.id, UNSNOOZED);
+    }
   }
 
   private stopSucceeded(sessionId: string, reason: StopReason): void {

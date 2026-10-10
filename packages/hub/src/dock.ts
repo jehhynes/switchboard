@@ -133,8 +133,11 @@ export interface DockRow {
   movable: boolean;
   window: DockWindow | null;
   open: DockOpen | null;
-  /** The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time. */
-  controls: { label: string; glyph: string; action: Record<string, unknown> }[];
+  /**
+   * The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time.
+   * A control with `confirm` posts only after the operator confirms, such as Delete (PRD R76).
+   */
+  controls: { label: string; glyph: string; action: Record<string, unknown>; confirm?: { question: string; detail: string; action: string } }[];
   /** The label of the control the row shows as a button, or null (PRD R27). */
   main: string | null;
   /** The main control's codicon glyph, shown before its label, or null. */
@@ -430,7 +433,11 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
 
 /** The controls the hub runs; Copy and the VS Code controls are in `pastes` and `commands` (PRD R71). */
 function hubControls(controls: Control[]): DockRow['controls'] {
-  return controls.flatMap((control) => (control.message['type'] === 'action' ? [{ label: control.label, glyph: CONTROL_GLYPHS[control.icon], action: control.message['action'] as Record<string, unknown> }] : []));
+  return controls.flatMap((control) =>
+    control.message['type'] === 'action'
+      ? [{ label: control.label, glyph: CONTROL_GLYPHS[control.icon], action: control.message['action'] as Record<string, unknown>, ...(control.confirm === undefined ? {} : { confirm: control.confirm }) }]
+      : [],
+  );
 }
 
 /** The codicons of a pull request badge (git-pull-request) and of another link's badge (link). */

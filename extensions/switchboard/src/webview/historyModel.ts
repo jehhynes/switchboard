@@ -89,6 +89,7 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   'mark-done': { text: 'You marked it done', icon: 'pass' },
   retriage: { text: 'You asked to triage it again', icon: 'filter' },
   stop: { text: 'You asked to stop the session', icon: 'debug-stop' },
+  delete: { text: 'You deleted a work item', icon: 'trash' },
   answer: { text: 'You answered the question', icon: 'comment' },
   'open-question': { text: 'You opened the question in Claude', icon: 'comment-discussion' },
   pick: { text: 'You picked it from the pool', icon: 'pin' },

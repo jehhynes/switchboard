@@ -827,6 +827,9 @@ export class Runtime {
 
         if (failure === null) {
           await this.findSetupWorktrees();
+        } else if (this.deps.store.session(action.sessionId) === null) {
+          // Delete removed the session row, so the flow has nowhere to show the failure (PRD R76).
+          this.deps.log(`stop of deleted session ${action.sessionId} (${action.shortId}) failed; it may still be running: ${failure.error}`);
         }
 
         this.send(failure === null ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason } : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error });

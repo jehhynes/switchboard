@@ -169,8 +169,14 @@ describe('dockView', () => {
       { label: 'Triage again', glyph: '\u{ea6d}', action: { type: 'retriage', workItemId: 7 } },
       { label: 'Mark done', glyph: '\u{eba4}', action: { type: 'mark-done', workItemId: 7 } },
       { label: 'Snooze', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 7 } },
+      {
+        label: 'Delete',
+        glyph: '\u{ea81}',
+        action: { type: 'delete', workItemId: 7 },
+        confirm: { question: 'Delete gh 107?', detail: expect.stringContaining('Switchboard deletes the work item') as string, action: 'Delete' },
+      },
     ]);
-    expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop', 'Mark done', 'Snooze']);
+    expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop', 'Mark done', 'Snooze', 'Delete']);
   });
 
   it('opens Open in Claude for a waiting background session, the latest session when it is not running, and nothing while it runs', () => {

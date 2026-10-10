@@ -37,22 +37,35 @@ describe('groupOf', () => {
 
 describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
-    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'Open in terminal', 'History']);
+    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'Open in terminal', 'History']);
-    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Open in terminal', 'History']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
       { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
       { type: 'action', action: { type: 'snooze', ticketId: 7 } },
       { type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false },
+      { type: 'action', action: { type: 'delete', workItemId: 7 } },
       { type: 'history', ticketId: 7, key: 'gh 107' },
     ]);
+  });
+
+  it('asks before Delete, naming the session it stops, and offers no Delete while a session starts (PRD R76)', () => {
+    const confirm = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Delete')?.confirm ?? null;
+    const kept = "Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay.";
+    const returns = 'The ticket gets a new work item only when it is assigned to you again.';
+
+    expect(confirm(item(7, { sessions: [session()] }))).toEqual({ question: 'Delete gh 107?', detail: `Its running session is stopped. ${kept} ${returns}`, action: 'Delete' });
+    expect(confirm(item(7, { sessions: [session({ state: 'idle', released: true })] }))?.detail).toBe(`${kept} ${returns}`);
+    expect(confirm(item(7, { status: 'done', sessions: [session({ state: 'ended' })] }))?.detail).toBe(`${kept} ${returns}`);
+    expect(confirm(item(7, { status: 'failed', ticket: { ...item(7).ticket, source: 'adhoc' } }))?.detail).toBe(kept);
+    expect(confirm(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).toBeNull();
   });
 
   it('attaches a terminal to a background session, resumes the latest ended session, shows one the operator resumed, and offers none while a session starts (PRD R28)', () => {

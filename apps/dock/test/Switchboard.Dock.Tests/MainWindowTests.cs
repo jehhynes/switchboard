@@ -166,16 +166,17 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void MenuOf_Row_ListsHubControlsSnoozeChoicesOpenTicketAndLinks()
+    public void MenuOf_Row_ListsHubControlsSnoozeChoicesDeleteOpenTicketAndLinks()
     {
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7"));
         var snooze = (MenuItem)menu[2];
 
         Assert.Equal(
-            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Open ticket", "Open PR #19002"],
+            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002"],
             menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
         Assert.IsType<Separator>(menu[9]);
+        Assert.IsType<Separator>(menu[11]);
         Assert.Equal(7, snooze.ItemsSource!.Cast<MenuItem>().Count());
         Assert.Equal("Indefinitely", snooze.ItemsSource!.Cast<MenuItem>().Last().Header);
         Assert.StartsWith("Tomorrow · ", (string)snooze.ItemsSource!.Cast<MenuItem>().First().Header!);
@@ -193,8 +194,8 @@ public sealed class MainWindowTests
         ((MenuItem)menu[1]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         snooze[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         actions.UrlReply = "The browser did not open it.";
-        ((MenuItem)menu[10]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        ((MenuItem)menu[11]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[12]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[13]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}", "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}"], hub.Calls);
@@ -230,9 +231,48 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
 
-        Assert.IsType<Separator>(menu[9]);
-        Assert.Equal("Open PR #19002", ((MenuItem)menu[10]).Header);
-        Assert.Equal(11, menu.Count);
+        Assert.IsType<Separator>(menu[11]);
+        Assert.Equal("Open PR #19002", ((MenuItem)menu[12]).Header);
+        Assert.Equal(13, menu.Count);
+    }
+
+    [AvaloniaFact]
+    public void MenuOf_RowWithOnlyDelete_ListsItWithoutASeparator()
+    {
+        var (window, _) = Open();
+        var row = Fixtures.Row("item:7");
+        var menu = window.MenuOf(row with { Controls = row.Controls.Where((control) => control.Label == "Delete").ToList(), Commands = [], Url = "", Links = [] });
+
+        Assert.Equal(["Delete"], menu.Select((item) => ((MenuItem)item).Header));
+    }
+
+    [AvaloniaFact]
+    public void Delete_Clicked_AsksInADialogAndPostsOnlyAfterDelete()
+    {
+        var (window, _) = Open();
+        var delete = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[10];
+        Button DialogButton(string name) => Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
+
+        delete.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        var texts = VisibleTexts(Assert.Single(window.OwnedWindows));
+
+        Assert.Equal("Delete gh 107?", texts[0]);
+        Assert.StartsWith("Switchboard deletes the work item", texts[1]);
+        DialogButton("ConfirmCancel").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Empty(window.OwnedWindows);
+        Assert.Empty(hub.Calls);
+
+        hub.ActReplies.Enqueue(null);
+        delete.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        DialogButton("ConfirmAction").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["act {\"type\":\"delete\",\"workItemId\":7}"], hub.Calls);
     }
 
     [AvaloniaFact]

@@ -42,6 +42,7 @@ export const CONTROL_GLYPHS = {
   play: '\u{eb2c}',
   search: '\u{ea6d}',
   terminal: '\u{ea85}',
+  trash: '\u{ea81}',
 } as const;
 
 /** A codicon name a control may use; a new one needs its glyph in `CONTROL_GLYPHS`, or the build fails. */
@@ -52,6 +53,8 @@ export interface Control {
   icon: ControlIcon;
   /** The message the button posts. */
   message: Record<string, unknown>;
+  /** A question the dock asks before it posts the message, with its detail and the label of the button that goes ahead. */
+  confirm?: { question: string; detail: string; action: string };
 }
 
 /** The one control a Blocked on you, Ready for review or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
@@ -134,7 +137,23 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Open in terminal', icon: 'terminal', message: terminal });
   }
 
+  // A starting session has no short ID to stop yet (PRD R76).
+  if (session?.state !== 'starting') {
+    controls.push({ label: 'Delete', icon: 'trash', message: action('delete'), confirm: deleteConfirm(item, isBackground(session)) });
+  }
+
   return [...controls, historyControl(item.ticket)];
+}
+
+/** What Delete asks before it deletes the work item (PRD R76). */
+function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control['confirm']> {
+  const detail = [
+    stops ? 'Its running session is stopped.' : null,
+    'Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude\'s session files stay.',
+    item.ticket.source === 'adhoc' ? null : 'The ticket gets a new work item only when it is assigned to you again.',
+  ];
+
+  return { question: `Delete ${ticketKey(item.ticket)}?`, detail: detail.filter((text) => text !== null).join(' '), action: 'Delete' };
 }
 
 /**

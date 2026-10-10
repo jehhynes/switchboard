@@ -33,9 +33,12 @@ public sealed class DockViewTests
         Assert.Equal(("gh-107-58c609", "Issue <7>"), (finished.Window!.Name, finished.Window.Title));
         Assert.Equal(["D:/git/widgets/.worktrees/107-fix"], finished.Window.Folders);
         Assert.Equal(new DockOpen("session", null, "aaaa1111-native", "D:/git/widgets/.worktrees/107-fix", null), finished.Open);
-        Assert.Equal(["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down"], finished.Controls.Select((control) => control.Label));
+        Assert.Equal(["Triage again", "Mark done", "Snooze", "Delete", "Move to top", "Move up", "Move down"], finished.Controls.Select((control) => control.Label));
         Assert.Equal("{\"type\":\"retriage\",\"workItemId\":7}", finished.Controls[0].Action.ToJsonString());
-        Assert.Equal("{\"type\":\"move\",\"workItemId\":7,\"after\":10}", finished.Controls[5].Action.ToJsonString());
+        Assert.Null(finished.Controls[0].Confirm);
+        Assert.Equal(("Delete gh 107?", "Delete"), (finished.Controls[3].Confirm!.Question, finished.Controls[3].Confirm!.Action));
+        Assert.StartsWith("Switchboard deletes the work item", finished.Controls[3].Confirm!.Detail);
+        Assert.Equal("{\"type\":\"move\",\"workItemId\":7,\"after\":10}", finished.Controls[6].Action.ToJsonString());
         Assert.Equal(7, finished.WorkItemId);
     }
 

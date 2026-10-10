@@ -681,7 +681,7 @@ export class Store {
     return this.#one('SELECT * FROM workItems WHERE id = ?', id);
   }
 
-  /** Deletes a work item that never had a session, with its triages, pastes and activity, so History does not show it (PRD R10). */
+  /** Deletes a work item with its triages, sessions, pastes and activity, so History does not show it (PRD R10, R76); its children keep no parent. */
   deleteWorkItem(id: number): void {
     this.#bump(this.workItem(id)?.ticketId ?? null);
 
@@ -702,7 +702,9 @@ export class Store {
     }
 
     this.#db.prepare('DELETE FROM triages WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM sessions WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
+    this.#db.prepare('UPDATE workItems SET parentId = NULL WHERE parentId = ?').run(id);
     this.#db.prepare('DELETE FROM workItems WHERE id = ?').run(id);
   }
 
