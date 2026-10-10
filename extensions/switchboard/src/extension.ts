@@ -4,7 +4,9 @@ import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub, windowsDir } from '@switchboard/hub';
+import { closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
+import { DoneWindow } from './doneWindow.js';
 import { openChanges } from './git.js';
 import { HistoryPanels } from './historyPanel.js';
 import type { HistoryMessage } from './historyPanel.js';
@@ -40,6 +42,12 @@ export interface SwitchboardApi {
   run(command: WindowCommand): Promise<unknown>;
   /** Opens a URL or file as an item window's tab; the suite's window is not an item window (PRD R72). */
   openTab(target: string): Promise<void>;
+  /** Closes this window as the item window opened from `file` would, or as its own again with null; the suite's window is not an item window (PRD R76). */
+  itemWindow(file: string | null): void;
+  /** Handles a state as if the hub sent it; resolves to whether the window asked VS Code to close (PRD R76). */
+  receive(state: string): Promise<boolean>;
+  /** Handles a focus change as VS Code reports it. */
+  windowStateChanged(focused: boolean): Promise<unknown>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -84,6 +92,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   const state = new HubState();
   const tabs = new ItemTabs(workspaceFile(), windowsDir(home), openTab);
+  let done = new DoneWindow(workspaceFile(), windowsDir(home));
+  const closeDone = (focused?: boolean): Promise<boolean> =>
+    closeIfDone(done, focused).catch((error: unknown) => (void vscode.window.showErrorMessage(`Switchboard: the window did not close: ${String(error)}`), false));
   const history = new HistoryPanels(context.extensionUri, () => keeper.current(), (link) => openHistoryLink(link));
   /** Runs a command the dock left for this window (PRD R71). */
   const runCommand = async (command: WindowCommand): Promise<unknown> => {
@@ -126,6 +137,15 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     status.tooltip = shown.tooltip;
   };
 
+  const windowStateChanged = (focused: boolean): Promise<unknown> => {
+    if (focused) {
+      return Promise.resolve(vscode.commands.executeCommand('switchboard.claim')).catch(() => {});
+    }
+
+    // A window focused when its work became done closes once the operator leaves it (PRD R76).
+    return closeDone(false);
+  };
+
   status.name = 'Switchboard';
   status.command = 'switchboard.showDock';
   showStatus();
@@ -142,7 +162,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
       return record === null ? null : claimOpen(record, runCommand);
     }),
-    vscode.window.onDidChangeWindowState((window) => window.focused && void vscode.commands.executeCommand('switchboard.claim').then(undefined, () => {})),
+    vscode.window.onDidChangeWindowState((window) => void windowStateChanged(window.focused)),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration('switchboard.configDir')) {
         return;
@@ -161,16 +181,24 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   );
 
   const toasts = new NeedsYouToasts((workItemId) => openTarget(opening(), { workItemId }));
+  const stateReceived = (data: string): Promise<boolean> => {
+    const snapshot = JSON.parse(data);
+
+    state.update(data);
+    showStatus();
+    history.changed();
+    toasts.update(snapshot);
+    void tabs.update(snapshot).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
+    done.update(snapshot);
+
+    return closeDone();
+  };
   const keeper = keepHub({
     ensure,
     open: (record, onEnd) =>
       openEvents(record, onEnd, undefined, (event, data) => {
         if (event === 'state') {
-          state.update(data);
-          showStatus();
-          history.changed();
-          toasts.update(JSON.parse(data));
-          void tabs.update(JSON.parse(data)).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
+          void stateReceived(data);
         } else if (event === 'claim') {
           // The dock left something for this window, which may already be in front, so no focus change would claim it (PRD R71).
           if (claimIsFor(data, workspaceFile())) {
@@ -204,6 +232,11 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     claim: (hub, run = runCommand) => claimOpen(hub, run),
     run: runCommand,
     openTab,
+    itemWindow: (file) => {
+      done = new DoneWindow(file ?? workspaceFile(), windowsDir(home));
+    },
+    receive: stateReceived,
+    windowStateChanged,
   };
 }
 

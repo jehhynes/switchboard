@@ -41,6 +41,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show a notification in the focused window when a work item starts needing you, such as an approval or a question."
+        },
+        "switchboard.closeDoneWindows": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Close an item window once all its work items are done and their sessions have ended their turns, while it is not focused and has no unsaved changes."
         }
       }
     },

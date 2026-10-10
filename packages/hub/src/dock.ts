@@ -392,16 +392,21 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   return { name, title: item.ticket.title, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };
 }
 
+/** The work items whose window is the one opened from `file` (PRD R72, R76). */
+export function windowItems(snapshot: Snapshot, file: string, windows: string): WorkItemView[] {
+  return snapshot.workItems.filter((item) => {
+    const window = windowOf(item, windows);
+
+    return window !== null && samePath(window.file, file);
+  });
+}
+
 /**
  * What the item window opened from `file` shows in editor tabs (PRD R72), each once, for every work item whose window it is: `urls`, the tickets,
  * their other linked tickets and pages, then their pull requests, and `reports`, the approval reports of `awaiting-approval` work items.
  */
 export function windowTabs(snapshot: Snapshot, file: string, windows: string): { urls: string[]; reports: string[] } {
-  const items = snapshot.workItems.filter((item) => {
-    const window = windowOf(item, windows);
-
-    return window !== null && samePath(window.file, file);
-  });
+  const items = windowItems(snapshot, file, windows);
   const tickets = items.map((item) => item.ticket.url).filter((url) => url !== '');
   const links = items.flatMap((item) => item.links.map((link) => link.target).filter((target) => /^https?:\/\//i.test(target)));
   const reports = items.flatMap((item) => (item.status === 'awaiting-approval' && item.approvalReport !== null ? [item.approvalReport] : []));
