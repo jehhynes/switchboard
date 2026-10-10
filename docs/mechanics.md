@@ -324,6 +324,15 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** a link from the dock through Windows' URL handler to Chrome; the operator's branded Chrome, which no longer accepts `--load-extension` (M23); how GitHub, Zoho Desk and Forum treat the marks when the extension is missing; whether Chrome warns before an extension closes a tab with unsaved changes; where Zoho Desk takes a signed-in agent's link; Duplicate, Reopen closed tab or session restore of a tab whose current entry still has the bookmark, as after Back to it, which would be placed again.
 - **Current use:** the Switchboard tab group (PRD R74; architecture.md § Chrome extension).
 
+## M29. Opening a new Claude session in a tab without changing the preferred location
+
+- **Date:** 2026-10-10.
+- **Versions:** Claude Code extension 2.1.296 (`extension.js`); Ground Control M63 inspected the same argument on 2.1.284.
+- **Inspection:** the extension contributes `claude-vscode.editor.open` and registers it as `(sessionId?, initialPrompt?, viewColumn?, newSessionGroupId?, fullEditor?, {programmatic}?)`. With any `programmatic` value it never writes `claudeCode.preferredLocation` and does not focus the input box; with no session ID, `pin-to-panel` opens an editor tab, and `honor-preferred-location` uses the sidebar when the setting is `sidebar` and no tab holds the session; `createPanel` shows a session the sidebar already holds there. Without `programmatic` it opens a tab, focuses the input, and sets the preference to `panel` unless `fullEditor` is true or the session is shown in the sidebar. With no session ID it starts a new session; an open session's tab is revealed instead. The extension activates `onStartupFinished`, and executing its contributed command activates it earlier.
+- **Experiment:** the operator's Support bridge extension (`D:\git\support\extensions\session-launcher`) made the same `pin-to-panel` call from a title-bar button until it moved here; its README (support commit `e543213`) recorded that on 2.1.286 the call opened a tab and left the setting alone. The operator's `preferredLocation` is `sidebar`.
+- **Not verified:** the call from Switchboard's installed extension; the argument order is undocumented and can change with any Claude Code extension update.
+- **Current use:** New Claude Session in Editor Tab (PRD R75; architecture.md § VS Code extension).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

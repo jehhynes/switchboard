@@ -12,7 +12,7 @@ import { startHub } from './hubProcess.js';
 import { needsStatus } from './needs.js';
 import { NeedsYouToasts } from './notify.js';
 import { claimIsFor } from './claims.js';
-import { claimOpen, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, workspaceFile } from './open.js';
+import { claimOpen, newClaudeTab, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { HubState } from './state.js';
 import { ItemTabs } from './tabs.js';
@@ -135,6 +135,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     status,
     history.register(),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
+    vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
     vscode.window.registerUriHandler({ handleUri: (uri) => void openUri(opening(), uri) }),
     vscode.commands.registerCommand('switchboard.claim', () => {
       const record = keeper.current();

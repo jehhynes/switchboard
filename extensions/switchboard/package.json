@@ -49,8 +49,30 @@
         "command": "switchboard.showDock",
         "title": "Show the Dock",
         "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.newClaudeTab",
+        "title": "New Claude Session in Editor Tab",
+        "category": "Switchboard",
+        "icon": "$(add)"
       }
-    ]
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "switchboard.newClaudeTab",
+          "when": "!config.claudeCode.useTerminal",
+          "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "switchboard.newClaudeTab",
+          "when": "view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "node esbuild.js",

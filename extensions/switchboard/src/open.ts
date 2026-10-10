@@ -113,6 +113,15 @@ async function showInClaude(sessionId: string): Promise<void> {
   }
 }
 
+/** Starts a new Claude session in an editor tab without changing `claudeCode.preferredLocation` (PRD R75, mechanics M29). */
+export async function newClaudeTab(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand('claude-vscode.editor.open', undefined, undefined, undefined, undefined, undefined, { programmatic: 'pin-to-panel' });
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Switchboard: could not open a Claude tab: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /**
  * Resumes or focuses a session in Claude Code's preferred location, from a History link (PRD R59). Claude's tab lists only sessions of its window's
  * first folder, and opening another session there starts an empty one (GC M6, M7, M52). A session from another folder is therefore left with the
