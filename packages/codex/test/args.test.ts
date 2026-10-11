@@ -75,7 +75,7 @@ describe('startArgs, resumeArgs and forkArgs', () => {
     ]);
   });
 
-  it('forks without persisting', () => {
-    expect(forkArgs('thread-1', 'What slowed you down?')).toEqual(['exec', 'fork', '--json', '--ephemeral', 'thread-1', '--', 'What slowed you down?']);
+  it('forks read-only without persisting, with the prompt on stdin', () => {
+    expect(forkArgs('thread-1')).toEqual(['exec', 'fork', '--json', '--ephemeral', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"', 'thread-1', '-']);
   });
 });

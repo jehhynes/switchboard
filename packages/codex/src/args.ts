@@ -64,7 +64,7 @@ export function resumeArgs(threadId: string, text: string, options: RunOptions):
   return ['exec', 'resume', '--json', ...sharedArgs(options), threadId, '--', text];
 }
 
-/** An ephemeral fork for a friction debrief: it writes no rollout and leaves the thread unchanged (mechanics M31). */
-export function forkArgs(threadId: string, prompt: string): string[] {
-  return ['exec', 'fork', '--json', '--ephemeral', threadId, '--', prompt];
+/** An ephemeral, read-only fork for a friction debrief, with its prompt on stdin: it writes no rollout and leaves the thread unchanged (mechanics M31). */
+export function forkArgs(threadId: string): string[] {
+  return ['exec', 'fork', '--json', '--ephemeral', ...modeArgs('plan'), threadId, '-'];
 }

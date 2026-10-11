@@ -64,6 +64,8 @@ describe('Debriefs', () => {
   let forks: { args: string[]; stdin: string | undefined }[];
   let codexCalls: { args: string[]; env: Record<string, string> | undefined }[];
   let codexReply: () => ExecResult;
+  let codexForks: { args: string[]; stdin: string | undefined; env: Record<string, string> | undefined; cwd: string | undefined }[];
+  let codexForkReply: () => ExecResult;
   let reply: () => ExecResult | Promise<ExecResult>;
   let logs: string[];
 
@@ -83,6 +85,8 @@ describe('Debriefs', () => {
     roster = [];
     forks = [];
     codexCalls = [];
+    codexForks = [];
+    codexForkReply = () => ok(['{"type":"thread.started","thread_id":"fork-1"}', '{"type":"turn.started"}', JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: `\`\`\`json\n${JSON.stringify({ friction: [friction] })}\n\`\`\`` } }), '{"type":"turn.completed"}'].join('\n'));
     codexReply = () => ok(JSON.stringify({ friction: [friction] }));
     mkdirSync(`${root}/tools/agent-delegate`, { recursive: true });
     writeFileSync(`${root}/tools/agent-delegate/debrief.mjs`, '');
@@ -105,6 +109,11 @@ describe('Debriefs', () => {
       return codexReply();
     }
 
+    if (file === 'codex') {
+      codexForks.push({ args, stdin: options.stdin, env: options.env, cwd: options.cwd });
+      return codexForkReply();
+    }
+
     if (args[0] !== '-p') {
       throw new Error(`unexpected call ${args.join(' ')}`);
     }
@@ -114,7 +123,7 @@ describe('Debriefs', () => {
     return reply();
   };
 
-  function debriefs(): Debriefs {
+  function debriefs(over: Partial<DebriefDeps> = {}): Debriefs {
     let ids = 0;
     const deps: DebriefDeps = {
       dir,
@@ -122,6 +131,8 @@ describe('Debriefs', () => {
       projectsDir: `${root}/projects`,
       claudePath: 'claude',
       codexScript: `${root}/tools/agent-delegate/debrief.mjs`,
+      codexPath: 'codex',
+      codexHome: `${root}/.codex`,
       nodePath: 'node',
       exec,
       enabled: () => enabled,
@@ -131,6 +142,7 @@ describe('Debriefs', () => {
       now: () => now,
       newId: () => `fork-${++ids}`,
       log: (line) => logs.push(line),
+      ...over,
     };
 
     return new Debriefs(deps);
@@ -381,6 +393,8 @@ describe('Debriefs', () => {
       projectsDir: `${root}/projects`,
       claudePath: 'claude',
       codexScript: `${root}/tools/agent-delegate/debrief.mjs`,
+      codexPath: 'codex',
+      codexHome: `${root}/.codex`,
       nodePath: 'node',
       exec,
       enabled: () => enabled,
@@ -423,7 +437,7 @@ describe('Debriefs', () => {
     expect(readDebriefState(dir)?.sessions[NATIVE]?.lastError).toBe('The debrief failed: Error: spawn broke');
 
     const broken = new Debriefs({
-      dir, promptPath: `${root}/skills/friction-review/prompt.md`, projectsDir: `${root}/projects`, claudePath: 'claude', codexScript: '', nodePath: 'node', exec, enabled: () => true,
+      dir, promptPath: `${root}/skills/friction-review/prompt.md`, projectsDir: `${root}/projects`, claudePath: 'claude', codexScript: '', codexPath: 'codex', codexHome: `${root}/.codex`, nodePath: 'node', exec, enabled: () => true,
       sessions: () => {
         throw new Error('store closed');
       },
@@ -563,5 +577,120 @@ describe('Debriefs', () => {
     expect(runner.running()).toBe(false);
     expect(forks).toHaveLength(1);
     expect(logLines()[0]?.['friction']).toEqual([]);
+  });
+
+  describe("a Codex session's own debrief (PRD R55)", () => {
+    const THREAD = '01a128b1-5384-7b62-a7be-64a4b4c611a9';
+    const rolloutPath = () => `${root}/.codex/sessions/2026/10/06/rollout-2026-10-06T11-00-00-${THREAD}.jsonl`;
+
+    /** A rollout with one completed turn per entry, each with its prompt and that many tool calls. */
+    function writeRollout(turns: { id: string; prompt: string; tools: number; done?: boolean }[], at = WRITTEN): void {
+      const lines = [JSON.stringify({ type: 'session_meta', payload: { id: THREAD } })];
+
+      for (const turn of turns) {
+        lines.push(JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: turn.id } }));
+        lines.push(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions\nRead them.' }] } }));
+        lines.push(JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: turn.prompt }] } }));
+
+        for (let call = 0; call < turn.tools; call++) {
+          lines.push(JSON.stringify({ type: 'response_item', payload: { type: call % 2 === 0 ? 'custom_tool_call' : 'function_call', name: 'exec' } }));
+        }
+
+        if (turn.done !== false) {
+          lines.push(JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', turn_id: turn.id } }));
+        }
+      }
+
+      mkdirSync(`${root}/.codex/sessions/2026/10/06`, { recursive: true });
+      writeFileSync(rolloutPath(), `${lines.join('\n')}\n`);
+      utimesSync(rolloutPath(), at / 1000, at / 1000);
+    }
+
+    beforeEach(() => {
+      sessions = [session({ provider: 'codex', nativeSessionId: THREAD, shortId: THREAD })];
+      writeRollout([{ id: 'turn-1', prompt: 'Plan issue 42', tools: 10 }]);
+    });
+
+    it('asks the whole thread in a read-only ephemeral fork, and logs and records it by turn', async () => {
+      await debriefs().scan();
+
+      expect(forks).toEqual([]);
+      expect(codexForks).toEqual([
+        {
+          args: ['exec', 'fork', '--json', '--ephemeral', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"', THREAD, '-'],
+          stdin: 'Report friction in the whole conversation. Subagents: none',
+          env: { CODEX_HOME: `${root}/.codex`, FRICTION_DEBRIEF: '1' },
+          cwd: CWD,
+        },
+      ]);
+      expect(logLines()).toEqual([
+        { v: 1, at: new Date(now).toISOString(), provider: 'codex', sessionId: THREAD, parentSessionId: null, cwd: CWD, fromMessageUuid: null, throughMessageUuid: 'turn-1', skills: null, toolCalls: 10, cache: null, friction: [friction] },
+      ]);
+      expect(readDebriefState(dir)?.sessions[THREAD]).toMatchObject({ throughMessageUuid: 'turn-1', attempts: 0, lastError: null });
+    });
+
+    it('asks later only about the turns since, named by the first prompt after the last debrief', async () => {
+      await debriefs().scan();
+      writeRollout([{ id: 'turn-1', prompt: 'Plan issue 42', tools: 10 }, { id: 'turn-2', prompt: 'Now build   it', tools: 12 }, { id: 'turn-3', prompt: 'Still running', tools: 30, done: false }]);
+      await debriefs().scan();
+
+      expect(codexForks).toHaveLength(2);
+      expect(codexForks[1]!.stdin).toBe('Report friction in the work after the user message that begins "Now build it". Subagents: none');
+      expect(logLines()[1]).toMatchObject({ fromMessageUuid: 'turn-1', throughMessageUuid: 'turn-2', toolCalls: 12 });
+    });
+
+    it('skips a thread with too little new work, one not yet idle long enough, one past the cache, one still running, and one without a rollout', async () => {
+      writeRollout([{ id: 'turn-1', prompt: 'Plan', tools: 9 }]);
+      await debriefs().scan();
+
+      writeRollout([{ id: 'turn-1', prompt: 'Plan', tools: 10 }], now - 44 * MINUTE);
+      await debriefs().scan();
+
+      writeRollout([{ id: 'turn-1', prompt: 'Plan', tools: 10 }], now - 61 * MINUTE);
+      await debriefs().scan();
+
+      writeRollout([{ id: 'turn-1', prompt: 'Plan', tools: 10 }]);
+      sessions = [session({ provider: 'codex', nativeSessionId: THREAD, state: 'running' })];
+      await debriefs().scan();
+
+      sessions = [session({ provider: 'codex', nativeSessionId: 'other-thread' })];
+      await debriefs().scan();
+
+      expect(codexForks).toEqual([]);
+    });
+
+    it("asks a Codex session without Claude's roster, which may be unreadable", async () => {
+      roster = { error: 'claude is not installed' };
+      await debriefs().scan();
+
+      expect(codexForks).toHaveLength(1);
+    });
+
+    it('skips a Codex session that runs again by the time its fork would start', async () => {
+      let reads = 0;
+      const running = session({ provider: 'codex', nativeSessionId: THREAD, state: 'running' });
+
+      await debriefs({ sessions: () => (++reads === 1 ? sessions : [running]) }).scan();
+
+      expect(reads).toBeGreaterThan(1);
+      expect(codexForks).toEqual([]);
+    });
+
+    it('records a failed fork on its range and does not ask again until new work, as a Claude debrief does', async () => {
+      codexForkReply = () => ({ code: 1, stdout: '{"type":"turn.failed","error":{"message":"quota exceeded"}}\n', stderr: '', missing: false, timedOut: false });
+      await debriefs().scan();
+      await debriefs().scan();
+
+      expect(codexForks).toHaveLength(1);
+      expect(logs).toContain(`debrief: Codex session ${THREAD} failed: quota exceeded`);
+      expect(readDebriefState(dir)?.sessions[THREAD]).toMatchObject({ throughMessageUuid: null, attempts: 1, lastError: 'quota exceeded', attemptedThrough: 'turn-1' });
+
+      codexForkReply = () => ok(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Nothing slowed me down.' } }));
+      writeRollout([{ id: 'turn-1', prompt: 'Plan', tools: 10 }, { id: 'turn-2', prompt: 'More', tools: 10 }]);
+      await debriefs().scan();
+
+      expect(codexForks).toHaveLength(2);
+      expect(readDebriefState(dir)?.sessions[THREAD]).toMatchObject({ lastError: 'the answer was not the friction JSON: Nothing slowed me down.', attemptedThrough: 'turn-2' });
+    });
   });
 });

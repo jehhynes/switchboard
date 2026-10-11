@@ -200,6 +200,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     projectsDir: `${claudeRoot}/projects`,
     claudePath: deps.claudePath,
     codexScript: `${claudeRoot}/tools/agent-delegate/debrief.mjs`,
+    codexPath: deps.codex?.path ?? 'codex',
+    codexHome: deps.codex?.home ?? join(homedir(), '.codex'),
     nodePath: process.execPath,
     exec: deps.exec,
     enabled: () => config.settings.sessions.debriefs,

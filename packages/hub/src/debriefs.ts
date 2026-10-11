@@ -1,6 +1,8 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { DEBRIEF_ENV, debriefRange, failureOf, findTranscript, frictionOf, rosterState, runDebrief, scopeOf, subagentTranscripts } from '@switchboard/claude';
 import type { DebriefCache, DebriefRange, DebriefResult, Exec, ExecResult, FrictionEntry, RosterResult } from '@switchboard/claude';
+import { codexDebriefRange, codexScopeOf, findRollout, runCodexDebrief } from '@switchboard/codex';
+import type { CodexDebriefRange } from '@switchboard/codex';
 import type { Session } from '@switchboard/core';
 
 /** A session whose work item is not done is debriefed this long after its last turn, in case the operator resumes it (PRD R55). */
@@ -70,7 +72,10 @@ export type DebriefLogEntry = {
       subagents: string[];
       delegated: string[];
     }
+  /** A Codex thread a Claude session delegated to, through agent-delegate. */
   | { provider: 'codex'; parentSessionId: string; fromMessageUuid: null; throughMessageUuid: null; skills: null; toolCalls: null; cache: null }
+  /** A Codex session's own thread; the message IDs are its turn IDs. */
+  | { provider: 'codex'; parentSessionId: null; fromMessageUuid: string | null; throughMessageUuid: string; skills: null; toolCalls: number; cache: null }
 );
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,6 +126,11 @@ function writeState(dir: string, state: DebriefState): boolean {
   }
 }
 
+/** The text inside a Markdown code fence the model may wrap its JSON in. */
+function unfenced(text: string): string {
+  return /^\s*```(?:json)?\s*\n([\s\S]*?)\n\s*```\s*$/.exec(text)?.[1] ?? text;
+}
+
 /** Whether the file ends inside a line, as a write cut short leaves it. */
 function endsInsideLine(path: string): boolean {
   try {
@@ -154,6 +164,9 @@ export interface DebriefDeps {
   claudePath: string;
   /** agent-delegate's debrief command for a Codex thread, run with `nodePath`; skipped when the file is missing. */
   codexScript: string;
+  /** The Codex CLI and Codex's home, whose `sessions` folder holds the rollouts, for Codex sessions' own debriefs. */
+  codexPath: string;
+  codexHome: string;
   nodePath: string;
   exec: Exec;
   enabled(): boolean;
@@ -174,21 +187,23 @@ interface Change {
   subagents?: Record<string, string>;
 }
 
-interface Candidate {
+type Candidate = {
   session: Session & { nativeSessionId: string };
   transcript: string;
   writtenAt: number;
-  range: DebriefRange;
-}
+} & ({ provider: 'claude'; range: DebriefRange } | { provider: 'codex'; range: CodexDebriefRange });
 
 /** Whether a range is worth a fork: new work over the floor, and not a range whose debrief failed, which is reported and not retried. */
-export function rangeDue(range: DebriefRange, held: SessionDebrief | undefined): boolean {
+export function rangeDue(range: { throughMessageUuid: string; toolCalls: number }, held: SessionDebrief | undefined): boolean {
   if (range.throughMessageUuid === held?.throughMessageUuid || range.toolCalls < DEBRIEF_TOOL_CALL_FLOOR) {
     return false;
   }
 
   return held?.attemptedThrough !== range.throughMessageUuid;
 }
+
+/** The end of a candidate's range, which the state records. */
+const throughOf = (candidate: Candidate): string => (candidate.provider === 'claude' ? candidate.range.throughMessageUuid : candidate.range.throughTurnId);
 
 /**
  * Friction debriefs (PRD R55): forks each Switchboard session once it is 45 to 60 minutes past its last turn and has done
@@ -273,21 +288,34 @@ export class Debriefs {
 
       tried.add(next.session.id);
 
-      const roster = await this.deps.roster();
+      if (next.provider === 'codex') {
+        // A Codex session's run decides its state in the store, read again here, as the scan may have taken a while.
+        const fresh = this.deps.sessions().find((session) => session.id === next.session.id);
 
-      if ('error' in roster) {
-        this.deps.log(`debrief: the roster could not be read: ${roster.error}`);
-        return;
+        if (fresh === undefined || !['idle', 'failed', 'ended'].includes(fresh.state)) {
+          continue;
+        }
+      } else {
+        const roster = await this.deps.roster();
+
+        if ('error' in roster) {
+          this.deps.log(`debrief: the roster could not be read: ${roster.error}`);
+          return;
+        }
+
+        const entry = roster.entries.find((candidate) => candidate.sessionId === next!.session.nativeSessionId && candidate.pid !== undefined);
+
+        if (entry !== undefined && rosterState(entry) !== 'idle') {
+          continue;
+        }
       }
 
-      const entry = roster.entries.find((candidate) => candidate.sessionId === next!.session.nativeSessionId && candidate.pid !== undefined);
-
       // The roster read can take seconds, in which the setting can change or the cache expire.
-      if ((entry !== undefined && rosterState(entry) !== 'idle') || !this.deps.enabled() || this.deps.now() - next.writtenAt >= DEBRIEF_EXPIRY_MS) {
+      if (!this.deps.enabled() || this.deps.now() - next.writtenAt >= DEBRIEF_EXPIRY_MS) {
         continue;
       }
 
-      await this.debrief(state, prompt, next);
+      await (next.provider === 'claude' ? this.debrief(state, prompt, next) : this.debriefCodexSession(state, prompt, next));
       await this.askPending();
 
       if (this.unsaved !== null) {
@@ -304,11 +332,22 @@ export class Debriefs {
     for (const session of this.deps.sessions()) {
       const ended = session.endedAt === null ? false : now - session.endedAt >= DEBRIEF_EXPIRY_MS;
 
-      if (session.provider !== 'claude' || session.nativeSessionId === null || tried.has(session.id) || ended || !['idle', 'failed', 'ended'].includes(session.state)) {
+      if (session.nativeSessionId === null || tried.has(session.id) || ended || !['idle', 'failed', 'ended'].includes(session.state)) {
         continue;
       }
 
       const held = state.sessions[session.nativeSessionId];
+
+      if (session.provider === 'codex') {
+        const candidate = this.codexCandidate(session as Candidate['session'], held, now);
+
+        if (candidate !== null) {
+          candidates.push(candidate);
+        }
+
+        continue;
+      }
+
       const transcript = findTranscript(this.deps.projectsDir, session.cwd, session.nativeSessionId);
       const age = transcript === null ? -1 : now - transcript.writtenAt;
 
@@ -327,14 +366,106 @@ export class Debriefs {
       const range = debriefRange(text, subagentTranscripts(transcript.path), session.nativeSessionId, held?.throughMessageUuid ?? null);
 
       if (range !== null && rangeDue(range, held)) {
-        candidates.push({ session: session as Candidate['session'], transcript: transcript.path, writtenAt: transcript.writtenAt, range });
+        candidates.push({ provider: 'claude', session: session as Candidate['session'], transcript: transcript.path, writtenAt: transcript.writtenAt, range });
       }
     }
 
     return candidates.sort((left, right) => left.writtenAt - right.writtenAt)[0] ?? null;
   }
 
-  private async debrief(state: DebriefState, prompt: string, candidate: Candidate): Promise<void> {
+  /** A Codex session due for a debrief: its rollout's last turn 45 to 60 minutes old, or done, with enough tool calls since its last debrief. */
+  private codexCandidate(session: Candidate['session'], held: SessionDebrief | undefined, now: number): Candidate | null {
+    const rollout = findRollout(this.deps.codexHome, session.nativeSessionId);
+    const age = rollout === null ? -1 : now - rollout.writtenAt;
+
+    if (rollout === null || age < (this.deps.workItemDone(session.workItemId) ? 0 : DEBRIEF_IDLE_MS) || age >= DEBRIEF_EXPIRY_MS) {
+      return null;
+    }
+
+    let text: string;
+
+    try {
+      text = readFileSync(rollout.path, 'utf8');
+    } catch {
+      return null;
+    }
+
+    const range = codexDebriefRange(text, held?.throughMessageUuid ?? null);
+
+    return range !== null && rangeDue({ throughMessageUuid: range.throughTurnId, toolCalls: range.toolCalls }, held)
+      ? { provider: 'codex', session, transcript: rollout.path, writtenAt: rollout.writtenAt, range }
+      : null;
+  }
+
+  /** Asks a Codex session in an ephemeral fork of its thread; a failure is recorded on its range and not retried (PRD R55). */
+  private async debriefCodexSession(state: DebriefState, prompt: string, candidate: Candidate & { provider: 'codex' }): Promise<void> {
+    const thread = candidate.session.nativeSessionId;
+    const held = state.sessions[thread];
+    const through = candidate.range.throughTurnId;
+
+    this.deps.log(`debrief: Codex session ${thread}, ${candidate.range.toolCalls} tool calls since ${held?.throughMessageUuid ?? 'the start'}`);
+
+    const result = await runCodexDebrief(
+      {
+        codexPath: this.deps.codexPath,
+        threadId: thread,
+        cwd: candidate.session.cwd,
+        // A Codex fork has no subagents to message.
+        prompt: prompt.replaceAll('{{scope}}', () => codexScopeOf(candidate.range)).replaceAll('{{subagents}}', 'none'),
+        env: { CODEX_HOME: this.deps.codexHome, [DEBRIEF_ENV]: '1' },
+        timeoutMs: DEBRIEF_TIMEOUT_MS,
+      },
+      this.deps.exec,
+    ).catch((error: unknown) => ({ error: `The debrief failed: ${String(error)}` }));
+    const at = new Date(this.deps.now()).toISOString();
+    let friction: FrictionEntry[] | null = null;
+
+    if ('text' in result) {
+      try {
+        friction = frictionOf(JSON.parse(unfenced(result.text)));
+      } catch {
+        friction = null;
+      }
+    }
+
+    const error = 'error' in result ? result.error : friction === null ? `the answer was not the friction JSON: ${result.text.slice(0, 200)}` : null;
+
+    if (error !== null || friction === null) {
+      this.deps.log(`debrief: Codex session ${thread} failed: ${error}`);
+      this.save(
+        {
+          sessions: {
+            [thread]: { throughMessageUuid: held?.throughMessageUuid ?? null, debriefedAt: held?.debriefedAt ?? null, attempts: 1, lastError: error, attemptedAt: at, attemptedThrough: through },
+          },
+        },
+        [],
+      );
+      return;
+    }
+
+    this.deps.log(`debrief: Codex session ${thread}, ${friction.length} friction reports`);
+    this.save(
+      { sessions: { [thread]: { throughMessageUuid: through, debriefedAt: at, attempts: 0, lastError: null, attemptedAt: null, attemptedThrough: null } } },
+      [
+        {
+          v: 1,
+          at,
+          provider: 'codex',
+          sessionId: thread,
+          parentSessionId: null,
+          cwd: candidate.session.cwd,
+          fromMessageUuid: held?.throughMessageUuid ?? null,
+          throughMessageUuid: through,
+          skills: null,
+          toolCalls: candidate.range.toolCalls,
+          cache: null,
+          friction,
+        },
+      ],
+    );
+  }
+
+  private async debrief(state: DebriefState, prompt: string, candidate: Candidate & { provider: 'claude' }): Promise<void> {
     const sessionId = candidate.session.nativeSessionId;
     const held = state.sessions[sessionId];
     const prefix = `${sessionId}/`;
@@ -412,7 +543,7 @@ export class Debriefs {
   }
 
   /** The range's delegated threads, marked to be asked. */
-  private pending(state: DebriefState, candidate: Candidate): Record<string, CodexDebrief> {
+  private pending(state: DebriefState, candidate: Candidate & { provider: 'claude' }): Record<string, CodexDebrief> {
     return Object.fromEntries(
       candidate.range.delegated.map((thread) => {
         const held = state.codex[thread];
