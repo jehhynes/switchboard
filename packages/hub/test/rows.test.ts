@@ -304,7 +304,7 @@ describe('snapshotErrors and setupNotes', () => {
     expect(setupNotes(snapshot([]))).toEqual([]);
     expect(setupNotes(snapshot([], { sources: [], playbooks: [] }))).toEqual([
       'No source is polled. Turn one on in the header.',
-      'No task playbooks are loaded. Add them under C:\\Users\\me\\.claude\\switchboard\\playbooks.',
+      'No task playbooks are loaded. Add them under playbooks in C:\\Users\\me\\.claude\\switchboard\\settings.json.',
     ]);
     expect(setupNotes(snapshot([], { sources: [], sourceStates: [] }))).toEqual(['No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.']);
   });

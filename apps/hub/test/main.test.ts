@@ -102,14 +102,14 @@ describe('hub entry point', () => {
     expect(record()).toBeNull();
   });
 
-  it('creates the playbook folder under --config, not the Switchboard home, and records the folder', async () => {
+  it('creates the --config folder, and records it', async () => {
     const configDir = join(home, 'repo', 'switchboard');
     const first = start('--idle-ms=60000', `--config=${configDir}`);
     const found = await recorded();
 
     expect(found.configDir).toBe(resolve(configDir));
-    expect(existsSync(join(configDir, 'playbooks'))).toBe(true);
-    expect(existsSync(join(home, '.switchboard', 'playbooks'))).toBe(false);
+    expect(existsSync(configDir)).toBe(true);
+    expect(existsSync(join(configDir, 'playbooks'))).toBe(false);
 
     await start('--stop').exited;
     expect((await first.exited).code).toBe(0);

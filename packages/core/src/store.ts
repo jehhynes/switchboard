@@ -259,6 +259,8 @@ export const MIGRATIONS = [
   ALTER TABLE workItems ADD COLUMN orderAt INTEGER;
   UPDATE workItems SET status = 'finished', error = NULL WHERE status = 'blocked' AND error IN ('The session finished its turn.', 'The session ended.');
   UPDATE workItems SET readyAt = statusAt WHERE status IN ('awaiting-approval', 'finished');`,
+  // Turning a source on and off is state, not configuration, so it is kept here rather than in settings.json (PRD R3).
+  `CREATE TABLE sourceStates (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL);`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'approvalHeld']);
@@ -870,6 +872,20 @@ export class Store {
   /** The ticket's history revision, which every write to its log advances, deletions too; `0` for none. */
   historyRevision(ticketId: number): string {
     return String(this.#one<{ revision: number }>('SELECT revision FROM historyRevisions WHERE ticketId = ?', ticketId)?.revision ?? 0);
+  }
+
+  /** The sources the operator turned on; a source with no row is off. */
+  enabledSources(): Set<string> {
+    return new Set((this.#db.prepare('SELECT name FROM sourceStates WHERE enabled = 1').all() as { name: string }[]).map((row) => row.name));
+  }
+
+  setSourceEnabled(name: string, enabled: boolean): void {
+    this.#db.prepare('INSERT INTO sourceStates (name, enabled) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET enabled = excluded.enabled').run(name, enabled ? 1 : 0);
+  }
+
+  /** Forgets the state of every source not in `names`, so a source removed and added again starts off (PRD R3). */
+  keepSourceStates(names: string[]): void {
+    this.#db.prepare(`DELETE FROM sourceStates WHERE name NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names));
   }
 
   /** When the activity log began; earlier work shows only as the facts its migration reconstructed. */

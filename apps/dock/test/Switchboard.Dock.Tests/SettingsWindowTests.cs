@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -49,28 +50,29 @@ public sealed class SettingsWindowTests
         where T : Control => window.GetVisualDescendants().OfType<T>().Single((control) => control.Name == $"field:{path}");
 
     [AvaloniaFact]
-    public void Reload_WhileTyping_KeepsFocusAndCaretInTheField()
+    public void Reload_FileChangedOnDisk_KeepsFocusAndCaretInTheField()
     {
         var (window, editor) = Open();
-        var box = Field<TextBox>(window, "sessions.model");
+        var box = Field<TextBox>(window, "sessions.concurrency");
 
+        SettingsConfigs.Value(hub.Config)["sessions"]!["model"] = "opus";
+        Settle();
         box.Focus();
-        box.Text = "opus";
-        box.SelectionStart = 2;
-        box.SelectionEnd = 2;
+        box.SelectionStart = 1;
+        box.SelectionEnd = 1;
         Settle();
 
         // Another field changed on disk, so the read redraws the page.
-        hub.Config["settings"]!["value"]!["sessions"]!["concurrency"] = 5;
+        hub.Config["settings"]!["version"] = "v2";
         editor.Load().GetAwaiter().GetResult();
         Settle();
 
-        var again = Field<TextBox>(window, "sessions.model");
+        var again = Field<TextBox>(window, "sessions.concurrency");
 
         Assert.NotSame(box, again);
         Assert.True(again.IsFocused);
-        Assert.Equal("opus", again.Text);
-        Assert.Equal(2, again.SelectionStart);
+        Assert.Equal("opus", Field<TextBox>(window, "sessions.model").Text);
+        Assert.Equal(1, again.SelectionStart);
     }
 
     [AvaloniaFact]
@@ -84,12 +86,13 @@ public sealed class SettingsWindowTests
         Assert.Equal("2", Field<TextBox>(window, "sessions.concurrency").Text);
         Assert.Contains("+ Add Forum", texts);
         Assert.Contains("develop", texts);
-        Assert.False(PageButton(window, "revert").IsEnabled);
-        Assert.Equal("Saved", SaveState(window));
+        Assert.False(PageButton(window, "save").IsEnabled);
+        Assert.False(PageButton(window, "discard").IsEnabled);
+        Assert.Equal("Saved", FileStatus(window));
     }
 
     [AvaloniaFact]
-    public void Edit_FieldTyped_EnablesSaveAndShowsTheCheckErrorUnderIt()
+    public void Edit_FieldTyped_EnablesSaveAndShowsTheCheckErrorUnderItWithoutSaving()
     {
         var (window, _) = Open();
 
@@ -100,38 +103,81 @@ public sealed class SettingsWindowTests
         var panel = window.GetVisualDescendants().OfType<StackPanel>().Single((stack) => (string?)stack.Tag == "sessions.concurrency");
 
         Assert.Contains("sessions.concurrency must be 1 to 10.", Texts(panel));
-        Assert.True(PageButton(window, "revert").IsEnabled);
-        Assert.Equal("Not saved", SaveState(window));
+        Assert.True(PageButton(window, "save").IsEnabled);
+        Assert.True(PageButton(window, "discard").IsEnabled);
+        Assert.Equal("Unsaved changes · 1 error", FileStatus(window));
+        Assert.Contains(window.GetVisualDescendants().OfType<Button>(), (button) => (string?)button.Tag == "general" && Texts(button).Contains("●"));
         Assert.Contains(hub.Calls, (call) => call.Contains("\"concurrency\":11", StringComparison.Ordinal));
         Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
     }
 
     [AvaloniaFact]
-    public void Edit_CheckPasses_SavesTheFile()
+    public void Save_Clicked_SavesTheFile()
     {
         var (window, editor) = Open();
 
         Field<TextBox>(window, "sessions.concurrency").Text = "3";
         Settle();
+        Assert.Empty(hub.Saves);
 
-        Assert.Contains(hub.Calls, (call) => call.StartsWith("save {\"target\":\"settings\",\"value\":{\"sessions\":{\"concurrency\":3}", StringComparison.Ordinal));
-        Assert.False(editor.State!.AnyDirty);
-        Assert.Equal("Saved", SaveState(window));
-        Assert.False(PageButton(window, "revert").IsEnabled);
+        Click(PageButton(window, "save"));
+
+        Assert.StartsWith("save {\"value\":{\"sessions\":{\"concurrency\":3}", Assert.Single(hub.Saves));
+        Assert.False(editor.State!.Dirty);
+        Assert.Equal("Saved", FileStatus(window));
+        Assert.False(PageButton(window, "save").IsEnabled);
     }
 
     [AvaloniaFact]
-    public void Save_HubRefuses_ShowsTheRefusalOnThePage()
+    public void CtrlS_InATextBox_SavesTheFile()
+    {
+        var (window, _) = Open();
+        var box = Field<TextBox>(window, "sessions.concurrency");
+
+        box.Text = "3";
+        box.Focus();
+        Settle();
+        box.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.S, KeyModifiers = KeyModifiers.Control });
+        Settle();
+
+        Assert.Single(hub.Saves);
+        Assert.Equal("Saved", FileStatus(window));
+    }
+
+    [AvaloniaFact]
+    public void Save_HubRefuses_ShowsTheRefusalInTheBarUntilTheNextEdit()
     {
         var (window, _) = Open();
 
         hub.SaveReplies.Enqueue(["Switchboard is not running."]);
         Field<TextBox>(window, "sessions.concurrency").Text = "3";
         Settle();
+        Click(PageButton(window, "save"));
 
-        Assert.Contains("Switchboard is not running.", Texts(window));
-        Assert.Equal("Not saved", SaveState(window));
-        Assert.Contains(hub.Calls, (call) => call.StartsWith("save {\"target\":\"settings\"", StringComparison.Ordinal) && call.EndsWith("\"version\":\"v1\",\"configDir\":\"C:/cfg\"}", StringComparison.Ordinal));
+        var bar = window.GetVisualDescendants().OfType<StackPanel>().Single((panel) => panel.Name == "BarErrors");
+
+        Assert.Equal(["Switchboard is not running."], Texts(bar));
+        Assert.Equal("Unsaved changes", FileStatus(window));
+
+        Field<TextBox>(window, "sessions.concurrency").Text = "4";
+        Settle();
+
+        Assert.Empty(Texts(bar));
+    }
+
+    [AvaloniaFact]
+    public void Discard_Clicked_ShowsTheFileAgain()
+    {
+        var (window, editor) = Open();
+
+        Field<TextBox>(window, "sessions.concurrency").Text = "3";
+        Settle();
+        Click(PageButton(window, "discard"));
+
+        Assert.Equal("2", Field<TextBox>(window, "sessions.concurrency").Text);
+        Assert.Null(editor.State!.Draft);
+        Assert.False(PageButton(window, "discard").IsEnabled);
+        Assert.Empty(hub.Saves);
     }
 
     [AvaloniaFact]
@@ -141,12 +187,12 @@ public sealed class SettingsWindowTests
 
         Click(NavButton(window, "source:github"));
         Assert.Equal("acme/widgets", Field<TextBox>(window, "sources.github.repo").Text);
-        Assert.True(Field<CheckBox>(window, "sources.github.enabled").IsChecked);
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<Control>(), (control) => control.Name == "field:sources.github.enabled");
 
         Click(NavButton(window, "playbook:dev:develop"));
         Assert.True(Field<CheckBox>(window, "reports.done").IsChecked);
         Assert.Equal("Do {{ticket.title}}.", Field<TextBox>(window, "template").Text);
-        Assert.Contains("C:/cfg/playbooks/dev/develop.md", window.GetVisualDescendants().OfType<Button>().Select((button) => button.Content as string));
+        Assert.Contains("C:/cfg/settings.json", window.GetVisualDescendants().OfType<Button>().Select((button) => button.Content as string));
     }
 
     [AvaloniaFact]
@@ -247,11 +293,9 @@ public sealed class SettingsWindowTests
         Click(NavButton(window, "namespace:dev"));
         Assert.True(Cell(window, "dev:develop", "reports.done").IsChecked);
         Assert.False(Cell(window, "dev:review", "approvalSends").IsEnabled);
-        Assert.False(PageButton(window, "revert").IsEnabled);
-
         var sends = Cell(window, "dev:review", "approvalSends");
 
-        hub.CheckReplies.Enqueue(["description is required."]);
+        hub.CheckReplies.Enqueue(["playbooks.dev:review: description is required."]);
         Cell(window, "dev:review", "reports.approval").IsChecked = true;
         Settle();
 
@@ -259,79 +303,126 @@ public sealed class SettingsWindowTests
         Assert.Same(sends, Cell(window, "dev:review", "approvalSends"));
         Assert.True(sends.IsEnabled);
         Assert.Contains("description is required.", Texts(window.GetVisualDescendants().OfType<StackPanel>().Single((panel) => (string?)panel.Tag == "dev:review")));
-        Assert.True(PageButton(window, "revert").IsEnabled);
-        Assert.Equal("Not saved", SaveState(window));
+        Assert.Equal("Unsaved changes · 1 error", FileStatus(window));
         Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), (text) => text.Classes.Contains("dirty") && text.IsEffectivelyVisible);
+        Assert.Empty(hub.Saves);
 
         Click(window.GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "open:dev:review"));
         Assert.Equal("playbook:dev:review", editor.State.Page);
         Assert.True(Field<CheckBox>(window, "reports.approval").IsChecked);
     }
 
-    static string? SaveState(Window window) => window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Name == "SaveState").Text;
+    static string? FileStatus(Window window) => window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Name == "FileStatus").Text;
 
-    [AvaloniaFact]
-    public void Close_EditPending_SavesItAndCloses()
-    {
-        var (window, _) = Open((cancel) => Task.Delay(Timeout.Infinite, cancel));
-        var closed = false;
+    static Button DialogButton(Window window, string name) => Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
 
-        window.Closed += (_, _) => closed = true;
-        Field<TextBox>(window, "sessions.concurrency").Text = "3";
-        Settle();
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-
-        window.Close();
-        Settle();
-
-        Assert.Contains(hub.Calls, (call) => call.StartsWith("save {\"target\":\"settings\"", StringComparison.Ordinal));
-        Assert.Empty(window.OwnedWindows);
-        Assert.True(closed);
-    }
-
-    [AvaloniaFact]
-    public void Close_ChangeNotSaved_AsksAndClosesOnlyOnDiscard()
+    /// <summary>A window with an unsaved change, and a flag that turns true when it closes.</summary>
+    (SettingsWindow Window, Func<bool> Closed) Changed()
     {
         var (window, _) = Open();
         var closed = false;
 
         window.Closed += (_, _) => closed = true;
-        hub.CheckReplies.Enqueue(["sessions.concurrency must be 1 to 10."]);
-        Field<TextBox>(window, "sessions.concurrency").Text = "11";
+        Field<TextBox>(window, "sessions.concurrency").Text = "3";
         Settle();
-
         window.Close();
         Settle();
 
-        var dialog = Assert.Single(window.OwnedWindows);
-
-        Assert.Contains("settings.json has changes that are not saved.", Texts(dialog));
-        Click(dialog.GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "ConfirmCancel"));
-        Assert.False(closed);
-
-        window.Close();
-        Settle();
-        Click(Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "ConfirmAction"));
-
-        Assert.True(closed);
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
+        return (window, () => closed);
     }
 
     [AvaloniaFact]
-    public void Close_ClickedAgainWhileSaving_AsksOnce()
+    public void Close_NoChanges_ClosesWithoutAsking()
     {
-        var (window, _) = Open((cancel) => Task.Delay(Timeout.Infinite, cancel));
-        var release = new TaskCompletionSource();
+        var (window, _) = Open();
+        var closed = false;
 
-        Field<TextBox>(window, "sessions.concurrency").Text = "11";
-        Settle();
-        hub.CheckReplies.Enqueue(["sessions.concurrency must be 1 to 10."]);
-        hub.HoldCheck = (_) => release.Task;
+        window.Closed += (_, _) => closed = true;
         window.Close();
         Settle();
+
+        Assert.True(closed);
+        Assert.Empty(window.OwnedWindows);
+    }
+
+    [AvaloniaFact]
+    public void Close_ChangesKeepEditing_StaysOpenWithTheDraft()
+    {
+        var (window, closed) = Changed();
+
+        Assert.Contains("Save changes to settings.json?", Texts(Assert.Single(window.OwnedWindows)));
+        Click(DialogButton(window, "CloseKeep"));
+
+        Assert.False(closed());
+        Assert.Equal("3", Field<TextBox>(window, "sessions.concurrency").Text);
+        Assert.Empty(hub.Saves);
+    }
+
+    [AvaloniaFact]
+    public void Close_ChangesDiscard_ClosesWithoutSaving()
+    {
+        var (window, closed) = Changed();
+
+        Click(DialogButton(window, "CloseDiscard"));
+
+        Assert.True(closed());
+        Assert.Empty(hub.Saves);
+    }
+
+    [AvaloniaFact]
+    public void Close_ChangesSave_SavesAndCloses()
+    {
+        var (window, closed) = Changed();
+
+        Click(DialogButton(window, "CloseSave"));
+
+        Assert.True(closed());
+        Assert.Contains("\"concurrency\":3", Assert.Single(hub.Saves));
+    }
+
+    [AvaloniaFact]
+    public void Close_ChangesSaveRefused_StaysOpenAndShowsWhy()
+    {
+        var (window, closed) = Changed();
+
+        hub.SaveReplies.Enqueue(["Switchboard is not running."]);
+        Click(DialogButton(window, "CloseSave"));
+
+        Assert.False(closed());
+        Assert.Contains("Switchboard is not running.", Texts(window));
+    }
+
+    [AvaloniaFact]
+    public void Close_SaveChosenWhileASaveIsInFlight_WaitsForItAndCloses()
+    {
+        var (window, _) = Open();
+        var release = new TaskCompletionSource();
+        var closed = false;
+
+        window.Closed += (_, _) => closed = true;
+        Field<TextBox>(window, "sessions.concurrency").Text = "3";
+        Settle();
+        hub.HoldSave = () => release.Task;
+        Click(PageButton(window, "save"));
         window.Close();
         Settle();
+        Click(DialogButton(window, "CloseSave"));
+        Assert.False(closed);
+
+        hub.HoldSave = null;
         release.SetResult();
+        Settle();
+
+        Assert.True(closed);
+        Assert.Single(hub.Saves);
+    }
+
+    [AvaloniaFact]
+    public void Close_ClickedAgainWhileAsking_AsksOnce()
+    {
+        var (window, _) = Changed();
+
+        window.Close();
         Settle();
 
         Assert.Single(window.OwnedWindows);
@@ -362,7 +453,7 @@ public sealed class SettingsWindowTests
     }
 
     [AvaloniaFact]
-    public void Delete_Clicked_AsksInADialogAndDeletesOnlyAfterDelete()
+    public void Delete_Clicked_AsksInADialogAndRemovesItFromTheDraftOnlyAfterDelete()
     {
         var (window, _) = Open();
 
@@ -371,12 +462,13 @@ public sealed class SettingsWindowTests
 
         var dialog = Assert.Single(window.OwnedWindows);
 
-        Assert.Contains("2 open work items use it. Its file is deleted.", Texts(dialog));
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("delete", StringComparison.Ordinal));
+        Assert.Contains("2 open work items use it. Save removes it from settings.json.", Texts(dialog));
 
         Click(dialog.GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "ConfirmAction"));
 
-        Assert.Contains("delete dev:develop p1", hub.Calls);
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<Button>(), (button) => (string?)button.Tag == "playbook:dev:develop");
+        Assert.Equal("Unsaved changes", FileStatus(window));
+        Assert.Empty(hub.Saves);
     }
 
     [AvaloniaFact]
@@ -389,11 +481,12 @@ public sealed class SettingsWindowTests
         Click(Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "ConfirmCancel"));
 
         Assert.Empty(window.OwnedWindows);
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("delete", StringComparison.Ordinal));
+        Assert.NotNull(NavButton(window, "playbook:dev:review"));
+        Assert.Equal("Saved", FileStatus(window));
     }
 
     [AvaloniaFact]
-    public void Create_NameTyped_CreatesThePlaybookAndShowsIt()
+    public void Create_NameTyped_AddsThePlaybookToTheDraftAndShowsIt()
     {
         var (window, _) = Open();
 
@@ -401,10 +494,28 @@ public sealed class SettingsWindowTests
         window.GetVisualDescendants().OfType<AutoCompleteBox>().Single().Text = "dev";
         window.GetVisualDescendants().OfType<TextBox>().Single((box) => box.Name == "NewName").Text = "fix-tests";
         Settle();
-        hub.Config["playbooks"]!.AsArray().Add(new System.Text.Json.Nodes.JsonObject { ["name"] = "dev:fix-tests", ["path"] = "C:/cfg/playbooks/dev/fix-tests.md", ["version"] = "p9", ["playbook"] = SettingsConfigs.Playbook(), ["error"] = null });
         Click(PageButton(window, "create"));
 
-        Assert.Contains(hub.Calls, (call) => call.StartsWith("save {\"target\":\"playbook\",\"name\":\"dev:fix-tests\"", StringComparison.Ordinal));
-        Assert.Contains("C:/cfg/playbooks/dev/fix-tests.md", window.GetVisualDescendants().OfType<Button>().Select((button) => button.Content as string));
+        Assert.Contains("current", NavButton(window, "playbook:dev:fix-tests").Classes);
+        Assert.Contains("●", Texts(NavButton(window, "playbook:dev:fix-tests")));
+        Assert.NotNull(Field<TextBox>(window, "template"));
+        Assert.Empty(hub.Saves);
+    }
+
+    [AvaloniaFact]
+    public void RemoveSource_Clicked_RemovesItWithoutAskingAndDiscardRestoresIt()
+    {
+        var (window, _) = Open();
+
+        Click(NavButton(window, "source:github"));
+        Click(PageButton(window, "remove-source"));
+
+        Assert.Empty(window.OwnedWindows);
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<Button>(), (button) => (string?)button.Tag == "source:github");
+
+        Click(PageButton(window, "discard"));
+
+        Assert.NotNull(NavButton(window, "source:github"));
+        Assert.Empty(hub.Saves);
     }
 }

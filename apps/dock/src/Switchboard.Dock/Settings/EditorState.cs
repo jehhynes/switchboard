@@ -10,16 +10,10 @@ public sealed record NewPlaybook(string Namespace, string Name, PlaybookFields P
     public string FullName => $"{Namespace.Trim()}:{Name.Trim()}";
 }
 
-/// <summary>An unsaved playbook and the file version it started from.</summary>
-public sealed record PlaybookDraft(PlaybookFields Playbook, string Version);
-
-/// <summary>Unsaved settings.json and the file version it started from, null for a missing file.</summary>
-public sealed record SettingsDraft(JsonObject Value, string? Version);
-
 /// <summary>
-/// The Settings window's state: the files, the page, unsaved drafts, and errors. Pages are <c>general</c>, <c>source:&lt;name&gt;</c>,
-/// <c>namespace:&lt;namespace&gt;</c>, <c>playbook:&lt;namespace:name&gt;</c> and <c>new-playbook</c>. Errors and refusals are keyed by
-/// <c>settings</c>, a playbook name, or <c>new</c>.
+/// The Settings window's state: settings.json as read, one unsaved draft of the whole file with the version it started from, the page, and the
+/// errors. Pages are <c>general</c>, <c>source:&lt;name&gt;</c>, <c>namespace:&lt;namespace&gt;</c>, <c>playbook:&lt;namespace:name&gt;</c> and
+/// <c>new-playbook</c>.
 /// </summary>
 public sealed class EditorState(EditorConfig config)
 {
@@ -27,62 +21,88 @@ public sealed class EditorState(EditorConfig config)
 
     public string Page { get; set; } = "general";
 
-    public SettingsDraft? SettingsDraft { get; set; }
+    /// <summary>The unsaved settings.json, or null when there are no unsaved changes.</summary>
+    public JsonObject? Draft { get; private set; }
 
-    public Dictionary<string, PlaybookDraft> PlaybookDrafts { get; } = [];
+    /// <summary>The file version the draft started from, null for a missing file.</summary>
+    public string? DraftVersion { get; private set; }
 
     public NewPlaybook NewPlaybook { get; set; } = NewPlaybook.Empty;
 
-    public IReadOnlyList<string> SettingsErrors { get; set; } = [];
+    /// <summary>The last check's errors for the whole draft.</summary>
+    public IReadOnlyList<string> Errors { get; set; } = [];
 
-    public Dictionary<string, IReadOnlyList<string>> PlaybookErrors { get; } = [];
+    /// <summary>A refused save's errors, or the check errors that stopped a save; shown in the bar until the next edit, discard or successful save.</summary>
+    public IReadOnlyList<string> BarErrors { get; set; } = [];
 
-    /// <summary>The files whose save is in flight.</summary>
-    public HashSet<string> Saving { get; } = [];
-
-    /// <summary>Why the last save, create or delete failed; kept across checks and refreshes until the next edit, revert or success.</summary>
-    public Dictionary<string, IReadOnlyList<string>> Refusals { get; } = [];
-
-    /// <summary><c>settings</c>, a playbook name, or <c>new</c>: what the current page checks and saves; null for none.</summary>
-    public string? Target =>
-        Page == "new-playbook" ? "new" : Page.StartsWith("playbook:", StringComparison.Ordinal) ? Page["playbook:".Length..] : Page == "general" || Page.StartsWith("source:", StringComparison.Ordinal) ? "settings" : null;
-
-    /// <summary>What the current page checks, saves and reverts: its <see cref="Target"/>, or a namespace page's playbooks.</summary>
-    public IReadOnlyList<string> Targets => Page.StartsWith("namespace:", StringComparison.Ordinal) ? NamespacePlaybooks(Page["namespace:".Length..]) : Target is { } target ? [target] : [];
-
-    /// <summary>The playbooks of a namespace, read or drafted, sorted.</summary>
-    public IReadOnlyList<string> NamespacePlaybooks(string space) =>
-        Config.Playbooks.Select((entry) => entry.Name).Concat(PlaybookDrafts.Keys).Distinct().Where((name) => name.Split(':')[0] == space).Order(StringComparer.Ordinal).ToList();
+    public bool Saving { get; set; }
 
     /// <summary>The settings being edited: the draft, else the file's object, else null when the file holds no object.</summary>
-    public JsonObject? SettingsValue => SettingsDraft?.Value ?? Config.Settings.Value as JsonObject;
+    public JsonObject? SettingsValue => Draft ?? Config.Settings.Value as JsonObject;
 
-    public bool SettingsDirty => SettingsDraft is not null && SettingsDraft.Value.ToJsonString() != (Config.Settings.Value?.ToJsonString() ?? "null");
-
-    public PlaybookFile? PlaybookFile(string name) => Config.Playbooks.FirstOrDefault((entry) => entry.Name == name);
-
-    public PlaybookFields? PlaybookValue(string name) => PlaybookDrafts.TryGetValue(name, out var draft) ? draft.Playbook : PlaybookFile(name)?.Playbook;
-
-    public bool PlaybookDirty(string name) => PlaybookDrafts.TryGetValue(name, out var draft) && !PlaybookFields.Same(draft.Playbook, PlaybookFile(name)?.Playbook);
-
-    /// <summary>Whether settings.json or any playbook has unsaved changes.</summary>
-    public bool AnyDirty => SettingsDirty || PlaybookDrafts.Keys.Any(PlaybookDirty);
-
-    /// <summary>The unsaved files by name, with the New playbook page's when anything was entered on it, for the question before closing.</summary>
-    public IReadOnlyList<string> Unsaved =>
-        [.. SettingsDirty ? ["settings.json"] : Array.Empty<string>(), .. PlaybookDrafts.Keys.Where(PlaybookDirty).Order(StringComparer.Ordinal), .. NewPlaybook.Namespace.Trim() != "" || NewPlaybook.Name.Trim() != "" || !PlaybookFields.Same(NewPlaybook.Playbook, PlaybookFields.Empty) ? ["the new playbook"] : Array.Empty<string>()];
-
-    /// <summary>What the current page shows from the files and drafts; equal before and after a read when the read changes nothing there.</summary>
-    public string PageSignature() =>
-        string.Join('\n', [Page, Config.ConfigDir, .. Targets.Select((target) => target switch
+    /// <summary>Replaces the draft; the first change records the file version it starts from.</summary>
+    public void SetDraft(JsonObject value)
+    {
+        if (Draft is null)
         {
-            "settings" => $"{SettingsValue?.ToJsonString()} {Config.Settings.Path} {Config.Settings.Error}",
-            "new" => string.Join(',', Namespaces),
-            _ => $"{target} {PlaybookValue(target)?.ToJson().ToJsonString()} {PlaybookFile(target)?.Path} {PlaybookFile(target)?.Error}",
-        })]);
+            DraftVersion = Config.Settings.Version;
+        }
 
-    /// <summary>The version a new settings draft starts from: the draft's own, even null for a missing file, so a save never overwrites a later change.</summary>
-    public string? DraftVersion => SettingsDraft is null ? Config.Settings.Version : SettingsDraft.Version;
+        Draft = value;
+    }
+
+    public void DropDraft()
+    {
+        Draft = null;
+        DraftVersion = null;
+    }
+
+    public bool Dirty => Draft is not null && Draft.ToJsonString() != (Config.Settings.Value?.ToJsonString() ?? "null");
+
+    /// <summary>Whether settings.json changed on disk after the draft started, so the hub refuses to save the draft.</summary>
+    public bool ChangedOnDisk => Draft is not null && DraftVersion != Config.Settings.Version;
+
+    /// <summary>The playbook names in the settings being edited, sorted.</summary>
+    public IReadOnlyList<string> PlaybookNames => SettingsValue?["playbooks"] is JsonObject playbooks ? playbooks.Select((entry) => entry.Key).Order(StringComparer.Ordinal).ToList() : [];
+
+    public JsonNode? PlaybookEntry(string name) => SettingsValue?["playbooks"] is JsonObject playbooks ? playbooks[name] : null;
+
+    public bool HasPlaybook(string name) => SettingsValue?["playbooks"] is JsonObject playbooks && playbooks.ContainsKey(name);
+
+    public JsonNode? FileEntry(string name) => Config.Settings.Value?["playbooks"] is JsonObject playbooks ? playbooks[name] : null;
+
+    /// <summary>A playbook's fields, or null when it is absent or its entry cannot be read.</summary>
+    public PlaybookFields? PlaybookValue(string name) => HasPlaybook(name) ? PlaybookFields.Read(PlaybookEntry(name)).Fields : null;
+
+    public bool PlaybookDirty(string name) => Draft is not null && Json(PlaybookEntry(name), HasPlaybook(name)) != Json(FileEntry(name), Config.Settings.Value?["playbooks"] is JsonObject file && file.ContainsKey(name));
+
+    static string Json(JsonNode? node, bool present) => present ? node?.ToJsonString() ?? "null" : "absent";
+
+    /// <summary>The playbooks of a namespace, sorted.</summary>
+    public IReadOnlyList<string> NamespacePlaybooks(string space) => PlaybookNames.Where((name) => name.Split(':')[0] == space).ToList();
+
+    /// <summary>The namespaces of the playbooks, sorted.</summary>
+    public IReadOnlyList<string> Namespaces => PlaybookNames.Select((name) => name.Split(':')[0]).Distinct().ToList();
+
+    static string Prefix(string name) => $"playbooks.{name}: ";
+
+    /// <summary>The check errors of one playbook, without their <c>playbooks.&lt;name&gt;: </c> prefix.</summary>
+    public IReadOnlyList<string> PlaybookErrors(string name) =>
+        Errors.Where((error) => error.StartsWith(Prefix(name), StringComparison.Ordinal)).Select((error) => error[Prefix(name).Length..]).ToList();
+
+    /// <summary>The check errors that belong to no playbook in the draft.</summary>
+    public IReadOnlyList<string> SettingsErrors
+    {
+        get
+        {
+            var prefixes = PlaybookNames.Select(Prefix).ToList();
+
+            return Errors.Where((error) => !prefixes.Any((prefix) => error.StartsWith(prefix, StringComparison.Ordinal))).ToList();
+        }
+    }
+
+    /// <summary>What the current page shows from the file and draft; equal before and after a read when the read changes nothing there.</summary>
+    public string PageSignature() => string.Join('\n', Page, Config.ConfigDir, SettingsValue?.ToJsonString(), Config.Settings.Path, Config.Settings.Error);
 
     /// <summary>Why the new playbook's name cannot be used, or null.</summary>
     public string? NewNameError
@@ -94,64 +114,43 @@ public sealed class EditorState(EditorConfig config)
                 return "Namespace and name must be lowercase letters, digits and hyphens.";
             }
 
-            return PlaybookFile(NewPlaybook.FullName) is null ? null : $"A playbook named {NewPlaybook.FullName} already exists.";
+            if (SettingsValue is not { } value || (value["playbooks"] is { } playbooks && playbooks is not JsonObject))
+            {
+                return "settings.json must hold an object with a playbooks object.";
+            }
+
+            return HasPlaybook(NewPlaybook.FullName) ? $"A playbook named {NewPlaybook.FullName} already exists." : null;
         }
     }
 
-    /// <summary>The namespaces of the configured playbooks, sorted.</summary>
-    public IReadOnlyList<string> Namespaces => Config.Playbooks.Select((entry) => entry.Name.Split(':')[0]).Distinct().Order(StringComparer.Ordinal).ToList();
+    /// <summary>Takes a successful save of <paramref name="sent"/> at <paramref name="version"/>; a draft edited since continues from that version.</summary>
+    public void Wrote(JsonObject sent, string version)
+    {
+        Config = Config with { Settings = Config.Settings with { Version = version, Value = sent.DeepClone(), Error = null } };
+
+        if (Draft is not null && Draft.ToJsonString() == sent.ToJsonString())
+        {
+            DropDraft();
+        }
+        else if (Draft is not null)
+        {
+            DraftVersion = version;
+        }
+    }
 
     /// <summary>
-    /// Takes a successful save: the file holds <paramref name="sent"/> at <paramref name="version"/>. A draft that equals it is done, because the
-    /// read that follows may show it normalized; a draft edited since continues from the version written.
+    /// Takes the file read again. A draft that matches the old or the new file holds no edit and is dropped, so the page shows the new file; any
+    /// other draft is kept, so no edit is lost.
     /// </summary>
-    public void Wrote(string target, JsonNode sent, string version)
-    {
-        if (target == "settings")
-        {
-            Config = Config with { Settings = Config.Settings with { Version = version, Value = sent.DeepClone(), Error = null } };
-
-            if (SettingsDraft is { } settings)
-            {
-                SettingsDraft = settings.Value.ToJsonString() == sent.ToJsonString() ? null : settings with { Version = version };
-            }
-
-            return;
-        }
-
-        var written = PlaybookFields.FromJson(sent);
-
-        Config = Config with { Playbooks = [.. Config.Playbooks.Select((file) => file.Name == target ? file with { Version = version, Playbook = written, Error = null } : file)] };
-
-        if (PlaybookDrafts.TryGetValue(target, out var draft))
-        {
-            if (draft.Playbook.ToJson().ToJsonString() == sent.ToJsonString())
-            {
-                PlaybookDrafts.Remove(target);
-            }
-            else
-            {
-                PlaybookDrafts[target] = draft with { Version = version };
-            }
-        }
-    }
-
-    /// <summary>Takes files read again: a draft that now matches its file is saved; one whose file was deleted or broke on disk is kept, so no edit is lost.</summary>
     public void Refresh(EditorConfig config)
     {
+        var unchanged = !Dirty;
+
         Config = config;
 
-        if (SettingsDraft is not null && SettingsDraft.Value.ToJsonString() == (config.Settings.Value?.ToJsonString() ?? "null"))
+        if (unchanged || !Dirty)
         {
-            SettingsDraft = null;
-        }
-
-        foreach (var (name, draft) in PlaybookDrafts.ToList())
-        {
-            if (PlaybookFile(name) is { } file && PlaybookFields.Same(draft.Playbook, file.Playbook))
-            {
-                PlaybookDrafts.Remove(name);
-            }
+            DropDraft();
         }
     }
 }

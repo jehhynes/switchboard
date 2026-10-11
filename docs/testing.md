@@ -25,7 +25,7 @@ Test behavior that types cannot establish:
 - Unassignment during an active session deferring the done decision, and unassignment deleting a work item that never had a session.
 - Work item status transitions, the concurrency limit, and `queued`.
 - Hook installation: entries preserved, malformed settings refused, missing entries added. The event-to-state mapping from recorded markers, and the roster fallback.
-- Playbook loading, front-matter errors, and template rendering.
+- Playbook loading from settings.json, playbook errors, and template rendering.
 - Classifier output validation, including an unknown playbook name.
 - Report command handling, including unknown session IDs and worktree paths `git worktree list` does not show.
 - Required CLI arguments for `claude --bg`, `claude -p`, `claude attach` and `claude stop`.

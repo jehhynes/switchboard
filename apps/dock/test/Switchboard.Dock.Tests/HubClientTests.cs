@@ -246,8 +246,7 @@ public sealed class HubClientTests
 
         Assert.Null(error);
         Assert.Equal("v1", config!.Settings.Version);
-        Assert.Equal(["dev:develop", "dev:review", "triage:github"], config.Playbooks.Select((playbook) => playbook.Name));
-        Assert.Equal(["done"], config.Playbooks[0].Playbook!.Reports);
+        Assert.Equal("Build it", config.Settings.Value!["playbooks"]!["dev:develop"]!["description"]!.GetValue<string>());
         Assert.Equal(2, config.InUse["dev:develop"]);
         Assert.Contains("POST /config/read HTTP/1.1 {}", server.Requests);
     }
@@ -256,14 +255,23 @@ public sealed class HubClientTests
     public async Task SaveConfig_HubRefusesOrFails_ReturnsTheErrors()
     {
         using var server = new LoopbackHub((start, _, stream) =>
-            start.StartsWith("POST /config/save") ? LoopbackHub.Reply(stream, 409, "{\"errors\":[\"a\",\"b\"]}") : start.StartsWith("POST /config/delete") ? LoopbackHub.Reply(stream, 200, "{\"deleted\":true}") : LoopbackHub.Reply(stream, 400, "{\"error\":\"Expected {target}.\"}"));
+            start.StartsWith("POST /config/save") ? LoopbackHub.Reply(stream, 409, "{\"errors\":[\"a\",\"b\"]}") : LoopbackHub.Reply(stream, 400, "{\"error\":\"Expected {settings}.\"}"));
         using var client = new HubClient(HomeFor(server));
 
-        Assert.Equal(["a", "b"], (await client.SaveConfig(new JsonObject { ["target"] = "settings" })).Errors);
-        Assert.Empty(await client.DeletePlaybook("dev:x", "p1", "C:/cfg"));
+        Assert.Equal(["a", "b"], (await client.SaveConfig(new JsonObject { ["sessions"] = new JsonObject() }, "v1", "C:/cfg")).Errors);
         Assert.Null(await client.CheckConfig(new JsonObject()));
-        Assert.Contains("POST /config/delete HTTP/1.1 {\"name\":\"dev:x\",\"version\":\"p1\",\"configDir\":\"C:/cfg\"}", server.Requests);
-        Assert.Equal(["Switchboard is not running."], (await new HubClient(Fixtures.TempFolder()).SaveConfig([])).Errors);
+        Assert.Contains("POST /config/save HTTP/1.1 {\"value\":{\"sessions\":{}},\"version\":\"v1\",\"configDir\":\"C:/cfg\"}", server.Requests);
+        Assert.Equal(["Switchboard is not running."], (await new HubClient(Fixtures.TempFolder()).SaveConfig([], null, "C:/cfg")).Errors);
+    }
+
+    [Fact]
+    public async Task CheckConfig_HubAnswers_SendsTheDraftAndReturnsTheErrors()
+    {
+        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, "{\"errors\":[\"playbooks.dev:x: description is required.\"]}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(["playbooks.dev:x: description is required."], await client.CheckConfig(new JsonObject { ["playbooks"] = new JsonObject() }));
+        Assert.Contains("POST /config/check HTTP/1.1 {\"settings\":{\"playbooks\":{}}}", server.Requests);
     }
 
     [Fact]
@@ -272,7 +280,7 @@ public sealed class HubClientTests
         using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, "{\"saved\":true,\"version\":\"abc\"}"));
         using var client = new HubClient(HomeFor(server));
 
-        var reply = await client.SaveConfig(new JsonObject { ["target"] = "settings" });
+        var reply = await client.SaveConfig([], null, "C:/cfg");
 
         Assert.Empty(reply.Errors);
         Assert.Equal("abc", reply.Version);

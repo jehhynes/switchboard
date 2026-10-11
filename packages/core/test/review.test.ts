@@ -4,7 +4,7 @@ import { heldSlots } from '../src/queue.js';
 import { HOUR, Harness, MINUTE, T0, issue, playbooks, settings } from './flowHarness.js';
 
 // dev:question offers approval and done, so a held run can finish either way.
-const QUESTION = { 'dev:question': '---\ndescription: Answer a question\nreports: approval, done\n---\nAnswer {{ticket.title}}.' };
+const QUESTION = { 'dev:question': { description: 'Answer a question', reports: ['approval', 'done'], template: 'Answer {{ticket.title}}.' } };
 
 /** Polls, triages and starts issue `key` as work item `id` with dev:question, returning its session. */
 function running(h: Harness, key: string, id: number): string {

@@ -57,7 +57,7 @@ describe('approval reports (PRD R23, R31)', () => {
 describe('a resumed session after an approval report (PRD R34)', () => {
   const APPROVAL = { approvalPrompt: '/publish', approvalSummary: 'Ready.', approvalReport: 'D:\\wt\\review.md' };
   // dev:question offers approval and done, so a held run can finish either way.
-  const harness = () => new Harness({ playbooks: playbooks(undefined, { 'dev:question': '---\ndescription: Answer a question\nreports: approval, done\n---\nAnswer {{ticket.title}}.' }) });
+  const harness = () => new Harness({ playbooks: playbooks(undefined, { 'dev:question': { description: 'Answer a question', reports: ['approval', 'done'], template: 'Answer {{ticket.title}}.' } }) });
 
   function awaitingApproval(h: Harness): { item: number; session: string } {
     const run = running(h);
@@ -231,7 +231,7 @@ describe('a resumed session after an approval report (PRD R34)', () => {
 });
 
 describe('paste reports (PRD R60)', () => {
-  const withPaste = () => new Harness({ playbooks: playbooks(undefined, { 'dev:reply': '---\ndescription: Draft a reply\nreports: approval, paste\n---\nDraft the reply.' }) });
+  const withPaste = () => new Harness({ playbooks: playbooks(undefined, { 'dev:reply': { description: 'Draft a reply', reports: ['approval', 'paste'], template: 'Draft the reply.' } }) });
 
   it('offers paste only from a playbook that lists it, and keeps the latest file per label on the work item', () => {
     const h = withPaste();

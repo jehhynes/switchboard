@@ -4,7 +4,7 @@ import { Harness, issue, playbooks } from './flowHarness.js';
 
 describe('link reports (PRD R52)', () => {
   it('stores links on the ticket, replaces the label of a repeated target, and keeps them for a returned ticket', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:finish': '---\ndescription: Finish it\nreports: done\n---\nFinish it.' }) });
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:finish': { description: 'Finish it', reports: ['done'], template: 'Finish it.' } }) });
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:finish');
     const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);

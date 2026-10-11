@@ -187,13 +187,12 @@ describe('loadConfig', () => {
     expect(valid.settings.sessions.concurrency).toBe(3);
 
     writeSettings({ sessions: { concurrency: 11 } });
-    const invalid = loadConfig(join(temp.home, '.switchboard'), valid.settings);
+    const invalid = loadConfig(join(temp.home, '.switchboard'), valid);
     expect(invalid.settings.sessions.concurrency).toBe(3);
     expect(invalid.settingsError).toBe('sessions.concurrency must be a whole number from 1 to 10.');
 
-    mkdirSync(join(temp.home, '.switchboard', 'playbooks', 'dev'), { recursive: true });
-    writeFileSync(join(temp.home, '.switchboard', 'playbooks', 'dev', 'bad.md'), 'no front matter');
-    expect(loadConfig(join(temp.home, '.switchboard')).playbookErrors).toEqual([{ file: 'dev/bad.md', error: 'The file must start with front matter between --- lines.' }]);
+    writeSettings({ playbooks: { 'dev:bad': { description: 'Bad' } } });
+    expect(loadConfig(join(temp.home, '.switchboard')).playbookErrors).toEqual([{ name: 'dev:bad', error: 'The prompt template is empty.' }]);
   });
 });
 
@@ -223,14 +222,13 @@ describe('createHubApp', () => {
     expect((app.snapshot() as { repoRoots: string[] }).repoRoots).toEqual(['D:/scratch']);
   });
 
-  it('reloads settings and playbooks when they change', async () => {
+  it('reloads settings and playbooks when settings.json changes', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
     let changes = 0;
     app.onChange(() => changes++);
 
-    mkdirSync(join(temp.home, '.switchboard', 'playbooks', 'dev'), { recursive: true });
-    writeFileSync(join(temp.home, '.switchboard', 'playbooks', 'dev', 'develop.md'), '---\ndescription: Build it\n---\nBuild.');
+    writeSettings({ sessions: { installHooks: false }, playbooks: { 'dev:develop': { description: 'Build it', template: 'Build.' } } });
 
     await until(() => ((app.snapshot() as { playbooks: unknown[] }).playbooks.length === 1 ? true : null));
 
@@ -239,39 +237,75 @@ describe('createHubApp', () => {
     expect(changes).toBeGreaterThan(0);
   });
 
-  it('turns a source on and off in settings.json, keeping its other settings, and refuses an unknown source', async () => {
-    writeSettings({ sessions: { installHooks: false }, sources: { zoho: { enabled: true, repoRoot: 'D:/support', orgId: '1' }, adhoc: { repoRoot: 'D:/scratch' } } });
-    const app = await start();
+  it('turns a source on and off in the store, leaving settings.json alone, and refuses an unknown source', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support', orgId: '1' }, adhoc: { repoRoot: 'D:/scratch' } } });
+    const text = readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8');
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
     const states = () => (app.snapshot() as { sourceStates: unknown }).sourceStates;
-    const file = () => JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'));
+    const enabled = async () => ((await app.post['/config/read']!({})).body as { enabled: Record<string, boolean> }).enabled;
 
+    expect(states()).toEqual([{ name: 'zoho', enabled: false }]);
+    expect(await enabled()).toEqual({ zoho: false, adhoc: false });
+    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(states()).toEqual([{ name: 'zoho', enabled: true }]);
-    expect(await app.post['/sources']!({ name: 'zoho', enabled: false })).toEqual({ status: 200, body: { done: true } });
-    expect(file().sources.zoho).toEqual({ enabled: false, repoRoot: 'D:/support', orgId: '1' });
-    await until(() => (JSON.stringify(states()) === '[{"name":"zoho","enabled":false}]' ? true : null));
+    expect(await enabled()).toEqual({ zoho: true, adhoc: false });
+    expect(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).toBe(text);
 
     expect(await app.post['/sources']!({ name: 'forum', enabled: true })).toEqual({ status: 409, body: { error: 'settings.json has no source named forum.' } });
     expect(await app.post['/sources']!({ name: 'zoho', enabled: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {name, enabled}.' } });
+    app.close();
+
+    // The state is kept in the store, so a new hub starts the source again.
+    const again = await start();
+
+    expect((again.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: true }]);
+  });
+
+  it('tells an open Settings window to read again after a toggle, and not after a refused one', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support' } } });
+    const app = await start();
+    const sent: string[] = [];
+
+    app.attachDock!((event) => {
+      sent.push(event);
+      return 1;
+    });
+    expect(await app.post['/sources']!({ name: 'forum', enabled: true })).toMatchObject({ status: 409 });
+    expect(sent).not.toContain('config');
+    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(sent).toContain('config');
+  });
+
+  it('checks an enabled source\'s own keys only while it is on, and refuses an enabled key in settings.json', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support' } } });
+    const app = await start();
+    const check = async (settings: unknown) => ((await app.post['/config/check']!({ settings })).body as { errors: string[] }).errors;
+
+    expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([]);
+    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([expect.stringMatching(/^sources\.zoho\./)]);
+    expect(await check({ sources: { zoho: { enabled: true } } })).toEqual(["sources.zoho.enabled is not a setting; turn a source on and off in the dock's header."]);
   });
 
   it('reads, reloads and writes settings and playbooks in a configDir outside the Switchboard home', async () => {
     const configDir = join(temp.home, 'repo', 'switchboard');
     mkdirSync(configDir, { recursive: true });
-    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ sessions: { installHooks: false }, sources: { zoho: { enabled: true, repoRoot: 'D:/support', orgId: '1' } } }));
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support', orgId: '1' } } }));
     writeSettings({ sessions: { installHooks: false } });
     const app = await createHubApp({ home: temp.home, configDir, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());
 
-    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: true }]);
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: false }]);
     expect((app.snapshot() as { configDir: string }).configDir).toBe(configDir);
 
-    mkdirSync(join(configDir, 'playbooks', 'dev'), { recursive: true });
-    writeFileSync(join(configDir, 'playbooks', 'dev', 'develop.md'), '---\ndescription: Build it\n---\nBuild.');
+    writeFileSync(
+      join(configDir, 'settings.json'),
+      JSON.stringify({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support', orgId: '1' } }, playbooks: { 'dev:develop': { description: 'Build it', template: 'Build.' } } }),
+    );
     await until(() => ((app.snapshot() as { playbooks: unknown[] }).playbooks.length === 1 ? true : null));
 
-    expect(await app.post['/sources']!({ name: 'zoho', enabled: false })).toEqual({ status: 200, body: { done: true } });
-    expect(JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf8')).sources.zoho.enabled).toBe(false);
-    await until(() => (JSON.stringify((app.snapshot() as { sourceStates: unknown }).sourceStates) === '[{"name":"zoho","enabled":false}]' ? true : null));
+    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: true }]);
     expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'))).toEqual({ sessions: { installHooks: false } });
   });
 
@@ -363,48 +397,49 @@ describe('createHubApp', () => {
     await until(() => (sent.includes('config') ? true : null));
   });
 
-  it('reads, checks, saves and deletes settings and playbooks for the Settings window, refusing a stale version', async () => {
+  it('reads, checks and saves settings.json with its playbooks for the Settings window, refusing a stale version', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
-    const playbook = { description: 'Build it', kind: 'task', autoStart: false, requiresWorktree: false, permissionMode: null, model: null, workdir: 'worktree', reports: ['done'], approvalSends: false, rates: false, returnOf: [], template: 'Build {{ticket.title}}.' };
-    const read = async () => (await app.post['/config/read']!({})).body as { settings: { version: string | null; value: unknown }; playbooks: { name: string; version: string }[]; permissionModes: string[]; sourceKinds: string[]; inUse: Record<string, number> };
+    const playbook = { description: 'Build it', reports: ['done'], template: 'Build {{ticket.title}}.' };
+    const read = async () => (await app.post['/config/read']!({})).body as { settings: { version: string | null; value: unknown }; permissionModes: string[]; sourceKinds: string[]; inUse: Record<string, number> };
+    const file = () => JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'));
 
     const first = await read();
 
     expect(first.settings.value).toEqual({ sessions: { installHooks: false } });
-    expect(first.playbooks).toEqual([]);
+    expect('playbooks' in first).toBe(false);
     expect(first.sourceKinds).toEqual(['github', 'zoho', 'forum']);
     expect(first.permissionModes).toContain('auto');
     expect(first.inUse).toEqual({});
     expect((first as unknown as { configDir: string }).configDir).toBe(join(temp.home, '.switchboard'));
 
-    expect(await app.post['/config/check']!({ target: 'settings', settings: { sessions: { concurrency: 11 } } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('sessions.concurrency')] } });
-    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, template: '{{nope}}' } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('nope')] } });
-    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook })).toEqual({ status: 200, body: { errors: [] } });
-    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, kind: 'other' } })).toMatchObject({ status: 400 });
-    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, returnOf: [1] } })).toMatchObject({ status: 400 });
-    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, returnOf: undefined } })).toMatchObject({ status: 400 });
-    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, returnOf: ['dev:develop'] } })).toMatchObject({ status: 200, body: { errors: ['returnOf must list other playbook names, not dev:develop.'] } });
+    expect(await app.post['/config/check']!({ settings: { sessions: { concurrency: 11 } } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('sessions.concurrency')] } });
+    expect(await app.post['/config/check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, template: '{{nope}}' } } } })).toEqual({
+      status: 200,
+      body: { errors: ['playbooks.dev:develop: Unknown template variable: nope.'] },
+    });
+    expect(await app.post['/config/check']!({ settings: { playbooks: { 'dev:develop': playbook } } })).toEqual({ status: 200, body: { errors: [] } });
+    expect(await app.post['/config/check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, returnOf: ['dev:develop'] } } } })).toEqual({
+      status: 200,
+      body: { errors: ['playbooks.dev:develop: returnOf must list other playbook names, not dev:develop.'] },
+    });
+    expect(await app.post['/config/check']!({})).toEqual({ status: 400, body: { error: 'Expected {settings}.' } });
 
-    expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: 'stale' })).toEqual({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Reload to see the change.'] } });
-    expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: first.settings.version })).toEqual({ status: 200, body: { saved: true, version: (await read()).settings.version ?? 'unread' } });
-    expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).sessions.concurrency).toBe(3);
+    const value = { sessions: { installHooks: false, concurrency: 3 }, playbooks: { 'dev:develop': playbook } };
 
-    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook, version: null })).toEqual({ status: 200, body: { saved: true, version: (await read()).playbooks.find((entry) => entry.name === 'dev:develop')?.version } });
-    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook, version: null })).toEqual({ status: 409, body: { errors: ['A playbook named dev:develop already exists.'] } });
-    expect(await app.post['/config/save']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, reports: ['nope'] }, version: null })).toMatchObject({ status: 400 });
+    expect(await app.post['/config/save']!({ value, version: 'stale' })).toEqual({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Discard to load it.'] } });
+    expect(await app.post['/config/save']!({ value: { ...value, playbooks: { 'dev:develop': { ...playbook, reports: ['nope'] } } }, version: first.settings.version })).toMatchObject({ status: 409 });
+    expect(file()).toEqual({ sessions: { installHooks: false } });
+    expect(await app.post['/config/save']!({ value, version: first.settings.version })).toEqual({ status: 200, body: { saved: true, version: (await read()).settings.version ?? 'unread' } });
+    expect(file()).toEqual(value);
+    await until(() => ((app.snapshot() as { playbooks: { name: string }[] }).playbooks.some((entry) => entry.name === 'dev:develop') ? true : null));
 
-    const saved = (await read()).playbooks.find((entry) => entry.name === 'dev:develop')!;
-
-    expect(await app.post['/config/delete']!({ name: 'dev:develop', version: 'stale' })).toMatchObject({ status: 409 });
-    expect(await app.post['/config/delete']!({ name: 'dev:develop', version: saved.version })).toEqual({ status: 200, body: { deleted: true } });
-    expect((await read()).playbooks).toEqual([]);
-    expect(await app.post['/config/delete']!({ name: 'dev:develop' })).toEqual({ status: 400, body: { error: 'Expected {name, version}.' } });
-    expect(await app.post['/config/save']!({ target: 'settings', value: {}, version: null, configDir: 'D:/old' })).toEqual({
+    expect(await app.post['/config/save']!({ version: null })).toEqual({ status: 400, body: { error: 'Expected {value, version}.' } });
+    expect(await app.post['/config/save']!({ value: {}, version: null, configDir: 'D:/old' })).toEqual({
       status: 409,
       body: { errors: [`The config folder is now ${join(temp.home, '.switchboard')}, not D:/old. Settings reads it again; make your change there.`] },
     });
-    expect(await app.post['/config/delete']!({ name: 'dev:develop', version: 'v', configDir: 'D:/old' })).toMatchObject({ status: 409 });
+    expect(app.post['/config/delete']).toBeUndefined();
   });
 
   it('writes each item window\'s workspace file when it builds the dock view', async () => {

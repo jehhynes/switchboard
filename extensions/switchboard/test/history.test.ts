@@ -11,16 +11,16 @@ const MINUTE = 60_000;
 
 const SETTINGS: Settings = {
   ...DEFAULT_SETTINGS,
-  sources: { github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage', setupPrompt: '', namespace: '', options: {} } },
+  sources: { github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
 };
 
 function playbooks(): Map<string, Playbook> {
-  const texts: Record<string, string> = {
-    triage: '---\ndescription: Triage\nkind: triage\n---\nClassify.',
-    'dev:question': '---\ndescription: Answer a question\nreports: approval\n---\nAnswer {{ticket.title}}.',
+  const entries: Record<string, unknown> = {
+    'triage:github': { description: 'Triage', kind: 'triage', template: 'Classify.' },
+    'dev:question': { description: 'Answer a question', reports: ['approval'], template: 'Answer {{ticket.title}}.' },
   };
 
-  return new Map(Object.entries(texts).map(([name, text]) => [name, (parsePlaybook(name, text) as { playbook: Playbook }).playbook]));
+  return new Map(Object.entries(entries).map(([name, entry]) => [name, (parsePlaybook(name, entry) as { playbook: Playbook }).playbook]));
 }
 
 const ISSUE = { sourceKey: '77', ref: '#77', sourceId: null, title: 'Inbox badge', url: 'https://github.com/o/r/issues/77', assigned: true, pool: false, sortAt: null, enteredAt: null };

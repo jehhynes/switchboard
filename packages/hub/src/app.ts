@@ -5,8 +5,8 @@ import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeService, claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
-import { PERMISSION_MODES, PLAYBOOK_REPORTS, TEMPLATE_VARIABLES } from '@switchboard/core';
-import type { FlowEvent, PlaybookFields, SourceSettings } from '@switchboard/core';
+import { PERMISSION_MODES, TEMPLATE_VARIABLES } from '@switchboard/core';
+import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
@@ -15,7 +15,7 @@ import { cardsOf } from './cards.js';
 import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
 import { isPastePath } from './report.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
-import { type SaveResult, SOURCE_KINDS, checkPlaybook, checkSettings, deletePlaybook, loadConfig, playbooksDir, readConfigFiles, savePlaybook, saveSettings, setSourceEnabled } from './config.js';
+import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
@@ -146,7 +146,7 @@ export function parseAction(body: unknown): FlowEvent | null {
 
 export interface AppOptions {
   home: string;
-  /** The folder holding settings.json and playbooks/; the Switchboard home when left out. */
+  /** The folder holding settings.json; the Switchboard home when left out. */
   configDir?: string;
   log(line: string): void;
   /** Overrides for tests. */
@@ -158,7 +158,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const home = switchboardHome(options.home);
   const configDir = options.configDir ?? home;
 
-  mkdirSync(playbooksDir(configDir), { recursive: true });
+  mkdirSync(configDir, { recursive: true });
 
   const store = Store.open(join(home, 'switchboard.db'));
   let config = loadConfig(configDir);
@@ -216,21 +216,18 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const written = new Map<string, string>();
   const windows = windowsDir(options.home);
 
-  // Settings and playbooks are reloaded when they change (PRD R42).
+  // settings.json, which holds the playbooks, is reloaded when it changes (PRD R42).
   let pending: NodeJS.Timeout | undefined;
   const reload = () => {
     clearTimeout(pending);
     pending = setTimeout(() => {
-      config = loadConfig(configDir, config.settings);
+      config = loadConfig(configDir, config);
       runtime.reload(config);
-      // The dock's Settings window reads the files again (PRD R54).
+      // The dock's Settings window reads the file again (PRD R54).
       sendDock('config', {});
     }, RELOAD_DEBOUNCE_MS);
   };
-  const watchers: FSWatcher[] = [
-    watch(configDir, (_event, file) => file === 'settings.json' && reload()),
-    watch(playbooksDir(configDir), { recursive: true }, reload),
-  ];
+  const watchers: FSWatcher[] = [watch(configDir, (_event, file) => file === 'settings.json' && reload())];
 
   await runtime.startup();
   runtime.start();
@@ -351,35 +348,37 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Expected {name, enabled}.' } };
         }
 
-        const error = setSourceEnabled(configDir, body['name'], body['enabled']);
+        const error = runtime.setSourceEnabled(body['name'], body['enabled']);
+
+        if (error === null) {
+          // The Settings window reads again, so its source states and checks follow the toggle (PRD R54).
+          sendDock('config', {});
+        }
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
-      // The dock's Settings window (PRD R54): the files with their versions, and what the editor offers.
+      // The dock's Settings window (PRD R54): settings.json with its version, and what the editor offers.
       '/config/read': async () => ({
         status: 200,
-        body: { ...readConfigFiles(configDir), configDir, permissionModes: [...PERMISSION_MODES], templateVariables: [...TEMPLATE_VARIABLES], sourceKinds: [...SOURCE_KINDS], inUse: openPlaybooks(runtime) },
+        body: {
+          settings: readConfigFile(configDir),
+          configDir,
+          permissionModes: [...PERMISSION_MODES],
+          templateVariables: [...TEMPLATE_VARIABLES],
+          sourceKinds: [...SOURCE_KINDS],
+          inUse: openPlaybooks(runtime),
+          enabled: Object.fromEntries(Object.keys(config.settings.sources).map((name) => [name, runtime.enabledSources().has(name)])),
+        },
       }),
-      '/config/check': async (body) => {
-        if (isRecord(body) && body['target'] === 'settings') {
-          return { status: 200, body: { errors: checkSettings(body['settings']) } };
-        }
-
-        if (!isRecord(body) || body['target'] !== 'playbook' || typeof body['name'] !== 'string' || !isPlaybookFields(body['playbook'])) {
-          return { status: 400, body: { error: 'Expected {target: settings, settings} or {target: playbook, name, playbook}.' } };
-        }
-
-        const checked = checkPlaybook(body['name'], body['playbook']);
-
-        return { status: 200, body: { errors: 'errors' in checked ? checked.errors : [] } };
-      },
+      '/config/check': async (body) =>
+        isRecord(body) && 'settings' in body ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources()) } } : { status: 400, body: { error: 'Expected {settings}.' } },
       '/config/save': async (body) => {
         const version = isRecord(body) ? body['version'] : undefined;
 
-        if (!isRecord(body) || !(version === null || typeof version === 'string')) {
-          return { status: 400, body: { error: 'Expected {target, version} with the settings or a playbook.' } };
+        if (!isRecord(body) || !('value' in body) || !(version === null || typeof version === 'string')) {
+          return { status: 400, body: { error: 'Expected {value, version}.' } };
         }
 
         const moved = movedFrom(body['configDir']);
@@ -388,32 +387,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 409, body: { errors: [moved] } };
         }
 
-        let result: SaveResult;
-
-        if (body['target'] === 'settings') {
-          result = saveSettings(configDir, body['value'], version);
-        } else if (body['target'] === 'playbook' && typeof body['name'] === 'string' && isPlaybookFields(body['playbook'])) {
-          result = savePlaybook(configDir, body['name'], body['playbook'], version);
-        } else {
-          return { status: 400, body: { error: 'Expected {target: settings, value, version} or {target: playbook, name, playbook, version}.' } };
-        }
+        const result = saveSettings(configDir, body['value'], version, runtime.enabledSources());
 
         return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
-      },
-      '/config/delete': async (body) => {
-        if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['version'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {name, version}.' } };
-        }
-
-        const moved = movedFrom(body['configDir']);
-
-        if (moved !== null) {
-          return { status: 409, body: { errors: [moved] } };
-        }
-
-        const errors = deletePlaybook(configDir, body['name'], body['version']);
-
-        return errors.length === 0 ? { status: 200, body: { deleted: true } } : { status: 409, body: { errors } };
       },
       '/action': async (body) => {
         const event = parseAction(body);
@@ -487,29 +463,6 @@ function openPlaybooks(runtime: Runtime): Record<string, number> {
   }
 
   return counts;
-}
-
-/** A playbook's fields as the Settings window sends them, with the types `checkPlaybook` reads. */
-function isPlaybookFields(value: unknown): value is PlaybookFields {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const nullableString = (key: string) => value[key] === null || typeof value[key] === 'string';
-
-  return (
-    typeof value['description'] === 'string' &&
-    (value['kind'] === 'task' || value['kind'] === 'triage') &&
-    ['autoStart', 'requiresWorktree', 'approvalSends', 'rates'].every((key) => typeof value[key] === 'boolean') &&
-    nullableString('permissionMode') &&
-    nullableString('model') &&
-    (value['workdir'] === 'worktree' || value['workdir'] === 'repoRoot') &&
-    Array.isArray(value['reports']) &&
-    value['reports'].every((report) => (PLAYBOOK_REPORTS as readonly unknown[]).includes(report)) &&
-    Array.isArray(value['returnOf']) &&
-    value['returnOf'].every((entry) => typeof entry === 'string') &&
-    typeof value['template'] === 'string'
-  );
 }
 
 function optionalString(value: unknown): value is string | null | undefined {

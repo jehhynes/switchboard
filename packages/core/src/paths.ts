@@ -19,7 +19,7 @@ export function hubBundlePath(home: string): string {
 
 
 /**
- * The folder holding settings.json and playbooks/: the `switchboard.configDir` setting, with a leading `~` meaning
+ * The folder holding settings.json: the `switchboard.configDir` setting, with a leading `~` meaning
  * `profile`, or the Switchboard home when the setting is empty. A relative path is an error.
  */
 export function resolveConfigDir(setting: string, home: string, profile: string): { dir: string } | { error: string } {

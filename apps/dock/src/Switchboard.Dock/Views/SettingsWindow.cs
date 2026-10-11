@@ -11,8 +11,9 @@ using Switchboard.Dock.Switching;
 namespace Switchboard.Dock.Views;
 
 /// <summary>
-/// The Settings window (PRD R54): the navigation on the left, the page on the right. It draws what <see cref="SettingsPages"/> gives for the
-/// editor's state; while the operator types it updates only the navigation, buttons, notes and errors, so the field keeps focus.
+/// The Settings window (PRD R54): the navigation on the left, the page on the right, and a bar with the file's status, Save and Discard. It draws
+/// what <see cref="SettingsPages"/> gives for the editor's state; while the operator types it updates only the navigation, bar, buttons, notes and
+/// errors, so the field keeps focus.
 /// </summary>
 public sealed class SettingsWindow : Window
 {
@@ -21,9 +22,15 @@ public sealed class SettingsWindow : Window
     readonly StackPanel nav = new() { Margin = new Thickness(8), Spacing = 2 };
     readonly StackPanel page = new() { Margin = new Thickness(16, 12), Spacing = 10 };
     readonly TextBlock status = new() { Name = "SettingsStatus", Margin = new Thickness(16, 6), TextWrapping = TextWrapping.Wrap, IsVisible = false };
+    // The window-wide bar.
+    readonly TextBlock fileStatus = new() { Name = "FileStatus", VerticalAlignment = VerticalAlignment.Center };
+    readonly TextBlock warning = new() { Name = "FileWarning", TextWrapping = TextWrapping.Wrap, IsVisible = false };
+    readonly StackPanel barErrors = new() { Name = "BarErrors", Spacing = 2 };
+    readonly Button save = new() { Name = "Save", Content = "Save", Tag = "save", IsEnabled = false };
+    readonly Button discard = new() { Name = "Discard", Content = "Discard", Tag = "discard", IsEnabled = false };
     // The parts of the drawn page that an update changes in place.
     StackPanel buttons = new();
-    // Set once the window may close without asking again, and while a close waits for saves or an answer.
+    // Set once the window may close without asking again, and while a close waits for an answer or a save.
     bool closing;
     bool asking;
     StackPanel notes = new();
@@ -55,6 +62,8 @@ public sealed class SettingsWindow : Window
         this.Bind(ForegroundProperty, this.GetResourceObservable("DockForeground"));
         editor.Confirm ??= (question, detail, action) => Ask(question, detail, action);
         Closing += OnClosing;
+        // Tunnelling, so Ctrl+S saves while a text box has focus.
+        AddHandler(KeyDownEvent, OnKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         var navScroll = new ScrollViewer { Content = nav, Width = 210 };
         var pageScroll = new ScrollViewer { Name = "PageScroller", Content = page, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
@@ -64,12 +73,19 @@ public sealed class SettingsWindow : Window
         right.Children.Add(status);
         right.Children.Add(pageScroll);
 
-        var root = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        var main = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
 
         navScroll.Bind(BorderBrushProperty, this.GetResourceObservable("DockBorder"));
         Grid.SetColumn(right, 1);
-        root.Children.Add(navScroll);
-        root.Children.Add(right);
+        main.Children.Add(navScroll);
+        main.Children.Add(right);
+
+        var root = new DockPanel();
+        var bar = Bar();
+
+        DockPanel.SetDock(bar, Avalonia.Controls.Dock.Bottom);
+        root.Children.Add(bar);
+        root.Children.Add(main);
         Content = root;
 
         editor.Changed += (redraw) => Dispatcher.UIThread.Post(() =>
@@ -86,11 +102,40 @@ public sealed class SettingsWindow : Window
         Draw();
     }
 
-    /// <summary>Saves what is pending before the window closes, and asks before closing over changes that cannot be saved.</summary>
+    /// <summary>The bar under the whole window: the file's status, a changed-on-disk warning and a refused save's errors, then Save and Discard.</summary>
+    Control Bar()
+    {
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Top, Children = { discard, save } };
+        var text = new StackPanel { Spacing = 4, Children = { fileStatus, Tinted(warning, "DockWarning"), barErrors } };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Children = { text, buttons } };
+        var border = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(16, 8), Child = grid };
+
+        save.Classes.Add("accent");
+        ToolTip.SetTip(save, "Save settings.json (Ctrl+S)");
+        ToolTip.SetTip(discard, "Drop every unsaved change and read settings.json again");
+        save.Click += async (_, _) => await editor.Save();
+        discard.Click += async (_, _) => await editor.Discard();
+        Grid.SetColumn(buttons, 1);
+        border.Bind(Border.BorderBrushProperty, this.GetResourceObservable("DockBorder"));
+        Tinted(fileStatus, "DockMuted");
+
+        return border;
+    }
+
+    async void OnKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key == Avalonia.Input.Key.S && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
+        {
+            e.Handled = true;
+            await editor.Save();
+        }
+    }
+
+    /// <summary>Asks before closing over unsaved changes: Save closes once the file holds them, Discard closes, and Keep editing stays.</summary>
     async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
         // The dock closing ends the app, which cannot wait for an answer.
-        if (closing || e.CloseReason is WindowCloseReason.ApplicationShutdown or WindowCloseReason.OwnerWindowClosing)
+        if (closing || e.CloseReason is WindowCloseReason.ApplicationShutdown or WindowCloseReason.OwnerWindowClosing || editor.State is not { Dirty: true })
         {
             return;
         }
@@ -106,10 +151,9 @@ public sealed class SettingsWindow : Window
 
         try
         {
-            await editor.Flush();
+            var answer = await Choose("Save changes to settings.json?", "Your changes are lost if you don't save them.", [("CloseSave", "Save", true), ("CloseDiscard", "Discard", false), ("CloseKeep", "Keep editing", false)]);
 
-            if (editor.State?.Unsaved is { Count: > 0 } files &&
-                !await Ask("Discard unsaved changes?", $"{string.Join(", ", files)} {(files.Count == 1 ? "has" : "have")} changes that are not saved.", "Discard", "Keep editing"))
+            if (answer is null or "CloseKeep" || (answer == "CloseSave" && !await editor.Save()))
             {
                 return;
             }
@@ -134,16 +178,29 @@ public sealed class SettingsWindow : Window
         }
     }
 
-    /// <summary>Asks before a delete, a removal or a discard in a small modal window; <paramref name="action"/> labels the button that goes ahead.</summary>
-    async Task<bool> Ask(string question, string detail, string action, string cancelLabel = "Cancel")
-    {
-        var dialog = new Window { Title = question, Width = 380, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        var delete = new Button { Name = "ConfirmAction", Content = action };
-        var cancel = new Button { Name = "ConfirmCancel", Content = cancelLabel };
+    /// <summary>Asks before a delete in a small modal window; <paramref name="action"/> labels the button that goes ahead.</summary>
+    async Task<bool> Ask(string question, string detail, string action) =>
+        await Choose(question, detail, [("ConfirmCancel", "Cancel", false), ("ConfirmAction", action, true)]) == "ConfirmAction";
 
-        delete.Classes.Add("accent");
-        delete.Click += (_, _) => dialog.Close(true);
-        cancel.Click += (_, _) => dialog.Close(false);
+    /// <summary>Asks in a small modal window with one button per choice, by name, label and whether it is the accent; the chosen name, or null when closed.</summary>
+    async Task<string?> Choose(string question, string detail, IReadOnlyList<(string Name, string Label, bool Accent)> choices)
+    {
+        var dialog = new Window { Title = question, Width = 400, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
+
+        foreach (var (name, label, accent) in choices)
+        {
+            var button = new Button { Name = name, Content = label };
+
+            if (accent)
+            {
+                button.Classes.Add("accent");
+            }
+
+            button.Click += (_, _) => dialog.Close(name);
+            row.Children.Add(button);
+        }
+
         dialog.Bind(BackgroundProperty, this.GetResourceObservable("DockBackground"));
         dialog.Content = new StackPanel
         {
@@ -153,11 +210,11 @@ public sealed class SettingsWindow : Window
             {
                 new TextBlock { Text = question, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap },
                 new TextBlock { Text = detail, TextWrapping = TextWrapping.Wrap },
-                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancel, delete } },
+                row,
             },
         };
 
-        return await dialog.ShowDialog<bool>(this);
+        return await dialog.ShowDialog<string?>(this);
     }
 
     /// <summary>Draws the page again, keeping focus and the caret in the same field, as a reload after a save or an edit on disk redraws it.</summary>
@@ -358,7 +415,7 @@ public sealed class SettingsWindow : Window
         return runs;
     }
 
-    /// <summary>Updates the navigation, buttons, notes and errors without replacing the fields.</summary>
+    /// <summary>Updates the navigation, bar, buttons, notes and errors without replacing the fields.</summary>
     void Update()
     {
         if (editor.State is not { } state)
@@ -370,19 +427,8 @@ public sealed class SettingsWindow : Window
         var view = SettingsPages.Page(state);
 
         DrawNav(state);
+        UpdateBar(SettingsPages.Bar(state));
         buttons.Children.Clear();
-        if (view.Saved is { } saved)
-        {
-            var text = saved switch
-            {
-                SaveState.Saved => "Saved",
-                SaveState.Saving => "Saving…",
-                SaveState.NotSaved => "Not saved",
-                _ => throw new ArgumentOutOfRangeException(nameof(view)),
-            };
-
-            buttons.Children.Add(Tinted(new TextBlock { Name = "SaveState", Text = text, VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Margin = new Thickness(0, 0, 6, 0) }, saved == SaveState.NotSaved ? "DockWarning" : "DockMuted"));
-        }
 
         foreach (var button in view.Buttons)
         {
@@ -433,6 +479,16 @@ public sealed class SettingsWindow : Window
         {
             ShowErrors(nameErrors, names.Error is null ? [] : [names.Error]);
         }
+    }
+
+    void UpdateBar(BarView bar)
+    {
+        fileStatus.Text = bar.Status;
+        warning.Text = bar.Warning;
+        warning.IsVisible = bar.Warning is not null;
+        ShowErrors(barErrors, bar.Errors);
+        save.IsEnabled = bar.CanSave;
+        discard.IsEnabled = bar.CanDiscard;
     }
 
     void ShowErrors(StackPanel panel, IReadOnlyList<string> list)
@@ -520,15 +576,15 @@ public sealed class SettingsWindow : Window
         }
 
         button.Classes.Add("nav");
-        button.Click += async (_, _) =>
+        button.Click += (_, _) =>
         {
             if (entry.Command == "add-source")
             {
-                await editor.AddSource(entry.Argument!);
+                editor.AddSource(entry.Argument!);
             }
             else
             {
-                await editor.Navigate(entry.Argument!);
+                editor.Navigate(entry.Argument!);
             }
         };
 
@@ -553,17 +609,14 @@ public sealed class SettingsWindow : Window
         {
             switch (spec.Command)
             {
-                case "revert":
-                    await editor.Revert();
-                    break;
                 case "create":
-                    await editor.Create();
+                    editor.Create();
                     break;
                 case "delete":
                     await editor.Delete();
                     break;
                 case "remove-source":
-                    await editor.RemoveSource(spec.Argument!);
+                    editor.RemoveSource(spec.Argument!);
                     break;
             }
         };
@@ -595,7 +648,7 @@ public sealed class SettingsWindow : Window
 
         var parts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { space, new TextBlock { Text = ":", VerticalAlignment = VerticalAlignment.Center }, name } };
 
-        return Row("Name", "The file is playbooks/<namespace>/<name>.md. Lowercase letters, digits and hyphens.", new StackPanel { Spacing = 3, Children = { parts, nameErrors } });
+        return Row("Name", "Lowercase letters, digits and hyphens. Create adds the playbook to settings.json when you save.", new StackPanel { Spacing = 3, Children = { parts, nameErrors } });
     }
 
     /// <summary>A labelled row: the label and its info icon on the left, the content on the right.</summary>
@@ -893,7 +946,7 @@ public sealed class SettingsWindow : Window
                 ToolTip.SetTip(open, new TextBlock { Text = entry.Description, TextWrapping = TextWrapping.Wrap, MaxWidth = 360 });
             }
 
-            open.Click += async (_, _) => await editor.Navigate($"playbook:{entry.Name}");
+            open.Click += (_, _) => editor.Navigate($"playbook:{entry.Name}");
             name.Children.Add(open);
 
             var dot = new TextBlock { Text = "●", Classes = { "dirty" } };

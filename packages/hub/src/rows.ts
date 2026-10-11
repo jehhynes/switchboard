@@ -602,7 +602,7 @@ export function setupNotes(snapshot: Snapshot): string[] {
       : snapshot.sourceStates.length > 0
         ? 'No source is polled. Turn one on in the header.'
         : `No source is configured. Add one in ${snapshot.configDir}\\settings.json.`,
-    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under ${snapshot.configDir}\\playbooks.` : null,
+    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under playbooks in ${snapshot.configDir}\\settings.json.` : null,
   ].filter((line): line is string => line !== null);
 }
 

@@ -9,7 +9,7 @@ export interface HubRecord {
   version: string;
   /** Hash of the hub bundle; differs between builds of one version. */
   build: string;
-  /** The folder holding settings.json and playbooks/. */
+  /** The folder holding settings.json. */
   configDir: string;
   port: number;
   token: string;

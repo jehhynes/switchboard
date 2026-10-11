@@ -1,8 +1,9 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Switchboard.Dock.Settings;
 
-/// <summary>A playbook's front matter and template, as the hub reads and writes them (PRD R54).</summary>
+/// <summary>A playbook entry of settings.json's <c>playbooks</c> object, as the window edits it (PRD R54).</summary>
 public sealed record PlaybookFields(
     string Description,
     string Kind,
@@ -17,29 +18,104 @@ public sealed record PlaybookFields(
     IReadOnlyList<string> ReturnOf,
     string Template)
 {
-    /// <summary>The reports a task playbook can list, in front matter order.</summary>
+    /// <summary>The reports a task playbook can list, in the order the window writes them.</summary>
     public static readonly IReadOnlyList<string> ReportKinds = ["done", "approval", "worktree", "playbook", "paste"];
+
+    /// <summary>The keys of a playbook entry, which the hub accepts and the window has fields for, in the order it writes them.</summary>
+    public static readonly IReadOnlyList<string> Keys = ["description", "kind", "autoStart", "requiresWorktree", "workdir", "reports", "approvalSends", "returnOf", "rates", "permissionMode", "model", "template"];
 
     public static readonly PlaybookFields Empty = new("", "task", false, false, null, null, "worktree", [], false, false, [], "");
 
-    public static PlaybookFields FromJson(JsonNode node) =>
-        new(
-            Text(node, "description") ?? "",
-            Text(node, "kind") ?? "task",
-            node["autoStart"]?.GetValue<bool>() ?? false,
-            node["requiresWorktree"]?.GetValue<bool>() ?? false,
-            Text(node, "permissionMode"),
-            Text(node, "model"),
-            Text(node, "workdir") ?? "worktree",
-            node["reports"] is JsonArray reports ? reports.Select((report) => report?.GetValue<string>() ?? "").ToList() : [],
-            node["approvalSends"]?.GetValue<bool>() ?? false,
-            node["rates"]?.GetValue<bool>() ?? false,
-            node["returnOf"] is JsonArray returnOf ? returnOf.Select((entry) => entry?.GetValue<string>() ?? "").ToList() : [],
-            Text(node, "template") ?? "");
+    /// <summary>
+    /// An entry's fields, or null and why it cannot be read: it is not an object, has a key the hub does not know, or a key has the wrong JSON type.
+    /// Absent and null keys take their defaults.
+    /// </summary>
+    public static (PlaybookFields? Fields, string? Error) Read(JsonNode? node)
+    {
+        if (node is not JsonObject entry)
+        {
+            return (null, "A playbook must be an object.");
+        }
 
-    static string? Text(JsonNode node, string key) => node[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+        if (entry.Select((pair) => pair.Key).Where((key) => !Keys.Contains(key)).ToList() is { Count: > 0 } unknown)
+        {
+            return (null, $"Unknown keys: {string.Join(", ", unknown)}.");
+        }
 
-    /// <summary>The fields in the order the hub's playbook files hold them.</summary>
+        string? error = null;
+
+        string? Text(string key)
+        {
+            var value = entry[key];
+
+            if (value is null)
+            {
+                return null;
+            }
+
+            if (value is JsonValue item && item.GetValueKind() == JsonValueKind.String)
+            {
+                return item.GetValue<string>();
+            }
+
+            error ??= $"{key} must be a string.";
+            return null;
+        }
+
+        bool Flag(string key)
+        {
+            var value = entry[key];
+
+            if (value is null)
+            {
+                return false;
+            }
+
+            if (value.GetValueKind() is JsonValueKind.True or JsonValueKind.False)
+            {
+                return value.GetValueKind() == JsonValueKind.True;
+            }
+
+            error ??= $"{key} must be true or false.";
+            return false;
+        }
+
+        IReadOnlyList<string> List(string key)
+        {
+            var value = entry[key];
+
+            if (value is null)
+            {
+                return [];
+            }
+
+            if (value is JsonArray list && list.All((item) => item?.GetValueKind() == JsonValueKind.String))
+            {
+                return list.Select((item) => item!.GetValue<string>()).ToList();
+            }
+
+            error ??= $"{key} must be a list of strings.";
+            return [];
+        }
+
+        var fields = new PlaybookFields(
+            Text("description") ?? "",
+            Text("kind") ?? "task",
+            Flag("autoStart"),
+            Flag("requiresWorktree"),
+            Text("permissionMode"),
+            Text("model"),
+            Text("workdir") ?? "worktree",
+            List("reports"),
+            Flag("approvalSends"),
+            Flag("rates"),
+            List("returnOf"),
+            Text("template") ?? "");
+
+        return error is null ? (fields, null) : (null, error);
+    }
+
+    /// <summary>Every field with its value, for reading one by key and comparing playbooks.</summary>
     public JsonObject ToJson() =>
         new()
         {
@@ -50,41 +126,94 @@ public sealed record PlaybookFields(
             ["permissionMode"] = PermissionMode,
             ["model"] = Model,
             ["workdir"] = Workdir,
-            ["reports"] = new JsonArray(Reports.Select((report) => (JsonNode)JsonValue.Create(report)).ToArray()),
+            ["reports"] = Strings(Reports),
             ["approvalSends"] = ApprovalSends,
             ["rates"] = Rates,
-            ["returnOf"] = new JsonArray(ReturnOf.Select((entry) => (JsonNode)JsonValue.Create(entry)).ToArray()),
+            ["returnOf"] = Strings(ReturnOf),
             ["template"] = Template,
         };
 
-    /// <summary>Whether two playbooks are the same once saved: saving gives the template a final newline.</summary>
-    public static bool Same(PlaybookFields a, PlaybookFields? b)
+    /// <summary>The entry the window writes: defaults left out, except <c>autoStart</c> and <c>requiresWorktree</c> on a task playbook, in <see cref="Keys"/> order.</summary>
+    public JsonObject ToEntry()
     {
-        static string Saved(PlaybookFields playbook)
-        {
-            var template = playbook.Template.Replace("\r\n", "\n");
+        var task = Kind == "task";
+        var entry = new JsonObject { ["description"] = Description };
 
-            return (playbook with { Template = template.Length > 0 && !template.EndsWith('\n') ? template + "\n" : template }).ToJson().ToJsonString();
+        if (!task)
+        {
+            entry["kind"] = Kind;
         }
 
-        return b is not null && Saved(a) == Saved(b);
+        if (task || AutoStart)
+        {
+            entry["autoStart"] = AutoStart;
+        }
+
+        if (task || RequiresWorktree)
+        {
+            entry["requiresWorktree"] = RequiresWorktree;
+        }
+
+        if (Workdir != "worktree")
+        {
+            entry["workdir"] = Workdir;
+        }
+
+        if (Reports.Count > 0)
+        {
+            entry["reports"] = Strings(Reports);
+        }
+
+        if (ApprovalSends)
+        {
+            entry["approvalSends"] = true;
+        }
+
+        if (ReturnOf.Count > 0)
+        {
+            entry["returnOf"] = Strings(ReturnOf);
+        }
+
+        if (Rates)
+        {
+            entry["rates"] = true;
+        }
+
+        if (PermissionMode is not null)
+        {
+            entry["permissionMode"] = PermissionMode;
+        }
+
+        if (Model is not null)
+        {
+            entry["model"] = Model;
+        }
+
+        entry["template"] = Template;
+
+        return entry;
     }
+
+    /// <summary>Whether two playbooks have the same fields.</summary>
+    public static bool Same(PlaybookFields a, PlaybookFields? b) => b is not null && a.ToJson().ToJsonString() == b.ToJson().ToJsonString();
+
+    static JsonArray Strings(IEnumerable<string> items) => new(items.Select((item) => (JsonNode)JsonValue.Create(item)).ToArray());
 }
 
 /// <summary>settings.json as the hub read it: its value, or null and the error when it is not valid JSON.</summary>
 public sealed record SettingsFile(string Path, string? Version, JsonNode? Value, string? Error);
 
-/// <summary>A playbook file: its fields, or null and the error when the hub would leave it out.</summary>
-public sealed record PlaybookFile(string Name, string Path, string Version, PlaybookFields? Playbook, string? Error);
-
-/// <summary>What <c>POST /config/read</c> answers: the files, the choices the editor offers, the open work items per playbook, and the config folder.</summary>
+/// <summary>
+/// What <c>POST /config/read</c> answers: settings.json, the choices the editor offers, the open work items per playbook, whether each configured
+/// source is on, which the hub stores outside settings.json, and the config folder.
+/// </summary>
 public sealed record EditorConfig(
     SettingsFile Settings,
-    IReadOnlyList<PlaybookFile> Playbooks,
     IReadOnlyList<string> PermissionModes,
     IReadOnlyList<string> TemplateVariables,
     IReadOnlyList<string> SourceKinds,
     IReadOnlyDictionary<string, int> InUse,
+    IReadOnlyDictionary<string, bool> Enabled,
     string ConfigDir = "")
 {
     public static EditorConfig Parse(JsonNode body)
@@ -94,18 +223,11 @@ public sealed record EditorConfig(
 
         return new EditorConfig(
             new SettingsFile(settings["path"]?.GetValue<string>() ?? "", settings["version"]?.GetValue<string>(), settings["value"]?.DeepClone(), settings["error"]?.GetValue<string>()),
-            body["playbooks"] is JsonArray playbooks
-                ? playbooks.OfType<JsonNode>().Select((entry) => new PlaybookFile(
-                    entry["name"]?.GetValue<string>() ?? "",
-                    entry["path"]?.GetValue<string>() ?? "",
-                    entry["version"]?.GetValue<string>() ?? "",
-                    entry["playbook"] is JsonObject fields ? PlaybookFields.FromJson(fields) : null,
-                    entry["error"]?.GetValue<string>())).ToList()
-                : [],
             strings("permissionModes"),
             strings("templateVariables"),
             strings("sourceKinds"),
             body["inUse"] is JsonObject inUse ? inUse.ToDictionary((entry) => entry.Key, (entry) => entry.Value?.GetValue<int>() ?? 0) : new Dictionary<string, int>(),
+            body["enabled"] is JsonObject enabled ? enabled.ToDictionary((entry) => entry.Key, (entry) => entry.Value?.GetValueKind() == JsonValueKind.True) : new Dictionary<string, bool>(),
             body["configDir"]?.GetValue<string>() ?? "");
     }
 }
@@ -116,15 +238,12 @@ public sealed record SaveReply(IReadOnlyList<string> Errors, string? Version);
 /// <summary>The hub's config requests for the Settings window (PRD R54).</summary>
 public interface IConfigHub
 {
-    /// <summary>The files and choices, or null and why not.</summary>
+    /// <summary>settings.json and the choices, or null and why not.</summary>
     Task<(EditorConfig? Config, string? Error)> ReadConfig();
 
-    /// <summary>Every error the hub would report for a draft, or null when the hub did not answer.</summary>
-    Task<IReadOnlyList<string>?> CheckConfig(JsonObject body);
+    /// <summary>Every error the hub would report for a draft of settings.json, or null when the hub did not answer.</summary>
+    Task<IReadOnlyList<string>?> CheckConfig(JsonObject settings);
 
-    /// <summary>Writes settings.json or a playbook; returns the refusal's errors, or none and the version of the file written.</summary>
-    Task<SaveReply> SaveConfig(JsonObject body);
-
-    /// <summary>Deletes a playbook file read from <paramref name="configDir"/>; returns the refusal's errors, empty when it deleted.</summary>
-    Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir);
+    /// <summary>Writes settings.json if it is still at <paramref name="version"/>; returns the refusal's errors, or none and the version written.</summary>
+    Task<SaveReply> SaveConfig(JsonObject value, string? version, string configDir);
 }

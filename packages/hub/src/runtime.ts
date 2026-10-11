@@ -28,7 +28,7 @@ export const QUESTION_READ_MS = 1_000;
 export interface RuntimeDeps {
   /** The operator's home; the Switchboard home is `<home>/.switchboard`. */
   home: string;
-  /** The folder holding settings.json and playbooks/. */
+  /** The folder holding settings.json. */
   configDir: string;
   store: Store;
   exec: Exec;
@@ -92,7 +92,7 @@ export interface Snapshot {
   sourceStates: { name: string; enabled: boolean }[];
   /** Each configured source's playbook namespace, which names a triage in progress, such as `dev:triage`. */
   namespaces: Record<string, string>;
-  /** The folder holding settings.json and playbooks/. */
+  /** The folder holding settings.json. */
   configDir: string;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
 }
@@ -286,6 +286,22 @@ export class Runtime {
     this.buildSources();
     this.restartPolls();
     this.send({ type: 'tick' });
+  }
+
+  /** The sources the operator turned on in the dock's header (PRD R3). */
+  enabledSources(): Set<string> {
+    return this.deps.store.enabledSources();
+  }
+
+  /** Turns a configured source on or off and starts or stops its polls; returns why it could not, or null. */
+  setSourceEnabled(name: string, enabled: boolean): string | null {
+    if (this.config.settings.sources[name] === undefined || name === ADHOC_SOURCE) {
+      return `settings.json has no source named ${name}.`;
+    }
+
+    this.deps.store.setSourceEnabled(name, enabled);
+    this.reload(this.config);
+    return null;
   }
 
   /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
@@ -657,6 +673,7 @@ export class Runtime {
   snapshot(): Snapshot {
     const store = this.deps.store;
     const { settings, playbooks, settingsError, playbookErrors } = this.config;
+    const enabled = this.enabledSources();
     // Returned counts earlier work items with the same playbook, or one it is a return of, that started a session; a failed launch has no shortId.
     const started = (item: WorkItem) => store.sessionsFor(item.id).some((session) => session.shortId !== null);
     const returned = (items: WorkItem[], playbook: string | null) => {
@@ -700,12 +717,12 @@ export class Runtime {
       sources: [...this.sources.keys()],
       sourceStates: Object.entries(settings.sources)
         .filter(([name]) => name !== ADHOC_SOURCE)
-        .map(([name, source]) => ({ name, enabled: source.enabled })),
+        .map(([name]) => ({ name, enabled: enabled.has(name) })),
       namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
       configDir: this.deps.configDir,
       errors: {
         settings: settingsError,
-        playbooks: playbookErrors.map((entry) => `${entry.file}: ${entry.error}`),
+        playbooks: playbookErrors.map((entry) => `${entry.name}: ${entry.error}`),
         hooks: this.hookError,
         sources: { ...this.sourceErrors },
       },
@@ -728,8 +745,15 @@ export class Runtime {
     this.sources.clear();
     this.sourceErrors = {};
 
+    // Only a valid file lists the configured sources; with an invalid one the previous settings stay in force.
+    if (this.config.settingsError === null) {
+      this.deps.store.keepSourceStates(Object.keys(this.config.settings.sources));
+    }
+
+    const enabled = this.enabledSources();
+
     for (const [name, settings] of Object.entries(this.config.settings.sources)) {
-      if (!settings.enabled || name === ADHOC_SOURCE) {
+      if (!enabled.has(name) || name === ADHOC_SOURCE) {
         continue;
       }
 

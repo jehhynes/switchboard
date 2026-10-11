@@ -38,7 +38,7 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IDispo
     /// <summary>Raised on the stream's thread after the view or the connection changes.</summary>
     public event Action? Changed;
 
-    /// <summary>Raised on the stream's thread when the hub says the settings or playbook files changed on disk (PRD R54).</summary>
+    /// <summary>Raised on the stream's thread when the hub says settings.json changed on disk (PRD R54).</summary>
     public event Action? ConfigChanged;
 
     /// <summary>Raised on the stream's thread when a VS Code window's status bar item asks the dock to show its list (PRD R71).</summary>
@@ -218,22 +218,19 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IDispo
         return body is null ? (null, error ?? "The hub sent no settings.") : (EditorConfig.Parse(body), null);
     }
 
-    public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject body)
+    public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject settings)
     {
-        var (_, reply, _) = await Send("/config/check", body);
+        var (_, reply, _) = await Send("/config/check", new JsonObject { ["settings"] = settings.DeepClone() });
 
         return reply?["errors"] is JsonArray errors ? Strings(errors) : null;
     }
 
-    public async Task<SaveReply> SaveConfig(JsonObject body)
+    public async Task<SaveReply> SaveConfig(JsonObject value, string? version, string configDir)
     {
-        var (errors, reply) = await Written("/config/save", body);
+        var (errors, reply) = await Written("/config/save", new JsonObject { ["value"] = value.DeepClone(), ["version"] = version, ["configDir"] = configDir });
 
-        return new SaveReply(errors, reply?["version"] is JsonValue version && version.TryGetValue<string>(out var text) ? text : null);
+        return new SaveReply(errors, reply?["version"] is JsonValue written && written.TryGetValue<string>(out var text) ? text : null);
     }
-
-    public async Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir) =>
-        (await Written("/config/delete", new JsonObject { ["name"] = name, ["version"] = version, ["configDir"] = configDir })).Errors;
 
     /// <summary>A write's refusal: the <c>errors</c> of a 409, else the failure; empty, with the reply, when the hub wrote the file.</summary>
     async Task<(IReadOnlyList<string> Errors, JsonNode? Reply)> Written(string path, JsonObject body)

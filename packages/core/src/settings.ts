@@ -21,7 +21,6 @@ export interface TriageSettings {
 
 /** Fields every source has. The source plugin validates its own keys in `options`. */
 export interface SourceSettings {
-  enabled: boolean;
   pollIntervalSeconds: number;
   repoRoot: string;
   triagePlaybook: string;
@@ -48,7 +47,7 @@ export function repoRoots(settings: Settings): string[] {
   return [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))];
 }
 
-const SOURCE_DEFAULTS = { enabled: false, pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '' };
+const SOURCE_DEFAULTS = { pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '' };
 
 export type SettingsResult = { settings: Settings } | { errors: string[] };
 
@@ -141,7 +140,7 @@ class Reader {
   }
 }
 
-/** Parses `settings.json`. Any error rejects the whole file, so the hub keeps the last valid settings (PRD R42). */
+/** Parses `settings.json`. Any error outside `playbooks` rejects the whole file, so the hub keeps the last valid settings (PRD R42). */
 export function parseSettings(text: string): SettingsResult {
   let root: unknown;
 
@@ -156,7 +155,9 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const read = new Reader();
-  read.unknown(root, ['sessions', 'triage', 'sources'], 'settings');
+  read.unknown(root, ['sessions', 'triage', 'sources', 'playbooks'], 'settings');
+  // Each playbook is checked on its own by `parsePlaybooks`, so an invalid one is left out rather than rejecting the file.
+  read.section(root, 'playbooks', 'playbooks');
 
   const sessionsIn = read.section(root, 'sessions', 'sessions');
   const defaults = DEFAULT_SETTINGS;
@@ -184,10 +185,13 @@ export function parseSettings(text: string): SettingsResult {
     const path = `sources.${name}`;
     const sourceIn = read.section(sourcesIn, name, path);
     const { enabled, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace, ...options } = sourceIn;
-    const common = { enabled, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace };
+    const common = { pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace };
+
+    if (enabled !== undefined) {
+      read.errors.push(`${path}.enabled is not a setting; turn a source on and off in the dock's header.`);
+    }
 
     sources[name] = {
-      enabled: read.boolean(common, 'enabled', path, SOURCE_DEFAULTS.enabled),
       pollIntervalSeconds: read.integer(common, 'pollIntervalSeconds', path, SOURCE_DEFAULTS.pollIntervalSeconds, 10),
       repoRoot: read.string(common, 'repoRoot', path, SOURCE_DEFAULTS.repoRoot),
       triagePlaybook: read.string(common, 'triagePlaybook', path, SOURCE_DEFAULTS.triagePlaybook),

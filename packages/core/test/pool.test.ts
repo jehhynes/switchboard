@@ -15,7 +15,7 @@ function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Ext
 
 const pollZoho = (h: Harness, ...tickets: PolledTicket[]) => h.act({ type: 'poll', source: 'zoho', tickets });
 
-const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': '---\ndescription: A Support case\nautoStart: true\nworkdir: repoRoot\n---\n/support-process {{ticket.ref}}' });
+const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': { description: 'A Support case', autoStart: true, workdir: 'repoRoot', template: '/support-process {{ticket.ref}}' } });
 
 describe('pool triage (PRD R47, R50)', () => {
   it('triages a ticket entering the pool, offering only its namespace, stores its rating, and creates no work item', () => {
@@ -56,7 +56,7 @@ describe('pool triage (PRD R47, R50)', () => {
   });
 
   it('fails a pool triage at once when the triage playbook uses a variable other than {{playbooks}}', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'triage:zoho': '---\ndescription: Zoho triage\nkind: triage\n---\n{{ticket.title}}\n{{playbooks}}' }) });
+    const h = new Harness({ playbooks: playbooks(undefined, { 'triage:zoho': { description: 'Zoho triage', kind: 'triage', template: '{{ticket.title}}\n{{playbooks}}' } }) });
 
     expect(pollZoho(h, zoho('500', 'pool'))).toEqual([]);
     expect(h.store.poolTriages(1)).toMatchObject([{ error: 'Triage playbook triage:zoho: Unknown template variable: ticket.title.', endedAt: T0 }]);
@@ -83,7 +83,7 @@ describe('pool triage (PRD R47, R50)', () => {
 });
 
 describe('pick (PRD R48)', () => {
-  const MANUAL = playbooks(undefined, { 'support:case': '---\ndescription: A Support case\nworkdir: repoRoot\n---\n/support-process {{ticket.ref}}' });
+  const MANUAL = playbooks(undefined, { 'support:case': { description: 'A Support case', workdir: 'repoRoot', template: '/support-process {{ticket.ref}}' } });
 
   function pooled(h: Harness, key = '500', playbook: string | null = 'support:case'): number {
     const triage = only(pollZoho(h, zoho(key, 'pool')), 'triage');

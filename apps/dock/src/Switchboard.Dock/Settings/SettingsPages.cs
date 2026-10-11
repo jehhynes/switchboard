@@ -6,7 +6,7 @@ namespace Switchboard.Dock.Settings;
 /// <summary>A navigation entry: a heading, a namespace's table page, a page, or an Add button (<see cref="Command"/> <c>add-source</c> or <c>navigate</c>).</summary>
 public sealed record NavEntry(string Kind, string Label, string? Command = null, string? Argument = null, string? Note = null, bool Current = false, bool Dirty = false, bool HasErrors = false);
 
-/// <summary>A header button: <see cref="Command"/> is <c>revert</c>, <c>create</c>, <c>delete</c> or <c>remove-source</c>.</summary>
+/// <summary>A header button: <see cref="Command"/> is <c>create</c>, <c>delete</c> or <c>remove-source</c>.</summary>
 public sealed record PageButton(string Command, string Label, bool Enabled, bool Primary = false, string? Argument = null, string? Tip = null);
 
 /// <summary>A field with what it shows: its text or checked state and the errors that name it.</summary>
@@ -15,9 +15,9 @@ public sealed record FieldView(Field Field, string Text, bool Checked, string Se
 public sealed record SectionView(string Heading, bool Advanced, IReadOnlyList<FieldView> Fields);
 
 /// <summary>
-/// One page of the Settings window: its title, the file it edits, its buttons, a note (unknown source, changed on disk), the errors that name no
-/// field, a message in place of fields for a file to fix by hand, and the sections. <see cref="NewName"/> is set on the New playbook page, and
-/// <see cref="Table"/> on a namespace page. <see cref="Saved"/> says whether the page's changes are saved; null on a page with no file to save.
+/// One page of the Settings window: its title, the file it edits, its buttons, notes (an unknown source), the errors that name no field, a message
+/// in place of fields for an entry or file to fix by hand, and the sections. <see cref="NewName"/> is set on the New playbook page, and
+/// <see cref="Table"/> on a namespace page.
 /// </summary>
 public sealed record PageView(
     string Title,
@@ -28,18 +28,15 @@ public sealed record PageView(
     string? Message,
     IReadOnlyList<SectionView> Sections,
     NewNameView? NewName,
-    PlaybookTable? Table = null,
-    SaveState? Saved = null);
+    PlaybookTable? Table = null);
 
-/// <summary>Whether a page's files hold its changes: saved, saving once the check passes, or not saved because of an error or a refusal.</summary>
-public enum SaveState
-{
-    Saved,
-    Saving,
-    NotSaved,
-}
+/// <summary>
+/// The window-wide bar: the file's status, a warning that settings.json changed on disk, the errors of a refused or blocked save, and whether
+/// Save and Discard are enabled.
+/// </summary>
+public sealed record BarView(string Status, string? Warning, IReadOnlyList<string> Errors, bool CanSave, bool CanDiscard);
 
-/// <summary>A namespace's playbooks, one row each, with a checkbox per column; a null cell does not apply to the row's kind or invalid file.</summary>
+/// <summary>A namespace's playbooks, one row each, with a checkbox per column; a null cell does not apply to the row's kind or unreadable entry.</summary>
 public sealed record PlaybookTable(IReadOnlyList<TableColumn> Columns, IReadOnlyList<TableRow> Rows);
 
 /// <summary>A playbook's row: its full and short name, its description, its cells, and its unsaved and error state.</summary>
@@ -48,27 +45,27 @@ public sealed record TableRow(string Name, string Label, string Description, IRe
 /// <summary>The New playbook page's name fields and the name's error, shown once a name is typed or Create was pressed.</summary>
 public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<string> Namespaces, string? Error);
 
-/// <summary>What each page of the Settings window shows, from the editor state alone (PRD R54).</summary>
+/// <summary>What each page of the Settings window and its bar show, from the editor state alone (PRD R54).</summary>
 public static class SettingsPages
 {
-    const string FixByHand = "Fix the file in an editor; the editor reloads it when it changes.";
+    const string FixByHand = "Fix the file in an editor; the window reads it again when it changes.";
+    const string FixEntry = "Fix this entry in settings.json in an editor, or delete it.";
 
     public static IReadOnlyList<NavEntry> Nav(EditorState state)
     {
         var sources = state.SettingsValue?["sources"] is JsonObject configured ? configured.ToList() : [];
         var missing = state.Config.SourceKinds.Where((kind) => !sources.Any((entry) => entry.Key == kind));
-        var names = state.Config.Playbooks.Select((entry) => entry.Name).Concat(state.PlaybookDrafts.Keys).Distinct().Order(StringComparer.Ordinal).ToList();
         List<NavEntry> nav = [new("heading", "Settings"), Item(state, "general", "Sessions and triage"), new("heading", "Sources")];
 
-        foreach (var (name, source) in sources)
+        foreach (var (name, _) in sources)
         {
-            nav.Add(Item(state, $"source:{name}", SettingsFields.SourceLabel(name), source is JsonObject entry && entry["enabled"] is JsonValue on && on.GetValueKind() == JsonValueKind.True ? null : "off"));
+            nav.Add(Item(state, $"source:{name}", SettingsFields.SourceLabel(name), state.Config.Enabled.GetValueOrDefault(name) ? null : "off"));
         }
 
         nav.AddRange(missing.Select((kind) => new NavEntry("add", $"Add {SettingsFields.SourceLabel(kind)}", "add-source", kind)));
         nav.Add(new NavEntry("heading", "Playbooks"));
 
-        foreach (var group in names.GroupBy((full) => full.Split(':')[0]))
+        foreach (var group in state.PlaybookNames.GroupBy((full) => full.Split(':')[0]))
         {
             var page = $"namespace:{group.Key}";
 
@@ -95,11 +92,10 @@ public static class SettingsPages
         {
             var name = page["playbook:".Length..];
 
-            return state.PlaybookErrors.GetValueOrDefault(name)?.Count > 0 || state.Refusals.GetValueOrDefault(name)?.Count > 0 || state.PlaybookFile(name)?.Error is not null;
+            return state.PlaybookErrors(name).Count > 0 || (state.HasPlaybook(name) && state.PlaybookValue(name) is null);
         }
 
-        // A refused settings save names no field, so the mark goes on Sessions and triage.
-        return SettingsFields.SettingsErrorPages(state).Values.Contains(page) || (page == "general" && state.Refusals.GetValueOrDefault("settings")?.Count > 0);
+        return SettingsFields.SettingsErrorPages(state).Values.Contains(page);
     }
 
     public static bool PageDirty(EditorState state, string page)
@@ -114,17 +110,28 @@ public static class SettingsPages
             return state.PlaybookDirty(page["playbook:".Length..]);
         }
 
-        if (page == "new-playbook" || state.SettingsDraft is null)
+        if (page == "new-playbook" || state.Draft is null)
         {
             return false;
         }
 
         string[] paths = page == "general" ? ["sessions", "triage"] : [$"sources.{page["source:".Length..]}"];
 
-        return paths.Any((path) => Json(SettingsFields.GetAt(state.SettingsDraft.Value, path)) != Json(SettingsFields.GetAt(state.Config.Settings.Value, path)));
+        return paths.Any((path) => Json(SettingsFields.GetAt(state.Draft, path)) != Json(SettingsFields.GetAt(state.Config.Settings.Value, path)));
     }
 
     static string Json(JsonNode? node) => node?.ToJsonString() ?? "undefined";
+
+    public static BarView Bar(EditorState state)
+    {
+        var count = state.Errors.Count;
+        var status = state.Saving ? "Saving…"
+            : state.SettingsValue is null ? "settings.json cannot be read"
+            : string.Join(" · ", [state.Dirty ? "Unsaved changes" : "Saved", .. count == 0 ? Array.Empty<string>() : [count == 1 ? "1 error" : $"{count} errors"]]);
+        var warning = state.ChangedOnDisk ? "settings.json changed on disk, so your changes cannot be saved. Discard to load it." : null;
+
+        return new BarView(status, warning, state.BarErrors, state.Dirty && !state.ChangedOnDisk && !state.Saving, (state.Dirty || state.ChangedOnDisk) && !state.Saving);
+    }
 
     public static PageView Page(EditorState state)
     {
@@ -152,47 +159,32 @@ public static class SettingsPages
         {
             var draft = state.NewPlaybook;
             var nameError = draft.Namespace == "" && draft.Name == "" && !draft.Touched ? null : state.NewNameError;
-            var (errors, sections) = PlaybookSections(state, draft.Playbook, state.PlaybookErrors.GetValueOrDefault("new") ?? [], state.Refusals.GetValueOrDefault("new") ?? []);
+            var (errors, sections) = PlaybookSections(state, draft.Playbook, []);
 
             return new PageView("New playbook", null, [new PageButton("create", "Create", true, Primary: true)], [], errors, null, sections,
                 new NewNameView(draft.Namespace, draft.Name, state.Namespaces, nameError));
         }
 
         var playbook = page["playbook:".Length..];
-        var file = state.PlaybookFile(playbook);
-        var hasDraft = state.PlaybookDrafts.TryGetValue(playbook, out var current);
-        var refused = state.Refusals.GetValueOrDefault(playbook) ?? [];
+        var path = state.Config.Settings.Path;
 
-        if (file is null && !hasDraft)
+        if (!state.HasPlaybook(playbook))
         {
-            return new PageView(playbook, null, [], [], refused, "This playbook no longer exists.", [], null);
+            return new PageView(playbook, path, [], [], [], "This playbook no longer exists.", [], null);
         }
 
-        List<PageButton> delete = file is null ? [] : [new PageButton("delete", "Delete", true)];
+        List<PageButton> delete = [new PageButton("delete", "Delete", true)];
+        var errorsOf = state.PlaybookErrors(playbook);
 
-        // An invalid file is fixed by hand; a draft started before the file broke stays editable.
-        if (!hasDraft && file!.Playbook is null)
+        if (PlaybookFields.Read(state.PlaybookEntry(playbook)) is { Fields: null, Error: var readError })
         {
-            return new PageView(playbook, file.Path, delete, [], [file.Error ?? "The file is invalid.", .. refused], FixByHand, [], null);
+            return new PageView(playbook, path, delete, [], errorsOf.Count > 0 ? errorsOf : [readError!], FixEntry, [], null);
         }
 
-        var changed = hasDraft && (file is null || current!.Version != file.Version);
-        var broken = hasDraft && file is not null && file.Playbook is null ? new[] { $"On disk: {file.Error ?? "The file is invalid."}" } : [];
-        var (loose, fields) = PlaybookSections(state, state.PlaybookValue(playbook)!, state.PlaybookErrors.GetValueOrDefault(playbook) ?? [], [.. refused, .. broken]);
+        var (loose, fields) = PlaybookSections(state, state.PlaybookValue(playbook)!, errorsOf);
 
-        var dirty = state.PlaybookDirty(playbook);
-
-        return new PageView(playbook, file?.Path, [.. delete, Discard(dirty && !state.Saving.Contains(playbook))], changed ? [ChangedNote(playbook, file is null)] : [], loose, null, fields, null,
-            Saved: SaveStateOf(dirty, changed || loose.Count > 0 || fields.Any((section) => section.Fields.Any((field) => field.Errors.Count > 0))));
+        return new PageView(playbook, path, delete, [], loose, null, fields, null);
     }
-
-    static string ChangedNote(string file, bool deleted) =>
-        deleted ? $"{file} was deleted on disk, so your changes are not saved. Discard them to close it." : $"{file} changed on disk, so your changes are not saved. Discard them to load it.";
-
-    /// <summary>Discard, enabled for unsaved drafts whose save is not in flight, because that save writes them anyway.</summary>
-    static PageButton Discard(bool enabled) => new("revert", "Discard", enabled, Tip: "Discard the changes that are not saved");
-
-    static SaveState SaveStateOf(bool dirty, bool blocked) => !dirty ? SaveState.Saved : blocked ? SaveState.NotSaved : SaveState.Saving;
 
     static PageView SettingsPage(EditorState state, string title, IReadOnlyList<Section> sections, IReadOnlyList<PageButton> extra, IReadOnlyList<string> notes)
     {
@@ -204,22 +196,21 @@ public static class SettingsPages
         }
 
         var paths = SettingsFields.AllSettingsPaths(state);
+        var errors = state.SettingsErrors;
         var pages = SettingsFields.SettingsErrorPages(state);
-        var loose = (state.Refusals.GetValueOrDefault("settings") ?? []).Concat(state.SettingsErrors.Where((error) => pages.GetValueOrDefault(error) is null)).ToList();
+        var loose = errors.Where((error) => pages.GetValueOrDefault(error) is null).ToList();
         var views = sections.Select((section) => new SectionView(section.Heading, section.Advanced, section.Fields.Select((field) =>
-            FieldViewOf(field, SettingsFields.GetAt(value, field.Path), state.SettingsErrors.Where((error) => SettingsFields.FieldOfError(error, paths) == field.Path).ToList())).ToList())).ToList();
-        var changed = state.SettingsDraft is not null && state.SettingsDraft.Version != settings.Version;
+            FieldViewOf(field, SettingsFields.GetAt(value, field.Path), errors.Where((error) => SettingsFields.FieldOfError(error, paths) == field.Path).ToList())).ToList())).ToList();
 
-        return new PageView(title, settings.Path, [.. extra, Discard(state.SettingsDirty && !state.Saving.Contains("settings"))], changed ? [.. notes, ChangedNote("settings.json", false)] : notes, loose, null, views, null,
-            Saved: SaveStateOf(state.SettingsDirty, changed || state.SettingsErrors.Count > 0 || state.Refusals.ContainsKey("settings")));
+        return new PageView(title, settings.Path, extra, notes, loose, null, views, null);
     }
 
-    /// <summary>The errors that name no field, led by <paramref name="extra"/>, and the playbook's fields with the errors that name each.</summary>
-    static (IReadOnlyList<string> Loose, IReadOnlyList<SectionView> Sections) PlaybookSections(EditorState state, PlaybookFields playbook, IReadOnlyList<string> errors, IReadOnlyList<string> extra)
+    /// <summary>The errors that name no field, and the playbook's fields with the errors that name each.</summary>
+    static (IReadOnlyList<string> Loose, IReadOnlyList<SectionView> Sections) PlaybookSections(EditorState state, PlaybookFields playbook, IReadOnlyList<string> errors)
     {
         var fields = SettingsFields.PlaybookFieldsOf(state, playbook);
         var paths = fields.Select((field) => field.Path).ToList();
-        var loose = extra.Concat(errors.Where((error) => SettingsFields.PlaybookFieldOfError(error, paths) is null)).ToList();
+        var loose = errors.Where((error) => SettingsFields.PlaybookFieldOfError(error, paths) is null).ToList();
         var views = fields.Select((field) => FieldViewOf(field, SettingsFields.PlaybookFieldValue(playbook, field.Path), errors.Where((error) => SettingsFields.PlaybookFieldOfError(error, paths) == field.Path).ToList())).ToList();
 
         return (loose, [new SectionView("", false, views)]);
@@ -229,29 +220,24 @@ public static class SettingsPages
     static PageView NamespacePage(EditorState state, string space)
     {
         var names = state.NamespacePlaybooks(space);
-        var playbooks = names.Select((name) => (Name: name, Playbook: state.PlaybookValue(name))).ToList();
-        var columns = SettingsFields.TableColumns(playbooks.Select((entry) => entry.Playbook).OfType<PlaybookFields>());
-        var rows = playbooks.Select((entry) =>
-        {
-            var file = state.PlaybookFile(entry.Name);
-            var hasDraft = state.PlaybookDrafts.TryGetValue(entry.Name, out var draft);
-            var onDisk = file?.Error is { } broken ? new[] { hasDraft ? $"On disk: {broken}" : broken } : [];
-            var changed = hasDraft && (file is null || draft!.Version != file.Version) ? new[] { ChangedNote(entry.Name, file is null) } : [];
-            var cells = columns.Select((column) => entry.Playbook is { } playbook ? SettingsFields.Cell(playbook, column.Path) : null).ToList();
-            IReadOnlyList<string> errors = [.. changed, .. onDisk, .. state.Refusals.GetValueOrDefault(entry.Name) ?? [], .. state.PlaybookErrors.GetValueOrDefault(entry.Name) ?? []];
-
-            return new TableRow(entry.Name, entry.Name[(entry.Name.IndexOf(':') + 1)..], entry.Playbook?.Description ?? "", cells, state.PlaybookDirty(entry.Name), errors);
-        }).ToList();
 
         if (names.Count == 0)
         {
             return new PageView($"{space} playbooks", null, [], [], [], "This namespace has no playbooks.", [], null);
         }
 
-        var dirty = rows.Where((row) => row.Dirty).ToList();
+        var playbooks = names.Select((name) => (Name: name, Read: PlaybookFields.Read(state.PlaybookEntry(name)))).ToList();
+        var columns = SettingsFields.TableColumns(playbooks.Select((entry) => entry.Read.Fields).OfType<PlaybookFields>());
+        var rows = playbooks.Select((entry) =>
+        {
+            var cells = columns.Select((column) => entry.Read.Fields is { } playbook ? SettingsFields.Cell(playbook, column.Path) : null).ToList();
+            var errors = state.PlaybookErrors(entry.Name);
 
-        return new PageView($"{space} playbooks", null, [Discard(dirty.Count > 0 && !names.Any(state.Saving.Contains))], [], [], null, [], null, new PlaybookTable(columns, rows),
-            SaveStateOf(dirty.Count > 0, dirty.Any((row) => row.Errors.Count > 0)));
+            return new TableRow(entry.Name, entry.Name[(entry.Name.IndexOf(':') + 1)..], entry.Read.Fields?.Description ?? "", cells, state.PlaybookDirty(entry.Name),
+                errors.Count == 0 && entry.Read.Error is { } unread ? [unread] : errors);
+        }).ToList();
+
+        return new PageView($"{space} playbooks", null, [], [], [], null, [], null, new PlaybookTable(columns, rows));
     }
 
     /// <summary>What a field shows for its value: an absent list with a default shows the default; a checkbox without a value shows its fallback.</summary>

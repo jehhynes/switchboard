@@ -1,15 +1,21 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatPlaybook, isPlaybookName, loadPlaybooks, parsePlaybook } from '../src/playbook.js';
-import type { PlaybookFields } from '../src/playbook.js';
+import { describe, expect, it } from 'vitest';
+import { isPlaybookName, parsePlaybook, parsePlaybooks } from '../src/playbook.js';
 
 describe('parsePlaybook', () => {
-  it('reads front matter and the body, with CRLF and a BOM', () => {
-    const text = '﻿---\r\ndescription: "Defect: research it"\r\nautoStart: true\r\nrequiresWorktree: true\r\npermissionMode: plan\r\nmodel: opus\r\nworkdir: repoRoot\r\nreports: worktree,  done\r\n# a comment\r\n---\r\nResearch {{ticket.sourceKey}}.\r\n';
+  it('reads every key', () => {
+    const entry = {
+      description: 'Defect: research it',
+      autoStart: true,
+      requiresWorktree: true,
+      permissionMode: 'plan',
+      model: 'opus',
+      workdir: 'repoRoot',
+      reports: ['worktree', 'done'],
+      returnOf: ['support:how-to'],
+      template: 'Research {{ticket.sourceKey}}.\n',
+    };
 
-    expect(parsePlaybook('support:defect', text)).toEqual({
+    expect(parsePlaybook('support:defect', entry)).toEqual({
       playbook: {
         name: 'support:defect',
         description: 'Defect: research it',
@@ -22,14 +28,14 @@ describe('parsePlaybook', () => {
         reports: ['done', 'worktree'],
         approvalSends: false,
         rates: false,
-        returnOf: [],
+        returnOf: ['support:how-to'],
         template: 'Research {{ticket.sourceKey}}.\n',
       },
     });
   });
 
-  it('applies defaults', () => {
-    expect(parsePlaybook('triage:github', "---\ndescription: 'Triage'\nkind: triage\n---\nClassify.")).toEqual({
+  it('applies defaults, and reads null as unset', () => {
+    expect(parsePlaybook('triage:github', { description: 'Triage', kind: 'triage', model: null, permissionMode: null, template: 'Classify.' })).toEqual({
       playbook: {
         name: 'triage:github',
         description: 'Triage',
@@ -48,147 +54,80 @@ describe('parsePlaybook', () => {
     });
   });
 
-  it('reads approvalSends beside the approval report', () => {
-    const result = parsePlaybook('dev:review-pr', '---\ndescription: x\nreports: approval\napprovalSends: true\n---\nbody');
+  it('reads an empty model as unset', () => {
+    const result = parsePlaybook('dev:x', { description: 'x', model: '', template: 'body' });
 
-    expect('playbook' in result && [result.playbook.reports, result.playbook.approvalSends]).toEqual([['approval'], true]);
+    expect('playbook' in result && result.playbook.model).toBeNull();
+  });
+
+  it('reads approvalSends beside the approval report, and rates on a triage playbook', () => {
+    const sends = parsePlaybook('dev:review-pr', { description: 'x', reports: ['approval'], approvalSends: true, template: 'body' });
+    const rates = parsePlaybook('triage:zoho', { description: 'x', kind: 'triage', rates: true, template: 'body' });
+
+    expect('playbook' in sends && [sends.playbook.reports, sends.playbook.approvalSends]).toEqual([['approval'], true]);
+    expect('playbook' in rates && rates.playbook.rates).toBe(true);
   });
 
   it('reads returnOf as distinct playbook names', () => {
-    const result = parsePlaybook('dev:qa-failure', '---\ndescription: x\nreturnOf: dev:qa-question, dev:develop,dev:qa-question\n---\nbody');
+    const result = parsePlaybook('dev:qa-failure', { description: 'x', returnOf: ['dev:qa-question', 'dev:develop', 'dev:qa-question'], template: 'body' });
 
     expect('playbook' in result && result.playbook.returnOf).toEqual(['dev:qa-question', 'dev:develop']);
   });
 
   it.each([
-    ['no front matter', 'Just text', 'The file must start with front matter between --- lines.'],
-    ['no closing line', '---\ndescription: x\nbody', 'The front matter has no closing --- line.'],
-    ['closing line with text after it', '---\ndescription: x\n---more\nbody', 'The front matter has no closing --- line.'],
-    ['a line without a key', '---\ndescription: x\n- item\n---\nbody', 'Front matter line is not "key: value": - item'],
-    ['a repeated key', '---\ndescription: x\ndescription: y\n---\nbody', 'Front matter repeats description.'],
-    ['an unknown key', '---\ndescription: x\nauto: true\ncolor: red\n---\nbody', 'Unknown front matter: auto, color.'],
-    ['no description', '---\nautoStart: true\n---\nbody', 'description is required.'],
-    ['a bad kind', '---\ndescription: x\nkind: setup\n---\nbody', 'kind must be task or triage.'],
-    ['a bad autoStart', '---\ndescription: x\nautoStart: yes\n---\nbody', 'autoStart must be true or false.'],
-    ['a bad requiresWorktree', '---\ndescription: x\nrequiresWorktree: 1\n---\nbody', 'requiresWorktree must be true or false.'],
-    ['a bad approvalSends', '---\ndescription: x\nreports: approval\napprovalSends: yes\n---\nbody', 'approvalSends must be true or false.'],
-    ['approvalSends without the approval report', '---\ndescription: x\nreports: done\napprovalSends: true\n---\nbody', 'approvalSends applies only to a playbook whose reports include approval.'],
-    ['a bad permissionMode', '---\ndescription: x\npermissionMode: yolo\n---\nbody', 'permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.'],
-    ['a bad workdir', '---\ndescription: x\nworkdir: home\n---\nbody', 'workdir must be worktree or repoRoot.'],
-    ['an unknown report', '---\ndescription: x\nreports: done, stage, blocked\n---\nbody', 'reports can list done, approval, worktree, playbook, paste, not stage, blocked.'],
-    ['reports on a triage playbook', '---\ndescription: x\nkind: triage\nreports: done\n---\nbody', 'reports applies only to a task playbook.'],
-    ['a bad rates', '---\ndescription: x\nkind: triage\nrates: yes\n---\nbody', 'rates must be true or false.'],
-    ['rates on a task playbook', '---\ndescription: x\nrates: true\n---\nbody', 'rates applies only to a triage playbook.'],
-    ['a returnOf entry that is not a playbook name', '---\ndescription: x\nreturnOf: dev:ok, review\n---\nbody', 'returnOf must list other playbook names, not review.'],
-    ['a returnOf entry naming the playbook itself', '---\ndescription: x\nreturnOf: dev:x\n---\nbody', 'returnOf must list other playbook names, not dev:x.'],
-    ['returnOf on a triage playbook', '---\ndescription: x\nkind: triage\nreturnOf: dev:y\n---\nbody', 'returnOf applies only to a task playbook.'],
-    ['an empty body', '---\ndescription: x\n---\n  \n', 'The prompt template is empty.'],
-  ])('rejects %s', (_case, text, error) => {
-    expect(parsePlaybook('dev:x', text)).toEqual({ error });
+    ['a bad name', 'Dev:x', { description: 'x', template: 'body' }, 'Namespace and name must be lowercase letters, digits and hyphens.'],
+    ['a name without a namespace', 'triage', { description: 'x', template: 'body' }, 'Namespace and name must be lowercase letters, digits and hyphens.'],
+    ['an entry that is not an object', 'dev:x', 'body', 'A playbook must be an object.'],
+    ['an array entry', 'dev:x', [], 'A playbook must be an object.'],
+    ['unknown keys', 'dev:x', { description: 'x', auto: true, color: 'red', template: 'body' }, 'Unknown keys: auto, color.'],
+    ['no description', 'dev:x', { template: 'body' }, 'description is required.'],
+    ['an empty description', 'dev:x', { description: '', template: 'body' }, 'description is required.'],
+    ['a two-line description', 'dev:x', { description: 'a\nb', template: 'body' }, 'description must be one line.'],
+    ['a description that is not a string', 'dev:x', { description: 3, template: 'body' }, 'description must be a string.'],
+    ['a bad kind', 'dev:x', { description: 'x', kind: 'setup', template: 'body' }, 'kind must be task or triage.'],
+    ['a string autoStart', 'dev:x', { description: 'x', autoStart: 'true', template: 'body' }, 'autoStart must be true or false.'],
+    ['a numeric requiresWorktree', 'dev:x', { description: 'x', requiresWorktree: 1, template: 'body' }, 'requiresWorktree must be true or false.'],
+    ['a bad approvalSends', 'dev:x', { description: 'x', reports: ['approval'], approvalSends: 'yes', template: 'body' }, 'approvalSends must be true or false.'],
+    ['approvalSends without the approval report', 'dev:x', { description: 'x', reports: ['done'], approvalSends: true, template: 'body' }, 'approvalSends applies only to a playbook whose reports include approval.'],
+    ['a bad permissionMode', 'dev:x', { description: 'x', permissionMode: 'yolo', template: 'body' }, 'permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.'],
+    ['a bad workdir', 'dev:x', { description: 'x', workdir: 'home', template: 'body' }, 'workdir must be worktree or repoRoot.'],
+    ['reports as a comma-separated string', 'dev:x', { description: 'x', reports: 'done, approval', template: 'body' }, 'reports must be a list of strings.'],
+    ['a report that is not a string', 'dev:x', { description: 'x', reports: ['done', 1], template: 'body' }, 'reports must be a list of strings.'],
+    ['an unknown report', 'dev:x', { description: 'x', reports: ['done', 'stage', 'blocked'], template: 'body' }, 'reports can list done, approval, worktree, playbook, paste, not stage, blocked.'],
+    ['reports on a triage playbook', 'dev:x', { description: 'x', kind: 'triage', reports: ['done'], template: 'body' }, 'reports applies only to a task playbook.'],
+    ['a bad rates', 'dev:x', { description: 'x', kind: 'triage', rates: 'yes', template: 'body' }, 'rates must be true or false.'],
+    ['rates on a task playbook', 'dev:x', { description: 'x', rates: true, template: 'body' }, 'rates applies only to a triage playbook.'],
+    ['returnOf as a string', 'dev:x', { description: 'x', returnOf: 'dev:y', template: 'body' }, 'returnOf must be a list of strings.'],
+    ['a returnOf entry that is not a playbook name', 'dev:x', { description: 'x', returnOf: ['dev:ok', 'review'], template: 'body' }, 'returnOf must list other playbook names, not review.'],
+    ['a returnOf entry naming the playbook itself', 'dev:x', { description: 'x', returnOf: ['dev:x'], template: 'body' }, 'returnOf must list other playbook names, not dev:x.'],
+    ['returnOf on a triage playbook', 'dev:x', { description: 'x', kind: 'triage', returnOf: ['dev:y'], template: 'body' }, 'returnOf applies only to a task playbook.'],
+    ['no template', 'dev:x', { description: 'x' }, 'The prompt template is empty.'],
+    ['a blank template', 'dev:x', { description: 'x', template: '  \n' }, 'The prompt template is empty.'],
+    ['a template that is not a string', 'dev:x', { description: 'x', template: ['a'] }, 'template must be a string.'],
+  ])('refuses %s', (_case, name, entry, error) => {
+    expect(parsePlaybook(name, entry)).toEqual({ error });
   });
 });
 
-describe('loadPlaybooks', () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'switchboard-playbooks-'));
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  function file(path: string, text: string): void {
-    mkdirSync(join(dir, path, '..'), { recursive: true });
-    writeFileSync(join(dir, path), text);
-  }
-
-  it('names playbooks by namespace and file, and leaves out invalid ones with their errors', () => {
-    file('support/defect.md', '---\ndescription: Defect\n---\nResearch.');
-    file('dev/qa-failure.md', '---\ndescription: QA failed\nautoStart: true\n---\n/address-feedback');
-    file('dev/broken.md', 'no front matter');
-    file('dev/Upper.md', '---\ndescription: x\n---\nbody');
-    file('dev/notes.txt', 'ignored');
-    file('loose.md', 'ignored: not in a namespace');
-
-    const { playbooks, errors } = loadPlaybooks(dir);
+describe('parsePlaybooks', () => {
+  it('reads each entry sorted by name, and leaves out invalid ones with their errors', () => {
+    const { playbooks, errors } = parsePlaybooks({
+      'support:defect': { description: 'Defect', template: 'Research.' },
+      'dev:qa-failure': { description: 'QA failed', autoStart: true, template: '/address-feedback' },
+      'dev:broken': { description: 'x' },
+      'dev:Upper': { description: 'x', template: 'body' },
+    });
 
     expect([...playbooks.keys()]).toEqual(['dev:qa-failure', 'support:defect']);
     expect(playbooks.get('dev:qa-failure')?.autoStart).toBe(true);
     expect(errors).toEqual([
-      { file: 'dev/Upper.md', error: 'Namespace and name must be lowercase letters, digits and hyphens.' },
-      { file: 'dev/broken.md', error: 'The file must start with front matter between --- lines.' },
+      { name: 'dev:Upper', error: 'Namespace and name must be lowercase letters, digits and hyphens.' },
+      { name: 'dev:broken', error: 'The prompt template is empty.' },
     ]);
   });
 
-  it('treats a missing directory as empty', () => {
-    expect(loadPlaybooks(join(dir, 'missing'))).toEqual({ playbooks: new Map(), errors: [] });
-  });
-
-  it('throws when the directory cannot be read for another reason', () => {
-    file('file.md', 'x');
-
-    expect(() => loadPlaybooks(join(dir, 'file.md'))).toThrow(/ENOTDIR/);
-  });
-});
-
-describe('formatPlaybook', () => {
-  const task: PlaybookFields = {
-    description: 'Review a pull request',
-    kind: 'task',
-    autoStart: true,
-    requiresWorktree: false,
-    permissionMode: null,
-    model: null,
-    workdir: 'worktree',
-    reports: [],
-    approvalSends: false,
-    rates: false,
-    returnOf: [],
-    template: '/review-pr {{ticket.sourceKey}}\n',
-  };
-
-  it('writes only the non-default keys, keeping a task playbook\'s autoStart and requiresWorktree', () => {
-    expect(formatPlaybook(task)).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
-    expect(formatPlaybook({ ...task, reports: ['approval'], approvalSends: true })).toEqual({
-      text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreports: approval\napprovalSends: true\n---\n/review-pr {{ticket.sourceKey}}\n',
-    });
-    expect(formatPlaybook({ ...task, reports: ['approval'] })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreports: approval\n---\n/review-pr {{ticket.sourceKey}}\n' });
-    expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, reports: ['done'], template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
-    expect(formatPlaybook({ ...task, returnOf: ['dev:review-pr', 'dev:develop'] })).toEqual({
-      text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreturnOf: dev:review-pr, dev:develop\n---\n/review-pr {{ticket.sourceKey}}\n',
-    });
-    expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, returnOf: ['dev:y'], template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
-    expect(formatPlaybook({ ...task, rates: true })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
-  });
-
-  it.each<[string, Partial<PlaybookFields>]>([
-    ['every key set', { workdir: 'repoRoot', permissionMode: 'plan', model: 'opus', requiresWorktree: true, reports: ['done', 'approval', 'worktree'], returnOf: ['dev:review-pr'] }],
-    ['a description with a colon and quotes', { description: '"Defect": research it' }],
-    ['a description with outer spaces', { description: ' padded ' }],
-    ['a quoted model', { model: "'x'" }],
-    ['a triage playbook that starts automatically', { kind: 'triage', autoStart: true }],
-    ['a triage playbook that rates', { kind: 'triage', autoStart: false, rates: true }],
-  ])('reads back the same fields with %s', (_case, patch) => {
-    const playbook = { ...task, ...patch };
-    const formatted = formatPlaybook(playbook);
-
-    expect(formatted).toHaveProperty('text');
-    expect(parsePlaybook('dev:x', (formatted as { text: string }).text)).toEqual({ playbook: { name: 'dev:x', ...playbook } });
-  });
-
-  it('adds a final newline and turns CRLF into LF', () => {
-    expect(formatPlaybook({ ...task, template: 'a\r\nb' })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\na\nb\n' });
-  });
-
-  it('refuses a description or model of more than one line', () => {
-    expect(formatPlaybook({ ...task, description: 'a\nb' })).toEqual({ error: 'description must be one line.' });
-    expect(formatPlaybook({ ...task, model: 'a\r\nb' })).toEqual({ error: 'model must be one line.' });
-  });
-
-  it('refuses a returnOf entry that would not read back as one playbook name', () => {
-    expect(formatPlaybook({ ...task, returnOf: ['dev:a, dev:b', 'dev:c'] })).toEqual({ error: 'returnOf must list other playbook names, not dev:a, dev:b.' });
+  it('treats a missing playbooks key as none', () => {
+    expect(parsePlaybooks(undefined)).toEqual({ playbooks: new Map(), errors: [] });
   });
 });
 

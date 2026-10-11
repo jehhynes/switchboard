@@ -203,12 +203,13 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
     /// <summary>When set, each check waits for the task this returns for it before answering.</summary>
     public Func<int, Task>? HoldCheck { get; set; }
 
+    /// <summary>Each save's refusal; an empty queue, or an empty entry, saves.</summary>
     public Queue<string[]> SaveReplies { get; } = new();
-
-    public string[] DeleteReply { get; set; } = [];
 
     /// <summary>When set, the next read answers with the config as it was when asked, once the task this returns ends.</summary>
     public Func<Task>? HoldRead { get; set; }
+
+    public IEnumerable<string> Saves => Calls.Where((call) => call.StartsWith("save", StringComparison.Ordinal));
 
     public async Task<(Switchboard.Dock.Settings.EditorConfig? Config, string? Error)> ReadConfig()
     {
@@ -228,12 +229,9 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
     /// <summary>When set, checks get no answer, as when the hub stopped.</summary>
     public bool Silent { get; set; }
 
-    /// <summary>When set, a saved playbook is stored as this returns it, as the hub normalizes the file it writes.</summary>
-    public Func<JsonObject, JsonObject>? Normalize { get; set; }
-
-    public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject body)
+    public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject settings)
     {
-        Calls.Add($"check {body.ToJsonString()}");
+        Calls.Add($"check {settings.ToJsonString()}");
 
         if (Silent)
         {
@@ -255,10 +253,13 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
 
     int saves;
 
-    /// <summary>Answers the next <see cref="SaveReplies"/> entry; with none, writes the value into <see cref="Config"/> under a new version <c>s&lt;n&gt;</c>.</summary>
-    public async Task<Switchboard.Dock.Settings.SaveReply> SaveConfig(JsonObject body)
+    /// <summary>
+    /// Refuses with the next <see cref="SaveReplies"/> entry, or as the hub does when settings.json is no longer at the version sent; else writes
+    /// the value into <see cref="Config"/> under a new version <c>s&lt;n&gt;</c>.
+    /// </summary>
+    public async Task<Switchboard.Dock.Settings.SaveReply> SaveConfig(JsonObject value, string? version, string configDir)
     {
-        Calls.Add($"save {body.ToJsonString()}");
+        Calls.Add($"save {new JsonObject { ["value"] = value.DeepClone(), ["version"] = version, ["configDir"] = configDir }.ToJsonString()}");
 
         if (HoldSave is { } hold)
         {
@@ -270,53 +271,49 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
             return new(errors, null);
         }
 
-        var version = $"s{++saves}";
-
-        if (body["target"]?.GetValue<string>() == "settings")
+        if (version != Config["settings"]!["version"]?.GetValue<string>())
         {
-            Config["settings"]!["value"] = body["value"]!.DeepClone();
-            Config["settings"]!["version"] = version;
-        }
-        else if (Config["playbooks"]!.AsArray().FirstOrDefault((entry) => entry!["name"]!.GetValue<string>() == body["name"]!.GetValue<string>()) is { } entry)
-        {
-            var playbook = body["playbook"]!.DeepClone().AsObject();
-
-            entry["playbook"] = Normalize is null ? playbook : Normalize(playbook);
-            entry["version"] = version;
+            return new(["settings.json changed on disk after the editor read it. Discard to load it."], null);
         }
 
-        return new([], version);
-    }
+        var written = $"s{++saves}";
 
-    public Task<IReadOnlyList<string>> DeletePlaybook(string name, string version, string configDir)
-    {
-        Calls.Add($"delete {name} {version}");
+        Config["settings"]!["value"] = value.DeepClone();
+        Config["settings"]!["version"] = written;
 
-        return Task.FromResult<IReadOnlyList<string>>(DeleteReply);
+        return new([], written);
     }
 }
 
 /// <summary>Config replies as <c>POST /config/read</c> answers them.</summary>
 static class SettingsConfigs
 {
-    public static JsonObject Playbook(string kind = "task", string template = "Do {{ticket.title}}.", params string[] reports) =>
-        new()
-        {
-            ["description"] = "Build it",
-            ["kind"] = kind,
-            ["autoStart"] = false,
-            ["requiresWorktree"] = false,
-            ["permissionMode"] = null,
-            ["model"] = null,
-            ["workdir"] = "worktree",
-            ["reports"] = new JsonArray(reports.Select((report) => (JsonNode)JsonValue.Create(report)).ToArray()),
-            ["approvalSends"] = false,
-            ["rates"] = false,
-            ["returnOf"] = new JsonArray(),
-            ["template"] = template,
-        };
+    /// <summary>A task playbook entry as the window writes it, or a triage one.</summary>
+    public static JsonObject Playbook(string kind = "task", string template = "Do {{ticket.title}}.", params string[] reports)
+    {
+        var entry = new JsonObject { ["description"] = "Build it" };
 
-    /// <summary>Settings with GitHub on and Zoho off, playbooks dev:develop, dev:review and triage:github, and dev:develop used by two open work items.</summary>
+        if (kind == "task")
+        {
+            entry["autoStart"] = false;
+            entry["requiresWorktree"] = false;
+        }
+        else
+        {
+            entry["kind"] = kind;
+        }
+
+        if (reports.Length > 0)
+        {
+            entry["reports"] = new JsonArray(reports.Select((report) => (JsonNode)JsonValue.Create(report)).ToArray());
+        }
+
+        entry["template"] = template;
+
+        return entry;
+    }
+
+    /// <summary>Settings with GitHub on and Zoho off in the hub's stored state, playbooks dev:develop, dev:review and triage:github, and dev:develop used by two open work items.</summary>
     public static JsonObject Basic() =>
         new()
         {
@@ -327,20 +324,26 @@ static class SettingsConfigs
                 ["value"] = new JsonObject
                 {
                     ["sessions"] = new JsonObject { ["concurrency"] = 2 },
-                    ["sources"] = new JsonObject { ["github"] = new JsonObject { ["enabled"] = true, ["repo"] = "acme/widgets" }, ["zoho"] = new JsonObject { ["enabled"] = false } },
+                    ["sources"] = new JsonObject { ["github"] = new JsonObject { ["repo"] = "acme/widgets" }, ["zoho"] = new JsonObject() },
+                    ["playbooks"] = new JsonObject
+                    {
+                        ["dev:develop"] = Playbook(reports: ["done"]),
+                        ["dev:review"] = Playbook(),
+                        ["triage:github"] = Playbook("triage", "Choose."),
+                    },
                 },
                 ["error"] = null,
             },
-            ["playbooks"] = new JsonArray(
-                new JsonObject { ["name"] = "dev:develop", ["path"] = "C:/cfg/playbooks/dev/develop.md", ["version"] = "p1", ["playbook"] = Playbook(reports: ["done"]), ["error"] = null },
-                new JsonObject { ["name"] = "dev:review", ["path"] = "C:/cfg/playbooks/dev/review.md", ["version"] = "p2", ["playbook"] = Playbook(), ["error"] = null },
-                new JsonObject { ["name"] = "triage:github", ["path"] = "C:/cfg/playbooks/triage/github.md", ["version"] = "p3", ["playbook"] = Playbook("triage", "Choose."), ["error"] = null }),
             ["permissionModes"] = new JsonArray("acceptEdits", "auto", "plan"),
             ["templateVariables"] = new JsonArray("ticket.title", "report"),
             ["sourceKinds"] = new JsonArray("github", "zoho", "forum"),
             ["inUse"] = new JsonObject { ["dev:develop"] = 2 },
+            ["enabled"] = new JsonObject { ["github"] = true, ["zoho"] = false },
             ["configDir"] = "C:/cfg",
         };
+
+    /// <summary>The settings.json value of a config reply.</summary>
+    public static JsonObject Value(JsonObject config) => config["settings"]!["value"]!.AsObject();
 
     public static Switchboard.Dock.Settings.EditorState State(JsonObject? config = null) => new(Switchboard.Dock.Settings.EditorConfig.Parse(config ?? Basic()));
 }

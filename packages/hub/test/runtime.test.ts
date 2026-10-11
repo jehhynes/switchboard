@@ -21,8 +21,8 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function playbook(name: string, text: string): [string, Playbook] {
-  const parsed = parsePlaybook(name, text);
+function playbook(name: string, entry: unknown): [string, Playbook] {
+  const parsed = parsePlaybook(name, entry);
 
   if ('error' in parsed) {
     throw new Error(parsed.error);
@@ -32,8 +32,8 @@ function playbook(name: string, text: string): [string, Playbook] {
 }
 
 const PLAYBOOKS = new Map([
-  playbook('triage:github', '---\ndescription: Triage\nkind: triage\n---\nClassify.'),
-  playbook('dev:develop', '---\ndescription: Build it\nautoStart: true\nreports: done, approval, worktree\n---\nBuild {{ticket.sourceKey}}.'),
+  playbook('triage:github', { description: 'Triage', kind: 'triage', template: 'Classify.' }),
+  playbook('dev:develop', { description: 'Build it', autoStart: true, reports: ['done', 'approval', 'worktree'], template: 'Build {{ticket.sourceKey}}.' }),
 ]);
 
 function config(patch: Partial<Settings['sessions']> = {}): Config {
@@ -41,7 +41,7 @@ function config(patch: Partial<Settings['sessions']> = {}): Config {
     settings: {
       ...DEFAULT_SETTINGS,
       sessions: { ...DEFAULT_SETTINGS.sessions, installHooks: false, ...patch },
-      sources: { github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
+      sources: { github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
     },
     settingsError: null,
     playbooks: PLAYBOOKS,
@@ -152,6 +152,11 @@ const NO_SERVICE: ServiceDeps = {
 function setup(cfg = config(), now = () => T0, service = NO_SERVICE) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
+
+  for (const name of Object.keys(cfg.settings.sources)) {
+    store.setSourceEnabled(name, true);
+  }
+
   const source = new FakeSource();
   let ids = 0;
   const logs: string[] = [];
@@ -445,7 +450,7 @@ describe('Runtime', () => {
   it('links a setup worktree by branch name before the setup session ends', async () => {
     const cfg = config();
     cfg.settings.sources['github']!.setupPrompt = '/init-worktree {{ticket.sourceKey}}';
-    cfg.playbooks = new Map([...PLAYBOOKS, playbook('dev:develop', '---\ndescription: Build it\nautoStart: true\nrequiresWorktree: true\n---\nBuild.')]);
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('dev:develop', { description: 'Build it', autoStart: true, requiresWorktree: true, template: 'Build.' })]);
     const { store, cli, source, runtime } = setup(cfg);
     cli.worktrees = 'worktree D:/git/widgets\nHEAD abc\nbranch refs/heads/master\n';
     source.result = { tickets: [issue('8')] };
@@ -708,7 +713,7 @@ describe('Runtime', () => {
 
   it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook or one it is a return of, and hides a disabled source (PRD R50, R51)', async () => {
     const cfg = config();
-    cfg.playbooks = new Map([...PLAYBOOKS, playbook('triage:github', '---\ndescription: Triage\nkind: triage\nrates: true\n---\nClassify and rate.')]);
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('triage:github', { description: 'Triage', kind: 'triage', rates: true, template: 'Classify and rate.' })]);
     const { store, cli, source, runtime } = setup(cfg);
     const rated = (immediacy: string, severity: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', immediacy, severity } }));
     cli.classifyByContext.set(triageText('Issue 2 text', T0), rated('NON-BLOCKING', 'LOW'));
@@ -745,20 +750,24 @@ describe('Runtime', () => {
 
     // With dev:develop a return of dev:review, the started dev:review work item counts as well.
     const returning = config();
-    returning.playbooks = new Map([...cfg.playbooks, playbook('dev:develop', '---\ndescription: Build it\nreturnOf: dev:review\n---\nBuild.')]);
+    returning.playbooks = new Map([...cfg.playbooks, playbook('dev:develop', { description: 'Build it', returnOf: ['dev:review'], template: 'Build.' })]);
     runtime.reload(returning);
 
     expect(runtime.snapshot().pool.find((entry) => entry.ticket.sourceKey === '1')?.returned).toBe(2);
 
     // A disabled source's pool is not read, so it is hidden; the filter lists it as off.
     const off = config();
-    off.settings.sources['github']!.enabled = false;
     off.settings.sources['github']!.namespace = 'dev';
     runtime.reload(off);
 
+    expect(runtime.setSourceEnabled('github', false)).toBeNull();
+    expect(store.enabledSources()).toEqual(new Set());
     expect(runtime.snapshot().pool).toEqual([]);
     expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', enabled: false }]);
     expect(runtime.snapshot().namespaces).toEqual({ github: 'dev' });
+    expect(runtime.setSourceEnabled('zoho', true)).toBe('settings.json has no source named zoho.');
+    expect(runtime.setSourceEnabled('adhoc', true)).toBe('settings.json has no source named adhoc.');
+    expect(store.enabledSources()).toEqual(new Set());
   });
 
   it('gives each work item its current playbook\'s approvalSends (PRD R27)', async () => {
@@ -770,7 +779,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems.map((item) => [item.playbook, item.approvalSends])).toEqual([['dev:develop', false]]);
 
     const sends = config();
-    sends.playbooks = new Map([...PLAYBOOKS, playbook('dev:develop', '---\ndescription: Build it\nreports: approval\napprovalSends: true\n---\nBuild.')]);
+    sends.playbooks = new Map([...PLAYBOOKS, playbook('dev:develop', { description: 'Build it', reports: ['approval'], approvalSends: true, template: 'Build.' })]);
     runtime.reload(sends);
     expect(runtime.snapshot().workItems.map((item) => item.approvalSends)).toEqual([true]);
 
@@ -862,7 +871,7 @@ describe('Runtime', () => {
 
     // A playbook that is a return of dev:develop counts its started work items too.
     const cfg = config();
-    cfg.playbooks = new Map([...PLAYBOOKS, playbook('dev:review', '---\ndescription: Review it\nreturnOf: dev:develop\n---\nReview.')]);
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('dev:review', { description: 'Review it', returnOf: ['dev:develop'], template: 'Review.' })]);
     runtime.reload(cfg);
 
     expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned])).toEqual([[4, 1], [3, 1], [2, 1]]);
@@ -874,9 +883,24 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems.find((item) => item.id === later.id)?.returned).toBe(1);
   });
 
+  it('turns off a source that was removed from settings.json, so adding it again starts it off, and keeps it while the file is invalid', () => {
+    const { store, runtime } = setup();
+    const removed = config();
+    removed.settings.sources = {};
+
+    runtime.reload({ ...removed, settingsError: 'sessions.concurrency must be a whole number from 1 to 10.' });
+    expect(store.enabledSources()).toEqual(new Set(['github']));
+
+    runtime.reload(removed);
+    expect(store.enabledSources()).toEqual(new Set());
+
+    runtime.reload(config());
+    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', enabled: false }]);
+  });
+
   it('reports an unknown or misconfigured source', () => {
     const cfg = config();
-    cfg.settings.sources['zoho'] = { ...cfg.settings.sources['github']!, enabled: true };
+    cfg.settings.sources['zoho'] = { ...cfg.settings.sources['github']! };
     const { runtime } = setup(cfg);
 
     expect(runtime.snapshot().errors.sources).toEqual({ zoho: 'Switchboard has no source named zoho.' });

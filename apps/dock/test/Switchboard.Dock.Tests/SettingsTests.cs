@@ -24,7 +24,7 @@ public sealed class SettingsFieldsTests
     {
         var config = SettingsConfigs.Basic();
 
-        config["settings"]!["value"]!["sources"]!["github"]!["triagePlaybook"] = "triage:gone";
+        SettingsConfigs.Value(config)["sources"]!["github"]!["triagePlaybook"] = "triage:gone";
 
         var sections = SettingsFields.SourceFields(SettingsConfigs.State(config), "github");
         var fields = sections.SelectMany((section) => section.Fields).ToDictionary((field) => field.Path);
@@ -35,6 +35,8 @@ public sealed class SettingsFieldsTests
         Assert.Equal(["None", "triage:github", "triage:gone (missing)"], fields["sources.github.triagePlaybook"].Options!.Select((option) => option.Label));
         Assert.Equal(FieldKind.List, fields["sources.github.logins"].Kind);
         Assert.Equal("^(\\d+)-", sections[2].Fields.Single((field) => field.Path == "sources.github.branchPattern").Placeholder);
+        Assert.DoesNotContain("sources.github.enabled", fields.Keys);
+        Assert.Equal("sources.github.pollIntervalSeconds", sections[0].Fields[0].Path);
     }
 
     [Fact]
@@ -77,7 +79,7 @@ public sealed class SettingsFieldsTests
 
         Assert.Equal(["dev:qa-question", "dev:develop"], playbook.ReturnOf);
         Assert.Equal("dev:qa-question\ndev:develop", SettingsPages.FieldViewOf(SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(), playbook).Single((field) => field.Path == "returnOf"), SettingsFields.PlaybookFieldValue(playbook, "returnOf"), []).Text);
-        Assert.Equal(playbook.ReturnOf, PlaybookFields.FromJson(playbook.ToJson()).ReturnOf);
+        Assert.Equal(playbook.ReturnOf, PlaybookFields.Read(playbook.ToEntry()).Fields!.ReturnOf);
     }
 
     [Fact]
@@ -142,7 +144,7 @@ public sealed class SettingsFieldsTests
     {
         var config = SettingsConfigs.Basic();
 
-        config["settings"]!["value"]!["sessions"] = new JsonObject { ["permissionMode"] = "plan", ["model"] = "opus" };
+        SettingsConfigs.Value(config)["sessions"] = new JsonObject { ["permissionMode"] = "plan", ["model"] = "opus" };
 
         var fields = SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(config), PlaybookFields.Empty).ToDictionary((field) => field.Path);
         var defaults = SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(), PlaybookFields.Empty).ToDictionary((field) => field.Path);
@@ -245,13 +247,48 @@ public sealed class SettingsFieldsTests
     }
 
     [Fact]
-    public void Same_TemplatesDifferOnlyByTheFinalNewlineOrCrLf_AreTheSame()
+    public void ToEntry_TaskPlaybook_LeavesOutDefaultsExceptTheStartFlagsInKeyOrder()
     {
-        var a = PlaybookFields.Empty with { Template = "One\r\nTwo" };
+        var entry = (PlaybookFields.Empty with { Description = "D", Template = "T\n" }).ToEntry();
+        var full = new PlaybookFields("D", "task", true, true, "plan", "opus", "repoRoot", ["approval"], true, false, ["dev:x"], "T").ToEntry();
 
-        Assert.True(PlaybookFields.Same(a, a with { Template = "One\nTwo\n" }));
-        Assert.False(PlaybookFields.Same(a, a with { Template = "One\nTwo\n\n" }));
-        Assert.False(PlaybookFields.Same(a, null));
+        Assert.Equal("{\"description\":\"D\",\"autoStart\":false,\"requiresWorktree\":false,\"template\":\"T\\n\"}", entry.ToJsonString());
+        Assert.Equal(
+            "{\"description\":\"D\",\"autoStart\":true,\"requiresWorktree\":true,\"workdir\":\"repoRoot\",\"reports\":[\"approval\"],\"approvalSends\":true,\"returnOf\":[\"dev:x\"],\"permissionMode\":\"plan\",\"model\":\"opus\",\"template\":\"T\"}",
+            full.ToJsonString());
+    }
+
+    [Fact]
+    public void ToEntry_TriagePlaybook_WritesKindAndRatesAndLeavesOutFalseStartFlags()
+    {
+        var entry = (PlaybookFields.Empty with { Description = "D", Kind = "triage", Rates = true, Template = "T" }).ToEntry();
+
+        Assert.Equal("{\"description\":\"D\",\"kind\":\"triage\",\"rates\":true,\"template\":\"T\"}", entry.ToJsonString());
+    }
+
+    [Theory]
+    [InlineData("[]", "A playbook must be an object.")]
+    [InlineData("{\"description\":1}", "description must be a string.")]
+    [InlineData("{\"autoStart\":\"yes\"}", "autoStart must be true or false.")]
+    [InlineData("{\"reports\":\"done\"}", "reports must be a list of strings.")]
+    [InlineData("{\"returnOf\":[1]}", "returnOf must be a list of strings.")]
+    [InlineData("{\"description\":\"D\",\"note\":\"x\",\"extra\":1,\"template\":\"T\"}", "Unknown keys: note, extra.")]
+    public void Read_WrongJsonType_ReturnsTheErrorAndNoFields(string json, string error)
+    {
+        var (fields, message) = PlaybookFields.Read(JsonNode.Parse(json));
+
+        Assert.Null(fields);
+        Assert.Equal(error, message);
+    }
+
+    [Fact]
+    public void Read_AbsentAndNullKeys_TakeTheDefaults()
+    {
+        var (fields, error) = PlaybookFields.Read(new JsonObject { ["description"] = "D", ["model"] = null, ["template"] = "T" });
+
+        Assert.Null(error);
+        Assert.True(PlaybookFields.Same(PlaybookFields.Empty with { Description = "D", Template = "T" }, fields));
+        Assert.False(PlaybookFields.Same(PlaybookFields.Empty, fields));
     }
 }
 
@@ -268,25 +305,136 @@ public sealed class SettingsPagesTests
         Assert.True(nav[1].Current);
         Assert.Equal("add-source", nav[5].Command);
         Assert.Equal("forum", nav[5].Argument);
+        Assert.DoesNotContain(nav, (entry) => entry.Dirty || entry.HasErrors);
     }
 
     [Fact]
-    public void Nav_Namespaces_OpenTheirTablesAndMarkTheirPlaybooksDraftsAndErrors()
+    public void Nav_EnabledMap_MarksTheSourcesItHasOffAndAMissingMapMarksAll()
+    {
+        var config = SettingsConfigs.Basic();
+
+        config["enabled"] = new JsonObject { ["github"] = false, ["zoho"] = true };
+
+        var notes = (JsonObject? reply) => SettingsPages.Nav(SettingsConfigs.State(reply)).Where((entry) => entry.Argument?.StartsWith("source:", StringComparison.Ordinal) == true).Select((entry) => $"{entry.Argument} {entry.Note}");
+
+        Assert.Equal(["source:github off", "source:zoho "], notes(config));
+
+        config.Remove("enabled");
+        Assert.Equal(["source:github off", "source:zoho off"], notes(config));
+        Assert.Equal(["source:github ", "source:zoho off"], notes(null));
+    }
+
+    [Theory]
+    [InlineData("sessions.concurrency", "general")]
+    [InlineData("triage.model", "general")]
+    [InlineData("sources.github.repo", "source:github")]
+    [InlineData("sources.zoho.orgId", "source:zoho")]
+    public void Nav_SettingEdited_MarksOnlyItsPage(string path, string page)
     {
         var state = SettingsConfigs.State();
 
-        state.PlaybookDrafts["dev:review"] = new PlaybookDraft(state.PlaybookValue("dev:review")! with { AutoStart = true }, "p2");
-        state.PlaybookErrors["triage:github"] = ["model must be a string."];
-        state.Page = "namespace:dev";
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, path, "x"));
 
-        var nav = SettingsPages.Nav(state).Where((entry) => entry.Kind == "namespace").ToDictionary((entry) => entry.Label);
+        var dirty = SettingsPages.Nav(state).Where((entry) => entry.Dirty).Select((entry) => entry.Argument);
 
-        Assert.Equal(("navigate", "namespace:dev"), (nav["dev"].Command, nav["dev"].Argument));
-        Assert.True(nav["dev"].Current);
-        Assert.True(nav["dev"].Dirty);
-        Assert.False(nav["dev"].HasErrors);
-        Assert.False(nav["triage"].Dirty);
-        Assert.True(nav["triage"].HasErrors);
+        Assert.Equal([page], dirty);
+    }
+
+    [Fact]
+    public void Nav_PlaybookEdited_MarksItsPageAndNamespace()
+    {
+        var state = SettingsConfigs.State();
+
+        state.SetDraft(SettingsFields.WithPlaybook(state.SettingsValue!, "dev:review", SettingsConfigs.Playbook(template: "Other")));
+
+        Assert.Equal(["namespace:dev", "playbook:dev:review"], SettingsPages.Nav(state).Where((entry) => entry.Dirty).Select((entry) => entry.Argument));
+    }
+
+    [Fact]
+    public void Nav_PlaybookAddedOrDeletedInTheDraft_MarksTheNewOneAndDropsTheDeletedOne()
+    {
+        var state = SettingsConfigs.State();
+        var value = SettingsFields.WithPlaybook(state.SettingsValue!, "dev:new", SettingsConfigs.Playbook());
+
+        state.SetDraft(SettingsFields.WithPlaybook(value, "triage:github", null));
+
+        var nav = SettingsPages.Nav(state);
+
+        Assert.Equal(["namespace:dev", "playbook:dev:new"], nav.Where((entry) => entry.Dirty).Select((entry) => entry.Argument));
+        Assert.DoesNotContain(nav, (entry) => entry.Argument is "playbook:triage:github" or "namespace:triage");
+    }
+
+    [Fact]
+    public void Nav_Errors_MarkTheirPagesAndNamespaces()
+    {
+        var state = SettingsConfigs.State();
+
+        state.Errors = ["sessions.concurrency must be 1 to 10.", "playbooks.dev:review: model must be a string."];
+
+        var nav = SettingsPages.Nav(state).Where((entry) => entry.HasErrors).Select((entry) => entry.Argument);
+
+        Assert.Equal(["general", "namespace:dev", "playbook:dev:review"], nav);
+    }
+
+    [Fact]
+    public void Page_PlaybookErrors_LandOnTheirPlaybooksFieldsOrTop()
+    {
+        var state = SettingsConfigs.State();
+
+        state.Errors =
+        [
+            "playbooks.dev:review: description is required.",
+            "playbooks.dev:review: Unknown template variable: nope.",
+            "playbooks.dev:review: approvalSends applies only to a playbook with the approval report.",
+            "playbooks.dev:develop: model must be a string.",
+            "playbooks must be an object.",
+        ];
+        state.Page = "playbook:dev:review";
+
+        var page = SettingsPages.Page(state);
+        var fields = page.Sections.SelectMany((section) => section.Fields).ToDictionary((field) => field.Field.Path);
+
+        Assert.Equal(["description is required."], fields["description"].Errors);
+        Assert.Equal(["Unknown template variable: nope."], fields["template"].Errors);
+        Assert.Equal(["approvalSends applies only to a playbook with the approval report."], page.Errors);
+        Assert.Empty(fields["model"].Errors);
+        Assert.Equal(["playbooks must be an object."], state.SettingsErrors);
+
+        state.Page = "general";
+        Assert.Equal(["playbooks must be an object."], SettingsPages.Page(state).Errors);
+    }
+
+    [Fact]
+    public void Page_ErrorOfAPlaybookNotInTheDraft_ShowsOnTheSettingsPages()
+    {
+        var state = SettingsConfigs.State();
+
+        state.Errors = ["playbooks.dev:gone: description is required."];
+
+        Assert.Equal(["playbooks.dev:gone: description is required."], SettingsPages.Page(state).Errors);
+    }
+
+    [Fact]
+    public void Page_UnreadableEntry_ShowsItsErrorAndDeleteWithoutFields()
+    {
+        var config = SettingsConfigs.Basic();
+
+        SettingsConfigs.Value(config)["playbooks"]!["dev:bad"] = new JsonObject { ["description"] = "Bad", ["reports"] = "done", ["template"] = "T" };
+
+        var state = SettingsConfigs.State(config);
+
+        state.Page = "playbook:dev:bad";
+
+        var page = SettingsPages.Page(state);
+
+        Assert.Equal(["reports must be a list of strings."], page.Errors);
+        Assert.Equal(["delete"], page.Buttons.Select((button) => button.Command));
+        Assert.Empty(page.Sections);
+        Assert.NotNull(page.Message);
+        Assert.Contains(SettingsPages.Nav(state), (entry) => entry.Argument == "playbook:dev:bad" && entry.HasErrors);
+
+        state.Errors = ["playbooks.dev:bad: reports must be a list of done, approval, worktree, playbook, paste."];
+        Assert.Equal(["reports must be a list of done, approval, worktree, playbook, paste."], SettingsPages.Page(state).Errors);
     }
 
     [Fact]
@@ -294,13 +442,13 @@ public sealed class SettingsPagesTests
     {
         var config = SettingsConfigs.Basic();
 
-        config["playbooks"]!.AsArray().Add(new JsonObject { ["name"] = "dev:broken", ["path"] = "C:/cfg/playbooks/dev/broken.md", ["version"] = "p4", ["playbook"] = null, ["error"] = "dev:broken has no front matter." });
+        SettingsConfigs.Value(config)["playbooks"]!["dev:broken"] = new JsonArray();
 
         var state = SettingsConfigs.State(config);
 
         state.Page = "namespace:dev";
-        state.PlaybookDrafts["dev:review"] = new PlaybookDraft(state.PlaybookValue("dev:review")! with { Reports = ["approval"] }, "p2");
-        state.Refusals["dev:review"] = ["dev:review changed on disk after the editor read it. Reload to see the change."];
+        state.SetDraft(SettingsFields.WithPlaybook(state.SettingsValue!, "dev:review", SettingsConfigs.Playbook(reports: ["approval"])));
+        state.Errors = ["playbooks.dev:review: description is required."];
 
         var page = SettingsPages.Page(state);
         var table = page.Table!;
@@ -312,33 +460,16 @@ public sealed class SettingsPagesTests
         Assert.Equal(["dev:broken", "dev:develop", "dev:review"], table.Rows.Select((row) => row.Name));
         Assert.DoesNotContain(table.Columns, (column) => column.Path == "rates");
         Assert.All(rows["dev:broken"].Cells, Assert.Null);
-        Assert.Equal(["dev:broken has no front matter."], rows["dev:broken"].Errors);
+        Assert.Equal(["A playbook must be an object."], rows["dev:broken"].Errors);
         Assert.False(rows["dev:develop"].Cells[approval]!.Checked);
         Assert.False(rows["dev:develop"].Cells[sends]!.Enabled);
+        Assert.False(rows["dev:develop"].Dirty);
         Assert.True(rows["dev:review"].Cells[approval]!.Checked);
         Assert.True(rows["dev:review"].Cells[sends]!.Enabled);
         Assert.True(rows["dev:review"].Dirty);
-        Assert.Equal(["dev:review changed on disk after the editor read it. Reload to see the change."], rows["dev:review"].Errors);
+        Assert.Equal(["description is required."], rows["dev:review"].Errors);
         Assert.Equal("review", rows["dev:review"].Label);
-        Assert.Equal(["revert"], page.Buttons.Select((button) => button.Command));
-        Assert.True(page.Buttons.Single().Enabled);
-        Assert.Equal(SaveState.NotSaved, page.Saved);
-    }
-
-    [Fact]
-    public void Page_NamespaceDraftsOfChangedOrDeletedFiles_WarnOnTheirRows()
-    {
-        var state = SettingsConfigs.State();
-
-        state.Page = "namespace:dev";
-        state.PlaybookDrafts["dev:review"] = new PlaybookDraft(state.PlaybookValue("dev:review")! with { AutoStart = true }, "p0");
-        state.PlaybookDrafts["dev:gone"] = new PlaybookDraft(PlaybookFields.Empty with { Description = "Gone" }, "p5");
-
-        var rows = SettingsPages.Page(state).Table!.Rows.ToDictionary((row) => row.Name);
-
-        Assert.Equal(["dev:review changed on disk, so your changes are not saved. Discard them to load it."], rows["dev:review"].Errors);
-        Assert.Equal(["dev:gone was deleted on disk, so your changes are not saved. Discard them to close it."], rows["dev:gone"].Errors);
-        Assert.Empty(rows["dev:develop"].Errors);
+        Assert.Empty(page.Buttons);
     }
 
     [Fact]
@@ -356,41 +487,20 @@ public sealed class SettingsPagesTests
     }
 
     [Fact]
-    public void Nav_DraftAndErrors_MarkTheirPages()
-    {
-        var state = SettingsConfigs.State();
-
-        state.SettingsDraft = new SettingsDraft(SettingsFields.SetAt(state.SettingsValue!, "sources.github.repo", "a/b"), "v1");
-        state.SettingsErrors = ["sessions.concurrency must be 1 to 10."];
-        state.PlaybookErrors["dev:review"] = ["model must be a string."];
-
-        var nav = SettingsPages.Nav(state).Where((entry) => entry.Kind == "item").ToDictionary((entry) => entry.Argument!);
-
-        Assert.True(nav["source:github"].Dirty);
-        Assert.False(nav["general"].Dirty);
-        Assert.True(nav["general"].HasErrors);
-        Assert.False(nav["source:github"].HasErrors);
-        Assert.True(nav["playbook:dev:review"].HasErrors);
-        Assert.False(nav["playbook:dev:develop"].HasErrors);
-    }
-
-    [Fact]
     public void Page_SettingsErrors_PlacesFieldErrorsAndShowsTheRestAtTheTop()
     {
         var state = SettingsConfigs.State();
 
-        state.SettingsErrors = ["sessions.concurrency must be 1 to 10.", "sources.github.repo must be owner/name.", "Something else."];
-        state.Refusals["settings"] = ["settings.json changed on disk after the editor read it. Reload to see the change."];
+        state.Errors = ["sessions.concurrency must be 1 to 10.", "sources.github.repo must be owner/name.", "Something else."];
 
         var page = SettingsPages.Page(state);
         var concurrency = page.Sections[0].Fields[0];
 
-        Assert.Equal(["settings.json changed on disk after the editor read it. Reload to see the change.", "Something else."], page.Errors);
+        Assert.Equal(["Something else."], page.Errors);
         Assert.Equal(["sessions.concurrency must be 1 to 10."], concurrency.Errors);
         Assert.Equal("2", concurrency.Text);
-        Assert.Equal(["revert"], page.Buttons.Select((button) => button.Command));
-        Assert.All(page.Buttons, (button) => Assert.False(button.Enabled));
-        Assert.Equal(SaveState.Saved, page.Saved);
+        Assert.Empty(page.Buttons);
+        Assert.Equal("C:/cfg/settings.json", page.FilePath);
     }
 
     [Fact]
@@ -401,12 +511,14 @@ public sealed class SettingsPagesTests
         config["settings"]!["value"] = null;
         config["settings"]!["error"] = "settings.json is not valid JSON: x";
 
-        var page = SettingsPages.Page(SettingsConfigs.State(config));
+        var state = SettingsConfigs.State(config);
+        var page = SettingsPages.Page(state);
 
         Assert.Equal(["settings.json is not valid JSON: x"], page.Errors);
         Assert.Empty(page.Sections);
         Assert.Empty(page.Buttons);
-        Assert.Equal("Fix the file in an editor; the editor reloads it when it changes.", page.Message);
+        Assert.Equal("Fix the file in an editor; the window reads it again when it changes.", page.Message);
+        Assert.Equal(("settings.json cannot be read", (string?)null, false, false), Summary(SettingsPages.Bar(state)));
     }
 
     [Fact]
@@ -423,46 +535,16 @@ public sealed class SettingsPagesTests
     }
 
     [Fact]
-    public void Page_InvalidPlaybookFileWithoutDraft_ShowsItsErrorWithDeleteOnly()
-    {
-        var config = SettingsConfigs.Basic();
-
-        config["playbooks"]![1]!["playbook"] = null;
-        config["playbooks"]![1]!["error"] = "The front matter has no closing --- line.";
-
-        var state = SettingsConfigs.State(config);
-
-        state.Page = "playbook:dev:review";
-
-        var page = SettingsPages.Page(state);
-
-        Assert.Equal(["The front matter has no closing --- line."], page.Errors);
-        Assert.Equal(["delete"], page.Buttons.Select((button) => button.Command));
-        Assert.Empty(page.Sections);
-    }
-
-    [Fact]
-    public void Page_DraftOfAChangedOrDeletedFile_SaysSo()
+    public void Page_PlaybookNotInTheDraft_SaysItNoLongerExists()
     {
         var state = SettingsConfigs.State();
 
-        state.Page = "playbook:dev:review";
-        state.PlaybookDrafts["dev:review"] = new PlaybookDraft(PlaybookFields.Empty with { Description = "New" }, "p0");
-
-        var changed = SettingsPages.Page(state);
-
-        Assert.Equal(["dev:review changed on disk, so your changes are not saved. Discard them to load it."], changed.Notes);
-        Assert.Equal(["delete", "revert"], changed.Buttons.Select((button) => button.Command));
-        Assert.True(changed.Buttons.Single((button) => button.Command == "revert").Enabled);
-        Assert.Equal(SaveState.NotSaved, changed.Saved);
-
-        state.PlaybookDrafts["dev:gone"] = new PlaybookDraft(PlaybookFields.Empty, "p9");
         state.Page = "playbook:dev:gone";
 
-        var deleted = SettingsPages.Page(state);
+        var page = SettingsPages.Page(state);
 
-        Assert.Equal(["dev:gone was deleted on disk, so your changes are not saved. Discard them to close it."], deleted.Notes);
-        Assert.DoesNotContain("delete", deleted.Buttons.Select((button) => button.Command));
+        Assert.Equal("This playbook no longer exists.", page.Message);
+        Assert.Empty(page.Buttons);
     }
 
     [Fact]
@@ -496,23 +578,65 @@ public sealed class SettingsPagesTests
     }
 
     [Fact]
-    public void Refresh_FilesReadAgain_DropsSavedDraftsAndKeepsOthers()
+    public void Bar_States_ShowSavedUnsavedErrorsAndChangedOnDisk()
+    {
+        var state = SettingsConfigs.State();
+
+        Assert.Equal(("Saved", (string?)null, false, false), Summary(SettingsPages.Bar(state)));
+
+        state.Errors = ["a"];
+        Assert.Equal("Saved · 1 error", SettingsPages.Bar(state).Status);
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "sessions.concurrency", 3));
+        state.Errors = ["a", "b"];
+
+        var dirty = SettingsPages.Bar(state);
+
+        Assert.Equal(("Unsaved changes · 2 errors", true, true, (string?)null), (dirty.Status, dirty.CanSave, dirty.CanDiscard, dirty.Warning));
+
+        state.Refresh(EditorConfig.Parse(SettingsConfigs.Basic().Also((config) => config["settings"]!["version"] = "v2")));
+
+        var changed = SettingsPages.Bar(state);
+
+        Assert.Equal("settings.json changed on disk, so your changes cannot be saved. Discard to load it.", changed.Warning);
+        Assert.False(changed.CanSave);
+        Assert.True(changed.CanDiscard);
+
+        state.Saving = true;
+        Assert.Equal(("Saving…", false, false), (SettingsPages.Bar(state).Status, SettingsPages.Bar(state).CanSave, SettingsPages.Bar(state).CanDiscard));
+    }
+
+    static (string, string?, bool, bool) Summary(BarView bar) => (bar.Status, bar.Warning, bar.CanSave, bar.CanDiscard);
+
+    [Fact]
+    public void Refresh_FileReadAgain_DropsADraftItMatchesAndKeepsOthers()
     {
         var state = SettingsConfigs.State();
         var saved = SettingsConfigs.Basic();
 
-        saved["settings"]!["value"]!["sessions"]!["concurrency"] = 4;
-        saved["playbooks"]![0]!["playbook"]!["description"] = "Saved";
-        saved["playbooks"]!.AsArray().RemoveAt(1);
-        state.SettingsDraft = new SettingsDraft(SettingsFields.SetAt(state.SettingsValue!, "sessions.concurrency", 4), "v1");
-        state.PlaybookDrafts["dev:develop"] = new PlaybookDraft(state.PlaybookValue("dev:develop")! with { Description = "Saved" }, "p1");
-        state.PlaybookDrafts["dev:review"] = new PlaybookDraft(PlaybookFields.Empty, "p2");
-
+        SettingsConfigs.Value(saved)["sessions"]!["concurrency"] = 4;
+        saved["settings"]!["version"] = "v2";
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "sessions.concurrency", 5));
         state.Refresh(EditorConfig.Parse(saved));
 
-        Assert.Null(state.SettingsDraft);
-        Assert.False(state.PlaybookDrafts.ContainsKey("dev:develop"));
-        Assert.True(state.PlaybookDrafts.ContainsKey("dev:review"));
+        Assert.NotNull(state.Draft);
+        Assert.Equal("v1", state.DraftVersion);
+        Assert.True(state.ChangedOnDisk);
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "sessions.concurrency", 4));
+        state.Refresh(EditorConfig.Parse(saved));
+
+        Assert.Null(state.Draft);
+        Assert.False(state.ChangedOnDisk);
+    }
+}
+
+static class JsonTestExtensions
+{
+    public static JsonObject Also(this JsonObject node, Action<JsonObject> change)
+    {
+        change(node);
+        return node;
     }
 }
 
@@ -522,7 +646,11 @@ public sealed class SettingsEditorTests
 
     static Field Concurrency => SettingsFields.GeneralFields(SettingsConfigs.State())[0].Fields[0];
 
-    /// <summary>An editor that has read the files; by default its delayed check never runs, so a test runs it with <see cref="SettingsEditor.Flush"/>.</summary>
+    static Field Model => SettingsFields.GeneralFields(SettingsConfigs.State())[0].Fields[2];
+
+    static Field PlaybookField(string path, FieldKind kind = FieldKind.Text) => new(path, path, kind, "");
+
+    /// <summary>An editor that has read the file; by default its delayed check never runs, so a test runs it with <see cref="SettingsEditor.Check"/>.</summary>
     async Task<SettingsEditor> Loaded(Func<CancellationToken, Task>? delay = null)
     {
         var editor = new SettingsEditor(hub, delay ?? ((cancel) => Task.Delay(Timeout.Infinite, cancel)));
@@ -533,8 +661,10 @@ public sealed class SettingsEditorTests
         return editor;
     }
 
+    static JsonObject SavedValue(string call) => JsonNode.Parse(call["save ".Length..])!["value"]!.AsObject();
+
     [Fact]
-    public async Task Edit_SettingsField_ChecksTheDraftOnlyAfterTheDelay()
+    public async Task Edit_SettingsField_ChecksTheWholeDraftOnlyAfterTheDelay()
     {
         var wait = new TaskCompletionSource();
         var editor = await Loaded((_) => wait.Task);
@@ -544,10 +674,14 @@ public sealed class SettingsEditorTests
 
         hub.CheckReplies.Enqueue(["sessions.concurrency must be 1 to 10."]);
         wait.SetResult();
-        await Until(() => editor.State!.SettingsErrors.Count > 0);
+        await Until(() => editor.State!.Errors.Count > 0);
 
-        Assert.Equal(["check {\"target\":\"settings\",\"settings\":{\"sessions\":{\"concurrency\":11},\"sources\":{\"github\":{\"enabled\":true,\"repo\":\"acme/widgets\"},\"zoho\":{\"enabled\":false}}}}"], hub.Calls);
-        Assert.True(editor.State!.SettingsDirty);
+        var check = JsonNode.Parse(Assert.Single(hub.Calls)["check ".Length..])!;
+
+        Assert.Equal(11, check["sessions"]!["concurrency"]!.GetValue<long>());
+        Assert.NotNull(check["playbooks"]!["dev:review"]);
+        Assert.NotNull(check["sources"]!["github"]);
+        Assert.True(editor.State!.Dirty);
     }
 
     [Fact]
@@ -570,10 +704,7 @@ public sealed class SettingsEditorTests
         await Until(() => hub.Calls.Count > 0);
         await Task.Delay(50, TestContext.Current.CancellationToken);
 
-        // The read after the save checks the page again.
-        var check = Assert.Single(hub.Calls.TakeWhile((call) => !call.StartsWith("save", StringComparison.Ordinal)), (call) => call.StartsWith("check", StringComparison.Ordinal));
-
-        Assert.Contains("\"concurrency\":12", check);
+        Assert.Contains("\"concurrency\":12", Assert.Single(hub.Calls));
     }
 
     [Fact]
@@ -592,175 +723,239 @@ public sealed class SettingsEditorTests
         first.SetResult();
         await older;
 
-        Assert.Equal(["new"], editor.State!.SettingsErrors);
+        Assert.Equal(["new"], editor.State!.Errors);
     }
 
     [Fact]
-    public async Task Save_Refused_KeepsTheRefusalUntilTheNextEdit()
+    public async Task Edit_CheckPasses_DoesNotSave()
+    {
+        var editor = await Loaded((_) => Task.CompletedTask);
+
+        editor.Edit(Concurrency, "3");
+        await Until(() => hub.Calls.Count > 0);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Empty(hub.Saves);
+        Assert.True(editor.State!.Dirty);
+        Assert.Equal("Unsaved changes", SettingsPages.Bar(editor.State).Status);
+    }
+
+    [Fact]
+    public async Task Save_Draft_WritesTheWholeDraftWithItsVersionAndReadsTheFileAgain()
+    {
+        var editor = await Loaded();
+
+        editor.Edit(Concurrency, "3");
+        editor.Navigate("playbook:dev:review");
+        editor.Edit(PlaybookField("model"), "opus");
+
+        Assert.True(await editor.Save());
+
+        var save = Assert.Single(hub.Saves);
+        var sent = JsonNode.Parse(save["save ".Length..])!;
+
+        Assert.Equal(3, sent["value"]!["sessions"]!["concurrency"]!.GetValue<long>());
+        Assert.Equal("opus", sent["value"]!["playbooks"]!["dev:review"]!["model"]!.GetValue<string>());
+        Assert.Equal("acme/widgets", sent["value"]!["sources"]!["github"]!["repo"]!.GetValue<string>());
+        Assert.Equal(("v1", "C:/cfg"), (sent["version"]!.GetValue<string>(), sent["configDir"]!.GetValue<string>()));
+        Assert.Equal("read", hub.Calls.SkipWhile((call) => !call.StartsWith("save", StringComparison.Ordinal)).ElementAt(1));
+        Assert.Null(editor.State!.Draft);
+        Assert.Equal("s1", editor.State.Config.Settings.Version);
+        Assert.Equal("Saved", SettingsPages.Bar(editor.State).Status);
+    }
+
+    [Fact]
+    public async Task Save_HubRefuses_ShowsItsErrorsInTheBarAndKeepsTheDraftUntilTheNextEdit()
     {
         var editor = await Loaded();
 
         editor.Edit(Concurrency, "3");
         hub.SaveReplies.Enqueue(["Switchboard is not running."]);
-        await editor.Flush();
 
-        Assert.Contains("save {\"target\":\"settings\",\"value\":{\"sessions\":{\"concurrency\":3},", string.Join('\n', hub.Calls));
-        Assert.Contains("\"version\":\"v1\",\"configDir\":\"C:/cfg\"}", hub.Calls.Single((call) => call.StartsWith("save", StringComparison.Ordinal)));
-        Assert.Equal(["Switchboard is not running."], SettingsPages.Page(editor.State!).Errors);
-        Assert.Equal(SaveState.NotSaved, SettingsPages.Page(editor.State!).Saved);
-        Assert.True(editor.State!.SettingsDirty);
+        Assert.False(await editor.Save());
+        Assert.Equal(["Switchboard is not running."], SettingsPages.Bar(editor.State!).Errors);
+        Assert.True(editor.State!.Dirty);
+        Assert.DoesNotContain("read", hub.Calls);
 
         editor.Edit(Concurrency, "4");
-        Assert.Empty(SettingsPages.Page(editor.State!).Errors);
+        Assert.Empty(SettingsPages.Bar(editor.State).Errors);
     }
 
     [Fact]
-    public async Task Save_Accepted_ReadsTheFilesAgainAndDropsTheSavedDraft()
-    {
-        var editor = await Loaded();
-
-        editor.Edit(Concurrency, "3");
-        Assert.Equal(SaveState.Saving, SettingsPages.Page(editor.State!).Saved);
-        await editor.Flush();
-
-        Assert.Contains("read", hub.Calls);
-        Assert.Null(editor.State!.SettingsDraft);
-        Assert.Equal(3, editor.State.Config.Settings.Value!["sessions"]!["concurrency"]!.GetValue<long>());
-        Assert.Equal(SaveState.Saved, SettingsPages.Page(editor.State).Saved);
-    }
-
-    [Fact]
-    public async Task AutoSave_EditsOnTwoPagesBeforeTheCheck_SavesEachFileWithItsVersion()
-    {
-        var editor = await Loaded();
-        var description = new Field("description", "Description", FieldKind.Text, "");
-
-        editor.Edit(Concurrency, "3");
-        await editor.Navigate("playbook:dev:review");
-        editor.Edit(description, "Review it");
-        await editor.Navigate("playbook:dev:develop");
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-        await editor.Flush();
-
-        var saves = hub.Calls.Where((call) => call.StartsWith("save", StringComparison.Ordinal)).ToList();
-
-        Assert.Equal(2, saves.Count);
-        Assert.Contains(saves, (save) => save.Contains("\"target\":\"settings\"", StringComparison.Ordinal) && save.EndsWith("\"version\":\"v1\",\"configDir\":\"C:/cfg\"}", StringComparison.Ordinal));
-        Assert.Contains(saves, (save) => save.Contains("\"description\":\"Review it\"", StringComparison.Ordinal) && save.EndsWith("\"version\":\"p2\",\"configDir\":\"C:/cfg\"}", StringComparison.Ordinal));
-        Assert.False(editor.State!.AnyDirty);
-    }
-
-    [Fact]
-    public async Task AutoSave_CheckFails_KeepsTheDraftUnsaved()
+    public async Task Save_CheckErrorStands_ShowsTheErrorsWithoutCallingTheHub()
     {
         var editor = await Loaded();
 
         editor.Edit(Concurrency, "11");
         hub.CheckReplies.Enqueue(["sessions.concurrency must be 1 to 10."]);
-        await editor.Flush();
+        await editor.Check();
+        hub.Calls.Clear();
 
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-        Assert.True(editor.State!.SettingsDirty);
-        Assert.Equal(SaveState.NotSaved, SettingsPages.Page(editor.State).Saved);
+        Assert.False(await editor.Save());
+        Assert.Empty(hub.Calls);
+        Assert.Equal(["sessions.concurrency must be 1 to 10."], SettingsPages.Bar(editor.State!).Errors);
+        Assert.True(editor.State!.Dirty);
     }
 
     [Fact]
-    public async Task AutoSave_EditedDuringASave_SavesAgainFromTheVersionWritten()
+    public async Task Save_EditNotYetChecked_ChecksItFirst()
+    {
+        var editor = await Loaded();
+
+        editor.Edit(Concurrency, "11");
+        hub.CheckReplies.Enqueue(["sessions.concurrency must be 1 to 10."]);
+
+        Assert.False(await editor.Save());
+        Assert.StartsWith("check", Assert.Single(hub.Calls));
+        Assert.Equal(["sessions.concurrency must be 1 to 10."], SettingsPages.Bar(editor.State!).Errors);
+    }
+
+    [Fact]
+    public async Task Save_NothingChanged_DoesNotCallTheHub()
+    {
+        var editor = await Loaded();
+
+        Assert.True(await editor.Save());
+        Assert.Empty(hub.Calls);
+    }
+
+    [Fact]
+    public async Task Save_EditedDuringTheSave_KeepsTheEditFromTheVersionWritten()
     {
         var editor = await Loaded();
         var release = new TaskCompletionSource();
 
-        hub.HoldSave = () => release.Task;
         editor.Edit(Concurrency, "3");
+        await editor.Check();
+        hub.HoldSave = () => release.Task;
 
-        var first = editor.Flush();
+        var first = editor.Save();
 
-        editor.Edit(Concurrency, "4");
+        Assert.Equal("Saving…", SettingsPages.Bar(editor.State!).Status);
+        editor.Edit(Model, "opus");
 
-        var second = editor.Flush();
+        var second = editor.Save();
 
         hub.HoldSave = null;
         release.SetResult();
-        await first;
-        await second;
+        Assert.True(await first);
+        // The second Save waited for the first, which did not write the later edit.
+        Assert.False(await second);
 
-        var saves = hub.Calls.Where((call) => call.StartsWith("save", StringComparison.Ordinal)).ToList();
+        Assert.Single(hub.Saves);
+        Assert.True(editor.State!.Dirty);
+        Assert.Equal("s1", editor.State.DraftVersion);
+        Assert.False(editor.State.ChangedOnDisk);
 
-        Assert.Equal(2, saves.Count);
-        Assert.Contains("\"concurrency\":3", saves[0]);
-        Assert.EndsWith("\"version\":\"v1\",\"configDir\":\"C:/cfg\"}", saves[0]);
-        Assert.Contains("\"concurrency\":4", saves[1]);
-        Assert.EndsWith("\"version\":\"s1\",\"configDir\":\"C:/cfg\"}", saves[1]);
-        Assert.Null(editor.State!.SettingsDraft);
+        Assert.True(await editor.Save());
+        Assert.Equal("{\"concurrency\":3,\"model\":\"opus\"}", SavedValue(hub.Saves.Last())["sessions"]!.ToJsonString());
+        Assert.Contains("\"version\":\"s1\"", hub.Saves.Last());
     }
 
     [Fact]
-    public async Task AutoSave_HubNormalizesTheFile_SavesOnceAndShowsTheFile()
+    public async Task Save_DuringASaveOfTheSameDraft_WaitsAndReportsItSaved()
     {
         var editor = await Loaded();
-        var redraws = new List<bool>();
-
-        // The hub strips a template's leading newline, so the file never equals the draft.
-        hub.Normalize = (playbook) =>
-        {
-            playbook["template"] = playbook["template"]!.GetValue<string>().TrimStart('\n');
-            return playbook;
-        };
-        await editor.Navigate("playbook:dev:review");
-        editor.Edit(new Field("template", "Prompt", FieldKind.Prompt, ""), "\nReview {{ticket.title}}.");
-        editor.Changed += redraws.Add;
-        await editor.Flush();
-
-        Assert.Single(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-        Assert.Empty(editor.State!.PlaybookDrafts);
-        Assert.Equal("Review {{ticket.title}}.", editor.State.PlaybookValue("dev:review")!.Template);
-        Assert.Contains(true, redraws);
-    }
-
-    [Fact]
-    public async Task AutoSave_EditWhileTheReadAfterASaveIsPending_KeepsBothChanges()
-    {
-        var editor = await Loaded();
-        var model = SettingsFields.GeneralFields(SettingsConfigs.State())[0].Fields[2];
-        var read = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
 
         editor.Edit(Concurrency, "3");
-        hub.HoldSave = () =>
-        {
-            hub.HoldRead = () => read.Task;
-            return Task.CompletedTask;
-        };
+        await editor.Check();
+        hub.HoldSave = () => release.Task;
 
-        var first = editor.Flush();
+        var first = editor.Save();
+        var second = editor.Save();
 
+        Assert.False(second.IsCompleted);
         hub.HoldSave = null;
-        editor.Edit(model, "opus");
-        read.SetResult();
-        await first;
-        await editor.Flush();
+        release.SetResult();
 
-        var saves = hub.Calls.Where((call) => call.StartsWith("save", StringComparison.Ordinal)).ToList();
-
-        Assert.Equal(2, saves.Count);
-        Assert.Contains("\"concurrency\":3,\"model\":\"opus\"", saves[1]);
-        Assert.EndsWith("\"version\":\"s1\",\"configDir\":\"C:/cfg\"}", saves[1]);
-        Assert.Null(editor.State!.SettingsDraft);
-        Assert.Empty(SettingsPages.Page(editor.State).Notes);
+        Assert.True(await second);
+        Assert.True(await first);
+        Assert.Single(hub.Saves);
     }
 
     [Fact]
-    public async Task AutoSave_OwnSave_DoesNotRedrawTheFields()
+    public async Task Load_DraftEditedBackToTheFileThenFileChanged_ShowsTheNewFile()
     {
         var editor = await Loaded();
-        var redraws = new List<bool>();
 
         editor.Edit(Concurrency, "3");
-        editor.Changed += redraws.Add;
-        await editor.Flush();
+        editor.Edit(Concurrency, "2");
+        Assert.NotNull(editor.State!.Draft);
+        Assert.False(editor.State.Dirty);
 
-        Assert.NotEmpty(redraws);
-        Assert.DoesNotContain(true, redraws);
-        Assert.Null(editor.State!.SettingsDraft);
+        SettingsConfigs.Value(hub.Config)["sessions"]!["model"] = "opus";
+        hub.Config["settings"]!["version"] = "v2";
+        await editor.Load();
+
+        Assert.Null(editor.State.Draft);
+        Assert.Equal("opus", editor.State.SettingsValue!["sessions"]!["model"]!.GetValue<string>());
+        Assert.Null(SettingsPages.Bar(editor.State).Warning);
+        Assert.Equal("Saved", SettingsPages.Bar(editor.State).Status);
+    }
+
+    [Fact]
+    public async Task Discard_EveryKindOfChange_DropsThemAllAndReadsTheFile()
+    {
+        var editor = await Loaded();
+        var before = editor.State!.SettingsValue!.ToJsonString();
+
+        editor.Edit(Concurrency, "3");
+        editor.RemoveSource("github");
+        editor.AddSource("forum");
+        editor.EditCell("dev:develop", "autoStart", true);
+        editor.Navigate("new-playbook");
+        editor.EditNewName("dev", "fix");
+        editor.Create();
+        hub.SaveReplies.Enqueue(["no"]);
+        await editor.Save();
+        Assert.True(editor.State.Dirty);
+        hub.Calls.Clear();
+
+        await editor.Discard();
+
+        Assert.Null(editor.State.Draft);
+        Assert.Equal(before, editor.State.SettingsValue!.ToJsonString());
+        Assert.Empty(editor.State.BarErrors);
+        Assert.Equal("read", hub.Calls[0]);
+        Assert.Empty(hub.Saves);
+    }
+
+    [Fact]
+    public async Task Load_FileChangedOnDiskWithADraft_KeepsTheDraftWarnsAndDiscardTakesTheFile()
+    {
+        var editor = await Loaded();
+
+        editor.Edit(Concurrency, "3");
+        SettingsConfigs.Value(hub.Config)["sessions"]!["concurrency"] = 7;
+        hub.Config["settings"]!["version"] = "v2";
+        await editor.Load();
+
+        Assert.Equal(3, editor.State!.SettingsValue!["sessions"]!["concurrency"]!.GetValue<long>());
+        Assert.NotNull(SettingsPages.Bar(editor.State).Warning);
+
+        Assert.False(SettingsPages.Bar(editor.State).CanSave);
+        Assert.False(await editor.Save());
+        Assert.Empty(hub.Saves);
+
+        await editor.Discard();
+
+        Assert.Equal(7, editor.State.SettingsValue!["sessions"]!["concurrency"]!.GetValue<int>());
+        Assert.Null(SettingsPages.Bar(editor.State).Warning);
+    }
+
+    [Fact]
+    public async Task Load_FileChangedOnDiskWithoutADraft_ShowsTheFile()
+    {
+        var editor = await Loaded();
+
+        SettingsConfigs.Value(hub.Config)["sessions"]!["concurrency"] = 7;
+        hub.Config["settings"]!["version"] = "v2";
+        await editor.Load();
+
+        Assert.Equal(7, editor.State!.SettingsValue!["sessions"]!["concurrency"]!.GetValue<int>());
+        Assert.Null(SettingsPages.Bar(editor.State).Warning);
+        Assert.Equal("Saved", SettingsPages.Bar(editor.State).Status);
     }
 
     [Fact]
@@ -771,7 +966,7 @@ public sealed class SettingsEditorTests
 
         editor.Changed += redraws.Add;
         await editor.Load();
-        hub.Config["settings"]!["value"]!["sessions"]!["concurrency"] = 4;
+        SettingsConfigs.Value(hub.Config)["sessions"]!["concurrency"] = 4;
         await editor.Load();
 
         Assert.False(redraws[0]);
@@ -779,177 +974,31 @@ public sealed class SettingsEditorTests
     }
 
     [Fact]
-    public async Task AutoSave_HubDoesNotAnswerTheCheck_SaysTheChangeIsNotSaved()
+    public async Task Save_OwnSave_DoesNotRedrawTheFields()
+    {
+        var editor = await Loaded();
+        var redraws = new List<bool>();
+
+        editor.Edit(Concurrency, "3");
+        editor.Changed += redraws.Add;
+        await editor.Save();
+
+        Assert.NotEmpty(redraws);
+        Assert.DoesNotContain(true, redraws);
+    }
+
+    [Fact]
+    public async Task Load_ConfigFolderChanged_DropsTheDraftAndSaysSo()
     {
         var editor = await Loaded();
 
         editor.Edit(Concurrency, "3");
-        hub.Silent = true;
-        await editor.Flush();
-
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-        Assert.Equal(["Switchboard did not answer, so the change is not saved."], SettingsPages.Page(editor.State!).Errors);
-        Assert.Equal(SaveState.NotSaved, SettingsPages.Page(editor.State!).Saved);
-        Assert.Equal(["settings.json"], editor.State!.Unsaved);
-    }
-
-    [Fact]
-    public async Task AutoSave_SaveInFlight_DisablesDiscard()
-    {
-        var editor = await Loaded();
-        var release = new TaskCompletionSource();
-
-        hub.HoldSave = () => release.Task;
-        editor.Edit(Concurrency, "3");
-
-        var flush = editor.Flush();
-
-        Assert.False(SettingsPages.Page(editor.State!).Buttons.Single((button) => button.Command == "revert").Enabled);
-        Assert.Equal(SaveState.Saving, SettingsPages.Page(editor.State!).Saved);
-
-        hub.HoldSave = null;
-        release.SetResult();
-        await flush;
-
-        Assert.Equal(SaveState.Saved, SettingsPages.Page(editor.State!).Saved);
-    }
-
-    [Fact]
-    public async Task Unsaved_NewPlaybookStarted_NamesIt()
-    {
-        var editor = await Loaded();
-
-        Assert.Empty(editor.State!.Unsaved);
-        await editor.Navigate("new-playbook");
-        editor.Edit(new Field("description", "Description", FieldKind.Text, ""), "Fix tests");
-
-        Assert.Equal(["the new playbook"], editor.State.Unsaved);
-    }
-
-    [Fact]
-    public async Task AutoSave_FileChangedOnDisk_DoesNotOverwriteIt()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("playbook:dev:review");
-        editor.Edit(new Field("model", "Model", FieldKind.Text, ""), "opus");
-        hub.Config["playbooks"]![1]!["version"] = "p7";
-        hub.CheckReplies.Enqueue(["x"]);
-        await editor.Load();
-        await editor.Flush();
-
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-        Assert.Equal(["dev:review changed on disk, so your changes are not saved. Discard them to load it."], SettingsPages.Page(editor.State!).Notes);
-        Assert.Equal(SaveState.NotSaved, SettingsPages.Page(editor.State!).Saved);
-    }
-
-    [Fact]
-    public async Task Create_BadName_ShowsTheErrorWithoutSaving()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("new-playbook");
-        await editor.Create();
-
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-        Assert.Equal("Namespace and name must be lowercase letters, digits and hyphens.", SettingsPages.Page(editor.State!).NewName!.Error);
-    }
-
-    [Fact]
-    public async Task Create_Accepted_SavesWithNoVersionAndOpensThePlaybook()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("new-playbook");
-        editor.EditNewName("dev", null);
-        editor.EditNewName(null, "fix-tests");
-        await editor.Create();
-
-        Assert.Contains(hub.Calls, (call) => call.StartsWith("save {\"target\":\"playbook\",\"name\":\"dev:fix-tests\"", StringComparison.Ordinal) && call.EndsWith("\"version\":null,\"configDir\":\"C:/cfg\"}", StringComparison.Ordinal));
-        Assert.Equal("playbook:dev:fix-tests", editor.State!.Page);
-        Assert.Equal(NewPlaybook.Empty, editor.State.NewPlaybook);
-    }
-
-    [Fact]
-    public async Task Create_Refused_ShowsTheRefusalOnThePage()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("new-playbook");
-        editor.EditNewName("dev", "fix");
-        hub.SaveReplies.Enqueue(["Unknown template variable: x."]);
-        await editor.Create();
-
-        Assert.Equal("new-playbook", editor.State!.Page);
-        Assert.Equal(["Unknown template variable: x."], SettingsPages.Page(editor.State).Errors);
-    }
-
-    [Fact]
-    public async Task Delete_PlaybookInUse_AsksNamingTheOpenWorkItemsAndDeletesOnlyOnYes()
-    {
-        var editor = await Loaded();
-        var asked = new List<string>();
-        var answer = false;
-
-        editor.Confirm = (question, detail, _) =>
-        {
-            asked.Add($"{question} {detail}");
-            return Task.FromResult(answer);
-        };
-        await editor.Navigate("playbook:dev:develop");
-        await editor.Delete();
-
-        Assert.Equal(["Delete playbook dev:develop? 2 open work items use it. Its file is deleted."], asked);
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("delete", StringComparison.Ordinal));
-
-        answer = true;
-        await editor.Delete();
-
-        Assert.Contains("delete dev:develop p1", hub.Calls);
-        Assert.Equal("general", editor.State!.Page);
-    }
-
-    [Fact]
-    public async Task Delete_WorkItemsChangedSinceTheRead_NamesTheCurrentCount()
-    {
-        var editor = await Loaded();
-        var asked = new List<string>();
-
-        editor.Confirm = (question, detail, _) =>
-        {
-            asked.Add(detail);
-            return Task.FromResult(false);
-        };
-        await editor.Navigate("playbook:dev:review");
-        hub.Config["inUse"]!["dev:review"] = 1;
-        await editor.Delete();
-
-        Assert.Equal(["1 open work item uses it. Its file is deleted."], asked);
-    }
-
-    [Fact]
-    public async Task Save_Settings_NamesTheConfigFolderItRead()
-    {
-        var editor = await Loaded();
-
-        editor.Edit(Concurrency, "3");
-        await editor.Flush();
-
-        Assert.Contains(hub.Calls, (call) => call.StartsWith("save {\"target\":\"settings\"", StringComparison.Ordinal) && call.EndsWith(",\"version\":\"v1\",\"configDir\":\"C:/cfg\"}", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task Load_ConfigFolderChanged_DropsTheDraftsAndSaysSo()
-    {
-        var editor = await Loaded();
-
-        editor.Edit(Concurrency, "3");
-        Assert.NotNull(editor.State!.SettingsDraft);
+        Assert.NotNull(editor.State!.Draft);
 
         hub.Config["configDir"] = "D:/repo/switchboard";
         await editor.Load();
 
-        Assert.Null(editor.State!.SettingsDraft);
+        Assert.Null(editor.State!.Draft);
         Assert.Equal("D:/repo/switchboard", editor.State.Config.ConfigDir);
         Assert.Equal("The config folder changed to D:/repo/switchboard. Unsaved changes were discarded.", editor.Notice);
     }
@@ -971,188 +1020,226 @@ public sealed class SettingsEditorTests
         await stale;
 
         Assert.Equal("D:/repo/switchboard", editor.State!.Config.ConfigDir);
-        Assert.NotNull(editor.State.SettingsDraft);
+        Assert.NotNull(editor.State.Draft);
     }
 
     [Fact]
-    public async Task Load_SameConfigFolder_KeepsTheDraft()
+    public async Task Create_BadName_ShowsTheErrorWithoutChangingTheDraft()
     {
         var editor = await Loaded();
 
-        editor.Edit(Concurrency, "3");
-        hub.CheckReplies.Enqueue(["sessions.concurrency must be 1 to 10."]);
-        await editor.Load();
+        editor.Navigate("new-playbook");
+        editor.Create();
 
-        Assert.NotNull(editor.State!.SettingsDraft);
-        Assert.Null(editor.Notice);
+        Assert.Null(editor.State!.Draft);
+        Assert.Equal("new-playbook", editor.State.Page);
+        Assert.Equal("Namespace and name must be lowercase letters, digits and hyphens.", SettingsPages.Page(editor.State).NewName!.Error);
     }
 
     [Fact]
-    public async Task Delete_Refused_KeepsThePageAndShowsTheRefusal()
+    public async Task Create_Accepted_AddsTheCompactEntryToTheDraftOnlyAndOpensIt()
     {
         var editor = await Loaded();
 
-        editor.Confirm = (_, _, _) => Task.FromResult(true);
-        hub.DeleteReply = ["dev:review changed on disk after the editor read it. Reload to see the change."];
-        await editor.Navigate("playbook:dev:review");
+        editor.Navigate("new-playbook");
+        editor.EditNewName("dev", null);
+        editor.EditNewName(null, "fix-tests");
+        editor.Edit(PlaybookField("description"), "Fix tests");
+        editor.Edit(PlaybookField("template", FieldKind.Prompt), "Fix {{ticket.title}}");
+        editor.Create();
+
+        Assert.Empty(hub.Saves);
+        Assert.Equal("playbook:dev:fix-tests", editor.State!.Page);
+        Assert.Equal(NewPlaybook.Empty, editor.State.NewPlaybook);
+        Assert.Equal("{\"description\":\"Fix tests\",\"autoStart\":false,\"requiresWorktree\":false,\"template\":\"Fix {{ticket.title}}\"}", editor.State.PlaybookEntry("dev:fix-tests")!.ToJsonString());
+        Assert.True(editor.State.PlaybookDirty("dev:fix-tests"));
+        Assert.Null(editor.State.FileEntry("dev:fix-tests"));
+    }
+
+    [Fact]
+    public async Task Create_NameAlreadyInTheDraft_IsRefused()
+    {
+        var editor = await Loaded();
+
+        editor.Navigate("new-playbook");
+        editor.EditNewName("dev", "fix");
+        editor.Create();
+        var draft = editor.State!.Draft!.ToJsonString();
+
+        editor.Navigate("new-playbook");
+        editor.EditNewName("dev", "fix");
+        editor.Edit(PlaybookField("description"), "Other");
+        editor.Create();
+
+        Assert.Equal("new-playbook", editor.State.Page);
+        Assert.Equal("A playbook named dev:fix already exists.", SettingsPages.Page(editor.State).NewName!.Error);
+        Assert.Equal(draft, editor.State.Draft!.ToJsonString());
+    }
+
+    [Fact]
+    public async Task Delete_PlaybookInUse_AsksNamingTheOpenWorkItemsAndRemovesItFromTheDraftOnlyOnYes()
+    {
+        var editor = await Loaded();
+        var asked = new List<string>();
+        var answer = false;
+
+        editor.Confirm = (question, detail, _) =>
+        {
+            asked.Add($"{question} {detail}");
+            return Task.FromResult(answer);
+        };
+        editor.Navigate("playbook:dev:develop");
         await editor.Delete();
 
-        Assert.Equal("playbook:dev:review", editor.State!.Page);
-        Assert.Equal(["dev:review changed on disk after the editor read it. Reload to see the change."], SettingsPages.Page(editor.State).Errors);
+        Assert.Equal(["Delete playbook dev:develop? 2 open work items use it. Save removes it from settings.json."], asked);
+        Assert.Null(editor.State!.Draft);
+
+        answer = true;
+        await editor.Delete();
+
+        Assert.False(editor.State.HasPlaybook("dev:develop"));
+        Assert.NotNull(editor.State.FileEntry("dev:develop"));
+        Assert.Equal("general", editor.State.Page);
+        Assert.Empty(hub.Saves);
+        Assert.Equal(["read", "read"], hub.Calls.Where((call) => !call.StartsWith("check", StringComparison.Ordinal)));
     }
 
     [Fact]
-    public async Task AddAndRemoveSource_Clicked_DraftTheSettingsAndChangePage()
+    public async Task Delete_WorkItemsChangedSinceTheRead_NamesTheCurrentCount()
     {
         var editor = await Loaded();
-
         var asked = new List<string>();
 
-        editor.Confirm = (question, detail, action) =>
+        editor.Confirm = (question, detail, _) =>
         {
-            asked.Add($"{question} {detail} {action}");
+            asked.Add(detail);
+            return Task.FromResult(false);
+        };
+        editor.Navigate("playbook:dev:review");
+        hub.Config["inUse"]!["dev:review"] = 1;
+        await editor.Delete();
+
+        Assert.Equal(["1 open work item uses it. Save removes it from settings.json."], asked);
+    }
+
+    [Fact]
+    public async Task AddAndRemoveSource_Clicked_ChangeOnlyTheDraftWithoutAsking()
+    {
+        var editor = await Loaded();
+        var asked = 0;
+
+        editor.Confirm = (_, _, _) =>
+        {
+            asked++;
             return Task.FromResult(true);
         };
-        await editor.AddSource("forum");
+        editor.AddSource("forum");
         Assert.Equal("source:forum", editor.State!.Page);
-        Assert.Equal("{\"enabled\":false}", editor.State.Config.Settings.Value!["sources"]!["forum"]!.ToJsonString());
+        Assert.Equal("{}", editor.State.SettingsValue!["sources"]!["forum"]!.ToJsonString());
 
-        await editor.RemoveSource("github");
-        Assert.Equal(["Remove GitHub? Its settings are deleted from settings.json. Its work items stay. Remove"], asked);
+        editor.RemoveSource("github");
         Assert.Equal("general", editor.State.Page);
-        Assert.Null(editor.State.Config.Settings.Value!["sources"]!["github"]);
-        Assert.Null(editor.State.SettingsDraft);
+        Assert.Null(editor.State.SettingsValue!["sources"]!["github"]);
+        Assert.NotNull(editor.State.Config.Settings.Value!["sources"]!["github"]);
+        Assert.Null(editor.State.Config.Settings.Value!["sources"]!["forum"]);
+        Assert.Equal(0, asked);
+        Assert.Empty(hub.Saves);
     }
 
     [Fact]
-    public async Task RemoveSource_Declined_ChangesNothing()
+    public async Task EditCell_NamespacePage_WritesTheCompactEntryInPlace()
     {
+        SettingsConfigs.Value(hub.Config)["playbooks"]!["dev:review"] = new JsonObject { ["description"] = "Build it", ["kind"] = "task", ["model"] = null, ["template"] = "Do it." };
+
         var editor = await Loaded();
 
-        editor.Confirm = (_, _, _) => Task.FromResult(false);
-        await editor.Navigate("source:github");
-        await editor.RemoveSource("github");
-
-        Assert.Equal("source:github", editor.State!.Page);
-        Assert.NotNull(editor.State.SettingsValue!["sources"]!["github"]);
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task Revert_PlaybookDraft_DropsItAndItsRefusal()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("playbook:dev:review");
-        editor.Edit(new Field("model", "Model", FieldKind.Text, ""), "opus");
-        editor.State!.Refusals["dev:review"] = ["no"];
-        await editor.Revert();
-
-        Assert.False(editor.State.PlaybookDrafts.ContainsKey("dev:review"));
-        Assert.False(editor.State.Refusals.ContainsKey("dev:review"));
-    }
-
-    [Fact]
-    public async Task EditCell_NamespacePage_DraftsThatPlaybookAndSaveWritesOnlyTheChangedOnes()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("namespace:dev");
-        Assert.Equal(["check dev:develop", "check dev:review"], hub.Calls.Select(Checked).Order(StringComparer.Ordinal));
+        editor.Navigate("namespace:dev");
         editor.EditCell("dev:review", "reports.approval", true);
         editor.EditCell("dev:review", "workdir", true);
-        hub.Calls.Clear();
-        await editor.Flush();
 
-        var save = Assert.Single(hub.Calls, (call) => call.StartsWith("save", StringComparison.Ordinal));
-
-        Assert.Contains("\"name\":\"dev:review\"", save);
-        Assert.Contains("\"workdir\":\"repoRoot\",\"reports\":[\"approval\"]", save);
-        Assert.EndsWith("\"version\":\"p2\",\"configDir\":\"C:/cfg\"}", save);
-    }
-
-    [Fact]
-    public async Task Revert_NamespacePage_DropsOnlyItsPlaybooksDrafts()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("namespace:triage");
-        editor.EditCell("triage:github", "rates", true);
-        await editor.Navigate("namespace:dev");
-        editor.EditCell("dev:develop", "autoStart", true);
-        editor.State!.Refusals["dev:develop"] = ["no"];
-        await editor.Revert();
-
-        Assert.Equal(["triage:github"], editor.State.PlaybookDrafts.Keys);
-        Assert.False(editor.State.Refusals.ContainsKey("dev:develop"));
-    }
-
-    [Fact]
-    public async Task AutoSave_NamespacePageOneRefused_KeepsItsDraftAndRefusalAndSavesTheOther()
-    {
-        var editor = await Loaded();
-
-        await editor.Navigate("namespace:dev");
-        editor.EditCell("dev:develop", "autoStart", true);
-        editor.EditCell("dev:review", "autoStart", true);
-        // dev:develop changed on disk, which the next read shows.
-        hub.Config["playbooks"]![0]!["version"] = "p9";
-        hub.SaveReplies.Enqueue(["dev:develop changed on disk after the editor read it. Reload to see the change."]);
-        hub.Calls.Clear();
-        await editor.Flush();
-
-        Assert.Equal(["save dev:develop", "save dev:review", "read"], hub.Calls.Where((call) => !call.StartsWith("check", StringComparison.Ordinal)).Select(Saved));
-        Assert.True(editor.State!.PlaybookDrafts.ContainsKey("dev:develop"));
-        Assert.False(editor.State.PlaybookDrafts.ContainsKey("dev:review"));
         Assert.Equal(
-            ["dev:develop changed on disk, so your changes are not saved. Discard them to load it.", "dev:develop changed on disk after the editor read it. Reload to see the change."],
-            SettingsPages.Page(editor.State).Table!.Rows.Single((row) => row.Name == "dev:develop").Errors);
+            "{\"description\":\"Build it\",\"autoStart\":false,\"requiresWorktree\":false,\"workdir\":\"repoRoot\",\"reports\":[\"approval\"],\"template\":\"Do it.\"}",
+            editor.State!.PlaybookEntry("dev:review")!.ToJsonString());
+        Assert.Equal(["dev:develop", "dev:review", "triage:github"], ((JsonObject)editor.State.SettingsValue!["playbooks"]!).Select((entry) => entry.Key));
+        Assert.Empty(hub.Saves);
     }
 
     [Fact]
-    public async Task Check_NamespacePage_PlacesEachAnswerOnItsRowAndDropsAnOlderOne()
+    public async Task EditPlaybook_EditUndone_RestoresTheFileEntryAndIsNotUnsaved()
     {
+        SettingsConfigs.Value(hub.Config)["playbooks"]!["dev:review"] = new JsonObject { ["description"] = "Build it", ["kind"] = "task", ["template"] = "Do it." };
+
         var editor = await Loaded();
-        var first = new TaskCompletionSource();
 
-        editor.State!.Page = "namespace:dev";
-        hub.CheckReplies.Enqueue(["old develop"]);
-        hub.CheckReplies.Enqueue(["first review"]);
-        hub.CheckReplies.Enqueue(["new develop"]);
-        hub.CheckReplies.Enqueue(["second review"]);
-        hub.HoldCheck = (n) => n == 1 ? first.Task : Task.CompletedTask;
+        editor.Navigate("playbook:dev:review");
+        editor.Edit(PlaybookField("autoStart", FieldKind.Boolean), "", true);
+        Assert.True(editor.State!.PlaybookDirty("dev:review"));
 
-        var older = editor.Check();
+        editor.Edit(PlaybookField("autoStart", FieldKind.Boolean), "", false);
 
-        await editor.Check();
-        first.SetResult();
-        await older;
-
-        var rows = SettingsPages.Page(editor.State).Table!.Rows.ToDictionary((row) => row.Name);
-
-        Assert.Equal(["new develop"], rows["dev:develop"].Errors);
-        Assert.Equal(["second review"], rows["dev:review"].Errors);
+        Assert.False(editor.State.PlaybookDirty("dev:review"));
+        Assert.False(editor.State.Dirty);
     }
 
     [Fact]
-    public async Task EditCell_InvalidFileWithoutDraft_DoesNothing()
+    public async Task EditPlaybook_Template_IsStoredAsTyped()
     {
-        var config = SettingsConfigs.Basic();
+        var editor = await Loaded();
 
-        config["playbooks"]!.AsArray().Add(new JsonObject { ["name"] = "dev:broken", ["path"] = "C:/cfg/playbooks/dev/broken.md", ["version"] = "p4", ["playbook"] = null, ["error"] = "dev:broken has no front matter." });
-        hub.Config = config;
+        editor.Navigate("playbook:dev:review");
+        editor.Edit(PlaybookField("template", FieldKind.Prompt), "Line one\nLine two");
+
+        Assert.Equal("Line one\nLine two", editor.State!.PlaybookEntry("dev:review")!["template"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task UnknownKey_Entry_ShowsItsErrorAndDeleteWithoutFieldsAndCannotBeEdited()
+    {
+        SettingsConfigs.Value(hub.Config)["playbooks"]!["dev:review"] = new JsonObject { ["description"] = "Build it", ["note"] = "mine", ["template"] = "Do it." };
 
         var editor = await Loaded();
 
-        await editor.Navigate("namespace:dev");
+        editor.Navigate("playbook:dev:review");
+
+        var page = SettingsPages.Page(editor.State!);
+
+        Assert.Equal(["Unknown keys: note."], page.Errors);
+        Assert.Equal(["delete"], page.Buttons.Select((button) => button.Command));
+        Assert.Empty(page.Sections);
+
+        editor.EditCell("dev:review", "autoStart", true);
+        Assert.Null(editor.State!.Draft);
+    }
+
+    [Fact]
+    public async Task EditCell_UnreadableEntry_DoesNothing()
+    {
+        SettingsConfigs.Value(hub.Config)["playbooks"]!["dev:broken"] = new JsonObject { ["reports"] = "done" };
+
+        var editor = await Loaded();
+
+        editor.Navigate("namespace:dev");
         editor.EditCell("dev:broken", "autoStart", true);
 
-        Assert.Empty(editor.State!.PlaybookDrafts);
+        Assert.Null(editor.State!.Draft);
     }
 
-    static string Saved(string call) => call.StartsWith("save", StringComparison.Ordinal) ? $"save {System.Text.Json.Nodes.JsonNode.Parse(call["save ".Length..])!["name"]}" : call;
+    [Fact]
+    public async Task Check_PlaybookErrors_LandOnThePlaybookPageField()
+    {
+        var editor = await Loaded();
 
-    static string Checked(string call) => call.StartsWith("check", StringComparison.Ordinal) ? $"check {System.Text.Json.Nodes.JsonNode.Parse(call["check ".Length..])!["name"]}" : call;
+        editor.Navigate("playbook:dev:review");
+        editor.Edit(PlaybookField("description"), "");
+        hub.CheckReplies.Enqueue(["playbooks.dev:review: description is required."]);
+        await editor.Check();
+
+        var page = SettingsPages.Page(editor.State!);
+
+        Assert.Equal(["description is required."], page.Sections[0].Fields.Single((field) => field.Field.Path == "description").Errors);
+        Assert.Empty(page.Errors);
+        Assert.Equal("Unsaved changes · 1 error", SettingsPages.Bar(editor.State!).Status);
+    }
 
     static async Task Until(Func<bool> done)
     {

@@ -112,6 +112,29 @@ public static partial class SettingsFields
         return copy;
     }
 
+    /// <summary>A copy of <paramref name="root"/> with a playbook entry set, or removed when <paramref name="entry"/> is null; an edited entry keeps its place.</summary>
+    public static JsonObject WithPlaybook(JsonObject root, string name, JsonNode? entry)
+    {
+        var copy = root.DeepClone().AsObject();
+
+        if (copy["playbooks"] is not JsonObject playbooks)
+        {
+            playbooks = [];
+            copy["playbooks"] = playbooks;
+        }
+
+        if (entry is null)
+        {
+            playbooks.Remove(name);
+        }
+        else
+        {
+            playbooks[name] = entry.DeepClone();
+        }
+
+        return copy;
+    }
+
     /// <summary>Reads a settings field's input; null removes the key, so the default applies. Text that is not a whole number is kept, so the check names the field.</summary>
     public static JsonNode? ReadField(FieldKind kind, string text, bool isChecked = false, bool keepEmpty = false)
     {
@@ -145,7 +168,7 @@ public static partial class SettingsFields
             var listed = playbook.Reports.Where((report) => report != kind).Concat(isChecked ? [kind] : []).ToList();
             var reports = PlaybookFields.ReportKinds.Where(listed.Contains).ToList();
 
-            // The file holds approvalSends only beside the approval report, so the draft drops it with the report.
+            // The hub accepts approvalSends only beside the approval report, so the draft drops it with the report.
             return playbook with { Reports = reports, ApprovalSends = playbook.ApprovalSends && reports.Contains("approval") };
         }
 
@@ -158,8 +181,7 @@ public static partial class SettingsFields
             "permissionMode" => playbook with { PermissionMode = text == "" ? null : text },
             "model" => playbook with { Model = text == "" ? null : text },
             "returnOf" => playbook with { ReturnOf = text.Split(['\n', ',']).Select((line) => line.Trim()).Where((line) => line != "").Distinct(StringComparer.Ordinal).ToList() },
-            // A task playbook's file cannot hold rates, so keeping it would leave the saved draft unlike the file.
-            // The file holds reports only for a task playbook and rates only for a triage one, so the draft drops what the file would.
+            // The hub accepts reports only on a task playbook and rates only on a triage one, so the draft drops the other kind's keys.
             "kind" => text == "triage" ? playbook with { Kind = "triage", Reports = [], ApprovalSends = false, ReturnOf = [] } : playbook with { Kind = "task", Rates = false },
             "workdir" => playbook with { Workdir = text == "repoRoot" ? "repoRoot" : "worktree" },
             "description" => playbook with { Description = text },
@@ -286,10 +308,9 @@ public static partial class SettingsFields
     {
         var path = $"sources.{name}";
         var value = state.SettingsValue;
-        var triage = state.Config.Playbooks.Where((entry) => entry.Playbook?.Kind == "triage").Select((entry) => new FieldOption(entry.Name, entry.Name));
+        var triage = state.PlaybookNames.Where((name) => state.PlaybookValue(name)?.Kind == "triage").Select((name) => new FieldOption(name, name));
         List<Field> common =
         [
-            new Field($"{path}.enabled", "Enabled", FieldKind.Boolean, "A disabled source is not polled and its pool is hidden. Its work items stay.", Fallback: false),
             new Field($"{path}.pollIntervalSeconds", "Poll interval (seconds)", FieldKind.Integer, "At least 10.", "300"),
             new Field($"{path}.repoRoot", "Repo root", FieldKind.Text, "The repository sessions run in when the ticket has no worktree."),
             new Field($"{path}.namespace", "Namespace", FieldKind.Select, "Triage chooses among this namespace’s task playbooks.",

@@ -1,30 +1,27 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ADHOC_SOURCE,
   DEFAULT_SETTINGS,
-  formatPlaybook,
-  isPlaybookName,
-  listPlaybookFiles,
-  loadPlaybooks,
   parsePlaybook,
-  parsePlaybookFile,
+  parsePlaybooks,
   parseSettings,
   TEMPLATE_VARIABLES,
   templateError,
   TRIAGE_VARIABLES,
 } from '@switchboard/core';
-import type { Playbook, PlaybookError, PlaybookFields, Settings } from '@switchboard/core';
+import type { Playbook, PlaybookError, Settings } from '@switchboard/core';
 import { parseForumConfig } from '@switchboard/forum';
 import { parseGithubConfig } from '@switchboard/github';
 import { parseZohoConfig } from '@switchboard/zoho';
 
 export interface Config {
   settings: Settings;
-  /** Why settings.json was rejected; the previous settings stay in force (PRD R42). */
+  /** Why settings.json was rejected; the previous settings and playbooks stay in force (PRD R42). */
   settingsError: string | null;
   playbooks: Map<string, Playbook>;
+  /** The playbooks left out, each invalid on its own. */
   playbookErrors: PlaybookError[];
 }
 
@@ -33,10 +30,6 @@ export const SOURCE_KINDS = ['github', 'zoho', 'forum'] as const;
 
 export function settingsPath(configDir: string): string {
   return join(configDir, 'settings.json');
-}
-
-export function playbooksDir(configDir: string): string {
-  return join(configDir, 'playbooks');
 }
 
 /** Why a source's own keys are invalid, or null. */
@@ -71,39 +64,14 @@ function writeAtomic(path: string, text: string): void {
   renameSync(`${path}.tmp`, path);
 }
 
-const changed = (file: string) => `${file} changed on disk after the editor read it. Reload to see the change.`;
+const changed = (file: string) => `${file} changed on disk after the editor read it. Discard to load it.`;
 
 /**
- * Turns a configured source on or off in settings.json, which the hub then reloads. The file is rewritten as formatted JSON.
- * Returns why it could not, or null.
+ * Every error the hub would report for these settings: the file's own, which reject it whole (PRD R42), then the keys of each source
+ * in `enabled`, which disable that source, unknown variables in `setupPrompt`, and each playbook's, as `playbooks.<name>: <error>`,
+ * which leave that playbook out. Unknown template variables are included because the hub finds them only when rendering fails.
  */
-export function setSourceEnabled(configDir: string, name: string, enabled: boolean): string | null {
-  const path = settingsPath(configDir);
-  let settings: { sources?: Record<string, Record<string, unknown>> };
-
-  try {
-    settings = JSON.parse(readFileSync(path, 'utf8'));
-  } catch (error) {
-    return `settings.json could not be read: ${(error as Error).message}`;
-  }
-
-  const source = settings.sources?.[name];
-
-  if (source === undefined) {
-    return `settings.json has no source named ${name}.`;
-  }
-
-  source['enabled'] = enabled;
-  writeAtomic(path, `${JSON.stringify(settings, null, 2)}\n`);
-
-  return null;
-}
-
-/**
- * Every error the hub would report for these settings: the file's own, which reject it whole (PRD R42), then each enabled
- * source's keys, which disable that source, and unknown variables in `setupPrompt`.
- */
-export function checkSettings(value: unknown): string[] {
+export function checkSettings(value: unknown, enabled: ReadonlySet<string>): string[] {
   const parsed = parseSettings(JSON.stringify(value));
 
   if ('errors' in parsed) {
@@ -119,10 +87,34 @@ export function checkSettings(value: unknown): string[] {
       errors.push(`sources.${name}.setupPrompt: ${setupError}`);
     }
 
-    const error = source.enabled && name !== ADHOC_SOURCE ? sourceOptionsError(name, source.options) : null;
+    const error = enabled.has(name) && name !== ADHOC_SOURCE ? sourceOptionsError(name, source.options) : null;
 
     if (error !== null) {
       errors.push(error);
+    }
+  }
+
+  const playbooks = (value as { playbooks?: Record<string, unknown> }).playbooks ?? {};
+
+  for (const [name, entry] of Object.entries(playbooks)) {
+    errors.push(...playbookErrors(name, entry).map((error) => `playbooks.${name}: ${error}`));
+  }
+
+  return errors;
+}
+
+/** A playbook entry's parse error and its unknown template variable, so the operator sees both at once. */
+function playbookErrors(name: string, entry: unknown): string[] {
+  const parsed = parsePlaybook(name, entry);
+  const errors = 'error' in parsed ? [parsed.error] : [];
+  const fields = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : {};
+  const template = fields['template'];
+
+  if (typeof template === 'string') {
+    const unknown = templateError(template, fields['kind'] === 'triage' ? TRIAGE_VARIABLES : TEMPLATE_VARIABLES);
+
+    if (unknown !== null) {
+      errors.push(unknown);
     }
   }
 
@@ -138,68 +130,35 @@ export interface SettingsFile {
   error: string | null;
 }
 
-export interface PlaybookFileView {
-  name: string;
-  path: string;
-  version: string;
-  /** Null when the file is invalid. */
-  playbook: PlaybookFields | null;
-  error: string | null;
-}
-
-export interface ConfigFiles {
-  settings: SettingsFile;
-  playbooks: PlaybookFileView[];
-}
-
-/** Reads settings.json and every playbook file, valid or not, for the settings editor. */
-export function readConfigFiles(configDir: string): ConfigFiles {
+/** Reads settings.json for the settings editor, valid or not. */
+export function readConfigFile(configDir: string): SettingsFile {
   const path = settingsPath(configDir);
   const text = readText(path);
-  let settings: SettingsFile = { path, version: fileVersion(text), value: {}, error: null };
+  const file: SettingsFile = { path, version: fileVersion(text), value: {}, error: null };
 
-  if (text !== null) {
-    try {
-      settings.value = JSON.parse(text);
-    } catch (error) {
-      settings = { ...settings, value: null, error: `settings.json is not valid JSON: ${(error as Error).message}` };
-    }
+  if (text === null) {
+    return file;
   }
 
-  const playbooks = listPlaybookFiles(playbooksDir(configDir)).flatMap((file): PlaybookFileView[] => {
-    const content = readText(file.path);
-
-    if (content === null) {
-      return [];
-    }
-
-    const result = parsePlaybookFile(file, content);
-    const version = fileVersion(content)!;
-
-    if ('error' in result) {
-      return [{ name: file.name, path: file.path, version, playbook: null, error: result.error }];
-    }
-
-    const { name: _name, ...playbook } = result.playbook;
-
-    return [{ name: file.name, path: file.path, version, playbook, error: null }];
-  });
-
-  return { settings, playbooks };
+  try {
+    return { ...file, value: JSON.parse(text) };
+  } catch (error) {
+    return { ...file, value: null, error: `settings.json is not valid JSON: ${(error as Error).message}` };
+  }
 }
 
 /** A save's refusal, or the version of the text it wrote, so the editor can keep editing over it. */
 export type SaveResult = { errors: string[]; version: string | null };
 
 /** Writes settings.json as formatted JSON. Refuses when the file changed since `version` was read, or with the errors of {@link checkSettings}. */
-export function saveSettings(configDir: string, value: unknown, version: string | null): SaveResult {
+export function saveSettings(configDir: string, value: unknown, version: string | null, enabled: ReadonlySet<string>): SaveResult {
   const path = settingsPath(configDir);
 
   if (fileVersion(readText(path)) !== version) {
     return { errors: [changed('settings.json')], version: null };
   }
 
-  const errors = checkSettings(value);
+  const errors = checkSettings(value, enabled);
 
   if (errors.length > 0) {
     return { errors, version: null };
@@ -211,97 +170,27 @@ export function saveSettings(configDir: string, value: unknown, version: string 
   return { errors: [], version: fileVersion(text) };
 }
 
-function playbookPath(configDir: string, name: string): string {
-  const [namespace = '', base = ''] = name.split(':');
-
-  return join(playbooksDir(configDir), namespace, `${base}.md`);
-}
-
-/**
- * Writes a playbook. `version` null creates it, and refuses when the file exists. Refuses when the file changed since
- * `version` was read, or when the hub would leave the playbook out.
- */
-export function savePlaybook(configDir: string, name: string, playbook: PlaybookFields, version: string | null): SaveResult {
-  if (!isPlaybookName(name)) {
-    return { errors: ['The name must be namespace:name, in lowercase letters, digits and hyphens.'], version: null };
-  }
-
-  const path = playbookPath(configDir, name);
-  const current = fileVersion(readText(path));
-
-  if (current !== version) {
-    return { errors: [version === null ? `A playbook named ${name} already exists.` : changed(name)], version: null };
-  }
-
-  const checked = checkPlaybook(name, playbook);
-
-  if ('errors' in checked) {
-    return { errors: checked.errors, version: null };
-  }
-
-  writeAtomic(path, checked.text);
-  return { errors: [], version: fileVersion(checked.text) };
-}
-
-/** The file text for a playbook, or every error the hub would report for it, including unknown template variables. */
-export function checkPlaybook(name: string, playbook: PlaybookFields): { text: string } | { errors: string[] } {
-  const formatted = formatPlaybook(playbook);
-
-  if ('error' in formatted) {
-    return { errors: [formatted.error] };
-  }
-
-  const parsed = parsePlaybook(name, formatted.text);
-  const errors = 'error' in parsed ? [parsed.error] : [];
-  const unknown = templateError(playbook.template, playbook.kind === 'triage' ? TRIAGE_VARIABLES : TEMPLATE_VARIABLES);
-
-  if (unknown !== null) {
-    errors.push(unknown);
-  }
-
-  return errors.length > 0 ? { errors } : formatted;
-}
-
-/** Deletes a playbook file, unless it changed since `version` was read. */
-export function deletePlaybook(configDir: string, name: string, version: string): string[] {
-  const file = listPlaybookFiles(playbooksDir(configDir)).find((entry) => entry.name === name);
-
-  if (file === undefined || fileVersion(readText(file.path)) !== version) {
-    return [changed(name)];
-  }
-
-  rmSync(file.path);
-
-  return [];
-}
-
-/** Reads settings and playbooks. A missing settings file means the defaults; an invalid one keeps `previous`. */
-export function loadConfig(configDir: string, previous: Settings = DEFAULT_SETTINGS): Config {
-  let settings = previous;
-  let settingsError: string | null = null;
-  let text: string | null = null;
+/** Reads settings.json. A missing file means the defaults and no playbooks; an invalid one keeps `previous` (PRD R42). */
+export function loadConfig(configDir: string, previous: Config = { settings: DEFAULT_SETTINGS, settingsError: null, playbooks: new Map(), playbookErrors: [] }): Config {
+  let text: string;
 
   try {
     text = readFileSync(settingsPath(configDir), 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      settingsError = `settings.json could not be read: ${(error as Error).message}`;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { settings: DEFAULT_SETTINGS, settingsError: null, playbooks: new Map(), playbookErrors: [] };
     }
+
+    return { ...previous, settingsError: `settings.json could not be read: ${(error as Error).message}` };
   }
 
-  if (text !== null) {
-    const parsed = parseSettings(text);
+  const parsed = parseSettings(text);
 
-    if ('settings' in parsed) {
-      settings = parsed.settings;
-    } else {
-      settingsError = parsed.errors.join(' ');
-    }
-  } else if (settingsError === null) {
-    settings = DEFAULT_SETTINGS;
+  if ('errors' in parsed) {
+    return { ...previous, settingsError: parsed.errors.join(' ') };
   }
 
-  const { playbooks, errors } = loadPlaybooks(playbooksDir(configDir));
+  const { playbooks, errors } = parsePlaybooks((JSON.parse(text) as { playbooks?: unknown }).playbooks);
 
-  return { settings, settingsError, playbooks, playbookErrors: errors };
+  return { settings: parsed.settings, settingsError: null, playbooks, playbookErrors: errors };
 }

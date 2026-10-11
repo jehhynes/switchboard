@@ -35,7 +35,7 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
 
 const QUESTION_REPORTS = ['stage', 'approval', 'link', 'task'];
 /** A playbook whose session may report done. */
-const FINISH = { 'dev:finish': '---\ndescription: Finish it\nreports: done\n---\nFinish {{ticket.sourceKey}}.' };
+const FINISH = { 'dev:finish': { description: 'Finish it', reports: ['done'], template: 'Finish {{ticket.sourceKey}}.' } };
 const FINISHING_REPORTS = ['stage', 'worktree', 'done', 'link', 'task'];
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
@@ -242,14 +242,14 @@ describe('triage', () => {
   });
 
   it('renders {{playbooks}} into the classifier instructions in place of the appended list', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'triage:github': '---\ndescription: Triage\nkind: triage\n---\nPick one:\n{{playbooks}}\nThen summarize.\n' }) });
+    const h = new Harness({ playbooks: playbooks(undefined, { 'triage:github': { description: 'Triage', kind: 'triage', template: 'Pick one:\n{{playbooks}}\nThen summarize.\n' } }) });
     const [triage] = h.poll(issue('1'));
 
     expect(triage).toMatchObject({ type: 'triage', systemPrompt: 'Pick one:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect\nThen summarize.\n' });
   });
 
   it('fails on configuration errors', () => {
-    const variable = new Harness({ playbooks: playbooks(undefined, { 'triage:github': '---\ndescription: Triage\nkind: triage\n---\n{{ticket.title}}\n' }) });
+    const variable = new Harness({ playbooks: playbooks(undefined, { 'triage:github': { description: 'Triage', kind: 'triage', template: '{{ticket.title}}\n' } }) });
     variable.poll(issue('1'));
     expect(variable.item(1)).toMatchObject({ status: 'failed', error: 'Triage playbook triage:github: Unknown template variable: ticket.title.' });
 
@@ -457,7 +457,7 @@ describe('sessions', () => {
 
   it('hands a work item to another task playbook in its namespace, and refuses any other', () => {
     const h = new Harness({
-      playbooks: playbooks(undefined, { 'dev:other': '---\ndescription: Route it\nreports: done, playbook\n---\nRoute {{ticket.sourceKey}}.', 'dev:triage': '---\ndescription: Dev triage\nkind: triage\n---\nClassify it.' }),
+      playbooks: playbooks(undefined, { 'dev:other': { description: 'Route it', reports: ['done', 'playbook'], template: 'Route {{ticket.sourceKey}}.' }, 'dev:triage': { description: 'Dev triage', kind: 'triage', template: 'Classify it.' } }),
     });
     const { item, session } = running(h, '1', 'dev:other');
 
@@ -495,7 +495,7 @@ describe('sessions', () => {
     expect(h.item(a.item).readyAt).toBeNull();
 
     // A playbook with no reports: its turn ending is the normal finish, ready for review.
-    const read = () => new Harness({ playbooks: playbooks(undefined, { 'dev:read': '---\ndescription: Read it\n---\nRead {{ticket.sourceKey}}.' }) });
+    const read = () => new Harness({ playbooks: playbooks(undefined, { 'dev:read': { description: 'Read it', template: 'Read {{ticket.sourceKey}}.' } }) });
     const g = read();
     const b = running(g, '2', 'dev:read');
 
@@ -894,7 +894,7 @@ describe('operator actions', () => {
   });
 
   it('fails a start whose playbook is no longer loaded or does not render', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:bad': '---\ndescription: Bad\n---\nUse {{nope}}.' }) });
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:bad': { description: 'Bad', template: 'Use {{nope}}.' } }) });
     const triages = h.poll(issue('1'), issue('2'));
     h.triaged(triages[0], 'dev:question');
     h.triaged(triages[1], 'dev:bad');

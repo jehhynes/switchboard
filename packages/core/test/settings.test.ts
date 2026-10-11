@@ -18,7 +18,7 @@ describe('parseSettings', () => {
         sessions: { concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
-          github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
+          github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
       }),
     );
@@ -29,7 +29,6 @@ describe('parseSettings', () => {
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: {
-            enabled: true,
             pollIntervalSeconds: 300,
             repoRoot: 'D:/git/widgets',
             triagePlaybook: 'triage:github',
@@ -42,10 +41,10 @@ describe('parseSettings', () => {
     });
   });
 
-  it('defaults a source that sets nothing to disabled', () => {
+  it('fills defaults for a source that sets nothing', () => {
     expect(parseSettings('{"sources":{"adhoc":{}}}')).toEqual({
       settings: expect.objectContaining({
-        sources: { adhoc: { enabled: false, pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} } },
+        sources: { adhoc: { pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} } },
       }),
     });
   });
@@ -76,7 +75,7 @@ describe('parseSettings', () => {
         'sessions.installHooks must be true or false.',
         'triage.concurrency must be a whole number of at least 1.',
         'triage.timeoutSeconds must be a whole number of at least 1.',
-        'sources.github.enabled must be true or false.',
+        "sources.github.enabled is not a setting; turn a source on and off in the dock's header.",
         'sources.github.pollIntervalSeconds must be a whole number of at least 10.',
         'sources.zoho must be an object.',
       ],
@@ -85,5 +84,10 @@ describe('parseSettings', () => {
 
   it('rejects a section that is not an object', () => {
     expect(parseSettings('{"sessions":[]}')).toEqual({ errors: ['sessions must be an object.'] });
+    expect(parseSettings('{"playbooks":[]}')).toEqual({ errors: ['playbooks must be an object.'] });
+  });
+
+  it('accepts playbooks without reading them, so an invalid playbook does not reject the file', () => {
+    expect(parseSettings('{"playbooks":{"dev:x":{"reports":"done"}}}')).toEqual(parseSettings('{}'));
   });
 });

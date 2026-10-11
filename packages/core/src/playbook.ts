@@ -1,5 +1,3 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { PERMISSION_MODES } from './settings.js';
 import type { PermissionMode } from './settings.js';
 
@@ -8,7 +6,7 @@ export const PLAYBOOK_REPORTS = ['done', 'approval', 'worktree', 'playbook', 'pa
 export type PlaybookReport = (typeof PLAYBOOK_REPORTS)[number];
 
 export interface Playbook {
-  /** `<namespace>:<name>`, from the file's path. */
+  /** `<namespace>:<name>`, its key under `playbooks` in settings.json. */
   name: string;
   description: string;
   kind: 'task' | 'triage';
@@ -31,130 +29,100 @@ export interface Playbook {
 }
 
 export interface PlaybookError {
-  /** The file, relative to the playbook directory. */
-  file: string;
+  /** The key under `playbooks`, which may not be a valid playbook name. */
+  name: string;
   error: string;
 }
 
 export type PlaybookResult = { playbook: Playbook } | { error: string };
 
+export type PlaybookFields = Omit<Playbook, 'name'>;
+
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates', 'returnOf'];
+const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates', 'returnOf', 'template'];
 
-function parseFrontMatter(text: string): { fields: Map<string, string>; body: string } | { error: string } {
-  const normalized = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+type Json = Record<string, unknown>;
 
-  if (!normalized.startsWith('---\n')) {
-    return { error: 'The file must start with front matter between --- lines.' };
-  }
-
-  const end = normalized.indexOf('\n---', 3);
-
-  if (end === -1 || (normalized[end + 4] !== undefined && normalized[end + 4] !== '\n')) {
-    return { error: 'The front matter has no closing --- line.' };
-  }
-
-  const fields = new Map<string, string>();
-
-  for (const line of normalized.slice(4, end + 1).split('\n')) {
-    if (line.trim() === '' || line.trimStart().startsWith('#')) {
-      continue;
-    }
-
-    const match = /^([A-Za-z]+):\s*(.*?)\s*$/.exec(line);
-
-    if (match === null) {
-      return { error: `Front matter line is not "key: value": ${line}` };
-    }
-
-    const [, key = '', raw = ''] = match;
-    const quoted = /^"(.*)"$/.exec(raw) ?? /^'(.*)'$/.exec(raw);
-
-    if (fields.has(key)) {
-      return { error: `Front matter repeats ${key}.` };
-    }
-
-    fields.set(key, quoted?.[1] ?? raw);
-  }
-
-  return { fields, body: normalized.slice(end + 4).replace(/^\n/, '') };
+function isObject(value: unknown): value is Json {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function flag(fields: Map<string, string>, key: string): boolean | { error: string } {
-  const value = fields.get(key);
+function flag(entry: Json, key: string): boolean | { error: string } {
+  const value = entry[key] ?? false;
 
-  if (value === undefined || value === 'false') {
-    return false;
-  }
-
-  return value === 'true' ? true : { error: `${key} must be true or false.` };
+  return typeof value === 'boolean' ? value : { error: `${key} must be true or false.` };
 }
 
-/** Parses a playbook file. `name` is `<namespace>:<name>`. */
-export function parsePlaybook(name: string, text: string): PlaybookResult {
-  const parsed = parseFrontMatter(text);
+function text(entry: Json, key: string): string | null | { error: string } {
+  const value = entry[key] ?? null;
 
-  if ('error' in parsed) {
-    return parsed;
+  return value === null || typeof value === 'string' ? value : { error: `${key} must be a string.` };
+}
+
+function list(entry: Json, key: string): string[] | { error: string } {
+  const value = entry[key] ?? [];
+
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : { error: `${key} must be a list of strings.` };
+}
+
+/** Parses one entry under `playbooks` in settings.json. `name` is its key, `<namespace>:<name>`. */
+export function parsePlaybook(name: string, value: unknown): PlaybookResult {
+  if (!isPlaybookName(name)) {
+    return { error: 'Namespace and name must be lowercase letters, digits and hyphens.' };
   }
 
-  const { fields, body } = parsed;
-  const unknown = [...fields.keys()].filter((key) => !KEYS.includes(key));
+  if (!isObject(value)) {
+    return { error: 'A playbook must be an object.' };
+  }
+
+  const unknown = Object.keys(value).filter((key) => !KEYS.includes(key));
 
   if (unknown.length > 0) {
-    return { error: `Unknown front matter: ${unknown.join(', ')}.` };
+    return { error: `Unknown keys: ${unknown.join(', ')}.` };
   }
 
-  const description = fields.get('description') ?? '';
+  const strings = Object.fromEntries(['description', 'kind', 'permissionMode', 'model', 'workdir', 'template'].map((key) => [key, text(value, key)]));
+  const flags = Object.fromEntries(['autoStart', 'requiresWorktree', 'rates', 'approvalSends'].map((key) => [key, flag(value, key)]));
+  const lists = Object.fromEntries(['reports', 'returnOf'].map((key) => [key, list(value, key)]));
+  const invalid = [...Object.values(strings), ...Object.values(flags), ...Object.values(lists)].find((field) => field !== null && typeof field === 'object' && 'error' in field);
 
-  if (description === '') {
+  if (invalid !== undefined) {
+    return invalid as { error: string };
+  }
+
+  const description = strings['description'] as string | null;
+  const kind = (strings['kind'] as string | null) ?? 'task';
+  const permissionMode = strings['permissionMode'] as string | null;
+  const model = strings['model'] as string | null;
+  const workdir = (strings['workdir'] as string | null) ?? 'worktree';
+  const template = (strings['template'] as string | null) ?? '';
+  const [autoStart, requiresWorktree, rates, approvalSends] = ['autoStart', 'requiresWorktree', 'rates', 'approvalSends'].map((key) => flags[key] as boolean) as [boolean, boolean, boolean, boolean];
+  const reports = lists['reports'] as string[];
+
+  if (description === null || description === '') {
     return { error: 'description is required.' };
   }
 
-  const kind = fields.get('kind') ?? 'task';
+  if (/[\r\n]/.test(description)) {
+    return { error: 'description must be one line.' };
+  }
 
   if (kind !== 'task' && kind !== 'triage') {
     return { error: 'kind must be task or triage.' };
-  }
-
-  const autoStart = flag(fields, 'autoStart');
-  const requiresWorktree = flag(fields, 'requiresWorktree');
-  const rates = flag(fields, 'rates');
-  const approvalSends = flag(fields, 'approvalSends');
-
-  if (typeof autoStart !== 'boolean') {
-    return autoStart;
-  }
-
-  if (typeof requiresWorktree !== 'boolean') {
-    return requiresWorktree;
-  }
-
-  if (typeof rates !== 'boolean') {
-    return rates;
-  }
-
-  if (typeof approvalSends !== 'boolean') {
-    return approvalSends;
   }
 
   if (kind === 'task' && rates) {
     return { error: 'rates applies only to a triage playbook.' };
   }
 
-  const permissionMode = fields.get('permissionMode') ?? null;
-
   if (permissionMode !== null && !(PERMISSION_MODES as readonly string[]).includes(permissionMode)) {
     return { error: `permissionMode must be one of ${PERMISSION_MODES.join(', ')}.` };
   }
-
-  const workdir = fields.get('workdir') ?? 'worktree';
 
   if (workdir !== 'worktree' && workdir !== 'repoRoot') {
     return { error: 'workdir must be worktree or repoRoot.' };
   }
 
-  const reports = (fields.get('reports') ?? '').split(',').map((entry) => entry.trim()).filter((entry) => entry !== '');
   const unknownReports = reports.filter((entry) => !(PLAYBOOK_REPORTS as readonly string[]).includes(entry));
 
   if (unknownReports.length > 0) {
@@ -169,7 +137,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
     return { error: 'approvalSends applies only to a playbook whose reports include approval.' };
   }
 
-  const returnOf = [...new Set((fields.get('returnOf') ?? '').split(',').map((entry) => entry.trim()).filter((entry) => entry !== ''))];
+  const returnOf = [...new Set(lists['returnOf'] as string[])];
   const badReturnOf = returnOf.filter((entry) => !isPlaybookName(entry) || entry === name);
 
   if (badReturnOf.length > 0) {
@@ -180,7 +148,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
     return { error: 'returnOf applies only to a task playbook.' };
   }
 
-  if (body.trim() === '') {
+  if (template.trim() === '') {
     return { error: 'The prompt template is empty.' };
   }
 
@@ -192,85 +160,15 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
       autoStart,
       requiresWorktree,
       permissionMode: permissionMode as PermissionMode | null,
-      model: fields.get('model') || null,
+      model: model || null,
       workdir,
       reports: PLAYBOOK_REPORTS.filter((entry) => reports.includes(entry)),
       approvalSends,
       rates,
       returnOf,
-      template: body,
+      template,
     },
   };
-}
-
-export type PlaybookFields = Omit<Playbook, 'name'>;
-
-/** A front matter value, quoted when the parser would otherwise trim it or strip its quotes. */
-function frontMatterValue(value: string): string {
-  return value !== value.trim() || /^["']/.test(value) ? `"${value}"` : value;
-}
-
-/**
- * Writes a playbook file that {@link parsePlaybook} reads back with the same fields; the template gains a final newline.
- * Defaults are left out, except a task playbook's `autoStart` and `requiresWorktree`. Front matter comments are not kept.
- */
-export function formatPlaybook(playbook: PlaybookFields): { text: string } | { error: string } {
-  for (const [key, value] of Object.entries({ description: playbook.description, model: playbook.model ?? '' })) {
-    if (/[\r\n]/.test(value)) {
-      return { error: `${key} must be one line.` };
-    }
-  }
-
-  // A comma in an entry would read back as two entries.
-  const unnamed = playbook.kind === 'task' ? playbook.returnOf.filter((entry) => !isPlaybookName(entry)) : [];
-
-  if (unnamed.length > 0) {
-    return { error: `returnOf must list other playbook names, not ${unnamed.join(', ')}.` };
-  }
-
-  const lines = [`description: ${frontMatterValue(playbook.description)}`];
-
-  if (playbook.kind === 'triage') {
-    lines.push('kind: triage');
-  }
-
-  if (playbook.kind === 'triage' && playbook.rates) {
-    lines.push('rates: true');
-  }
-
-  for (const key of ['autoStart', 'requiresWorktree'] as const) {
-    if (playbook.kind === 'task' || playbook[key]) {
-      lines.push(`${key}: ${playbook[key]}`);
-    }
-  }
-
-  if (playbook.workdir !== 'worktree') {
-    lines.push(`workdir: ${playbook.workdir}`);
-  }
-
-  if (playbook.kind === 'task' && playbook.reports.length > 0) {
-    lines.push(`reports: ${playbook.reports.join(', ')}`);
-  }
-
-  if (playbook.kind === 'task' && playbook.reports.includes('approval') && playbook.approvalSends) {
-    lines.push('approvalSends: true');
-  }
-
-  if (playbook.kind === 'task' && playbook.returnOf.length > 0) {
-    lines.push(`returnOf: ${playbook.returnOf.join(', ')}`);
-  }
-
-  if (playbook.permissionMode !== null) {
-    lines.push(`permissionMode: ${playbook.permissionMode}`);
-  }
-
-  if (playbook.model !== null && playbook.model !== '') {
-    lines.push(`model: ${frontMatterValue(playbook.model)}`);
-  }
-
-  const body = playbook.template.replace(/\r\n/g, '\n');
-
-  return { text: `---\n${lines.join('\n')}\n---\n${body.endsWith('\n') ? body : `${body}\n`}` };
 }
 
 /** Whether `name` is a valid `<namespace>:<name>` playbook name. */
@@ -285,54 +183,22 @@ export interface PlaybookSet {
   errors: PlaybookError[];
 }
 
-export interface PlaybookFile {
-  /** `<namespace>:<name>`, from the path, which may not be a valid playbook name. */
-  name: string;
-  /** Relative to the playbook directory, such as `dev/develop.md`. */
-  file: string;
-  path: string;
-}
-
-/** The `<dir>/<namespace>/<name>.md` files, sorted. A missing directory has none. */
-export function listPlaybookFiles(dir: string): PlaybookFile[] {
-  let namespaces: string[];
-
-  try {
-    namespaces = readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-
-    throw error;
-  }
-
-  return namespaces.flatMap((namespace) =>
-    readdirSync(join(dir, namespace), { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-      .map((entry) => entry.name)
-      .sort()
-      .map((file) => ({ name: `${namespace}:${file.slice(0, -'.md'.length)}`, file: `${namespace}/${file}`, path: join(dir, namespace, file) })),
-  );
-}
-
-/** Parses one listed playbook file's text. */
-export function parsePlaybookFile(file: PlaybookFile, text: string): PlaybookResult {
-  return isPlaybookName(file.name) ? parsePlaybook(file.name, text) : { error: 'Namespace and name must be lowercase letters, digits and hyphens.' };
-}
-
-/** Reads `<dir>/<namespace>/<name>.md`. An invalid file is left out and reported (PRD R42). A missing directory is empty. */
-export function loadPlaybooks(dir: string): PlaybookSet {
+/**
+ * Parses the `playbooks` object of settings.json; undefined has none. An invalid entry is left out and reported (PRD R42).
+ * `parseSettings` rejects a `playbooks` value that is not an object.
+ */
+export function parsePlaybooks(value: unknown): PlaybookSet {
   const playbooks = new Map<string, Playbook>();
   const errors: PlaybookError[] = [];
 
-  for (const file of listPlaybookFiles(dir)) {
-    const result = parsePlaybookFile(file, readFileSync(file.path, 'utf8'));
+  // Sorted by name, so the classifier's list does not depend on the order of the keys in the file.
+  for (const [name, entry] of Object.entries(isObject(value) ? value : {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const result = parsePlaybook(name, entry);
 
     if ('error' in result) {
-      errors.push({ file: file.file, error: result.error });
+      errors.push({ name, error: result.error });
     } else {
-      playbooks.set(result.playbook.name, result.playbook);
+      playbooks.set(name, result.playbook);
     }
   }
 

@@ -11,20 +11,20 @@ export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
 export const REPORT = 'node "C:/home/.switchboard/hub.js" report';
 
-const PLAYBOOKS: Record<string, string> = {
-  'triage:github': '---\ndescription: GitHub triage\nkind: triage\n---\nClassify the GitHub issue.',
-  'triage:zoho': '---\ndescription: Zoho triage\nkind: triage\nrates: true\n---\nTriage the Support case.',
-  'dev:develop': '---\ndescription: Plan and build the change\nautoStart: true\nrequiresWorktree: true\nreports: done, worktree\n---\n/gc-plan {{ticket.sourceKey}}',
-  'dev:question': '---\ndescription: Answer a question\npermissionMode: plan\nmodel: opus\nreports: approval\n---\nAnswer {{ticket.title}}.\n{{ticket.context}}',
-  'support:defect': '---\ndescription: Research a defect\nautoStart: true\nworkdir: repoRoot\nreports: done\n---\nResearch {{ticket.sourceKey}} in {{ticket.url}}.',
+const PLAYBOOKS: Record<string, unknown> = {
+  'triage:github': { description: 'GitHub triage', kind: 'triage', template: 'Classify the GitHub issue.' },
+  'triage:zoho': { description: 'Zoho triage', kind: 'triage', rates: true, template: 'Triage the Support case.' },
+  'dev:develop': { description: 'Plan and build the change', autoStart: true, requiresWorktree: true, reports: ['done', 'worktree'], template: '/gc-plan {{ticket.sourceKey}}' },
+  'dev:question': { description: 'Answer a question', permissionMode: 'plan', model: 'opus', reports: ['approval'], template: 'Answer {{ticket.title}}.\n{{ticket.context}}' },
+  'support:defect': { description: 'Research a defect', autoStart: true, workdir: 'repoRoot', reports: ['done'], template: 'Research {{ticket.sourceKey}} in {{ticket.url}}.' },
 };
 
-export function playbooks(names: string[] = Object.keys(PLAYBOOKS), extra: Record<string, string> = {}): Map<string, Playbook> {
+export function playbooks(names: string[] = Object.keys(PLAYBOOKS), extra: Record<string, unknown> = {}): Map<string, Playbook> {
   const all = { ...PLAYBOOKS, ...extra };
   const result = new Map<string, Playbook>();
 
   for (const name of [...names, ...Object.keys(extra)]) {
-    const parsed = parsePlaybook(name, all[name]!);
+    const parsed = parsePlaybook(name, all[name]);
 
     if ('error' in parsed) {
       throw new Error(`${name}: ${parsed.error}`);
@@ -41,8 +41,8 @@ export function settings(patch: { sessions?: Partial<Settings['sessions']>; tria
     sessions: { ...DEFAULT_SETTINGS.sessions, ...patch.sessions },
     triage: { ...DEFAULT_SETTINGS.triage, ...patch.triage },
     sources: {
-      github: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', namespace: '', options: {} },
-      zoho: { enabled: true, pollIntervalSeconds: 300, repoRoot: 'D:/git/support', triagePlaybook: 'triage:zoho', setupPrompt: '', namespace: 'support', options: {} },
+      github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', namespace: '', options: {} },
+      zoho: { pollIntervalSeconds: 300, repoRoot: 'D:/git/support', triagePlaybook: 'triage:zoho', setupPrompt: '', namespace: 'support', options: {} },
     },
   };
 }

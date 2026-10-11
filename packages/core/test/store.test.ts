@@ -285,8 +285,8 @@ describe('Store', () => {
   it('makes a version 19 turn that finished without a done or approval report finished, and gives ready work items their readyAt', () => {
     const path = join(dir, 'v19.db');
     const raw = new DatabaseSync(path);
-    raw.exec(MIGRATIONS.slice(0, MIGRATIONS.length - 1).join(';'));
-    raw.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    raw.exec(MIGRATIONS.slice(0, 19).join(';'));
+    raw.exec('PRAGMA user_version = 19');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
     raw.exec(
       `INSERT INTO workItems (id, ticketId, status, error, createdAt, statusAt, approvalPrompt) VALUES
@@ -348,6 +348,28 @@ describe('Store', () => {
     expect(store.workItem(2)?.parentId).toBeNull();
     expect(() => store.insertSession({ ...kept, id: 's2', workItemId: 99 })).toThrow(/FOREIGN KEY/);
     store.close();
+  });
+
+  it('keeps each source off until it is turned on, and keeps the latest state across reopening', () => {
+    const path = join(dir, 'switchboard.db');
+    const store = Store.open(path);
+
+    expect(store.enabledSources()).toEqual(new Set());
+    store.setSourceEnabled('github', true);
+    store.setSourceEnabled('zoho', true);
+    store.setSourceEnabled('zoho', false);
+    store.close();
+
+    const reopened = Store.open(path);
+
+    expect(reopened.enabledSources()).toEqual(new Set(['github']));
+
+    reopened.setSourceEnabled('forum', true);
+    reopened.keepSourceStates(['forum', 'zoho']);
+    expect(reopened.enabledSources()).toEqual(new Set(['forum']));
+    reopened.keepSourceStates([]);
+    expect(reopened.enabledSources()).toEqual(new Set());
+    reopened.close();
   });
 
   it('finds the latest session with a Claude session ID', () => {
