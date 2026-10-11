@@ -33,6 +33,7 @@ export const MESSAGES = {
   noTaskPlaybooks: 'No task playbooks to choose from.',
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
   openedToAnswer: 'Opened in Claude to answer.',
+  openedInCodexToAnswer: 'Opened in Codex to answer.',
 } as const;
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
@@ -62,7 +63,9 @@ export type Report =
   | { kind: 'playbook'; playbook: string }
   | { kind: 'paste'; label: string; file: string }
   /** A follow-up for a new ad-hoc work item (PRD R68); a null repo or title takes the default. */
-  | { kind: 'task'; prompt: string; repo: string | null; title: string | null };
+  | { kind: 'task'; prompt: string; repo: string | null; title: string | null }
+  /** A Codex session's question, which it waits on once its turn ends (PRD R70). */
+  | { kind: 'question'; text: string; options: string[] };
 
 /** `open`: the operator opens the waiting session in a Claude tab to answer it there (PRD R70). */
 export type StopReason = 'operator' | 'release' | 'open';
@@ -103,13 +106,16 @@ export type FlowEvent =
   | { type: 'stop-succeeded'; sessionId: string; reason: StopReason }
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string }
   | { type: 'reply-failed'; sessionId: string; message: string }
+  /** A Codex answer's turn started, so the question it answers is no longer waited on (PRD R70). */
+  | { type: 'reply-started'; sessionId: string; questionId: string }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
   | { type: 'start' | 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
   /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
   /** Answers the question the row showed, which the hub checks against the job state (PRD R70). */
-  | { type: 'answer'; workItemId: number; nativeSessionId: string; question: string; answer: string }
+  /** `questionId` names a Codex question the row showed; its answer is refused once the session waits on another. */
+  | { type: 'answer'; workItemId: number; nativeSessionId: string; question: string; answer: string; questionId?: string | null }
   | { type: 'pick' | 'retriage-pool' | 'restore'; ticketId: number }
   /** Snoozes the ticket until `until`, or indefinitely when null (PRD R49). */
   | { type: 'snooze'; ticketId: number; until: number | null }
@@ -156,7 +162,7 @@ export type FlowAction =
     }
   /** The provider travels with the action, because Delete removes the session's row before its stop runs. */
   | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason }
-  | { type: 'reply-session'; sessionId: string; provider: Provider; shortId: string; question: string; text: string };
+  | { type: 'reply-session'; sessionId: string; provider: Provider; shortId: string; question: string; questionId: string | null; text: string };
 
 export interface FlowContext {
   now: number;
@@ -179,13 +185,18 @@ class Refusal extends Error {}
  * The reports a session's prompt offers (PRD R23). A playbook's task session gets stage, link and the playbook's own; a setup or approved
  * session finishes with done, and an ad-hoc prompt has no playbook to narrow them.
  */
-function sessionReports(kind: SessionKind, approved: boolean, playbook: Playbook | null): ReportKind[] {
+function sessionReports(kind: SessionKind, approved: boolean, playbook: Playbook | null, provider: Provider): ReportKind[] {
+  // A background Codex run cannot wait on the operator mid-turn, so it reports its question (mechanics M31).
+  const asks = (entry: ReportKind) => entry === 'question' && provider === 'codex';
+
   if (kind !== 'task' || approved) {
-    return ['stage', 'worktree', 'done', 'link', 'task'];
+    return REPORT_KINDS.filter((entry) => ['stage', 'worktree', 'done', 'link', 'task'].includes(entry) || asks(entry));
   }
 
   // An ad-hoc work item has no playbook to change.
-  return playbook === null ? REPORT_KINDS.filter((entry) => entry !== 'playbook') : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || entry === 'task' || (playbook.reports as readonly string[]).includes(entry));
+  return playbook === null
+    ? REPORT_KINDS.filter((entry) => entry !== 'playbook' && (entry !== 'question' || asks(entry)))
+    : REPORT_KINDS.filter((entry) => entry === 'stage' || entry === 'link' || entry === 'task' || asks(entry) || (playbook.reports as readonly string[]).includes(entry));
 }
 
 /** Why a task session's turn or process ended without the done or approval report its prompt offered. */
@@ -266,6 +277,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { reason: event.reason, message: event.message };
     case 'reply-failed':
       return { message: event.message };
+    case 'reply-started':
+      return { questionId: event.questionId };
     case 'answer':
       return { answer: event.answer };
     case 'worktree-found':
@@ -409,6 +422,8 @@ class Flow {
         return this.stopFailed(event.sessionId, event.reason, event.message);
       case 'reply-failed':
         return this.replyFailed(event.sessionId, event.message);
+      case 'reply-started':
+        return this.replyStarted(event.sessionId, event.questionId);
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
@@ -426,7 +441,7 @@ class Flow {
       case 'delete':
         return this.delete(this.knownItem(event.workItemId));
       case 'answer':
-        return this.answer(this.openItem(event.workItemId), event.nativeSessionId, event.question, event.answer);
+        return this.answer(this.openItem(event.workItemId), event.nativeSessionId, event.question, event.answer, event.questionId ?? null);
       case 'open-question':
         return this.openQuestion(this.openItem(event.workItemId), event.nativeSessionId);
       case 'pick':
@@ -865,8 +880,9 @@ class Flow {
 
       if (session !== null && session.state !== 'starting') {
         // An interactive session is the operator's; Switchboard never stops it (PRD R39).
-        if (entry.interactive === true && (!session.released || session.releasing)) {
-          this.store.updateSession(session.id, { released: true, releasing: false });
+        // The operator has the session now and answers in its own view, so a reported question is no longer waited on.
+        if (entry.interactive === true && (!session.released || session.releasing || session.question !== null)) {
+          this.store.updateSession(session.id, { released: true, releasing: false, question: null });
         }
 
         this.setState({ ...session, released: session.released || entry.interactive === true, releasing: session.releasing && entry.interactive !== true }, entry.state, entry.detail);
@@ -878,7 +894,7 @@ class Flow {
     for (const session of this.store.activeSessions()) {
       if (session.state !== 'starting' && !listed.has(session.id) && (looked === null || looked.has(session.id))) {
         // Its background process is gone, so a later resume (such as in a VS Code tab) is never released (PRD R39).
-        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true, releasing: false });
+        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true, releasing: false, question: null });
         this.ended({ ...session, state: 'ended' });
       }
     }
@@ -1050,6 +1066,22 @@ class Flow {
       case 'task':
         // Follow-up work is new work, so it is recorded whatever the state of the reporting work item.
         return this.task(session, report);
+      case 'question':
+        // A session the operator resumed elsewhere asks there; only its background run waits on a reported question.
+        if (session.state !== 'ended' && (!session.released || session.releasing)) {
+          this.store.updateSession(sessionId, { question: { id: this.context.newSessionId(), text: report.text, options: report.options } });
+        }
+
+        return;
+    }
+  }
+
+  /** The answer's turn started: the question it answers is no longer waited on; a newer one stays (PRD R70). */
+  private replyStarted(sessionId: string, questionId: string): void {
+    const session = this.session(sessionId);
+
+    if (session.question?.id === questionId) {
+      this.store.updateSession(sessionId, { question: null });
     }
   }
 
@@ -1110,12 +1142,13 @@ class Flow {
 
     // A session that already reported done ends normally, so a finished setup still starts its task.
     const stopped = reason !== 'release' && session.outcome !== 'done';
-    const message = reason === 'open' ? MESSAGES.openedToAnswer : MESSAGES.stopped;
+    const message = reason !== 'open' ? MESSAGES.stopped : session.provider === 'codex' ? MESSAGES.openedInCodexToAnswer : MESSAGES.openedToAnswer;
 
     this.store.updateSession(sessionId, {
       state: 'ended',
       released: true,
       releasing: false,
+      question: null,
       stateAt: this.now,
       endedAt: this.now,
       ...(stopped && session.outcome === null ? { outcome: 'stopped' as const, outcomeDetail: message } : {}),
@@ -1181,14 +1214,19 @@ class Flow {
   }
 
   /** Sends the answer through Claude's background service; the hook marker moves the session to running (PRD R70). */
-  private answer(item: WorkItem, nativeSessionId: string, question: string, answer: string): void {
+  private answer(item: WorkItem, nativeSessionId: string, question: string, answer: string, questionId: string | null): void {
     if (answer.trim() === '') {
       throw new Refusal('The answer is empty.');
     }
 
     const session = this.waitingBackground(item, nativeSessionId);
 
-    this.actions.push({ type: 'reply-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, question, text: answer });
+    // A Codex question is answered by the ID the row showed, so a click on an earlier question with the same text answers nothing.
+    if (session.question !== null && session.question.id !== questionId) {
+      throw new Refusal('The session no longer waits on that question.');
+    }
+
+    this.actions.push({ type: 'reply-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, question, questionId: session.question?.id ?? null, text: answer });
   }
 
   /** Stops the background session, so the window can open it in a Claude tab, which asks the question again (PRD R70). */
@@ -1569,10 +1607,10 @@ class Flow {
       prompt = rendered.text;
     }
 
-    const reports = sessionReports(kind, approved, playbook);
-    const full = sessionPrompt(prompt, id);
     // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do.
     const provider = playbook?.provider ?? sessions.provider;
+    const reports = sessionReports(kind, approved, playbook, provider);
+    const full = sessionPrompt(prompt, id);
 
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
@@ -1597,6 +1635,7 @@ class Flow {
       endedAt: null,
       released: false,
       releasing: false,
+      question: null,
       reports,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });

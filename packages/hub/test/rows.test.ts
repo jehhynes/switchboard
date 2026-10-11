@@ -92,7 +92,10 @@ describe('Codex sessions (PRD R22)', () => {
   const terminal = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Open in terminal')?.message ?? null;
 
   it('names Codex on Open, as the main control of a waiting session, and in Delete', () => {
-    const waiting = item(7, { sessions: [codex({ state: 'waiting' })] });
+    const waiting = item(7, { sessions: [codex({ state: 'waiting' })], question: { text: 'Which?', options: [], parts: 1, id: 'q1' } });
+
+    // Until the hub shows the question, its asking turn may still run, so nothing opens it.
+    expect(mainControl(item(7, { sessions: [codex({ state: 'waiting' })] }))).toBeNull();
 
     expect(mainControl(waiting)).toEqual({ label: 'Open in Codex', icon: 'comment-discussion', message: { type: 'open-question', workItemId: 7, sessionId: 'thread-1', cwd: 'D:/git/widgets', provider: 'codex' } });
     expect(labels(waiting)).not.toContain('Open in Claude');

@@ -22,7 +22,7 @@ function session(patch: Partial<Session> = {}): Session {
     outcomeDetail: null,
     startedAt: NOW - 5 * 60_000,
     endedAt: null,
-    released: false, releasing: false,
+    released: false, releasing: false, question: null,
     reports: ['stage', 'done', 'link'],
     ...patch,
   };

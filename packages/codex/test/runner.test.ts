@@ -150,7 +150,7 @@ const session = (patch: Partial<Session> = {}): Session => ({
   outcomeDetail: null,
   startedAt: 0,
   endedAt: null,
-  released: false, releasing: false,
+  released: false, releasing: false, question: null,
   reports: ['stage'],
   ...patch,
 });
@@ -238,14 +238,14 @@ describe('observe', () => {
     const fake = new Fake();
     const { runner, record } = await started(fake);
 
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
 
     append(record, DONE);
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }] });
 
     fake.alive.delete(100);
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }] });
-    expect(await runner.observe([session({ released: true })])).toEqual({ sessions: [] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }] });
+    expect(await runner.observe([session({ released: true })])).toMatchObject({ sessions: [] });
   });
 
   it('ends a run that died without a turn end, and one whose PID another process now has', async () => {
@@ -253,10 +253,10 @@ describe('observe', () => {
     const { runner } = await started(fake);
 
     fake.created.set(100, 'reused');
-    expect(await runner.observe([session()])).toEqual({ sessions: [] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [] });
 
     fake.alive.delete(100);
-    expect(await runner.observe([session()])).toEqual({ sessions: [] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [] });
   });
 
   it('gives a failed turn with its message', async () => {
@@ -265,7 +265,7 @@ describe('observe', () => {
 
     append(record, '{"type":"turn.failed","error":{"message":"stream disconnected"}}\n');
     fake.alive.delete(100);
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'failed', detail: 'stream disconnected', interactive: false }] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'failed', detail: 'stream disconnected', interactive: false }] });
   });
 
   it("takes a live process that resumed the thread since the run began as the operator's", async () => {
@@ -277,11 +277,11 @@ describe('observe', () => {
     fake.alive.add(900);
     fake.created.set(900, 'c900');
     marker({ event: 'UserPromptSubmit' });
-    expect(await runner.observe([session({ released: true })])).toEqual({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: true }] });
+    expect(await runner.observe([session({ released: true })])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: true }] });
 
     // The panel's process stays; a reused PID does not.
     fake.created.set(900, 'other');
-    expect(await runner.observe([session({ released: true })])).toEqual({ sessions: [] });
+    expect(await runner.observe([session({ released: true })])).toMatchObject({ sessions: [] });
   });
 
   it('finds a run the record holds no process for by its tag, and fails the read when the query fails', async () => {
@@ -291,7 +291,7 @@ describe('observe', () => {
 
     writeRecord(home, { ...record, process: null });
     fake.tags.set('s1-1', { pid: 100, created: 'c100' });
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
     expect(readRecord(home, 's1')!.process).toEqual({ pid: 100, created: 'c100' });
 
     fake.queryError = 'WMI is down';
@@ -303,11 +303,11 @@ describe('observe', () => {
     const { runner, record } = await started(fake);
 
     fake.question = { id: 'q1', text: 'Which tree?', options: [] };
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
 
     append(record, DONE);
     fake.alive.delete(100);
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }] });
   });
 });
 
@@ -529,7 +529,7 @@ describe('lifecycle races and recovery', () => {
 
     const failed = { state: 'failed', detail: "The 'no-such-model' model is not supported when using Codex with a ChatGPT account." };
 
-    expect(await runner.observe([session({ released: true })])).toEqual({ sessions: [{ sessionId: 's1', ...failed, interactive: true }] });
+    expect(await runner.observe([session({ released: true })])).toMatchObject({ sessions: [{ sessionId: 's1', ...failed, interactive: true }] });
     expect(runner.markers([session({ released: true })]).get(THREAD)).toEqual({ at: 50, observed: failed, recheck: false });
   });
 
@@ -598,7 +598,7 @@ describe('lifecycle races and recovery', () => {
     expect(readRecord(home, 's1')!.process).toBeNull();
 
     fake.tags.set('s1-1', { pid: 100, created: 'c100' });
-    expect(await runner.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
   });
 
   it('adopts a reply a stopped hub spawned, and fails one it only reserved, so the question can be answered again', async () => {
@@ -610,7 +610,7 @@ describe('lifecycle races and recovery', () => {
     fake.alive.delete(100);
     writeRecord(home, { ...readRecord(home, 's1')!, reply: { questionId: 'q1', attempt: 2, state: 'reserved' } });
 
-    expect(await fake.runner().observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }] });
+    expect(await fake.runner().observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }] });
     expect(readRecord(home, 's1')!.reply).toEqual({ questionId: 'q1', attempt: 2, state: 'failed' });
 
     writeRecord(home, { ...readRecord(home, 's1')!, reply: { questionId: 'q1', attempt: 2, state: 'reserved' } });
@@ -618,7 +618,7 @@ describe('lifecycle races and recovery', () => {
     fake.alive.add(300);
     fake.created.set(300, 'c300');
     fake.tags.set('s1-2', { pid: 300, created: 'c300' });
-    expect(await fake.runner().observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
+    expect(await fake.runner().observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
     expect(readRecord(home, 's1')).toMatchObject({ attempt: 2, process: { pid: 300, created: 'c300' }, previous: { pid: 100, created: 'c100' }, reply: { state: 'spawned' } });
   });
 
@@ -632,7 +632,7 @@ describe('lifecycle races and recovery', () => {
     writeRecord(home, { ...readRecord(home, 's1')!, reply: { questionId: 'q1', attempt: 2, state: 'reserved' } });
     writeFileSync(attemptFiles(home, 's1', 2).stdout, STARTED + TURN + DONE);
 
-    expect(await fake.runner().observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }] });
+    expect(await fake.runner().observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }], acknowledged: [{ sessionId: 's1', questionId: 'q1' }] });
     expect(readRecord(home, 's1')).toMatchObject({ attempt: 2, process: null, reply: { questionId: 'q1', attempt: 2, state: 'spawned' } });
   });
 

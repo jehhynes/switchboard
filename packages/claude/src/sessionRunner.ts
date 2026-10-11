@@ -74,7 +74,7 @@ export class ClaudeRunner implements SessionRunner {
   }
 
   /** The question from the job state, read again only when the file changed (PRD R70, mechanics M24). */
-  question(session: Session): { question: SessionQuestion | null; version: number } | null {
+  question(session: Session): { question: SessionQuestion | null; version: string } | null {
     if (session.shortId === null) {
       return null;
     }
@@ -96,7 +96,7 @@ export class ClaudeRunner implements SessionRunner {
     const cached = this.questions.get(session.shortId);
 
     if (cached?.mtimeMs === mtimeMs) {
-      return { question: cached.question, version: mtimeMs };
+      return { question: cached.question, version: String(mtimeMs) };
     }
 
     const read = readJobQuestion(this.configDir, session.shortId);
@@ -104,7 +104,7 @@ export class ClaudeRunner implements SessionRunner {
 
     this.questions.set(session.shortId, { mtimeMs, question });
 
-    return { question, version: mtimeMs };
+    return { question, version: String(mtimeMs) };
   }
 
   forgetQuestion(target: SessionTarget): void {

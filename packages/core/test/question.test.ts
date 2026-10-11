@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
 import { MESSAGES } from '../src/flow.js';
-import { Harness, MINUTE, issue } from './flowHarness.js';
+import { Harness, MINUTE, issue, settings } from './flowHarness.js';
 
 /** A dev:question task session for ticket `key`, started and waiting on a question in its background process. */
 function waiting(h: Harness, key = '1'): { item: number; session: string } {
@@ -23,7 +23,7 @@ describe('answering on the row (PRD R70)', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
-    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual([{ type: 'reply-session', sessionId: session, provider: 'claude', shortId: 'abc12341', question: 'Which?', text: 'Birch' }]);
+    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual([{ type: 'reply-session', sessionId: session, provider: 'claude', shortId: 'abc12341', question: 'Which?', questionId: null, text: 'Birch' }]);
     expect(h.item(item)).toMatchObject({ status: 'running', error: null });
     expect(h.store.session(session)?.state).toBe('waiting');
   });
@@ -158,5 +158,84 @@ describe('History of answers (PRD R59, R70)', () => {
     ]);
     expect(events[2]!.changes[0]!.fields).toEqual({ error: [null, 'Answer failed: no such session'] });
     expect(events[4]!.changes.find((change) => change.entity === 'workItem')!.fields).toMatchObject({ status: ['running', 'blocked'], error: ['Answer failed: no such session', MESSAGES.openedToAnswer] });
+  });
+});
+
+describe('Codex questions (PRD R70)', () => {
+  /** A Codex dev:question task session for ticket 1, started and running in its background process. */
+  function codexRunning(h: Harness): { item: number; session: string } {
+    const [triage] = h.poll(issue('1'));
+    const item = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId!;
+
+    h.triaged(triage, 'dev:question');
+    const start = h.act({ type: 'start', workItemId: item })[0] as Extract<FlowAction, { type: 'start-session' }>;
+
+    expect(start.provider).toBe('codex');
+    h.act({ type: 'session-started', sessionId: start.sessionId, nativeSessionId: 'thread-1', shortId: 'thread-1' });
+
+    return { item, session: start.sessionId };
+  }
+
+  const codexHarness = () => new Harness({ settings: settings({ sessions: { provider: 'codex', codex: { permissionMode: 'plan', model: '' } } }) });
+
+  it('keeps the reported question with an ID, answers it with that ID, and clears it only for that ID once the answer runs', () => {
+    const h = codexHarness();
+    const { item, session } = codexRunning(h);
+
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: ['Oak', 'Birch'] } });
+    const asked = h.store.session(session)!.question!;
+
+    expect(asked).toMatchObject({ text: 'Which tree?', options: ['Oak', 'Birch'] });
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
+
+    // A click without the row's question ID, as from an older row, is refused.
+    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'thread-1', question: 'Which tree?', answer: 'Birch' }).refused).toBe('The session no longer waits on that question.');
+    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'thread-1', question: 'Which tree?', answer: 'Birch', questionId: asked.id })).toEqual([
+      { type: 'reply-session', sessionId: session, provider: 'codex', shortId: 'thread-1', question: 'Which tree?', questionId: asked.id, text: 'Birch' },
+    ]);
+
+    // A second question with the same text, reported before the first answer was acknowledged, keeps its own ID and survives.
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: [] } });
+    const second = h.store.session(session)!.question!;
+
+    expect(second.id).not.toBe(asked.id);
+    // A click on the first question's row cannot answer the second, though its text is the same.
+    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'thread-1', question: 'Which tree?', answer: 'Oak', questionId: asked.id }).refused).toBe('The session no longer waits on that question.');
+    h.act({ type: 'reply-started', sessionId: session, questionId: asked.id });
+    expect(h.store.session(session)!.question).toEqual(second);
+    h.act({ type: 'reply-started', sessionId: session, questionId: second.id });
+    expect(h.store.session(session)!.question).toBeNull();
+  });
+
+  it("opens a waiting Codex question in Codex, blocking the work item with Codex's reason and dropping the question", () => {
+    const h = codexHarness();
+    const { item, session } = codexRunning(h);
+
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: [] } });
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
+    expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'thread-1' })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'codex', shortId: 'thread-1', reason: 'open' }]);
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
+
+    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.openedInCodexToAnswer });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', question: null });
+  });
+
+  it('takes no question from a session the operator resumed, and drops one when the operator is seen running the session', () => {
+    const h = codexHarness();
+    const { session } = codexRunning(h);
+
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: [] } });
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
+    expect(h.store.session(session)).toMatchObject({ released: true, question: null });
+
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Again?', options: [] } });
+    expect(h.store.session(session)!.question).toBeNull();
+  });
+
+  it("refuses a question report from a Claude session, whose contract offers AskUserQuestion instead", () => {
+    const h = new Harness();
+    const { session } = waiting(h);
+
+    expect(h.send({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which?', options: [] } }).refused).toBe("This session's report contract does not offer the question report.");
   });
 });

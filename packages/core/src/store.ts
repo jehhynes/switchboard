@@ -263,11 +263,15 @@ export const MIGRATIONS = [
   `CREATE TABLE sourceStates (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL);`,
   // A release stop sent and not yet finished: the session is not the operator's to open yet (PRD R39).
   `ALTER TABLE sessions ADD COLUMN releasing INTEGER NOT NULL DEFAULT 0;`,
+  // A Codex session's question, as JSON, which it waits on after its turn (PRD R70).
+  `ALTER TABLE sessions ADD COLUMN question TEXT;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports']);
+/** Stored as JSON text. */
+const OBJECTS = new Set(['question']);
 
 type Row = Record<string, unknown>;
 
@@ -279,7 +283,7 @@ function fromRow<T>(row: Row | undefined): T | null {
   const result: Row = {};
 
   for (const [key, value] of Object.entries(row)) {
-    result[key] = BOOLEANS.has(key) ? value === 1 : LISTS.has(key) ? String(value).split(',').filter((entry) => entry !== '') : value;
+    result[key] = BOOLEANS.has(key) ? value === 1 : LISTS.has(key) ? String(value).split(',').filter((entry) => entry !== '') : OBJECTS.has(key) && typeof value === 'string' ? JSON.parse(value) : value;
   }
 
   return result as T;
@@ -332,7 +336,7 @@ function toParams(values: Row): Record<string, SQLInputValue> {
   const result: Record<string, SQLInputValue> = {};
 
   for (const [key, value] of Object.entries(values)) {
-    result[key] = typeof value === 'boolean' ? (value ? 1 : 0) : Array.isArray(value) ? value.join(',') : (value as SQLInputValue);
+    result[key] = typeof value === 'boolean' ? (value ? 1 : 0) : Array.isArray(value) ? value.join(',') : OBJECTS.has(key) && value !== null ? JSON.stringify(value) : (value as SQLInputValue);
   }
 
   return result;
@@ -403,7 +407,8 @@ export interface TicketHistory {
 const UNLOGGED: Record<string, ReadonlySet<string>> = {
   tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt']),
   workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt']),
-  sessions: new Set(['stateAt', 'releasing']),
+  // The question report's event names the question; its ID and its clearing are bookkeeping.
+  sessions: new Set(['stateAt', 'releasing', 'question']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

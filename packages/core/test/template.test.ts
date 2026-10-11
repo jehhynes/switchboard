@@ -58,12 +58,13 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
     expect(approval).not.toContain('end your turn; the operator reviews it');
   });
 
-  it('tells a Codex session to end its turn with a question, because its background run cannot wait on the operator (mechanics M31)', () => {
-    const codex = sessionContract('s-5', 'R', ['stage', 'done'], 'codex');
+  it('offers a Codex session the question report in place of AskUserQuestion, because its background run cannot wait on the operator (mechanics M31)', () => {
+    const codex = sessionContract('s-5', 'R', ['stage', 'done', 'question'], 'codex');
 
-    expect(codex.endsWith("When you need the operator's answer or choice, or cannot continue without them, write the question, with any choices, as your final message and end your turn. Do not report or write a file for a question.")).toBe(true);
+    expect(codex).toContain("- R question s-5 --text <question> [--option <choice>]..., when you need the operator's answer or choice, or cannot continue without them; write the question and its choices as your final message too, then end your turn.");
+    expect(codex.endsWith('Ask the operator only with the question report. Do not write a file for a question.')).toBe(true);
     expect(codex).not.toContain('AskUserQuestion');
-    expect(codex.replace(/\n\n[^\n]*$/, '')).toBe(sessionContract('s-5', 'R', ['stage', 'done'], 'claude').replace(/\n\n[^\n]*$/, ''));
+    expect(sessionContract('s-5', 'R', ['stage', 'done'], 'claude')).not.toContain('question s-5');
   });
 
   it('does not list the task report a session may send, so only the operator starts one (PRD R68)', () => {

@@ -168,6 +168,7 @@ describe('History model', () => {
       [event('report', 'session', { kind: 'worktree', path: 'D:/wt/77' }, [change('worktree', 'insert', { path: [null, 'D:/wt/77'] }, { workItemId: null })]), { text: 'Reported the worktree D:/wt/77', lines: [] }],
       [event('report', 'session', { kind: 'done', assigned: true }), { text: 'Reported done, but the ticket is still assigned to you', tone: 'warning' }],
       [event('report', 'session', { kind: 'done' }, [change('workItem', 'update', { status: ['running', 'done'], doneReason: [null, 'session'] })]), { text: 'Reported done', lines: ['Done: finished by the session'], tone: 'success' }],
+      [event('report', 'session', { kind: 'question', text: 'Which tree?', options: ['Oak', 'Birch'] }), { text: 'Asked: Which tree?', detail: 'Oak · Birch' }],
       [event('report', 'session', { kind: 'playbook', playbook: 'dev:review' }, [change('workItem', 'update', { playbook: ['dev:question', 'dev:review'] })]), { text: 'Handed the work to dev:review', lines: [] }],
       [event('report', 'session', { kind: 'paste', label: 'Reply', file: 'D:/r.md' }, [change('paste', 'update', { file: ['D:/a.md', 'D:/r.md'] })]), { text: 'Drafted Reply', lines: [] }],
       [event('report', 'session', { kind: 'task', childTicketId: 2, childRef: '#4', childTitle: 'Fix it' }), { text: 'Queued a follow-up: Fix it', detail: 'Ad-hoc #4' }],

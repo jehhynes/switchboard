@@ -119,6 +119,20 @@ describe('parseReport and reportBody', () => {
     }
   });
 
+  it("reads a Codex session's question with its choices, and refuses one without text or with a bad choice", () => {
+    expect(reportBody(['question', 's1', '--text', 'Which tree?', '--option', 'Oak', '--option=Birch'])).toEqual({ sessionId: 's1', kind: 'question', text: 'Which tree?', options: ['Oak', 'Birch'] });
+    expect(reportBody(['question', 's1', '--text', 'Free text?'])).toEqual({ sessionId: 's1', kind: 'question', text: 'Free text?', options: [] });
+    expect(reportBody(['question', 's1', '--text', ' '])).toBeNull();
+    expect(reportBody(['question', 's1', '--option', 'Oak'])).toBeNull();
+
+    expect(parseReport({ sessionId: 's1', kind: 'question', text: ' Which? ', options: [' Oak '] })).toEqual({ sessionId: 's1', kind: 'question', text: 'Which?', options: ['Oak'] });
+    expect(parseReport({ sessionId: 's1', kind: 'question', text: 'Which?' })).toEqual({ sessionId: 's1', kind: 'question', text: 'Which?', options: [] });
+
+    for (const patch of [{ text: '' }, { text: 3 }, { options: 'Oak' }, { options: [''] }, { options: [1] }]) {
+      expect(parseReport({ sessionId: 's1', kind: 'question', text: 'Which?', ...patch })).toBeNull();
+    }
+  });
+
   it('validates report and action bodies', () => {
     expect(parseReport({ sessionId: 's1', kind: 'stage', stage: 'x' })).toEqual({ sessionId: 's1', kind: 'stage', stage: 'x' });
     expect(parseReport({ sessionId: 's1', kind: 'done' })).toEqual({ sessionId: 's1', kind: 'done' });
@@ -158,8 +172,10 @@ describe('parseReport and reportBody', () => {
   it('keeps only the fields of an answer and of Open in Claude, and refuses them without a work item, the session, the question or a text answer (PRD R70)', () => {
     const answer = { type: 'answer', workItemId: 3, nativeSessionId: 'native-3', question: 'Which tree?', answer: 'Birch' };
 
-    expect(parseAction({ ...answer, sessionId: 's1' })).toEqual(answer);
-    expect(parseAction({ ...answer, answer: '' })).toEqual({ ...answer, answer: '' });
+    expect(parseAction({ ...answer, sessionId: 's1' })).toEqual({ ...answer, questionId: null });
+    expect(parseAction({ ...answer, answer: '' })).toEqual({ ...answer, answer: '', questionId: null });
+    expect(parseAction({ ...answer, questionId: 'q7' })).toEqual({ ...answer, questionId: 'q7' });
+    expect(parseAction({ ...answer, questionId: 7 })).toBeNull();
     expect(parseAction({ type: 'open-question', workItemId: 3, nativeSessionId: 'native-3', sessionId: 's1', cwd: 'D:/wt' })).toEqual({ type: 'open-question', workItemId: 3, nativeSessionId: 'native-3' });
 
     for (const body of [

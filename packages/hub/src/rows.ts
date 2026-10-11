@@ -241,11 +241,14 @@ function waitsInBackground(session: SessionView | null): session is SessionView 
   return isBackground(session) && session.state === 'waiting' && session.nativeSessionId !== null;
 }
 
-/** Open in Claude or Codex: the hub stops the session, which then opens in the item window's view of its provider (PRD R70). */
+/**
+ * Open in Claude or Codex: the hub stops the session, which then opens in the item window's view of its provider (PRD R70). A Codex session offers it
+ * only while the hub shows its question, which it does once the asking turn has ended; Claude's stays offered when its job state cannot be read.
+ */
 export function openQuestion(item: WorkItemView): { type: 'open-question'; workItemId: number; sessionId: string; cwd: string; provider: Provider } | null {
   const session = activeSession(item);
 
-  return waitsInBackground(session) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider } : null;
+  return waitsInBackground(session) && (session.provider !== 'codex' || item.question !== null) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider } : null;
 }
 
 /** How labels name each provider. */

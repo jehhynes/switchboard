@@ -26,7 +26,7 @@ const RELOAD_DEBOUNCE_MS = 300;
 /** Operator events the dock may send (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'answer', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
 
-const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task']);
+const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 
 /** A link target: an http(s) URL (PRD R52). */
 export function isLinkTarget(target: unknown): target is string {
@@ -83,6 +83,15 @@ export function parseReport(body: unknown): ReportBody | null {
       : null;
   }
 
+  if (body['kind'] === 'question') {
+    const text = body['text'];
+    const options = body['options'] ?? [];
+
+    return typeof text === 'string' && text.trim() !== '' && Array.isArray(options) && options.every((option) => typeof option === 'string' && option.trim() !== '')
+      ? { sessionId: body['sessionId'], kind: 'question', text: text.trim(), options: (options as string[]).map((option) => option.trim()) }
+      : null;
+  }
+
   const optional = (field: string, valid: (value: unknown) => boolean) => body[field] === undefined || body[field] === null || valid(body[field]);
 
   // A task's repo is checked against the repo roots by the core; here it must be an absolute path (PRD R68).
@@ -94,7 +103,7 @@ export function parseReport(body: unknown): ReportBody | null {
       : null;
   }
 
-  const text = { stage: 'stage', worktree: 'path', approval: 'prompt', playbook: 'playbook' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done' | 'paste' | 'task'>];
+  const text = { stage: 'stage', worktree: 'path', approval: 'prompt', playbook: 'playbook' }[body['kind'] as Exclude<ReportBody['kind'], 'link' | 'done' | 'paste' | 'task' | 'question'>];
   const value = body[text];
 
   if (body['kind'] === 'approval' && !(optional('summary', (value) => typeof value === 'string') && optional('report', isReportPath))) {
@@ -130,8 +139,10 @@ export function parseAction(body: unknown): FlowEvent | null {
       return { type: 'open-question', workItemId: workItemId as number, nativeSessionId };
     }
 
-    return typeof body['answer'] === 'string' && typeof body['question'] === 'string'
-      ? { type: 'answer', workItemId: workItemId as number, nativeSessionId, question: body['question'], answer: body['answer'] }
+    const questionId = body['questionId'];
+
+    return typeof body['answer'] === 'string' && typeof body['question'] === 'string' && (questionId === undefined || questionId === null || typeof questionId === 'string')
+      ? { type: 'answer', workItemId: workItemId as number, nativeSessionId, question: body['question'], answer: body['answer'], questionId: questionId ?? null }
       : null;
   }
 
@@ -405,7 +416,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Unknown action.' } };
         }
 
-        const { refused } = event.type === 'answer' ? runtime.answer(event) : runtime.send(event);
+        const { refused } = event.type === 'answer' ? runtime.answer(event) : event.type === 'open-question' ? runtime.openQuestion(event) : runtime.send(event);
 
         return refused === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: refused } };
       },

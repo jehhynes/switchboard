@@ -110,7 +110,8 @@ export type ReportBody =
   | { sessionId: string; kind: 'link'; label: string; target: string }
   | { sessionId: string; kind: 'playbook'; playbook: string }
   | { sessionId: string; kind: 'paste'; label: string; file: string }
-  | { sessionId: string; kind: 'task'; prompt: string; repo: string | null; title: string | null };
+  | { sessionId: string; kind: 'task'; prompt: string; repo: string | null; title: string | null }
+  | { sessionId: string; kind: 'question'; text: string; options: string[] };
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -135,7 +136,7 @@ export class Runtime {
   /** The read in flight per source; reads run one at a time, so their results apply in order. */
   private reads = new Map<string, Promise<void>>();
   /** The question's version when the hub sent an answer, by short ID, so a question is answered once (PRD R70). */
-  private answered = new Map<string, number>();
+  private answered = new Map<string, string>();
   /** Sessions a stopped hub left starting that a runner could not settle yet. */
   private unreconciled = new Set<string>();
   /** One runner per agent, chosen by each session's provider (PRD R22). */
@@ -158,7 +159,7 @@ export class Runtime {
         new ClaudeRunner({ claudePath: deps.claudePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, service: deps.service, hooks }),
       codex:
         deps.runners?.codex ??
-        new CodexRunner({ codexPath: codex.path, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks, questionOf: () => null }),
+        new CodexRunner({ codexPath: codex.path, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
     };
     this.buildSources();
   }
@@ -234,6 +235,16 @@ export class Runtime {
     const read = this.runners[session.provider].question(session);
     const question = read?.question ?? null;
     const version = read?.version;
+
+    // A Codex row names its question's ID; a click on an earlier question with the same text is refused.
+    if (question?.id !== undefined && question.id !== event.questionId) {
+      const refused = 'The session no longer waits on that question.';
+
+      store.transaction(() => recordRefusal(store, event, this.deps.now(), refused));
+      this.changed();
+
+      return { actions: [], refused };
+    }
     // A reply answers only the first part of a question with several and loses the rest (mechanics M24).
     const refused =
       question?.text !== event.question
@@ -258,6 +269,26 @@ export class Runtime {
     }
 
     return result;
+  }
+
+  /**
+   * Open in Codex only while the session waits on its question as its run is now: a reply's turn that runs, before the roster sees it, must not be
+   * stopped. Claude's open stays offered when its job state cannot be read (PRD R70).
+   */
+  openQuestion(event: Extract<FlowEvent, { type: 'open-question' }>): FlowResult {
+    const store = this.deps.store;
+    const session = activeSession({ sessions: store.sessionsFor(event.workItemId) });
+
+    if (session?.provider === 'codex' && waitsInBackground(session) && session.nativeSessionId === event.nativeSessionId && this.runners.codex.question(session) === null) {
+      const refused = 'The session is not waiting on a question.';
+
+      store.transaction(() => recordRefusal(store, event, this.deps.now(), refused));
+      this.changed();
+
+      return { actions: [], refused };
+    }
+
+    return this.send(event);
   }
 
   /** The question a background session waits on (PRD R70). */
@@ -565,6 +596,8 @@ export class Runtime {
         continue;
       }
 
+      // A question reported while the read ran makes its result stale for that session, which the next read decides (PRD R70).
+      const asked = new Map(own.map((session) => [session.id, session.question?.id ?? null]));
       const roster = await this.runners[provider].observe(own);
 
       // A failed read changes none of the provider's sessions.
@@ -573,8 +606,19 @@ export class Runtime {
         continue;
       }
 
-      observed.push(...roster.sessions);
-      checked.push(...own.map((session) => session.id));
+      const stale = new Set(own.filter((session) => (this.deps.store.session(session.id)?.question?.id ?? null) !== asked.get(session.id)).map((session) => session.id));
+
+      if (stale.size > 0) {
+        this.rosterAgain = true;
+      }
+
+      // An answer whose turn started ends the wait before the states that follow it apply (PRD R70).
+      for (const { sessionId, questionId } of (roster.acknowledged ?? []).filter((entry) => !stale.has(entry.sessionId))) {
+        this.send({ type: 'reply-started', sessionId, questionId });
+      }
+
+      observed.push(...roster.sessions.filter((entry) => !stale.has(entry.sessionId)));
+      checked.push(...own.filter((session) => !stale.has(session.id)).map((session) => session.id));
     }
 
     if (checked.length > 0) {
@@ -708,7 +752,9 @@ export class Runtime {
                 ? { kind: body.kind, label: body.label, file: body.file }
                 : body.kind === 'task'
                   ? { kind: body.kind, prompt: body.prompt, repo: body.repo, title: body.title }
-                  : { kind: body.kind, label: body.label, target: body.target };
+                  : body.kind === 'question'
+                    ? { kind: body.kind, text: body.text, options: body.options }
+                    : { kind: body.kind, label: body.label, target: body.target };
 
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
   }
@@ -918,7 +964,11 @@ export class Runtime {
         return;
       }
       case 'reply-session': {
-        const failure = await this.runners[action.provider].reply({ sessionId: action.sessionId, shortId: action.shortId, question: action.question, questionId: null, answer: action.text });
+        const failure = await this.runners[action.provider].reply({ sessionId: action.sessionId, shortId: action.shortId, question: action.question, questionId: action.questionId, answer: action.text });
+
+        if (failure === null && action.questionId !== null) {
+          this.send({ type: 'reply-started', sessionId: action.sessionId, questionId: action.questionId });
+        }
 
         if (failure !== null) {
           this.answered.delete(action.shortId);

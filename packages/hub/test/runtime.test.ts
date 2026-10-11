@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import { REPORT_CHECK_MS, MARKER_MS, MARKER_WATCH_RETRY_MS, QUESTION_READ_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
+import { controlsOf } from '../src/rows.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -174,7 +175,10 @@ class FakeCodex {
   kills: number[] = [];
   trustError: string | null = null;
   queryError: string | null = null;
-  onSpawn: (stdout: string) => string = () => '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n';
+  onSpawn: (stdout: string, pid: number, args: string[]) => string = () => '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n';
+  /** Holds the next process query until released. */
+  queryGate: Promise<void> | null = null;
+  queryEntered: (() => void) | null = null;
 
   runner(): CodexRunner {
     return new CodexRunner({
@@ -188,18 +192,25 @@ class FakeCodex {
       codexHome: join(home, '.codex'),
       env: {},
       hooks: () => true,
-      questionOf: () => null,
       spawn: async (_file, args, options) => {
         const pid = this.nextPid++;
 
         this.spawned.push(args);
         this.commandLines.set(pid, args.join(' '));
         this.alive.add(pid);
-        writeFileSync(options.stdout, this.onSpawn(options.stdout));
+        writeFileSync(options.stdout, this.onSpawn(options.stdout, pid, args));
         writeFileSync(options.stderr, '');
         return { pid, error: null };
       },
-      processes: async (pids) => this.queryError !== null ? { error: this.queryError } : new Map(pids.filter((pid) => this.alive.has(pid)).map((pid) => [pid, { pid, created: `c${pid}`, name: 'codex.exe', commandLine: this.commandLines.get(pid) ?? '' }])),
+      processes: async (pids) => {
+        const gate = this.queryGate;
+
+        this.queryGate = null;
+        this.queryEntered?.();
+        await gate;
+
+        return this.queryError !== null ? { error: this.queryError } : new Map(pids.filter((pid) => this.alive.has(pid)).map((pid) => [pid, { pid, created: `c${pid}`, name: 'codex.exe', commandLine: this.commandLines.get(pid) ?? '' }]));
+      },
       tagged: async () => null,
       alive: (pid) => this.alive.has(pid),
       kill: async (pid) => {
@@ -485,7 +496,7 @@ describe('Runtime', () => {
     gate.resolve();
     await read;
     await runtime.settled();
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false, question: null });
     runtime.stop();
   });
 
@@ -510,11 +521,11 @@ describe('Runtime', () => {
     await new Promise((done) => setImmediate(done));
 
     expect(reads).toBe(1);
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false, question: null });
 
     roster.resolve();
     await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false, question: null });
     runtime.stop();
   });
 
@@ -555,7 +566,7 @@ describe('Runtime', () => {
 
     gate.resolve();
     await read;
-    expect(store.session('s2')).toMatchObject({ state: 'running', released: false, releasing: false });
+    expect(store.session('s2')).toMatchObject({ state: 'running', released: false, releasing: false, question: null });
   });
 
   it('ignores markers when hooks are off', async () => {
@@ -839,7 +850,7 @@ describe('Runtime', () => {
     expect(store.session('s1')).toMatchObject({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'thread-1', state: 'running' });
 
     await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false, question: null });
 
     // The turn ends and its process exits; the next read delivers the end, the release lets the process go, and the session ends.
     writeFileSync(join(home, '.switchboard', 'codex', 's1-1.jsonl'), '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n{"type":"turn.completed"}\n');
@@ -909,6 +920,177 @@ describe('Runtime', () => {
 
     expect(store.workItem(2)).toMatchObject({ status: 'queued' });
     expect(codex.spawned).toHaveLength(0);
+  });
+
+  it("shows a Codex session's reported question once its turn ends, answers it by resuming the thread, and drops it once the answer runs (PRD R70)", async () => {
+    const codex = new FakeCodex();
+    const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, NO_SERVICE, undefined, codex);
+    const log = (attempt: number) => join(home, '.switchboard', 'codex', `s1-${attempt}.jsonl`);
+
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    await runtime.settled();
+    expect(await runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?', options: ['Oak', 'Birch'] })).toEqual({ refused: null });
+
+    // Running: the question waits for the turn to end.
+    await runtime.readRoster();
+    expect(runtime.snapshot().workItems[0]!.question).toBeNull();
+
+    writeFileSync(log(1), '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n{"type":"turn.completed"}\n');
+    codex.alive.clear();
+    await runtime.readRoster();
+    await runtime.settled();
+    expect(store.session('s1')).toMatchObject({ state: 'waiting', released: false });
+    expect(runtime.snapshot().workItems[0]!.question).toEqual({ text: 'Which tree?', options: [{ label: 'Oak', description: '' }, { label: 'Birch', description: '' }], parts: 1, id: 's2' });
+
+    const answer = { type: 'answer' as const, workItemId: 1, nativeSessionId: 'thread-1', question: 'Which tree?', answer: 'Birch', questionId: 's2' };
+
+    expect(runtime.answer(answer).refused).toBeNull();
+    await runtime.settled();
+    expect(codex.spawned[1]!.slice(0, 3)).toEqual(['exec', 'resume', '--json']);
+    expect(codex.spawned[1]!.slice(-3)).toEqual(['thread-1', '--', 'Answering your earlier question "Which tree?": Birch']);
+    expect(store.session('s1')!.question).toBeNull();
+
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'running' });
+    expect(runtime.answer(answer).refused).toBe('The session is not waiting on a question.');
+  });
+
+  describe('Codex question races and recovery (PRD R70)', () => {
+    const START = '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n';
+    const DONE = START + '{"type":"turn.completed"}\n';
+    const log = (attempt: number) => join(home, '.switchboard', 'codex', `s1-${attempt}.jsonl`);
+    const answer = (questionId: string, text = 'Birch') => ({ type: 'answer' as const, workItemId: 1, nativeSessionId: 'thread-1', question: 'Which tree?', answer: text, questionId });
+
+    /** A Codex ad-hoc session s1 waiting on its question "Which tree?", whose asking run has exited. */
+    async function waitingCodex(codex = new FakeCodex(), cfg = config({ provider: 'codex' })) {
+      const context = setup(cfg, () => T0, NO_SERVICE, undefined, codex);
+
+      context.runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+      await context.runtime.settled();
+      await context.runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?', options: ['Oak', 'Birch'] });
+      writeFileSync(log(1), DONE);
+      codex.alive.clear();
+      await context.runtime.readRoster();
+      await context.runtime.settled();
+      expect(context.store.session('s1')).toMatchObject({ state: 'waiting' });
+
+      return { ...context, codex, questionId: context.store.session('s1')!.question!.id };
+    }
+
+    it('keeps a question reported while a roster read ran, and decides it at the next read', async () => {
+      const codex = new FakeCodex();
+      const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, NO_SERVICE, undefined, codex);
+
+      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+      await runtime.settled();
+
+      const entered = deferred();
+      const gate = deferred();
+
+      codex.queryEntered = entered.resolve;
+      codex.queryGate = gate.promise;
+      const read = runtime.readRoster();
+
+      await entered.promise;
+      codex.queryEntered = null;
+      await runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?', options: [] });
+      writeFileSync(log(1), DONE);
+      codex.alive.clear();
+      gate.resolve();
+      await read;
+      await runtime.settled();
+
+      expect(store.session('s1')).toMatchObject({ state: 'waiting', released: false });
+      expect(store.session('s1')!.question).toMatchObject({ text: 'Which tree?' });
+    });
+
+    it("hides a question the answer's own turn reports until that turn ends, and refuses a click on the answered one", async () => {
+      const { store, runtime, questionId, codex } = await waitingCodex();
+
+      expect(runtime.answer(answer(questionId)).refused).toBeNull();
+      await runtime.settled();
+
+      // The answer's turn runs and asks again before the roster sees it run.
+      await runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?', options: ['Oak'] });
+      const second = store.session('s1')!.question!.id;
+
+      expect(runtime.snapshot().workItems[0]!.question).toBeNull();
+      expect(runtime.answer(answer(second)).refused).toBe('The session no longer waits on that question.');
+      expect(runtime.answer(answer(questionId)).refused).toBe('The session no longer waits on that question.');
+      // Open in Codex is neither offered nor accepted while the answer's turn runs, so it cannot stop that turn.
+      expect(controlsOf(runtime.snapshot().workItems[0]!).map((control) => control.message['type'])).not.toContain('open-question');
+      expect(runtime.openQuestion({ type: 'open-question', workItemId: 1, nativeSessionId: 'thread-1' }).refused).toBe('The session is not waiting on a question.');
+      expect(codex.kills).toEqual([]);
+
+      writeFileSync(log(2), DONE);
+      await runtime.readRoster();
+      expect(runtime.snapshot().workItems[0]!.question).toMatchObject({ text: 'Which tree?', id: second });
+      expect(controlsOf(runtime.snapshot().workItems[0]!).map((control) => control.message['type'])).toContain('open-question');
+    });
+
+    it('keeps the question when the answer fails before its turn starts, and sends a later answer', async () => {
+      const codex = new FakeCodex();
+      const { store, runtime, questionId } = await waitingCodex(codex);
+
+      codex.onSpawn = (_stdout, pid) => {
+        codex.alive.delete(pid);
+        return '';
+      };
+      expect(runtime.answer(answer(questionId)).refused).toBeNull();
+      await runtime.settled();
+      expect(store.workItem(1)!.error).toMatch(/^Answer failed: /);
+      expect(store.session('s1')!.question?.id).toBe(questionId);
+
+      await runtime.readRoster();
+      expect(store.session('s1')).toMatchObject({ state: 'waiting' });
+
+      codex.onSpawn = () => START;
+      expect(runtime.answer(answer(questionId, 'Oak')).refused).toBeNull();
+      await runtime.settled();
+      expect(store.session('s1')!.question).toBeNull();
+      expect(codex.spawned.at(-1)!.at(-1)).toBe('Answering your earlier question "Which tree?": Oak');
+    });
+
+    it('acknowledges at the next roster read an answer a stopped hub started', async () => {
+      const codex = new FakeCodex();
+      const { store, runtime, questionId } = await waitingCodex(codex);
+      const record = join(home, '.switchboard', 'codex', 's1.json');
+
+      // The hub stopped after the answer's run started its turn, before it acknowledged the answer.
+      writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), attempt: 2, process: { pid: 900, created: 'c900' }, reply: { questionId, attempt: 2, state: 'spawned' } }));
+      writeFileSync(log(2), START);
+      codex.alive.add(900);
+      codex.commandLines.set(900, 'switchboard_run="s1-2"');
+      runtime.stop();
+
+      const next = new Runtime({ ...(runtime as unknown as { deps: RuntimeDeps }).deps, runners: { codex: codex.runner(), claude: (runtime as unknown as { runners: RuntimeDeps['runners'] }).runners!.claude! } }, config({ provider: 'codex' }));
+
+      await next.startup();
+      await next.settled();
+      expect(store.session('s1')).toMatchObject({ question: null, state: 'running' });
+    });
+
+    it('keeps an approval through a question, and holds no slot while it waits (PRD R34, R38)', async () => {
+      const codex = new FakeCodex();
+      const cfg = config({ provider: 'codex', concurrency: 1 });
+      const { store, runtime } = setup(cfg, () => T0, NO_SERVICE, undefined, codex);
+
+      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+      await runtime.settled();
+      await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/legacy-ship 1', summary: 'Ship it', report: null });
+      await runtime.report({ sessionId: 's1', kind: 'question', text: 'Ship now?', options: ['Yes'] });
+      writeFileSync(log(1), DONE);
+      codex.alive.clear();
+      await runtime.readRoster();
+      await runtime.settled();
+
+      expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/legacy-ship 1' });
+      expect(store.session('s1')).toMatchObject({ state: 'waiting' });
+
+      runtime.send({ type: 'adhoc', prompt: 'Other work', repoRoot: 'D:/git/widgets' });
+      await runtime.settled();
+      expect(store.workItem(2)).toMatchObject({ status: 'running' });
+    });
   });
 
   it('stops a running Codex session for the operator by ending its process', async () => {
@@ -1006,7 +1188,7 @@ describe('Runtime', () => {
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);
     const review = store.insertWorkItem({ ...done, playbook: 'dev:review' });
-    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false } as const;
+    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null } as const;
     store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123', reports: [] });
     store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null, reports: [] });
     store.insertSession({ ...session, id: 'review', workItemId: review.id, shortId: 'def456', reports: [] });
@@ -1142,7 +1324,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned])).toEqual([[4, 1], [3, 1], [2, 1]]);
 
     // Counting runs one way: a later dev:develop work item does not count the started dev:review one.
-    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, reports: [] });
+    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, reports: [] });
     const later = store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
 
     expect(runtime.snapshot().workItems.find((item) => item.id === later.id)?.returned).toBe(1);

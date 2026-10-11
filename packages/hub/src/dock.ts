@@ -263,7 +263,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
         ? question.options.map((option) => ({
             label: option.label,
             description: option.description,
-            action: { type: 'answer', workItemId: item.id, nativeSessionId: sessionId, question: question.text, answer: option.label },
+            action: { type: 'answer', workItemId: item.id, nativeSessionId: sessionId, question: question.text, answer: option.label, ...(question.id === undefined ? {} : { questionId: question.id }) },
           }))
         : [],
     pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],

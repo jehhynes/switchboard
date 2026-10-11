@@ -37,8 +37,8 @@ export interface CodexRunnerDeps {
   env: Record<string, string>;
   /** Whether Switchboard's hooks are on (`sessions.installHooks`). */
   hooks(): boolean;
-  /** The question the session waits on, or null. */
-  questionOf(session: Session): { id: string; text: string; options: string[] } | null;
+  /** The question the session reported, or null; the store's by default. */
+  questionOf?(session: Session): { id: string; text: string; options: string[] } | null;
   spawn?: (file: string, args: string[], options: { cwd: string; stdout: string; stderr: string; env?: Record<string, string> }) => Promise<DetachedSpawn>;
   processes?: (pids: number[]) => Promise<Map<number, ProcessInfo> | { error: string }>;
   tagged?: (tag: string) => Promise<ProcessIdentity | null | { error: string }>;
@@ -63,6 +63,10 @@ export class CodexRunner implements SessionRunner {
   /** Every Codex process reads the same home as the hooks Switchboard installs. */
   private get env(): Record<string, string> {
     return { ...this.deps.env, CODEX_HOME: this.deps.codexHome };
+  }
+
+  private questionOf(session: Session) {
+    return this.deps.questionOf ? this.deps.questionOf(session) : session.question;
   }
 
   private get spawn() {
@@ -269,7 +273,7 @@ export class CodexRunner implements SessionRunner {
 
     return reduce({
       released: session.released,
-      question: this.deps.questionOf(session)?.id ?? null,
+      question: this.questionOf(session)?.id ?? null,
       record,
       log: this.log(record),
       attemptAlive,
@@ -325,7 +329,7 @@ export class CodexRunner implements SessionRunner {
     return record;
   }
 
-  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[] } | { error: string }> {
+  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; acknowledged: { sessionId: string; questionId: string }[] } | { error: string }> {
     const records = new Map<string, RunRecord>();
 
     for (const session of sessions) {
@@ -360,6 +364,7 @@ export class CodexRunner implements SessionRunner {
     this.known = new Map([...fresh.values()].map((info) => [info.pid, info.created]));
 
     const observed: ObservedSession[] = [];
+    const acknowledged: { sessionId: string; questionId: string }[] = [];
 
     for (const session of sessions) {
       const record = records.get(session.id);
@@ -367,10 +372,14 @@ export class CodexRunner implements SessionRunner {
 
       if (reduced?.listed === true) {
         observed.push({ sessionId: session.id, state: reduced.state, detail: reduced.detail, interactive: reduced.interactive });
+
+        if (reduced.acknowledge !== null) {
+          acknowledged.push({ sessionId: session.id, questionId: reduced.acknowledge });
+        }
       }
     }
 
-    return { sessions: observed };
+    return { sessions: observed, acknowledged };
   }
 
   markers(sessions: Session[]): Map<string, MarkerReading> {
@@ -467,8 +476,20 @@ export class CodexRunner implements SessionRunner {
     });
   }
 
-  question(_session: Session): { question: SessionQuestion | null; version: number } | null {
-    return null;
+  /**
+   * The question the session waits on: shown and answerable only once the turn that reported it has ended, as the reducer decides from the run
+   * as it is now. Its ID is the version, so a question is answered once even when the next has the same text.
+   */
+  question(session: Session): { question: SessionQuestion | null; version: string } | null {
+    const reported = this.questionOf(session);
+    const record = reported === null ? null : readRecord(this.deps.home, session.id);
+    const reduced = record === null ? null : this.reduceOne(session, record, null, null);
+
+    if (reported === null || reduced?.listed !== true || reduced.state !== 'waiting') {
+      return null;
+    }
+
+    return { question: { text: reported.text, options: reported.options.map((label) => ({ label, description: '' })), parts: 1, id: reported.id }, version: reported.id };
   }
 
   forgetQuestion(_target: SessionTarget): void {}

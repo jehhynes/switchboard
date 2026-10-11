@@ -78,6 +78,8 @@ export function triagePrompt(template: string, choices: readonly PlaybookChoice[
 
 /** Each report's lines in the contract, in contract order. The task report is accepted but not listed, so only the operator starts one (PRD R68). */
 const REPORT_LINES: Record<Exclude<ReportKind, 'task'>, string> = {
+  question: `- {{report}} question {{session.id}} --text <question> [--option <choice>]..., when you need the operator's answer or choice, or cannot continue without them; write the question and its choices as your final message too, then end your turn.
+  - Give each choice as its own --option; the operator can also answer in their own words.`,
   stage: `- {{report}} stage {{session.id}} <stage>, when you start a new phase of the work.
   - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
   worktree: '- {{report}} worktree {{session.id}} <path>, when you create a worktree.',
@@ -99,11 +101,10 @@ const REPORT_LINES: Record<Exclude<ReportKind, 'task'>, string> = {
 export function sessionContract(sessionId: string, report: string, reports: readonly ReportKind[], provider: Provider): string {
   const lines = REPORT_KINDS.filter((kind): kind is Exclude<ReportKind, 'task'> => kind !== 'task' && reports.includes(kind)).map((kind) => REPORT_LINES[kind]);
   const finish = reports.includes('done') || reports.includes('approval') ? '' : '\n\nWhen the work is finished, end your turn; the operator reviews it.';
-  // A background Codex run cannot wait on the operator mid-turn (mechanics M31).
-  const ask =
-    provider === 'codex'
-      ? "When you need the operator's answer or choice, or cannot continue without them, write the question, with any choices, as your final message and end your turn. Do not report or write a file for a question."
-      : "When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.";
+  // A background Codex run cannot wait on the operator mid-turn, so it reports its question and ends its turn (mechanics M31).
+  const ask = provider === 'codex'
+    ? 'Ask the operator only with the question report. Do not write a file for a question.'
+    : "When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.";
 
   return `Report to Switchboard with these commands:
 ${lines.join('\n')}${finish}

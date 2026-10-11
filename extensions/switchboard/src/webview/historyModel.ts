@@ -538,6 +538,11 @@ class Builder {
       case 'paste':
         skip.add('*');
         return { ...base, icon: 'clippy', text: `Drafted ${str(detail['label'])}`, links: [targetLink('Open', str(detail['file']))] };
+      case 'question': {
+        const options = Array.isArray(detail['options']) ? detail['options'].map(str) : [];
+
+        return { ...base, icon: 'question', text: `Asked: ${str(detail['text'])}`, detail: options.length === 0 ? null : options.join(' · ') };
+      }
       case 'task':
         return {
           ...base,

@@ -37,7 +37,7 @@ function session(patch: Partial<Session> = {}): Session {
     outcomeDetail: null,
     startedAt: 0,
     endedAt: null,
-    released: false, releasing: false,
+    released: false, releasing: false, question: null,
     reports: ['stage'],
     ...patch,
   };
@@ -113,7 +113,7 @@ describe('ClaudeRunner', () => {
     utimesSync(path, 1000, 1000);
     const first = claude.question(session());
 
-    expect(first).toEqual({ question: { text: 'Which fruit should I record?', options: expect.any(Array), parts: 1 }, version: 1_000_000 });
+    expect(first).toEqual({ question: { text: 'Which fruit should I record?', options: expect.any(Array), parts: 1 }, version: '1000000' });
 
     // Same modification time: the cached read stands even though the content changed.
     writeFileSync(path, readFileSync(join(FIXTURES, 'job-state-two-questions.json')));

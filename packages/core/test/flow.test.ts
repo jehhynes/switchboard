@@ -1135,7 +1135,8 @@ describe('agents (PRD R22)', () => {
     const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
 
     expect(start).toMatchObject({ provider: 'codex', permissionMode: 'dontAsk', model: 'gpt-6', prompt: '/gc-plan 1' });
-    expect(start.contract).toContain('write the question, with any choices, as your final message and end your turn');
+    expect(start.contract).toContain('report question s1 --text <question>');
+    expect(start.contract).not.toContain('AskUserQuestion');
     expect(h.store.session('s1')).toMatchObject({ provider: 'codex' });
 
     h.started(start);

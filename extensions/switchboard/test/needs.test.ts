@@ -20,7 +20,7 @@ function session(state: Session['state']): Session {
     outcomeDetail: null,
     startedAt: 0,
     endedAt: null,
-    released: false, releasing: false,
+    released: false, releasing: false, question: null,
     reports: [],
   };
 }

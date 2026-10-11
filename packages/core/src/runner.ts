@@ -10,6 +10,8 @@ export interface SessionQuestion {
   text: string;
   options: { label: string; description: string }[];
   parts: number;
+  /** The question's ID when the provider keeps one, which the row's answer names, so a stale click cannot answer a newer question. */
+  id?: string;
 }
 
 /** The session a stop or reply acts on; a deleted session's row is gone, so the action carries what the runner needs. */
@@ -48,15 +50,18 @@ export type Reconciled =
 export interface SessionRunner {
   /** Starts a background session and resolves once it runs. */
   start(action: StartAction): Promise<StartResult>;
-  /** Liveness and state of the given started sessions; a session left out has ended. A failed read changes nothing. */
-  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[] } | { error: string }>;
+  /**
+   * Liveness and state of the given started sessions; a session left out has ended. A failed read changes nothing. `acknowledged` lists the
+   * answers whose turn has started, which the hub applies before the states.
+   */
+  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; acknowledged?: { sessionId: string; questionId: string }[] } | { error: string }>;
   /** Fast readings of the given started sessions by native session ID, read without starting a process. */
   markers(sessions: Session[]): Map<string, MarkerReading>;
   /** Whether the session runs in Switchboard's background process, so a release may stop it (PRD R39). */
   isBackground(target: SessionTarget): Promise<boolean>;
   stop(target: SessionTarget, reason: StopReason): Promise<{ error: string } | null>;
   /** The question a background session waits on, and a version that changes when it may have changed; null when none can be read. */
-  question(session: Session): { question: SessionQuestion | null; version: number } | null;
+  question(session: Session): { question: SessionQuestion | null; version: string } | null;
   /** Drops what the runner kept about a question the session no longer waits on. */
   forgetQuestion(target: SessionTarget): void;
   /** Sends the operator's answer to a background session waiting on a question (PRD R70). */

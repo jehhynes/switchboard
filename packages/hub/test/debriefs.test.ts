@@ -45,7 +45,7 @@ function session(over: Partial<Session> = {}): Session {
     outcomeDetail: null,
     startedAt: WRITTEN - 30 * MINUTE,
     endedAt: WRITTEN,
-    released: true, releasing: false,
+    released: true, releasing: false, question: null,
     reports: [],
     ...over,
   };
