@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Exec, ExecResult } from '../src/exec.js';
 import type { Marker } from '../src/hooks.js';
 import { entryFor, observe, readRoster, rosterState, shortIdFrom, startArgs, startSession, stopSession } from '../src/runner.js';
-import type { RosterEntry, StartAction } from '../src/runner.js';
+import type { StartAction } from '@switchboard/core';
+import type { RosterEntry } from '../src/runner.js';
 
 const AGENTS = readFileSync(join(import.meta.dirname, 'fixtures', 'agents.json'), 'utf8');
 const ENTRIES = JSON.parse(AGENTS) as RosterEntry[];

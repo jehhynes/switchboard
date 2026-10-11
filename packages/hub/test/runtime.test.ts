@@ -2,12 +2,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ClaudeRunner } from '@switchboard/claude';
 import type { Exec, ExecResult, ServiceDeps } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
-import type { ContextResult, Playbook, PolledTicket, PollResult, Settings, Source } from '@switchboard/core';
+import type { ContextResult, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import { REPORT_CHECK_MS, MARKER_MS, MARKER_WATCH_RETRY_MS, QUESTION_READ_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import type { RuntimeDeps } from '../src/runtime.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -55,6 +57,8 @@ const fail = (stderr: string): ExecResult => ({ code: 1, stdout: '', stderr, mis
 /** A fake Claude CLI and git. `roster` is what `claude agents --json` lists. */
 class FakeCli {
   roster: object[] = [];
+  gitGate: Promise<void> | null = null;
+  gitEntered: (() => void) | null = null;
   /** When set, the next roster read lists the roster as it is now, then waits for this before returning. */
   rosterGate: Promise<void> | null = null;
   calls: string[][] = [];
@@ -70,6 +74,14 @@ class FakeCli {
     this.calls.push([file, ...args]);
 
     if (file === 'git') {
+      this.gitEntered?.();
+      const gate = this.gitGate;
+      this.gitGate = null;
+
+      if (gate !== null) {
+        await gate;
+      }
+
       return ok(this.worktrees);
     }
 
@@ -149,7 +161,7 @@ const NO_SERVICE: ServiceDeps = {
   },
 };
 
-function setup(cfg = config(), now = () => T0, service = NO_SERVICE) {
+function setup(cfg = config(), now = () => T0, service = NO_SERVICE, runners?: RuntimeDeps['runners']) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
 
@@ -176,6 +188,7 @@ function setup(cfg = config(), now = () => T0, service = NO_SERVICE) {
       service,
       configDir: join(home, 'cfg'),
       log: (line) => logs.push(line),
+      ...(runners === undefined ? {} : { runners }),
     },
     cfg,
   );
@@ -391,6 +404,67 @@ describe('Runtime', () => {
     runtime.readMarkers();
     await vi.waitFor(() => expect(store.workItem(1)?.status).toBe('running'));
     expect(store.session('s1')?.state).toBe('running');
+  });
+
+  it('takes in the hook markers after worktree discovery, so a marker written during it is not overwritten', async () => {
+    const cfg = config({ installHooks: true });
+    cfg.settings.sources['github']!.setupPrompt = '/init-worktree {{ticket.sourceKey}}';
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('dev:develop', { description: 'Build it', autoStart: true, requiresWorktree: true, template: 'Build.' })]);
+    const { runtime, store, cli, source } = setup(cfg);
+    cli.worktrees = 'worktree D:/git/widgets\nHEAD abc\nbranch refs/heads/master\n';
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const dir = join(home, '.switchboard', 'activity');
+    const write = (event: string, at: number) => writeFileSync(join(dir, '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event, at, backgroundTasks: 0 }));
+
+    mkdirSync(dir, { recursive: true });
+    write('Stop', 1);
+    const entered = deferred();
+    const gate = deferred();
+    cli.gitEntered = entered.resolve;
+    cli.gitGate = gate.promise;
+    const read = runtime.readRoster();
+    await entered.promise;
+    write('UserPromptSubmit', 2);
+    runtime.readMarkers();
+    expect(store.session('s1')?.state).toBe('running');
+
+    gate.resolve();
+    await read;
+    await runtime.settled();
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false });
+    runtime.stop();
+  });
+
+  it('leaves a marker reading that needs the roster read to it, without changing the session', async () => {
+    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ({ code: 0, stdout: '[]', stderr: '', missing: false, timedOut: false }), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), service: NO_SERVICE, hooks: () => true });
+    const roster = deferred();
+    let reads = 0;
+    const runner: SessionRunner = Object.assign(Object.create(real) as SessionRunner, {
+      start: async () => ({ shortId: 'abc', nativeSessionId: 'native-1' }),
+      markers: () => new Map([['native-1', { at: 1, observed: { state: 'idle' as const, detail: null }, recheck: true }]]),
+      observe: async (sessions: Session[]) => {
+        reads += 1;
+        await roster.promise;
+        return { sessions: sessions.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) };
+      },
+    });
+    const { runtime, store } = setup(config(), () => T0, NO_SERVICE, { claude: runner });
+
+    runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets' });
+    await runtime.settled();
+    runtime.readMarkers();
+    await new Promise((done) => setImmediate(done));
+
+    expect(reads).toBe(1);
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false });
+
+    roster.resolve();
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false });
+    runtime.stop();
   });
 
   it('reads the roster again when asked during a read, so an older result does not end a resumed session', async () => {
@@ -994,6 +1068,19 @@ describe('questions (PRD R70)', () => {
     await runtime.readRoster();
     expect(store.session('s1')).toMatchObject({ state: 'waiting', released: true });
     expect(question(runtime)).toBeNull();
+  });
+
+  it('reads a new wait\'s question again even when the job state keeps its modification time', async () => {
+    const { runtime } = await started();
+
+    jobState({ tempo: 'blocked', block: { questions: [{ question: 'first', options: [] }] } }, 1_000);
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+    expect(question(runtime)?.text).toBe('first');
+
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'running', detail: null });
+    jobState({ tempo: 'blocked', block: { questions: [{ question: 'second', options: [] }] } }, 1_000);
+    runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
+    expect(question(runtime)?.text).toBe('second');
   });
 
   it('shows no question when the job state is missing', async () => {

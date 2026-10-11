@@ -153,7 +153,7 @@ export type FlowAction =
       model: string | null;
     }
   | { type: 'stop-session'; sessionId: string; shortId: string | null; reason: StopReason }
-  | { type: 'reply-session'; sessionId: string; shortId: string; text: string };
+  | { type: 'reply-session'; sessionId: string; shortId: string; question: string; text: string };
 
 export interface FlowContext {
   now: number;
@@ -423,7 +423,7 @@ class Flow {
       case 'delete':
         return this.delete(this.knownItem(event.workItemId));
       case 'answer':
-        return this.answer(this.openItem(event.workItemId), event.nativeSessionId, event.answer);
+        return this.answer(this.openItem(event.workItemId), event.nativeSessionId, event.question, event.answer);
       case 'open-question':
         return this.openQuestion(this.openItem(event.workItemId), event.nativeSessionId);
       case 'pick':
@@ -1176,14 +1176,14 @@ class Flow {
   }
 
   /** Sends the answer through Claude's background service; the hook marker moves the session to running (PRD R70). */
-  private answer(item: WorkItem, nativeSessionId: string, answer: string): void {
+  private answer(item: WorkItem, nativeSessionId: string, question: string, answer: string): void {
     if (answer.trim() === '') {
       throw new Refusal('The answer is empty.');
     }
 
     const session = this.waitingBackground(item, nativeSessionId);
 
-    this.actions.push({ type: 'reply-session', sessionId: session.id, shortId: session.shortId, text: answer });
+    this.actions.push({ type: 'reply-session', sessionId: session.id, shortId: session.shortId, question, text: answer });
   }
 
   /** Stops the background session, so the window can open it in a Claude tab, which asks the question again (PRD R70). */

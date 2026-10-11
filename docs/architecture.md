@@ -35,7 +35,7 @@ The ad-hoc source is local and lives in `packages/hub`. State, the hub bundle, i
 | Source plugins | Supply tickets, decide whether each is in the assigned state, and build each ticket's triage context: GitHub, Zoho Desk, Forum, ad-hoc. |
 | Playbook loader | Reads the playbooks in settings.json and renders their templates. |
 | Classifier | Runs one-shot triage and returns structured output. |
-| Runner | Starts, stops and tracks agent sessions for one provider. Claude Code first. |
+| Runner | Starts, stops and tracks agent sessions for one provider, behind the `SessionRunner` interface in `packages/core/src/runner.ts`, which the hub runtime calls. Claude Code first. |
 | Worktree linker | Links worktrees to tickets from session reports, falling back to branch-name convention. |
 | Store | Local SQLite database holding tickets, work items, triage results, sessions and worktrees. |
 | VS Code extension | Starts the hub, opens claimed sessions in the item window's Claude view, runs the dock's commands, opens a worktree's changes, shows a ticket's history and notifications of work on the operator's turn, and shows the dock from its status bar item. |

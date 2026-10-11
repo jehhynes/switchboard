@@ -23,7 +23,7 @@ describe('answering on the row (PRD R70)', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
-    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual([{ type: 'reply-session', sessionId: session, shortId: 'abc12341', text: 'Birch' }]);
+    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual([{ type: 'reply-session', sessionId: session, shortId: 'abc12341', question: 'Which?', text: 'Birch' }]);
     expect(h.item(item)).toMatchObject({ status: 'running', error: null });
     expect(h.store.session(session)?.state).toBe('waiting');
   });

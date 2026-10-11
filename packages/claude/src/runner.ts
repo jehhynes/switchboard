@@ -1,10 +1,8 @@
-import type { FlowAction, LiveState, ObservedSession } from '@switchboard/core';
+import type { LiveState, ObservedSession, StartAction, StartResult } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { failureOf } from './exec.js';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
-
-export type StartAction = Extract<FlowAction, { type: 'start-session' }>;
 
 /** One `claude agents --json` entry. A background session has a short `id` and a `state`. */
 export interface RosterEntry {
@@ -17,8 +15,6 @@ export interface RosterEntry {
   cwd: string;
   name?: string;
 }
-
-export type StartResult = { shortId: string; nativeSessionId: string } | { error: string };
 
 export const START_TIMEOUT_MS = 60_000;
 const LAUNCH_TIMEOUT_MS = 60_000;
