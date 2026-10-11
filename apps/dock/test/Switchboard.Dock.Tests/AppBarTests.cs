@@ -42,4 +42,12 @@ public sealed class AppBarTests
 
         Assert.False(AppBar.Hold(ref position, Strip));
     }
+
+    [Fact]
+    public void SizeParam_Strip_PacksWidthLowAndHeightHigh()
+    {
+        var packed = AppBar.SizeParam(new Native.Rect { Left = 6065, Top = 405, Right = 6400, Bottom = 1845 });
+
+        Assert.Equal((335, 1440), ((int)(packed & 0xFFFF), (int)(packed >> 16)));
+    }
 }

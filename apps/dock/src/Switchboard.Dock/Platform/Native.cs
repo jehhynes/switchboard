@@ -151,6 +151,12 @@ static partial class Native
     [DllImport("comctl32.dll")]
     public static extern bool RemoveWindowSubclass(nint window, SubclassProc proc, nuint id);
 
+    [DllImport("user32.dll")]
+    public static extern bool GetClientRect(nint window, out Rect rect);
+
+    [DllImport("user32.dll")]
+    public static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
+
     [DllImport("comctl32.dll")]
     public static extern nint DefSubclassProc(nint window, uint message, nint wParam, nint lParam);
 
@@ -164,7 +170,8 @@ static partial class Native
     public const uint AbmNew = 0, AbmRemove = 1, AbmQueryPos = 2, AbmSetPos = 3, AbmActivate = 6, AbmWindowPosChanged = 9;
     public const uint AbeLeft = 0, AbeRight = 2;
     public const int AbnPosChanged = 1, AbnFullScreenApp = 2;
-    public const uint WmActivate = 0x0006, WmWindowPosChanging = 0x0046, WmWindowPosChanged = 0x0047, WmDisplayChange = 0x007E;
+    public const uint WmActivate = 0x0006, WmWindowPosChanging = 0x0046, WmWindowPosChanged = 0x0047, WmDisplayChange = 0x007E, WmSize = 0x0005, WmDpiChanged = 0x02E0;
+    public const nint SizeRestored = 0;
 
     public static nint PrimaryMonitor() => MonitorFromPoint(new System.Drawing.Point(0, 0), MonitorDefaultToPrimary);
 

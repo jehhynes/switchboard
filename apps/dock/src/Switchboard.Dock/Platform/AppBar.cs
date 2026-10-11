@@ -110,6 +110,17 @@ internal sealed class AppBar : IDisposable
         {
             Moved?.Invoke();
         }
+        else if (message == Native.WmDpiChanged && Strip is not null && !Native.IsIconic(hwnd))
+        {
+            var result = Native.DefSubclassProc(hwnd, message, wParam, lParam);
+
+            // Avalonia takes the new scale here and sizes the window to Windows' suggestion, which the strip holds back to the same size, so no WM_SIZE
+            // follows and Avalonia keeps the size it computed at the old scale; a WM_SIZE at the current size makes it lay out at the new scale.
+            Native.GetClientRect(hwnd, out var client);
+            Native.SendMessage(hwnd, Native.WmSize, Native.SizeRestored, SizeParam(client));
+
+            return result;
+        }
         else if (message == Native.WmActivate || message == Native.WmWindowPosChanged)
         {
             var data = Data();
@@ -119,6 +130,9 @@ internal sealed class AppBar : IDisposable
 
         return Native.DefSubclassProc(hwnd, message, wParam, lParam);
     }
+
+    /// <summary>A client area's width and height packed into a WM_SIZE lParam.</summary>
+    internal static nint SizeParam(Native.Rect client) => ((client.Bottom - client.Top) << 16) | ((client.Right - client.Left) & 0xFFFF);
 
     /// <summary>Holds a pending move or resize to the strip; returns whether it changed anything.</summary>
     internal static bool Hold(ref Native.WindowPos position, Native.Rect strip)
