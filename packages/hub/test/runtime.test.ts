@@ -587,6 +587,36 @@ describe('Runtime', () => {
     expect(runtime.snapshot().errors.sources).toEqual({ github: 'GitHub is down.' });
   });
 
+  it('drops a read that finishes after its source is turned off', async () => {
+    const { store, source, runtime } = setup();
+    const slow = deferred();
+    source.gate = slow.promise;
+    source.result = { error: 'The forum database cannot be reached; check the VPN.' };
+    const scheduled = runtime.pollSource('github');
+    await vi.waitFor(() => expect(source.polls).toBe(1));
+
+    expect(runtime.setSourceEnabled('github', false)).toBeNull();
+    slow.resolve();
+    await scheduled;
+    await runtime.settled();
+
+    expect(runtime.snapshot().errors.sources).toEqual({});
+
+    // A slow read of tickets is dropped as well.
+    expect(runtime.setSourceEnabled('github', true)).toBeNull();
+    source.result = { tickets: [issue('8')] };
+    const second = deferred();
+    source.gate = second.promise;
+    const again = runtime.pollSource('github');
+    await vi.waitFor(() => expect(source.polls).toBe(2));
+    expect(runtime.setSourceEnabled('github', false)).toBeNull();
+    second.resolve();
+    await again;
+    await runtime.settled();
+
+    expect(store.findTicket('github', '8')).toBeNull();
+  });
+
   it('accepts a done report unchecked when the source read outlasts the check, and applies reads in order', async () => {
     const { store, source, runtime, logs, late } = setup();
     source.result = { tickets: [issue('8')] };

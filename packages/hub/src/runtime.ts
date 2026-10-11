@@ -442,6 +442,11 @@ export class Runtime {
   private async read(name: string, source: Source): Promise<PolledTicket[] | null> {
     const result = await source.poll();
 
+    // The operator turned the source off while it was read; its result would show an error or tickets of a source that is off.
+    if (!this.sources.has(name)) {
+      return null;
+    }
+
     if ('error' in result) {
       this.sourceErrors[name] = result.error;
       this.send({ type: 'poll-failed', source: name, error: result.error });
