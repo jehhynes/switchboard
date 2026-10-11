@@ -21,7 +21,7 @@ public sealed record SourceState(string Name, bool Enabled);
 public sealed record SnoozeChoice(string Label, string Description, long? Until);
 
 /// <summary>A group of rows, with its codicon glyph and, for Ready for review, how many of its rows are on the operator's turn.</summary>
-public sealed record DockGroup(string Key, string Title, string? Empty, IReadOnlyList<DockRow> Rows, string Glyph = "", int? Yours = null);
+public sealed record DockGroup(string Key, string Title, string? Empty, IReadOnlyList<DockRow> Rows, string Glyph = "");
 
 public sealed record DockRow(
     string Key,

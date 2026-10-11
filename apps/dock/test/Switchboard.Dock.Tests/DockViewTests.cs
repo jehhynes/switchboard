@@ -13,7 +13,6 @@ public sealed class DockViewTests
         Assert.Equal(["review", "blocked", "progress", "unstarted", "done"], view.Groups.Select((group) => group.Key));
         Assert.Equal(["item:13", "item:7", "item:10"], view.Groups[0].Rows.Select((row) => row.Key));
         Assert.Equal(["item:14", "item:8"], view.Groups[1].Rows.Select((row) => row.Key));
-        Assert.Equal([2, null, null, null, null], view.Groups.Select((group) => group.Yours));
         Assert.Equal(7, view.Snooze.Count);
         Assert.Equal(new SnoozeChoice("Indefinitely", "", null), view.Snooze[^1]);
         Assert.Equal(1791093600000, view.Snooze[0].Until);
@@ -112,9 +111,7 @@ public sealed class DockViewTests
 
         foreach (var group in json["groups"]!.AsArray())
         {
-            group!.AsObject().Remove("yours");
-
-            foreach (var row in group["rows"]!.AsArray())
+            foreach (var row in group!["rows"]!.AsArray())
             {
                 row!.AsObject().Remove("turn");
                 row.AsObject().Remove("dim");
@@ -126,7 +123,6 @@ public sealed class DockViewTests
         var rows = view.Groups.SelectMany((group) => group.Rows).ToList();
 
         Assert.Equal(9, rows.Count);
-        Assert.All(view.Groups, (group) => Assert.Null(group.Yours));
         Assert.All(rows, (row) => Assert.Equal((null, false, false), (row.Turn, row.Dim, row.Movable)));
     }
 

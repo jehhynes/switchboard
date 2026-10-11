@@ -60,7 +60,7 @@ describe('dockView', () => {
     ]);
   });
 
-  it("counts Ready for review's rows on the operator's turn, and gives each row its turn, dimming and Move controls (PRD R27, R73)", () => {
+  it("gives each row its turn, dimming and Move controls (PRD R27, R73)", () => {
     const view = dockView(
       snapshot([
         item(1, { status: 'awaiting-approval', readyAt: NOW - 3000 }),
@@ -73,23 +73,22 @@ describe('dockView', () => {
       NOW,
       W,
     );
-    const shown = view.groups.map((group) => [group.key, group.yours, group.rows.map((entry) => [entry.key, entry.turn, entry.dim, entry.movable, entry.stripe])]);
+    const shown = view.groups.map((group) => [group.key, group.rows.map((entry) => [entry.key, entry.turn, entry.dim, entry.movable, entry.stripe])]);
 
     expect(shown).toEqual([
       [
         'review',
-        2,
         [
           ['item:1', 'operator', false, true, 'turn'],
           ['item:2', 'agent', true, true, null],
           ['item:3', 'operator', false, true, 'turn'],
         ],
       ],
-      ['blocked', null, [['item:5', 'operator', false, false, 'warning']]],
-      ['progress', null, [['item:4', 'agent', false, false, null]]],
-      ['unstarted', null, []],
-      ['snoozed', null, [['item:6', null, false, false, null]]],
-      ['done', null, []],
+      ['blocked', [['item:5', 'operator', false, false, 'warning']]],
+      ['progress', [['item:4', 'agent', false, false, null]]],
+      ['unstarted', []],
+      ['snoozed', [['item:6', null, false, false, null]]],
+      ['done', []],
     ]);
 
     const second = view.groups.find((group) => group.key === 'review')!.rows[1]!;

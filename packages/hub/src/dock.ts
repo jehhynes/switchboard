@@ -170,8 +170,6 @@ export interface DockGroup {
   glyph: string;
   /** What the group says when it has no rows, or null. */
   empty: string | null;
-  /** Ready for review's rows on the operator's turn, which its header shows; null for the other groups. */
-  yours: number | null;
   rows: DockRow[];
 }
 
@@ -210,11 +208,9 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
 
     return { ...shown, search, links: linksOf(entry), returned: entry.returned, band };
   };
-  const yours = (key: RowGroup) => (key === 'review' ? groups.review.filter((entry) => 'status' in entry && turnOf(entry) === 'operator').length : null);
-
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
-    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, yours: yours(key), rows: groups[key].map(row(key)) })),
+    groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
     snooze: snoozeChoices(new Date(now)),
     sources: snapshot.sourceStates,
     repoRoots: snapshot.repoRoots,

@@ -51,9 +51,9 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var texts = VisibleTexts(window);
 
-        string[] headers = ["Blocked on you", "Ready for review", "In progress", "Unstarted", "Done", "0", "2", "3", "2 yours"];
+        string[] headers = ["Blocked on you", "Ready for review", "In progress", "Unstarted", "Done", "0", "2", "3"];
 
-        Assert.Equal(["Ready for review", "2 yours", "3", "Blocked on you", "2", "In progress", "0", "Unstarted", "2", "Done", "2"], texts.Where(headers.Contains));
+        Assert.Equal(["Ready for review", "3", "Blocked on you", "2", "In progress", "0", "Unstarted", "2", "Done", "2"], texts.Where(headers.Contains));
         Assert.Contains("Nothing is in progress.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);

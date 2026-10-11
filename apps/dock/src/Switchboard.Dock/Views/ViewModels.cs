@@ -397,7 +397,6 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     IReadOnlyList<BandViewModel> bands = [];
     string title = "";
     string? empty;
-    bool countsYours;
     string filter = "";
     IReadOnlyList<RowViewModel> all = [];
     IReadOnlyList<RowViewModel> rows = [];
@@ -464,18 +463,9 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
 
     public bool ShowEmpty => Rows.Count == 0 && Empty is not null && !Filtering;
 
-    /// <summary>Ready for review's shown rows on the operator's turn, such as <c>2 yours</c>, or empty when there are none (PRD R27).</summary>
-    public string Yours => HasYours ? $"{YoursCount} yours" : "";
-
-    public bool HasYours => YoursCount > 0;
-
-    // The hub sends a count only for Ready for review; the dock counts the rows the search box lets through, as the badge does.
-    int YoursCount => countsYours ? Rows.Count((row) => row.Row.Turn == "operator") : 0;
-
     public void Show(DockGroup group, string? selected, string filtering)
     {
         Title = group.Title;
-        countsYours = group.Yours is not null;
         Glyph = group.Glyph;
         Empty = group.Empty;
         all = group.Rows.Select((row) => new RowViewModel(row) { IsSelected = row.Key == selected }).ToList();
@@ -488,8 +478,6 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
         Rows = all.Where((row) => Matches(row.Row.Search, text)).ToList();
         Bands = Rows.GroupBy((row) => row.Row.Band).Select((rows) => BandOf(rows.Key, rows.ToList())).ToList();
         Changed(nameof(Count));
-        Changed(nameof(Yours));
-        Changed(nameof(HasYours));
         Changed(nameof(IsZero));
         Changed(nameof(ShowEmpty));
         Changed(nameof(ShowsRows));

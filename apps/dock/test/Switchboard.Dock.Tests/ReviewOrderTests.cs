@@ -48,7 +48,7 @@ public sealed class ReviewOrderTests
 
     static DockRow Review(int id, string turn = "operator") => Row(id, turn, movable: true, stripe: turn == "operator" ? Tone.Turn : null, dim: turn == "agent");
 
-    static DockGroup Group(string key, params DockRow[] rows) => new(key, key, null, rows, Yours: key == "review" ? rows.Count((row) => row.Turn == "operator") : null);
+    static DockGroup Group(string key, params DockRow[] rows) => new(key, key, null, rows);
 
     /// <summary>Blocked on you: 1 (yours); Ready for review: 2, 3 (agent), 4, 5; In progress: 6 (agent); Snoozed: 7 (no turn); Done: 8.</summary>
     static DockView View() =>
@@ -109,47 +109,6 @@ public sealed class ReviewOrderTests
     }
 
     static List<string> Headers(MainWindow window, DockRow row) => window.MenuOf(row).Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList();
-
-    [AvaloniaFact]
-    public void Header_ReviewWithOperatorRows_ShowsTheYoursCountBesideTheBadge()
-    {
-        var (window, _) = Open();
-        var headers = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("group")).ToList();
-        var yours = headers.Select((header) => header.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("yours"))).ToList();
-
-        Assert.Equal(5, headers.Count);
-        Assert.Equal(["", "3 yours", "", "", ""], yours.Select((text) => text.IsEffectivelyVisible ? text.Text : ""));
-        Assert.Equal("4", ((GroupViewModel)headers[1].DataContext!).Count);
-    }
-
-    [AvaloniaFact]
-    public void Header_SearchFiltersReview_CountsYoursAmongTheShownRows()
-    {
-        var (window, model) = Open();
-        var yours = window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("yours") && text.DataContext is GroupViewModel { Key: "review" });
-        var review = model.Groups.Single((group) => group.Key == "review");
-
-        model.Filter = "gh 3";
-        Dispatcher.UIThread.RunJobs();
-        Assert.Equal(("1", false), (review.Count, yours.IsEffectivelyVisible));
-
-        model.Filter = "gh 4";
-        Dispatcher.UIThread.RunJobs();
-        Assert.Equal(("1", "1 yours", true), (review.Count, yours.Text, yours.IsEffectivelyVisible));
-
-        model.Filter = "";
-        Dispatcher.UIThread.RunJobs();
-        Assert.Equal("3 yours", yours.Text);
-    }
-
-    [AvaloniaFact]
-    public void Header_ReviewWithNoOperatorRows_ShowsNoYoursCount()
-    {
-        var (window, model) = Open(new DockView([], [Group("review", Review(3, "agent"))], [], [], []));
-
-        Assert.Equal("", model.Groups.Single().Yours);
-        Assert.False(window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Classes.Contains("yours")).IsEffectivelyVisible);
-    }
 
     [AvaloniaTheory]
     [InlineData(Tone.Error, "error")]

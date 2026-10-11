@@ -6,7 +6,6 @@
       "title": "Ready for review",
       "glyph": "",
       "empty": "Nothing is ready for review.",
-      "yours": 2,
       "rows": [
         {
           "key": "item:13",
@@ -451,7 +450,6 @@
       "title": "Blocked on you",
       "glyph": "",
       "empty": null,
-      "yours": null,
       "rows": [
         {
           "key": "item:14",
@@ -679,7 +677,6 @@
       "title": "In progress",
       "glyph": "",
       "empty": "Nothing is in progress.",
-      "yours": null,
       "rows": []
     },
     {
@@ -687,7 +684,6 @@
       "title": "Unstarted",
       "glyph": "",
       "empty": "Nothing waits to be started.",
-      "yours": null,
       "rows": [
         {
           "key": "item:9",
@@ -846,7 +842,6 @@
       "title": "Done",
       "glyph": "",
       "empty": null,
-      "yours": null,
       "rows": [
         {
           "key": "item:11",
