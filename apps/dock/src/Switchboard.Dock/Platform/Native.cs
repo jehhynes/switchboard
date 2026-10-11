@@ -152,6 +152,9 @@ static partial class Native
     public static extern bool RemoveWindowSubclass(nint window, SubclassProc proc, nuint id);
 
     [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out System.Drawing.Point point);
+
+    [DllImport("user32.dll")]
     public static extern bool GetClientRect(nint window, out Rect rect);
 
     [DllImport("user32.dll")]

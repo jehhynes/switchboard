@@ -190,7 +190,15 @@ public sealed partial class MainWindow : Window
         moving = false;
     }
 
-    /// <summary>Docks at the nearer left or right edge of the monitor the title is dropped on, and keeps it (PRD R71).</summary>
+    /// <summary>Docks at the nearer left or right edge of the monitor under the pointer while the title is dragged, and keeps it (PRD R71).</summary>
+    void OnMoveMoved(object? sender, PointerEventArgs e)
+    {
+        if (moving)
+        {
+            DockAtPointer();
+        }
+    }
+
     void OnMoveReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (!moving)
@@ -200,12 +208,19 @@ public sealed partial class MainWindow : Window
 
         moving = false;
         e.Pointer.Capture(null);
+        DockAtPointer();
+    }
 
-        if (OperatingSystem.IsWindows() && appBar is not null)
+    /// <summary>
+    /// Docks at the nearer edge of the monitor under the pointer when that differs from where the dock is. The pointer is read from Windows,
+    /// because the window moves under it during the drag.
+    /// </summary>
+    void DockAtPointer()
+    {
+        if (OperatingSystem.IsWindows() && appBar is not null && Native.GetCursorPos(out var at))
         {
-            var drop = this.PointToScreen(e.GetPosition(this));
-            var monitor = Native.MonitorFromPoint(new System.Drawing.Point(drop.X, drop.Y), Native.MonitorDefaultToNearest);
-            var edge = DockPlacement.EdgeAt(drop.X, Native.Bounds(monitor));
+            var monitor = Native.MonitorFromPoint(at, Native.MonitorDefaultToNearest);
+            var edge = DockPlacement.EdgeAt(at.X, Native.Bounds(monitor));
             var name = monitor == Native.PrimaryMonitor() ? null : Native.MonitorName(monitor);
 
             if (edge != model.Settings.DockEdge || name != model.Settings.Monitor)

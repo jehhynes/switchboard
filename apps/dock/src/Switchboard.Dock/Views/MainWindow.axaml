@@ -297,9 +297,9 @@
       <StackPanel DockPanel.Dock="Top" Margin="8,0,0,0" Spacing="4">
         <!-- 35px, the height of VS Code's title bar on Windows. -->
         <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
-          <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor it is dropped on. -->
+          <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor under the pointer as it moves. -->
           <TextBlock Name="MoveHandle" Text="Switchboard" FontSize="12" Classes="muted" VerticalAlignment="Center" Cursor="SizeAll" Background="Transparent"
-                     ToolTip.Tip="Drag to the left or right edge of a monitor" PointerPressed="OnMovePressed" PointerReleased="OnMoveReleased" PointerCaptureLost="OnMoveCaptureLost" />
+                     ToolTip.Tip="Drag to the left or right half of a monitor to dock there" PointerPressed="OnMovePressed" PointerMoved="OnMoveMoved" PointerReleased="OnMoveReleased" PointerCaptureLost="OnMoveCaptureLost" />
           <ItemsControl Name="SourceList" Grid.Column="1" ItemsSource="{Binding Sources}" VerticalAlignment="Center">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
