@@ -157,7 +157,7 @@ export interface DockRow {
    * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon.
    */
   links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null }[];
-  /** How many earlier work items with the same playbook were done, for "Returned ×N" on line 2 (PRD R51); 0 when it is not marked. */
+  /** How many earlier work items with the same playbook, or one it is a return of, were done, for "Returned ×N" on line 2 (PRD R51); 0 when it is not marked. */
   returned: number;
   /** A Done row's date band, such as `Today` or `Last week` (PRD R27); null in the other groups. */
   band: string | null;

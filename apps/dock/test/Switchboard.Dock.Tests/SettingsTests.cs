@@ -63,11 +63,30 @@ public sealed class SettingsFieldsTests
         var fields = SettingsFields.PlaybookFieldsOf(state, PlaybookFields.Empty with { Reports = ["approval"] });
 
         Assert.Equal(
-            ["description", "kind", "autoStart", "requiresWorktree", "reports.done", "reports.approval", "reports.worktree", "reports.playbook", "reports.paste", "approvalSends", "workdir", "permissionMode", "model", "template"],
+            ["description", "kind", "autoStart", "requiresWorktree", "reports.done", "reports.approval", "reports.worktree", "reports.playbook", "reports.paste", "approvalSends", "workdir", "permissionMode", "model", "returnOf", "template"],
             paths);
         Assert.Equal(["Start", "Start", "Reports", "Reports", "Reports", "Reports", "Reports"], fields.Where((field) => field.Group is not null).Select((field) => field.Group));
         Assert.Null(fields.Single((field) => field.Path == "approvalSends").Group);
         Assert.DoesNotContain("approvalSends", SettingsFields.PlaybookFieldsOf(state, PlaybookFields.Empty).Select((field) => field.Path));
+    }
+
+    [Fact]
+    public void ApplyPlaybookField_ReturnOfLines_KeepsDistinctTrimmedNames()
+    {
+        var playbook = SettingsFields.ApplyPlaybookField(PlaybookFields.Empty, "returnOf", " dev:qa-question \n\ndev:develop, dev:qa-question");
+
+        Assert.Equal(["dev:qa-question", "dev:develop"], playbook.ReturnOf);
+        Assert.Equal("dev:qa-question\ndev:develop", SettingsPages.FieldViewOf(SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(), playbook).Single((field) => field.Path == "returnOf"), SettingsFields.PlaybookFieldValue(playbook, "returnOf"), []).Text);
+        Assert.Equal(playbook.ReturnOf, PlaybookFields.FromJson(playbook.ToJson()).ReturnOf);
+    }
+
+    [Fact]
+    public void ApplyPlaybookField_KindTriage_DropsReturnOf()
+    {
+        var playbook = SettingsFields.ApplyPlaybookField(PlaybookFields.Empty with { ReturnOf = ["dev:develop"] }, "kind", "triage");
+
+        Assert.Empty(playbook.ReturnOf);
+        Assert.DoesNotContain("returnOf", SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(), playbook).Select((field) => field.Path));
     }
 
     [Fact]

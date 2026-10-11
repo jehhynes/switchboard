@@ -312,6 +312,7 @@ static class SettingsConfigs
             ["reports"] = new JsonArray(reports.Select((report) => (JsonNode)JsonValue.Create(report)).ToArray()),
             ["approvalSends"] = false,
             ["rates"] = false,
+            ["returnOf"] = new JsonArray(),
             ["template"] = template,
         };
 

@@ -22,6 +22,7 @@ describe('parsePlaybook', () => {
         reports: ['done', 'worktree'],
         approvalSends: false,
         rates: false,
+        returnOf: [],
         template: 'Research {{ticket.sourceKey}}.\n',
       },
     });
@@ -41,6 +42,7 @@ describe('parsePlaybook', () => {
         reports: [],
         approvalSends: false,
         rates: false,
+        returnOf: [],
         template: 'Classify.',
       },
     });
@@ -50,6 +52,12 @@ describe('parsePlaybook', () => {
     const result = parsePlaybook('dev:review-pr', '---\ndescription: x\nreports: approval\napprovalSends: true\n---\nbody');
 
     expect('playbook' in result && [result.playbook.reports, result.playbook.approvalSends]).toEqual([['approval'], true]);
+  });
+
+  it('reads returnOf as distinct playbook names', () => {
+    const result = parsePlaybook('dev:qa-failure', '---\ndescription: x\nreturnOf: dev:qa-question, dev:develop,dev:qa-question\n---\nbody');
+
+    expect('playbook' in result && result.playbook.returnOf).toEqual(['dev:qa-question', 'dev:develop']);
   });
 
   it.each([
@@ -71,6 +79,9 @@ describe('parsePlaybook', () => {
     ['reports on a triage playbook', '---\ndescription: x\nkind: triage\nreports: done\n---\nbody', 'reports applies only to a task playbook.'],
     ['a bad rates', '---\ndescription: x\nkind: triage\nrates: yes\n---\nbody', 'rates must be true or false.'],
     ['rates on a task playbook', '---\ndescription: x\nrates: true\n---\nbody', 'rates applies only to a triage playbook.'],
+    ['a returnOf entry that is not a playbook name', '---\ndescription: x\nreturnOf: dev:ok, review\n---\nbody', 'returnOf must list other playbook names, not review.'],
+    ['a returnOf entry naming the playbook itself', '---\ndescription: x\nreturnOf: dev:x\n---\nbody', 'returnOf must list other playbook names, not dev:x.'],
+    ['returnOf on a triage playbook', '---\ndescription: x\nkind: triage\nreturnOf: dev:y\n---\nbody', 'returnOf applies only to a task playbook.'],
     ['an empty body', '---\ndescription: x\n---\n  \n', 'The prompt template is empty.'],
   ])('rejects %s', (_case, text, error) => {
     expect(parsePlaybook('dev:x', text)).toEqual({ error });
@@ -134,6 +145,7 @@ describe('formatPlaybook', () => {
     reports: [],
     approvalSends: false,
     rates: false,
+    returnOf: [],
     template: '/review-pr {{ticket.sourceKey}}\n',
   };
 
@@ -144,11 +156,15 @@ describe('formatPlaybook', () => {
     });
     expect(formatPlaybook({ ...task, reports: ['approval'] })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreports: approval\n---\n/review-pr {{ticket.sourceKey}}\n' });
     expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, reports: ['done'], template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
+    expect(formatPlaybook({ ...task, returnOf: ['dev:review-pr', 'dev:develop'] })).toEqual({
+      text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\nreturnOf: dev:review-pr, dev:develop\n---\n/review-pr {{ticket.sourceKey}}\n',
+    });
+    expect(formatPlaybook({ ...task, kind: 'triage', autoStart: false, returnOf: ['dev:y'], template: 'Classify.' })).toEqual({ text: '---\ndescription: Review a pull request\nkind: triage\n---\nClassify.\n' });
     expect(formatPlaybook({ ...task, rates: true })).toEqual({ text: '---\ndescription: Review a pull request\nautoStart: true\nrequiresWorktree: false\n---\n/review-pr {{ticket.sourceKey}}\n' });
   });
 
   it.each<[string, Partial<PlaybookFields>]>([
-    ['every key set', { workdir: 'repoRoot', permissionMode: 'plan', model: 'opus', requiresWorktree: true, reports: ['done', 'approval', 'worktree'] }],
+    ['every key set', { workdir: 'repoRoot', permissionMode: 'plan', model: 'opus', requiresWorktree: true, reports: ['done', 'approval', 'worktree'], returnOf: ['dev:review-pr'] }],
     ['a description with a colon and quotes', { description: '"Defect": research it' }],
     ['a description with outer spaces', { description: ' padded ' }],
     ['a quoted model', { model: "'x'" }],
@@ -169,6 +185,10 @@ describe('formatPlaybook', () => {
   it('refuses a description or model of more than one line', () => {
     expect(formatPlaybook({ ...task, description: 'a\nb' })).toEqual({ error: 'description must be one line.' });
     expect(formatPlaybook({ ...task, model: 'a\r\nb' })).toEqual({ error: 'model must be one line.' });
+  });
+
+  it('refuses a returnOf entry that would not read back as one playbook name', () => {
+    expect(formatPlaybook({ ...task, returnOf: ['dev:a, dev:b', 'dev:c'] })).toEqual({ error: 'returnOf must list other playbook names, not dev:a, dev:b.' });
   });
 });
 

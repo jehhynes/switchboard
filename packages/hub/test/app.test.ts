@@ -366,7 +366,7 @@ describe('createHubApp', () => {
   it('reads, checks, saves and deletes settings and playbooks for the Settings window, refusing a stale version', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
-    const playbook = { description: 'Build it', kind: 'task', autoStart: false, requiresWorktree: false, permissionMode: null, model: null, workdir: 'worktree', reports: ['done'], approvalSends: false, rates: false, template: 'Build {{ticket.title}}.' };
+    const playbook = { description: 'Build it', kind: 'task', autoStart: false, requiresWorktree: false, permissionMode: null, model: null, workdir: 'worktree', reports: ['done'], approvalSends: false, rates: false, returnOf: [], template: 'Build {{ticket.title}}.' };
     const read = async () => (await app.post['/config/read']!({})).body as { settings: { version: string | null; value: unknown }; playbooks: { name: string; version: string }[]; permissionModes: string[]; sourceKinds: string[]; inUse: Record<string, number> };
 
     const first = await read();
@@ -382,6 +382,9 @@ describe('createHubApp', () => {
     expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, template: '{{nope}}' } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('nope')] } });
     expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook })).toEqual({ status: 200, body: { errors: [] } });
     expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, kind: 'other' } })).toMatchObject({ status: 400 });
+    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, returnOf: [1] } })).toMatchObject({ status: 400 });
+    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, returnOf: undefined } })).toMatchObject({ status: 400 });
+    expect(await app.post['/config/check']!({ target: 'playbook', name: 'dev:develop', playbook: { ...playbook, returnOf: ['dev:develop'] } })).toMatchObject({ status: 200, body: { errors: ['returnOf must list other playbook names, not dev:develop.'] } });
 
     expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: 'stale' })).toEqual({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Reload to see the change.'] } });
     expect(await app.post['/config/save']!({ target: 'settings', value: { sessions: { installHooks: false, concurrency: 3 } }, version: first.settings.version })).toEqual({ status: 200, body: { saved: true, version: (await read()).settings.version ?? 'unread' } });

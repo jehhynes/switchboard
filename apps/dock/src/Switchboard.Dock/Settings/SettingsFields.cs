@@ -57,6 +57,7 @@ public static partial class SettingsFields
 
     public const string AutoStartHelp = "Start the session after triage. Off, the work item waits in Unstarted for you to start it.";
     public const string RequiresWorktreeHelp = "Run the source’s setup prompt first when the ticket has no worktree.";
+    public const string ReturnOfHelp = "One playbook per line, such as dev:review-pr for dev:review-pr-followup. Returned also counts the ticket’s earlier work items with these playbooks.";
     public const string ApprovalSendsHelp = "Approve posts or pushes the session’s work. Off, you send it yourself, such as by pasting a reply, and Approve finishes up.";
     public const string RatesHelp = "Triage stores immediacy and severity, which these instructions must define. Off, it stores neither.";
     public const string RepoRootHelp = "The session always runs in the source’s repo root. Off, it runs in the ticket’s worktree, else the repo root.";
@@ -156,9 +157,10 @@ public static partial class SettingsFields
             "rates" => playbook with { Rates = isChecked },
             "permissionMode" => playbook with { PermissionMode = text == "" ? null : text },
             "model" => playbook with { Model = text == "" ? null : text },
+            "returnOf" => playbook with { ReturnOf = text.Split(['\n', ',']).Select((line) => line.Trim()).Where((line) => line != "").Distinct(StringComparer.Ordinal).ToList() },
             // A task playbook's file cannot hold rates, so keeping it would leave the saved draft unlike the file.
             // The file holds reports only for a task playbook and rates only for a triage one, so the draft drops what the file would.
-            "kind" => text == "triage" ? playbook with { Kind = "triage", Reports = [], ApprovalSends = false } : playbook with { Kind = "task", Rates = false },
+            "kind" => text == "triage" ? playbook with { Kind = "triage", Reports = [], ApprovalSends = false, ReturnOf = [] } : playbook with { Kind = "task", Rates = false },
             "workdir" => playbook with { Workdir = text == "repoRoot" ? "repoRoot" : "worktree" },
             "description" => playbook with { Description = text },
             "template" => playbook with { Template = text },
@@ -344,6 +346,7 @@ public static partial class SettingsFields
             fields.Add(new Field("permissionMode", "Permission mode", FieldKind.Select, "",
                 Options: [new FieldOption("", $"Sessions setting ({mode ?? "auto"})"), .. state.Config.PermissionModes.Select((entry) => new FieldOption(entry, entry))]));
             fields.Add(new Field("model", "Model", FieldKind.Text, "", $"Sessions setting ({model ?? "Claude’s default"})"));
+            fields.Add(new Field("returnOf", "Return of", FieldKind.List, ReturnOfHelp));
         }
 
         fields.Add(new Field(

@@ -706,7 +706,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'running', playbook: 'dev:develop', triage: { playbook: 'dev:develop' } }]);
   });
 
-  it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook, and hides a disabled source (PRD R50, R51)', async () => {
+  it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook or one it is a return of, and hides a disabled source (PRD R50, R51)', async () => {
     const cfg = config();
     cfg.playbooks = new Map([...PLAYBOOKS, playbook('triage:github', '---\ndescription: Triage\nkind: triage\nrates: true\n---\nClassify and rate.')]);
     const { store, cli, source, runtime } = setup(cfg);
@@ -742,6 +742,13 @@ describe('Runtime', () => {
     store.insertSession({ ...session, id: 'review', workItemId: review.id, shortId: 'def456', reports: [] });
 
     expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['5', 0], ['1', 1], ['2', 0], ['4', 0], ['3', 0]]);
+
+    // With dev:develop a return of dev:review, the started dev:review work item counts as well.
+    const returning = config();
+    returning.playbooks = new Map([...cfg.playbooks, playbook('dev:develop', '---\ndescription: Build it\nreturnOf: dev:review\n---\nBuild.')]);
+    runtime.reload(returning);
+
+    expect(runtime.snapshot().pool.find((entry) => entry.ticket.sourceKey === '1')?.returned).toBe(2);
 
     // A disabled source's pool is not read, so it is hidden; the filter lists it as off.
     const off = config();
@@ -829,7 +836,7 @@ describe('Runtime', () => {
     );
   });
 
-  it('records a link report and lists the ticket links and earlier work items on the work item (PRD R51, R52)', async () => {
+  it('records a link report and lists the ticket links and earlier work items, with those of playbooks it is a return of, on the work item (PRD R51, R52)', async () => {
     const { store, source, runtime } = setup();
     source.result = { tickets: [issue('8')] };
     await runtime.pollSource('github');
@@ -852,6 +859,19 @@ describe('Runtime', () => {
       [3, 'dev:develop', 1, 1],
       [2, 'dev:develop', 1, 1],
     ]);
+
+    // A playbook that is a return of dev:develop counts its started work items too.
+    const cfg = config();
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('dev:review', '---\ndescription: Review it\nreturnOf: dev:develop\n---\nReview.')]);
+    runtime.reload(cfg);
+
+    expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned])).toEqual([[4, 1], [3, 1], [2, 1]]);
+
+    // Counting runs one way: a later dev:develop work item does not count the started dev:review one.
+    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, reports: [] });
+    const later = store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
+
+    expect(runtime.snapshot().workItems.find((item) => item.id === later.id)?.returned).toBe(1);
   });
 
   it('reports an unknown or misconfigured source', () => {

@@ -53,7 +53,7 @@ export interface WorkItemView extends WorkItem {
   links: Link[];
   /** Drafted texts the operator copies into the source (PRD R60). */
   pastes: Paste[];
-  /** Earlier started work items for the same ticket; above 0 the dock marks the work item Returned (PRD R51). */
+  /** Earlier started work items for the same ticket with the same playbook or one it is a return of; above 0 the dock marks the work item Returned (PRD R51). */
   returned: number;
   /** The ticket of the work item whose session reported this one as a task (PRD R68). */
   parent: Ticket | null;
@@ -74,7 +74,7 @@ export interface PoolView {
   triage: Triage | null;
   /** The ticket's links, such as a GitHub issue its thread names (PRD R52, R61). */
   links: Link[];
-  /** Started done work items for the ticket; above 0 the dock marks it Returned (PRD R51). */
+  /** Started done work items for the ticket with the latest triage's playbook or one it is a return of; above 0 the dock marks it Returned (PRD R51). */
   returned: number;
 }
 
@@ -657,10 +657,17 @@ export class Runtime {
   snapshot(): Snapshot {
     const store = this.deps.store;
     const { settings, playbooks, settingsError, playbookErrors } = this.config;
-    // Returned counts earlier work items with the same playbook that started a session; a failed launch has no shortId.
+    // Returned counts earlier work items with the same playbook, or one it is a return of, that started a session; a failed launch has no shortId.
     const started = (item: WorkItem) => store.sessionsFor(item.id).some((session) => session.shortId !== null);
-    const returned = (items: WorkItem[], playbook: string | null) =>
-      playbook === null ? 0 : items.filter((item) => item.playbook === playbook && started(item)).length;
+    const returned = (items: WorkItem[], playbook: string | null) => {
+      if (playbook === null) {
+        return 0;
+      }
+
+      const counted = new Set([playbook, ...(playbooks.get(playbook)?.returnOf ?? [])]);
+
+      return items.filter((item) => item.playbook !== null && counted.has(item.playbook) && started(item)).length;
+    };
     const used = heldSlots(store);
 
     return {

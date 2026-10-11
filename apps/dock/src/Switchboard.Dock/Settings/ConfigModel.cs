@@ -14,12 +14,13 @@ public sealed record PlaybookFields(
     IReadOnlyList<string> Reports,
     bool ApprovalSends,
     bool Rates,
+    IReadOnlyList<string> ReturnOf,
     string Template)
 {
     /// <summary>The reports a task playbook can list, in front matter order.</summary>
     public static readonly IReadOnlyList<string> ReportKinds = ["done", "approval", "worktree", "playbook", "paste"];
 
-    public static readonly PlaybookFields Empty = new("", "task", false, false, null, null, "worktree", [], false, false, "");
+    public static readonly PlaybookFields Empty = new("", "task", false, false, null, null, "worktree", [], false, false, [], "");
 
     public static PlaybookFields FromJson(JsonNode node) =>
         new(
@@ -33,6 +34,7 @@ public sealed record PlaybookFields(
             node["reports"] is JsonArray reports ? reports.Select((report) => report?.GetValue<string>() ?? "").ToList() : [],
             node["approvalSends"]?.GetValue<bool>() ?? false,
             node["rates"]?.GetValue<bool>() ?? false,
+            node["returnOf"] is JsonArray returnOf ? returnOf.Select((entry) => entry?.GetValue<string>() ?? "").ToList() : [],
             Text(node, "template") ?? "");
 
     static string? Text(JsonNode node, string key) => node[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
@@ -51,6 +53,7 @@ public sealed record PlaybookFields(
             ["reports"] = new JsonArray(Reports.Select((report) => (JsonNode)JsonValue.Create(report)).ToArray()),
             ["approvalSends"] = ApprovalSends,
             ["rates"] = Rates,
+            ["returnOf"] = new JsonArray(ReturnOf.Select((entry) => (JsonNode)JsonValue.Create(entry)).ToArray()),
             ["template"] = Template,
         };
 

@@ -25,6 +25,8 @@ export interface Playbook {
   approvalSends: boolean;
   /** A triage playbook's classifier rates immediacy and severity (PRD R50); without it, triage stores neither. */
   rates: boolean;
+  /** Playbooks whose work this one's work comes back to, such as `dev:review-pr` for `dev:review-pr-followup`; Returned counts them too (PRD R51). */
+  returnOf: string[];
   template: string;
 }
 
@@ -37,7 +39,7 @@ export interface PlaybookError {
 export type PlaybookResult = { playbook: Playbook } | { error: string };
 
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates'];
+const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates', 'returnOf'];
 
 function parseFrontMatter(text: string): { fields: Map<string, string>; body: string } | { error: string } {
   const normalized = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
@@ -167,6 +169,17 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
     return { error: 'approvalSends applies only to a playbook whose reports include approval.' };
   }
 
+  const returnOf = [...new Set((fields.get('returnOf') ?? '').split(',').map((entry) => entry.trim()).filter((entry) => entry !== ''))];
+  const badReturnOf = returnOf.filter((entry) => !isPlaybookName(entry) || entry === name);
+
+  if (badReturnOf.length > 0) {
+    return { error: `returnOf must list other playbook names, not ${badReturnOf.join(', ')}.` };
+  }
+
+  if (kind === 'triage' && returnOf.length > 0) {
+    return { error: 'returnOf applies only to a task playbook.' };
+  }
+
   if (body.trim() === '') {
     return { error: 'The prompt template is empty.' };
   }
@@ -184,6 +197,7 @@ export function parsePlaybook(name: string, text: string): PlaybookResult {
       reports: PLAYBOOK_REPORTS.filter((entry) => reports.includes(entry)),
       approvalSends,
       rates,
+      returnOf,
       template: body,
     },
   };
@@ -205,6 +219,13 @@ export function formatPlaybook(playbook: PlaybookFields): { text: string } | { e
     if (/[\r\n]/.test(value)) {
       return { error: `${key} must be one line.` };
     }
+  }
+
+  // A comma in an entry would read back as two entries.
+  const unnamed = playbook.kind === 'task' ? playbook.returnOf.filter((entry) => !isPlaybookName(entry)) : [];
+
+  if (unnamed.length > 0) {
+    return { error: `returnOf must list other playbook names, not ${unnamed.join(', ')}.` };
   }
 
   const lines = [`description: ${frontMatterValue(playbook.description)}`];
@@ -233,6 +254,10 @@ export function formatPlaybook(playbook: PlaybookFields): { text: string } | { e
 
   if (playbook.kind === 'task' && playbook.reports.includes('approval') && playbook.approvalSends) {
     lines.push('approvalSends: true');
+  }
+
+  if (playbook.kind === 'task' && playbook.returnOf.length > 0) {
+    lines.push(`returnOf: ${playbook.returnOf.join(', ')}`);
   }
 
   if (playbook.permissionMode !== null) {

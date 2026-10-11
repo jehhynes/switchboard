@@ -506,6 +506,8 @@ function isPlaybookFields(value: unknown): value is PlaybookFields {
     (value['workdir'] === 'worktree' || value['workdir'] === 'repoRoot') &&
     Array.isArray(value['reports']) &&
     value['reports'].every((report) => (PLAYBOOK_REPORTS as readonly unknown[]).includes(report)) &&
+    Array.isArray(value['returnOf']) &&
+    value['returnOf'].every((entry) => typeof entry === 'string') &&
     typeof value['template'] === 'string'
   );
 }
