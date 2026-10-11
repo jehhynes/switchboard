@@ -92,24 +92,22 @@ const REPORT_LINES: Record<Exclude<ReportKind, 'task'>, string> = {
 };
 
 /**
- * Appended to every session prompt, because skills written for Ground Control do not know Switchboard. It lists only the reports the
- * session may send (PRD R23).
+ * The report contract, which the session gets as appended system prompt and again after each compaction, because skills written for
+ * Ground Control do not know Switchboard. It lists only the reports the session may send (PRD R23).
  */
-export function reportContract(reports: readonly ReportKind[]): string {
+export function sessionContract(sessionId: string, report: string, reports: readonly ReportKind[]): string {
   const lines = REPORT_KINDS.filter((kind): kind is Exclude<ReportKind, 'task'> => kind !== 'task' && reports.includes(kind)).map((kind) => REPORT_LINES[kind]);
   const finish = reports.includes('done') || reports.includes('approval') ? '' : '\n\nWhen the work is finished, end your turn; the operator reviews it.';
 
-  return `
-
-Report to Switchboard with these commands:
+  return `Report to Switchboard with these commands:
 ${lines.join('\n')}${finish}
 
-When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`;
+When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`
+    .replaceAll('{{report}}', report)
+    .replace(SESSION_ID, sessionId);
 }
 
-/** The prompt one session runs: the task prompt with its session ID filled in, plus the contract for its reports. */
-export function sessionPrompt(taskPrompt: string, sessionId: string, report: string, reports: readonly ReportKind[]): string {
-  const contract = reportContract(reports).replaceAll('{{report}}', report);
-
-  return (taskPrompt.trimEnd() + contract).replace(SESSION_ID, sessionId);
+/** The first message of one session: the task prompt with its session ID filled in. */
+export function sessionPrompt(taskPrompt: string, sessionId: string): string {
+  return taskPrompt.trimEnd().replace(SESSION_ID, sessionId);
 }

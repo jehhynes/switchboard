@@ -25,8 +25,6 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
   const finish = reports.includes('done') || reports.includes('approval') ? [] : ['', 'When the work is finished, end your turn; the operator reviews it.'];
 
   return [
-    '',
-    '',
     `Report to Switchboard with these commands:`,
     ...Object.keys(lines).filter((kind) => reports.includes(kind)).flatMap((kind) => lines[kind]!),
     ...finish,
@@ -201,7 +199,8 @@ describe('triage', () => {
       workItemId: 1,
       kind: 'task',
       cwd: 'D:/git/widgets',
-      prompt: 'Answer Issue 1.\nContext 1' + CONTRACT('s1', QUESTION_REPORTS),
+      prompt: 'Answer Issue 1.\nContext 1',
+      contract: CONTRACT('s1', QUESTION_REPORTS),
       name: 'switchboard · dev:question · github 1',
       permissionMode: 'plan',
       model: 'opus',
@@ -428,7 +427,7 @@ describe('sessions', () => {
     const second = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
 
     expect(second.sessionId).toBe('s2');
-    expect(second.prompt).toBe('Answer Issue 1.\nContext 1' + CONTRACT('s2', QUESTION_REPORTS));
+    expect(second).toMatchObject({ prompt: 'Answer Issue 1.\nContext 1', contract: CONTRACT('s2', QUESTION_REPORTS) });
 
   });
 
@@ -463,7 +462,7 @@ describe('sessions', () => {
     const { item, session } = running(h, '1', 'dev:other');
 
     expect(h.store.session(session)?.reports).toEqual(['stage', 'done', 'link', 'playbook', 'task']);
-    expect(h.item(item).taskPrompt).toContain(`${REPORT} playbook ${session} <name>`);
+    expect(h.item(item).taskPrompt).toBe('Route 1.');
 
     for (const name of ['dev:missing', 'support:defect', 'triage:github', 'dev:triage']) {
       expect(h.report(session, { kind: 'playbook', playbook: name }).refused).toBe(`${name} is not a task playbook in the dev namespace.`);
@@ -476,7 +475,7 @@ describe('sessions', () => {
 
     // A session whose playbook does not list it, and an ad-hoc prompt, cannot change the playbook.
     const other = running(h, '2');
-    expect(h.report(other.session, { kind: 'playbook', playbook: 'dev:develop' }).refused).toBe("This session's prompt does not offer the playbook report.");
+    expect(h.report(other.session, { kind: 'playbook', playbook: 'dev:develop' }).refused).toBe("This session's report contract does not offer the playbook report.");
   });
 
   it('refuses a report the session was not offered, and ends a session that cannot report done or approval as finished, for review', () => {
@@ -484,8 +483,8 @@ describe('sessions', () => {
     const a = running(h, '1');
 
     expect(h.store.session(a.session)?.reports).toEqual(QUESTION_REPORTS);
-    expect(h.report(a.session, { kind: 'done' })).toEqual({ actions: [], refused: "This session's prompt does not offer the done report." });
-    expect(h.report(a.session, { kind: 'worktree', path: 'D:/wt/1', branch: null }).refused).toBe("This session's prompt does not offer the worktree report.");
+    expect(h.report(a.session, { kind: 'done' })).toEqual({ actions: [], refused: "This session's report contract does not offer the done report." });
+    expect(h.report(a.session, { kind: 'worktree', path: 'D:/wt/1', branch: null }).refused).toBe("This session's report contract does not offer the worktree report.");
     expect(h.item(a.item)).toMatchObject({ status: 'running', doneAt: null });
     expect(h.store.session(a.session)?.outcome).toBeNull();
     expect(h.store.worktreeFor(h.item(a.item).ticketId)).toBeNull();
@@ -589,7 +588,7 @@ describe('setup', () => {
     const start = only(h.triaged(triage, 'dev:develop'), 'start-session');
 
     expect(start).toMatchObject({ kind: 'setup', cwd: 'D:/git/widgets', name: 'switchboard · setup · github 15619', permissionMode: 'auto', model: null });
-    expect(start.prompt).toBe('/init-worktree 15619' + CONTRACT(start.sessionId, FINISHING_REPORTS));
+    expect(start).toMatchObject({ prompt: '/init-worktree 15619', contract: CONTRACT(start.sessionId, FINISHING_REPORTS) });
     expect(h.item(1)).toMatchObject({ status: 'setup', taskPrompt: null });
 
     return h.started(start);
@@ -607,7 +606,7 @@ describe('setup', () => {
 
     const task = only(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release' }), 'start-session');
 
-    expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/15619', prompt: '/gc-plan 15619' + CONTRACT(task.sessionId, FINISHING_REPORTS), name: 'switchboard · dev:develop · github 15619' });
+    expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/15619', prompt: '/gc-plan 15619', contract: CONTRACT(task.sessionId, FINISHING_REPORTS), name: 'switchboard · dev:develop · github 15619' });
     expect(h.status(1)).toBe('running');
   });
 
@@ -676,7 +675,7 @@ describe('setup', () => {
     const defect = only(h.triaged({ type: 'triage', triageId: 2, workItemId: 2, ticket: h.store.ticket(2)! } as FlowAction, 'support:defect'), 'start-session');
 
     expect(develop).toMatchObject({ kind: 'task', cwd: 'D:/wt/1' });
-    expect(defect).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets', prompt: 'Research 2 in https://github.com/acme/widgets/issues/2.' + CONTRACT(defect.sessionId, ['stage', 'done', 'link', 'task']) });
+    expect(defect).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets', prompt: 'Research 2 in https://github.com/acme/widgets/issues/2.', contract: CONTRACT(defect.sessionId, ['stage', 'done', 'link', 'task']) });
   });
 });
 
@@ -920,7 +919,8 @@ describe('ad-hoc', () => {
       workItemId: 1,
       kind: 'task',
       cwd: 'D:/scratch',
-      prompt: '  Write hello.txt\nthen report done' + CONTRACT('s1', ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task']),
+      prompt: '  Write hello.txt\nthen report done',
+      contract: CONTRACT('s1', ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task']),
       name: 'switchboard · ad-hoc · adhoc 1',
       permissionMode: 'auto',
       model: null,
@@ -983,7 +983,8 @@ describe('task reports (PRD R68)', () => {
       workItemId: 2,
       kind: 'task',
       cwd: 'D:/git/widgets',
-      prompt: prompt + CONTRACT('s2', ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task']),
+      prompt,
+      contract: CONTRACT('s2', ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task']),
       name: 'switchboard · ad-hoc · adhoc 1',
       permissionMode: 'auto',
       model: null,

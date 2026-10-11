@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { HOOK_SOURCE } from '../src/hooks.js';
+import { CONTRACT_HOOK_SOURCE, HOOK_SOURCE } from '../src/hooks.js';
 import { claudeSettingsPath, installHooks, readMarkers } from '../src/install.js';
 
 let dir: string;
@@ -23,7 +23,7 @@ describe('claudeSettingsPath', () => {
 });
 
 describe('installHooks', () => {
-  it('writes the hook and adds entries, keeping existing settings', () => {
+  it('writes the hooks and adds entries, keeping existing settings', () => {
     const home = join(dir, '.switchboard');
     const settings = join(dir, '.claude', 'settings.json');
     mkdirSync(join(dir, '.claude'));
@@ -31,10 +31,12 @@ describe('installHooks', () => {
 
     expect(installHooks(home, settings)).toBeNull();
     expect(readFileSync(join(home, 'hook.mjs'), 'utf8')).toBe(HOOK_SOURCE);
+    expect(readFileSync(join(home, 'contract.mjs'), 'utf8')).toBe(CONTRACT_HOOK_SOURCE);
 
     const written = JSON.parse(readFileSync(settings, 'utf8'));
     expect(written.theme).toBe('dark');
     expect(written.hooks.Stop[0].hooks[0].args).toEqual([join(home, 'hook.mjs').replaceAll('\\', '/')]);
+    expect(written.hooks.SessionStart[1].hooks[0].args).toEqual([join(home, 'contract.mjs').replaceAll('\\', '/')]);
 
     const before = readFileSync(settings, 'utf8');
     expect(installHooks(home, settings)).toBeNull();

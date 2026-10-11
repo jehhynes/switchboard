@@ -257,6 +257,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return refused === null ? { status: 200, body: { recorded: true } } : { status: 409, body: { error: refused } };
       },
+      '/contract': async (body) => {
+        if (!isRecord(body) || typeof body['nativeSessionId'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {nativeSessionId}.' } };
+        }
+
+        const contract = runtime.contract(body['nativeSessionId']);
+
+        return contract === null ? { status: 404, body: { error: 'No Switchboard session has this Claude session ID.' } } : { status: 200, body: { contract } };
+      },
       '/open': async (body) => {
         if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace'])) {
           return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?}.' } };

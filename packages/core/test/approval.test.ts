@@ -30,14 +30,15 @@ describe('approval reports (PRD R23, R31)', () => {
 
     const start = only(h.act({ type: 'approve', workItemId: item }), 'start-session');
     expect(start).toMatchObject({ kind: 'task', sessionId: 's2' });
-    expect(start.prompt).toMatch(/^\/review-pr pr:123 publish\n\nReport to Switchboard with these commands:\n- .* stage s2 </);
+    expect(start.prompt).toBe('/review-pr pr:123 publish');
+    expect(start.contract).toMatch(/^Report to Switchboard with these commands:\n- .* stage s2 </);
     expect(h.item(item)).toMatchObject({ status: 'running', approvalPrompt: '/review-pr pr:123 publish' });
 
     // The playbook offers no done report, but the approved prompt's session finishes the work item with one.
-    expect(start.prompt).toContain(' done s2, when the work is finished.');
-    expect(start.prompt).not.toContain(' approval ');
+    expect(start.contract).toContain(' done s2, when the work is finished.');
+    expect(start.contract).not.toContain(' approval ');
     h.started(start);
-    expect(h.report('s2', { kind: 'approval', prompt: '/again', summary: null, report: null }).refused).toBe("This session's prompt does not offer the approval report.");
+    expect(h.report('s2', { kind: 'approval', prompt: '/again', summary: null, report: null }).refused).toBe("This session's report contract does not offer the approval report.");
     expect(h.report('s2', { kind: 'done' }).refused).toBeNull();
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
   });
@@ -84,7 +85,7 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false, error: null, ...APPROVAL });
 
     // The resumed session stays open idle in VS Code; Approve runs the held prompt without waiting for it to close (PRD R17).
-    expect(only(h.act({ type: 'approve', workItemId: item }), 'start-session').prompt.startsWith('/publish\n\n')).toBe(true);
+    expect(only(h.act({ type: 'approve', workItemId: item }), 'start-session').prompt).toBe('/publish');
   });
 
   it('runs again when the operator answers a question the session asked after its approval report', () => {
@@ -239,7 +240,7 @@ describe('paste reports (PRD R60)', () => {
     const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
     const session = h.started(start);
 
-    expect(start.prompt).toContain(`- ${REPORT} paste ${session} --label <text> --file <absolute path>, for each drafted text`);
+    expect(start.contract).toContain(`- ${REPORT} paste ${session} --label <text> --file <absolute path>, for each drafted text`);
     expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply.md' }).refused).toBeNull();
     h.report(session, { kind: 'paste', label: 'Private note', file: 'D:\\case\\private-note.md' });
     h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply-2.md' });
@@ -254,7 +255,7 @@ describe('paste reports (PRD R60)', () => {
     // The approved prompt's session is not offered paste.
     h.act({ type: 'roster', sessions: [] });
     const approved = h.started(h.act({ type: 'approve', workItemId: 1 })[0]);
-    expect(h.report(approved, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\late.md' }).refused).toBe("This session's prompt does not offer the paste report.");
+    expect(h.report(approved, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\late.md' }).refused).toBe("This session's report contract does not offer the paste report.");
 
     // An earlier session's paste is not applied, as for its other reports (PRD R45).
     expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\stale.md' }).refused).toBeNull();
@@ -265,7 +266,7 @@ describe('paste reports (PRD R60)', () => {
     const h = withPaste();
     const { session } = running(h);
 
-    expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply.md' }).refused).toBe("This session's prompt does not offer the paste report.");
+    expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply.md' }).refused).toBe("This session's report contract does not offer the paste report.");
     expect(h.store.pastesFor(1)).toEqual([]);
   });
 });

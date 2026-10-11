@@ -350,6 +350,26 @@ describe('Store', () => {
     store.close();
   });
 
+  it('finds the latest session with a Claude session ID', () => {
+    const path = join(dir, 'native.db');
+    Store.open(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
+    raw.exec("INSERT INTO workItems (id, ticketId, status, createdAt, statusAt) VALUES (1, 1, 'running', 1, 1)");
+    raw.exec(
+      "INSERT INTO sessions (id, workItemId, kind, provider, nativeSessionId, cwd, state, stateAt, startedAt, released) VALUES " +
+        "('s1', 1, 'task', 'claude', 'n1', 'c', 'ended', 1, 1, 1), ('s2', 1, 'task', 'claude', 'n1', 'c', 'running', 2, 2, 0), ('s3', 1, 'task', 'claude', 'n2', 'c', 'running', 3, 3, 0)",
+    );
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect(store.sessionByNativeId('n1')?.id).toBe('s2');
+    expect(store.sessionByNativeId('n2')?.id).toBe('s3');
+    expect(store.sessionByNativeId('n3')).toBeNull();
+    store.close();
+  });
+
   it('rolls back a transaction that throws', () => {
     const store = Store.open(':memory:');
 

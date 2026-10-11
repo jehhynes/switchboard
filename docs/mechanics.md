@@ -333,6 +333,20 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** the call from Switchboard's installed extension; the argument order is undocumented and can change with any Claude Code extension update.
 - **Current use:** New Claude Session in Editor Tab (PRD R75; architecture.md § VS Code extension).
 
+## M30. The report contract in the system prompt, across resume and compaction
+
+- **Date:** 2026-10-10.
+- **Versions:** Claude Code 2.1.296.
+- **Experiment:** in the trusted `.wip/mech`, Haiku sessions started with `claude --bg --append-system-prompt "<contract with a code word>" "Reply with exactly: ready"`, stopped, then asked for the code word through `claude -p --resume <id>` with no append flag:
+  - Before any compaction, the session knew the code word and quoted the line from its system prompt; the transcript holds a `prompt_snapshot` entry.
+  - After `/compact` in a `-p --resume` process without the flag, it did not.
+  - After `/compact` in the background process woken by `claude --bg --resume <id>`, which reported "woke session … with its saved options (--permission-mode, -n, --append-system-prompt, --model)", a later `-p --resume` without the flag did not know it either.
+  - With a project `SessionStart` hook, matcher `compact`, printing `{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: <contract>}}`, a `/compact` saved a `hook_additional_context` entry after the compaction boundary, and a later `-p --resume` without the hook knew the code word, citing the hook's context.
+  - The built `contract.mjs`, registered as `{command: "node", args: [<path>], timeout: 10}` and pointed at a stand-in hub through `hub.json`, posted the session ID with the token on `/compact`, and a later resume without the hook knew the code word the stand-in returned.
+- **Result:** Claude records the rendered system prompt, `--append-system-prompt` text included, on the first request and resends it on every later request and resume, as `--system-prompt-snapshot on` (the default) describes, until a compaction. After a compaction the next process renders it again from its own flags. `claude --bg --resume <id>` with any flag starts a copy of a background session; without flags it reuses the saved ones. Git Bash rewrites a `/compact` argument into a Windows path (M20).
+- **Not verified:** a resume or compaction in a VS Code Claude tab; an automatic compaction.
+- **Current use:** the start command and the contract hook (architecture.md § Claude Code runner, § Playbooks).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

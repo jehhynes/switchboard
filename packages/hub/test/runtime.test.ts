@@ -506,7 +506,7 @@ describe('Runtime', () => {
     await runtime.pollSource('github');
     await runtime.settled();
     store.updateSession('s2', { reports: ['stage', 'link'] });
-    expect(await runtime.report({ sessionId: 's2', kind: 'done' })).toEqual({ refused: "This session's prompt does not offer the done report." });
+    expect(await runtime.report({ sessionId: 's2', kind: 'done' })).toEqual({ refused: "This session's report contract does not offer the done report." });
     expect(store.workItem(2)?.status).toBe('running');
   });
 
@@ -517,7 +517,7 @@ describe('Runtime', () => {
     await runtime.settled();
 
     store.updateSession('s1', { reports: ['stage', 'link'] });
-    expect(await runtime.report({ sessionId: 's1', kind: 'paste', label: 'Customer reply', file: 'D:/case/draft-reply.md' })).toEqual({ refused: "This session's prompt does not offer the paste report." });
+    expect(await runtime.report({ sessionId: 's1', kind: 'paste', label: 'Customer reply', file: 'D:/case/draft-reply.md' })).toEqual({ refused: "This session's report contract does not offer the paste report." });
     expect(runtime.snapshot().workItems[0]?.pastes).toEqual([]);
 
     store.updateSession('s1', { reports: ['stage', 'link', 'paste'] });
@@ -542,7 +542,9 @@ describe('Runtime', () => {
     await runtime.settled();
 
     expect(store.sessionsFor(child!.id)).toMatchObject([{ cwd: 'D:/git/widgets', state: 'running' }]);
-    expect(cli.calls.filter((call) => call[1] === '--bg').at(-1)?.at(-1)).toMatch(/^Fix the flaky CartTests\n\nReport to Switchboard/);
+    const start = cli.calls.filter((call) => call[1] === '--bg').at(-1);
+    expect(start?.at(-1)).toBe('Fix the flaky CartTests');
+    expect(start?.at(-2)).toMatch(/^Report to Switchboard/);
   });
 
   it('blocks a done report while a fresh read lists the ticket as assigned, without telling the session (PRD R10)', async () => {
@@ -695,8 +697,11 @@ describe('Runtime', () => {
     await runtime.settled();
 
     const start = cli.calls.find((call) => call[1] === '--bg');
-    expect(start?.at(-1)).toMatch(/^Build 8\.\n\nReport to Switchboard with these commands:/);
+    expect(start?.slice(-3)).toEqual(['--append-system-prompt', expect.stringMatching(/^Report to Switchboard with these commands:\n- .* stage s1 /), 'Build 8.']);
     expect(store.session('s1')).toMatchObject({ kind: 'task', state: 'running' });
+    // After a compaction, the hook gets the contract the session started with (mechanics M30).
+    expect(runtime.contract(store.session('s1')!.nativeSessionId!)).toBe(start?.at(-2));
+    expect(runtime.contract('not-a-switchboard-session')).toBeNull();
     expect(runtime.snapshot().pool.map((entry) => entry.ticket.sourceKey)).toEqual(['9']);
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'running', playbook: 'dev:develop', triage: { playbook: 'dev:develop' } }]);
   });

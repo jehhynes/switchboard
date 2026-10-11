@@ -103,7 +103,7 @@ describe('pick (PRD R48)', () => {
     const start = only(h.act({ type: 'pick', ticketId }), 'start-session');
 
     expect(start).toMatchObject({ kind: 'task', cwd: 'D:/git/support', name: 'switchboard · support:case · zoho 500', permissionMode: 'auto', model: null });
-    expect(start.prompt.startsWith('/support-process R500\n\n')).toBe(true);
+    expect(start.prompt).toBe('/support-process R500');
     expect(h.item(1)).toMatchObject({ ticketId, status: 'running', playbook: 'support:case' });
     expect(h.store.triagesFor(1)).toMatchObject([{ ticketId, workItemId: 1, playbook: 'support:case' }]);
     expect(h.send({ type: 'pick', ticketId }).refused).toBe('The ticket already has a work item.');

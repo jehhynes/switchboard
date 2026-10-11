@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TRIAGE_VARIABLES, render, renderTaskPrompt, sessionPrompt, templateError, triagePrompt } from '../src/template.js';
+import { TRIAGE_VARIABLES, render, renderTaskPrompt, sessionContract, sessionPrompt, templateError, triagePrompt } from '../src/template.js';
 
 describe('render', () => {
   it('replaces variables, with or without inner spaces, and does not re-scan values', () => {
@@ -11,37 +11,34 @@ describe('render', () => {
   });
 });
 
-describe('renderTaskPrompt and sessionPrompt', () => {
-  it('fills the session ID in the template and the appended report contract', () => {
+describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
+  it('fills the session ID in the template and in the report contract, which is not part of the prompt', () => {
     const task = renderTaskPrompt('Work on {{ticket.sourceKey}} as {{session.id}}.\n\n', { 'ticket.sourceKey': '7' });
 
     expect(task).toEqual({ text: 'Work on 7 as {{session.id}}.\n\n' });
+    expect(sessionPrompt((task as { text: string }).text, 's-1')).toBe('Work on 7 as s-1.');
 
-    expect(sessionPrompt((task as { text: string }).text, 's-1', 'node "C:/h/hub.js" report', ['link', 'approval', 'done', 'worktree', 'stage'])).toBe(
+    expect(sessionContract('s-1', 'node "C:/h/hub.js" report', ['link', 'approval', 'done', 'worktree', 'stage'])).toBe(
       [
-        'Work on 7 as s-1.',
-        '',
         `Report to Switchboard with these commands:`,
         `- node "C:/h/hub.js" report stage s-1 <stage>, when you start a new phase of the work.`,
         `  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
         `- node "C:/h/hub.js" report worktree s-1 <path>, when you create a worktree.`,
         `- node "C:/h/hub.js" report done s-1, when the work is finished.`,
         `- node "C:/h/hub.js" report approval s-1 --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
-    `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,
-    `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
-    `  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
-    `- node "C:/h/hub.js" report link s-1 --label <text> --target <url>, for each GitHub issue or pull request that tracks or delivers this work, such as one you create, but not a related, base or parent one.`,
-    ``,
-    `When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`,
+        `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,
+        `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
+        `  - The report is the file holding the text Approve publishes, such as a drafted comment; leave out --report when nothing is drafted.`,
+        `- node "C:/h/hub.js" report link s-1 --label <text> --target <url>, for each GitHub issue or pull request that tracks or delivers this work, such as one you create, but not a related, base or parent one.`,
+        ``,
+        `When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`,
       ].join('\n'),
     );
   });
 
   it('lists only the offered reports, and tells a session with neither done nor approval to end its turn', () => {
-    expect(sessionPrompt('Answer it.', 's-2', 'R', ['stage', 'link'])).toBe(
+    expect(sessionContract('s-2', 'R', ['stage', 'link'])).toBe(
       [
-        'Answer it.',
-        '',
         'Report to Switchboard with these commands:',
         '- R stage s-2 <stage>, when you start a new phase of the work.',
         '  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.',
@@ -53,7 +50,7 @@ describe('renderTaskPrompt and sessionPrompt', () => {
       ].join('\n'),
     );
 
-    const approval = sessionPrompt('Draft it.', 's-3', 'R', ['stage', 'approval', 'link']);
+    const approval = sessionContract('s-3', 'R', ['stage', 'approval', 'link']);
 
     expect(approval).toContain('- R approval s-3 --prompt');
     expect(approval).not.toContain(' done ');
@@ -62,7 +59,7 @@ describe('renderTaskPrompt and sessionPrompt', () => {
   });
 
   it('does not list the task report a session may send, so only the operator starts one (PRD R68)', () => {
-    expect(sessionPrompt('Answer it.', 's-4', 'R', ['stage', 'link', 'task'])).toBe(sessionPrompt('Answer it.', 's-4', 'R', ['stage', 'link']));
+    expect(sessionContract('s-4', 'R', ['stage', 'link', 'task'])).toBe(sessionContract('s-4', 'R', ['stage', 'link']));
   });
 });
 

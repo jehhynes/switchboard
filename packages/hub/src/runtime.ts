@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { classify, entryFor, installHooks, jobStatePath, markerState, observe, readJobQuestion, readMarkers, readRoster, replyToSession, startSession, stopSession } from '@switchboard/claude';
 import type { Exec, JobQuestion, Marker, ServiceDeps } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, QueueWait, Session, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, handle, heldSlots, queueWaits, recordRefusal, repoRoots, switchboardHome } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, handle, heldSlots, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -595,6 +595,19 @@ export class Runtime {
 
     this.deps.store.transaction(() => recordRefusal(this.deps.store, event, this.deps.now(), message));
     this.changed();
+  }
+
+  /** The report contract of the Switchboard session with this Claude session ID, for the hook that restores it after compaction, or null. */
+  contract(nativeSessionId: string): string | null {
+    const session = this.deps.store.sessionByNativeId(nativeSessionId);
+
+    if (session === null) {
+      return null;
+    }
+
+    this.deps.log(`restored the report contract of session ${session.id} after compaction`);
+
+    return sessionContract(session.id, this.reportCommand, session.reports);
   }
 
   /** A report from the `report` command. A worktree must be one `git worktree list` shows in that path. */

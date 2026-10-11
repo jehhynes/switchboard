@@ -841,6 +841,11 @@ export class Store {
     return this.#one('SELECT * FROM sessions WHERE id = ?', id);
   }
 
+  /** The latest session with this Claude session ID. */
+  sessionByNativeId(nativeSessionId: string): Session | null {
+    return this.#one('SELECT * FROM sessions WHERE nativeSessionId = ? ORDER BY startedAt DESC, rowid DESC LIMIT 1', nativeSessionId);
+  }
+
   sessionsFor(workItemId: number): Session[] {
     return this.#all('SELECT * FROM sessions WHERE workItemId = ? ORDER BY startedAt, rowid', workItemId);
   }

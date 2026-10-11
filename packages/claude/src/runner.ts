@@ -29,6 +29,7 @@ const ROSTER_POLL_MS = 2_000;
 /**
  * Background session start (GC M33). `bgIsolation: none` lets the session edit its working directory; the prompt is one
  * argument, so a leading slash command survives. `--bg` ignores `--session-id`, so the short ID comes from its output.
+ * The contract goes in the system prompt, which Claude records and reuses on resume until compaction (mechanics M30).
  */
 export function startArgs(action: StartAction): string[] {
   return [
@@ -40,6 +41,8 @@ export function startArgs(action: StartAction): string[] {
     '-n',
     action.name,
     ...(action.model === null ? [] : ['--model', action.model]),
+    '--append-system-prompt',
+    action.contract,
     action.prompt,
   ];
 }

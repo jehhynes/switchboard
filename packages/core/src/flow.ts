@@ -7,7 +7,7 @@ import { REPORT_KINDS } from './model.js';
 import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import type { SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
-import { renderTaskPrompt, sessionPrompt, triagePrompt } from './template.js';
+import { renderTaskPrompt, sessionContract, sessionPrompt, triagePrompt } from './template.js';
 import type { TemplateVariable } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
@@ -144,7 +144,10 @@ export type FlowAction =
       workItemId: number;
       kind: SessionKind;
       cwd: string;
+      /** The first message. */
       prompt: string;
+      /** The report contract, appended to the system prompt. */
+      contract: string;
       name: string;
       permissionMode: PermissionMode;
       model: string | null;
@@ -989,7 +992,7 @@ class Flow {
     const session = this.session(sessionId);
 
     if (!session.reports.includes(report.kind)) {
-      throw new Refusal(`This session's prompt does not offer the ${report.kind} report.`);
+      throw new Refusal(`This session's report contract does not offer the ${report.kind} report.`);
     }
 
     const item = this.latest(session);
@@ -1562,7 +1565,7 @@ class Flow {
     }
 
     const reports = sessionReports(kind, approved, playbook);
-    const full = sessionPrompt(prompt, id, this.context.report, reports);
+    const full = sessionPrompt(prompt, id);
 
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
@@ -1596,6 +1599,7 @@ class Flow {
       kind,
       cwd,
       prompt: full,
+      contract: sessionContract(id, this.context.report, reports),
       name: `switchboard · ${label} · ${ticket.source} ${ticket.sourceKey}`,
       permissionMode: own?.permissionMode ?? sessions.permissionMode,
       model: own?.model ?? (sessions.model || null),

@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HOOK_SOURCE, planHooks } from './hooks.js';
+import { CONTRACT_HOOK_SOURCE, HOOK_SOURCE, planHooks } from './hooks.js';
 import type { Marker } from './hooks.js';
 
 /** Claude's settings file: under CLAUDE_CONFIG_DIR when the operator set it, else `~/.claude`. */
@@ -44,17 +44,26 @@ function writeAtomically(path: string, text: string): void {
   }
 }
 
-/** Writes `<switchboard home>/hook.mjs` and adds its entries to Claude's settings. Returns why settings were left alone, or null. */
+/**
+ * Writes `<switchboard home>/hook.mjs` and `contract.mjs` and adds their entries to Claude's settings. Returns why settings were
+ * left alone, or null.
+ */
 export function installHooks(switchboardHome: string, settingsPath: string): string | null {
   const hookPath = join(switchboardHome, 'hook.mjs').replaceAll('\\', '/');
+  const contractPath = join(switchboardHome, 'contract.mjs').replaceAll('\\', '/');
 
   mkdirSync(switchboardHome, { recursive: true });
 
-  if (readText(hookPath) !== HOOK_SOURCE) {
-    writeAtomically(hookPath, HOOK_SOURCE);
+  for (const [path, source] of [
+    [hookPath, HOOK_SOURCE],
+    [contractPath, CONTRACT_HOOK_SOURCE],
+  ] as const) {
+    if (readText(path) !== source) {
+      writeAtomically(path, source);
+    }
   }
 
-  const plan = planHooks(readText(settingsPath), hookPath);
+  const plan = planHooks(readText(settingsPath), hookPath, contractPath);
 
   if ('error' in plan) {
     return plan.error;
