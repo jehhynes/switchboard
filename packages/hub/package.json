@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@switchboard/claude": "*",
+    "@switchboard/codex": "*",
     "@switchboard/core": "*",
     "@switchboard/github": "*",
     "@switchboard/zoho": "*",

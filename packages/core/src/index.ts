@@ -13,3 +13,4 @@ export * from './snooze.js';
 export * from './githubLinks.js';
 export * from './queue.js';
 export * from './runner.js';
+export * from './exec.js';

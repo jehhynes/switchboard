@@ -15,7 +15,7 @@ describe('delete (PRD R76)', () => {
     const h = new Harness();
     const session = running(h);
 
-    expect(h.act({ type: 'delete', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12345', reason: 'operator' }]);
+    expect(h.act({ type: 'delete', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator' }]);
 
     expect(h.store.workItem(1)).toBeNull();
     expect(h.store.session(session)).toBeNull();

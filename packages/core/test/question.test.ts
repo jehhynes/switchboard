@@ -23,7 +23,7 @@ describe('answering on the row (PRD R70)', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
-    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual([{ type: 'reply-session', sessionId: session, shortId: 'abc12341', question: 'Which?', text: 'Birch' }]);
+    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual([{ type: 'reply-session', sessionId: session, provider: 'claude', shortId: 'abc12341', question: 'Which?', text: 'Birch' }]);
     expect(h.item(item)).toMatchObject({ status: 'running', error: null });
     expect(h.store.session(session)?.state).toBe('waiting');
   });
@@ -65,7 +65,7 @@ describe('answering on the row (PRD R70)', () => {
 
     expect(h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' })).toEqual({ actions: [], refused: 'The work item has another session now.' });
     expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Oak' }).refused).toBe('The work item has another session now.');
-    expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-new' })).toEqual([{ type: 'stop-session', sessionId: next, shortId: 'def12345', reason: 'open' }]);
+    expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-new' })).toEqual([{ type: 'stop-session', sessionId: next, provider: 'claude', shortId: 'def12345', reason: 'open' }]);
   });
 
   it('refuses a session still starting', () => {
@@ -94,7 +94,7 @@ describe('Open in Claude (PRD R70)', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
-    expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12341', reason: 'open' }]);
+    expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12341', reason: 'open' }]);
     expect(h.item(item).status).toBe('running');
 
     h.now += MINUTE;

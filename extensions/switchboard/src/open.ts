@@ -70,12 +70,21 @@ export async function openTab(target: string): Promise<void> {
 /** Terminals this window opened sessions in, by `attach:` or `resume:` and session ID, so an attach left open is not shown for a resume. */
 const terminals = new Map<string, vscode.Terminal>();
 
+/** The agents a session can run in; the hub names one with each session (PRD R22). */
+export type Provider = 'claude' | 'codex';
+
+/** A provider from a hub message; an older hub names none, and its sessions are Claude's. */
+export function providerOf(value: unknown): Provider {
+  return value === 'codex' ? 'codex' : 'claude';
+}
+
 /**
  * Open in terminal (PRD R28): shows the terminal this window already opened the session in while it runs, else opens `claude attach <short ID>`
- * for a session in its background process, or `claude --resume <session ID>` in its directory. A session `active` elsewhere, such as in a
- * VS Code tab, opens there instead, because resuming a live session starts a copy (mechanics M18). Closing an attach leaves the session running (M7, M9).
+ * for a Claude session in its background process, or `claude --resume <session ID>` or `codex resume <thread ID>` in its directory. A session
+ * `active` elsewhere, such as in a VS Code tab, opens there instead, because resuming a live session starts a copy (mechanics M18). Closing an
+ * attach leaves the session running (M7, M9).
  */
-export async function openTerminal(record: HubRecord | null, sessionId: string, cwd: string, name: string, shortId: string | null, active: boolean): Promise<void> {
+export async function openTerminal(record: HubRecord | null, sessionId: string, cwd: string, name: string, shortId: string | null, active: boolean, provider: Provider = 'claude'): Promise<void> {
   const key = `${shortId === null ? 'resume' : 'attach'}:${sessionId}`;
   const existing = terminals.get(key);
 
@@ -85,11 +94,12 @@ export async function openTerminal(record: HubRecord | null, sessionId: string, 
   }
 
   if (active) {
-    await openSession(record, sessionId, cwd);
+    await openSession(record, sessionId, cwd, provider);
     return;
   }
 
-  const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: 'claude', shellArgs: shortId === null ? ['--resume', sessionId] : ['attach', shortId], cwd });
+  const args = provider === 'codex' ? ['resume', sessionId] : shortId === null ? ['--resume', sessionId] : ['attach', shortId];
+  const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: provider, shellArgs: args, cwd });
 
   terminals.set(key, terminal);
   terminal.show();
@@ -113,6 +123,39 @@ async function showInClaude(sessionId: string): Promise<void> {
   }
 }
 
+/** How long the Codex panel's tab may take to appear after `vscode.open`, which resolves before the extension shows it. */
+export const CODEX_TAB_WAIT_MS = 2_500;
+
+/** The Codex extension's conversation editor for a thread (mechanics M31). */
+export function codexThreadUri(threadId: string): vscode.Uri {
+  return vscode.Uri.parse(`openai-codex://route/local/${threadId}`);
+}
+
+function codexTabOpen(threadId: string): boolean {
+  const wanted = codexThreadUri(threadId).toString();
+
+  return vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType.includes('chatgpt.conversationEditor') && tab.input.uri.toString() === wanted));
+}
+
+/**
+ * Opens a Codex thread in the Codex extension's panel, or shows its open tab. `vscode.open` makes a tab for the URI even without the extension,
+ * so only a tab of the extension's view type counts (GC M43, mechanics M31).
+ */
+async function showInCodex(threadId: string): Promise<void> {
+  await vscode.commands.executeCommand('vscode.open', codexThreadUri(threadId));
+
+  for (const deadline = Date.now() + CODEX_TAB_WAIT_MS; !codexTabOpen(threadId); await new Promise((done) => setTimeout(done, 100))) {
+    if (Date.now() >= deadline) {
+      throw new Error('The Codex extension did not open the session. Is it installed?');
+    }
+  }
+}
+
+/** Opens the session in the view of its provider. */
+export function showSession(sessionId: string, provider: Provider): Promise<void> {
+  return provider === 'codex' ? showInCodex(sessionId) : showInClaude(sessionId);
+}
+
 /** Starts a new Claude session in an editor tab without changing `claudeCode.preferredLocation` (PRD R75, mechanics M29). */
 export async function newClaudeTab(): Promise<void> {
   try {
@@ -123,15 +166,16 @@ export async function newClaudeTab(): Promise<void> {
 }
 
 /**
- * Resumes or focuses a session in Claude Code's preferred location, from a History link (PRD R59). Claude's tab lists only sessions of its window's
- * first folder, and opening another session there starts an empty one (GC M6, M7, M52). A session from another folder is therefore left with the
- * hub as a pending open, and that folder is opened in its own window, which claims it.
+ * Resumes or focuses a session in its provider's view, from a History link (PRD R59). Claude's tab lists only sessions of its window's first folder,
+ * and opening another session there starts an empty one (GC M6, M7, M52); a Codex thread opens in any window, but runs in the window of its folder
+ * as Claude's do. A session from another folder is therefore left with the hub as a pending open, and that folder is opened in its own window,
+ * which claims it.
  */
-export async function openSession(record: HubRecord | null, sessionId: string, cwd: string): Promise<'opened' | 'other-folder'> {
+export async function openSession(record: HubRecord | null, sessionId: string, cwd: string, provider: Provider = 'claude'): Promise<'opened' | 'other-folder'> {
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
   if (folder !== undefined && samePath(folder, cwd)) {
-    await showInClaude(sessionId);
+    await showSession(sessionId, provider);
     return 'opened';
   }
 
@@ -156,7 +200,7 @@ export async function claimOpen(record: HubRecord, run: (command: WindowCommand)
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   // Only the focused window takes the dock's commands for any window, so a window reconnecting in the background does not (PRD R71).
   const reply = await postToHub(record, '/claim', { folder, workspace: workspaceFile(), focused: vscode.window.state.focused }, ACTION_TIMEOUT_MS);
-  const body = reply?.body as { sessionId?: unknown; commands?: unknown } | null | undefined;
+  const body = reply?.body as { sessionId?: unknown; provider?: unknown; commands?: unknown } | null | undefined;
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : null;
   const commands = Array.isArray(body?.commands) ? (body.commands as WindowCommand[]) : [];
   const runEach = async (list: WindowCommand[]) => {
@@ -170,7 +214,7 @@ export async function claimOpen(record: HubRecord, run: (command: WindowCommand)
 
   // The hub has already handed over the commands, so a session that fails to open does not keep them from running.
   if (sessionId !== null) {
-    await showInClaude(sessionId).then(undefined, (error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
+    await showSession(sessionId, providerOf(body?.provider)).then(undefined, (error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
   }
 
   // Commands the dock left for this window: Open Changes, History and Open report (PRD R71).
@@ -179,7 +223,7 @@ export async function claimOpen(record: HubRecord, run: (command: WindowCommand)
   return sessionId;
 }
 
-/** How long Open in Claude waits for the hub to report the stopped session ended; `claude stop` itself times out at 15 seconds. */
+/** How long Open in Claude or Codex waits for the hub to report the stopped session ended; a stop itself times out at 15 seconds. */
 const OPEN_QUESTION_WAIT_MS = 20_000;
 
 export interface OpenContext {
@@ -189,7 +233,7 @@ export interface OpenContext {
   home: string;
   /** Runs a claimed command, for a row whose item window is this window. */
   run: (command: WindowCommand) => Promise<unknown>;
-  /** How long Open in Claude waits for the session to stop. */
+  /** How long Open in Claude or Codex waits for the session to stop. */
   waitMs?: number;
 }
 
@@ -208,7 +252,7 @@ function rowOf(snapshot: Snapshot, key: string, home: string): DockRow | null {
 }
 
 /**
- * Runs a row's click as the dock does (PRD R71), for a notification's Open and Open in Switchboard (PRD R65, R69): Open in Claude's
+ * Runs a row's click as the dock does (PRD R71), for a notification's Open and Open in Switchboard (PRD R65, R69): Open in Claude's or Codex's
  * stop first, then the session left for the item window, which VS Code brings to the front or opens. VS Code may bring its own window forward,
  * because it holds the foreground, where Windows would refuse the dock (mechanics M26). A row with no item window opens its ticket.
  */
@@ -234,7 +278,7 @@ export async function openRow(context: OpenContext, key: string): Promise<OpenRe
 /** The row click under way in this window. */
 let running: { key: string } | null = null;
 
-/** Open in Claude's stops under way by session ID, so a later click on the same question waits for the stop already sent instead of sending another. */
+/** Open in Claude's or Codex's stops under way by session ID, so a later click on the same question waits for the stop already sent instead of sending another. */
 const stopping = new Map<string, Promise<'stopped' | 'refused' | 'timeout'>>();
 
 /** Asks the hub to stop a waiting session, then waits for a snapshot in which it ended (PRD R70). */
@@ -278,7 +322,7 @@ async function click(context: OpenContext, key: string, replaced: () => boolean)
   let open = row.open;
 
   if (open?.type === 'question') {
-    const { workItemId, sessionId, cwd } = open;
+    const { workItemId, sessionId, cwd, provider } = open;
     let stopped = stopping.get(sessionId);
 
     if (stopped === undefined) {
@@ -294,14 +338,14 @@ async function click(context: OpenContext, key: string, replaced: () => boolean)
 
     // Only the click still under way says the session did not stop.
     if (result === 'timeout') {
-      void vscode.window.showWarningMessage(`Switchboard: the session did not stop within ${(context.waitMs ?? OPEN_QUESTION_WAIT_MS) / 1000} seconds, so it was not opened in Claude.`);
+      void vscode.window.showWarningMessage(`Switchboard: the session did not stop within ${(context.waitMs ?? OPEN_QUESTION_WAIT_MS) / 1000} seconds, so it was not opened in ${provider === 'codex' ? 'Codex' : 'Claude'}.`);
     }
 
     if (result !== 'stopped') {
       return result;
     }
 
-    open = { type: 'session', sessionId, cwd };
+    open = { type: 'session', sessionId, cwd, provider };
   }
 
   if (open?.type === 'session') {

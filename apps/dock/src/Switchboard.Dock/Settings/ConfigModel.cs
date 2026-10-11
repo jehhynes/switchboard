@@ -22,7 +22,10 @@ public sealed record PlaybookFields(
     public static readonly IReadOnlyList<string> ReportKinds = ["done", "approval", "worktree", "playbook", "paste"];
 
     /// <summary>The keys of a playbook entry, which the hub accepts and the window has fields for, in the order it writes them.</summary>
-    public static readonly IReadOnlyList<string> Keys = ["description", "kind", "autoStart", "requiresWorktree", "workdir", "reports", "approvalSends", "returnOf", "rates", "permissionMode", "model", "template"];
+    public static readonly IReadOnlyList<string> Keys = ["description", "kind", "autoStart", "requiresWorktree", "workdir", "reports", "approvalSends", "returnOf", "rates", "provider", "permissionMode", "model", "template"];
+
+    /// <summary>The agent the playbook's sessions run in, or null for the sessions setting (PRD R22).</summary>
+    public string? Provider { get; init; }
 
     public static readonly PlaybookFields Empty = new("", "task", false, false, null, null, "worktree", [], false, false, [], "");
 
@@ -110,7 +113,10 @@ public sealed record PlaybookFields(
             Flag("approvalSends"),
             Flag("rates"),
             List("returnOf"),
-            Text("template") ?? "");
+            Text("template") ?? "")
+        {
+            Provider = Text("provider"),
+        };
 
         return error is null ? (fields, null) : (null, error);
     }
@@ -130,6 +136,7 @@ public sealed record PlaybookFields(
             ["approvalSends"] = ApprovalSends,
             ["rates"] = Rates,
             ["returnOf"] = Strings(ReturnOf),
+            ["provider"] = Provider,
             ["template"] = Template,
         };
 
@@ -179,6 +186,11 @@ public sealed record PlaybookFields(
             entry["rates"] = true;
         }
 
+        if (Provider is not null)
+        {
+            entry["provider"] = Provider;
+        }
+
         if (PermissionMode is not null)
         {
             entry["permissionMode"] = PermissionMode;
@@ -214,7 +226,9 @@ public sealed record EditorConfig(
     IReadOnlyList<string> SourceKinds,
     IReadOnlyDictionary<string, int> InUse,
     IReadOnlyDictionary<string, bool> Enabled,
-    string ConfigDir = "")
+    string ConfigDir = "",
+    IReadOnlyList<string>? CodexPermissionModes = null,
+    IReadOnlyList<string>? Providers = null)
 {
     public static EditorConfig Parse(JsonNode body)
     {
@@ -228,7 +242,9 @@ public sealed record EditorConfig(
             strings("sourceKinds"),
             body["inUse"] is JsonObject inUse ? inUse.ToDictionary((entry) => entry.Key, (entry) => entry.Value?.GetValue<int>() ?? 0) : new Dictionary<string, int>(),
             body["enabled"] is JsonObject enabled ? enabled.ToDictionary((entry) => entry.Key, (entry) => entry.Value?.GetValueKind() == JsonValueKind.True) : new Dictionary<string, bool>(),
-            body["configDir"]?.GetValue<string>() ?? "");
+            body["configDir"]?.GetValue<string>() ?? "",
+            strings("codexPermissionModes"),
+            strings("providers"));
     }
 }
 

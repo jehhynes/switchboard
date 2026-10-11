@@ -145,9 +145,18 @@ describe('History model', () => {
     expect(view.reconstructed).toBe(true);
     expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'Stage: old stage', reconstructed: true, category: 'report' });
     expect(sessionOpen({ ...session, state: 'running' })).toBeNull();
-    expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets' });
-    expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets' });
+    expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
     expect(sessionOpen({ ...session, state: 'ended', nativeSessionId: null })).toBeNull();
+    expect(sessionOpen({ ...session, state: 'idle', released: true, releasing: true })).toBeNull();
+  });
+
+  it("opens a Codex session in Codex, and names it by its thread ID's last 8 characters", () => {
+    const history = approvedRun().history();
+    const codex = { ...history, workItems: history.workItems.map((item) => ({ ...item, sessions: item.sessions.map((session) => ({ ...session, provider: 'codex' as const, shortId: '01a128b1-5384-7b62-a7be-64a4b4c611a9', state: 'ended' as const, released: true })) })) };
+    const started = historyView(codex, T0).sections[0]!.entries.find((entry) => entry.links.length > 0 && entry.links[0]!.label.startsWith('Open in'))!;
+
+    expect(started.links[0]).toMatchObject({ label: 'Open in Codex', title: 'Open session b4c611a9 in Codex', open: { type: 'open', provider: 'codex' } });
   });
 
   it('words every event, report and reconstructed fact, and every logged field', () => {
@@ -167,11 +176,11 @@ describe('History model', () => {
       [event('session-start-failed', 'hub', { message: 'Untrusted folder' }, [change('session', 'update', { state: ['starting', 'ended'], outcome: [null, 'failed'] }, { sessionId: 's1' }), change('workItem', 'update', { status: ['running', 'failed'], error: [null, 'Untrusted folder'] })]), { text: 'The session failed to start', detail: 'Untrusted folder', lines: ['Status: Running → Failed', 'Error: Untrusted folder'], tone: 'error' }],
       [event('stop-succeeded', 'hub', { reason: 'release' }, [change('session', 'update', { state: ['idle', 'ended'], released: [false, true] }, { sessionId: 's1' })]), { text: 'Switchboard released session abc12345 so it can resume in VS Code', lines: [] }],
       [event('stop-succeeded', 'hub', { reason: 'operator' }, [change('session', 'update', { outcome: [null, 'stopped'], outcomeDetail: [null, 'Stopped by you.'] }, { sessionId: 's1' })]), { text: 'Session abc12345 stopped', lines: ['Outcome: stopped, Stopped by you.'] }],
-      [event('stop-succeeded', 'hub', { reason: 'open' }, [change('workItem', 'update', { status: ['running', 'blocked'], error: [null, 'Opened in Claude to answer.'] })]), { text: 'Session abc12345 stopped to open in Claude', lines: ['Status: Running → Blocked', 'Error: Opened in Claude to answer.'] }],
+      [event('stop-succeeded', 'hub', { reason: 'open' }, [change('workItem', 'update', { status: ['running', 'blocked'], error: [null, 'Opened in Claude to answer.'] })]), { text: 'Session abc12345 stopped to open its question', lines: ['Status: Running → Blocked', 'Error: Opened in Claude to answer.'] }],
       [event('stop-failed', 'hub', { reason: 'open', message: 'exit 1' }, [change('workItem', 'update', { error: [null, 'Stop failed: exit 1'] })]), { text: 'Stopping the session failed', detail: 'exit 1', lines: [], tone: 'error' }],
       [event('reply-failed', 'hub', { message: 'no such session' }, [change('workItem', 'update', { error: [null, 'Answer failed: no such session'] })]), { text: 'Sending your answer failed', detail: 'no such session', lines: [], tone: 'error', category: 'session' }],
       [event('answer', 'operator', { answer: 'Birch\n bark' }, [], null), { text: 'You answered: Birch bark', category: 'you', tone: 'accent' }],
-      [event('open-question', 'operator', null, [], null), { text: 'You opened the question in Claude', category: 'you' }],
+      [event('open-question', 'operator', null, [], null), { text: 'You opened the question in its session', category: 'you' }],
       [event('triage-failed', 'triage', { triageId: 1, error: 'Timed out' }, [change('triage', 'update', { error: [null, 'Timed out'] })], null), { text: 'Triage failed', detail: 'Timed out', category: 'triage', tone: 'error' }],
       [event('triage-cancelled', 'hub', { triageId: 1 }, [change('triage', 'update', { error: [null, 'Cancelled.'] })], null), { text: 'Triage cancelled because the hub stopped', lines: [] }],
       [event('worktree-found', 'hub', { path: 'D:/wt/77', branch: '77-fix' }, [change('worktree', 'insert', { path: [null, 'D:/wt/77'] })], null), { text: 'Found the worktree D:/wt/77 (77-fix)', lines: [] }],

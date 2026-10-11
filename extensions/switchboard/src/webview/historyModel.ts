@@ -91,7 +91,7 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   stop: { text: 'You asked to stop the session', icon: 'debug-stop' },
   delete: { text: 'You deleted a work item', icon: 'trash' },
   answer: { text: 'You answered the question', icon: 'comment' },
-  'open-question': { text: 'You opened the question in Claude', icon: 'comment-discussion' },
+  'open-question': { text: 'You opened the question in its session', icon: 'comment-discussion' },
   pick: { text: 'You picked it from the pool', icon: 'pin' },
   'retriage-pool': { text: 'You asked to triage the pool ticket again', icon: 'filter' },
   restore: { text: 'You restored it', icon: 'bell' },
@@ -138,11 +138,11 @@ const str = (value: unknown): string => (value === null || value === undefined ?
 
 /** What a click on a session opens: the session in Claude, unless it runs in its background process or has no native ID yet; then null. */
 export function sessionOpen(session: Session): Record<string, unknown> | null {
-  if (session.state !== 'starting' && session.state !== 'ended' && session.shortId !== null && !session.released) {
+  if (session.state !== 'starting' && session.state !== 'ended' && session.shortId !== null && (!session.released || session.releasing)) {
     return null;
   }
 
-  return session.nativeSessionId === null ? null : { type: 'open', sessionId: session.nativeSessionId, cwd: session.cwd };
+  return session.nativeSessionId === null ? null : { type: 'open', sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider };
 }
 
 /** A link to open a reported URL or file. */
@@ -164,8 +164,12 @@ class Builder {
     }
   }
 
+  /** A Codex session's short ID is its whole thread ID, so the page shows its last 8 characters. */
   shortId(sessionId: string | null): string | null {
-    return sessionId === null ? null : (this.sessions.get(sessionId)?.shortId ?? null);
+    const session = sessionId === null ? undefined : this.sessions.get(sessionId);
+    const id = session?.shortId ?? null;
+
+    return id !== null && session?.provider === 'codex' ? id.slice(-8) : id;
   }
 
   /** `session abc12345`, or `the session` before it has a short ID. */
@@ -178,7 +182,9 @@ class Builder {
     const session = sessionId === null ? undefined : this.sessions.get(sessionId);
     const open = session === undefined ? null : sessionOpen(session);
 
-    return open === null ? [] : [{ label: 'Open in Claude', icon: 'comment-discussion', title: `Open ${this.sessionName(sessionId)} in Claude`, open }];
+    const name = session?.provider === 'codex' ? 'Codex' : 'Claude';
+
+    return open === null ? [] : [{ label: `Open in ${name}`, icon: 'comment-discussion', title: `Open ${this.sessionName(sessionId)} in ${name}`, open }];
   }
 
   /** One line per logged field of a change, in plain words; fields in `skip` are already in the entry's text. */
@@ -459,7 +465,7 @@ class Builder {
         return detail['reason'] === 'release'
           ? { category: 'session', icon: 'debug-disconnect', text: `Switchboard released ${session} so it can resume in VS Code` }
           : detail['reason'] === 'open'
-            ? { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped to open in Claude` }
+            ? { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped to open its question` }
             : { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped` };
       case 'stop-failed':
         skip.add('error');

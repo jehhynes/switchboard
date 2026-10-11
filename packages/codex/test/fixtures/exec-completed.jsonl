@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a128b1-5384-7b62-a7be-64a4b4c611a9"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"clamping SessionEnd hook timeout to 3s in C:\\Users\\operator\\.codex\\hooks.json"}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"clamping Interrupt hook timeout to 3s in C:\\Users\\operator\\.codex\\hooks.json"}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"ready"}}
+{"type":"turn.completed","usage":{"input_tokens":21776,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}

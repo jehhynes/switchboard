@@ -554,10 +554,10 @@ public sealed partial class MainWindow : Window
     {
         List<Control> items = [];
 
-        // Open in Claude is the click itself on a row whose session waits on a question (PRD R70).
+        // Open in Claude or Codex is the click itself on a row whose session waits on a question (PRD R70).
         if (row.Open is { Type: "question" } && model.Row(row.Key) is { } shown)
         {
-            items.Add(Item("Open in Claude", () => Open(shown), row.MainGlyph));
+            items.Add(Item(row.Main ?? "Open", () => Open(shown), row.MainGlyph));
         }
 
         foreach (var control in row.Controls.Where((control) => control.Confirm is null))
@@ -726,7 +726,8 @@ public sealed partial class MainWindow : Window
 
         model.Selected = row.Key;
 
-        if (row.Main == "Open in Claude")
+        // The main control of a row whose session waits on a question is Open in Claude or Codex, which is the row's click (PRD R70).
+        if (row.Row.Open is { Type: "question" })
         {
             await Open(row);
         }

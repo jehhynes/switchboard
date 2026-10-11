@@ -10,13 +10,20 @@ public sealed class SettingsFieldsTests
     {
         var sections = SettingsFields.GeneralFields(SettingsConfigs.State());
 
-        Assert.Equal(["Sessions", "Triage"], sections.Select((section) => section.Heading));
+        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage"], sections.Select((section) => section.Heading));
         Assert.Equal(
-            ["sessions.concurrency", "sessions.permissionMode", "sessions.model", "sessions.installHooks", "sessions.debriefs", "triage.model", "triage.concurrency", "triage.timeoutSeconds"],
+            [
+                "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.permissionMode", "sessions.model", "sessions.codex.permissionMode", "sessions.codex.model",
+                "triage.model", "triage.concurrency", "triage.timeoutSeconds",
+            ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
-        Assert.Equal(["acceptEdits", "auto", "plan"], sections[0].Fields[1].Options!.Select((option) => option.Value));
-        Assert.True(sections[0].Fields[3].Fallback);
-        Assert.False(sections[0].Fields[4].Fallback);
+        Assert.Equal(["claude", "codex"], sections[0].Fields[1].Options!.Select((option) => option.Value));
+        Assert.Equal(["Claude", "Codex"], sections[0].Fields[1].Options!.Select((option) => option.Label));
+        Assert.True(sections[0].Fields[2].Fallback);
+        Assert.False(sections[0].Fields[3].Fallback);
+        Assert.Equal(["acceptEdits", "auto", "plan"], sections[1].Fields[0].Options!.Select((option) => option.Value));
+        Assert.Equal(["auto", "bypassPermissions"], sections[2].Fields[0].Options!.Select((option) => option.Value));
+        Assert.Equal("bypassPermissions", sections[2].Fields[0].Placeholder);
     }
 
     [Fact]
@@ -65,7 +72,7 @@ public sealed class SettingsFieldsTests
         var fields = SettingsFields.PlaybookFieldsOf(state, PlaybookFields.Empty with { Reports = ["approval"] });
 
         Assert.Equal(
-            ["description", "kind", "autoStart", "requiresWorktree", "reports.done", "reports.approval", "reports.worktree", "reports.playbook", "reports.paste", "approvalSends", "workdir", "permissionMode", "model", "returnOf", "template"],
+            ["description", "kind", "autoStart", "requiresWorktree", "reports.done", "reports.approval", "reports.worktree", "reports.playbook", "reports.paste", "approvalSends", "workdir", "provider", "permissionMode", "model", "returnOf", "template"],
             paths);
         Assert.Equal(["Start", "Start", "Reports", "Reports", "Reports", "Reports", "Reports"], fields.Where((field) => field.Group is not null).Select((field) => field.Group));
         Assert.Null(fields.Single((field) => field.Path == "approvalSends").Group);
@@ -154,6 +161,37 @@ public sealed class SettingsFieldsTests
         Assert.Equal("Sessions setting (auto)", defaults["permissionMode"].Options![0].Label);
         Assert.Equal("Sessions setting (Claude’s default)", defaults["model"].Placeholder);
         Assert.StartsWith("Variables: {{ticket.title}} {{report}}.", fields["template"].Help);
+    }
+
+    [Fact]
+    public void PlaybookFieldsOf_CodexPlaybook_OffersCodexModesAndCodexDefaults()
+    {
+        var config = SettingsConfigs.Basic();
+
+        SettingsConfigs.Value(config)["sessions"] = new JsonObject { ["provider"] = "codex", ["codex"] = new JsonObject { ["model"] = "gpt-6" } };
+
+        var inherited = SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(config), PlaybookFields.Empty).ToDictionary((field) => field.Path);
+        var claude = SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(config), PlaybookFields.Empty with { Provider = "claude" }).ToDictionary((field) => field.Path);
+        var codex = SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(), PlaybookFields.Empty with { Provider = "codex" }).ToDictionary((field) => field.Path);
+
+        Assert.Equal(["", "claude", "codex"], inherited["provider"].Options!.Select((option) => option.Value));
+        Assert.Equal("Sessions setting (Codex)", inherited["provider"].Options![0].Label);
+        Assert.Equal(["", "auto", "bypassPermissions"], inherited["permissionMode"].Options!.Select((option) => option.Value));
+        Assert.Equal("Sessions setting (bypassPermissions)", inherited["permissionMode"].Options![0].Label);
+        Assert.Equal("Sessions setting (gpt-6)", inherited["model"].Placeholder);
+        Assert.Equal(["", "acceptEdits", "auto", "plan"], claude["permissionMode"].Options!.Select((option) => option.Value));
+        Assert.Equal("Sessions setting (Codex’s default)", codex["model"].Placeholder);
+        Assert.Equal("Sessions setting (Claude)", codex["provider"].Options![0].Label);
+    }
+
+    [Fact]
+    public void ToEntry_PlaybookWithProvider_WritesItBeforeThePermissionMode()
+    {
+        var entry = (PlaybookFields.Empty with { Description = "D", Template = "T", Provider = "codex", PermissionMode = "auto" }).ToEntry();
+
+        Assert.Equal(["description", "autoStart", "requiresWorktree", "provider", "permissionMode", "template"], entry.Select((pair) => pair.Key));
+        Assert.Equal("codex", PlaybookFields.Read(entry).Fields!.Provider);
+        Assert.Null(SettingsFields.ApplyPlaybookField(PlaybookFields.Empty with { Provider = "codex" }, "provider", "").Provider);
     }
 
     [Theory]
@@ -646,7 +684,7 @@ public sealed class SettingsEditorTests
 
     static Field Concurrency => SettingsFields.GeneralFields(SettingsConfigs.State())[0].Fields[0];
 
-    static Field Model => SettingsFields.GeneralFields(SettingsConfigs.State())[0].Fields[2];
+    static Field Model => SettingsFields.GeneralFields(SettingsConfigs.State())[1].Fields[1];
 
     static Field PlaybookField(string path, FieldKind kind = FieldKind.Text) => new(path, path, kind, "");
 
@@ -971,6 +1009,23 @@ public sealed class SettingsEditorTests
 
         Assert.False(redraws[0]);
         Assert.Contains(true, redraws.Skip(1));
+    }
+
+    [Fact]
+    public async Task Edit_PlaybookAgent_RedrawsTheFieldsWithTheAgentsModes()
+    {
+        var editor = await Loaded();
+        var redraws = new List<bool>();
+
+        editor.State!.Page = "playbook:dev:review";
+        editor.Changed += redraws.Add;
+        editor.Edit(PlaybookField("provider", FieldKind.Select), "codex");
+
+        Assert.Equal([true], redraws);
+        Assert.Equal(["", "auto", "bypassPermissions"], SettingsFields.PlaybookFieldsOf(editor.State, editor.State.PlaybookValue("dev:review")!).Single((field) => field.Path == "permissionMode").Options!.Select((option) => option.Value));
+
+        editor.Edit(PlaybookField("model"), "gpt-6");
+        Assert.Equal([true, false], redraws);
     }
 
     [Fact]

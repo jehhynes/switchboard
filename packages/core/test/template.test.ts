@@ -18,7 +18,7 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
     expect(task).toEqual({ text: 'Work on 7 as {{session.id}}.\n\n' });
     expect(sessionPrompt((task as { text: string }).text, 's-1')).toBe('Work on 7 as s-1.');
 
-    expect(sessionContract('s-1', 'node "C:/h/hub.js" report', ['link', 'approval', 'done', 'worktree', 'stage'])).toBe(
+    expect(sessionContract('s-1', 'node "C:/h/hub.js" report', ['link', 'approval', 'done', 'worktree', 'stage'], 'claude')).toBe(
       [
         `Report to Switchboard with these commands:`,
         `- node "C:/h/hub.js" report stage s-1 <stage>, when you start a new phase of the work.`,
@@ -37,7 +37,7 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
   });
 
   it('lists only the offered reports, and tells a session with neither done nor approval to end its turn', () => {
-    expect(sessionContract('s-2', 'R', ['stage', 'link'])).toBe(
+    expect(sessionContract('s-2', 'R', ['stage', 'link'], 'claude')).toBe(
       [
         'Report to Switchboard with these commands:',
         '- R stage s-2 <stage>, when you start a new phase of the work.',
@@ -50,7 +50,7 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
       ].join('\n'),
     );
 
-    const approval = sessionContract('s-3', 'R', ['stage', 'approval', 'link']);
+    const approval = sessionContract('s-3', 'R', ['stage', 'approval', 'link'], 'claude');
 
     expect(approval).toContain('- R approval s-3 --prompt');
     expect(approval).not.toContain(' done ');
@@ -58,8 +58,16 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
     expect(approval).not.toContain('end your turn; the operator reviews it');
   });
 
+  it('tells a Codex session to end its turn with a question, because its background run cannot wait on the operator (mechanics M31)', () => {
+    const codex = sessionContract('s-5', 'R', ['stage', 'done'], 'codex');
+
+    expect(codex.endsWith("When you need the operator's answer or choice, or cannot continue without them, write the question, with any choices, as your final message and end your turn. Do not report or write a file for a question.")).toBe(true);
+    expect(codex).not.toContain('AskUserQuestion');
+    expect(codex.replace(/\n\n[^\n]*$/, '')).toBe(sessionContract('s-5', 'R', ['stage', 'done'], 'claude').replace(/\n\n[^\n]*$/, ''));
+  });
+
   it('does not list the task report a session may send, so only the operator starts one (PRD R68)', () => {
-    expect(sessionContract('s-4', 'R', ['stage', 'link', 'task'])).toBe(sessionContract('s-4', 'R', ['stage', 'link']));
+    expect(sessionContract('s-4', 'R', ['stage', 'link', 'task'], 'claude')).toBe(sessionContract('s-4', 'R', ['stage', 'link'], 'claude'));
   });
 });
 

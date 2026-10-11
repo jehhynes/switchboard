@@ -98,4 +98,10 @@ describe("a row's Open in terminal", () => {
     assert.strictEqual(created.length, 1);
     assert.deepStrictEqual(opened, ['f-native']);
   });
+
+  it('resumes an ended Codex session with codex resume in its directory', async () => {
+    await run({ sessionId: 'thread-9', shortId: null, provider: 'codex' });
+
+    assert.deepStrictEqual(created.map((terminal) => terminal.options), [{ name: 'Switchboard · gh 7', shellPath: 'codex', shellArgs: ['resume', 'thread-9'], cwd: 'D:/git/widgets-wt/7-fix' }]);
+  });
 });

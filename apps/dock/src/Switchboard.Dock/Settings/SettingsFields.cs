@@ -178,6 +178,7 @@ public static partial class SettingsFields
             "requiresWorktree" => playbook with { RequiresWorktree = isChecked },
             "approvalSends" => playbook with { ApprovalSends = isChecked },
             "rates" => playbook with { Rates = isChecked },
+            "provider" => playbook with { Provider = text == "" ? null : text },
             "permissionMode" => playbook with { PermissionMode = text == "" ? null : text },
             "model" => playbook with { Model = text == "" ? null : text },
             "returnOf" => playbook with { ReturnOf = text.Split(['\n', ',']).Select((line) => line.Trim()).Where((line) => line != "").Distinct(StringComparer.Ordinal).ToList() },
@@ -241,6 +242,14 @@ public static partial class SettingsFields
     public static JsonNode? PlaybookFieldValue(PlaybookFields playbook, string path) =>
         path.StartsWith("reports.", StringComparison.Ordinal) ? JsonValue.Create(playbook.Reports.Contains(path["reports.".Length..])) : playbook.ToJson()[path]?.DeepClone();
 
+    /// <summary>A provider's name in the window.</summary>
+    static string ProviderName(string provider) => provider switch
+    {
+        "claude" => "Claude",
+        "codex" => "Codex",
+        _ => provider,
+    };
+
     /// <summary>The choices for a select, keeping a configured value that is not among them.</summary>
     static IReadOnlyList<FieldOption> WithCurrent(IReadOnlyList<FieldOption> options, JsonNode? current) =>
         current is JsonValue value && value.TryGetValue<string>(out var text) && text != "" && !options.Any((option) => option.Value == text) ? [.. options, new FieldOption(text, $"{text} (missing)")] : options;
@@ -248,16 +257,27 @@ public static partial class SettingsFields
     public static IReadOnlyList<Section> GeneralFields(EditorState state)
     {
         var modes = state.Config.PermissionModes.Select((mode) => new FieldOption(mode, mode)).ToList();
+        var codexModes = (state.Config.CodexPermissionModes ?? []).Select((mode) => new FieldOption(mode, mode)).ToList();
+        var providers = (state.Config.Providers ?? []).Select((provider) => new FieldOption(provider, ProviderName(provider))).ToList();
 
         return
         [
             new Section("Sessions",
             [
                 new Field("sessions.concurrency", "Concurrency", FieldKind.Integer, "Sessions that run at once, 1 to 10. A start with no free slot waits as queued.", "2"),
+                new Field("sessions.provider", "Agent", FieldKind.Select, "The agent playbook and ad-hoc sessions run in. A playbook can name its own.", "claude", providers),
+                new Field("sessions.installHooks", "Install hooks", FieldKind.Boolean, "Add Switchboard’s hooks to your Claude and Codex settings, so the dock shows when a session waits for you or runs in VS Code. Off, the session list and Codex’s run output alone decide state.", Fallback: true),
+                new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
+            ]),
+            new Section("Claude sessions",
+            [
                 new Field("sessions.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own.", "auto", modes),
                 new Field("sessions.model", "Model", FieldKind.Text, "A playbook can set its own.", "Claude's default"),
-                new Field("sessions.installHooks", "Install hooks", FieldKind.Boolean, "Add Switchboard’s hooks to your Claude settings, so the dock shows when a session waits for you. Off, the session list alone decides state.", Fallback: true),
-                new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
+            ]),
+            new Section("Codex sessions",
+            [
+                new Field("sessions.codex.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own. Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s, so skills that call them need bypassPermissions.", "bypassPermissions", codexModes),
+                new Field("sessions.codex.model", "Model", FieldKind.Text, "A playbook can set its own.", "Codex's default"),
             ]),
             new Section("Triage",
             [
@@ -338,8 +358,12 @@ public static partial class SettingsFields
     public static IReadOnlyList<Field> PlaybookFieldsOf(EditorState state, PlaybookFields playbook)
     {
         var sessions = state.SettingsValue;
-        var mode = GetAt(sessions, "sessions.permissionMode") is JsonValue modeValue && modeValue.TryGetValue<string>(out var modeText) ? modeText : null;
-        var model = GetAt(sessions, "sessions.model") is JsonValue modelValue && modelValue.TryGetValue<string>(out var modelText) && modelText != "" ? modelText : null;
+        string? Setting(string path) => GetAt(sessions, path) is JsonValue value && value.TryGetValue<string>(out var text) && text != "" ? text : null;
+        var defaultProvider = Setting("sessions.provider") ?? "claude";
+        var codex = (playbook.Provider ?? defaultProvider) == "codex";
+        var mode = Setting(codex ? "sessions.codex.permissionMode" : "sessions.permissionMode") ?? (codex ? "bypassPermissions" : "auto");
+        var model = Setting(codex ? "sessions.codex.model" : "sessions.model");
+        var modes = codex ? state.Config.CodexPermissionModes ?? [] : state.Config.PermissionModes;
         List<Field> fields =
         [
             new Field("description", "Description", FieldKind.Text, "Tells triage when to choose this playbook. One line."),
@@ -364,9 +388,11 @@ public static partial class SettingsFields
 
             fields.Add(new Field("workdir", "Working directory", FieldKind.Select, "",
                 Options: [new FieldOption("worktree", "The ticket’s worktree, else the repo root"), new FieldOption("repoRoot", "Always the source’s repo root")]));
-            fields.Add(new Field("permissionMode", "Permission mode", FieldKind.Select, "",
-                Options: [new FieldOption("", $"Sessions setting ({mode ?? "auto"})"), .. state.Config.PermissionModes.Select((entry) => new FieldOption(entry, entry))]));
-            fields.Add(new Field("model", "Model", FieldKind.Text, "", $"Sessions setting ({model ?? "Claude’s default"})"));
+            fields.Add(new Field("provider", "Agent", FieldKind.Select, "The agent this playbook’s sessions run in.",
+                Options: WithCurrent([new FieldOption("", $"Sessions setting ({ProviderName(defaultProvider)})"), .. (state.Config.Providers ?? []).Select((entry) => new FieldOption(entry, ProviderName(entry)))], playbook.Provider is null ? null : JsonValue.Create(playbook.Provider))));
+            fields.Add(new Field("permissionMode", "Permission mode", FieldKind.Select, codex ? "Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s." : "",
+                Options: WithCurrent([new FieldOption("", $"Sessions setting ({mode})"), .. modes.Select((entry) => new FieldOption(entry, entry))], playbook.PermissionMode is null ? null : JsonValue.Create(playbook.PermissionMode))));
+            fields.Add(new Field("model", "Model", FieldKind.Text, "", $"Sessions setting ({model ?? (codex ? "Codex’s default" : "Claude’s default")})"));
             fields.Add(new Field("returnOf", "Return of", FieldKind.List, ReturnOfHelp));
         }
 

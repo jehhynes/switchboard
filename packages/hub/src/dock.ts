@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
+import type { Provider } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
@@ -100,10 +101,13 @@ export function writeWorkspaceFile(window: DockWindow, written: Map<string, stri
   written.set(window.file, text);
 }
 
-/** What a click does besides the switch: Open in Claude first, a session to open in the window's Claude view, or the ticket in the browser for a row with no window. */
+/**
+ * What a click does besides the switch: Open in Claude or Codex first, a session to open in the window's view of its provider, or the ticket in
+ * the browser for a row with no window.
+ */
 export type DockOpen =
-  | { type: 'question'; workItemId: number; sessionId: string; cwd: string }
-  | { type: 'session'; sessionId: string; cwd: string }
+  | { type: 'question'; workItemId: number; sessionId: string; cwd: string; provider: Provider }
+  | { type: 'session'; sessionId: string; cwd: string; provider: Provider }
   | { type: 'url'; url: string };
 
 export interface DockRow {
@@ -413,19 +417,20 @@ export function windowTabs(snapshot: Snapshot, file: string, windows: string): {
   };
 }
 
-/** Open in Claude while the background session waits on a question (PRD R70), else the latest session when it is not running in its background process. */
+/** Open in Claude or Codex while the background session waits on a question (PRD R70), else the latest session when it is not running in its background process. */
 export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   const question = openQuestion(item);
 
   if (question !== null) {
-    return { type: 'question', workItemId: question.workItemId, sessionId: question.sessionId, cwd: question.cwd };
+    return { type: 'question', workItemId: question.workItemId, sessionId: question.sessionId, cwd: question.cwd, provider: question.provider };
   }
 
   const latest = item.sessions.at(-1) ?? null;
   const active = activeSession(item);
 
-  if (latest?.nativeSessionId != null && (active === null || active.released)) {
-    return { type: 'session', sessionId: latest.nativeSessionId, cwd: latest.cwd };
+  // A session whose release stop has not finished may still be held by its background process (PRD R39).
+  if (latest?.nativeSessionId != null && (active === null || (active.released && !active.releasing))) {
+    return { type: 'session', sessionId: latest.nativeSessionId, cwd: latest.cwd, provider: latest.provider };
   }
 
   // A row with no window opens its ticket (PRD R71).

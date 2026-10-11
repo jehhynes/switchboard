@@ -28,7 +28,7 @@ Test behavior that types cannot establish:
 - Playbook loading from settings.json, playbook errors, and template rendering.
 - Classifier output validation, including an unknown playbook name.
 - Report command handling, including unknown session IDs and worktree paths `git worktree list` does not show.
-- Required CLI arguments for `claude --bg`, `claude -p`, `claude attach` and `claude stop`.
+- Required CLI arguments for `claude --bg`, `claude -p`, `claude attach`, `claude stop`, `codex exec`, `codex exec resume` and `codex exec fork`.
 
 Do not test type declarations, pass-through property bags, or simple settings reads.
 
@@ -60,7 +60,7 @@ Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, V
 
 ## Fixtures and isolation
 
-- Record and scrub source payloads and Claude CLI output (`claude agents --json`, `--bg` output, classifier JSON). Never call GitHub, Zoho, the Forum database or a real Claude session from a test.
+- Record and scrub source payloads and Claude and Codex CLI output (`claude agents --json`, `--bg` output, classifier JSON, `codex exec --json` output and stderr, rollout records, the process query's answer). Never call GitHub, Zoho, the Forum database or a real Claude session from a test.
 - Inject the Switchboard home, clock and process spawner.
 - Use literal expected values. Do not derive an expectation by calling the code under test.
 - Assert counts where an empty result would pass a contents check.

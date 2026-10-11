@@ -38,8 +38,11 @@ export interface ReplyRequest extends SessionTarget {
   answer: string;
 }
 
-/** What a restarted hub learns about a session it left starting. */
-export type Reconciled = { sessionId: string; started: { shortId: string; nativeSessionId: string } } | { sessionId: string; failed: string };
+/** What a restarted hub learns about a session it left starting; `pending` says why it cannot tell yet, and the hub asks again at its next roster read. */
+export type Reconciled =
+  | { sessionId: string; started: { shortId: string; nativeSessionId: string } }
+  | { sessionId: string; failed: string }
+  | { sessionId: string; pending: string };
 
 /** Starts, observes and stops the sessions of one agent provider (architecture.md § Components). */
 export interface SessionRunner {
@@ -60,6 +63,6 @@ export interface SessionRunner {
   reply(request: ReplyRequest): Promise<{ error: string } | null>;
   /** Settles the sessions a hub that stopped left `starting`, after a restart (PRD R43). */
   reconcile(sessions: Session[]): Promise<Reconciled[]>;
-  /** Installs Switchboard's hooks for the provider; returns the error to show, or null. */
-  installHooks(): string | null;
+  /** Installs Switchboard's hooks for the provider, and has the provider trust them when it must; returns the error to show, or null. */
+  installHooks(): Promise<string | null>;
 }

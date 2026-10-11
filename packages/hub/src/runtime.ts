@@ -2,9 +2,10 @@ import { mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
+import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ServiceDeps } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, Link, Paste, PolledTicket, QueueWait, Session, SessionQuestion, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, handle, heldSlots, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionQuestion, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -42,8 +43,10 @@ export interface RuntimeDeps {
   claudeSettings: string;
   /** Reaches Claude's background service, which answers a session's question (PRD R70). */
   service: ServiceDeps;
-  /** Stand-in runners for tests; the Claude runner is built from the fields above otherwise. */
-  runners?: { claude?: SessionRunner };
+  /** The Codex CLI, Codex's home (`CODEX_HOME` or `~/.codex`), and the variables Codex runs need; defaults for tests that run no Codex session. */
+  codex?: { path: string; home: string; env: Record<string, string> };
+  /** Stand-in runners for tests; each runner is built from the fields above otherwise. */
+  runners?: Partial<Record<Provider, SessionRunner>>;
   log(line: string): void;
 }
 
@@ -133,27 +136,30 @@ export class Runtime {
   private reads = new Map<string, Promise<void>>();
   /** The question's version when the hub sent an answer, by short ID, so a question is answered once (PRD R70). */
   private answered = new Map<string, number>();
-  private readonly claude: SessionRunner;
+  /** Sessions a stopped hub left starting that a runner could not settle yet. */
+  private unreconciled = new Set<string>();
+  /** One runner per agent, chosen by each session's provider (PRD R22). */
+  private readonly runners: Record<Provider, SessionRunner>;
   /** Background sessions waiting on the operator by short ID, each with the timer that reads its question again. */
-  private waitingReads = new Map<string, { sessionId: string; timer: NodeJS.Timeout }>();
+  private waitingReads = new Map<string, { target: { sessionId: string; shortId: string }; provider: Provider; timer: NodeJS.Timeout }>();
 
   constructor(
     private readonly deps: RuntimeDeps,
     config: Config,
   ) {
     this.config = config;
-    this.claude =
-      deps.runners?.claude ??
-      new ClaudeRunner({
-        claudePath: deps.claudePath,
-        exec: deps.exec,
-        sleep: deps.sleep,
-        now: deps.now,
-        home: this.home,
-        claudeSettings: deps.claudeSettings,
-        service: deps.service,
-        hooks: () => this.config.settings.sessions.installHooks,
-      });
+
+    const hooks = () => this.config.settings.sessions.installHooks;
+    const codex = deps.codex ?? { path: 'codex', home: join(deps.home, '.codex'), env: {} };
+
+    this.runners = {
+      claude:
+        deps.runners?.claude ??
+        new ClaudeRunner({ claudePath: deps.claudePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, service: deps.service, hooks }),
+      codex:
+        deps.runners?.codex ??
+        new CodexRunner({ codexPath: codex.path, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks, questionOf: () => null }),
+    };
     this.buildSources();
   }
 
@@ -191,7 +197,7 @@ export class Runtime {
 
   /** Sends the snapshot again `QUESTION_READ_MS` after a background session starts waiting, so its question shows without another event. */
   private watchQuestions(): void {
-    const waiting = new Map(this.deps.store.activeSessions().flatMap((session) => (waitsInBackground(session) ? [[session.shortId, session.id] as const] : [])));
+    const waiting = new Map(this.deps.store.activeSessions().flatMap((session) => (waitsInBackground(session) ? [[session.shortId, session] as const] : [])));
 
     for (const [id, read] of this.waitingReads) {
       if (!waiting.has(id)) {
@@ -199,16 +205,16 @@ export class Runtime {
         this.waitingReads.delete(id);
         this.answered.delete(id);
         // A later wait reads its question afresh, even if the job state keeps its modification time.
-        this.claude.forgetQuestion({ sessionId: read.sessionId, shortId: id });
+        this.runners[read.provider].forgetQuestion(read.target);
       }
     }
 
-    for (const [id, sessionId] of waiting) {
+    for (const [id, session] of waiting) {
       if (!this.waitingReads.has(id)) {
         const timer = setTimeout(() => this.changed(), QUESTION_READ_MS);
 
         timer.unref();
-        this.waitingReads.set(id, { sessionId, timer });
+        this.waitingReads.set(id, { target: { sessionId: session.id, shortId: id }, provider: session.provider, timer });
       }
     }
   }
@@ -225,7 +231,7 @@ export class Runtime {
       return this.send(event);
     }
 
-    const read = this.claude.question(session);
+    const read = this.runners[session.provider].question(session);
     const question = read?.question ?? null;
     const version = read?.version;
     // A reply answers only the first part of a question with several and loses the rest (mechanics M24).
@@ -256,7 +262,7 @@ export class Runtime {
 
   /** The question a background session waits on (PRD R70). */
   private questionOf(session: Session | null): WorkItemView['question'] {
-    return session === null || !waitsInBackground(session) ? null : (this.claude.question(session)?.question ?? null);
+    return session === null || !waitsInBackground(session) ? null : (this.runners[session.provider].question(session)?.question ?? null);
   }
 
   /** Resolves when every action started so far, and the events they caused, have finished. */
@@ -292,22 +298,38 @@ export class Runtime {
   /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
   async startup(): Promise<void> {
     if (this.config.settings.sessions.installHooks) {
-      this.hookError = this.claude.installHooks();
+      const errors = await Promise.all(PROVIDERS.map((provider) => this.runners[provider].installHooks()));
+
+      this.hookError = errors.filter((error) => error !== null).join(' ') || null;
     }
 
     for (const triage of this.deps.store.runningTriages()) {
       this.send({ type: 'triage-cancelled', triageId: triage.id });
     }
 
-    for (const result of await this.claude.reconcile(this.deps.store.activeSessions().filter((entry) => entry.state === 'starting'))) {
-      this.send(
-        'failed' in result
-          ? { type: 'session-start-failed', sessionId: result.sessionId, message: result.failed }
-          : { type: 'session-started', sessionId: result.sessionId, ...result.started },
-      );
-    }
+    await this.reconcile(this.deps.store.activeSessions().filter((entry) => entry.state === 'starting'));
 
     await this.readRoster();
+  }
+
+  /** Settles sessions a stopped hub left starting; one the runner cannot tell about yet is asked about again at the next roster read. */
+  private async reconcile(starting: Session[]): Promise<void> {
+    for (const provider of PROVIDERS) {
+      for (const result of await this.runners[provider].reconcile(starting.filter((session) => session.provider === provider))) {
+        if ('pending' in result) {
+          this.unreconciled.add(result.sessionId);
+          this.deps.log(`session ${result.sessionId} left starting by the hub that stopped is not settled yet: ${result.pending}`);
+          continue;
+        }
+
+        this.unreconciled.delete(result.sessionId);
+        this.send(
+          'failed' in result
+            ? { type: 'session-start-failed', sessionId: result.sessionId, message: result.failed }
+            : { type: 'session-started', sessionId: result.sessionId, ...result.started },
+        );
+      }
+    }
   }
 
   start(): void {
@@ -520,6 +542,10 @@ export class Runtime {
   }
 
   private async readRosterOnce(): Promise<void> {
+    if (this.unreconciled.size > 0) {
+      await this.reconcile(this.deps.store.activeSessions().filter((session) => session.state === 'starting' && this.unreconciled.has(session.id)));
+    }
+
     const sessions = this.deps.store.startedSessions();
 
     if (sessions.length === 0) {
@@ -529,14 +555,31 @@ export class Runtime {
     // Worktree discovery runs first, so the hook markers the roster read takes in are as fresh as the event it sends.
     await this.findSetupWorktrees();
 
-    const roster = await this.claude.observe(sessions);
+    const observed: ObservedSession[] = [];
+    const checked: string[] = [];
 
-    if ('error' in roster) {
-      this.deps.log(`roster read failed: ${roster.error}`);
-      return;
+    for (const provider of PROVIDERS) {
+      const own = sessions.filter((session) => session.provider === provider);
+
+      if (own.length === 0) {
+        continue;
+      }
+
+      const roster = await this.runners[provider].observe(own);
+
+      // A failed read changes none of the provider's sessions.
+      if ('error' in roster) {
+        this.deps.log(`${provider} roster read failed: ${roster.error}`);
+        continue;
+      }
+
+      observed.push(...roster.sessions);
+      checked.push(...own.map((session) => session.id));
     }
 
-    this.send({ type: 'roster', sessions: roster.sessions, checked: sessions.map((session) => session.id) });
+    if (checked.length > 0) {
+      this.send({ type: 'roster', sessions: observed, checked });
+    }
   }
 
   /** Links a worktree a setup session created without reporting it, before its end decides the setup (PRD R25). */
@@ -560,9 +603,17 @@ export class Runtime {
 
   /** Sends a marker event for each live session whose marker shows another state. */
   readMarkers(): void {
-    const markers = this.claude.markers(this.deps.store.startedSessions());
+    const started = this.deps.store.startedSessions();
+    const markers = new Map<string, MarkerReading>();
+
+    for (const provider of PROVIDERS) {
+      for (const [id, reading] of this.runners[provider].markers(started.filter((session) => session.provider === provider))) {
+        markers.set(id, reading);
+      }
+    }
+
     // A new marker from an ended session can mean the operator resumed it, as in a VS Code tab; only the roster can revive it.
-    const changed = this.deps.store.startedSessions().filter((session) => {
+    const changed = started.filter((session) => {
       const at = session.state === 'ended' && session.nativeSessionId !== null ? markers.get(session.nativeSessionId)?.at : undefined;
 
       if (at === undefined || this.markerSeen.get(session.nativeSessionId!) === at) {
@@ -615,7 +666,7 @@ export class Runtime {
 
     this.deps.log(`restored the report contract of session ${session.id} after compaction`);
 
-    return sessionContract(session.id, this.reportCommand, session.reports);
+    return sessionContract(session.id, this.reportCommand, session.reports, session.provider);
   }
 
   /** A report from the `report` command. A worktree must be one `git worktree list` shows in that path. */
@@ -836,7 +887,7 @@ export class Runtime {
         return;
       }
       case 'start-session': {
-        const result = await this.claude.start(action);
+        const result = await this.runners[action.provider].start(action);
 
         this.send(
           'error' in result
@@ -846,13 +897,15 @@ export class Runtime {
         return;
       }
       case 'stop-session': {
-        if (action.reason === 'release' && action.shortId !== null && !(await this.claude.isBackground(action))) {
+        const runner = this.runners[action.provider];
+
+        if (action.reason === 'release' && action.shortId !== null && !(await runner.isBackground(action))) {
           // The operator resumed it, such as in a VS Code tab; a release never stops their session (PRD R39).
           this.deps.log(`release skipped: session ${action.sessionId} is not a background process`);
           return;
         }
 
-        const failure = await this.claude.stop(action, action.reason);
+        const failure = await runner.stop(action, action.reason);
 
         if (failure === null) {
           await this.findSetupWorktrees();
@@ -865,7 +918,7 @@ export class Runtime {
         return;
       }
       case 'reply-session': {
-        const failure = await this.claude.reply({ sessionId: action.sessionId, shortId: action.shortId, question: action.question, questionId: null, answer: action.text });
+        const failure = await this.runners[action.provider].reply({ sessionId: action.sessionId, shortId: action.shortId, question: action.question, questionId: null, answer: action.text });
 
         if (failure !== null) {
           this.answered.delete(action.shortId);

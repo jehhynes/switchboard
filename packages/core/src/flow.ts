@@ -2,7 +2,7 @@ import type { Playbook } from './playbook.js';
 import { activeSession, groupOf, reviewKey } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { repoRoots } from './settings.js';
-import type { PermissionMode, Settings } from './settings.js';
+import type { PermissionMode, Provider, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import type { SourceLink } from './source.js';
@@ -143,6 +143,8 @@ export type FlowAction =
       sessionId: string;
       workItemId: number;
       kind: SessionKind;
+      /** The runner that starts it (PRD R22). */
+      provider: Provider;
       cwd: string;
       /** The first message. */
       prompt: string;
@@ -152,8 +154,9 @@ export type FlowAction =
       permissionMode: PermissionMode;
       model: string | null;
     }
-  | { type: 'stop-session'; sessionId: string; shortId: string | null; reason: StopReason }
-  | { type: 'reply-session'; sessionId: string; shortId: string; question: string; text: string };
+  /** The provider travels with the action, because Delete removes the session's row before its stop runs. */
+  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason }
+  | { type: 'reply-session'; sessionId: string; provider: Provider; shortId: string; question: string; text: string };
 
 export interface FlowContext {
   now: number;
@@ -862,11 +865,11 @@ class Flow {
 
       if (session !== null && session.state !== 'starting') {
         // An interactive session is the operator's; Switchboard never stops it (PRD R39).
-        if (entry.interactive === true && !session.released) {
-          this.store.updateSession(session.id, { released: true });
+        if (entry.interactive === true && (!session.released || session.releasing)) {
+          this.store.updateSession(session.id, { released: true, releasing: false });
         }
 
-        this.setState({ ...session, released: session.released || entry.interactive === true }, entry.state, entry.detail);
+        this.setState({ ...session, released: session.released || entry.interactive === true, releasing: session.releasing && entry.interactive !== true }, entry.state, entry.detail);
       }
     }
 
@@ -875,7 +878,7 @@ class Flow {
     for (const session of this.store.activeSessions()) {
       if (session.state !== 'starting' && !listed.has(session.id) && (looked === null || looked.has(session.id))) {
         // Its background process is gone, so a later resume (such as in a VS Code tab) is never released (PRD R39).
-        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true });
+        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true, releasing: false });
         this.ended({ ...session, state: 'ended' });
       }
     }
@@ -984,8 +987,8 @@ class Flow {
       return;
     }
 
-    this.store.updateSession(session.id, { released: true });
-    this.actions.push({ type: 'stop-session', sessionId: session.id, shortId: session.shortId, reason: 'release' });
+    this.store.updateSession(session.id, { released: true, releasing: true });
+    this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'release' });
   }
 
   private report(sessionId: string, report: Report): void {
@@ -1069,7 +1072,7 @@ class Flow {
       throw new Refusal('The work item has no active session.');
     }
 
-    this.actions.push({ type: 'stop-session', sessionId: session.id, shortId: session.shortId, reason: 'operator' });
+    this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
   }
 
   /**
@@ -1083,8 +1086,9 @@ class Flow {
       throw new Refusal('The session is starting. Delete the work item once it has started.');
     }
 
-    if (session !== null && !session.released) {
-      this.actions.push({ type: 'stop-session', sessionId: session.id, shortId: session.shortId, reason: 'operator' });
+    // A session whose release stop has not finished may still run in its background process.
+    if (session !== null && (!session.released || session.releasing)) {
+      this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
     }
 
     this.store.deleteWorkItem(item.id);
@@ -1111,6 +1115,7 @@ class Flow {
     this.store.updateSession(sessionId, {
       state: 'ended',
       released: true,
+      releasing: false,
       stateAt: this.now,
       endedAt: this.now,
       ...(stopped && session.outcome === null ? { outcome: 'stopped' as const, outcomeDetail: message } : {}),
@@ -1183,14 +1188,14 @@ class Flow {
 
     const session = this.waitingBackground(item, nativeSessionId);
 
-    this.actions.push({ type: 'reply-session', sessionId: session.id, shortId: session.shortId, question, text: answer });
+    this.actions.push({ type: 'reply-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, question, text: answer });
   }
 
   /** Stops the background session, so the window can open it in a Claude tab, which asks the question again (PRD R70). */
   private openQuestion(item: WorkItem, nativeSessionId: string): void {
     const session = this.waitingBackground(item, nativeSessionId);
 
-    this.actions.push({ type: 'stop-session', sessionId: session.id, shortId: session.shortId, reason: 'open' });
+    this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'open' });
   }
 
   // Operator actions
@@ -1566,6 +1571,8 @@ class Flow {
 
     const reports = sessionReports(kind, approved, playbook);
     const full = sessionPrompt(prompt, id);
+    // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do.
+    const provider = playbook?.provider ?? sessions.provider;
 
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
@@ -1577,7 +1584,7 @@ class Flow {
       id,
       workItemId: item.id,
       kind,
-      provider: 'claude',
+      provider,
       nativeSessionId: null,
       shortId: null,
       cwd,
@@ -1589,6 +1596,7 @@ class Flow {
       startedAt: this.now,
       endedAt: null,
       released: false,
+      releasing: false,
       reports,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
@@ -1597,12 +1605,13 @@ class Flow {
       sessionId: id,
       workItemId: item.id,
       kind,
+      provider,
       cwd,
       prompt: full,
-      contract: sessionContract(id, this.context.report, reports),
+      contract: sessionContract(id, this.context.report, reports, provider),
       name: `switchboard · ${label} · ${ticket.source} ${ticket.sourceKey}`,
-      permissionMode: own?.permissionMode ?? sessions.permissionMode,
-      model: own?.model ?? (sessions.model || null),
+      permissionMode: own?.permissionMode ?? (provider === 'codex' ? sessions.codex.permissionMode : sessions.permissionMode),
+      model: own?.model ?? ((provider === 'codex' ? sessions.codex.model : sessions.model) || null),
     });
   }
 

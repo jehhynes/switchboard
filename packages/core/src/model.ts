@@ -1,3 +1,5 @@
+import type { Provider } from './settings.js';
+
 /** Work item statuses (PRD R34). */
 export type WorkItemStatus = 'triaging' | 'unstarted' | 'queued' | 'setup' | 'running' | 'awaiting-approval' | 'finished' | 'blocked' | 'failed' | 'done';
 
@@ -143,7 +145,8 @@ export interface Session {
   id: string;
   workItemId: number;
   kind: SessionKind;
-  provider: string;
+  /** The agent the session runs in (PRD R22). */
+  provider: Provider;
   nativeSessionId: string | null;
   shortId: string | null;
   cwd: string;
@@ -157,6 +160,8 @@ export interface Session {
   endedAt: number | null;
   /** `claude stop` was sent to release the finished turn (PRD R39). */
   released: boolean;
+  /** The release stop was sent and has not finished, so the background process may still hold the session. */
+  releasing: boolean;
   /** The reports its prompt offers; the hub refuses the rest (PRD R23). */
   reports: ReportKind[];
 }

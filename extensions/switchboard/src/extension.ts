@@ -14,7 +14,7 @@ import { startHub } from './hubProcess.js';
 import { needsStatus } from './needs.js';
 import { NeedsYouToasts } from './notify.js';
 import { claimIsFor } from './claims.js';
-import { claimOpen, newClaudeTab, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, workspaceFile } from './open.js';
+import { claimOpen, newClaudeTab, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, providerOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { HubState } from './state.js';
 import { ItemTabs } from './tabs.js';
@@ -104,7 +104,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       case 'history':
         return history.open(command as unknown as HistoryMessage);
       case 'terminal':
-        return openTerminal(keeper.current(), String(command['sessionId']), String(command['cwd']), String(command['name']), typeof command['shortId'] === 'string' ? command['shortId'] : null, command['active'] === true);
+        return openTerminal(keeper.current(), String(command['sessionId']), String(command['cwd']), String(command['name']), typeof command['shortId'] === 'string' ? command['shortId'] : null, command['active'] === true, providerOf(command['provider']));
       case 'openUrl':
         return openLink(String(command['url']));
       case 'openTabs':
@@ -117,7 +117,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   const openHistoryLink = async (link: { type: string; [key: string]: unknown }): Promise<unknown> => {
     switch (link.type) {
       case 'open':
-        return openSession(keeper.current(), String(link['sessionId']), String(link['cwd']));
+        return openSession(keeper.current(), String(link['sessionId']), String(link['cwd']), providerOf(link['provider']));
       case 'openFolder':
         // VS Code focuses a window that already has the folder.
         return vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(String(link['path'])), { forceNewWindow: true });

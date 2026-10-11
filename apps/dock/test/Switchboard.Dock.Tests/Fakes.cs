@@ -335,6 +335,8 @@ static class SettingsConfigs
                 ["error"] = null,
             },
             ["permissionModes"] = new JsonArray("acceptEdits", "auto", "plan"),
+            ["codexPermissionModes"] = new JsonArray("auto", "bypassPermissions"),
+            ["providers"] = new JsonArray("claude", "codex"),
             ["templateVariables"] = new JsonArray("ticket.title", "report"),
             ["sourceKinds"] = new JsonArray("github", "zoho", "forum"),
             ["inUse"] = new JsonObject { ["dev:develop"] = 2 },

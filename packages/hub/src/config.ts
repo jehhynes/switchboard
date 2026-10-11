@@ -11,7 +11,7 @@ import {
   templateError,
   TRIAGE_VARIABLES,
 } from '@switchboard/core';
-import type { Playbook, PlaybookError, Settings } from '@switchboard/core';
+import type { Playbook, PlaybookError, Provider, Settings } from '@switchboard/core';
 import { parseForumConfig } from '@switchboard/forum';
 import { parseGithubConfig } from '@switchboard/github';
 import { parseZohoConfig } from '@switchboard/zoho';
@@ -97,15 +97,15 @@ export function checkSettings(value: unknown, enabled: ReadonlySet<string>): str
   const playbooks = (value as { playbooks?: Record<string, unknown> }).playbooks ?? {};
 
   for (const [name, entry] of Object.entries(playbooks)) {
-    errors.push(...playbookErrors(name, entry).map((error) => `playbooks.${name}: ${error}`));
+    errors.push(...playbookErrors(name, entry, parsed.settings.sessions.provider).map((error) => `playbooks.${name}: ${error}`));
   }
 
   return errors;
 }
 
 /** A playbook entry's parse error and its unknown template variable, so the operator sees both at once. */
-function playbookErrors(name: string, entry: unknown): string[] {
-  const parsed = parsePlaybook(name, entry);
+function playbookErrors(name: string, entry: unknown, defaultProvider: Provider): string[] {
+  const parsed = parsePlaybook(name, entry, defaultProvider);
   const errors = 'error' in parsed ? [parsed.error] : [];
   const fields = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : {};
   const template = fields['template'];
@@ -190,7 +190,7 @@ export function loadConfig(configDir: string, previous: Config = { settings: DEF
     return { ...previous, settingsError: parsed.errors.join(' ') };
   }
 
-  const { playbooks, errors } = parsePlaybooks((JSON.parse(text) as { playbooks?: unknown }).playbooks);
+  const { playbooks, errors } = parsePlaybooks((JSON.parse(text) as { playbooks?: unknown }).playbooks, parsed.settings.sessions.provider);
 
   return { settings: parsed.settings, settingsError: null, playbooks, playbookErrors: errors };
 }

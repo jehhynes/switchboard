@@ -7,6 +7,7 @@ describe('parsePlaybook', () => {
       description: 'Defect: research it',
       autoStart: true,
       requiresWorktree: true,
+      provider: 'codex',
       permissionMode: 'plan',
       model: 'opus',
       workdir: 'repoRoot',
@@ -22,6 +23,7 @@ describe('parsePlaybook', () => {
         kind: 'task',
         autoStart: true,
         requiresWorktree: true,
+        provider: 'codex',
         permissionMode: 'plan',
         model: 'opus',
         workdir: 'repoRoot',
@@ -42,6 +44,7 @@ describe('parsePlaybook', () => {
         kind: 'triage',
         autoStart: false,
         requiresWorktree: false,
+        provider: null,
         permissionMode: null,
         model: null,
         workdir: 'worktree',
@@ -90,6 +93,8 @@ describe('parsePlaybook', () => {
     ['a bad approvalSends', 'dev:x', { description: 'x', reports: ['approval'], approvalSends: 'yes', template: 'body' }, 'approvalSends must be true or false.'],
     ['approvalSends without the approval report', 'dev:x', { description: 'x', reports: ['done'], approvalSends: true, template: 'body' }, 'approvalSends applies only to a playbook whose reports include approval.'],
     ['a bad permissionMode', 'dev:x', { description: 'x', permissionMode: 'yolo', template: 'body' }, 'permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.'],
+    ['a bad provider', 'dev:x', { description: 'x', provider: 'gemini', template: 'body' }, 'provider must be one of claude, codex.'],
+    ['a Codex playbook in a mode that needs a person', 'dev:x', { description: 'x', provider: 'codex', permissionMode: 'acceptEdits', template: 'body' }, "A Codex playbook's permissionMode must be one of auto, plan, dontAsk, bypassPermissions."],
     ['a bad workdir', 'dev:x', { description: 'x', workdir: 'home', template: 'body' }, 'workdir must be worktree or repoRoot.'],
     ['reports as a comma-separated string', 'dev:x', { description: 'x', reports: 'done, approval', template: 'body' }, 'reports must be a list of strings.'],
     ['a report that is not a string', 'dev:x', { description: 'x', reports: ['done', 1], template: 'body' }, 'reports must be a list of strings.'],
@@ -106,6 +111,17 @@ describe('parsePlaybook', () => {
     ['a template that is not a string', 'dev:x', { description: 'x', template: ['a'] }, 'template must be a string.'],
   ])('refuses %s', (_case, name, entry, error) => {
     expect(parsePlaybook(name, entry)).toEqual({ error });
+  });
+});
+
+describe('parsePlaybook with sessions.provider', () => {
+  it("checks the mode of a playbook that names no agent against sessions.provider's agent, and leaves a triage playbook alone", () => {
+    expect(parsePlaybook('dev:x', { description: 'x', permissionMode: 'acceptEdits', template: 'body' }, 'codex')).toEqual({
+      error: 'sessions.provider runs this playbook in Codex, whose permissionMode must be one of auto, plan, dontAsk, bypassPermissions.',
+    });
+    expect('playbook' in parsePlaybook('dev:x', { description: 'x', provider: 'claude', permissionMode: 'acceptEdits', template: 'body' }, 'codex')).toBe(true);
+    expect('playbook' in parsePlaybook('dev:x', { description: 'x', permissionMode: 'acceptEdits', template: 'body' }, 'claude')).toBe(true);
+    expect(parsePlaybooks({ 'dev:x': { description: 'x', permissionMode: 'manual', template: 'body' } }, 'codex').errors).toHaveLength(1);
   });
 });
 

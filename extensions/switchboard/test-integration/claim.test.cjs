@@ -6,7 +6,7 @@ const { join } = require('node:path');
 const vscode = require('vscode');
 
 /** A test-owned stand-in hub that answers each claim with the given commands, recording each claim's body. */
-async function claimingHub(commands, sessionId = null) {
+async function claimingHub(commands, sessionId = null, provider = sessionId === null ? null : 'claude') {
   const claims = [];
   const server = createServer((request, response) => {
     let body = '';
@@ -16,7 +16,7 @@ async function claimingHub(commands, sessionId = null) {
     request.on('end', () => {
       claims.push({ path: request.url, body: JSON.parse(body) });
       response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ sessionId, commands }));
+      response.end(JSON.stringify({ sessionId, provider, commands }));
     });
   });
 
@@ -157,6 +157,52 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
       assert.deepStrictEqual(order, ['openTabs', 'session', 'history']);
     } finally {
       vscode.commands.executeCommand = execute;
+      hub.server.close();
+    }
+  });
+
+  it('opens a claimed Codex session in a Codex extension tab, and says so when no such tab opens (PRD R29)', async () => {
+    const opened = [];
+    const execute = vscode.commands.executeCommand;
+    const realGroups = Object.getOwnPropertyDescriptor(vscode.window, 'tabGroups');
+    let codexTab = false;
+    const uri = 'openai-codex://route/local/thread-1';
+
+    vscode.commands.executeCommand = (command, ...args) => {
+      if (command === 'vscode.open' && String(args[0]?.scheme) === 'openai-codex') {
+        opened.push(args[0].toString());
+        return Promise.resolve();
+      }
+
+      return execute(command, ...args);
+    };
+    // A stand-in for the Codex extension's conversation editor, which this test host does not have.
+    Object.defineProperty(vscode.window, 'tabGroups', {
+      configurable: true,
+      get: () => ({ all: codexTab ? [{ tabs: [{ input: Object.assign(Object.create(vscode.TabInputCustom.prototype), { viewType: 'mainThreadWebview-chatgpt.conversationEditor', uri: vscode.Uri.parse(uri) }) }] }] : [] }),
+    });
+
+    const hub = await claimingHub([], 'thread-1', 'codex');
+
+    try {
+      codexTab = true;
+      assert.strictEqual(await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' }), 'thread-1');
+      assert.deepStrictEqual(opened, [uri]);
+      assert.deepStrictEqual(errors, []);
+
+      codexTab = false;
+      await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' });
+      assert.deepStrictEqual(opened, [uri, uri]);
+      assert.deepStrictEqual(errors, ['Switchboard: Error: The Codex extension did not open the session. Is it installed?']);
+    } finally {
+      vscode.commands.executeCommand = execute;
+
+      if (realGroups !== undefined) {
+        Object.defineProperty(vscode.window, 'tabGroups', realGroups);
+      } else {
+        delete vscode.window.tabGroups;
+      }
+
       hub.server.close();
     }
   });

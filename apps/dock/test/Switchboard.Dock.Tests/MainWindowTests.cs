@@ -210,7 +210,7 @@ public sealed class MainWindowTests
 
         Assert.Equal(
             [
-                "item:7 {\"type\":\"terminal\",\"sessionId\":\"aaaa1111-native\",\"cwd\":\"D:/git/widgets/.worktrees/107-fix\",\"name\":\"gh 107\",\"shortId\":null,\"active\":false}",
+                "item:7 {\"type\":\"terminal\",\"sessionId\":\"aaaa1111-native\",\"cwd\":\"D:/git/widgets/.worktrees/107-fix\",\"name\":\"gh 107\",\"shortId\":null,\"active\":false,\"provider\":\"claude\"}",
                 "item:7 {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}",
             ],
             actions.Runs);

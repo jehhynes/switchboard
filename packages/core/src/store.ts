@@ -261,9 +261,11 @@ export const MIGRATIONS = [
   UPDATE workItems SET readyAt = statusAt WHERE status IN ('awaiting-approval', 'finished');`,
   // Turning a source on and off is state, not configuration, so it is kept here rather than in settings.json (PRD R3).
   `CREATE TABLE sourceStates (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL);`,
+  // A release stop sent and not yet finished: the session is not the operator's to open yet (PRD R39).
+  `ALTER TABLE sessions ADD COLUMN releasing INTEGER NOT NULL DEFAULT 0;`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'approvalHeld']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports']);
 
@@ -401,7 +403,7 @@ export interface TicketHistory {
 const UNLOGGED: Record<string, ReadonlySet<string>> = {
   tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt']),
   workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt']),
-  sessions: new Set(['stateAt']),
+  sessions: new Set(['stateAt', 'releasing']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

@@ -115,7 +115,8 @@
                 "cwd": "D:/git/widgets",
                 "name": "gh 113",
                 "shortId": "aaaa1111",
-                "active": false
+                "active": false,
+                "provider": "claude"
               }
             },
             {
@@ -172,7 +173,8 @@
           "open": {
             "type": "session",
             "sessionId": "aaaa1111-native",
-            "cwd": "D:/git/widgets/.worktrees/107-fix"
+            "cwd": "D:/git/widgets/.worktrees/107-fix",
+            "provider": "claude"
           },
           "controls": [
             {
@@ -265,7 +267,8 @@
                 "cwd": "D:/git/widgets/.worktrees/107-fix",
                 "name": "gh 107",
                 "shortId": null,
-                "active": false
+                "active": false,
+                "provider": "claude"
               }
             },
             {
@@ -330,7 +333,8 @@
           "open": {
             "type": "session",
             "sessionId": "aaaa1111-native",
-            "cwd": "D:/git/support"
+            "cwd": "D:/git/support",
+            "provider": "claude"
           },
           "controls": [
             {
@@ -417,7 +421,8 @@
                 "cwd": "D:/git/support",
                 "name": "gh 110",
                 "shortId": null,
-                "active": false
+                "active": false,
+                "provider": "claude"
               }
             },
             {
@@ -584,7 +589,8 @@
             "type": "question",
             "workItemId": 8,
             "sessionId": "aaaa1111-native",
-            "cwd": "D:/git/widgets"
+            "cwd": "D:/git/widgets",
+            "provider": "claude"
           },
           "controls": [
             {
@@ -652,7 +658,8 @@
                 "cwd": "D:/git/widgets",
                 "name": "gh 108",
                 "shortId": "aaaa1111",
-                "active": false
+                "active": false,
+                "provider": "claude"
               }
             },
             {

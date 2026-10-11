@@ -124,6 +124,20 @@ describe('loadConfig', () => {
     expect(config.settingsError).toBeNull();
   });
 
+  it("leaves out a playbook that sessions.provider runs in Codex in a mode Codex cannot finish in, and reports it on a check", () => {
+    const settings = { sessions: { provider: 'codex' }, playbooks: { 'dev:develop': TASK, 'dev:edits': { ...TASK, permissionMode: 'acceptEdits' }, 'dev:claude': { ...TASK, provider: 'claude', permissionMode: 'acceptEdits' } } };
+
+    write(settingsFile(), JSON.stringify(settings));
+
+    const config = loadConfig(configDir());
+    const error = 'sessions.provider runs this playbook in Codex, whose permissionMode must be one of auto, plan, dontAsk, bypassPermissions.';
+
+    expect([...config.playbooks.keys()]).toEqual(['dev:claude', 'dev:develop']);
+    expect(config.playbookErrors).toEqual([{ name: 'dev:edits', error }]);
+    expect(checkSettings(settings, new Set())).toEqual([`playbooks.dev:edits: ${error}`]);
+    expect(checkSettings({ ...settings, sessions: { provider: 'claude' } }, new Set())).toEqual([]);
+  });
+
   it('keeps the previous settings and playbooks when the file is invalid, and has none without a file', () => {
     write(settingsFile(), JSON.stringify({ sessions: { concurrency: 3 }, playbooks: { 'dev:develop': TASK } }));
 

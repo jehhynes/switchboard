@@ -100,7 +100,7 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         if (page == "new-playbook")
         {
             state.NewPlaybook = state.NewPlaybook with { Playbook = SettingsFields.ApplyPlaybookField(state.NewPlaybook.Playbook, field.Path, text, isChecked) };
-            Changed?.Invoke(field.Path is "kind" or "reports.approval");
+            Changed?.Invoke(field.Path is "kind" or "reports.approval" or "provider");
             return;
         }
 
@@ -125,8 +125,8 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
             return;
         }
 
-        // The kind and the approval report decide which playbook fields show.
-        Edited(field.Path is "kind" or "reports.approval");
+        // The kind and the approval report decide which playbook fields show, and the agent which modes and defaults they offer.
+        Edited(field.Path is "kind" or "reports.approval" or "provider");
     }
 
     /// <summary>A checkbox in a namespace page's table, for one of its playbooks.</summary>

@@ -214,6 +214,9 @@ describe('contract hook', () => {
 
     reply = { status: 200, body: { contract: 'C' } };
     expect(await run({ ...compact, agent_id: 'sub' })).toEqual({ status: 0, stdout: '' });
+    // Codex runs the hook on every SessionStart, having no matcher (mechanics M31).
+    expect(await run({ ...compact, source: 'resume' })).toEqual({ status: 0, stdout: '' });
+    expect(await run({ ...compact, source: 'startup' })).toEqual({ status: 0, stdout: '' });
     expect(await run('not json')).toEqual({ status: 0, stdout: '' });
     expect(requests).toHaveLength(1);
 

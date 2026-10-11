@@ -1,4 +1,5 @@
 import { activeSession, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf } from '@switchboard/core/group';
+import type { Provider } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
@@ -65,18 +66,16 @@ export function mainControl(item: WorkItemView): Control | null {
     return null;
   }
 
-  // A question the session waits on comes before an approval it reported earlier, as the row's mark does.
-  const wanted = waitsInBackground(activeSession(item))
-    ? 'Open in Claude'
-    : item.status === 'unstarted'
-      ? 'Start'
-      : item.status === 'awaiting-approval'
-        ? 'Approve'
-        : item.status === 'failed'
-          ? 'Triage again'
-          : null;
+  const controls = controlsOf(item);
 
-  return controlsOf(item).find((control) => control.label === wanted) ?? null;
+  // A question the session waits on comes before an approval it reported earlier, as the row's mark does.
+  if (waitsInBackground(activeSession(item))) {
+    return controls.find((control) => control.message['type'] === 'open-question') ?? null;
+  }
+
+  const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Triage again' : null;
+
+  return controls.find((control) => control.label === wanted) ?? null;
 }
 
 /** The main control's tooltip: Approve names the prompt it runs, so the operator can read the exact command before approving (PRD R27). */
@@ -107,7 +106,7 @@ export function controlsOf(item: WorkItemView): Control[] {
   const question = openQuestion(item);
 
   if (question !== null) {
-    controls.push({ label: 'Open in Claude', icon: 'comment-discussion', message: question });
+    controls.push({ label: `Open in ${PROVIDER_NAMES[question.provider]}`, icon: 'comment-discussion', message: question });
   }
 
   if (isBackground(session)) {
@@ -149,7 +148,7 @@ export function controlsOf(item: WorkItemView): Control[] {
 function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control['confirm']> {
   const detail = [
     stops ? 'Its running session is stopped.' : null,
-    'Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude\'s session files stay.',
+    `Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and ${PROVIDER_NAMES[item.sessions.at(-1)?.provider ?? 'claude']}'s session files stay.`,
     item.ticket.source === 'adhoc' ? null : 'The ticket gets a new work item only when it is assigned to you again.',
   ];
 
@@ -157,8 +156,9 @@ function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control[
 }
 
 /**
- * Open in terminal (PRD R28): `claude attach` while the session runs in its background process, else `claude --resume` once it has ended. `active`
- * marks a session the operator resumed, in a terminal or a VS Code tab, which is shown rather than resumed again. Null while it starts.
+ * Open in terminal (PRD R28): `claude attach` while a Claude session runs in its background process, else `claude --resume` or `codex resume`
+ * once it has ended; Codex has no attach (mechanics M31). `active` marks a session the operator resumed, in a terminal or a VS Code tab, which is
+ * shown rather than resumed again. Null while it starts.
  */
 function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
@@ -166,14 +166,17 @@ function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
   const name = ticketKey(item.ticket);
 
   if (isBackground(session)) {
-    return { type: 'terminal', sessionId: session.nativeSessionId ?? session.shortId, cwd: session.cwd, name, shortId: session.shortId, active: false };
+    return session.provider === 'codex'
+      ? null
+      : { type: 'terminal', provider: session.provider, sessionId: session.nativeSessionId ?? session.shortId, cwd: session.cwd, name, shortId: session.shortId, active: false };
   }
 
-  if (latest?.nativeSessionId == null || (session !== null && (session.state === 'starting' || !session.released))) {
+  // A session whose release stop has not finished may still be held by its background process (PRD R39).
+  if (latest?.nativeSessionId == null || (session !== null && (session.state === 'starting' || !session.released || session.releasing))) {
     return null;
   }
 
-  return { type: 'terminal', sessionId: latest.nativeSessionId, cwd: latest.cwd, name, shortId: null, active: session !== null };
+  return { type: 'terminal', provider: latest.provider, sessionId: latest.nativeSessionId, cwd: latest.cwd, name, shortId: null, active: session !== null };
 }
 
 /**
@@ -225,22 +228,28 @@ function historyControl(ticket: { id: number; source: string; sourceKey: string 
 
 type SessionView = WorkItemView['sessions'][number];
 
-/** A session running in its background process; a released session that is active again was resumed elsewhere, such as in a VS Code tab. */
+/**
+ * A session running in its background process, including one whose release stop has not finished or failed, so Stop stays offered; a released
+ * session that is active again was resumed elsewhere, such as in a VS Code tab.
+ */
 function isBackground(session: SessionView | null): session is SessionView & { shortId: string } {
-  return session !== null && session.state !== 'starting' && session.shortId !== null && !session.released;
+  return session !== null && session.state !== 'starting' && session.shortId !== null && (!session.released || session.releasing);
 }
 
-/** A session waiting on the operator in its background process, which Open in Claude stops and opens in a Claude tab (PRD R70). */
+/** A session waiting on the operator in its background process, which Open in Claude or Codex stops and opens in a tab (PRD R70). */
 function waitsInBackground(session: SessionView | null): session is SessionView & { shortId: string; nativeSessionId: string } {
   return isBackground(session) && session.state === 'waiting' && session.nativeSessionId !== null;
 }
 
-/** Open in Claude: the hub stops the session, which then opens in the item window's Claude view (PRD R70). */
-export function openQuestion(item: WorkItemView): { type: 'open-question'; workItemId: number; sessionId: string; cwd: string } | null {
+/** Open in Claude or Codex: the hub stops the session, which then opens in the item window's view of its provider (PRD R70). */
+export function openQuestion(item: WorkItemView): { type: 'open-question'; workItemId: number; sessionId: string; cwd: string; provider: Provider } | null {
   const session = activeSession(item);
 
-  return waitsInBackground(session) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd } : null;
+  return waitsInBackground(session) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider } : null;
 }
+
+/** How labels name each provider. */
+export const PROVIDER_NAMES: Record<Provider, string> = { claude: 'Claude', codex: 'Codex' };
 
 
 /**

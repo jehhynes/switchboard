@@ -5,7 +5,7 @@ import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeService, claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
-import { PERMISSION_MODES, TEMPLATE_VARIABLES } from '@switchboard/core';
+import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
@@ -174,6 +174,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     newSessionId: () => randomUUID().slice(0, 8),
     claudeSettings: claudeSettingsPath(homedir(), process.env),
     service: claudeService,
+    // Codex reads CODEX_HOME when the operator set it, else ~/.codex.
+    codex: { path: 'codex', home: process.env['CODEX_HOME'] || join(homedir(), '.codex'), env: {} },
     log: options.log,
     ...options.deps,
   };
@@ -312,7 +314,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           deps.log(`window commands claimed by ${claimant}: ${commands.map((command) => String(command['type'])).join(', ')}`);
         }
 
-        return { status: 200, body: { sessionId, commands } };
+        // The window opens the session in its provider's view; an unknown one, such as a deleted session's, in Claude's.
+        const provider = sessionId === null ? null : (store.sessionByNativeId(sessionId)?.provider ?? 'claude');
+
+        return { status: 200, body: { sessionId, provider, commands } };
       },
       '/window': async (body) => {
         if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'], body['workspace'] ?? null)) {
@@ -366,6 +371,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           settings: readConfigFile(configDir),
           configDir,
           permissionModes: [...PERMISSION_MODES],
+          codexPermissionModes: [...CODEX_PERMISSION_MODES],
+          providers: [...PROVIDERS],
           templateVariables: [...TEMPLATE_VARIABLES],
           sourceKinds: [...SOURCE_KINDS],
           inUse: openPlaybooks(runtime),

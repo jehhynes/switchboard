@@ -3,6 +3,7 @@ import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ClaudeRunner } from '@switchboard/claude';
+import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult, ServiceDeps } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source } from '@switchboard/core';
@@ -161,7 +162,57 @@ const NO_SERVICE: ServiceDeps = {
   },
 };
 
-function setup(cfg = config(), now = () => T0, service = NO_SERVICE, runners?: RuntimeDeps['runners']) {
+/**
+ * A fake Codex: a process table, a spawner whose runs write `onSpawn`'s log, and a trust call, so no test starts a real Codex process. Its
+ * runs live until a test ends them.
+ */
+class FakeCodex {
+  alive = new Set<number>();
+  nextPid = 500;
+  spawned: string[][] = [];
+  commandLines = new Map<number, string>();
+  kills: number[] = [];
+  trustError: string | null = null;
+  queryError: string | null = null;
+  onSpawn: (stdout: string) => string = () => '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n';
+
+  runner(): CodexRunner {
+    return new CodexRunner({
+      codexPath: 'codex',
+      exec: async () => {
+        throw new Error('unexpected exec');
+      },
+      sleep: async () => {},
+      now: () => T0,
+      home: join(home, '.switchboard'),
+      codexHome: join(home, '.codex'),
+      env: {},
+      hooks: () => true,
+      questionOf: () => null,
+      spawn: async (_file, args, options) => {
+        const pid = this.nextPid++;
+
+        this.spawned.push(args);
+        this.commandLines.set(pid, args.join(' '));
+        this.alive.add(pid);
+        writeFileSync(options.stdout, this.onSpawn(options.stdout));
+        writeFileSync(options.stderr, '');
+        return { pid, error: null };
+      },
+      processes: async (pids) => this.queryError !== null ? { error: this.queryError } : new Map(pids.filter((pid) => this.alive.has(pid)).map((pid) => [pid, { pid, created: `c${pid}`, name: 'codex.exe', commandLine: this.commandLines.get(pid) ?? '' }])),
+      tagged: async () => null,
+      alive: (pid) => this.alive.has(pid),
+      kill: async (pid) => {
+        this.kills.push(pid);
+        this.alive.delete(pid);
+        return null;
+      },
+      trust: async () => this.trustError,
+    });
+  }
+}
+
+function setup(cfg = config(), now = () => T0, service = NO_SERVICE, runners?: RuntimeDeps['runners'], codex = new FakeCodex()) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
 
@@ -188,12 +239,12 @@ function setup(cfg = config(), now = () => T0, service = NO_SERVICE, runners?: R
       service,
       configDir: join(home, 'cfg'),
       log: (line) => logs.push(line),
-      ...(runners === undefined ? {} : { runners }),
+      runners: { codex: codex.runner(), ...runners },
     },
     cfg,
   );
 
-  return { store, cli, source, runtime, logs, late };
+  return { store, cli, source, runtime, logs, late, codex };
 }
 
 describe('Runtime', () => {
@@ -434,7 +485,7 @@ describe('Runtime', () => {
     gate.resolve();
     await read;
     await runtime.settled();
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false });
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
     runtime.stop();
   });
 
@@ -459,11 +510,11 @@ describe('Runtime', () => {
     await new Promise((done) => setImmediate(done));
 
     expect(reads).toBe(1);
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false });
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
 
     roster.resolve();
     await runtime.readRoster();
-    expect(store.session('s1')).toMatchObject({ state: 'running', released: false });
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
     runtime.stop();
   });
 
@@ -504,7 +555,7 @@ describe('Runtime', () => {
 
     gate.resolve();
     await read;
-    expect(store.session('s2')).toMatchObject({ state: 'running', released: false });
+    expect(store.session('s2')).toMatchObject({ state: 'running', released: false, releasing: false });
   });
 
   it('ignores markers when hooks are off', async () => {
@@ -551,7 +602,7 @@ describe('Runtime', () => {
     await runtime.readRoster();
 
     expect(store.session('s1')?.state).toBe('running');
-    expect(logs).toEqual(['roster read failed: claude agents returned an unexpected response.']);
+    expect(logs).toEqual(['claude roster read failed: claude agents returned an unexpected response.']);
   });
 
   it('records reports, validating a worktree with git', async () => {
@@ -764,6 +815,116 @@ describe('Runtime', () => {
     expect(runtime.snapshot().errors.hooks).toBeNull();
   });
 
+  it("installs both agents' hooks at startup and shows each failure", async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config({ installHooks: true }), () => T0, NO_SERVICE, undefined, codex);
+
+    codex.trustError = 'no app-server';
+    await runtime.startup();
+
+    expect(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8')).toContain('codex-hook.mjs');
+    expect(runtime.snapshot().errors.hooks).toBe("Codex did not trust Switchboard's hooks: no app-server");
+  });
+
+  it('runs a Codex session through the Codex runner: started, running, released when its turn ends, then ended', async () => {
+    const codex = new FakeCodex();
+    const cfg = config({ provider: 'codex' });
+    const { store, runtime } = setup(cfg, () => T0, NO_SERVICE, undefined, codex);
+
+    runtime.send({ type: 'adhoc', prompt: '/gc-plan 1', repoRoot: 'D:/git/widgets' });
+    await runtime.settled();
+
+    expect(codex.spawned[0]!.slice(0, 2)).toEqual(['exec', '--json']);
+    expect(codex.spawned[0]!.at(-1)).toBe('$gc-plan 1');
+    expect(store.session('s1')).toMatchObject({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'thread-1', state: 'running' });
+
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'running', released: false, releasing: false });
+
+    // The turn ends and its process exits; the next read delivers the end, the release lets the process go, and the session ends.
+    writeFileSync(join(home, '.switchboard', 'codex', 's1-1.jsonl'), '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n{"type":"turn.completed"}\n');
+    codex.alive.clear();
+    await runtime.readRoster();
+    await runtime.settled();
+    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
+    expect(codex.kills).toEqual([]);
+  });
+
+  it('asks again at each roster read about a Codex start it could not settle at startup', async () => {
+    const codex = new FakeCodex();
+    const { store, runtime, logs } = setup(config({ provider: 'codex' }), () => T0, NO_SERVICE, undefined, codex);
+
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    await runtime.settled();
+
+    // As a hub that stopped before the thread appeared would leave it.
+    const recordFile = join(home, '.switchboard', 'codex', 's1.json');
+    writeFileSync(recordFile, JSON.stringify({ ...JSON.parse(readFileSync(recordFile, 'utf8')), threadId: null }));
+    writeFileSync(join(home, '.switchboard', 'codex', 's1-1.jsonl'), '');
+    store.updateSession('s1', { state: 'starting', shortId: null, nativeSessionId: null });
+    codex.queryError = 'WMI is down';
+
+    await runtime.startup();
+    expect(store.session('s1')).toMatchObject({ state: 'starting' });
+    expect(logs).toContain('session s1 left starting by the hub that stopped is not settled yet: The Codex process query failed: WMI is down');
+
+    codex.queryError = null;
+    writeFileSync(join(home, '.switchboard', 'codex', 's1-1.jsonl'), '{"type":"thread.started","thread_id":"thread-1"}\n');
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ state: 'running', nativeSessionId: 'thread-1' });
+  });
+
+  it("keeps one agent's sessions as they were when its read fails, while the other agent's read applies", async () => {
+    const codex = new FakeCodex();
+    const { store, cli, source, runtime, logs } = setup(config(), () => T0, NO_SERVICE, undefined, codex);
+
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    runtime.reload({ ...config({ provider: 'codex' }), playbooks: PLAYBOOKS });
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    await runtime.settled();
+    expect(store.session('s2')).toMatchObject({ provider: 'codex', state: 'running' });
+
+    cli.roster = 'not a list' as unknown as object[];
+    codex.alive.clear();
+    await runtime.readRoster();
+
+    expect(store.session('s1')).toMatchObject({ provider: 'claude', state: 'running' });
+    expect(store.session('s2')).toMatchObject({ state: 'ended' });
+    expect(logs).toContain('claude roster read failed: claude agents returned an unexpected response.');
+  });
+
+  it('counts Claude and Codex sessions against one concurrency limit (PRD R38)', async () => {
+    const codex = new FakeCodex();
+    const { store, source, runtime } = setup(config({ concurrency: 1 }), () => T0, NO_SERVICE, undefined, codex);
+
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    runtime.reload({ ...config({ concurrency: 1, provider: 'codex' }), playbooks: PLAYBOOKS });
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    await runtime.settled();
+
+    expect(store.workItem(2)).toMatchObject({ status: 'queued' });
+    expect(codex.spawned).toHaveLength(0);
+  });
+
+  it('stops a running Codex session for the operator by ending its process', async () => {
+    const codex = new FakeCodex();
+    const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, NO_SERVICE, undefined, codex);
+
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    await runtime.settled();
+    await runtime.readRoster();
+
+    expect(runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
+    await runtime.settled();
+    expect(codex.kills).toEqual([500]);
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
+  });
+
   it('shows a failed hook install instead of failing startup', async () => {
     const { runtime } = setup(config({ installHooks: true }));
     mkdirSync(join(home, '.claude', 'settings.json'), { recursive: true });
@@ -845,7 +1006,7 @@ describe('Runtime', () => {
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);
     const review = store.insertWorkItem({ ...done, playbook: 'dev:review' });
-    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false } as const;
+    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false } as const;
     store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123', reports: [] });
     store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null, reports: [] });
     store.insertSession({ ...session, id: 'review', workItemId: review.id, shortId: 'def456', reports: [] });
@@ -981,7 +1142,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned])).toEqual([[4, 1], [3, 1], [2, 1]]);
 
     // Counting runs one way: a later dev:develop work item does not count the started dev:review one.
-    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, reports: [] });
+    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, reports: [] });
     const later = store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
 
     expect(runtime.snapshot().workItems.find((item) => item.id === later.id)?.returned).toBe(1);

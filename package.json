@@ -12,6 +12,7 @@
     "packages/zoho",
     "packages/forum",
     "packages/claude",
+    "packages/codex",
     "packages/hub",
     "apps/hub",
     "apps/dock",

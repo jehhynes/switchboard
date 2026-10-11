@@ -195,6 +195,7 @@ describe('triage', () => {
 
     expect(start).toEqual({
       type: 'start-session',
+      provider: 'claude',
       sessionId: 's1',
       workItemId: 1,
       kind: 'task',
@@ -287,7 +288,7 @@ describe('sessions', () => {
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session', warning: null });
 
     expect(h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null })).toEqual([]);
-    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12345', reason: 'release' }]);
+    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
     expect(h.act({ type: 'marker', sessionId: session, state: 'running', detail: null })).toEqual([]);
     expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([]);
 
@@ -304,7 +305,7 @@ describe('sessions', () => {
     expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.doneStillAssigned, doneAt: null });
     expect(h.store.session(session)?.outcome).toBe('done');
 
-    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12345', reason: 'release' }]);
+    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
     expect(h.item(item).status).toBe('blocked');
 
@@ -541,7 +542,7 @@ describe('sessions', () => {
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'operator' });
     expect(h.send({ type: 'mark-done', workItemId: item }).refused).toBe('The work item is done.');
 
-    expect(h.act({ type: 'stop', workItemId: item })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12345', reason: 'operator' }]);
+    expect(h.act({ type: 'stop', workItemId: item })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator' }]);
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'operator', error: null });
     expect(h.store.session(session)?.state).toBe('ended');
@@ -555,7 +556,7 @@ describe('stop', () => {
     h.triaged(triage, 'dev:question');
     const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
 
-    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, shortId: 'abc12345', reason: 'operator' }]);
+    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'operator' }]);
     expect(h.status(1)).toBe('running');
 
     h.act({ type: 'stop-failed', sessionId: session, reason: 'operator', message: 'timed out' });
@@ -602,7 +603,7 @@ describe('setup', () => {
     h.report(setup, { kind: 'done' });
     expect(h.status(1)).toBe('setup');
 
-    expect(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: setup, shortId: 'abc12345', reason: 'release' }]);
+    expect(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: setup, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
 
     const task = only(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release' }), 'start-session');
 
@@ -915,6 +916,7 @@ describe('ad-hoc', () => {
 
     expect(start).toEqual({
       type: 'start-session',
+      provider: 'claude',
       sessionId: 's1',
       workItemId: 1,
       kind: 'task',
@@ -979,6 +981,7 @@ describe('task reports (PRD R68)', () => {
 
     expect(start).toEqual({
       type: 'start-session',
+      provider: 'claude',
       sessionId: 's2',
       workItemId: 2,
       kind: 'task',
@@ -1120,5 +1123,93 @@ describe('in-queue times (PRD R27)', () => {
     h.now = T0 + 9_000;
     only(h.act({ type: 'roster', sessions: [] }), 'start-session');
     expect(h.item(2)).toMatchObject({ status: 'running', runStartedAt: T0 + 9_000 });
+  });
+});
+
+describe('agents (PRD R22)', () => {
+  it("runs a Codex playbook's sessions in Codex, with Codex's defaults and contract, and its stops name Codex", () => {
+    const h = new Harness({ settings: settings({ sessions: { codex: { permissionMode: 'dontAsk', model: 'gpt-6' } } }), playbooks: playbooks(['triage:github'], { 'dev:codex': { description: 'Build it in Codex', provider: 'codex', template: '/gc-plan {{ticket.sourceKey}}' } }) });
+    const [triage] = h.poll(issue('1'));
+
+    h.triaged(triage, 'dev:codex');
+    const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
+
+    expect(start).toMatchObject({ provider: 'codex', permissionMode: 'dontAsk', model: 'gpt-6', prompt: '/gc-plan 1' });
+    expect(start.contract).toContain('write the question, with any choices, as your final message and end your turn');
+    expect(h.store.session('s1')).toMatchObject({ provider: 'codex' });
+
+    h.started(start);
+    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: 's1', provider: 'codex', shortId: 'abc12345', reason: 'operator' }]);
+  });
+
+  it("takes sessions.provider for a playbook that names none and for an ad-hoc prompt, and a playbook's own mode and model over the provider's", () => {
+    const h = new Harness({ settings: settings({ sessions: { provider: 'codex' } }), playbooks: playbooks(['triage:github', 'dev:question']) });
+
+    const adhoc = only(h.act({ type: 'adhoc', prompt: 'Fix it', repoRoot: 'D:/git/widgets' }), 'start-session');
+
+    expect(adhoc).toMatchObject({ provider: 'codex', permissionMode: 'bypassPermissions', model: null });
+
+    const [triage] = h.poll(issue('2'));
+
+    h.triaged(triage, 'dev:question');
+    expect(only(h.act({ type: 'start', workItemId: 2 }), 'start-session')).toMatchObject({ provider: 'codex', permissionMode: 'plan', model: 'opus' });
+  });
+
+  it("runs a Codex playbook's setup session in Codex too, and a Claude playbook stays in Claude when the default is Codex", () => {
+    const h = new Harness({
+      settings: settings({ sessions: { provider: 'codex' } }),
+      playbooks: playbooks(['triage:github'], {
+        'dev:build': { description: 'Build', provider: 'codex', autoStart: true, requiresWorktree: true, template: 'Build.' },
+        'dev:claude': { description: 'Claude work', provider: 'claude', autoStart: true, template: 'Work.' },
+      }),
+    });
+    const [first, second] = h.poll(issue('1'), issue('2'));
+
+    expect(only(h.triaged(first, 'dev:build'), 'start-session')).toMatchObject({ kind: 'setup', provider: 'codex', prompt: '/init-worktree 1' });
+    expect(only(h.triaged(second, 'dev:claude'), 'start-session')).toMatchObject({ kind: 'task', provider: 'claude', permissionMode: 'auto' });
+  });
+});
+
+describe('release in progress (PRD R39)', () => {
+  it('marks a session releasing until its release stop finishes, fails, or the operator is seen running it', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
+
+    expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
+    expect(h.store.session(session)).toMatchObject({ released: true, releasing: true });
+
+    h.act({ type: 'stop-failed', sessionId: session, reason: 'release', message: 'busy' });
+    expect(h.store.session(session)).toMatchObject({ releasing: true });
+
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
+    expect(h.store.session(session)).toMatchObject({ released: true, releasing: false, state: 'running' });
+  });
+
+  it('lets the operator stop or delete a session whose release stop failed, which ends its background process', () => {
+    const h = new Harness();
+    const [first, second] = h.poll(issue('1'), issue('2'));
+    const one = h.started(only(h.triaged(first, 'support:defect'), 'start-session'), 'abc00001');
+    const two = h.started(only(h.triaged(second, 'support:defect'), 'start-session'), 'abc00002');
+
+    for (const session of [one, two]) {
+      h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+      h.act({ type: 'stop-failed', sessionId: session, reason: 'release', message: 'busy' });
+    }
+
+    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: one, provider: 'claude', shortId: 'abc00001', reason: 'operator' }]);
+    h.act({ type: 'stop-succeeded', sessionId: one, reason: 'operator' });
+    expect(h.store.session(one)).toMatchObject({ state: 'ended', releasing: false });
+    expect(h.act({ type: 'delete', workItemId: 2 })).toEqual([{ type: 'stop-session', sessionId: two, provider: 'claude', shortId: 'abc00002', reason: 'operator' }]);
+  });
+
+  it('clears releasing when the release stop succeeds', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    const session = h.started(only(h.triaged(triage, 'support:defect'), 'start-session'));
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', releasing: false });
   });
 });

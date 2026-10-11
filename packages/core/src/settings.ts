@@ -3,11 +3,36 @@ export const PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'ma
 
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
+/** The modes a background Codex session can finish in; the others need a person to approve each action (mechanics M31). */
+export const CODEX_PERMISSION_MODES = ['auto', 'plan', 'dontAsk', 'bypassPermissions'] as const satisfies readonly PermissionMode[];
+
+export type CodexPermissionMode = (typeof CODEX_PERMISSION_MODES)[number];
+
+/** The agents a session can run in (PRD R22). */
+export const PROVIDERS = ['claude', 'codex'] as const;
+
+export type Provider = (typeof PROVIDERS)[number];
+
+export function isCodexPermissionMode(mode: string): mode is CodexPermissionMode {
+  return (CODEX_PERMISSION_MODES as readonly string[]).includes(mode);
+}
+
+/** Codex's session defaults; `sessions.permissionMode` and `sessions.model` are Claude's. */
+export interface CodexSettings {
+  permissionMode: CodexPermissionMode;
+  /** Empty means Codex's default model. */
+  model: string;
+}
+
 export interface SessionSettings {
+  /** The agent playbook sessions run in unless the playbook names its own. */
+  provider: Provider;
   concurrency: number;
+  /** Claude's default mode. */
   permissionMode: PermissionMode;
   /** Empty means Claude's default model. */
   model: string;
+  codex: CodexSettings;
   installHooks: boolean;
   /** Ask each finished Claude session what slowed it down, for the friction-review skill (PRD R55). */
   debriefs: boolean;
@@ -37,7 +62,8 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  sessions: { concurrency: 2, permissionMode: 'auto', model: '', installHooks: true, debriefs: false },
+  // Commands in Codex's sandbox cannot use the operator's credentials, such as gh's, so Codex sessions default to no sandbox (mechanics M31).
+  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
 };
@@ -128,15 +154,16 @@ class Reader {
     return value;
   }
 
-  permissionMode(section: Json, key: string, path: string, fallback: PermissionMode): PermissionMode {
+  /** A string from a fixed list. */
+  choice<T extends string>(section: Json, key: string, path: string, choices: readonly T[], fallback: T): T {
     const value = this.string(section, key, path, fallback);
 
-    if (!(PERMISSION_MODES as readonly string[]).includes(value)) {
-      this.errors.push(`${path}.${key} must be one of ${PERMISSION_MODES.join(', ')}.`);
+    if (!(choices as readonly string[]).includes(value)) {
+      this.errors.push(`${path}.${key} must be one of ${choices.join(', ')}.`);
       return fallback;
     }
 
-    return value as PermissionMode;
+    return value as T;
   }
 }
 
@@ -161,11 +188,18 @@ export function parseSettings(text: string): SettingsResult {
 
   const sessionsIn = read.section(root, 'sessions', 'sessions');
   const defaults = DEFAULT_SETTINGS;
-  read.unknown(sessionsIn, ['concurrency', 'permissionMode', 'model', 'installHooks', 'debriefs'], 'sessions');
+  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'codex', 'installHooks', 'debriefs'], 'sessions');
+  const codexIn = read.section(sessionsIn, 'codex', 'sessions.codex');
+  read.unknown(codexIn, ['permissionMode', 'model'], 'sessions.codex');
   const sessions: SessionSettings = {
+    provider: read.choice(sessionsIn, 'provider', 'sessions', PROVIDERS, defaults.sessions.provider),
     concurrency: read.integer(sessionsIn, 'concurrency', 'sessions', defaults.sessions.concurrency, 1, 10),
-    permissionMode: read.permissionMode(sessionsIn, 'permissionMode', 'sessions', defaults.sessions.permissionMode),
+    permissionMode: read.choice(sessionsIn, 'permissionMode', 'sessions', PERMISSION_MODES, defaults.sessions.permissionMode),
     model: read.string(sessionsIn, 'model', 'sessions', defaults.sessions.model),
+    codex: {
+      permissionMode: read.choice(codexIn, 'permissionMode', 'sessions.codex', CODEX_PERMISSION_MODES, defaults.sessions.codex.permissionMode),
+      model: read.string(codexIn, 'model', 'sessions.codex', defaults.sessions.codex.model),
+    },
     installHooks: read.boolean(sessionsIn, 'installHooks', 'sessions', defaults.sessions.installHooks),
     debriefs: read.boolean(sessionsIn, 'debriefs', 'sessions', defaults.sessions.debriefs),
   };

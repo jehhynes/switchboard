@@ -37,7 +37,7 @@ function session(patch: Partial<Session> = {}): Session {
     outcomeDetail: null,
     startedAt: 0,
     endedAt: null,
-    released: false,
+    released: false, releasing: false,
     reports: ['stage'],
     ...patch,
   };
@@ -139,13 +139,13 @@ describe('ClaudeRunner', () => {
     expect(await runner(vi.fn<Exec>()).reply({ sessionId: 's1', shortId: '1a2b3c4d', question: 'Which fruit?', questionId: null, answer: 'Mango' })).toEqual({ error: "Claude's background service is not running." });
   });
 
-  it('installs the hooks into the settings file, and reports a settings file it must not change', () => {
+  it('installs the hooks into the settings file, and reports a settings file it must not change', async () => {
     const settings = join(root, '.claude', 'settings.json');
 
-    expect(runner(vi.fn<Exec>()).installHooks()).toBeNull();
+    expect(await runner(vi.fn<Exec>()).installHooks()).toBeNull();
     expect(readFileSync(settings, 'utf8')).toContain('hook.mjs');
 
     writeFileSync(settings, '{ not json');
-    expect(runner(vi.fn<Exec>()).installHooks()).toMatch(/settings/i);
+    expect(await runner(vi.fn<Exec>()).installHooks()).toMatch(/settings/i);
   });
 });

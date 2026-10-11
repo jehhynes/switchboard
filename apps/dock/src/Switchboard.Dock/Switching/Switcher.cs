@@ -6,7 +6,7 @@ namespace Switchboard.Dock.Switching;
 /// <summary>What a click on a row does (PRD R71): the session first, then the item window to the front, opened when it is not open.</summary>
 public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<TimeSpan, Task>? delay = null) : IDockActions
 {
-    /// <summary>How long Open in Claude waits for the stopped session to end; <c>claude stop</c> itself times out at 15 seconds.</summary>
+    /// <summary>How long Open in Claude or Codex waits for the stopped session to end; a stop itself times out at 15 seconds.</summary>
     public static readonly TimeSpan StopWait = TimeSpan.FromSeconds(20);
 
     /// <summary>How long a new item window may take to appear.</summary>
@@ -41,7 +41,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         {
             if (!stopping.TryGetValue(question, out var stop))
             {
-                stop = Stop(row.Key, workItemId, question);
+                stop = Stop(row.Key, workItemId, question, open.Provider == "codex" ? "Codex" : "Claude");
                 stopping[question] = stop;
             }
 
@@ -96,8 +96,8 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         return await Withdrawn(tabs, cancel.IsCancellationRequested ? null : await Switch(window, file, handle, cancel), cancel);
     }
 
-    /// <summary>Open in Claude's stop (PRD R70): asks the hub to stop the session, then waits for the row to offer the ended session; returns why not, or null.</summary>
-    async Task<string?> Stop(string rowKey, int workItemId, string sessionId)
+    /// <summary>Open in Claude's or Codex's stop (PRD R70): asks the hub to stop the session, then waits for the row to offer the ended session; returns why not, or null.</summary>
+    async Task<string?> Stop(string rowKey, int workItemId, string sessionId, string agent)
     {
         if (await hub.Act(new JsonObject { ["type"] = "open-question", ["workItemId"] = workItemId, ["nativeSessionId"] = sessionId }) is { } refused)
         {
@@ -106,7 +106,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
         var ended = await hub.Until((view) => RowOf(view, rowKey)?.Open is { Type: "session" } next && next.SessionId == sessionId, StopWait);
 
-        return ended is null ? $"The session did not stop within {StopWait.TotalSeconds:0} seconds, so it was not opened in Claude." : null;
+        return ended is null ? $"The session did not stop within {StopWait.TotalSeconds:0} seconds, so it was not opened in {agent}." : null;
     }
 
     /// <summary>

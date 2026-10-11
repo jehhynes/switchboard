@@ -24,7 +24,7 @@ function session(id: number, state: SessionState): Session {
     outcomeDetail: null,
     startedAt: NOW,
     endedAt: null,
-    released: true,
+    released: true, releasing: false,
     reports: ['done'],
   };
 }

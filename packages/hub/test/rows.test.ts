@@ -50,7 +50,7 @@ describe('controlsOf', () => {
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
       { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
       { type: 'action', action: { type: 'snooze', ticketId: 7 } },
-      { type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false },
+      { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false },
       { type: 'action', action: { type: 'delete', workItemId: 7 } },
       { type: 'history', ticketId: 7, key: 'gh 107' },
     ]);
@@ -72,15 +72,37 @@ describe('controlsOf', () => {
     const terminal = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Open in terminal')?.message ?? null;
     const waiting = item(7, { sessions: [session({ state: 'waiting' })] });
 
-    expect(terminal(waiting)).toEqual({ type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false });
+    expect(terminal(waiting)).toEqual({ type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false });
     expect(labels(waiting)).toContain('Open in Claude');
     expect(terminal(item(7, { sessions: [session({ nativeSessionId: null })] }))).toMatchObject({ sessionId: 'aaaa1111', shortId: 'aaaa1111' });
-    expect(terminal(item(7, { sessions: [session({ id: 's0', nativeSessionId: 'old-native', state: 'ended' }), session({ state: 'ended', cwd: 'D:/wt' })] }))).toEqual({ type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/wt', name: 'gh 107', shortId: null, active: false });
+    expect(terminal(item(7, { sessions: [session({ id: 's0', nativeSessionId: 'old-native', state: 'ended' }), session({ state: 'ended', cwd: 'D:/wt' })] }))).toEqual({ type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/wt', name: 'gh 107', shortId: null, active: false });
     // Released and not ended: the roster lists it as interactive, as for a terminal or a VS Code tab.
-    expect(terminal(item(7, { sessions: [session({ state: 'idle', released: true })] }))).toEqual({ type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: null, active: true });
+    expect(terminal(item(7, { sessions: [session({ state: 'idle', released: true })] }))).toEqual({ type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: null, active: true });
     expect(terminal(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).toBeNull();
+    // Its release stop has not finished, so its background process may still hold it.
+    expect(terminal(item(7, { sessions: [session({ state: 'idle', released: true, releasing: true, provider: 'codex' })] }))).toBeNull();
+    expect(labels(item(7, { sessions: [session({ state: 'idle', released: true, releasing: true })] }))).toContain('Stop');
     expect(terminal(item(7, { sessions: [session({ state: 'ended', nativeSessionId: null })] }))).toBeNull();
     expect(terminal(item(7))).toBeNull();
+  });
+});
+
+describe('Codex sessions (PRD R22)', () => {
+  const codex = (patch: Partial<WorkItemView['sessions'][number]> = {}) => session({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'thread-1', ...patch });
+  const terminal = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Open in terminal')?.message ?? null;
+
+  it('names Codex on Open, as the main control of a waiting session, and in Delete', () => {
+    const waiting = item(7, { sessions: [codex({ state: 'waiting' })] });
+
+    expect(mainControl(waiting)).toEqual({ label: 'Open in Codex', icon: 'comment-discussion', message: { type: 'open-question', workItemId: 7, sessionId: 'thread-1', cwd: 'D:/git/widgets', provider: 'codex' } });
+    expect(labels(waiting)).not.toContain('Open in Claude');
+    expect(controlsOf(item(7, { sessions: [codex({ state: 'ended' })] })).find((control) => control.label === 'Delete')?.confirm?.detail).toContain("its worktree and Codex's session files stay");
+  });
+
+  it('offers no terminal while the Codex run is in its background process, which has no attach, and codex resume once it ended', () => {
+    expect(terminal(item(7, { sessions: [codex()] }))).toBeNull();
+    expect(terminal(item(7, { sessions: [codex({ state: 'ended' })] }))).toEqual({ type: 'terminal', provider: 'codex', sessionId: 'thread-1', cwd: 'D:/git/widgets', name: 'gh 107', shortId: null, active: false });
+    expect(terminal(item(7, { sessions: [codex({ state: 'idle', released: true })] }))).toMatchObject({ provider: 'codex', active: true });
   });
 });
 

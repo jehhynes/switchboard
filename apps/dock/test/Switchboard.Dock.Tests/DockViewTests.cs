@@ -31,7 +31,7 @@ public sealed class DockViewTests
         Assert.Equal((Tone.Turn, "operator", false, true), (finished.Stripe, finished.Turn, finished.Dim, finished.Movable));
         Assert.Equal(("gh-107-58c609", "Issue <7>"), (finished.Window!.Name, finished.Window.Title));
         Assert.Equal(["D:/git/widgets/.worktrees/107-fix"], finished.Window.Folders);
-        Assert.Equal(new DockOpen("session", null, "aaaa1111-native", "D:/git/widgets/.worktrees/107-fix", null), finished.Open);
+        Assert.Equal(new DockOpen("session", null, "aaaa1111-native", "D:/git/widgets/.worktrees/107-fix", null, "claude"), finished.Open);
         Assert.Equal(["Triage again", "Mark done", "Snooze", "Delete", "Move to top", "Move up", "Move down"], finished.Controls.Select((control) => control.Label));
         Assert.Equal("{\"type\":\"retriage\",\"workItemId\":7}", finished.Controls[0].Action.ToJsonString());
         Assert.Null(finished.Controls[0].Confirm);
@@ -44,7 +44,7 @@ public sealed class DockViewTests
     [Fact]
     public void Parse_RecordedMessage_ReadsQuestionOpenPriorityAndPoolRow()
     {
-        Assert.Equal(new DockOpen("question", 8, "aaaa1111-native", "D:/git/widgets", null), Fixtures.Row("item:8").Open);
+        Assert.Equal(new DockOpen("question", 8, "aaaa1111-native", "D:/git/widgets", null, "claude"), Fixtures.Row("item:8").Open);
         Assert.Equal("Immediacy: BLOCKING   Severity: MED", Fixtures.Row("item:9").Priority);
 
         var pool = Fixtures.Row("ticket:4");

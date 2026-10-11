@@ -179,9 +179,11 @@ describe('dockView', () => {
   });
 
   it('opens Open in Claude for a waiting background session, the latest session when it is not running, and nothing while it runs', () => {
-    expect(row(item(7, { sessions: [session({ state: 'waiting' })] })).open).toEqual({ type: 'question', workItemId: 7, sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
-    expect(row(item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
-    expect(row(item(7, { sessions: [session({ state: 'idle', released: true })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets' });
+    expect(row(item(7, { sessions: [session({ state: 'waiting' })] })).open).toEqual({ type: 'question', workItemId: 7, sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(row(item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(row(item(7, { sessions: [session({ state: 'idle', released: true })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(row(item(7, { sessions: [session({ provider: 'codex', nativeSessionId: 'thread-1', state: 'ended' })] })).open).toEqual({ type: 'session', sessionId: 'thread-1', cwd: 'D:/git/widgets', provider: 'codex' });
+    expect(row(item(7, { sessions: [session({ state: 'idle', released: true, releasing: true })] })).open).toBeNull();
     expect(row(item(7, { sessions: [session()] })).open).toBeNull();
     expect(row(item(7, { worktree })).open).toBeNull();
     expect(row(item(7, { status: 'unstarted' })).open).toEqual({ type: 'url', url: 'https://github.com/o/r/issues/107' });
@@ -207,7 +209,7 @@ describe('dockView', () => {
     ]);
     expect(waiting.commands).toEqual([
       { label: 'Open Changes', glyph: '\u{ec23}', command: { type: 'changes', path: 'D:/git/widgets/.worktrees/107-fix', key: 'gh 107', title: 'Issue <7>' } },
-      { label: 'Open in terminal', glyph: '\u{ea85}', command: { type: 'terminal', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false } },
+      { label: 'Open in terminal', glyph: '\u{ea85}', command: { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false } },
       { label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
     ]);
     expect(waiting.search).toBe('Issue <7> · gh 107 · PR #19002 · dev:develop · Blocked on you · 107-fix');

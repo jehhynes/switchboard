@@ -1,5 +1,5 @@
-import { PERMISSION_MODES } from './settings.js';
-import type { PermissionMode } from './settings.js';
+import { CODEX_PERMISSION_MODES, isCodexPermissionMode, PERMISSION_MODES, PROVIDERS } from './settings.js';
+import type { PermissionMode, Provider } from './settings.js';
 
 /** The reports a task playbook can offer its session; stage and link are always offered (PRD R23). */
 export const PLAYBOOK_REPORTS = ['done', 'approval', 'worktree', 'playbook', 'paste'] as const;
@@ -12,7 +12,9 @@ export interface Playbook {
   kind: 'task' | 'triage';
   autoStart: boolean;
   requiresWorktree: boolean;
-  /** Null takes the `sessions` setting. */
+  /** The agent its sessions run in; null takes `sessions.provider` (PRD R22). */
+  provider: Provider | null;
+  /** Null takes the provider's `sessions` setting. */
   permissionMode: PermissionMode | null;
   model: string | null;
   /** `worktree`: the ticket's worktree when one exists, else the repo root. `repoRoot`: always the source's repo root. */
@@ -39,7 +41,7 @@ export type PlaybookResult = { playbook: Playbook } | { error: string };
 export type PlaybookFields = Omit<Playbook, 'name'>;
 
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates', 'returnOf', 'template'];
+const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'provider', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates', 'returnOf', 'template'];
 
 type Json = Record<string, unknown>;
 
@@ -65,8 +67,11 @@ function list(entry: Json, key: string): string[] | { error: string } {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : { error: `${key} must be a list of strings.` };
 }
 
-/** Parses one entry under `playbooks` in settings.json. `name` is its key, `<namespace>:<name>`. */
-export function parsePlaybook(name: string, value: unknown): PlaybookResult {
+/**
+ * Parses one entry under `playbooks` in settings.json. `name` is its key, `<namespace>:<name>`. `defaultProvider` is `sessions.provider`,
+ * the agent of a playbook that names none, whose permission mode must suit it.
+ */
+export function parsePlaybook(name: string, value: unknown, defaultProvider: Provider = 'claude'): PlaybookResult {
   if (!isPlaybookName(name)) {
     return { error: 'Namespace and name must be lowercase letters, digits and hyphens.' };
   }
@@ -81,7 +86,7 @@ export function parsePlaybook(name: string, value: unknown): PlaybookResult {
     return { error: `Unknown keys: ${unknown.join(', ')}.` };
   }
 
-  const strings = Object.fromEntries(['description', 'kind', 'permissionMode', 'model', 'workdir', 'template'].map((key) => [key, text(value, key)]));
+  const strings = Object.fromEntries(['description', 'kind', 'provider', 'permissionMode', 'model', 'workdir', 'template'].map((key) => [key, text(value, key)]));
   const flags = Object.fromEntries(['autoStart', 'requiresWorktree', 'rates', 'approvalSends'].map((key) => [key, flag(value, key)]));
   const lists = Object.fromEntries(['reports', 'returnOf'].map((key) => [key, list(value, key)]));
   const invalid = [...Object.values(strings), ...Object.values(flags), ...Object.values(lists)].find((field) => field !== null && typeof field === 'object' && 'error' in field);
@@ -92,6 +97,7 @@ export function parsePlaybook(name: string, value: unknown): PlaybookResult {
 
   const description = strings['description'] as string | null;
   const kind = (strings['kind'] as string | null) ?? 'task';
+  const provider = strings['provider'] as string | null;
   const permissionMode = strings['permissionMode'] as string | null;
   const model = strings['model'] as string | null;
   const workdir = (strings['workdir'] as string | null) ?? 'worktree';
@@ -115,8 +121,21 @@ export function parsePlaybook(name: string, value: unknown): PlaybookResult {
     return { error: 'rates applies only to a triage playbook.' };
   }
 
+  if (provider !== null && !(PROVIDERS as readonly string[]).includes(provider)) {
+    return { error: `provider must be one of ${PROVIDERS.join(', ')}.` };
+  }
+
   if (permissionMode !== null && !(PERMISSION_MODES as readonly string[]).includes(permissionMode)) {
     return { error: `permissionMode must be one of ${PERMISSION_MODES.join(', ')}.` };
+  }
+
+  if ((provider ?? defaultProvider) === 'codex' && kind === 'task' && permissionMode !== null && !isCodexPermissionMode(permissionMode)) {
+    return {
+      error:
+        provider === null
+          ? `sessions.provider runs this playbook in Codex, whose permissionMode must be one of ${CODEX_PERMISSION_MODES.join(', ')}.`
+          : `A Codex playbook's permissionMode must be one of ${CODEX_PERMISSION_MODES.join(', ')}.`,
+    };
   }
 
   if (workdir !== 'worktree' && workdir !== 'repoRoot') {
@@ -159,6 +178,7 @@ export function parsePlaybook(name: string, value: unknown): PlaybookResult {
       kind,
       autoStart,
       requiresWorktree,
+      provider: provider as Provider | null,
       permissionMode: permissionMode as PermissionMode | null,
       model: model || null,
       workdir,
@@ -187,13 +207,13 @@ export interface PlaybookSet {
  * Parses the `playbooks` object of settings.json; undefined has none. An invalid entry is left out and reported (PRD R42).
  * `parseSettings` rejects a `playbooks` value that is not an object.
  */
-export function parsePlaybooks(value: unknown): PlaybookSet {
+export function parsePlaybooks(value: unknown, defaultProvider: Provider = 'claude'): PlaybookSet {
   const playbooks = new Map<string, Playbook>();
   const errors: PlaybookError[] = [];
 
   // Sorted by name, so the classifier's list does not depend on the order of the keys in the file.
   for (const [name, entry] of Object.entries(isObject(value) ? value : {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-    const result = parsePlaybook(name, entry);
+    const result = parsePlaybook(name, entry, defaultProvider);
 
     if ('error' in result) {
       errors.push({ name, error: result.error });

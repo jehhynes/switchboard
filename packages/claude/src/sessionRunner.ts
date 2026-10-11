@@ -122,11 +122,11 @@ export class ClaudeRunner implements SessionRunner {
     return Promise.resolve(sessions.map((session) => ({ sessionId: session.id, failed: 'The hub stopped while the session was starting.' })));
   }
 
-  installHooks(): string | null {
+  installHooks(): Promise<string | null> {
     try {
-      return installHooks(this.deps.home, this.deps.claudeSettings);
+      return Promise.resolve(installHooks(this.deps.home, this.deps.claudeSettings));
     } catch (error) {
-      return `Switchboard could not add its hooks to ${this.deps.claudeSettings}: ${(error as Error).message}`;
+      return Promise.resolve(`Switchboard could not add its hooks to ${this.deps.claudeSettings}: ${(error as Error).message}`);
     }
   }
 }

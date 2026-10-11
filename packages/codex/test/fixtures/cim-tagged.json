@@ -1,0 +1,1 @@
+{"pid":66532,"created":"134361595707620230","name":"codex.exe","commandLine":"C:/Users/operator/AppData/Local/Programs/OpenAI/Codex/bin/codex.exe exec --json -c \"switchboard_run=\\\"sbtest42-1\\\"\" --dangerously-bypass-approvals-and-sandbox -C D:/git/switchboard/.wip/codex-spike/mech -- \"Run the shell command: Start-Sleep -Seconds 20 ; then reply with exactly: done\""}

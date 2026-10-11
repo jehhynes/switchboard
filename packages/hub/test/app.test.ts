@@ -467,8 +467,8 @@ describe('createHubApp', () => {
 
     const second = await start((line) => logs.push(line));
 
-    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: 'w-native', commands: [{ type: 'openTabs' }] } });
-    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: null, commands: [] } });
+    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: 'w-native', provider: 'claude', commands: [{ type: 'openTabs' }] } });
+    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [] } });
     expect(logs.filter((line) => /claimed/.test(line))).toEqual([`session w-native claimed by ${file}`, `window commands claimed by ${file}: openTabs`]);
 
     // An open or command the hub cannot save is refused, so the dock reports it instead of a window waiting for it.
@@ -492,12 +492,12 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' });
 
     expect(await postToHub(record, '/open', { sessionId: 'abc-native', cwd: 'D:\\git\\widgets-wt\\7-fix' }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix/' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'abc-native', commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix/' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'abc-native', provider: 'claude', commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
     expect(await postToHub(record, '/open', { sessionId: 'w-native', cwd: 'D:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'w-native', commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'w-native', provider: 'claude', commands: [] } });
     expect(await postToHub(record, '/open', { sessionId: 1 }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, cwd, workspace?}.' });
     expect(await postToHub(record, '/open', { sessionId: 'x', cwd: 'D:/x', workspace: 3 }, 5000)).toMatchObject({ status: 400 });
     expect(await postToHub(record, '/claim', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {folder, workspace?, focused?}.' });
@@ -509,13 +509,13 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/window/withdraw', { id: 'x' }, 5000)).toMatchObject({ status: 400, error: 'Expected {id}.' });
     expect(await postToHub(record, '/window', { workspace: null, command: { type: 'history', ticketId: 3, key: 'gh 3' } }, 5000)).toMatchObject({ status: 200 });
     expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' } }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: '', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }] } });
+    expect(await postToHub(record, '/claim', { folder: '', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }] } });
     expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 200 });
     expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({
       status: 200,
       error: null,
-      body: { sessionId: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }, { type: 'openTabs' }] },
+      body: { sessionId: null, provider: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }, { type: 'openTabs' }] },
     });
     for (const [shortId, active] of [['abcd0007', false], [null, true]]) {
       const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId, active };

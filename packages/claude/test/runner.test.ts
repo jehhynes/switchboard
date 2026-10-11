@@ -15,6 +15,7 @@ const ACTION: StartAction = {
   sessionId: 's1',
   workItemId: 1,
   kind: 'task',
+  provider: 'claude',
   cwd: 'D:/git/widgets',
   prompt: '/gc-plan 15619',
   contract: 'Report to Switchboard with these commands:',
