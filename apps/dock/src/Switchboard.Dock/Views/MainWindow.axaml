@@ -167,6 +167,13 @@
     <Style Selector="Border.row.selected">
       <Setter Property="Background" Value="{DynamicResource DockSelected}" />
     </Style>
+    <!-- Inset top and bottom so adjacent rows' stripes stay separate. -->
+    <Style Selector="Border.stripe">
+      <Setter Property="Margin" Value="0,8" />
+    </Style>
+    <Style Selector="Border.row.selected Border.stripe">
+      <Setter Property="Margin" Value="0" />
+    </Style>
     <Style Selector="Border.stripe.warning">
       <Setter Property="Background" Value="{DynamicResource DockWarning}" />
     </Style>
