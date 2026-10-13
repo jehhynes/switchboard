@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
-import { MESSAGES } from '../src/flow.js';
+import { MESSAGES, UNCONFIRMED_DONE } from '../src/flow.js';
 import { Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 
 /** The report contract offering `reports`, written out so a change to the contract shows here. */
@@ -297,35 +297,146 @@ describe('sessions', () => {
     expect(h.item(item).status).toBe('done');
   });
 
-  it('blocks a done report whose ticket is still assigned, and finishes it when the ticket leaves (PRD R10)', () => {
+  it('keeps a done report whose ticket is still assigned open until the recheck, which blocks it while the ticket stays assigned (PRD R10)', () => {
     const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
     const { item, session } = running(h, '1', 'dev:finish');
 
     expect(h.report(session, { kind: 'done', assigned: true })).toEqual({ actions: [], refused: null });
-    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.doneStillAssigned, doneAt: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', error: null, doneAt: null });
     expect(h.store.session(session)?.outcome).toBe('done');
 
     expect(h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12345', reason: 'release' }]);
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
-    expect(h.item(item).status).toBe('blocked');
+    expect(h.item(item).status).toBe('running');
+
+    h.act({ type: 'done-checked', sessionId: session, token: h.store.session(session)?.outcomeDetail ?? '', assigned: true });
+    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.doneStillAssigned, doneAt: null });
 
     h.poll();
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
   });
 
-  it('finishes a blocked done report when the ticket left while the session was active', () => {
+  it('finishes a done report on a recheck that lists the ticket unassigned', () => {
     const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
     const { item, session } = running(h, '1', 'dev:finish');
 
     h.report(session, { kind: 'done', assigned: true });
-    h.poll();
-    expect(h.item(item).status).toBe('blocked');
-
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
-    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
-    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+    h.act({ type: 'done-checked', sessionId: session, token: h.store.session(session)?.outcomeDetail ?? '', assigned: false });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session', error: null });
   });
 
+  it('finishes an unconfirmed or blocked done report when the ticket leaves while its session is still active (PRD R10)', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const a = running(h, '1', 'dev:finish');
+    h.report(a.session, { kind: 'done', assigned: true });
+    h.act({ type: 'marker', sessionId: a.session, state: 'idle', detail: null });
+    expect(h.store.session(a.session)?.state).toBe('idle');
+
+    const b = running(h, '2', 'dev:finish');
+    h.report(b.session, { kind: 'done', assigned: true });
+    h.act({ type: 'done-checked', sessionId: b.session, token: h.store.session(b.session)?.outcomeDetail ?? '', assigned: true });
+    expect(h.item(b.item).status).toBe('blocked');
+
+    h.poll();
+    expect(h.item(a.item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+    expect(h.item(b.item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+
+    // The recheck arriving after the ticket left changes nothing.
+    h.act({ type: 'done-checked', sessionId: a.session, token: h.store.session(a.session)?.outcomeDetail ?? '', assigned: true });
+    expect(h.item(a.item)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+  });
+
+  it('keeps an approval reported after an unconfirmed done report open when the ticket leaves or the recheck arrives', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:both': { description: 'Both', reports: ['done', 'approval'], template: 'Do {{ticket.sourceKey}}.' } }) });
+    const { item, session } = running(h, '1', 'dev:both');
+
+    h.report(session, { kind: 'done', assigned: true });
+    const token = h.store.session(session)!.outcomeDetail!;
+    h.report(session, { kind: 'approval', prompt: '/review-pr pr:1 publish', summary: 'post the review', report: null });
+    expect(h.item(item).status).toBe('awaiting-approval');
+
+    h.act({ type: 'done-checked', sessionId: session, token, assigned: false });
+    expect(h.item(item).status).toBe('awaiting-approval');
+
+    h.poll();
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', unassignedAt: T0 });
+  });
+
+  it('drops an unconfirmed done report when the operator resumes its session, and settles only the later report', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
+
+    h.report(session, { kind: 'done', assigned: true });
+    const first = h.store.session(session)!.outcomeDetail!;
+    expect(first).toBe(`${UNCONFIRMED_DONE}; it was still assigned at ${new Date(T0).toISOString()}.`);
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.store.session(session)).toMatchObject({ outcome: null, outcomeDetail: null });
+
+    h.act({ type: 'done-checked', sessionId: session, token: first, assigned: false });
+    expect(h.item(item).status).toBe('running');
+
+    h.now += 1_000;
+    h.report(session, { kind: 'done', assigned: true });
+    h.act({ type: 'done-checked', sessionId: session, token: first, assigned: true });
+    expect(h.item(item).status).toBe('running');
+
+    h.act({ type: 'done-checked', sessionId: session, token: h.store.session(session)!.outcomeDetail!, assigned: true });
+    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.doneStillAssigned });
+    expect(h.store.session(session)?.outcomeDetail).toBeNull();
+  });
+
+  it('ignores a recheck after the operator resumes an ended session into a question, after an approval and a done report', () => {
+    const both = { 'dev:both': { description: 'Both', reports: ['done', 'approval'], template: 'Do {{ticket.sourceKey}}.' } };
+    const h = new Harness({ playbooks: playbooks(undefined, both) });
+    const { item, session } = running(h, '1', 'dev:both');
+
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: null });
+    h.report(session, { kind: 'done', assigned: true });
+    const token = h.store.session(session)!.outcomeDetail!;
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.store.session(session)?.state).toBe('ended');
+
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null }] });
+    expect(h.store.session(session)).toMatchObject({ state: 'waiting', outcome: null, outcomeDetail: null });
+
+    h.act({ type: 'done-checked', sessionId: session, token, assigned: false });
+    expect(h.item(item).status).toBe('awaiting-approval');
+  });
+
+  it('ignores a recheck after Triage again', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
+
+    h.report(session, { kind: 'done', assigned: true });
+    const token = h.store.session(session)!.outcomeDetail!;
+    h.act({ type: 'roster', sessions: [] });
+    h.act({ type: 'retriage', workItemId: item });
+    expect(h.item(item).status).toBe('triaging');
+
+    h.act({ type: 'done-checked', sessionId: session, token, assigned: true });
+    expect(h.item(item)).toMatchObject({ status: 'triaging', error: null });
+  });
+
+  it('settles a done report that follows an approval in the same turn, keeping the approval when it blocks', () => {
+    const both = { 'dev:both': { description: 'Both', reports: ['done', 'approval'], template: 'Do {{ticket.sourceKey}}.' } };
+    const h = new Harness({ playbooks: playbooks(undefined, both) });
+    const a = running(h, '1', 'dev:both');
+    const b = running(h, '2', 'dev:both');
+
+    for (const { session } of [a, b]) {
+      h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: null });
+      h.report(session, { kind: 'done', assigned: true });
+    }
+
+    expect(h.item(a.item).status).toBe('awaiting-approval');
+    h.act({ type: 'done-checked', sessionId: a.session, token: h.store.session(a.session)!.outcomeDetail!, assigned: false });
+    expect(h.item(a.item)).toMatchObject({ status: 'done', doneReason: 'session' });
+
+    h.act({ type: 'done-checked', sessionId: b.session, token: h.store.session(b.session)!.outcomeDetail!, assigned: true });
+    expect(h.item(b.item)).toMatchObject({ status: 'blocked', approvalPrompt: '/publish' });
+  });
   it('blocks on a turn that ends without a report, a failed turn, or a session that ends, but not while it waits on the operator', () => {
     const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
     const a = running(h, '1', 'dev:finish');
@@ -594,6 +705,20 @@ describe('setup', () => {
 
     return h.started(start);
   }
+
+  it('keeps a setup session that reported done when the ticket leaves and returns before it ends', () => {
+    const h = new Harness();
+    const setup = toSetup(h);
+
+    h.report(setup, { kind: 'worktree', path: 'D:/git/widgets-wt/15619', branch: '15619-fix' });
+    h.report(setup, { kind: 'done' });
+    h.poll();
+    expect(h.item(1)).toMatchObject({ status: 'setup', unassignedAt: T0 });
+
+    h.poll(issue('15619'));
+    expect(h.store.workItemsForTicket(1)).toHaveLength(1);
+    expect(h.item(1)).toMatchObject({ status: 'setup', unassignedAt: null });
+  });
 
   it('starts the task in the reported worktree once the setup session ends, in the same slot', () => {
     const h = new Harness({ settings: settings({ sessions: { concurrency: 1 } }) });

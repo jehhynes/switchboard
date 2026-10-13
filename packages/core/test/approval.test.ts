@@ -175,6 +175,8 @@ describe('a resumed session after an approval report (PRD R34)', () => {
 
     resume(h, session);
     h.report(session, { kind: 'done', assigned: true });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true, ...APPROVAL });
+    h.act({ type: 'done-checked', sessionId: session, token: h.store.session(session)?.outcomeDetail ?? '', assigned: true });
     expect(h.item(item)).toMatchObject({ status: 'blocked', approvalHeld: false, ...APPROVAL });
     expect(h.send({ type: 'approve', workItemId: item }).refused).toBe('The work item is not awaiting approval.');
 

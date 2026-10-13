@@ -34,6 +34,14 @@ export const MESSAGES = {
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
 } as const;
 
+/** Starts a task session's `outcomeDetail` while its done report waits for the hub's second read of the ticket (PRD R10). */
+export const UNCONFIRMED_DONE = 'Waiting to read the ticket again';
+
+/** A task session's done report whose first read still listed the ticket, on a work item the second read can still settle. */
+export function awaitsRecheck(item: Pick<WorkItem, 'status'>, session: Pick<Session, 'kind' | 'outcome' | 'outcomeDetail'>): boolean {
+  return session.kind === 'task' && session.outcome === 'done' && !!session.outcomeDetail?.startsWith(UNCONFIRMED_DONE) && (item.status === 'running' || item.status === 'awaiting-approval');
+}
+
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
 export interface PolledTicket {
   sourceKey: string;
@@ -54,7 +62,7 @@ export interface PolledTicket {
 export type Report =
   | { kind: 'stage'; stage: string }
   | { kind: 'worktree'; path: string; branch: string | null }
-  /** `assigned`: a fresh read still lists the task's ticket as assigned, so the session did not hand it off (PRD R10). */
+  /** `assigned`: a fresh read still lists the task's ticket as assigned, so the work item waits for `done-checked` (PRD R10). */
   | { kind: 'done'; assigned?: boolean }
   | { kind: 'approval'; prompt: string; summary: string | null; report: string | null }
   | { kind: 'link'; label: string; target: string }
@@ -101,6 +109,9 @@ export type FlowEvent =
   | { type: 'roster'; sessions: ObservedSession[]; checked?: string[] }
   | { type: 'marker'; sessionId: string; state: LiveState; detail: string | null }
   | { type: 'report'; sessionId: string; report: Report }
+  /** The hub's recheck of a done report whose first read still listed the ticket as assigned (PRD R10). */
+  /** 	oken is the session's outcomeDetail when the hub scheduled the read, so a check of a superseded report changes nothing. */
+  | { type: 'done-checked'; sessionId: string; token: string; assigned: boolean }
   | { type: 'stop-succeeded'; sessionId: string; reason: StopReason }
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
@@ -270,6 +281,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       const { prompt: _prompt, ...report } = event.report as Report & { prompt?: string };
       return report;
     }
+    case 'done-checked':
+      return { assigned: event.assigned };
     case 'stop-succeeded':
       return { reason: event.reason };
     case 'stop-failed':
@@ -412,6 +425,8 @@ class Flow {
         return this.marker(event.sessionId, event.state, event.detail);
       case 'report':
         return this.report(event.sessionId, event.report);
+      case 'done-checked':
+        return this.doneChecked(event.sessionId, event.token, event.assigned);
       case 'stop-succeeded':
         return this.stopSucceeded(event.sessionId, event.reason);
       case 'stop-failed':
@@ -573,8 +588,9 @@ class Flow {
   }
 
   /**
-   * PRD R10: deleted when it never had a session, done now when no session is active, otherwise when the active session reports or ends.
-   * A running triage also defers the deletion, so its row keeps holding a `triage.concurrency` slot until the classifier finishes.
+   * PRD R10: deleted when it never had a session, done now when no session is active or its session reported done, otherwise
+   * when the active session reports or ends. A running triage also defers the deletion, so its row keeps holding a `triage.concurrency`
+   * slot until the classifier finishes.
    */
   private left(ticketId: number): void {
     const running = new Set(this.store.runningTriages().map((triage) => triage.workItemId));
@@ -584,13 +600,15 @@ class Flow {
         continue;
       }
 
+      const active = this.activeSession(item);
+
       if (this.store.sessionsFor(item.id).length === 0) {
         if (!running.has(item.id)) {
           this.store.deleteWorkItem(item.id);
         } else if (item.unassignedAt === null) {
           this.store.updateWorkItem(item.id, { unassignedAt: this.now });
         }
-      } else if (this.activeSession(item) === null) {
+      } else if (active === null || (active.kind === 'task' && active.outcome === 'done' && item.status === 'blocked') || awaitsRecheck(item, active)) {
         this.done(item, 'unassigned', null);
       } else if (item.unassignedAt === null) {
         this.store.updateWorkItem(item.id, { unassignedAt: this.now });
@@ -930,6 +948,11 @@ class Flow {
       return;
     }
 
+    // Resumed before the recheck of its done report, so that report no longer ends the work item.
+    if (resumed && awaitsRecheck(item, current)) {
+      this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
+    }
+
     if (TURN_ENDED.includes(state) && current.outcome === null && item.status === 'running') {
       const cause = state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : null;
 
@@ -949,6 +972,25 @@ class Flow {
       // The operator gave the session more work after its approval report; the report waits until the run ends (PRD R34).
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
       this.setStatus(item.id, { status: 'running', approvalHeld: true, error: null });
+    }
+  }
+
+  /** Settles a done report the first read could not confirm: blocked when the ticket is still assigned, else done (PRD R10). */
+  private doneChecked(sessionId: string, token: string, assigned: boolean): void {
+    const session = this.store.session(sessionId);
+    const item = session === null ? null : this.latest(session);
+
+    // A resume, an approval report or a later done report replaced the token; Triage again changed the status.
+    if (item === null || session!.outcomeDetail !== token || !awaitsRecheck(item, session!)) {
+      return;
+    }
+
+    this.store.updateSession(sessionId, { outcomeDetail: null });
+
+    if (assigned) {
+      this.block(item, MESSAGES.doneStillAssigned);
+    } else {
+      this.done(item, 'session', null);
     }
   }
 
@@ -983,7 +1025,7 @@ class Flow {
       return;
     }
 
-    // A session that reported done with its ticket still assigned leaves the work item blocked until the ticket leaves.
+    // A done report with its ticket still assigned leaves the work item open until the recheck or the ticket leaving settles it.
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', null);
     } else if (session.outcome === 'done') {
@@ -1036,8 +1078,9 @@ class Flow {
         this.store.updateSession(sessionId, { outcome: 'done', outcomeDetail: null });
 
         if (item !== null && session.kind === 'task') {
+          // A read that still lists the ticket waits for the hub's recheck (`done-checked`), because issue search lags an unassignment.
           if (report.assigned === true) {
-            this.block(item, MESSAGES.doneStillAssigned);
+            this.store.updateSession(sessionId, { outcomeDetail: `${UNCONFIRMED_DONE}; it was still assigned at ${new Date(this.now).toISOString()}.` });
           } else {
             this.done(item, 'session', null);
           }
@@ -1047,6 +1090,11 @@ class Flow {
       case 'approval':
         // The work is ready; Approve starts a new task session with the prompt that publishes it (PRD R23, R31).
         if (item !== null && session.kind === 'task') {
+          // An approval after a done report the hub has not confirmed replaces it.
+          if (awaitsRecheck(item, session)) {
+            this.store.updateSession(sessionId, { outcomeDetail: null });
+          }
+
           this.setStatus(item.id, { status: 'awaiting-approval', approvalPrompt: report.prompt, approvalSummary: report.summary, approvalReport: report.report, error: null });
         }
 

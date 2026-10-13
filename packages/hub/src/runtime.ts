@@ -5,7 +5,7 @@ import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -23,6 +23,8 @@ const FIXED_TIMERS = 3;
 export const DONE_DAYS = 7;
 /** How long a done or link report waits for the source read that checks it (PRD R10, R52). */
 export const REPORT_CHECK_MS = 6_000;
+/** When the source is read again after a done report it lists as assigned; GitHub issue search lags an unassignment by seconds (mechanics M34). */
+export const RECHECK_MS = 30_000;
 
 export interface RuntimeDeps {
   /** The operator's home; the Switchboard home is `<home>/.switchboard`. */
@@ -114,6 +116,10 @@ export class Runtime {
   private listeners = new Set<() => void>();
   /** The roster, marker and wake timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
   private timers: NodeJS.Timeout[] = [];
+  /** Set by `stop`, so a pending recheck does not read a source after the store closes. */
+  private stopped = false;
+  /** Session ID and token of each done report with a second read scheduled, so a startup scan and a report do not schedule two. */
+  private readonly rechecks = new Set<string>();
   private markerWatcher: FSWatcher | null = null;
   private markerRead: NodeJS.Timeout | null = null;
   private markerWatchRetry: NodeJS.Timeout | null = null;
@@ -227,6 +233,8 @@ export class Runtime {
     await this.reconcile(this.deps.store.activeSessions().filter((entry) => entry.state === 'starting'));
 
     await this.readRoster();
+
+    this.recheckDoneReports();
   }
 
   /** Settles sessions a stopped hub left starting; one the runner cannot tell about yet is asked about again at the next roster read. */
@@ -256,6 +264,8 @@ export class Runtime {
   }
 
   stop(): void {
+    this.stopped = true;
+
     for (const timer of this.timers.splice(0)) {
       clearInterval(timer);
     }
@@ -358,6 +368,11 @@ export class Runtime {
 
   /** Polls the source and applies the result; null when the read failed. */
   private async read(name: string, source: Source): Promise<PolledTicket[] | null> {
+    // A queued read can start after the hub stopped or the source was turned off.
+    if (this.stopped || this.sources.get(name) !== source) {
+      return null;
+    }
+
     const result = await source.poll();
 
     // The operator turned the source off while it was read; its result would show an error or tickets of a source that is off.
@@ -379,8 +394,8 @@ export class Runtime {
   }
 
   /**
-   * Whether a fresh read lists a task session's ticket as assigned when it reports done (PRD R10). False when the read fails or takes
-   * longer than REPORT_CHECK_MS, which keeps the reply inside the report CLI's 10-second timeout.
+   * Whether a fresh read lists a task session's ticket as assigned when it reports done (PRD R10); if so, `recheck` settles the report. False
+   * when the read fails or takes longer than REPORT_CHECK_MS, which keeps the reply inside the report CLI's 10-second timeout.
    */
   private async stillAssigned(sessionId: string): Promise<boolean> {
     const store = this.deps.store;
@@ -408,6 +423,48 @@ export class Runtime {
     return tickets?.some((entry) => entry.sourceKey === ticket.sourceKey && entry.assigned) ?? false;
   }
 
+  /** Starts the second read of each done report that waits for one, as the flow marks it (PRD R10). */
+  private recheckDoneReports(): void {
+    const store = this.deps.store;
+
+    for (const item of store.workItems(Number.MAX_SAFE_INTEGER)) {
+      const session = store.sessionsFor(item.id).at(-1);
+
+      const token = session?.outcomeDetail ?? null;
+      const key = `${session?.id} ${token}`;
+
+      if (session !== undefined && token !== null && awaitsRecheck(item, session) && !this.rechecks.has(key)) {
+        this.rechecks.add(key);
+        void this.recheck(session.id, token, store.ticket(item.ticketId)!).finally(() => this.rechecks.delete(key));
+      }
+    }
+  }
+
+  /**
+   * After RECHECK_MS, reads the ticket's source again, behind any read in flight, and sends whether it still lists the ticket as assigned. A
+   * failed read, one over REPORT_CHECK_MS or a source turned off accepts the done report; a stop leaves it for `startup`.
+   */
+  private async recheck(sessionId: string, token: string, ticket: Ticket): Promise<void> {
+    await this.deps.sleep(RECHECK_MS);
+    const source = this.sources.get(ticket.source);
+
+    if (this.stopped) {
+      return;
+    }
+
+    const read = source === undefined ? Promise.resolve(null) : this.readAfter(ticket.source, source).catch(() => null);
+    const tickets = await Promise.race([read, this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
+
+    if (tickets === 'late') {
+      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the second ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`);
+    }
+
+    if (!this.stopped) {
+      const assigned = tickets !== 'late' && (tickets?.some((entry) => entry.sourceKey === ticket.sourceKey && entry.assigned) ?? false);
+
+      this.send({ type: 'done-checked', sessionId, token, assigned });
+    }
+  }
   /**
    * Why the ticket's source refuses a link the session reports, or null (PRD R52). A failed check, or one that takes longer than
    * REPORT_CHECK_MS, accepts the link, so a GitHub outage does not block a session.
@@ -631,7 +688,13 @@ export class Runtime {
                     ? { kind: body.kind, text: body.text }
                     : { kind: body.kind, label: body.label, target: body.target };
 
-    return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
+    const refused = this.send({ type: 'report', sessionId: body.sessionId, report }).refused;
+
+    if (body.kind === 'done') {
+      this.recheckDoneReports();
+    }
+
+    return { refused };
   }
 
   snapshot(): Snapshot {

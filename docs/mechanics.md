@@ -389,6 +389,14 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Limits:** one monitor; the input-driven runs were on the left edge only, and the right edge was checked only by reading the sliver's pixels; no second auto-hide bar on the same edge, so the `ABM_SETAUTOHIDEBAREX` refusal was not seen. Showing it with Alt+Tab or a status bar click, and keeping it shown over a dialog or a tooltip, were not run. Once, during a run that also had the operator's own input, the reserved dock drew black and ignored two clicks until the operator closed it; the same toggles, clicks and Search repeated three times did not reproduce it, and the cause is unknown.
 - **Current use:** auto-hide (architecture.md § Dock).
 
+## M34. GitHub issue search lags an unassignment
+
+- **Date:** 2026-10-13.
+- **Versions:** GitHub GraphQL API through gh.
+- **Source inspection:** two hand-offs whose done check polled with issue search (`assignee:` qualifiers). #18137: the operator was unassigned at 16:14:12 UTC and the done report, whose poll still listed the issue, was applied at 16:14:22. #19953: unassigned at 16:25:04, report applied at 16:25:13. Both issues' Status was a configured assigned status, so only the search's assignee match could list them, and the next scheduled polls, 88 and 38 seconds after the reports, no longer did. A direct `repository.issue` read afterwards showed no assignees.
+- **Limits:** inferred from timestamps; the lag was not measured, and a direct read made within those seconds was not run.
+- **Current use:** a done report whose poll still lists the ticket as assigned waits for a second poll 30 seconds later (architecture.md § Session reports).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:
