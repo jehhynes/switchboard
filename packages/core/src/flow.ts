@@ -5,10 +5,11 @@ import { repoRoots } from './settings.js';
 import type { PermissionMode, Provider, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
-import type { SourceLink } from './source.js';
+import { focusUrl } from './focus.js';
+import type { Anchor, SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionContract, sessionPrompt, triagePrompt } from './template.js';
-import type { TemplateVariable } from './template.js';
+import type { PlaybookChoice, TemplateVariable } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
 
@@ -21,7 +22,7 @@ const READY_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['awaiting-approval'
 /** A ticket that leaves the source's scope stops being snoozed, so it leaves the Snoozed group (PRD R49). */
 const UNSNOOZED = { snoozed: false, snoozedUntil: null } as const;
 
-const EMPTY_TRIAGE = { context: null, playbook: null, immediacy: null, severity: null, model: null } as const;
+const EMPTY_TRIAGE = { context: null, playbook: null, immediacy: null, severity: null, focus: null, model: null } as const;
 
 export const MESSAGES = {
   stopped: 'Stopped by you.',
@@ -99,6 +100,9 @@ export type FlowEvent =
       severity: Severity | null;
       model: string | null;
       links?: SourceLink[];
+      /** The anchor id the classifier chose, resolved against `anchors` and the playbook's page (PRD R79). */
+      focus?: string | null;
+      anchors?: Anchor[];
     }
   | { type: 'triage-failed'; triageId: number; error: string; context: string | null }
   /** The hub stopped during triage. Nothing failed, so the work item is triaged again. */
@@ -131,10 +135,7 @@ export type FlowEvent =
   | { type: 'reset-position'; workItemId: number }
   | { type: 'tick' };
 
-export interface TriageChoice {
-  name: string;
-  description: string;
-}
+export type TriageChoice = PlaybookChoice;
 
 export type FlowAction =
   | {
@@ -737,6 +738,7 @@ class Flow {
       playbook: event.playbook,
       immediacy: event.immediacy,
       severity: event.severity,
+      focus: focusUrl(event.anchors ?? [], event.focus ?? null, playbook.focus),
       model: event.model,
     });
 
@@ -812,7 +814,7 @@ class Flow {
 
     const choices = [...this.context.playbooks.values()]
       .filter((candidate) => candidate.kind === 'task' && candidate.name.startsWith(prefix))
-      .map((candidate) => ({ name: candidate.name, description: candidate.description }));
+      .map((candidate) => ({ name: candidate.name, description: candidate.description, focus: candidate.focus }));
 
     if (choices.length === 0) {
       fail(prefix === '' ? MESSAGES.noTaskPlaybooks : `No task playbooks in the ${source!.namespace} namespace.`);

@@ -48,6 +48,7 @@ function item(id, cwd, state = 'waiting') {
     doneReason: null,
     ticket: { id, source: 'github', sourceKey: String(id), ref: `#${id}`, sourceId: null, title: `Issue ${id}`, url: `https://github.com/o/r/issues/${id}`, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 1_791_000_000_000, repoRoot: '' },
     triage: null,
+    focus: `https://github.com/o/r/issues/${id}#issuecomment-${id}00`,
     sessions: state === 'none' ? [] : [
       {
         id: `s${id}`, workItemId: id, kind: 'task', provider: 'claude', nativeSessionId: `native-${id}`, shortId: `abcd000${id}`, cwd, state, stateAt: 1_791_000_000_000,
@@ -219,11 +220,11 @@ describe("A row's click from VS Code: a notification's Open (PRD R65, R70, R71)"
     }
   });
 
-  it('opens the ticket of a row with no item window, and does nothing for a row the state does not show', async () => {
+  it('opens the focus of a row with no item window, and does nothing for a row the state does not show (PRD R79)', async () => {
     extension.show(JSON.stringify({ ...hubState, workItems: [item(9, folder, 'none')] }));
 
     assert.strictEqual(await extension.openRow('item:9'), 'url');
-    assert.deepStrictEqual(browsed, ['https://github.com/o/r/issues/9']);
+    assert.deepStrictEqual(browsed, ['https://github.com/o/r/issues/9#issuecomment-900']);
     assert.strictEqual(await extension.openRow('item:404'), 'nothing');
     assert.deepStrictEqual(commands, []);
   });

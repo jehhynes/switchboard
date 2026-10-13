@@ -57,9 +57,9 @@ describe('assigned-state transitions', () => {
       ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '' },
       systemPrompt: 'Classify the GitHub issue.\n\nChoose one playbook:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect',
       choices: [
-        { name: 'dev:develop', description: 'Plan and build the change' },
-        { name: 'dev:question', description: 'Answer a question' },
-        { name: 'support:defect', description: 'Research a defect' },
+        { name: 'dev:develop', description: 'Plan and build the change', focus: null },
+        { name: 'dev:question', description: 'Answer a question', focus: null },
+        { name: 'support:defect', description: 'Research a defect', focus: null },
       ],
       rates: false,
       model: null,

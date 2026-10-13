@@ -6,7 +6,7 @@ import { item, NOW, snapshot, triage } from '../../../packages/hub/test/views.js
 describe('rowFor (PRD R49, R65)', () => {
   const worktree = { id: 1, ticketId: 1, path: 'D:/git/widgets-wt/101-fix', branch: '101-fix', linkedBy: 'report' as const };
   const zoho = (id: number, patch: Partial<WorkItemView['ticket']> = {}): WorkItemView['ticket'] => ({ ...item(id).ticket, source: 'zoho', sourceKey: `Z${id}`, title: `Case ${id}`, url: '', ...patch });
-  const pooled = (id: number, patch: Partial<PoolView> = {}): PoolView => ({ ticket: zoho(id, { pool: true, assigned: false }), triage: triage({ ticketId: id, workItemId: null, playbook: 'support:defect' }), links: [], returned: 0, ...patch });
+  const pooled = (id: number, patch: Partial<PoolView> = {}): PoolView => ({ ticket: zoho(id, { pool: true, assigned: false }), triage: triage({ ticketId: id, workItemId: null, playbook: 'support:defect' }), focus: null, links: [], returned: 0, ...patch });
   // A snoozed ticket 8 with a done and an open work item, a snoozed pool ticket 9 with a done work item, and one row per other group.
   const data = snapshot(
     [
@@ -48,7 +48,7 @@ describe('Open in Switchboard (PRD R69)', () => {
       item(5, { ticketId: 8, status: 'done', doneAt: NOW, ticket: zoho(8, { snoozed: true }) }),
       item(6, { ticketId: 8, status: 'unstarted', ticket: zoho(8, { snoozed: true }) }),
     ],
-    { sources: ['github', 'zoho'], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: true }], pool: [{ ticket: zoho(10, { pool: true, assigned: false }), triage: null, returned: 0, links: [link('https://github.com/o/r/pull/77')] }] },
+    { sources: ['github', 'zoho'], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: true }], pool: [{ ticket: zoho(10, { pool: true, assigned: false }), triage: null, focus: null, returned: 0, links: [link('https://github.com/o/r/pull/77')] }] },
   );
 
   it("finds the row of the ticket with the URL, by GitHub's case and any page tab, before a work item that links to it", () => {

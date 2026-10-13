@@ -5,6 +5,10 @@ import type { PermissionMode, Provider } from './settings.js';
 export const PLAYBOOK_REPORTS = ['done', 'approval', 'worktree', 'playbook', 'paste'] as const;
 export type PlaybookReport = (typeof PLAYBOOK_REPORTS)[number];
 
+/** The page a task playbook's work is done on, which its focus must be on (PRD R79). */
+export const FOCUS_PAGES = ['ticket', 'pr'] as const;
+export type FocusPage = (typeof FOCUS_PAGES)[number];
+
 export interface Playbook {
   /** `<namespace>:<name>`, its key under `playbooks` in settings.json. */
   name: string;
@@ -27,6 +31,8 @@ export interface Playbook {
   rates: boolean;
   /** Playbooks whose work this one's work comes back to, such as `dev:review-pr` for `dev:review-pr-followup`; Returned counts them too (PRD R51). */
   returnOf: string[];
+  /** The page its focus must be on; null lets triage choose any page or comment (PRD R79). */
+  focus: FocusPage | null;
   template: string;
 }
 
@@ -41,7 +47,7 @@ export type PlaybookResult = { playbook: Playbook } | { error: string };
 export type PlaybookFields = Omit<Playbook, 'name'>;
 
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'provider', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates', 'returnOf', 'template'];
+const KEYS = ['description', 'kind', 'autoStart', 'requiresWorktree', 'provider', 'permissionMode', 'model', 'workdir', 'reports', 'approvalSends', 'rates', 'returnOf', 'focus', 'template'];
 
 type Json = Record<string, unknown>;
 
@@ -86,7 +92,7 @@ export function parsePlaybook(name: string, value: unknown, defaultProvider: Pro
     return { error: `Unknown keys: ${unknown.join(', ')}.` };
   }
 
-  const strings = Object.fromEntries(['description', 'kind', 'provider', 'permissionMode', 'model', 'workdir', 'template'].map((key) => [key, text(value, key)]));
+  const strings = Object.fromEntries(['description', 'kind', 'provider', 'permissionMode', 'model', 'workdir', 'focus', 'template'].map((key) => [key, text(value, key)]));
   const flags = Object.fromEntries(['autoStart', 'requiresWorktree', 'rates', 'approvalSends'].map((key) => [key, flag(value, key)]));
   const lists = Object.fromEntries(['reports', 'returnOf'].map((key) => [key, list(value, key)]));
   const invalid = [...Object.values(strings), ...Object.values(flags), ...Object.values(lists)].find((field) => field !== null && typeof field === 'object' && 'error' in field);
@@ -101,6 +107,7 @@ export function parsePlaybook(name: string, value: unknown, defaultProvider: Pro
   const permissionMode = strings['permissionMode'] as string | null;
   const model = strings['model'] as string | null;
   const workdir = (strings['workdir'] as string | null) ?? 'worktree';
+  const focus = strings['focus'] as string | null;
   const template = (strings['template'] as string | null) ?? '';
   const [autoStart, requiresWorktree, rates, approvalSends] = ['autoStart', 'requiresWorktree', 'rates', 'approvalSends'].map((key) => flags[key] as boolean) as [boolean, boolean, boolean, boolean];
   const reports = lists['reports'] as string[];
@@ -167,6 +174,14 @@ export function parsePlaybook(name: string, value: unknown, defaultProvider: Pro
     return { error: 'returnOf applies only to a task playbook.' };
   }
 
+  if (focus !== null && !(FOCUS_PAGES as readonly string[]).includes(focus)) {
+    return { error: `focus must be one of ${FOCUS_PAGES.join(', ')}.` };
+  }
+
+  if (kind === 'triage' && focus !== null) {
+    return { error: 'focus applies only to a task playbook.' };
+  }
+
   if (template.trim() === '') {
     return { error: 'The prompt template is empty.' };
   }
@@ -186,6 +201,7 @@ export function parsePlaybook(name: string, value: unknown, defaultProvider: Pro
       approvalSends,
       rates,
       returnOf,
+      focus: focus as FocusPage | null,
       template,
     },
   };

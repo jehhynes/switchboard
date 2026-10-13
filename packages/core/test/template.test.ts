@@ -88,8 +88,8 @@ describe('templateError', () => {
 
 describe('triagePrompt', () => {
   const choices = [
-    { name: 'support:defect', description: 'Something is broken.' },
-    { name: 'support:how-to', description: 'A usage question.' },
+    { name: 'support:defect', description: 'Something is broken.', focus: null },
+    { name: 'support:how-to', description: 'A usage question.', focus: null },
   ];
 
   it('replaces {{playbooks}} with the choices and appends nothing', () => {
@@ -98,6 +98,15 @@ describe('triagePrompt', () => {
 
   it('appends the choices when the instructions have no {{playbooks}}', () => {
     expect(triagePrompt('Classify it.\n\n', choices)).toEqual({ text: 'Classify it.\n\nChoose one playbook:\n- support:defect: Something is broken.\n- support:how-to: A usage question.' });
+  });
+
+  it('names the page of a playbook that sets one', () => {
+    const paged = [
+      { name: 'dev:review-pr', description: 'Review a pull request.', focus: 'pr' as const },
+      { name: 'dev:qa-failure', description: 'Fix a QA failure.', focus: 'ticket' as const },
+    ];
+
+    expect(triagePrompt('{{playbooks}}', paged)).toEqual({ text: '- dev:review-pr: Review a pull request. (page: pull request)\n- dev:qa-failure: Fix a QA failure. (page: ticket)' });
   });
 
   it('fails on another variable, with or without {{playbooks}}', () => {

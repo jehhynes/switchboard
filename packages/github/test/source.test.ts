@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Ticket } from '@switchboard/core';
+import type { Anchor, Ticket } from '@switchboard/core';
 import { describe, expect, it, vi } from 'vitest';
 import { parseGithubConfig } from '../src/config.js';
 import type { GithubConfig } from '../src/config.js';
@@ -187,7 +187,7 @@ describe('GithubSource.context', () => {
 
     expect(readRoles).toHaveBeenCalledWith('~/roster.json');
     expect(result).not.toHaveProperty('warning');
-    expect(text).toContain('### Last 5 pull request comments\n### User-A (tester, test-wrangler), 2026-09-10 12:01\nComment starts here.');
+    expect(text).toContain('### Last 5 pull request comments\n### User-A (tester, test-wrangler), 2026-09-10 12:01 [c11]\nComment starts here.');
     expect(text.match(/^### User-A[ ,]/gm)).toHaveLength(USER_A_HEADINGS);
     expect(text.match(/^### User-A \(tester, test-wrangler\), /gm)).toHaveLength(USER_A_HEADINGS);
     expect(text).toMatch(/^### user-[b-z], /m);
@@ -221,22 +221,71 @@ describe('GithubSource.context', () => {
 
     expect(result).toMatchObject({ links: [{ label: 'Pull request #19515', target: 'https://github.com/acme/widgets/pull/19515' }] });
 
-    expect(lines.slice(0, 6)).toEqual(['GitHub issue #19504: Issue 19504', 'https://github.com/acme/widgets/issues/19504', 'Board status: ⚒️ Dev', 'Assignees: work-login', '', '## Issue body']);
+    expect(lines.slice(0, 6)).toEqual(['GitHub issue #19504: Issue 19504 [ticket]', 'https://github.com/acme/widgets/issues/19504', 'Board status: ⚒️ Dev', 'Assignees: work-login', '', '## Issue body']);
     expect(lines[6]).toBe("Issue body starts here.");
     expect(text).toContain('Issue body ends here.\n\n## Status and assignment history\n2026-09-07 12:18 user-b: status (none) → 🆕 New\n2026-09-07 12:18 user-a: status 🆕 New → 🔖 Planned\n2026-09-07 12:18 user-a: assigned user-a\n');
     expect(text.match(/\[…\d+ characters omitted…\]/g)).toEqual(['[…39262 characters omitted…]', '[…984 characters omitted…]', '[…50924 characters omitted…]', '[…8178 characters omitted…]', '[…1335 characters omitted…]']);
-    expect(text.match(/^### .*, \d{4}-\d\d-\d\d \d\d:\d\d$/gm)).toHaveLength(5 + 5 + 10);
-    expect(text).toContain('## Pull request #19515: Pull request 19515\nhttps://github.com/acme/widgets/pull/19515\nAuthor: user-a. State: OPEN. Checks: SUCCESS.\n\nPR body starts here.');
-    expect(text).toContain('### Last 5 pull request comments\n### user-a, 2026-09-10 12:01\nComment starts here.');
+    expect(text.match(/^### .*, \d{4}-\d\d-\d\d \d\d:\d\d \[c\d+\]$/gm)).toHaveLength(5 + 5 + 10);
+    expect(text).toContain('## Pull request #19515: Pull request 19515 [pr]\nhttps://github.com/acme/widgets/pull/19515\nAuthor: user-a. State: OPEN. Checks: SUCCESS.\n\nPR body starts here.');
+    expect(text).toContain('### Last 5 pull request comments\n### user-a, 2026-09-10 12:01 [c11]\nComment starts here.');
     expect(text).toContain('### Reviews\n2026-09-07 20:31 user-e: COMMENTED\n');
     expect(text).toContain('### Last 5 review threads\n\n#### Resolved thread\n### ');
+  });
+
+  it('tags the issue, the pull request and each comment, numbering comments by time across sections, and returns their anchors (PRD R79)', async () => {
+    const result = (await new GithubSource(config(), fakeGh({ json: fixture('context-with-pr') })).context(ticket('19504'))) as { context: string; anchors: Anchor[] };
+    const issueUrl = 'https://github.com/acme/widgets/issues/19504';
+    const prUrl = 'https://github.com/acme/widgets/pull/19515';
+
+    // Review threads came first, then pull request comments, then issue comments, with one pull request comment among the issue's.
+    expect(result.context.match(/\[c\d+\]$/gm)).toEqual([
+      '[c15]', '[c16]', '[c17]', '[c19]', '[c20]',
+      '[c11]', '[c12]', '[c13]', '[c14]', '[c18]',
+      '[c1]', '[c6]', '[c2]', '[c7]', '[c3]', '[c8]', '[c4]', '[c9]', '[c5]', '[c10]',
+    ]);
+    expect(result.anchors).toHaveLength(22);
+    expect(result.anchors.slice(0, 3)).toEqual([
+      { id: 'ticket', url: issueUrl, page: 'ticket' },
+      { id: 'pr', url: prUrl, page: 'pr' },
+      { id: 'c1', url: `${prUrl}#discussion_r3952471066`, page: 'pr' },
+    ]);
+    expect(result.anchors.filter((anchor) => ['c10', 'c11', 'c18', 'c20'].includes(anchor.id))).toEqual([
+      { id: 'c10', url: `${prUrl}#discussion_r3952610894`, page: 'pr' },
+      { id: 'c11', url: `${prUrl}#issuecomment-5618353428`, page: 'pr' },
+      { id: 'c18', url: `${prUrl}#issuecomment-5961368999`, page: 'pr' },
+      { id: 'c20', url: `${issueUrl}#issuecomment-5962229582`, page: 'ticket' },
+    ]);
+  });
+
+  it('numbers comments made at the same time in section order, issue comments first', async () => {
+    type Node = { createdAt: string; url: string };
+    const json = fixture('context-with-pr') as { data: { repository: { issue: { comments: { nodes: Node[] }; closedByPullRequestsReferences: { nodes: { comments: { nodes: Node[] } }[] } } } } };
+    const issue = json.data.repository.issue;
+    const prComment = issue.closedByPullRequestsReferences.nodes[0]!.comments.nodes[0]!;
+    issue.comments.nodes[4]!.createdAt = prComment.createdAt;
+    const result = (await new GithubSource(config(), fakeGh({ json })).context(ticket('19504'))) as { anchors: Anchor[] };
+
+    expect(result.anchors.filter((anchor) => ['c11', 'c12'].includes(anchor.id))).toEqual([
+      { id: 'c11', url: issue.comments.nodes[4]!.url, page: 'ticket' },
+      { id: 'c12', url: prComment.url, page: 'pr' },
+    ]);
+  });
+
+  it('gives an issue with no pull request no pr anchor, and leaves a comment without a URL untagged', async () => {
+    const json = fixture('context-without-pr') as { data: { repository: { issue: { comments: { nodes: { url?: string }[] } } } } };
+    delete json.data.repository.issue.comments.nodes[0]!.url;
+    const result = (await new GithubSource(config(), fakeGh({ json })).context(ticket('18111'))) as { context: string; anchors: Anchor[] };
+
+    expect(result.anchors.map((anchor) => [anchor.id, anchor.page])).toEqual([['ticket', 'ticket'], ['c1', 'ticket'], ['c2', 'ticket'], ['c3', 'ticket'], ['c4', 'ticket']]);
+    expect(result.context).toContain('### user-f, 2026-08-10 15:59\n');
+    expect(result.context).toContain('### user-g, 2026-09-07 09:18 [c1]\n');
   });
 
   it('leaves out the pull request section when no pull request closes the issue', async () => {
     const result = await new GithubSource(config(), fakeGh({ json: fixture('context-without-pr') })).context(ticket('18111'));
     const text = (result as { context: string }).context;
 
-    expect(text.startsWith('GitHub issue #18111: Issue 18111\n')).toBe(true);
+    expect(text.startsWith('GitHub issue #18111: Issue 18111 [ticket]\n')).toBe(true);
     expect(text).not.toContain('## Pull request');
     expect(result).toMatchObject({ links: [] });
     expect(text).toContain('## Last 5 comments');

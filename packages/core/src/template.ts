@@ -1,6 +1,7 @@
 import { REPORT_KINDS } from './model.js';
 import type { ReportKind } from './model.js';
 import type { Provider } from './settings.js';
+import type { FocusPage } from './playbook.js';
 
 export type TemplateResult = { text: string } | { error: string };
 
@@ -56,7 +57,11 @@ export function renderTaskPrompt(template: string, values: Readonly<Record<strin
 export interface PlaybookChoice {
   name: string;
   description: string;
+  /** The page the playbook's work is done on, named beside it so triage chooses a comment there (PRD R79). */
+  focus: FocusPage | null;
 }
+
+const PAGE_NAMES: Record<FocusPage, string> = { ticket: 'ticket', pr: 'pull request' };
 
 const PLAYBOOKS = /\{\{\s*playbooks\s*\}\}/;
 
@@ -71,7 +76,7 @@ export function triagePrompt(template: string, choices: readonly PlaybookChoice[
     return { error };
   }
 
-  const list = choices.map((choice) => `- ${choice.name}: ${choice.description}`).join('\n');
+  const list = choices.map((choice) => `- ${choice.name}: ${choice.description}${choice.focus === null ? '' : ` (page: ${PAGE_NAMES[choice.focus]})`}`).join('\n');
 
   return PLAYBOOKS.test(template) ? render(template, { playbooks: list }) : { text: `${template.trimEnd()}\n\nChoose one playbook:\n${list}` };
 }

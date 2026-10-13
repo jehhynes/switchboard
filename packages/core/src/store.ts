@@ -267,6 +267,8 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN question TEXT;`,
   // The operator's guidance from Start, for the next task session (PRD R77).
   `ALTER TABLE workItems ADD COLUMN guidance TEXT;`,
+  // The URL triage chose as the work item's focus (PRD R79).
+  `ALTER TABLE triages ADD COLUMN focus TEXT;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld']);

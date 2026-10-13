@@ -189,7 +189,19 @@ describe('dockView', () => {
     expect(row(item(7, { sessions: [session()] })).open).toBeNull();
     expect(row(item(7, { worktree })).open).toBeNull();
     expect(row(item(7, { status: 'unstarted' })).open).toEqual({ type: 'url', url: 'https://github.com/o/r/issues/107' });
-    expect(row(item(7, { status: 'unstarted', ticket: { ...item(7).ticket, source: 'adhoc', url: '' } })).open).toBeNull();
+    expect(row(item(7, { status: 'unstarted', ticket: { ...item(7).ticket, source: 'adhoc', url: '' }, focus: null })).open).toBeNull();
+  });
+
+  it('opens the focus of a row with no window, keeping the ticket URL for Open ticket (PRD R71, R79)', () => {
+    const focus = 'https://github.com/o/r/issues/107#issuecomment-5';
+    const unstarted = row(item(7, { status: 'unstarted', focus }));
+    const pooled = dockView(snapshot([], { pool: [pool(4, { focus: 'https://github.com/o/r/issues/104#issuecomment-6' }), pool(5, { focus: null })] }), NOW, W).groups.flatMap((group) => group.rows);
+
+    expect([unstarted.open, unstarted.url]).toEqual([{ type: 'url', url: focus }, 'https://github.com/o/r/issues/107']);
+    expect(pooled.map((entry) => [entry.open, entry.url])).toEqual([
+      [{ type: 'url', url: 'https://github.com/o/r/issues/104#issuecomment-6' }, 'https://github.com/o/r/issues/104'],
+      [null, 'https://github.com/o/r/issues/105'],
+    ]);
   });
 
   it('gives a row its main control, pastes, VS Code commands and search text', () => {
@@ -365,42 +377,30 @@ describe('windowTabs', () => {
   const file = `${W}\\gh-107-58c609.code-workspace`;
   const link = (id: number, target: string) => ({ id, ticketId: 7, label: 'Link', target, reportedAt: NOW });
 
-  it("lists the window's ticket, its other links, then its pull requests, then an awaiting-approval report, each once", () => {
-    const links = [
-      link(1, 'https://github.com/o/r/issues/900'),
-      link(2, 'https://github.com/o/r/pull/19002'),
-      link(3, 'https://desk.example.test/tickets/900001'),
-      link(4, 'https://github.com/o/r/pull/19003'),
-      link(5, 'https://forum.example.com/t/forum/t-55'),
-      link(6, 'D:/notes/local.md'),
-    ];
-    const earlier = item(6, { status: 'done', worktree, links, ticket: item(7).ticket });
+  it("lists each window work item's focus, not its links, then an awaiting-approval report, each once (PRD R72, R79)", () => {
+    const links = [link(1, 'https://github.com/o/r/issues/900'), link(2, 'https://github.com/o/r/pull/19002')];
+    const earlier = item(6, { status: 'done', worktree, links, ticket: item(7).ticket, focus: 'https://github.com/o/r/pull/19002#discussion_r4' });
     const current = item(7, { status: 'awaiting-approval', approvalReport: 'D:/drafts/reply.md', worktree, links });
-
     const tabs = {
-      urls: [
-        'https://github.com/o/r/issues/107',
-        'https://github.com/o/r/issues/900',
-        'https://desk.example.test/tickets/900001',
-        'https://forum.example.com/t/forum/t-55',
-        'https://github.com/o/r/pull/19002',
-        'https://github.com/o/r/pull/19003',
+      focuses: [
+        { workItemId: 6, url: 'https://github.com/o/r/pull/19002#discussion_r4' },
+        { workItemId: 7, url: 'https://github.com/o/r/issues/107' },
       ],
       reports: ['D:/drafts/reply.md'],
     };
 
     expect(windowTabs(snapshot([earlier, current]), file, W)).toEqual(tabs);
     // The path compares as Windows does: case, slashes and a trailing separator do not matter.
-    expect(windowTabs(snapshot([current]), `${W.toUpperCase().replaceAll('\\', '/')}/GH-107-58c609.code-workspace/`, W)).toEqual(tabs);
+    expect(windowTabs(snapshot([earlier, current]), `${W.toUpperCase().replaceAll('\\', '/')}/GH-107-58c609.code-workspace/`, W)).toEqual(tabs);
   });
 
-  it('leaves out a report once its work item no longer awaits approval, another window and an empty ticket URL', () => {
+  it('leaves out a report once its work item no longer awaits approval, another window and a work item with no focus', () => {
     const blocked = item(7, { status: 'blocked', approvalReport: 'D:/drafts/reply.md', worktree });
     const other = item(8, { worktree: { ...worktree, ticketId: 8, path: 'D:/git/widgets/.worktrees/108-fix' } });
-    const noUrl = item(7, { worktree, ticket: { ...item(7).ticket, url: '' } });
+    const noFocus = item(7, { worktree, focus: null });
 
-    expect(windowTabs(snapshot([blocked, other]), file, W)).toEqual({ urls: ['https://github.com/o/r/issues/107'], reports: [] });
-    expect(windowTabs(snapshot([noUrl]), file, W)).toEqual({ urls: [], reports: [] });
+    expect(windowTabs(snapshot([blocked, other]), file, W)).toEqual({ focuses: [{ workItemId: 7, url: 'https://github.com/o/r/issues/107' }], reports: [] });
+    expect(windowTabs(snapshot([noFocus]), file, W)).toEqual({ focuses: [], reports: [] });
   });
 });
 

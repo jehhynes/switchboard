@@ -34,6 +34,7 @@ function item(cwd, done) {
     doneReason: done ? 'session' : null,
     ticket: { id: 7, source: 'github', sourceKey: '7', ref: '#7', sourceId: null, title: 'Issue 7', url: 'https://github.com/o/r/issues/7', assigned: !done, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 1_791_000_000_000, repoRoot: '' },
     triage: null,
+    focus: 'https://github.com/o/r/issues/7',
     sessions: [
       {
         id: 's7', workItemId: 7, kind: 'task', provider: 'claude', nativeSessionId: 'native-7', shortId: null, cwd, state: done ? 'idle' : 'running', stateAt: 1_791_000_000_000,

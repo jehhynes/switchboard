@@ -72,7 +72,7 @@ public sealed class SettingsFieldsTests
         var fields = SettingsFields.PlaybookFieldsOf(state, PlaybookFields.Empty with { Reports = ["approval"] });
 
         Assert.Equal(
-            ["description", "kind", "autoStart", "requiresWorktree", "reports.done", "reports.approval", "reports.worktree", "reports.playbook", "reports.paste", "approvalSends", "workdir", "provider", "permissionMode", "model", "returnOf", "template"],
+            ["description", "kind", "autoStart", "requiresWorktree", "reports.done", "reports.approval", "reports.worktree", "reports.playbook", "reports.paste", "approvalSends", "workdir", "provider", "permissionMode", "model", "returnOf", "focus", "template"],
             paths);
         Assert.Equal(["Start", "Start", "Reports", "Reports", "Reports", "Reports", "Reports"], fields.Where((field) => field.Group is not null).Select((field) => field.Group));
         Assert.Null(fields.Single((field) => field.Path == "approvalSends").Group);
@@ -87,6 +87,31 @@ public sealed class SettingsFieldsTests
         Assert.Equal(["dev:qa-question", "dev:develop"], playbook.ReturnOf);
         Assert.Equal("dev:qa-question\ndev:develop", SettingsPages.FieldViewOf(SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(), playbook).Single((field) => field.Path == "returnOf"), SettingsFields.PlaybookFieldValue(playbook, "returnOf"), []).Text);
         Assert.Equal(playbook.ReturnOf, PlaybookFields.Read(playbook.ToEntry()).Fields!.ReturnOf);
+    }
+
+    [Fact]
+    public void ApplyPlaybookField_FocusPage_SetsItAndAnyPageRemovesTheKey()
+    {
+        var state = SettingsConfigs.State();
+        var pr = SettingsFields.ApplyPlaybookField(PlaybookFields.Empty with { Description = "D", Template = "T" }, "focus", "pr");
+        var any = SettingsFields.ApplyPlaybookField(pr, "focus", "");
+
+        Assert.Equal("pr", pr.Focus);
+        Assert.Equal(["", "ticket", "pr"], SettingsFields.PlaybookFieldsOf(state, pr).Single((field) => field.Path == "focus").Options!.Select((option) => option.Value));
+        Assert.Equal("pr", PlaybookFields.Read(pr.ToEntry()).Fields!.Focus);
+        Assert.Null(any.Focus);
+        Assert.Equal("{\"description\":\"D\",\"autoStart\":false,\"requiresWorktree\":false,\"template\":\"T\"}", any.ToEntry().ToJsonString());
+        Assert.False(PlaybookFields.Same(pr, any));
+    }
+
+    [Fact]
+    public void ApplyPlaybookField_KindTriage_DropsFocus()
+    {
+        var playbook = SettingsFields.ApplyPlaybookField(PlaybookFields.Empty with { Description = "D", Focus = "ticket", Template = "T" }, "kind", "triage");
+
+        Assert.Null(playbook.Focus);
+        Assert.DoesNotContain("focus", SettingsFields.PlaybookFieldsOf(SettingsConfigs.State(), playbook).Select((field) => field.Path));
+        Assert.Equal("{\"description\":\"D\",\"kind\":\"triage\",\"template\":\"T\"}", playbook.ToEntry().ToJsonString());
     }
 
     [Fact]
@@ -288,11 +313,11 @@ public sealed class SettingsFieldsTests
     public void ToEntry_TaskPlaybook_LeavesOutDefaultsExceptTheStartFlagsInKeyOrder()
     {
         var entry = (PlaybookFields.Empty with { Description = "D", Template = "T\n" }).ToEntry();
-        var full = new PlaybookFields("D", "task", true, true, "plan", "opus", "repoRoot", ["approval"], true, false, ["dev:x"], "T").ToEntry();
+        var full = (new PlaybookFields("D", "task", true, true, "plan", "opus", "repoRoot", ["approval"], true, false, ["dev:x"], "T") with { Focus = "pr" }).ToEntry();
 
         Assert.Equal("{\"description\":\"D\",\"autoStart\":false,\"requiresWorktree\":false,\"template\":\"T\\n\"}", entry.ToJsonString());
         Assert.Equal(
-            "{\"description\":\"D\",\"autoStart\":true,\"requiresWorktree\":true,\"workdir\":\"repoRoot\",\"reports\":[\"approval\"],\"approvalSends\":true,\"returnOf\":[\"dev:x\"],\"permissionMode\":\"plan\",\"model\":\"opus\",\"template\":\"T\"}",
+            "{\"description\":\"D\",\"autoStart\":true,\"requiresWorktree\":true,\"workdir\":\"repoRoot\",\"reports\":[\"approval\"],\"approvalSends\":true,\"returnOf\":[\"dev:x\"],\"focus\":\"pr\",\"permissionMode\":\"plan\",\"model\":\"opus\",\"template\":\"T\"}",
             full.ToJsonString());
     }
 
@@ -310,6 +335,7 @@ public sealed class SettingsFieldsTests
     [InlineData("{\"autoStart\":\"yes\"}", "autoStart must be true or false.")]
     [InlineData("{\"reports\":\"done\"}", "reports must be a list of strings.")]
     [InlineData("{\"returnOf\":[1]}", "returnOf must be a list of strings.")]
+    [InlineData("{\"focus\":true}", "focus must be a string.")]
     [InlineData("{\"description\":\"D\",\"note\":\"x\",\"extra\":1,\"template\":\"T\"}", "Unknown keys: note, extra.")]
     public void Read_WrongJsonType_ReturnsTheErrorAndNoFields(string json, string error)
     {

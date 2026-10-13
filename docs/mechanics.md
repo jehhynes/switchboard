@@ -397,6 +397,17 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Limits:** inferred from timestamps; the lag was not measured, and a direct read made within those seconds was not run.
 - **Current use:** a done report whose poll still lists the ticket as assigned waits for a second poll 30 seconds later (architecture.md § Session reports).
 
+## M35. Opening a GitHub comment as the focus
+
+- **Date:** 2026-10-13.
+- **Versions:** GitHub GraphQL API through gh; VS Code 1.141.1 test host; Playwright's Chromium through `playwright-cli` 0.1.22, headless and signed out.
+- **Experiment:**
+  - The GraphQL `url` of `IssueComment` and `PullRequestReviewComment` on acme/widgets issue 19504 and pull request 19515 is `…/issues/19504#issuecomment-<id>`, `…/pull/19515#issuecomment-<id>` for a pull request comment, and `…/pull/19515#discussion_r<id>` for a review-thread comment.
+  - In the VS Code test host, `openTab` opened a test-owned loopback page at `…/focus#issuecomment-5` in the integrated browser; the page's script read `location.hash` as `#issuecomment-5`, and opening the same URL again reused the tab without loading the page again.
+  - In Chromium, `https://github.com/cli/cli/issues/14090#issuecomment-5382045207`, the 46th of 99 comments on a page that folds comments behind two Load more buttons, loaded with that comment 77 pixels below the top of a 720-pixel viewport. `https://github.com/cli/cli/pull/14181#discussion_r3801438940`, the first comment of a resolved review thread, loaded with that comment at the top of the viewport.
+- **Not verified:** scrolling inside VS Code's integrated browser on a signed-in GitHub page; an outdated review thread; a comment of a private repository.
+- **Current use:** the focus URLs that triage chooses (PRD R79; architecture.md § Triage).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

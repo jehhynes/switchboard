@@ -32,7 +32,8 @@ describe("Item window tabs (PRD R72)", () => {
     server = createServer((request, response) => {
       requests.push(request.url);
       response.writeHead(200, { 'Content-Type': 'text/html' });
-      response.end(`<!doctype html><title>page${request.url.replaceAll('/', '-')}</title><p>${request.url}</p>`);
+      // A page reports the bookmark it loaded with, which the browser does not send, as /hash?<bookmark>.
+      response.end(`<!doctype html><title>page${request.url.replaceAll('/', '-')}</title><p>${request.url}</p><script>fetch('/hash?' + location.hash.slice(1))</script>`);
     });
     await new Promise((done) => server.listen(0, '127.0.0.1', done));
     base = `http://127.0.0.1:${server.address().port}`;
@@ -83,6 +84,24 @@ describe("Item window tabs (PRD R72)", () => {
     assert.strictEqual(previews.length, 2, `tabs: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
     assert.ok(previews.some((tab) => tab.label.includes('reply.md')) && previews.some((tab) => tab.label.includes('second.md')), JSON.stringify(previews.map((tab) => tab.label)));
     assert.deepStrictEqual(previews.map((tab) => tab.isPreview), [false, false]);
+  });
+
+  it("opens a focus URL with its comment's bookmark, reusing its tab when opened again (PRD R79)", async function () {
+    this.timeout(120_000);
+
+    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
+
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    requests.length = 0;
+    await extension.openTab(`${base}/focus#issuecomment-5`);
+    await until(() => requests.includes('/hash?issuecomment-5'), `the page never loaded with its bookmark: ${JSON.stringify(requests)}`);
+    await extension.openTab(`${base}/focus#issuecomment-5`);
+
+    const browserTabs = tabs().filter((tab) => tab.input === undefined);
+
+    assert.strictEqual(browserTabs.length, 1, `tabs: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
+    assert.deepStrictEqual(requests.filter((url) => url === '/focus'), ['/focus']);
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
 
   it('turns a Markdown report into its text editor in the same tab with Toggle Preview, so editing adds no tab', async () => {

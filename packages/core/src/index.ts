@@ -1,4 +1,5 @@
 export * from './flow.js';
+export * from './focus.js';
 export * from './group.js';
 export * from './hubRecord.js';
 export * from './model.js';

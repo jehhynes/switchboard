@@ -58,6 +58,7 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     parentId: null,
     ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
+    focus: `https://github.com/o/r/issues/${100 + id}`,
     sessions: [],
     worktree: null,
     links: [],
@@ -89,9 +90,11 @@ export function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): 
 }
 
 export function triage(patch: Partial<Triage> = {}): Triage {
-  return { id: 1, ticketId: 1, workItemId: 1, context: 'Issue text', playbook: 'dev:develop', immediacy: null, severity: null, model: null, startedAt: NOW, endedAt: NOW, error: null, ...patch };
+  return { id: 1, ticketId: 1, workItemId: 1, context: 'Issue text', playbook: 'dev:develop', immediacy: null, severity: null, focus: null, model: null, startedAt: NOW, endedAt: NOW, error: null, ...patch };
 }
 
 export function pool(id: number, patch: Partial<PoolView> = {}): PoolView {
-  return { ticket: { ...item(id).ticket, assigned: false, pool: true }, triage: triage({ ticketId: id, workItemId: null }), links: [], returned: 0, ...patch };
+  const ticket = { ...item(id).ticket, assigned: false, pool: true };
+
+  return { ticket, triage: triage({ ticketId: id, workItemId: null }), focus: ticket.url, links: [], returned: 0, ...patch };
 }

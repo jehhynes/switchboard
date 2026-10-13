@@ -13,6 +13,7 @@ describe('parsePlaybook', () => {
       workdir: 'repoRoot',
       reports: ['worktree', 'done'],
       returnOf: ['support:how-to'],
+      focus: 'pr',
       template: 'Research {{ticket.sourceKey}}.\n',
     };
 
@@ -31,6 +32,7 @@ describe('parsePlaybook', () => {
         approvalSends: false,
         rates: false,
         returnOf: ['support:how-to'],
+        focus: 'pr',
         template: 'Research {{ticket.sourceKey}}.\n',
       },
     });
@@ -52,6 +54,7 @@ describe('parsePlaybook', () => {
         approvalSends: false,
         rates: false,
         returnOf: [],
+        focus: null,
         template: 'Classify.',
       },
     });
@@ -106,6 +109,9 @@ describe('parsePlaybook', () => {
     ['a returnOf entry that is not a playbook name', 'dev:x', { description: 'x', returnOf: ['dev:ok', 'review'], template: 'body' }, 'returnOf must list other playbook names, not review.'],
     ['a returnOf entry naming the playbook itself', 'dev:x', { description: 'x', returnOf: ['dev:x'], template: 'body' }, 'returnOf must list other playbook names, not dev:x.'],
     ['returnOf on a triage playbook', 'dev:x', { description: 'x', kind: 'triage', returnOf: ['dev:y'], template: 'body' }, 'returnOf applies only to a task playbook.'],
+    ['an unknown focus', 'dev:x', { description: 'x', focus: 'comment', template: 'body' }, 'focus must be one of ticket, pr.'],
+    ['a focus that is not a string', 'dev:x', { description: 'x', focus: true, template: 'body' }, 'focus must be a string.'],
+    ['focus on a triage playbook', 'dev:x', { description: 'x', kind: 'triage', focus: 'ticket', template: 'body' }, 'focus applies only to a task playbook.'],
     ['no template', 'dev:x', { description: 'x' }, 'The prompt template is empty.'],
     ['a blank template', 'dev:x', { description: 'x', template: '  \n' }, 'The prompt template is empty.'],
     ['a template that is not a string', 'dev:x', { description: 'x', template: ['a'] }, 'template must be a string.'],

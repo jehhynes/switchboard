@@ -33,7 +33,7 @@ describe('Store', () => {
     reopened.close();
   });
 
-  it('moves a version 1 database to the current schema, keeping each triage with its ticket, unrated and without its summary', () => {
+  it('moves a version 1 database to the current schema, keeping each triage with its ticket, unrated, without its summary and with no focus', () => {
     const path = join(dir, 'v1.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS[0]!);
@@ -50,7 +50,7 @@ describe('Store', () => {
     // A work item waiting to be started is unstarted from migration 4 on (PRD R34).
     expect(store.workItem(3)).toMatchObject({ status: 'unstarted', approvalPrompt: null, approvalSummary: null });
     expect(store.workItem(3)).not.toHaveProperty('needsPick');
-    expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, immediacy: null, severity: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
+    expect(store.triagesFor(3)).toEqual([{ id: 5, ticketId: 7, workItemId: 3, context: null, playbook: null, immediacy: null, severity: null, focus: null, model: null, startedAt: 1, endedAt: 2, error: null }]);
     store.close();
   });
 
@@ -457,7 +457,7 @@ describe('Store', () => {
       [2, ['t2'], [3]],
       [1, ['s1', 't1'], [1]],
     ]);
-    expect(history.poolTriages).toEqual([{ id: 2, ticketId: 1, workItemId: null, playbook: null, immediacy: null, severity: null, model: null, startedAt: 5, endedAt: 6, error: 'Timed out.' }]);
+    expect(history.poolTriages).toEqual([{ id: 2, ticketId: 1, workItemId: null, playbook: null, immediacy: null, severity: null, focus: null, model: null, startedAt: 5, endedAt: 6, error: 'Timed out.' }]);
     expect(history.workItems[0]).not.toHaveProperty('taskPrompt');
     expect(history.workItems[0]!.triages[0]).not.toHaveProperty('context');
     expect(store.ticketHistory(9)).toBeNull();

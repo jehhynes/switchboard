@@ -8,6 +8,8 @@ const WORKTREE = 'D:/git/widgets/.worktrees/107-fix';
 const FILE = `${WINDOWS}\\gh-107-58c609.code-workspace`;
 const ISSUE = 'https://github.com/o/r/issues/107';
 const PR = 'https://github.com/o/r/pull/19002';
+const COMMENT = `${ISSUE}#issuecomment-5`;
+const REVIEW = `${PR}#discussion_r9`;
 const REPORT = 'D:/drafts/reply.md';
 
 function item(patch: Partial<WorkItemView> = {}): WorkItemView {
@@ -43,6 +45,7 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     waits: [],
     ticket: { id: 7, source: 'github', sourceKey: '107', ref: '#107', sourceId: null, title: 'Issue 7', url: ISSUE, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
+    focus: ISSUE,
     sessions: [],
     worktree: { id: 1, ticketId: 7, path: WORKTREE, branch: '107-fix', linkedBy: 'report' },
     links: [],
@@ -82,16 +85,26 @@ function tabs(file: string | null = FILE, fail: string | null = null) {
 }
 
 describe('ItemTabs', () => {
-  it('opens nothing for the first snapshot, then each pull request and report a later one adds', async () => {
+  it('opens nothing for the first snapshot, then a changed focus and each report a later one adds, but not a link (PRD R72, R79)', async () => {
     const { tracker, opened } = tabs();
 
     await tracker.update(snapshot([item()]));
     expect(opened).toEqual([]);
 
     await tracker.update(snapshot([item(pr)]));
-    await tracker.update(snapshot([item({ ...pr, ...report })]));
-    await tracker.update(snapshot([item({ ...pr, ...report, stage: 'waiting' })]));
-    expect(opened).toEqual([PR, REPORT]);
+    await tracker.update(snapshot([item({ ...pr, focus: REVIEW })]));
+    await tracker.update(snapshot([item({ ...pr, focus: REVIEW, ...report })]));
+    await tracker.update(snapshot([item({ ...pr, focus: REVIEW, ...report, stage: 'waiting' })]));
+    expect(opened).toEqual([REVIEW, REPORT]);
+  });
+
+  it('opens a focus again when a later triage changes it back', async () => {
+    const { tracker, opened } = tabs();
+
+    await tracker.update(snapshot([item({ focus: COMMENT })]));
+    await tracker.update(snapshot([item({ focus: REVIEW })]));
+    await tracker.update(snapshot([item({ focus: COMMENT })]));
+    expect(opened).toEqual([REVIEW, COMMENT]);
   });
 
   it('opens a report again when its work item awaits approval again', async () => {
@@ -103,25 +116,44 @@ describe('ItemTabs', () => {
     expect(opened).toEqual([REPORT]);
   });
 
-  it('does not open a ticket or pull request again when it leaves the snapshot and returns', async () => {
+  it('opens a work item that joins the window once, and nothing when it leaves the snapshot and returns', async () => {
     const { tracker, opened } = tabs();
 
     await tracker.update(snapshot([]));
-    await tracker.update(snapshot([item(pr)]));
+    await tracker.update(snapshot([item({ focus: COMMENT })]));
     await tracker.update(snapshot([]));
-    await tracker.update(snapshot([item(pr)]));
-    expect(opened).toEqual([ISSUE, PR]);
+    await tracker.update(snapshot([item({ focus: COMMENT })]));
+    expect(opened).toEqual([COMMENT]);
   });
 
-  it('opens every tab for the window the dock opened, and afterwards only what is added', async () => {
+  it("opens each work item's own new focus in a shared window, and a focus two of them share once", async () => {
+    const { tracker, opened } = tabs();
+    const earlier = (patch: Partial<WorkItemView>) => item({ id: 6, status: 'done', ...patch });
+
+    await tracker.update(snapshot([earlier({ focus: COMMENT }), item({ focus: ISSUE })]));
+    await tracker.update(snapshot([earlier({ focus: COMMENT }), item({ focus: COMMENT })]));
+    expect(opened).toEqual([COMMENT]);
+
+    await tracker.update(snapshot([earlier({ focus: REVIEW }), item({ focus: REVIEW })]));
+    expect(opened).toEqual([COMMENT, REVIEW]);
+  });
+
+  it('opens every focus and report for the window the dock opened, each once, and afterwards only what changes', async () => {
     const { tracker, opened } = tabs();
 
     await tracker.update(snapshot([item(report)]));
-    await tracker.openAll(snapshot([item({ ...pr, ...report })]));
-    expect(opened).toEqual([ISSUE, PR, REPORT]);
+    await tracker.openAll(snapshot([item({ id: 6, focus: COMMENT }), item({ ...pr, ...report, focus: COMMENT })]));
+    expect(opened).toEqual([COMMENT, REPORT]);
 
-    await tracker.update(snapshot([item({ ...pr, ...report })]));
-    expect(opened).toHaveLength(3);
+    await tracker.update(snapshot([item({ ...pr, ...report, focus: COMMENT })]));
+    expect(opened).toHaveLength(2);
+  });
+
+  it('opens nothing for a work item with no focus', async () => {
+    const { tracker, opened } = tabs();
+
+    await tracker.openAll(snapshot([item({ focus: null })]));
+    expect(opened).toEqual([]);
   });
 
   it('opens every tab before the first snapshot, without opening them again when it arrives', async () => {
@@ -129,7 +161,7 @@ describe('ItemTabs', () => {
 
     await tracker.openAll(snapshot([item(pr)]));
     await tracker.update(snapshot([item(pr)]));
-    expect(opened).toEqual([ISSUE, PR]);
+    expect(opened).toEqual([ISSUE]);
   });
 
   it("does nothing in a window that is not an item window, or for another item's window", async () => {
@@ -137,7 +169,7 @@ describe('ItemTabs', () => {
 
     await folder.tracker.openAll(snapshot([item(pr)]));
     await folder.tracker.update(snapshot([item(pr)]));
-    await folder.tracker.update(snapshot([item({ ...pr, ...report })]));
+    await folder.tracker.update(snapshot([item({ ...pr, ...report, focus: REVIEW })]));
     expect(folder.opened).toEqual([]);
 
     const other = tabs(`${WINDOWS}\\gh-108-aaaaaa.code-workspace`);
@@ -151,6 +183,6 @@ describe('ItemTabs', () => {
     const { tracker, opened } = tabs(FILE, ISSUE);
 
     await expect(tracker.openAll(snapshot([item({ ...pr, ...report })]))).rejects.toThrow(`cannot open ${ISSUE}`);
-    expect(opened).toEqual([ISSUE, PR, REPORT]);
+    expect(opened).toEqual([ISSUE, REPORT]);
   });
 });

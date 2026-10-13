@@ -2,12 +2,12 @@ import type { Snapshot } from '@switchboard/hub';
 import { windowTabs } from '@switchboard/hub';
 
 /**
- * Opens an item window's ticket, its links and its approval report in editor tabs (PRD R72): all of them when the dock opened the window, and
- * afterwards each one a snapshot adds. A tab the operator closes stays closed until the dock opens the window again.
+ * Opens each of an item window's work items' focus and approval report in editor tabs (PRD R72, R79): all of them when the dock opened the window,
+ * and afterwards a focus a later triage changes and a report a snapshot adds. A tab the operator closes stays closed until the dock opens the window again.
  */
 export class ItemTabs {
-  /** Every URL the window has seen, so a URL that leaves the snapshot, as with a Done item that ages out, does not open again when it returns. */
-  private readonly urls = new Set<string>();
+  /** Each work item's focus when last seen, so only a changed focus opens, and a work item that leaves the snapshot and returns opens nothing. */
+  private readonly focuses = new Map<number, string>();
   /** The reports in the last snapshot, so a report opens again each time its work item starts awaiting approval. */
   private reports = new Set<string>();
   /** False until the first snapshot, which opens nothing. */
@@ -26,11 +26,12 @@ export class ItemTabs {
       return;
     }
 
-    const { urls, reports } = windowTabs(snapshot, this.file, this.windows);
-    const added = [...urls.filter((url) => !this.urls.has(url)), ...reports.filter((report) => !this.reports.has(report))];
+    const { focuses, reports } = windowTabs(snapshot, this.file, this.windows);
+    const changed = focuses.filter((focus) => this.focuses.get(focus.workItemId) !== focus.url).map((focus) => focus.url);
+    const added = [...new Set(changed), ...reports.filter((report) => !this.reports.has(report))];
     const started = this.started;
 
-    urls.forEach((url) => this.urls.add(url));
+    focuses.forEach((focus) => this.focuses.set(focus.workItemId, focus.url));
     this.reports = new Set(reports);
     this.started = true;
 
@@ -45,12 +46,12 @@ export class ItemTabs {
       return;
     }
 
-    const { urls, reports } = windowTabs(snapshot, this.file, this.windows);
+    const { focuses, reports } = windowTabs(snapshot, this.file, this.windows);
 
-    urls.forEach((url) => this.urls.add(url));
+    focuses.forEach((focus) => this.focuses.set(focus.workItemId, focus.url));
     reports.forEach((report) => this.reports.add(report));
     this.started = true;
-    await this.openEach([...urls, ...reports]);
+    await this.openEach([...new Set(focuses.map((focus) => focus.url)), ...reports]);
   }
 
   /** Opens each tab in turn, so they keep their order; one that fails does not stop the rest. */

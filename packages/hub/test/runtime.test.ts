@@ -1438,3 +1438,73 @@ describe('Open in Claude (PRD R70)', () => {
     expect(markOf({ ...runtime.snapshot().workItems[0]!, approvalSends: false })).toBe('question');
   });
 });
+
+describe('focus (PRD R79)', () => {
+  const ISSUE = 'https://github.com/o/r/issues/7';
+  const COMMENT = `${ISSUE}#issuecomment-1`;
+  const LATER = `${ISSUE}#issuecomment-2`;
+  const focused = (focus: string) => ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop', focus } }));
+  const waiting = (): Config => ({
+    ...config(),
+    playbooks: new Map([playbook('triage:github', { description: 'Triage', kind: 'triage', template: 'Classify.' }), playbook('dev:develop', { description: 'Build it', focus: 'ticket', template: 'Build {{ticket.sourceKey}}.' })]),
+  });
+
+  it("offers the source's anchor ids, stores the chosen comment's URL, and keeps it through a running and a failed triage until a later one changes it", async () => {
+    const { store, cli, source, runtime } = setup(waiting());
+    let triages = 0;
+    let release = (): void => undefined;
+    source.result = { tickets: [{ ...issue('7'), url: ISSUE }] };
+    source.context = async () => {
+      triages++;
+
+      if (triages === 2) {
+        await new Promise<void>((resolve) => (release = resolve));
+      }
+
+      return {
+        context: 'Issue 7 [ticket]\n### alice, 2026-10-01 [c1]\nPlease fix.\n### bob, 2026-10-02 [c2]\nStill broken.',
+        anchors: [
+          { id: 'ticket', url: ISSUE, page: 'ticket' },
+          { id: 'c1', url: COMMENT, page: 'ticket' },
+          { id: 'c2', url: LATER, page: 'ticket' },
+        ],
+      };
+    };
+    cli.classifyResult = focused('c1');
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const schema = JSON.parse(cli.calls.find((call) => call[1] === '-p')![5]!);
+    expect(schema.properties.focus).toEqual({ type: 'string', enum: ['ticket', 'c1', 'c2'] });
+    expect(store.triage(1)?.focus).toBe(COMMENT);
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'unstarted', focus: COMMENT });
+
+    runtime.send({ type: 'retriage', workItemId: 1 });
+    await vi.waitFor(() => expect(triages).toBe(2));
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'triaging', focus: COMMENT });
+
+    cli.classifyResult = fail('API Error: 529');
+    release();
+    await runtime.settled();
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'failed', focus: COMMENT });
+
+    cli.classifyResult = focused('c2');
+    runtime.send({ type: 'retriage', workItemId: 1 });
+    await runtime.settled();
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'unstarted', focus: LATER });
+  });
+
+  it('focuses the ticket when the source tags no anchors', async () => {
+    const { store, cli, source, runtime } = setup(waiting());
+    source.result = { tickets: [{ ...issue('7'), url: ISSUE }] };
+    cli.classifyResult = focused('c1');
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(JSON.parse(cli.calls.find((call) => call[1] === '-p')![5]!).properties).not.toHaveProperty('focus');
+    expect(store.triage(1)?.focus).toBeNull();
+    expect(runtime.snapshot().workItems[0]?.focus).toBe(ISSUE);
+  });
+});

@@ -5,7 +5,7 @@ import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -50,7 +50,10 @@ export interface RuntimeDeps {
 
 export interface WorkItemView extends WorkItem {
   ticket: Ticket;
+  /** The latest triage, which may still be running. */
   triage: Triage | null;
+  /** The URL an item window opens: the latest successful triage's focus, else the ticket's URL (PRD R79). */
+  focus: string | null;
   sessions: Session[];
   worktree: Worktree | null;
   links: Link[];
@@ -70,6 +73,8 @@ export interface WorkItemView extends WorkItem {
 export interface PoolView {
   ticket: Ticket;
   triage: Triage | null;
+  /** The URL a click on its row opens (PRD R79). */
+  focus: string | null;
   /** The ticket's links, such as a GitHub issue its thread names (PRD R52, R61). */
   links: Link[];
   /** Started done work items for the ticket with the latest triage's playbook or one it is a return of; above 0 the dock marks it Returned (PRD R51). */
@@ -715,28 +720,35 @@ export class Runtime {
     const used = heldSlots(store);
 
     return {
-      workItems: store.workItems(this.deps.now() - DONE_DAYS * 24 * 60 * 60 * 1000).map((item) => ({
-        ...item,
-        ticket: store.ticket(item.ticketId)!,
-        triage: store.triagesFor(item.id).at(-1) ?? null,
-        sessions: store.sessionsFor(item.id),
-        worktree: store.worktreeFor(item.ticketId),
-        links: store.linksFor(item.ticketId),
-        pastes: store.pastesFor(item.id),
-        returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
-        parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
-        approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
-        waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
-      })),
+      workItems: store.workItems(this.deps.now() - DONE_DAYS * 24 * 60 * 60 * 1000).map((item) => {
+        const ticket = store.ticket(item.ticketId)!;
+        const triages = store.triagesFor(item.id);
+
+        return {
+          ...item,
+          ticket,
+          triage: triages.at(-1) ?? null,
+          focus: effectiveFocus(triages, ticket.url),
+          sessions: store.sessionsFor(item.id),
+          worktree: store.worktreeFor(item.ticketId),
+          links: store.linksFor(item.ticketId),
+          pastes: store.pastesFor(item.id),
+          returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
+          parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
+          approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
+          waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
+        };
+      }),
       pool: store
         .poolTickets()
         .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
         // A disabled source's pool is not read, so its tickets are not shown.
         .filter(({ ticket, items }) => this.sources.has(ticket.source) && items.every((item) => item.status === 'done'))
         .map(({ ticket, items }) => {
-          const triage = store.poolTriages(ticket.id).at(-1) ?? null;
+          const triages = store.poolTriages(ticket.id);
+          const triage = triages.at(-1) ?? null;
 
-          return { ticket, triage, links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null) };
+          return { ticket, triage, focus: effectiveFocus(triages, ticket.url), links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null) };
         }),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: repoRoots(settings),
@@ -849,7 +861,17 @@ export class Runtime {
 
         const text = triageText(context.context, this.deps.now());
         const result = await classify(
-          { claudePath: this.deps.claudePath, systemPrompt: action.systemPrompt, choices: action.choices, rates: action.rates, context: text, model: action.model, timeoutSeconds: action.timeoutSeconds, cwd: this.home },
+          {
+            claudePath: this.deps.claudePath,
+            systemPrompt: action.systemPrompt,
+            choices: action.choices,
+            rates: action.rates,
+            focusIds: (context.anchors ?? []).map((anchor) => anchor.id),
+            context: text,
+            model: action.model,
+            timeoutSeconds: action.timeoutSeconds,
+            cwd: this.home,
+          },
           this.deps.exec,
         );
 
@@ -865,6 +887,8 @@ export class Runtime {
                 severity: result.severity,
                 model: action.model,
                 links: context.links ?? [],
+                focus: result.focus,
+                anchors: context.anchors ?? [],
               },
         );
         return;

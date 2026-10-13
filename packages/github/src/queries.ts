@@ -36,7 +36,7 @@ query($owner:String!, $name:String!, $number:Int!, $status:String!){
         fieldValueByName(name:$status){ ... on ProjectV2ItemFieldSingleSelectValue{ name updatedAt } }
       }}
       assignees(first:10){ nodes{ login } }
-      comments(last:5){ nodes{ body createdAt author{ login } } }
+      comments(last:5){ nodes{ body createdAt url author{ login } } }
       timelineItems(last:100, itemTypes:[ASSIGNED_EVENT, UNASSIGNED_EVENT, PROJECT_V2_ITEM_STATUS_CHANGED_EVENT]){ nodes{
         __typename
         ... on AssignedEvent{ createdAt actor{ login } assignee{ ... on User{ login } ... on Bot{ login } } }
@@ -47,10 +47,10 @@ query($owner:String!, $name:String!, $number:Int!, $status:String!){
         number title url state isDraft updatedAt body
         author{ login }
         reviewRequests(first:10){ nodes{ requestedReviewer{ ... on User{ login } ... on Team{ slug } } } }
-        comments(last:5){ nodes{ body createdAt author{ login } } }
+        comments(last:5){ nodes{ body createdAt url author{ login } } }
         commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } }
         reviews(last:20){ nodes{ state submittedAt author{ login } } }
-        reviewThreads(last:5){ nodes{ isResolved comments(first:3){ nodes{ body createdAt author{ login } } } } }
+        reviewThreads(last:5){ nodes{ isResolved comments(first:3){ nodes{ body createdAt url author{ login } } } } }
       }}
     }
   }

@@ -57,6 +57,7 @@ public static partial class SettingsFields
 
     public const string AutoStartHelp = "Start the session after triage. Off, the work item waits in Unstarted for you to start it.";
     public const string RequiresWorktreeHelp = "Run the source’s setup prompt first when the ticket has no worktree.";
+    public const string FocusHelp = "The page an item window opens for this playbook’s work, at the earliest comment there that asks for it.";
     public const string ReturnOfHelp = "One playbook per line, such as dev:review-pr for dev:review-pr-followup. Returned also counts the ticket’s earlier work items with these playbooks.";
     public const string ApprovalSendsHelp = "Approve posts or pushes the session’s work. Off, you send it yourself, such as by pasting a reply, and Approve finishes up.";
     public const string RatesHelp = "Triage stores immediacy and severity, which these instructions must define. Off, it stores neither.";
@@ -179,11 +180,12 @@ public static partial class SettingsFields
             "approvalSends" => playbook with { ApprovalSends = isChecked },
             "rates" => playbook with { Rates = isChecked },
             "provider" => playbook with { Provider = text == "" ? null : text },
+            "focus" => playbook with { Focus = text == "" ? null : text },
             "permissionMode" => playbook with { PermissionMode = text == "" ? null : text },
             "model" => playbook with { Model = text == "" ? null : text },
             "returnOf" => playbook with { ReturnOf = text.Split(['\n', ',']).Select((line) => line.Trim()).Where((line) => line != "").Distinct(StringComparer.Ordinal).ToList() },
             // The hub accepts reports only on a task playbook and rates only on a triage one, so the draft drops the other kind's keys.
-            "kind" => text == "triage" ? playbook with { Kind = "triage", Reports = [], ApprovalSends = false, ReturnOf = [] } : playbook with { Kind = "task", Rates = false },
+            "kind" => text == "triage" ? playbook with { Kind = "triage", Reports = [], ApprovalSends = false, ReturnOf = [], Focus = null } : playbook with { Kind = "task", Rates = false },
             "workdir" => playbook with { Workdir = text == "repoRoot" ? "repoRoot" : "worktree" },
             "description" => playbook with { Description = text },
             "template" => playbook with { Template = text },
@@ -394,6 +396,8 @@ public static partial class SettingsFields
                 Options: WithCurrent([new FieldOption("", $"Sessions setting ({mode})"), .. modes.Select((entry) => new FieldOption(entry, entry))], playbook.PermissionMode is null ? null : JsonValue.Create(playbook.PermissionMode))));
             fields.Add(new Field("model", "Model", FieldKind.Text, "", $"Sessions setting ({model ?? (codex ? "Codex’s default" : "Claude’s default")})"));
             fields.Add(new Field("returnOf", "Return of", FieldKind.List, ReturnOfHelp));
+            fields.Add(new Field("focus", "Focus page", FieldKind.Select, FocusHelp,
+                Options: WithCurrent([new FieldOption("", "Any page"), new FieldOption("ticket", "The ticket"), new FieldOption("pr", "The pull request")], playbook.Focus is null ? null : JsonValue.Create(playbook.Focus))));
         }
 
         fields.Add(new Field(

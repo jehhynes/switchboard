@@ -286,7 +286,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     dim: false,
     movable: false,
     window: null,
-    open: ticket.url === '' ? null : { type: 'url', url: ticket.url },
+    open: entry.focus === null ? null : { type: 'url', url: entry.focus },
     controls: hubControls(controls),
     main: main?.label ?? null,
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
@@ -384,17 +384,15 @@ export function windowItems(snapshot: Snapshot, file: string, windows: string): 
 }
 
 /**
- * What the item window opened from `file` shows in editor tabs (PRD R72), each once, for every work item whose window it is: `urls`, the tickets,
- * their other linked tickets and pages, then their pull requests, and `reports`, the approval reports of `awaiting-approval` work items.
+ * What the item window opened from `file` shows in editor tabs (PRD R72): `focuses`, each of its work items' focus (PRD R79), and `reports`,
+ * the approval reports of its `awaiting-approval` work items, each once.
  */
-export function windowTabs(snapshot: Snapshot, file: string, windows: string): { urls: string[]; reports: string[] } {
+export function windowTabs(snapshot: Snapshot, file: string, windows: string): { focuses: { workItemId: number; url: string }[]; reports: string[] } {
   const items = windowItems(snapshot, file, windows);
-  const tickets = items.map((item) => item.ticket.url).filter((url) => url !== '');
-  const links = items.flatMap((item) => item.links.map((link) => link.target).filter((target) => /^https?:\/\//i.test(target)));
   const reports = items.flatMap((item) => (item.status === 'awaiting-approval' && item.approvalReport !== null ? [item.approvalReport] : []));
 
   return {
-    urls: [...new Set([...tickets, ...links.filter((link) => linkKind(link) !== 'pr'), ...links.filter((link) => linkKind(link) === 'pr')])],
+    focuses: items.flatMap((item) => (item.focus === null ? [] : [{ workItemId: item.id, url: item.focus }])),
     reports: [...new Set(reports)],
   };
 }
@@ -415,8 +413,8 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
     return { type: 'session', sessionId: latest.nativeSessionId, cwd: latest.cwd, provider: latest.provider };
   }
 
-  // A row with no window opens its ticket (PRD R71).
-  return windowOf(item, windows) === null && item.ticket.url !== '' ? { type: 'url', url: item.ticket.url } : null;
+  // A row with no window opens its focus (PRD R71, R79).
+  return windowOf(item, windows) === null && item.focus !== null ? { type: 'url', url: item.focus } : null;
 }
 
 /** The controls the hub runs; Copy and the VS Code controls are in `pastes` and `commands` (PRD R71). */

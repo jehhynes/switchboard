@@ -22,10 +22,13 @@ public sealed record PlaybookFields(
     public static readonly IReadOnlyList<string> ReportKinds = ["done", "approval", "worktree", "playbook", "paste"];
 
     /// <summary>The keys of a playbook entry, which the hub accepts and the window has fields for, in the order it writes them.</summary>
-    public static readonly IReadOnlyList<string> Keys = ["description", "kind", "autoStart", "requiresWorktree", "workdir", "reports", "approvalSends", "returnOf", "rates", "provider", "permissionMode", "model", "template"];
+    public static readonly IReadOnlyList<string> Keys = ["description", "kind", "autoStart", "requiresWorktree", "workdir", "reports", "approvalSends", "returnOf", "focus", "rates", "provider", "permissionMode", "model", "template"];
 
     /// <summary>The agent the playbook's sessions run in, or null for the sessions setting (PRD R22).</summary>
     public string? Provider { get; init; }
+
+    /// <summary>The page a task playbook's focus must be on, <c>ticket</c> or <c>pr</c>, or null for any (PRD R79).</summary>
+    public string? Focus { get; init; }
 
     public static readonly PlaybookFields Empty = new("", "task", false, false, null, null, "worktree", [], false, false, [], "");
 
@@ -116,6 +119,7 @@ public sealed record PlaybookFields(
             Text("template") ?? "")
         {
             Provider = Text("provider"),
+            Focus = Text("focus"),
         };
 
         return error is null ? (fields, null) : (null, error);
@@ -136,6 +140,7 @@ public sealed record PlaybookFields(
             ["approvalSends"] = ApprovalSends,
             ["rates"] = Rates,
             ["returnOf"] = Strings(ReturnOf),
+            ["focus"] = Focus,
             ["provider"] = Provider,
             ["template"] = Template,
         };
@@ -179,6 +184,11 @@ public sealed record PlaybookFields(
         if (ReturnOf.Count > 0)
         {
             entry["returnOf"] = Strings(ReturnOf);
+        }
+
+        if (Focus is not null)
+        {
+            entry["focus"] = Focus;
         }
 
         if (Rates)

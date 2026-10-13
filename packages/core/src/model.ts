@@ -109,6 +109,8 @@ export interface Triage {
   playbook: string | null;
   immediacy: Immediacy | null;
   severity: Severity | null;
+  /** The URL of the page or comment the operator reads first (PRD R79); null before triage ends, on failure, and on triages from before it existed. */
+  focus: string | null;
   model: string | null;
   startedAt: number;
   endedAt: number | null;

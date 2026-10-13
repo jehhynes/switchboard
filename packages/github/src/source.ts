@@ -1,4 +1,4 @@
-import type { ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
+import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
 import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
@@ -62,8 +62,12 @@ interface SearchPage {
 interface Comment {
   body: string;
   createdAt: string;
+  url?: string;
   author: Actor | null;
 }
+
+/** Each comment's anchor id, which its heading shows, such as `[c3]` (PRD R79). */
+type CommentIds = Map<Comment, string>;
 
 interface TimelineNode {
   __typename: string;
@@ -290,9 +294,10 @@ export class GithubSource implements Source {
     const pr = pullRequestOf(issue.closedByPullRequestsReferences.nodes);
     const roles = this.config.rolesFile === null ? { roles: new Map() } : await this.readRoles(this.config.rolesFile);
     const links = pr === null ? [] : [{ label: `Pull request #${pr.number}`, target: pr.url }];
-    const context = this.format(issue, pr, 'roles' in roles ? roles.roles : new Map());
+    const { anchors, ids } = anchorsOf(issue, pr);
+    const context = this.format(issue, pr, 'roles' in roles ? roles.roles : new Map(), ids);
 
-    return 'error' in roles ? { context, links, warning: `${roles.error} Comment authors show no roles.` } : { context, links };
+    return 'error' in roles ? { context, links, anchors, warning: `${roles.error} Comment authors show no roles.` } : { context, links, anchors };
   }
 
   /** Why the configured project's status field cannot hold a status, or null when it is a single-select field. */
@@ -326,11 +331,11 @@ export class GithubSource implements Source {
     return project?.number === this.config.project.number && project.owner?.login === this.config.project.owner;
   }
 
-  private format(issue: ContextIssue, pr: PullRequest | null, roles: Roles): string {
+  private format(issue: ContextIssue, pr: PullRequest | null, roles: Roles, ids: CommentIds): string {
     // GitHub stopped logging status events around 2026-09-25, so the Status field is the current status.
     const field = issue.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName;
     const lines = [
-      `GitHub issue #${issue.number}: ${issue.title}`,
+      `GitHub issue #${issue.number}: ${issue.title} [ticket]`,
       issue.url,
       `Board status: ${field?.name ?? 'unknown'}`,
       `Assignees: ${issue.assignees.nodes.map((assignee) => assignee.login).join(', ') || 'none'}`,
@@ -348,12 +353,12 @@ export class GithubSource implements Source {
       lines.push('', `## Last ${issue.comments.nodes.length} comments`);
 
       for (const comment of issue.comments.nodes) {
-        lines.push('', commentHeading(comment, roles), clip(comment.body, TEXT_LIMIT));
+        lines.push('', commentHeading(comment, roles, ids), clip(comment.body, TEXT_LIMIT));
       }
     }
 
     if (pr !== null) {
-      lines.push('', ...pullRequestLines(pr, roles));
+      lines.push('', ...pullRequestLines(pr, roles, ids));
     }
 
     return lines.join('\n');
@@ -398,12 +403,34 @@ export class GithubSource implements Source {
   }
 }
 
-/** The author's roles from the roles file follow the login, as `### QaTester (tester), 2026-10-06 14:02`. */
-function commentHeading(comment: Comment, roles: Roles): string {
+/** The author's roles from the roles file follow the login, and the anchor id ends it, as `### QaTester (tester), 2026-10-06 14:02 [c3]`. */
+function commentHeading(comment: Comment, roles: Roles, ids: CommentIds): string {
   const login = comment.author?.login ?? 'ghost';
   const listed = roles.get(login.toLowerCase());
+  const id = ids.get(comment);
 
-  return `### ${login}${listed === undefined ? '' : ` (${listed.join(', ')})`}, ${comment.createdAt.slice(0, 16).replace('T', ' ')}`;
+  return `### ${login}${listed === undefined ? '' : ` (${listed.join(', ')})`}, ${comment.createdAt.slice(0, 16).replace('T', ' ')}${id === undefined ? '' : ` [${id}]`}`;
+}
+
+/**
+ * The pages and comments triage can choose as the focus (PRD R79): the issue, the pull request in the context, and each comment with a URL,
+ * numbered `c1`, `c2`… by creation time across the issue, pull request and review threads, so the lowest is the earliest.
+ */
+function anchorsOf(issue: ContextIssue, pr: PullRequest | null): { anchors: Anchor[]; ids: CommentIds } {
+  const comments = [
+    ...issue.comments.nodes.map((comment) => ({ comment, page: 'ticket' as const })),
+    ...(pr === null ? [] : [...pr.comments.nodes, ...pr.reviewThreads.nodes.flatMap((thread) => thread.comments.nodes)].map((comment) => ({ comment, page: 'pr' as const }))),
+  ].filter((entry) => entry.comment.url !== undefined);
+  // A stable sort keeps the section order for comments made in the same second.
+  const ordered = comments.sort((a, b) => a.comment.createdAt.localeCompare(b.comment.createdAt));
+  const ids: CommentIds = new Map(ordered.map((entry, index) => [entry.comment, `c${index + 1}`]));
+  const anchors: Anchor[] = [
+    { id: 'ticket', url: issue.url, page: 'ticket' },
+    ...(pr === null ? [] : [{ id: 'pr', url: pr.url, page: 'pr' as const }]),
+    ...ordered.map((entry) => ({ id: ids.get(entry.comment)!, url: entry.comment.url!, page: entry.page })),
+  ];
+
+  return { anchors, ids };
 }
 
 /** The most recently updated open closing pull request, else the most recently updated one (GC selectPullRequest). */
@@ -413,10 +440,10 @@ function pullRequestOf(nodes: PullRequest[]): PullRequest | null {
   return byRecency.find((pr) => pr.state === 'OPEN') ?? byRecency[0] ?? null;
 }
 
-function pullRequestLines(pr: PullRequest, roles: Roles): string[] {
+function pullRequestLines(pr: PullRequest, roles: Roles, ids: CommentIds): string[] {
   const checks = pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? 'none';
   const lines = [
-    `## Pull request #${pr.number}: ${pr.title}`,
+    `## Pull request #${pr.number}: ${pr.title} [pr]`,
     pr.url,
     `Author: ${pr.author?.login ?? 'ghost'}. State: ${pr.state}${pr.isDraft ? ' (draft)' : ''}. Checks: ${checks}.`,
     '',
@@ -433,7 +460,7 @@ function pullRequestLines(pr: PullRequest, roles: Roles): string[] {
     lines.push('', `### Last ${pr.comments.nodes.length} pull request comments`);
 
     for (const comment of pr.comments.nodes) {
-      lines.push(commentHeading(comment, roles), clip(comment.body, TEXT_LIMIT));
+      lines.push(commentHeading(comment, roles, ids), clip(comment.body, TEXT_LIMIT));
     }
   }
 
@@ -448,7 +475,7 @@ function pullRequestLines(pr: PullRequest, roles: Roles): string[] {
       lines.push('', `#### ${thread.isResolved ? 'Resolved' : 'Unresolved'} thread`);
 
       for (const comment of thread.comments.nodes) {
-        lines.push(commentHeading(comment, roles), clip(comment.body, TEXT_LIMIT));
+        lines.push(commentHeading(comment, roles, ids), clip(comment.body, TEXT_LIMIT));
       }
     }
   }
