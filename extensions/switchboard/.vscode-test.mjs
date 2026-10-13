@@ -16,6 +16,6 @@ export default defineConfig({
   workspaceFolder: './test-integration/workspace',
   launchArgs: [`--user-data-dir=${profile}`, `--extensions-dir=${join(profile, 'extensions')}`],
   // The extension reads os.homedir(); an isolated home keeps the test hub away from the developer's.
-  env: { USERPROFILE: home, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), SWITCHBOARD_TEST_HOME: home, VSCODE_PORTABLE: portable },
+  env: { USERPROFILE: home, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex'), SWITCHBOARD_TEST_HOME: home, VSCODE_PORTABLE: portable },
   mocha: { timeout: 60_000, ui: 'bdd' },
 });

@@ -23,12 +23,13 @@ afterEach(() => {
     child.kill();
   }
 
-  rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+  // The hub kills its Codex trust exchange without waiting, so the app-server can still hold <home>/.codex briefly.
+  rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 function start(...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
-  // CLAUDE_CONFIG_DIR keeps hook installation inside the temporary home.
-  const env = { ...process.env, CLAUDE_CONFIG_DIR: join(home, '.claude') };
+  // CLAUDE_CONFIG_DIR and CODEX_HOME keep hook installation inside the temporary home.
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex') };
   const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
@@ -155,6 +156,7 @@ describe('hub entry point', () => {
 
     expect(refused).toMatchObject({ code: 3, stderr: 'Refused: Unknown session s1.\n' });
     expect(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks.Stop).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8')).hooks.Stop).toHaveLength(1);
 
     await start('--stop').exited;
     expect((await hub.exited).code).toBe(0);
