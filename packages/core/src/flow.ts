@@ -32,8 +32,6 @@ export const MESSAGES = {
   sessionEndedWithoutApproval: 'The session ended without an approval report.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
-  openedToAnswer: 'Opened in Claude to answer.',
-  openedInCodexToAnswer: 'Opened in Codex to answer.',
 } as const;
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
@@ -873,6 +871,12 @@ class Flow {
       const session = this.store.session(entry.sessionId);
 
       if (session !== null && session.state !== 'starting') {
+        // An opened question waits until the operator's tab runs or asks again; a background listing was read before the stop, and an idle tab has
+        // not answered, so neither changes the session or the clock (PRD R70).
+        if (session.outcome === 'opened' && session.state === 'ended' && !(entry.interactive === true && (entry.state === 'running' || entry.state === 'waiting'))) {
+          continue;
+        }
+
         // An interactive session is the operator's; Switchboard never stops it (PRD R39).
         // The operator has the session now and answers in its own view, so a reported question is no longer waited on.
         if (entry.interactive === true && (!session.released || session.releasing || session.question !== null)) {
@@ -908,9 +912,11 @@ class Flow {
       return;
     }
 
-    this.store.updateSession(session.id, { state, stateAt: this.now, stateDetail: detail, endedAt: null });
+    const reopened = session.outcome === 'opened' ? { outcome: null, outcomeDetail: null } : {};
 
-    const current = { ...session, state, stateDetail: detail };
+    this.store.updateSession(session.id, { state, stateAt: this.now, stateDetail: detail, endedAt: null, ...reopened });
+
+    const current = { ...session, state, stateDetail: detail, ...reopened };
     // A new turn after the last one ended, as when the operator resumes the session in VS Code.
     const resumed = (state === 'running' || state === 'waiting') && (session.state === 'ended' || TURN_ENDED.includes(session.state));
 
@@ -1006,6 +1012,11 @@ class Flow {
 
     if (!session.reports.includes(report.kind)) {
       throw new Refusal(`This session's report contract does not offer the ${report.kind} report.`);
+    }
+
+    // A report after Open in Claude or Codex comes from the session the operator resumed, so its question no longer waits (PRD R70).
+    if (session.outcome === 'opened') {
+      this.store.updateSession(sessionId, { outcome: null, outcomeDetail: null });
     }
 
     const item = this.latest(session);
@@ -1127,16 +1138,18 @@ class Flow {
 
     // A session that already reported done ends normally, so a finished setup still starts its task.
     const stopped = reason !== 'release' && session.outcome !== 'done';
-    const message = reason !== 'open' ? MESSAGES.stopped : session.provider === 'codex' ? MESSAGES.openedInCodexToAnswer : MESSAGES.openedToAnswer;
+    // Open in Claude or Codex leaves the status as it was: the question still waits on the operator (PRD R70).
+    const outcome = reason === 'open' ? { outcome: 'opened' as const, outcomeDetail: null } : { outcome: 'stopped' as const, outcomeDetail: MESSAGES.stopped };
 
     this.store.updateSession(sessionId, {
       state: 'ended',
       released: true,
       releasing: false,
       question: null,
-      stateAt: this.now,
+      // An opened question keeps the time it was asked, which the row's clock counts from (PRD R27).
+      ...(reason === 'open' ? {} : { stateAt: this.now }),
       endedAt: this.now,
-      ...(stopped && session.outcome === null ? { outcome: 'stopped' as const, outcomeDetail: message } : {}),
+      ...(stopped && session.outcome === null ? outcome : {}),
     });
 
     if (!stopped) {
@@ -1152,11 +1165,13 @@ class Flow {
 
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', null);
+    } else if (reason === 'open') {
+      return;
     } else if (item.approvalHeld || item.status === 'awaiting-approval') {
       // A stop is not a decision on the approval, so Approve stays offered (PRD R40).
-      this.restoreApproval(item, message);
+      this.restoreApproval(item, MESSAGES.stopped);
     } else {
-      this.block(item, message);
+      this.block(item, MESSAGES.stopped);
     }
   }
 

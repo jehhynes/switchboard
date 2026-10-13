@@ -467,6 +467,12 @@ class Builder {
         return { category: 'session', icon: 'error', text: 'The session failed to start', detail: str(detail['message']), tone: 'error' };
       case 'stop-succeeded':
         skip.add('state').add('released');
+
+        // The text says the session stopped to open its question.
+        if (detail['reason'] === 'open') {
+          skip.add('outcome');
+        }
+
         return detail['reason'] === 'release'
           ? { category: 'session', icon: 'debug-disconnect', text: `Switchboard released ${session} so it can resume in VS Code` }
           : detail['reason'] === 'open'

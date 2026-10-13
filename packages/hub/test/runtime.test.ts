@@ -5,6 +5,7 @@ import { ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store } from '@switchboard/core';
+import { markOf } from '@switchboard/core/group';
 import type { ContextResult, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
@@ -936,8 +937,9 @@ describe('Runtime', () => {
 
     expect(runtime.send({ type: 'open-question', workItemId: 1, nativeSessionId: 'thread-1' }).refused).toBeNull();
     await runtime.settled();
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Opened in Codex to answer.' });
-    expect(store.session('s1')).toMatchObject({ state: 'ended', question: null });
+    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null });
+    expect(store.session('s1')).toMatchObject({ state: 'ended', question: null, outcome: 'opened' });
+    expect(markOf({ ...runtime.snapshot().workItems[0]!, approvalSends: false })).toBe('question');
   });
 
   describe('Codex question races and recovery (PRD R70)', () => {
@@ -1267,7 +1269,7 @@ describe('Open in Claude (PRD R70)', () => {
     return context;
   }
 
-  it('stops the session for Open in Claude without the release check, and blocks the work item', async () => {
+  it('stops the session for Open in Claude without the release check, and keeps the work item waiting on the question', async () => {
     const { store, cli, runtime } = await started();
     runtime.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: null });
     const roster = cli.calls.filter((call) => call[1] === 'agents').length;
@@ -1277,7 +1279,8 @@ describe('Open in Claude (PRD R70)', () => {
 
     expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([['claude', 'stop', '00000001']]);
     expect(cli.calls.filter((call) => call[1] === 'agents')).toHaveLength(roster);
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Opened in Claude to answer.' });
-    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    expect(store.workItem(1)).toMatchObject({ status: 'running', error: null });
+    expect(store.session('s1')).toMatchObject({ state: 'ended', released: true, outcome: 'opened' });
+    expect(markOf({ ...runtime.snapshot().workItems[0]!, approvalSends: false })).toBe('question');
   });
 });

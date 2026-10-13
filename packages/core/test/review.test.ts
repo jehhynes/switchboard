@@ -43,7 +43,7 @@ describe('readyAt (PRD R27)', () => {
     h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: null });
     expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', readyAt: T0 + HOUR });
 
-    // Resumed with a question, opened in Claude: the stop restores the approval without moving readyAt.
+    // Resumed with a question and opened in Claude, the run keeps its approval until the tab's turn ends, without moving readyAt.
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     h.now = T0 + 2 * HOUR;
     h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
@@ -52,6 +52,10 @@ describe('readyAt (PRD R27)', () => {
     h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
     expect(groupOfItem(h, 1)).toBe('blocked');
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
+    expect(h.item(1)).toMatchObject({ status: 'running', approvalHeld: true, readyAt: T0 + HOUR });
+    expect(groupOfItem(h, 1)).toBe('blocked');
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null, interactive: true }] });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', readyAt: T0 + HOUR });
 
     h.act({ type: 'snooze', ticketId: 1, until: null });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
-import { MESSAGES } from '../src/flow.js';
+import { groupOf, holdsSlot, markOf } from '../src/group.js';
 import { Harness, MINUTE, issue, settings } from './flowHarness.js';
 
 /** A dev:question task session for ticket `key`, started and waiting on a question in its background process. */
@@ -16,6 +16,13 @@ function waiting(h: Harness, key = '1'): { item: number; session: string } {
   h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
 
   return { item, session };
+}
+
+/** The work item's group and mark, as the dock shows them. */
+function shown(h: Harness, item: number): { group: string; mark: string | null; holdsSlot: boolean } {
+  const view = { ...h.item(item), sessions: h.store.sessionsFor(item), approvalSends: false };
+
+  return { group: groupOf(view), mark: markOf(view), holdsSlot: holdsSlot(view) };
 }
 
 describe('Open in Claude refusals (PRD R70)', () => {
@@ -64,25 +71,48 @@ describe('Open in Claude refusals (PRD R70)', () => {
 });
 
 describe('Open in Claude (PRD R70)', () => {
-  it('stops the waiting session, blocks the work item with its reason, and runs it again when the tab resumes it', () => {
+  it('stops the waiting session and keeps the status and the question until the tab resumes it', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
+    const before = h.item(item);
+    const asked = h.store.session(session)!.stateAt;
 
     expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12341', reason: 'open' }]);
-    expect(h.item(item).status).toBe('running');
 
     h.now += MINUTE;
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
-    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.openedToAnswer });
-    expect(h.store.session(session)).toMatchObject({ state: 'ended', released: true, outcome: 'stopped', outcomeDetail: 'Opened in Claude to answer.' });
+    expect(h.item(item)).toMatchObject({ status: 'running', error: null, statusAt: before.statusAt });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', released: true, outcome: 'opened', outcomeDetail: null, stateAt: asked });
+    expect(shown(h, item)).toEqual({ group: 'blocked', mark: 'question', holdsSlot: false });
+
+    // Neither a roster without the session nor a background listing read before the stop changes anything.
+    h.act({ type: 'roster', sessions: [] });
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null }] });
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.item(item)).toMatchObject({ status: 'running', error: null });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', outcome: 'opened' });
+
+    // A tab listed idle has not answered, so neither it nor closing it settles the run or moves the clock.
+    h.now += MINUTE;
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'idle', detail: null, interactive: true }] });
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.item(item)).toMatchObject({ status: 'running', error: null });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', outcome: 'opened', stateAt: asked });
+    expect(shown(h, item)).toEqual({ group: 'blocked', mark: 'question', holdsSlot: false });
 
     // The tab asks the question again, then runs once answered.
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null, interactive: true }] });
-    expect(h.item(item)).toMatchObject({ status: 'running', error: null });
     expect(h.store.session(session)).toMatchObject({ state: 'waiting', outcome: null, released: true });
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', error: null });
+    expect(shown(h, item)).toEqual({ group: 'progress', mark: 'running', holdsSlot: true });
+
+    // The tab's turn ends without a report, which settles the run as any resumed turn does.
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item).status).toBe('blocked');
   });
 
-  it('returns a work item that held an approval to awaiting approval with the reason', () => {
+  it('keeps a held approval waiting on the question', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
@@ -94,7 +124,8 @@ describe('Open in Claude (PRD R70)', () => {
     h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' });
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
 
-    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: MESSAGES.openedToAnswer, approvalPrompt: '/publish' });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: null, approvalPrompt: '/publish' });
+    expect(shown(h, item)).toMatchObject({ group: 'blocked', mark: 'question' });
   });
 
   it('notes a failed stop and leaves the session waiting', () => {
@@ -111,7 +142,7 @@ describe('Open in Claude (PRD R70)', () => {
 });
 
 describe('History of Open in Claude (PRD R59, R70)', () => {
-  it('logs Open in Claude, its refusal and the stop', () => {
+  it('logs Open in Claude, its refusal and the stop, which changes no work item', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
@@ -126,7 +157,8 @@ describe('History of Open in Claude (PRD R59, R70)', () => {
       { type: 'open-question', actor: 'operator', detail: null, refused: null },
       { type: 'stop-succeeded', actor: 'hub', detail: { reason: 'open' }, refused: null },
     ]);
-    expect(events[2]!.changes.find((change) => change.entity === 'workItem')!.fields).toMatchObject({ status: ['running', 'blocked'], error: [null, MESSAGES.openedToAnswer] });
+    expect(events[2]!.changes.map((change) => change.entity)).toEqual(['session']);
+    expect(events[2]!.changes[0]!.fields).toMatchObject({ state: ['waiting', 'ended'], outcome: [null, 'opened'] });
   });
 });
 
@@ -159,7 +191,7 @@ describe('Codex questions (PRD R70)', () => {
     expect(h.store.session(session)!.question!.id).not.toBe(asked.id);
   });
 
-  it("opens a waiting Codex question in Codex, blocking the work item with Codex's reason and dropping the question", () => {
+  it('opens a waiting Codex question in Codex, keeping the status and the question mark until the session reports again', () => {
     const h = codexHarness();
     const { item, session } = codexRunning(h);
 
@@ -168,8 +200,14 @@ describe('Codex questions (PRD R70)', () => {
     expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'thread-1' })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'codex', shortId: 'thread-1', reason: 'open' }]);
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
 
-    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.openedInCodexToAnswer });
-    expect(h.store.session(session)).toMatchObject({ state: 'ended', question: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', error: null });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', question: null, outcome: 'opened' });
+    expect(shown(h, item)).toMatchObject({ group: 'blocked', mark: 'question' });
+
+    // The Codex panel's run reports, so the question was answered.
+    h.report(session, { kind: 'stage', stage: 'Answered' });
+    expect(h.store.session(session)?.outcome).toBeNull();
+    expect(shown(h, item)).toMatchObject({ group: 'progress', mark: 'running' });
   });
 
   it('takes no question from a session the operator resumed, and drops one when the operator is seen running the session', () => {

@@ -1,4 +1,4 @@
-import { activeSession, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf } from '@switchboard/core/group';
+import { activeSession, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion } from '@switchboard/core/group';
 import type { Provider } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -332,7 +332,6 @@ export interface Clock {
  */
 export function clockOf(item: WorkItemView): Clock {
   const group = groupOf(item);
-  const session = activeSession(item);
 
   if (group === 'done') {
     // Never the ticket's scopeAt: a ticket that returned after the work item was done has a later one.
@@ -346,7 +345,9 @@ export function clockOf(item: WorkItemView): Clock {
   if (group === 'blocked') {
     const byStatus = item.status === 'blocked' || item.status === 'failed';
 
-    return !byStatus && session?.state === 'waiting' ? { since: session.stateAt, label: 'Waiting since' } : { since: item.statusAt, label: 'In this status since' };
+    const latest = item.sessions.at(-1);
+
+    return !byStatus && latest !== undefined && waitsOnQuestion(item) ? { since: latest.stateAt, label: 'Waiting since' } : { since: item.statusAt, label: 'In this status since' };
   }
 
   if (group === 'review') {

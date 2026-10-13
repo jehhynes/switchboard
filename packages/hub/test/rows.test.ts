@@ -145,6 +145,8 @@ describe('clockOf', () => {
     expect(clockOf(scoped({ status: 'blocked' }))).toEqual({ since: 2, label: 'In this status since' });
     expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     expect(clockOf(scoped({ status: 'setup', sessions: [session({ kind: 'setup', state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
+    // Open in Claude ended the session but the question still waits from when it was asked (PRD R70).
+    expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'ended', outcome: 'opened', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     // A blocked item whose session still waits counts from the block.
     expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
     expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6, sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });

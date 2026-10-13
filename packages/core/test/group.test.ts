@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { activeSession, groupOf, holdsSlot, markOf, needsYou, reviewOrder, triageLabel, turnOf, urlKey } from '../src/group.js';
-import type { DoneReason, SessionState, WorkItemStatus } from '../src/model.js';
+import type { DoneReason, SessionOutcome, SessionState, WorkItemStatus } from '../src/model.js';
 
-const item = (status: WorkItemStatus, ...states: SessionState[]) => ({ status, readyAt: null as number | null, sessions: states.map((state) => ({ state })) });
+const item = (status: WorkItemStatus, ...states: SessionState[]) => ({
+  status,
+  readyAt: null as number | null,
+  sessions: states.map((state) => ({ state, outcome: null as SessionOutcome | null })),
+});
+/** A work item whose latest session Open in Claude stopped (PRD R70). */
+const opened = (status: WorkItemStatus) => ({ ...item(status), sessions: [{ state: 'ended' as SessionState, outcome: 'opened' as SessionOutcome | null }] });
 const ready = (status: WorkItemStatus, ...states: SessionState[]) => ({ ...item(status, ...states), readyAt: 1000 });
 
 describe('groupOf', () => {
@@ -16,6 +22,12 @@ describe('groupOf', () => {
     expect(groupOf(item('running', 'ended', 'waiting'))).toBe('blocked');
     expect(groupOf(ready('awaiting-approval', 'waiting'))).toBe('blocked');
     expect(groupOf(item('queued', 'waiting'))).toBe('blocked');
+    expect(groupOf(opened('running'))).toBe('blocked');
+    expect(groupOf({ ...opened('awaiting-approval'), readyAt: 1000 })).toBe('blocked');
+    expect(groupOf(opened('done'))).toBe('done');
+    // Approve while the slots are full, or triage again, moves on from the opened question.
+    expect(groupOf({ ...opened('queued'), readyAt: 1000 })).toBe('review');
+    expect(groupOf(opened('queued'))).toBe('unstarted');
     expect(['awaiting-approval', 'finished', 'running', 'setup', 'queued'].map((status) => groupOf(ready(status as WorkItemStatus, 'running')))).toEqual([
       'review',
       'review',
@@ -52,6 +64,7 @@ describe('holdsSlot', () => {
     expect(holdsSlot(item('running', 'running'))).toBe(true);
     expect(holdsSlot(item('setup', 'running'))).toBe(true);
     expect(holdsSlot(item('running', 'waiting'))).toBe(false);
+    expect(holdsSlot(opened('running'))).toBe(false);
     expect(['queued', 'awaiting-approval', 'finished', 'blocked', 'failed', 'done'].map((status) => holdsSlot(item(status as WorkItemStatus, 'idle')))).toEqual([
       false,
       false,
@@ -83,6 +96,8 @@ describe('markOf', () => {
   it('gives what the operator must do in Blocked on you, a question first (PRD R27)', () => {
     expect(marked('awaiting-approval', ['waiting'], { approvalSends: true, readyAt: 1 })).toBe('question');
     expect(marked('running', ['ended', 'waiting'])).toBe('question');
+    expect(markOf({ ...opened('running'), approvalSends: false, doneReason: null })).toBe('question');
+    expect(markOf({ ...opened('failed'), approvalSends: false, doneReason: null })).toBe('failed');
     expect(marked('blocked')).toBe('blocked');
     expect(marked('failed')).toBe('failed');
   });
@@ -112,7 +127,7 @@ describe('activeSession', () => {
   it('returns the latest session while it has not ended, or null, ignoring an earlier session left open', () => {
     const latest = { state: 'running' as const };
     expect(activeSession({ sessions: [{ state: 'idle' as const }, latest] })).toBe(latest);
-    expect(activeSession(item('running', 'ended', 'idle'))).toEqual({ state: 'idle' });
+    expect(activeSession(item('running', 'ended', 'idle'))).toEqual({ state: 'idle', outcome: null });
     expect(activeSession(item('blocked', 'idle', 'ended'))).toBeNull();
     expect(activeSession(item('unstarted'))).toBeNull();
   });

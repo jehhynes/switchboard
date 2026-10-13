@@ -5,13 +5,24 @@ import type { DoneReason, Session, WorkItem } from './model.js';
 /** Dock groups (PRD R27): Blocked on you, Ready for review, In progress, Unstarted and Done; Snoozed is the dock's own. */
 export type Group = 'blocked' | 'review' | 'progress' | 'unstarted' | 'done';
 
-type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: Pick<Session, 'state'>[] };
+type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: Pick<Session, 'state' | 'outcome'>[] };
 
 /** The latest session while it has not ended; an earlier session left open idle in VS Code is not the work item's (PRD R17). */
 export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions: S[] }): S | null {
   const latest = item.sessions.at(-1);
 
   return latest !== undefined && latest.state !== 'ended' ? latest : null;
+}
+
+/**
+ * A question waits on the operator: the session waits on it, or Open in Claude or Codex stopped it and it has not run since (PRD R70). A
+ * queued, triaged or failed work item has moved on from an opened question.
+ */
+export function waitsOnQuestion(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state' | 'outcome'>[] }): boolean {
+  const latest = item.sessions.at(-1);
+  const opened = latest?.outcome === 'opened' && (item.status === 'setup' || item.status === 'running' || item.status === 'awaiting-approval');
+
+  return latest?.state === 'waiting' || opened;
 }
 
 /**
@@ -27,7 +38,7 @@ export function groupOf(item: Grouped): Group {
     return 'unstarted';
   }
 
-  if (item.status === 'blocked' || item.status === 'failed' || activeSession(item)?.state === 'waiting') {
+  if (item.status === 'blocked' || item.status === 'failed' || waitsOnQuestion(item)) {
     return 'blocked';
   }
 
@@ -60,8 +71,8 @@ export function needsYou(item: Grouped & { ticket: { snoozed: boolean } }): bool
 }
 
 /** A session whose work item is running and not waiting on a question holds a concurrency slot (PRD R38). */
-export function holdsSlot(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state'>[] }): boolean {
-  return (item.status === 'setup' || item.status === 'running') && activeSession(item)?.state !== 'waiting';
+export function holdsSlot(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state' | 'outcome'>[] }): boolean {
+  return (item.status === 'setup' || item.status === 'running') && !waitsOnQuestion(item);
 }
 
 /** Ready for review's sort key: the operator's position, else when the work item became ready (PRD R27, R73). */
@@ -117,7 +128,7 @@ export const MARK_GLYPHS: Record<Mark, string> = {
 export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approvalSends: boolean }): Mark | null {
   switch (groupOf(item)) {
     case 'blocked':
-      if (activeSession(item)?.state === 'waiting') {
+      if (waitsOnQuestion(item)) {
         return 'question';
       }
 

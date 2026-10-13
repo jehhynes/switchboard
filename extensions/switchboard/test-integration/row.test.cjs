@@ -26,12 +26,12 @@ function item(id, cwd, state = 'waiting') {
     ticketId: id,
     parentId: null,
     playbook: 'dev:develop',
-    status: state === 'ended' ? 'blocked' : state === 'none' ? 'unstarted' : 'running',
+    status: state === 'none' ? 'unstarted' : 'running',
     stage: null,
     stageAt: null,
     taskPrompt: null,
     warning: null,
-    error: state === 'ended' ? 'Opened in Claude to answer.' : null,
+    error: null,
     unassignedAt: null,
     queuedAt: null,
     approvalPrompt: null,
@@ -49,7 +49,7 @@ function item(id, cwd, state = 'waiting') {
     sessions: state === 'none' ? [] : [
       {
         id: `s${id}`, workItemId: id, kind: 'task', provider: 'claude', nativeSessionId: `native-${id}`, shortId: `abcd000${id}`, cwd, state, stateAt: 1_791_000_000_000,
-        stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 1_791_000_000_000, endedAt: state === 'ended' ? 1_791_000_000_000 : null, released: state === 'ended', reports: [],
+        stateDetail: null, outcome: state === 'ended' ? 'opened' : null, outcomeDetail: null, startedAt: 1_791_000_000_000, endedAt: state === 'ended' ? 1_791_000_000_000 : null, released: state === 'ended', reports: [],
       },
     ],
     worktree: null,

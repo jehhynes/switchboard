@@ -10,7 +10,8 @@ export type SessionKind = 'setup' | 'task';
 /** Observed session state (PRD R36). */
 export type SessionState = 'starting' | 'running' | 'waiting' | 'idle' | 'failed' | 'ended';
 
-export type SessionOutcome = 'done' | 'failed' | 'stopped';
+/** `opened`: stopped for Open in Claude or Codex; the question still waits until the operator resumes the session (PRD R70). */
+export type SessionOutcome = 'done' | 'failed' | 'stopped' | 'opened';
 
 /** The reports a session can send (PRD R23). */
 export const REPORT_KINDS = ['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question'] as const;
