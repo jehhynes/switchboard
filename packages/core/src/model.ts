@@ -66,6 +66,8 @@ export interface WorkItem {
   stageAt: number | null;
   /** The prompt the latest task session ran, or the typed prompt of an ad-hoc work item. */
   taskPrompt: string | null;
+  /** The operator's guidance from Start, added to the next task session's prompt and cleared when that session starts (PRD R77). */
+  guidance: string | null;
   warning: string | null;
   /** The cause shown for `failed` or `blocked`, or a note such as a failed stop. */
   error: string | null;

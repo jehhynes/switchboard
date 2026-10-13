@@ -55,6 +55,19 @@ public sealed class DockViewTests
     }
 
     [Fact]
+    public void Parse_RecordedMessage_ReadsStartWithGuidanceInput()
+    {
+        var unstarted = Fixtures.Row("item:9");
+        var guided = unstarted.Controls[1];
+
+        Assert.Equal(["Start", "Start with guidance…"], unstarted.Controls.Take(2).Select((control) => control.Label));
+        Assert.Null(unstarted.Controls[0].Input);
+        Assert.Equal(new DockInput("Start with guidance", "Switchboard adds it to the end of the session's prompt.", "guidance", "Start"), guided.Input);
+        Assert.Equal("{\"type\":\"start\",\"workItemId\":9}", guided.Action.ToJsonString());
+        Assert.Equal("{\"type\":\"pick\",\"ticketId\":4}", Fixtures.Row("ticket:4").Controls.Single((control) => control.Input is not null).Action.ToJsonString());
+    }
+
+    [Fact]
     public void Parse_NullView_Throws()
     {
         Assert.Throws<System.Text.Json.JsonException>(() => DockView.Parse("null"));

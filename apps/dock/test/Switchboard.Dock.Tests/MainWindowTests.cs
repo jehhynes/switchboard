@@ -276,6 +276,46 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void StartWithGuidance_Clicked_AsksForTextAndPostsItOnlyAfterStart()
+    {
+        var (window, _) = Open();
+        var row = Fixtures.Row("item:9");
+        var menu = window.MenuOf(row);
+        var guided = (MenuItem)menu[1];
+        Window Dialog() => Assert.Single(window.OwnedWindows);
+        Button DialogButton(string name) => Dialog().GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
+        TextBox Text() => Dialog().GetVisualDescendants().OfType<TextBox>().Single((box) => box.Name == "InputText");
+
+        Assert.Equal(["Start", "Start with guidance…"], menu.Take(2).Select((item) => ((MenuItem)item).Header));
+
+        guided.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["Start with guidance", "Switchboard adds it to the end of the session's prompt."], VisibleTexts(Dialog()).Take(2));
+        Assert.False(DialogButton("InputAction").IsEnabled);
+
+        Text().Text = "   ";
+        Assert.False(DialogButton("InputAction").IsEnabled);
+        Text().Text = "Check the 2024 thread.";
+        DialogButton("InputCancel").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Empty(window.OwnedWindows);
+        Assert.Empty(hub.Calls);
+
+        hub.ActReplies.Enqueue(null);
+        guided.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Text().Text = "  Check the 2024 thread.\nKeep it short.  ";
+        Assert.True(DialogButton("InputAction").IsEnabled);
+        DialogButton("InputAction").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["act {\"type\":\"start\",\"workItemId\":9,\"guidance\":\"Check the 2024 thread.\\nKeep it short.\"}"], hub.Calls);
+        Assert.Equal("{\"type\":\"start\",\"workItemId\":9}", row.Controls[1].Action.ToJsonString());
+    }
+
+    [AvaloniaFact]
     public void Show_NotRunning_SaysSoAboveTheList()
     {
         var (window, model) = Open();

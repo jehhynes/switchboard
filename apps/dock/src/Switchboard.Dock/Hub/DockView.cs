@@ -133,8 +133,14 @@ public sealed partial record DockWindow(string Name, string Title, IReadOnlyList
 /// <summary>What a row's click opens; <paramref name="Provider"/> names the agent of a session, and an older hub sends none.</summary>
 public sealed record DockOpen(string Type, int? WorkItemId, string? SessionId, string? Cwd, string? Url, string? Provider = null);
 
-/// <summary>A hub control in the row's menu, with the action posted to <c>/action</c> as the hub sent it, after <paramref name="Confirm"/> when set.</summary>
-public sealed record DockControl(string Label, JsonObject Action, string Glyph = "", DockConfirm? Confirm = null);
+/// <summary>
+/// A hub control in the row's menu, with the action posted to <c>/action</c> as the hub sent it, after <paramref name="Confirm"/> when set, or with
+/// the text <paramref name="Input"/> asks for.
+/// </summary>
+public sealed record DockControl(string Label, JsonObject Action, string Glyph = "", DockConfirm? Confirm = null, DockInput? Input = null);
+
+/// <summary>A text the dock asks for before it posts a control's action, set as the action's <paramref name="Field"/>, such as Start's guidance (PRD R77).</summary>
+public sealed record DockInput(string Question, string Detail, string Field, string Action);
 
 /// <summary>A question the dock asks before it posts a control's action, such as Delete's (PRD R76); <paramref name="Action"/> labels the button that goes ahead.</summary>
 public sealed record DockConfirm(string Question, string Detail, string Action);

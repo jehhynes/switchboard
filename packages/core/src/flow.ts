@@ -107,10 +107,13 @@ export type FlowEvent =
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
-  | { type: 'start' | 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
+  | { type: 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
+  /** `guidance` is added to the task session's prompt (PRD R77). */
+  | { type: 'start'; workItemId: number; guidance?: string | null }
+  | { type: 'pick'; ticketId: number; guidance?: string | null }
   /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
-  | { type: 'pick' | 'retriage-pool' | 'restore'; ticketId: number }
+  | { type: 'retriage-pool' | 'restore'; ticketId: number }
   /** Snoozes the ticket until `until`, or indefinitely when null (PRD R49). */
   | { type: 'snooze'; ticketId: number; until: number | null }
   /** Places a Ready for review work item after `after`, or first when null (PRD R73). */
@@ -208,6 +211,11 @@ function firstLine(prompt: string): string {
   return prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
 }
 
+/** The operator's guidance from Start, trimmed, or null when there is none (PRD R77). */
+function guidanceOf(text: string | null | undefined): string | null {
+  return text?.trim() || null;
+}
+
 /** Compares repo paths as Windows does: either separator, any case, no trailing separator. */
 function samePath(a: string, b: string): boolean {
   const key = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
@@ -272,6 +280,9 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { path: event.path, branch: event.branch };
     case 'adhoc':
       return { repoRoot: event.repoRoot };
+    case 'start':
+    case 'pick':
+      return guidanceOf(event.guidance) === null ? null : { guidance: guidanceOf(event.guidance) };
     case 'snooze':
       return { until: event.until };
     case 'move':
@@ -412,7 +423,7 @@ class Flow {
       case 'adhoc':
         return this.adhoc(event.prompt, event.repoRoot);
       case 'start':
-        return this.start(this.openItem(event.workItemId));
+        return this.start(this.openItem(event.workItemId), guidanceOf(event.guidance));
       case 'approve':
         return this.approve(this.openItem(event.workItemId));
       case 'mark-done':
@@ -426,7 +437,7 @@ class Flow {
       case 'open-question':
         return this.openQuestion(this.openItem(event.workItemId), event.nativeSessionId);
       case 'pick':
-        return this.pick(this.poolTicket(event.ticketId));
+        return this.pick(this.poolTicket(event.ticketId), guidanceOf(event.guidance));
       case 'retriage-pool':
         return this.retriagePool(this.poolTicket(event.ticketId));
       case 'snooze':
@@ -535,6 +546,7 @@ class Flow {
       stage: null,
       stageAt: null,
       taskPrompt: null,
+      guidance: null,
       warning: null,
       error: null,
       unassignedAt: null,
@@ -666,6 +678,7 @@ class Flow {
       stage: null,
       stageAt: null,
       taskPrompt: prompt,
+      guidance: null,
       warning: null,
       error: null,
       unassignedAt: null,
@@ -1288,7 +1301,7 @@ class Flow {
   }
 
   /** PRD R48: a queued work item with the pool triage's playbook; its task session's skill claims the ticket. */
-  private pick(ticket: Ticket): void {
+  private pick(ticket: Ticket, guidance: string | null): void {
     const triages = this.store.poolTriages(ticket.id);
     const triaged = triages.filter((triage) => triage.playbook !== null).at(-1);
 
@@ -1303,6 +1316,7 @@ class Flow {
       stage: null,
       stageAt: null,
       taskPrompt: null,
+      guidance,
       warning: null,
       error: null,
       unassignedAt: null,
@@ -1347,11 +1361,12 @@ class Flow {
     this.queue(item);
   }
 
-  private start(item: WorkItem): void {
+  private start(item: WorkItem, guidance: string | null): void {
     if (item.status !== 'unstarted') {
       throw new Refusal('The work item is not unstarted.');
     }
 
+    this.store.updateWorkItem(item.id, { guidance });
     this.queue(item);
   }
 
@@ -1366,7 +1381,7 @@ class Flow {
       throw new Refusal('Triage is already running.');
     }
 
-    this.setStatus(item.id, { status: 'triaging', error: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, readyAt: null, orderAt: null });
+    this.setStatus(item.id, { status: 'triaging', error: null, queuedAt: null, guidance: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, readyAt: null, orderAt: null });
   }
 
   private requireNoSession(item: WorkItem): void {
@@ -1557,10 +1572,16 @@ class Flow {
     // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do.
     const provider = playbook?.provider ?? sessions.provider;
     const reports = sessionReports(kind, approved, playbook, provider);
-    const full = sessionPrompt(prompt, id);
+    // The guidance waits through a setup session for the task session, and an approved prompt does not take it (PRD R77).
+    const guided = kind === 'task' && !approved;
+    const full = sessionPrompt(prompt, id, guided ? item.guidance : null);
 
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
+    }
+
+    if (guided && item.guidance !== null) {
+      this.store.updateWorkItem(item.id, { guidance: null });
     }
     const label = kind === 'task' ? (item.playbook ?? 'ad-hoc') : kind;
     const own = kind === 'task' ? playbook : null;

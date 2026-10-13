@@ -19,6 +19,7 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     stage: null,
     stageAt: null,
     taskPrompt: null,
+    guidance: null,
     warning: null,
     error: null,
     unassignedAt: null,

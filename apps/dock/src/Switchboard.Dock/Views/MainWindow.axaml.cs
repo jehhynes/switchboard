@@ -660,7 +660,7 @@ public sealed partial class MainWindow : Window
         return copy;
     }
 
-    /// <summary>Posts the control's action, after the operator confirms it when the hub sent a question.</summary>
+    /// <summary>Posts the control's action, after the operator confirms it when the hub sent a question, or with the text the hub asked for.</summary>
     async Task Act(DockControl control)
     {
         if (control.Confirm is { } confirm && !await ConfirmDialog.Ask(this, confirm.Question, confirm.Detail, confirm.Action))
@@ -668,7 +668,27 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (control.Input is { } input)
+        {
+            if (await InputDialog.Ask(this, input.Question, input.Detail, input.Action) is not { } text)
+            {
+                return;
+            }
+
+            await Act(WithField(control.Action, input.Field, text));
+            return;
+        }
+
         await Act(control.Action);
+    }
+
+    static JsonObject WithField(JsonObject action, string field, string text)
+    {
+        var copy = action.DeepClone().AsObject();
+
+        copy[field] = text;
+
+        return copy;
     }
 
     async Task Act(JsonObject action)

@@ -38,6 +38,7 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     stage: null,
     stageAt: null,
     taskPrompt: null,
+    guidance: null,
     warning: null,
     error: null,
     unassignedAt: null,

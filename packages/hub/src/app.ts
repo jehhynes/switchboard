@@ -131,6 +131,10 @@ export function parseAction(body: unknown): FlowEvent | null {
     return Number.isInteger(workItemId) && typeof nativeSessionId === 'string' ? { type: 'open-question', workItemId: workItemId as number, nativeSessionId } : null;
   }
 
+  if ((body['type'] === 'start' || body['type'] === 'pick') && body['guidance'] != null && typeof body['guidance'] !== 'string') {
+    return null;
+  }
+
   if (body['type'] === 'move') {
     const { workItemId, after } = body;
 

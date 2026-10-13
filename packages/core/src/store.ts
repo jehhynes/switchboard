@@ -265,6 +265,8 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN releasing INTEGER NOT NULL DEFAULT 0;`,
   // A Codex session's question, as JSON, which it waits on after its turn (PRD R70).
   `ALTER TABLE sessions ADD COLUMN question TEXT;`,
+  // The operator's guidance from Start, for the next task session (PRD R77).
+  `ALTER TABLE workItems ADD COLUMN guidance TEXT;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld']);
@@ -406,7 +408,8 @@ export interface TicketHistory {
 /** Fields that change on every poll or status change; their change alone is not activity, and the event's time already says when. */
 const UNLOGGED: Record<string, ReadonlySet<string>> = {
   tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt']),
-  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt']),
+  // The start or pick event's detail holds the guidance (PRD R77).
+  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance']),
   // The question report's event names the question; its ID and its clearing are bookkeeping.
   sessions: new Set(['stateAt', 'releasing', 'question']),
   triages: new Set(),

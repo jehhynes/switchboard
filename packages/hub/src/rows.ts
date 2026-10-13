@@ -31,6 +31,7 @@ export const CONTROL_GLYPHS = {
   'arrow-up': '\u{eaa1}',
   check: '\u{eab2}',
   clockface: '\u{ec75}',
+  comment: '\u{ea6b}',
   'comment-discussion': '\u{eac7}',
   copy: '\u{ebcc}',
   discard: '\u{eae2}',
@@ -56,6 +57,15 @@ export interface Control {
   message: Record<string, unknown>;
   /** A question the dock asks before it posts the message, with its detail and the label of the button that goes ahead. */
   confirm?: { question: string; detail: string; action: string };
+  /** A text the dock asks for before it posts the message, set as the action's `field`, with the label of the button that goes ahead. */
+  input?: { question: string; detail: string; field: string; action: string };
+}
+
+/** Start with guidance…: Start, after the dock asks for guidance that the task session's prompt ends with (PRD R77). */
+function guidedStart(message: Record<string, unknown>): Control {
+  const input = { question: 'Start with guidance', detail: "Switchboard adds it to the end of the session's prompt.", field: 'guidance', action: 'Start' };
+
+  return { label: 'Start with guidance…', icon: 'comment', message, input };
 }
 
 /** The one control a Blocked on you, Ready for review or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
@@ -91,7 +101,7 @@ export function controlsOf(item: WorkItemView): Control[] {
   const action = (type: string) => ({ type: 'action', action: { type, workItemId: item.id } });
 
   if (item.status === 'unstarted') {
-    controls.push({ label: 'Start', icon: 'play', message: action('start') });
+    controls.push({ label: 'Start', icon: 'play', message: action('start') }, guidedStart(action('start')));
   }
 
   if (item.status === 'awaiting-approval') {
@@ -214,11 +224,13 @@ export function moveControls(item: WorkItemView, order: number[]): Control[] {
  */
 export function poolControls(entry: PoolView): { main: Control | null; controls: Control[] } {
   const { ticket, triage } = entry;
-  const pick: Control = { label: 'Start', icon: 'play', message: { type: 'action', action: { type: 'pick', ticketId: ticket.id } } };
+  const pickMessage = { type: 'action', action: { type: 'pick', ticketId: ticket.id } };
+  const pick: Control = { label: 'Start', icon: 'play', message: pickMessage };
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const main = triage?.error != null ? again : triage?.playbook != null ? pick : null;
+  const guided = main === pick ? [guidedStart(pickMessage)] : [];
 
-  return { main, controls: [...(main === null ? [] : [main]), ...snoozeControls(ticket), historyControl(ticket)] };
+  return { main, controls: [...(main === null ? [] : [main]), ...guided, ...snoozeControls(ticket), historyControl(ticket)] };
 }
 
 /** Every run the ticket has had, in a read-only document the extension opens (PRD R59). */

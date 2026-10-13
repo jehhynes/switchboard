@@ -708,6 +708,20 @@
               }
             },
             {
+              "label": "Start with guidance…",
+              "glyph": "",
+              "action": {
+                "type": "start",
+                "workItemId": 9
+              },
+              "input": {
+                "question": "Start with guidance",
+                "detail": "Switchboard adds it to the end of the session's prompt.",
+                "field": "guidance",
+                "action": "Start"
+              }
+            },
+            {
               "label": "Triage again",
               "glyph": "",
               "action": {
@@ -792,6 +806,20 @@
               "action": {
                 "type": "pick",
                 "ticketId": 4
+              }
+            },
+            {
+              "label": "Start with guidance…",
+              "glyph": "",
+              "action": {
+                "type": "pick",
+                "ticketId": 4
+              },
+              "input": {
+                "question": "Start with guidance",
+                "detail": "Switchboard adds it to the end of the session's prompt.",
+                "field": "guidance",
+                "action": "Start"
               }
             },
             {

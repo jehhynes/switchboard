@@ -113,7 +113,12 @@ ${ask}`
     .replace(SESSION_ID, sessionId);
 }
 
-/** The first message of one session: the task prompt with its session ID filled in. */
-export function sessionPrompt(taskPrompt: string, sessionId: string): string {
-  return taskPrompt.trimEnd().replace(SESSION_ID, sessionId);
+/**
+ * The first message of one session: the task prompt with its session ID filled in, then the operator's guidance from Start (PRD R77).
+ * The guidance follows the prompt after a blank line, so a leading `/<skill>` still runs the skill, and is not rendered.
+ */
+export function sessionPrompt(taskPrompt: string, sessionId: string, guidance: string | null = null): string {
+  const prompt = taskPrompt.trimEnd().replace(SESSION_ID, sessionId);
+
+  return guidance === null ? prompt : `${prompt}\n\n${guidance}`;
 }

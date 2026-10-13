@@ -37,7 +37,7 @@ describe('groupOf', () => {
 
 describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
-    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Triage again', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Start with guidance…', 'Triage again', 'Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
@@ -54,6 +54,20 @@ describe('controlsOf', () => {
       { type: 'action', action: { type: 'delete', workItemId: 7 } },
       { type: 'history', ticketId: 7, key: 'gh 107' },
     ]);
+  });
+
+  it('asks for guidance before Start with guidance…, posting the same start action, and keeps Start the main control (PRD R77)', () => {
+    const unstarted = item(7, { status: 'unstarted' });
+    const guided = controlsOf(unstarted).find((control) => control.label === 'Start with guidance…')!;
+
+    expect(guided).toEqual({
+      label: 'Start with guidance…',
+      icon: 'comment',
+      message: { type: 'action', action: { type: 'start', workItemId: 7 } },
+      input: { question: 'Start with guidance', detail: "Switchboard adds it to the end of the session's prompt.", field: 'guidance', action: 'Start' },
+    });
+    expect(mainControl(unstarted)?.label).toBe('Start');
+    expect(controlsOf(unstarted).filter((control) => control.input !== undefined)).toHaveLength(1);
   });
 
   it('asks before Delete, naming the session it stops, and offers no Delete while a session starts (PRD R76)', () => {
@@ -201,11 +215,12 @@ describe('poolControls', () => {
       return [main?.label ?? null, controls.map((control) => control.label)];
     };
 
-    expect(labels(pool(3))).toEqual(['Start', ['Start', 'Snooze', 'History']]);
+    expect(labels(pool(3))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze', 'History']]);
     expect(labels(pool(3, { triage: triage({ playbook: null, error: 'timed out' }) }))).toEqual(['Triage again', ['Triage again', 'Snooze', 'History']]);
     expect(labels(pool(3, { triage: triage({ playbook: null, endedAt: null }) }))).toEqual([null, ['Snooze', 'History']]);
-    expect(labels(pool(3, { ticket: { ...pool(3).ticket, snoozed: true } }))).toEqual(['Start', ['Start', 'Snooze', 'Restore', 'History']]);
+    expect(labels(pool(3, { ticket: { ...pool(3).ticket, snoozed: true } }))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze', 'Restore', 'History']]);
     expect(poolControls(pool(3)).main?.message).toEqual({ type: 'action', action: { type: 'pick', ticketId: 3 } });
+    expect(poolControls(pool(3)).controls[1]).toMatchObject({ message: { type: 'action', action: { type: 'pick', ticketId: 3 } }, input: { field: 'guidance', action: 'Start' } });
   });
 });
 

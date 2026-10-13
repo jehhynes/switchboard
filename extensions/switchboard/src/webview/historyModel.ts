@@ -422,6 +422,11 @@ class Builder {
         text = `You answered: ${oneLine(str(detail['answer']))}`;
       }
 
+      // Start with guidance… (PRD R77) shows the guidance under the entry.
+      if ((event.type === 'start' || event.type === 'pick') && typeof detail['guidance'] === 'string') {
+        return { category: 'you', icon: operator.icon, text: `${text} with guidance`, detail: detail['guidance'], tone: 'accent' };
+      }
+
       return { category: 'you', icon: operator.icon, text, tone: 'accent' };
     }
 
