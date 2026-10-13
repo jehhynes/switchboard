@@ -987,11 +987,11 @@ describe('Runtime', () => {
     const cfg = config({ provider: 'codex' });
     const { store, runtime } = setup(cfg, () => T0, undefined, codex);
 
-    runtime.send({ type: 'adhoc', prompt: '/gc-plan 1', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: '/sb-plan 1', repoRoot: 'D:/git/widgets' });
     await runtime.settled();
 
     expect(codex.spawned[0]!.slice(0, 2)).toEqual(['exec', '--json']);
-    expect(codex.spawned[0]!.at(-1)).toBe('$gc-plan 1');
+    expect(codex.spawned[0]!.at(-1)).toBe('$sb-plan 1');
     expect(store.session('s1')).toMatchObject({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'thread-1', state: 'running' });
 
     await runtime.readRoster();
@@ -1135,14 +1135,14 @@ describe('Runtime', () => {
 
       runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
       await runtime.settled();
-      await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/legacy-ship 1', summary: 'Ship it', report: null });
+      await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/sb-ship 1', summary: 'Ship it', report: null });
       await runtime.report({ sessionId: 's1', kind: 'question', text: 'Ship now?' });
       writeFileSync(log(), DONE);
       codex.alive.clear();
       await runtime.readRoster();
       await runtime.settled();
 
-      expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/legacy-ship 1' });
+      expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/sb-ship 1' });
       expect(store.session('s1')).toMatchObject({ state: 'waiting' });
 
       runtime.send({ type: 'adhoc', prompt: 'Other work', repoRoot: 'D:/git/widgets' });

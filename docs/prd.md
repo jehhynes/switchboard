@@ -8,7 +8,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - All Switchboard state is local. Switchboard reads sources and never writes to them; only the skills its sessions invoke change external state.
 - Switchboard manages only sessions it starts. It does not discover or adopt sessions started elsewhere.
 - Switchboard tracks worktrees but never creates or deletes them. Skills create worktrees; the operator removes them.
-- Switchboard replaces Ground Control and the Support board. Ground Control began as an observability layer linking sessions to GitHub cards; Switchboard is a modular, source-agnostic factory that reuses Ground Control's session mechanics (see [architecture.md](architecture.md)).
+- Switchboard replaces Ground Control and the Support board entirely; neither runs beside it. Ground Control began as an observability layer linking sessions to GitHub cards; Switchboard is a modular, source-agnostic factory that reuses Ground Control's session mechanics (see [architecture.md](architecture.md)).
 
 ## Goals
 
@@ -33,7 +33,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 ## Design rules
 
-- **Existing tools are context, not requirements.** Ground Control, the former Support board and the operator's skills show how the work was done before Switchboard. Switchboard adopts a behavior from them only when it serves this PRD's goals, and states its own reason.
+- **Existing tools are context, not requirements.** The retired Ground Control and Support board, and the operator's skills, show how the work was done before Switchboard. Switchboard adopts a behavior from them only when it serves this PRD's goals, and states its own reason.
 - **Skills drive the work; Switchboard is the harness.** Switchboard finds tickets, triages them, starts and observes sessions, and shows their state. Every change to a source, a repository or a worktree is made by a skill a session runs. When a feature needs a write, add a session that runs a skill, not Switchboard code that writes.
 - **Least authority.** An unattended session gets the least permission mode under which it can finish. The default is `auto`; a playbook can override it.
 - **The work item first, sessions second.** The operator manages work items; a session is how one runs, and the dock shows it as one control, not as content.

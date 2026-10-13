@@ -732,7 +732,7 @@ describe('setup', () => {
 
     const task = only(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release' }), 'start-session');
 
-    expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/15619', prompt: '/gc-plan 15619', contract: CONTRACT(task.sessionId, FINISHING_REPORTS), name: 'switchboard · dev:develop · github 15619' });
+    expect(task).toMatchObject({ kind: 'task', cwd: 'D:/git/widgets-wt/15619', prompt: '/sb-plan 15619', contract: CONTRACT(task.sessionId, FINISHING_REPORTS), name: 'switchboard · dev:develop · github 15619' });
     expect(h.status(1)).toBe('running');
   });
 
@@ -1253,13 +1253,13 @@ describe('in-queue times (PRD R27)', () => {
 
 describe('agents (PRD R22)', () => {
   it("runs a Codex playbook's sessions in Codex, with Codex's defaults and contract, and its stops name Codex", () => {
-    const h = new Harness({ settings: settings({ sessions: { codex: { permissionMode: 'dontAsk', model: 'gpt-6' } } }), playbooks: playbooks(['triage:github'], { 'dev:codex': { description: 'Build it in Codex', provider: 'codex', template: '/gc-plan {{ticket.sourceKey}}' } }) });
+    const h = new Harness({ settings: settings({ sessions: { codex: { permissionMode: 'dontAsk', model: 'gpt-6' } } }), playbooks: playbooks(['triage:github'], { 'dev:codex': { description: 'Build it in Codex', provider: 'codex', template: '/sb-plan {{ticket.sourceKey}}' } }) });
     const [triage] = h.poll(issue('1'));
 
     h.triaged(triage, 'dev:codex');
     const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
 
-    expect(start).toMatchObject({ provider: 'codex', permissionMode: 'dontAsk', model: 'gpt-6', prompt: '/gc-plan 1' });
+    expect(start).toMatchObject({ provider: 'codex', permissionMode: 'dontAsk', model: 'gpt-6', prompt: '/sb-plan 1' });
     expect(start.contract).toContain('report question s1 --text <question>');
     expect(start.contract).not.toContain('AskUserQuestion');
     expect(h.store.session('s1')).toMatchObject({ provider: 'codex' });

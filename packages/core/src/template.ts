@@ -94,8 +94,8 @@ const REPORT_LINES: Record<Exclude<ReportKind, 'task'>, string> = {
 };
 
 /**
- * The report contract, which the session gets as appended system prompt and again after each compaction, because skills written for
- * Ground Control do not know Switchboard. It lists only the reports the session may send (PRD R23).
+ * The report contract, which the session gets as appended system prompt and again after each compaction, because a skill does not
+ * know its session ID or the report commands. It lists only the reports the session may send (PRD R23).
  */
 export function sessionContract(sessionId: string, report: string, reports: readonly ReportKind[], provider: Provider): string {
   const lines = REPORT_KINDS.filter((kind): kind is Exclude<ReportKind, 'task'> => kind !== 'task' && reports.includes(kind)).map((kind) => REPORT_LINES[kind]);

@@ -56,7 +56,7 @@ describe('Start with guidance (PRD R77)', () => {
   });
 
   it('holds the guidance through a setup session and gives it to the task session only', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:build': { description: 'Build', requiresWorktree: true, reports: ['done', 'worktree'], template: '/gc-plan {{ticket.sourceKey}}' } }) });
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:build': { description: 'Build', requiresWorktree: true, reports: ['done', 'worktree'], template: '/sb-plan {{ticket.sourceKey}}' } }) });
     h.triaged(h.poll(issue('1'))[0], 'dev:build');
 
     const setup = only(h.act({ type: 'start', workItemId: 1, guidance: 'Skip the UI.' }), 'start-session');
@@ -68,12 +68,12 @@ describe('Start with guidance (PRD R77)', () => {
     h.report(session, { kind: 'worktree', path: 'D:/wt/1', branch: '1-x' });
     const task = only(h.act({ type: 'roster', sessions: [] }), 'start-session');
 
-    expect(task).toMatchObject({ kind: 'task', prompt: '/gc-plan 1\n\nSkip the UI.' });
+    expect(task).toMatchObject({ kind: 'task', prompt: '/sb-plan 1\n\nSkip the UI.' });
     expect(h.item(1).guidance).toBeNull();
   });
 
   it('drops guidance a failed setup never used when the operator triages again', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:build': { description: 'Build', requiresWorktree: true, reports: ['done', 'worktree'], template: '/gc-plan {{ticket.sourceKey}}' } }) });
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:build': { description: 'Build', requiresWorktree: true, reports: ['done', 'worktree'], template: '/sb-plan {{ticket.sourceKey}}' } }) });
     h.triaged(h.poll(issue('1'))[0], 'dev:build');
     h.started(only(h.act({ type: 'start', workItemId: 1, guidance: 'Skip the UI.' }), 'start-session'));
     h.act({ type: 'roster', sessions: [] });
@@ -83,7 +83,7 @@ describe('Start with guidance (PRD R77)', () => {
 
     expect(h.item(1).guidance).toBeNull();
     h.act({ type: 'worktree-found', source: 'github', sourceKey: '1', path: 'D:/wt/1', branch: '1-x' });
-    expect(only(h.triaged(triage, 'dev:develop'), 'start-session')).toMatchObject({ kind: 'task', prompt: '/gc-plan 1' });
+    expect(only(h.triaged(triage, 'dev:develop'), 'start-session')).toMatchObject({ kind: 'task', prompt: '/sb-plan 1' });
   });
 
   it('runs an approved prompt without the guidance', () => {

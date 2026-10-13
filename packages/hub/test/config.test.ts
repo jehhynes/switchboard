@@ -24,7 +24,7 @@ function write(path: string, text: string): void {
 
 const GITHUB = { repo: 'o/r', logins: ['me'], project: { owner: 'o', number: 3 }, assignedStatuses: ['Dev'] };
 
-const TASK = { description: 'Develop it', requiresWorktree: true, template: '/gc-plan {{ticket.sourceKey}}' };
+const TASK = { description: 'Develop it', requiresWorktree: true, template: '/sb-plan {{ticket.sourceKey}}' };
 
 describe('checkSettings', () => {
   it('passes valid settings, and a disabled source whose own keys are incomplete', () => {
@@ -119,7 +119,7 @@ describe('loadConfig', () => {
     const config = loadConfig(configDir());
 
     expect([...config.playbooks.keys()]).toEqual(['dev:develop']);
-    expect(config.playbooks.get('dev:develop')).toMatchObject({ requiresWorktree: true, template: '/gc-plan {{ticket.sourceKey}}' });
+    expect(config.playbooks.get('dev:develop')).toMatchObject({ requiresWorktree: true, template: '/sb-plan {{ticket.sourceKey}}' });
     expect(config.playbookErrors).toEqual([{ name: 'dev:bad', error: 'The prompt template is empty.' }]);
     expect(config.settingsError).toBeNull();
   });

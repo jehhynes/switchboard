@@ -17,7 +17,7 @@ const ACTION: StartAction = {
   kind: 'task',
   provider: 'claude',
   cwd: 'D:/git/widgets',
-  prompt: '/gc-plan 15619',
+  prompt: '/sb-plan 15619',
   contract: 'Report to Switchboard with these commands:',
   name: 'switchboard · dev:develop · github 15619',
   permissionMode: 'auto',
@@ -62,7 +62,7 @@ describe('startArgs and shortIdFrom', () => {
       'opus',
       '--append-system-prompt',
       'Report to Switchboard with these commands:',
-      '/gc-plan 15619',
+      '/sb-plan 15619',
     ]);
     expect(startArgs({ ...ACTION, model: null })).not.toContain('--model');
   });

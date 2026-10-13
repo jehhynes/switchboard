@@ -21,7 +21,7 @@ function transcript(calls: number, through = 'msg-last', start = 0, sessionId = 
   const records: object[] = [{ type: 'user', uuid: `prompt-${start}`, sessionId, message: { content: `Task ${start}` } }];
 
   for (let index = start; index < start + calls; index++) {
-    records.push({ type: 'assistant', uuid: `call-${index}`, sessionId, message: { content: [{ type: 'tool_use', id: `toolu_${index}`, name: index === start ? 'Skill' : 'Bash', input: index === start ? { skill: 'gc-plan' } : {} }] } });
+    records.push({ type: 'assistant', uuid: `call-${index}`, sessionId, message: { content: [{ type: 'tool_use', id: `toolu_${index}`, name: index === start ? 'Skill' : 'Bash', input: index === start ? { skill: 'sb-plan' } : {} }] } });
   }
 
   records.push({ type: 'assistant', uuid: through, sessionId, message: { content: [{ type: 'text', text: 'Done.' }] } });
@@ -168,7 +168,7 @@ describe('Debriefs', () => {
         cwd: CWD,
         fromMessageUuid: null,
         throughMessageUuid: 'msg-last',
-        skills: ['gc-plan'],
+        skills: ['sb-plan'],
         toolCalls: 10,
         cache: { read: 900, created: 10, costUsd: 0.05 },
         friction: [friction],

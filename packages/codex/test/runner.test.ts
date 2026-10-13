@@ -33,7 +33,7 @@ const ACTION: StartAction = {
   kind: 'task',
   provider: 'codex',
   cwd: 'D:/git/widgets',
-  prompt: '/gc-plan 1',
+  prompt: '/sb-plan 1',
   contract: 'Report to Switchboard with these commands:',
   name: 'switchboard · dev:develop · github 1',
   permissionMode: 'bypassPermissions',
@@ -185,7 +185,7 @@ describe('start', () => {
       '-C',
       'D:/git/widgets',
       '--',
-      '$gc-plan 1',
+      '$sb-plan 1',
     ]);
     expect(fake.spawns[0]!).toMatchObject({ cwd: 'D:/git/widgets', env: { CODEX_HOME: codexHome } });
     expect(fake.spawns[0]!.env).toEqual({ CODEX_HOME: codexHome });

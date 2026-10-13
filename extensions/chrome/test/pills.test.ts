@@ -106,7 +106,7 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([
       { ...needs, mark: 'question' },
       { ...working, group: 'unstarted', mark: 'queued' },
-      { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:gc-plan', group: 'blocked', mark: 'blocked', snoozed: true },
+      { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:sb-plan', group: 'blocked', mark: 'blocked', snoozed: true },
     ]));
 
     const marks = [...document.querySelectorAll('.switchboard-pill')].map((pill) => {
@@ -118,7 +118,7 @@ describe('applyPills', () => {
     expect(marks).toEqual([
       ['SPAN', 'switchboard-mark', 'question', 'true', '\u{eb32}dev:review-pr', 'Switchboard: Blocked on you · Answer a question. Click to open in VS Code.'],
       ['SPAN', 'switchboard-mark', 'queued', 'true', '\u{ea82}dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in VS Code.'],
-      ['SPAN', 'switchboard-mark', 'blocked', 'true', '\u{ead1}dev:gc-plan', 'Switchboard: Snoozed · Blocked. Click to open in VS Code.'],
+      ['SPAN', 'switchboard-mark', 'blocked', 'true', '\u{ead1}dev:sb-plan', 'Switchboard: Snoozed · Blocked. Click to open in VS Code.'],
     ]);
   });
 

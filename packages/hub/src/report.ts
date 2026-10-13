@@ -20,7 +20,7 @@ function runSync(file: string, args: string[]): string {
   return execFileSync(file, args, { encoding: 'utf8', timeout: 5_000, windowsHide: true });
 }
 
-/** Undoes Git Bash's rewrite of a slash command such as `/legacy-ship 16416`. */
+/** Undoes Git Bash's rewrite of a slash command such as `/sb-ship 16416`. */
 function unconverted(value: string, root: string | null): string {
   return root !== null && value.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? value.slice(root.length) : value;
 }

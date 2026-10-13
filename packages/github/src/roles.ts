@@ -6,7 +6,7 @@ export type Roles = Map<string, string[]>;
 
 export type RolesResult = { roles: Roles } | { error: string };
 
-/** Reads `{login: {roles: string[]}}`, such as the gc-handoff skill's roster.json. An entry without a roles list is left out. */
+/** Reads `{login: {roles: string[]}}`, such as the sb-handoff skill's roster.json. An entry without a roles list is left out. */
 export function parseRoles(text: string): RolesResult {
   let json: unknown;
 

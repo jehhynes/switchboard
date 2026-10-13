@@ -90,12 +90,12 @@ describe('spawnDetached', () => {
   it('starts a process with its output in files and the arguments unchanged', async () => {
     const stdout = join(dir, 'out.jsonl');
     const stderr = join(dir, 'err.txt');
-    const spawned = await spawnDetached(process.execPath, ['-e', 'console.log(process.argv[1]); console.error(process.env.SPAWN_TEST)', '/gc-plan "1"'], { cwd: dir, stdout, stderr, env: { SPAWN_TEST: 'yes' } });
+    const spawned = await spawnDetached(process.execPath, ['-e', 'console.log(process.argv[1]); console.error(process.env.SPAWN_TEST)', '/sb-plan "1"'], { cwd: dir, stdout, stderr, env: { SPAWN_TEST: 'yes' } });
 
     expect(spawned.error).toBeNull();
     expect(spawned.pid).toBeGreaterThan(0);
     await vi.waitFor(() => expect(readFileSync(stderr, 'utf8').trim()).toBe('yes'));
-    expect(readFileSync(stdout, 'utf8').trim()).toBe('/gc-plan "1"');
+    expect(readFileSync(stdout, 'utf8').trim()).toBe('/sb-plan "1"');
   });
 
   it('reports a missing executable', async () => {

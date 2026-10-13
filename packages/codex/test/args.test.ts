@@ -27,21 +27,21 @@ describe('tomlString', () => {
 
 describe('codexPrompt', () => {
   it('turns a leading slash skill into a dollar skill and keeps its arguments', () => {
-    expect(codexPrompt('/gc-plan 15619')).toBe('$gc-plan 15619');
+    expect(codexPrompt('/sb-plan 15619')).toBe('$sb-plan 15619');
     expect(codexPrompt('/review-pr pr:123 publish')).toBe('$review-pr pr:123 publish');
     expect(codexPrompt('/support:process')).toBe('$support:process');
   });
 
   it('leaves a path, a slash later in the prompt and a plain prompt alone', () => {
     expect(codexPrompt('/d/git/widgets is the repo')).toBe('/d/git/widgets is the repo');
-    expect(codexPrompt('Run /gc-plan 1')).toBe('Run /gc-plan 1');
+    expect(codexPrompt('Run /sb-plan 1')).toBe('Run /sb-plan 1');
     expect(codexPrompt('Fix the bug')).toBe('Fix the bug');
   });
 });
 
 describe('startArgs and forkArgs', () => {
   it('starts with the mode, contract, tag and model, then the work directory and the prompt after --', () => {
-    expect(startArgs('D:/git/widgets', '/gc-plan 1', { ...OPTIONS, model: 'gpt-6' })).toEqual([
+    expect(startArgs('D:/git/widgets', '/sb-plan 1', { ...OPTIONS, model: 'gpt-6' })).toEqual([
       'exec',
       '--json',
       ...modeArgs('auto'),
@@ -54,7 +54,7 @@ describe('startArgs and forkArgs', () => {
       '-C',
       'D:/git/widgets',
       '--',
-      '$gc-plan 1',
+      '$sb-plan 1',
     ]);
     expect(startArgs('D:/git/widgets', 'x', OPTIONS)).not.toContain('-m');
   });

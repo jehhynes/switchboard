@@ -49,9 +49,9 @@ describe('parseReport and reportBody', () => {
   it('restores a slash command that Git Bash rewrote under its root, and leaves other prompts alone', () => {
     const root = 'C:/Program Files/Git';
 
-    expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Git/legacy-ship 16416'], root)).toMatchObject({ prompt: '/legacy-ship 16416' });
+    expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Git/sb-ship 16416'], root)).toMatchObject({ prompt: '/sb-ship 16416' });
     expect(reportBody(['approval', 's1', '--prompt=c:/program files/git/publish'], root)).toMatchObject({ prompt: '/publish' });
-    expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Git/legacy-ship 16416'])).toMatchObject({ prompt: 'C:/Program Files/Git/legacy-ship 16416' });
+    expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Git/sb-ship 16416'])).toMatchObject({ prompt: 'C:/Program Files/Git/sb-ship 16416' });
     expect(reportBody(['approval', 's1', '--prompt', 'C:/Program Files/Gitlab/run'], root)).toMatchObject({ prompt: 'C:/Program Files/Gitlab/run' });
     expect(reportBody(['approval', 's1', '--prompt', 'Post the reply in C:/Program Files/Git/x'], root)).toMatchObject({ prompt: 'Post the reply in C:/Program Files/Git/x' });
   });
@@ -105,7 +105,7 @@ describe('parseReport and reportBody', () => {
   it('reads a task report, resolving its repo and restoring a slash command Git Bash rewrote, and refuses bad usage (PRD R68)', () => {
     expect(reportBody(['task', 's1', '--prompt', 'Fix CartTests', '--repo', 'D:/git/widgets', '--title', 'Flaky tests'])).toEqual({ sessionId: 's1', kind: 'task', prompt: 'Fix CartTests', repo: resolve('D:/git/widgets'), title: 'Flaky tests' });
     expect(reportBody(['task', 's1', '--prompt=Fix it'])).toEqual({ sessionId: 's1', kind: 'task', prompt: 'Fix it', repo: null, title: null });
-    expect(reportBody(['task', 's1', '--prompt', 'C:/Program Files/Git/gc-plan 18942'], 'C:/Program Files/Git')).toMatchObject({ prompt: '/gc-plan 18942' });
+    expect(reportBody(['task', 's1', '--prompt', 'C:/Program Files/Git/sb-plan 18942'], 'C:/Program Files/Git')).toMatchObject({ prompt: '/sb-plan 18942' });
 
     for (const argv of [['task', 's1'], ['task', 's1', '--prompt', ' '], ['task', 's1', '--prompt', 'x', '--repo'], ['task', 's1', '--prompt', 'x', '--repo='], ['task', 's1', '--prompt', 'x', '--title'], ['task', 's1', '--title', 'x']]) {
       expect(reportBody(argv)).toBeNull();
