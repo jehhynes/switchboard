@@ -3,7 +3,7 @@ import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
 import { holdLock, releaseLock } from '@switchboard/hub';
 import type { HubRecord } from '@switchboard/core';
@@ -23,13 +23,14 @@ afterEach(() => {
     child.kill();
   }
 
-  // The hub kills its Codex trust exchange without waiting, so the app-server can still hold <home>/.codex briefly.
   rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 function start(...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
-  // CLAUDE_CONFIG_DIR and CODEX_HOME keep hook installation inside the temporary home.
-  const env = { ...process.env, CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex') };
+  // CLAUDE_CONFIG_DIR and CODEX_HOME keep hook installation inside the temporary home. PATH holds only Node and Windows, so the hub runs no
+  // real Claude or Codex: an orphaned Codex app-server from the hook trust exchange held <home>/.codex past the cleanup.
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
+  const env = { ...inherited, PATH: [dirname(process.execPath), join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')].join(delimiter), CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex') };
   const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
