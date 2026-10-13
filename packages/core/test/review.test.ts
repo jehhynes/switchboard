@@ -34,7 +34,7 @@ function order(h: Harness): number[] {
 }
 
 describe('readyAt (PRD R27)', () => {
-  it('is set by the first approval report and kept through Approve, a question, Open in Claude, a stop and a snooze', () => {
+  it('is set by the first approval report and kept in Ready for review through Approve, a question, Open in Claude, a stop and a snooze', () => {
     const h = new Harness({ playbooks: playbooks(undefined, QUESTION), settings: settings({ sessions: { concurrency: 2 } }) });
     const session = running(h, '1', 1);
 
@@ -50,10 +50,10 @@ describe('readyAt (PRD R27)', () => {
     expect(h.item(1)).toMatchObject({ status: 'running', approvalHeld: true, readyAt: T0 + HOUR });
     expect(groupOfItem(h, 1)).toBe('review');
     h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
-    expect(groupOfItem(h, 1)).toBe('blocked');
+    expect(groupOfItem(h, 1)).toBe('review');
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
     expect(h.item(1)).toMatchObject({ status: 'running', approvalHeld: true, readyAt: T0 + HOUR });
-    expect(groupOfItem(h, 1)).toBe('blocked');
+    expect(groupOfItem(h, 1)).toBe('review');
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null, interactive: true }] });
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.item(1)).toMatchObject({ status: 'awaiting-approval', readyAt: T0 + HOUR });
@@ -68,6 +68,7 @@ describe('readyAt (PRD R27)', () => {
     h.act({ type: 'stop', workItemId: 1 });
     h.act({ type: 'stop-succeeded', sessionId: approved, reason: 'operator' });
     expect(h.item(1)).toMatchObject({ status: 'blocked', readyAt: T0 + HOUR });
+    expect(groupOfItem(h, 1)).toBe('review');
   });
 
   it('keeps an approved work item queued for a slot in Ready for review, holding no slot until it starts (PRD R38)', () => {
@@ -142,6 +143,19 @@ describe('move (PRD R73)', () => {
     h.act({ type: 'move', workItemId: 4, after: 1 });
     h.act({ type: 'restore', ticketId: 2 });
     expect(order(h)).toEqual([1, 4, 2, 3]);
+  });
+
+  it('moves a blocked or failed ready work item, and moves another after one (PRD R27, R73)', () => {
+    const h = four();
+
+    h.store.updateWorkItem(2, { status: 'blocked' });
+    h.store.updateWorkItem(3, { status: 'failed' });
+    h.act({ type: 'move', workItemId: 4, after: 2 });
+    expect(order(h)).toEqual([1, 2, 4, 3]);
+    h.act({ type: 'move', workItemId: 3, after: null });
+    expect(order(h)).toEqual([3, 1, 2, 4]);
+    h.act({ type: 'reset-position', workItemId: 3 });
+    expect(order(h)).toEqual([1, 2, 4, 3]);
   });
 
   it('respaces the whole order when no key fits between two work items, keeping every place', () => {

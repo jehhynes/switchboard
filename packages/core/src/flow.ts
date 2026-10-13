@@ -1233,7 +1233,7 @@ class Flow {
     return item;
   }
 
-  /** A work item in Ready for review: open, ready, not snoozed and not blocked on the operator (PRD R73). */
+  /** A work item in Ready for review: open, ready and not snoozed (PRD R73). */
   private reviewItem(workItemId: number): WorkItem {
     const item = this.openItem(workItemId);
 
@@ -1246,7 +1246,7 @@ class Flow {
 
   /**
    * Sets `orderAt` between `after` and the next work item in Ready for review's order, or first when `after` is null. The order holds every
-   * ready work item, snoozed and blocked ones too, so they return to their places, and stays before now, so a newly ready one comes last.
+   * ready work item, snoozed ones too, so they return to their places, and stays before now, so a newly ready one comes last.
    */
   private move(item: WorkItem, after: number | null): void {
     if (after === item.id) {

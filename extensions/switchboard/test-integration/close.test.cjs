@@ -26,6 +26,8 @@ function item(cwd, done) {
     approvalHeld: false,
     createdAt: 1_791_000_000_000,
     statusAt: 1_791_000_000_000,
+    readyAt: null,
+    orderAt: null,
     runStartedAt: 1_791_000_000_000,
     scopeAt: null,
     doneAt: done ? 1_791_000_000_000 : null,

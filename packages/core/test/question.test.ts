@@ -125,7 +125,7 @@ describe('Open in Claude (PRD R70)', () => {
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
 
     expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', error: null, approvalPrompt: '/publish' });
-    expect(shown(h, item)).toMatchObject({ group: 'blocked', mark: 'question' });
+    expect(shown(h, item)).toMatchObject({ group: 'review', mark: 'question' });
   });
 
   it('notes a failed stop and leaves the session waiting', () => {

@@ -1,4 +1,4 @@
-import { activeSession, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion } from '@switchboard/core/group';
+import { activeSession, blocksOnYou, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion } from '@switchboard/core/group';
 import type { Provider } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -495,7 +495,7 @@ export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | nul
     return null;
   }
 
-  if (groupOf(item) === 'blocked') {
+  if (blocksOnYou(item)) {
     return item.status === 'failed' ? 'error' : 'warning';
   }
 

@@ -1,7 +1,7 @@
 import type { Snapshot } from '@switchboard/hub';
 import { needsYou } from '@switchboard/core/group';
 
-/** Unsnoozed work items on the operator's turn: Blocked on you, and Ready for review rows awaiting review or approval (PRD R27, R49, R64). */
+/** Unsnoozed work items on the operator's turn: Blocked on you, and Ready for review rows on their turn (PRD R27, R49, R64). */
 export function needsCount(snapshot: Snapshot): number {
   return snapshot.workItems.filter(needsYou).length;
 }

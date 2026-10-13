@@ -7,9 +7,8 @@ export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
 
 export const PILL = 'switchboard-pill';
 const GROUPS: Record<Group, string> = { blocked: 'Blocked on you', review: 'Ready for review', progress: 'In progress', unstarted: 'Unstarted', done: 'Done' };
-
-/** The marks of work waiting on the operator's review or approval in Ready for review (PRD R27). */
-const REVIEW_MARKS: ReadonlySet<string> = new Set(['send', 'review', 'finished']);
+/** The marks of work on the operator's turn in Ready for review: review, approval, a question, a block or a failure (PRD R27). */
+const TURN_MARKS: ReadonlySet<string> = new Set(['send', 'review', 'finished', 'question', 'blocked', 'failed']);
 
 function isCard(value: unknown): value is Card {
   if (typeof value !== 'object' || value === null) {
@@ -66,7 +65,7 @@ function pill(doc: Document, card: Card): HTMLElement {
   element.dataset['switchboardGroup'] = card.snoozed ? 'snoozed' : card.group;
 
   // The warning colour marks a card waiting on the operator, as the status bar counts them (PRD R64, R67).
-  if (!card.snoozed && (card.group === 'blocked' || (card.group === 'review' && REVIEW_MARKS.has(card.mark ?? '')))) {
+  if (!card.snoozed && (card.group === 'blocked' || (card.group === 'review' && TURN_MARKS.has(card.mark ?? '')))) {
     element.dataset['switchboardYours'] = '';
   }
   element.title = `Switchboard: ${card.snoozed ? 'Snoozed' : GROUPS[card.group]}${card.mark == null ? '' : ` · ${MARK_TITLES[card.mark]}`}. Click to open in VS Code.`;

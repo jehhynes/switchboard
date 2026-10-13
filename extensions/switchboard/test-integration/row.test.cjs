@@ -40,6 +40,8 @@ function item(id, cwd, state = 'waiting') {
     approvalHeld: false,
     createdAt: 1_791_000_000_000,
     statusAt: 1_791_000_000_000,
+    readyAt: null,
+    orderAt: null,
     runStartedAt: 1_791_000_000_000,
     scopeAt: null,
     doneAt: null,

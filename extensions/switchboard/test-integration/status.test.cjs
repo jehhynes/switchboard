@@ -34,6 +34,8 @@ function item(id, status, snoozed = false) {
     approvalReport: null,
     createdAt: 1_791_000_000_000,
     statusAt: 1_791_000_000_000,
+    readyAt: null,
+    orderAt: null,
     runStartedAt: null,
     scopeAt: null,
     doneAt: null,

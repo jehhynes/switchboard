@@ -93,6 +93,12 @@ describe('applyPills', () => {
     applyPills(document, cardsByIssue([{ ...ready, mark: 'running' }, { ...needs, snoozed: true }]));
     expect(colour('126571572')).toBe('var(--fgColor-default, #1f2328)');
     expect(colour('88050488')).toBe('var(--fgColor-default, #1f2328)');
+
+    // A ready work item that asks a question, blocks or fails stays in Ready for review, on the operator's turn.
+    for (const mark of ['question', 'blocked', 'failed'] as const) {
+      applyPills(document, cardsByIssue([{ ...ready, mark }]));
+      expect(colour('126571572')).toBe('var(--fgColor-attention, #9a6700)');
+    }
     document.head.innerHTML = '';
   });
 

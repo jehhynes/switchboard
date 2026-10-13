@@ -24,11 +24,13 @@ import { item, NOW, pool, session, snapshot, triage } from './views.js';
 const labels = (entry: WorkItemView) => controlsOf(entry).map((control) => control.label);
 
 describe('groupOf', () => {
-  it('puts done first, then unstarted, triaging and queued work, then work blocked on the operator, then ready work, then the rest', () => {
+  it('puts done first, then unstarted, triaging and queued work, then ready work, then work blocked on the operator, then the rest', () => {
     expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');
     expect(['unstarted', 'triaging', 'queued'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['unstarted', 'unstarted', 'unstarted']);
-    expect(['blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'], readyAt: NOW })))).toEqual(['blocked', 'blocked']);
+    expect(['blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['blocked', 'blocked']);
     expect(groupOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('blocked');
+    expect(['blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'], readyAt: NOW })))).toEqual(['review', 'review']);
+    expect(groupOf(item(1, { readyAt: NOW, sessions: [session({ state: 'waiting' })] }))).toBe('review');
     expect(['awaiting-approval', 'finished'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['review', 'review']);
     expect(groupOf(item(1, { readyAt: NOW, sessions: [session()] }))).toBe('review');
     expect(['setup', 'running'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['progress', 'progress']);
@@ -128,6 +130,9 @@ describe('mainControl', () => {
 
     expect(mainControl(item(1, { status: 'awaiting-approval' }))?.label).toBe('Approve');
     expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Triage again');
+    // A ready row keeps the control of what it waits on.
+    expect(mainControl(item(1, { status: 'failed', readyAt: NOW }))?.label).toBe('Triage again');
+    expect(mainControl(item(1, { status: 'awaiting-approval', readyAt: NOW, sessions: [session({ state: 'waiting' })] }))?.label).toBe('Open in Claude');
     expect(mainControl(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toBeNull();
     expect(mainControl(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toBeNull();
     expect(mainControl(item(1, { status: 'unstarted' }))?.label).toBe('Start');
@@ -149,7 +154,9 @@ describe('clockOf', () => {
     expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'ended', outcome: 'opened', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     // A blocked item whose session still waits counts from the block.
     expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
-    expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6, sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
+    // A ready work item counts from when it became ready, through a question or a block.
+    expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6, sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 6, label: 'Ready since' });
+    expect(clockOf(scoped({ status: 'blocked', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
     expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
     expect(clockOf(scoped({ status: 'running', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
     expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Working since' });
@@ -231,6 +238,9 @@ describe('stripeOf', () => {
     expect(stripeOf(item(1, { status: 'failed' }))).toBe('error');
     expect(stripeOf(item(1, { status: 'blocked' }))).toBe('warning');
     expect(stripeOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('warning');
+    // A ready row keeps the stripe of what it waits on.
+    expect(stripeOf(item(1, { status: 'failed', readyAt: NOW }))).toBe('error');
+    expect(stripeOf(item(1, { status: 'awaiting-approval', readyAt: NOW, sessions: [session({ state: 'waiting' })] }))).toBe('warning');
     expect(stripeOf(item(1, { status: 'awaiting-approval' }))).toBe('turn');
     expect(stripeOf(item(1, { status: 'finished' }))).toBe('turn');
     expect(stripeOf(item(1, { status: 'running', readyAt: NOW, sessions: [session()] }))).toBeNull();

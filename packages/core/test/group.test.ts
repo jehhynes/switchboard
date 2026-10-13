@@ -12,18 +12,20 @@ const opened = (status: WorkItemStatus) => ({ ...item(status), sessions: [{ stat
 const ready = (status: WorkItemStatus, ...states: SessionState[]) => ({ ...item(status, ...states), readyAt: 1000 });
 
 describe('groupOf', () => {
-  it('checks Done, then Unstarted, then Blocked on you, then Ready for review, then In progress (PRD R27)', () => {
+  it('checks Done, then Unstarted, then Ready for review, then Blocked on you, then In progress (PRD R27)', () => {
     expect(groupOf(item('done', 'waiting'))).toBe('done');
     expect(groupOf(ready('done'))).toBe('done');
     expect(groupOf(item('triaging'))).toBe('unstarted');
     expect(groupOf(item('unstarted'))).toBe('unstarted');
     expect(groupOf(item('queued'))).toBe('unstarted');
-    expect(['blocked', 'failed'].map((status) => groupOf(ready(status as WorkItemStatus)))).toEqual(['blocked', 'blocked']);
+    expect(['blocked', 'failed'].map((status) => groupOf(item(status as WorkItemStatus)))).toEqual(['blocked', 'blocked']);
+    // A ready work item stays in Ready for review through a block, a failure and a question.
+    expect(['blocked', 'failed'].map((status) => groupOf(ready(status as WorkItemStatus)))).toEqual(['review', 'review']);
     expect(groupOf(item('running', 'ended', 'waiting'))).toBe('blocked');
-    expect(groupOf(ready('awaiting-approval', 'waiting'))).toBe('blocked');
+    expect(groupOf(ready('awaiting-approval', 'waiting'))).toBe('review');
     expect(groupOf(item('queued', 'waiting'))).toBe('blocked');
     expect(groupOf(opened('running'))).toBe('blocked');
-    expect(groupOf({ ...opened('awaiting-approval'), readyAt: 1000 })).toBe('blocked');
+    expect(groupOf({ ...opened('awaiting-approval'), readyAt: 1000 })).toBe('review');
     expect(groupOf(opened('done'))).toBe('done');
     // Approve while the slots are full, or triage again, moves on from the opened question.
     expect(groupOf({ ...opened('queued'), readyAt: 1000 })).toBe('review');
@@ -45,6 +47,8 @@ describe('turnOf', () => {
     expect(turnOf(item('running', 'waiting'))).toBe('operator');
     expect(turnOf(ready('awaiting-approval'))).toBe('operator');
     expect(turnOf(ready('finished'))).toBe('operator');
+    expect(['blocked', 'failed'].map((status) => turnOf(ready(status as WorkItemStatus)))).toEqual(['operator', 'operator']);
+    expect(turnOf(ready('running', 'waiting'))).toBe('operator');
     expect(turnOf(ready('running', 'running'))).toBe('agent');
     expect(turnOf(ready('queued'))).toBe('agent');
     expect(turnOf(item('running', 'running'))).toBe('agent');
@@ -100,6 +104,7 @@ describe('markOf', () => {
     expect(markOf({ ...opened('failed'), approvalSends: false, doneReason: null })).toBe('failed');
     expect(marked('blocked')).toBe('blocked');
     expect(marked('failed')).toBe('failed');
+    expect(['blocked', 'failed'].map((status) => marked(status as WorkItemStatus, [], { readyAt: 1 }))).toEqual(['blocked', 'failed']);
   });
 
   it('gives the review to do or the phase in Ready for review (PRD R27)', () => {

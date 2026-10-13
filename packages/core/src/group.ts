@@ -25,9 +25,14 @@ export function waitsOnQuestion(item: Pick<WorkItem, 'status'> & { sessions: Pic
   return latest?.state === 'waiting' || opened;
 }
 
+/** The work item waits on the operator's answer or fix: it is blocked or failed, or a question waits on the operator (PRD R27). */
+export function blocksOnYou(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state' | 'outcome'>[] }): boolean {
+  return item.status === 'blocked' || item.status === 'failed' || waitsOnQuestion(item);
+}
+
 /**
- * PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Blocked on you, then Ready for review for a work
- * item that has been ready, then queued starts in Unstarted, then In progress.
+ * PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Ready for review for a work item that has been ready,
+ * then Blocked on you, then queued starts in Unstarted, then In progress.
  */
 export function groupOf(item: Grouped): Group {
   if (item.status === 'done') {
@@ -38,27 +43,27 @@ export function groupOf(item: Grouped): Group {
     return 'unstarted';
   }
 
-  if (item.status === 'blocked' || item.status === 'failed' || waitsOnQuestion(item)) {
-    return 'blocked';
-  }
-
-  // An approved work item queued for a slot keeps its place in Ready for review.
+  // A ready work item keeps its place in Ready for review while it runs again, waits for a slot, asks a question, blocks or fails.
   if (item.readyAt !== null) {
     return 'review';
+  }
+
+  if (blocksOnYou(item)) {
+    return 'blocked';
   }
 
   // A queued item waits for a slot or for another session of its ticket to end its turn (queueWaits).
   return item.status === 'queued' ? 'unstarted' : 'progress';
 }
 
-/** Whose turn it is in the three active groups (PRD R27): the operator's in Blocked on you and on work ready for review, else the agent's. */
+/** Whose turn it is in the three active groups (PRD R27): the operator's on work blocked on them or ready for their review, else the agent's. */
 export function turnOf(item: Grouped): 'operator' | 'agent' | null {
   switch (groupOf(item)) {
     case 'blocked':
       return 'operator';
     case 'review':
     case 'progress':
-      return item.status === 'awaiting-approval' || item.status === 'finished' ? 'operator' : 'agent';
+      return blocksOnYou(item) || item.status === 'awaiting-approval' || item.status === 'finished' ? 'operator' : 'agent';
     case 'unstarted':
     case 'done':
       return null;
@@ -128,13 +133,17 @@ export const MARK_GLYPHS: Record<Mark, string> = {
 export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approvalSends: boolean }): Mark | null {
   switch (groupOf(item)) {
     case 'blocked':
+    case 'review':
+    case 'progress':
+      // A question the session waits on comes before an approval it reported earlier.
       if (waitsOnQuestion(item)) {
         return 'question';
       }
 
-      return item.status === 'failed' ? 'failed' : 'blocked';
-    case 'review':
-    case 'progress':
+      if (item.status === 'failed' || item.status === 'blocked') {
+        return item.status;
+      }
+
       if (item.status === 'awaiting-approval') {
         return item.approvalSends ? 'send' : 'review';
       }
