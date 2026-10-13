@@ -58,7 +58,7 @@ public sealed class MainWindowTests
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
         Assert.Contains("Setup ended without a worktree.", texts);
-        Assert.Contains("Which branch?", texts);
+        Assert.Contains("Answer a question", texts);
         Assert.DoesNotContain("Nothing waits to be started.", texts);
     }
 

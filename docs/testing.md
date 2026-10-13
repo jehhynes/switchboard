@@ -28,7 +28,7 @@ Test behavior that types cannot establish:
 - Playbook loading from settings.json, playbook errors, and template rendering.
 - Classifier output validation, including an unknown playbook name.
 - Report command handling, including unknown session IDs and worktree paths `git worktree list` does not show.
-- Required CLI arguments for `claude --bg`, `claude -p`, `claude attach`, `claude stop`, `codex exec`, `codex exec resume` and `codex exec fork`.
+- Required CLI arguments for `claude --bg`, `claude -p`, `claude attach`, `claude stop`, `codex exec` and `codex exec fork`.
 
 Do not test type declarations, pass-through property bags, or simple settings reads.
 
@@ -54,7 +54,7 @@ Run it with an isolated home (`hub.js --home=<repo>/.wip/acceptance-home`, so th
 
 1. **GitHub read.** Configure the GitHub source with the operator's settings and every playbook set to `autoStart: false`. Confirm that the work items match the issues currently assigned to the operator in the configured statuses, and that each has a triage result. Never approve a GitHub work item during acceptance, because its playbook would run the operator's skills against a real issue.
 2. **Ad-hoc session.** Use a scratch git repository under `.wip/`, trusted by running `claude` there once. Run an ad-hoc prompt that writes a file, reports a stage, reports a worktree, and reports done. Observe `running`, the stage, `done` and the release stop in the dock.
-3. **Controls.** Click an ended session's row; its item window comes forward and the session opens in its Claude view. Stop a session; it should end up `blocked` with "Stopped by you." Resume it from the row. Reach `waiting` with a prompt that asks an `AskUserQuestion` with one question; the row shows the question and its options, and an option button answers it and the session runs on in its background process. Reach `waiting` again and use Open in Claude; the row becomes `blocked` with "Opened in Claude to answer.", the session opens in the item window's Claude view, which asks the question again, and answering there returns the row to In progress. Get the trust refusal from an untrusted directory.
+3. **Controls.** Click an ended session's row; its item window comes forward and the session opens in its Claude view. Stop a session; it should end up `blocked` with "Stopped by you." Resume it from the row. Reach `waiting` with a prompt that asks an `AskUserQuestion`; the row shows the Answer a question mark and no option buttons. Use Open in Claude; the row becomes `blocked` with "Opened in Claude to answer.", the session opens in the item window's Claude view, which asks the question again, and answering there returns the row to In progress. Get the trust refusal from an untrusted directory.
 
 Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, VS Code and Claude extension versions, and the result of each step. A failed step is a defect or a new mechanics finding, not a skipped check.
 

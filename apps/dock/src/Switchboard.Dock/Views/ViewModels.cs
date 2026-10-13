@@ -602,10 +602,6 @@ public sealed class RowViewModel(DockRow row) : Observable
     /// <summary>Approve takes the accent colour (PRD R27).</summary>
     public bool MainIsApprove => row.Main == "Approve";
 
-    public IReadOnlyList<DockAnswer> Answers => row.Answers;
-
-    public bool HasAnswers => row.Answers.Count > 0;
-
     public bool HasCopy => row.Pastes.Count > 0;
 
     public string CopyTitle => row.Pastes.Count == 1 ? $"Copy {row.Pastes[0].Label}" : "Copy…";

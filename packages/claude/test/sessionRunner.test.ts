@@ -1,14 +1,12 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@switchboard/core';
 import type { Exec, ExecResult } from '../src/exec.js';
-import { jobStatePath } from '../src/service.js';
 import { ClaudeRunner } from '../src/sessionRunner.js';
 import type { ClaudeRunnerDeps } from '../src/sessionRunner.js';
 
-const FIXTURES = join(import.meta.dirname, 'fixtures');
 const ran = (patch: Partial<ExecResult>): ExecResult => ({ code: 0, stdout: '', stderr: '', missing: false, timedOut: false, ...patch });
 
 let root: string;
@@ -51,7 +49,6 @@ function runner(exec: Exec, patch: Partial<ClaudeRunnerDeps> = {}): ClaudeRunner
     now: () => 0,
     home: join(root, '.switchboard'),
     claudeSettings: join(root, '.claude', 'settings.json'),
-    service: { listPipes: () => [], connect: () => { throw new Error('no pipe'); } },
     hooks: () => true,
     ...patch,
   });
@@ -101,42 +98,8 @@ describe('ClaudeRunner', () => {
     expect(await claude.stop({ sessionId: 's1', shortId: null }, 'operator')).toEqual({ error: 'The session has not started yet.' });
   });
 
-  it('reads the job state question again only when the file changes', () => {
-    const claude = runner(vi.fn<Exec>());
-    const path = jobStatePath(join(root, '.claude'), '1a2b3c4d');
-
-    expect(claude.question(session())).toBeNull();
-    expect(claude.question(session({ shortId: null }))).toBeNull();
-
-    mkdirSync(join(path, '..'), { recursive: true });
-    copyFileSync(join(FIXTURES, 'job-state-one-question.json'), path);
-    utimesSync(path, 1000, 1000);
-    const first = claude.question(session());
-
-    expect(first).toEqual({ question: { text: 'Which fruit should I record?', options: expect.any(Array), parts: 1 }, version: '1000000' });
-
-    // Same modification time: the cached read stands even though the content changed.
-    writeFileSync(path, readFileSync(join(FIXTURES, 'job-state-two-questions.json')));
-    utimesSync(path, 1000, 1000);
-    expect(claude.question(session())).toEqual(first);
-
-    utimesSync(path, 2000, 2000);
-    expect(claude.question(session())?.question?.parts).toBe(2);
-
-    // Forgotten when the session stops waiting: the next wait reads the file even at the same modification time.
-    copyFileSync(join(FIXTURES, 'job-state-one-question.json'), path);
-    utimesSync(path, 2000, 2000);
-    expect(claude.question(session())?.question?.parts).toBe(2);
-    claude.forgetQuestion({ sessionId: 's1', shortId: '1a2b3c4d' });
-    expect(claude.question(session())?.question?.parts).toBe(1);
-  });
-
   it('fails every session a stopped hub left starting', async () => {
     expect(await runner(vi.fn<Exec>()).reconcile([session({ state: 'starting', shortId: null })])).toEqual([{ sessionId: 's1', failed: 'The hub stopped while the session was starting.' }]);
-  });
-
-  it('reports a reply the service cannot take', async () => {
-    expect(await runner(vi.fn<Exec>()).reply({ sessionId: 's1', shortId: '1a2b3c4d', question: 'Which fruit?', questionId: null, answer: 'Mango' })).toEqual({ error: "Claude's background service is not running." });
   });
 
   it('installs the hooks into the settings file, and reports a settings file it must not change', async () => {

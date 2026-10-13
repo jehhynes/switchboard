@@ -1,23 +1,23 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { failureMessage, lastErrorLine, parseAttemptLog } from '../src/log.js';
+import { failureMessage, lastErrorLine, parseRunLog } from '../src/log.js';
 
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8');
 
-describe('parseAttemptLog', () => {
+describe('parseRunLog', () => {
   it('reads the thread, the turn start and a completed turn, skipping the warning items', () => {
-    expect(parseAttemptLog(fixture('exec-completed.jsonl'))).toEqual({ threadId: '01a128b1-5384-7b62-a7be-64a4b4c611a9', turnStarted: true, end: { state: 'idle' } });
+    expect(parseRunLog(fixture('exec-completed.jsonl'))).toEqual({ threadId: '01a128b1-5384-7b62-a7be-64a4b4c611a9', end: { state: 'idle' } });
   });
 
   it('reads a failed turn with the API error message unwrapped', () => {
-    expect(parseAttemptLog(fixture('exec-failed.jsonl')).end).toEqual({ state: 'failed', message: "The 'no-such-model' model is not supported when using Codex with a ChatGPT account." });
+    expect(parseRunLog(fixture('exec-failed.jsonl')).end).toEqual({ state: 'failed', message: "The 'no-such-model' model is not supported when using Codex with a ChatGPT account." });
   });
 
   it('reads a run in progress and skips a partial last line', () => {
-    expect(parseAttemptLog('{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.started"}\n{"type":"turn.compl')).toEqual({ threadId: 't1', turnStarted: true, end: null });
-    expect(parseAttemptLog('')).toEqual({ threadId: null, turnStarted: false, end: null });
-    expect(parseAttemptLog('[1]\n{"type":"turn.failed","error":"no message"}').end).toEqual({ state: 'failed', message: 'unknown error' });
+    expect(parseRunLog('{"type":"thread.started","thread_id":"t1"}\n{"type":"turn.started"}\n{"type":"turn.compl')).toEqual({ threadId: 't1', end: null });
+    expect(parseRunLog('')).toEqual({ threadId: null, end: null });
+    expect(parseRunLog('[1]\n{"type":"turn.failed","error":"no message"}').end).toEqual({ state: 'failed', message: 'unknown error' });
   });
 });
 

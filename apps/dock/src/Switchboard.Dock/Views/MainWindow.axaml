@@ -90,11 +90,6 @@
       <Setter Property="Fill" Value="{x:Null}" />
       <Setter Property="Stroke" Value="{DynamicResource DockSourceOff}" />
     </Style>
-    <Style Selector="Button.option">
-      <Setter Property="Padding" Value="8,1" />
-      <Setter Property="Margin" Value="0,2,4,0" />
-      <Setter Property="FontSize" Value="12" />
-    </Style>
     <!-- A row's buttons are VS Code-sized, 26px tall with a 16px icon, as the VS Code panel's were: Approve in the button colour, the others
          in a light tint of the text colour. -->
     <Style Selector="Button.main, Button.icon-button">
@@ -400,7 +395,7 @@
                             <Grid ColumnDefinitions="3,*">
                               <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" Classes.turn="{Binding StripeTurn}" />
                               <!-- The row's buttons sit beside lines 2 and 3, so they never shorten the title or hide the time. -->
-                              <Grid Grid.Column="1" Classes="content" Margin="8,5,8,6" RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
+                              <Grid Grid.Column="1" Classes="content" Margin="8,5,8,6" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
                                 <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto">
                                   <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center" Fill="{DynamicResource DockPriority}"
                                            IsVisible="{Binding IsPriority}" ToolTip.Tip="{Binding PriorityTitle}" />
@@ -455,20 +450,6 @@
                                   </ItemsControl>
                                 </DockPanel>
                                 </StackPanel>
-                                <WrapPanel Grid.Row="2" Grid.ColumnSpan="2" IsVisible="{Binding HasAnswers}">
-                                  <ItemsControl ItemsSource="{Binding Answers}">
-                                    <ItemsControl.ItemsPanel>
-                                      <ItemsPanelTemplate>
-                                        <WrapPanel />
-                                      </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                      <DataTemplate x:DataType="hub:DockAnswer">
-                                        <Button Classes="option" Content="{Binding Label}" ToolTip.Tip="{Binding Description}" Click="OnAnswerClicked" />
-                                      </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                  </ItemsControl>
-                                </WrapPanel>
                                 <!-- The negative margins let the 26px buttons reach into the gap above line 2 and the row's padding, so a two-line row keeps its height. -->
                                 <StackPanel Grid.Row="1" Grid.Column="1" Classes="actions" Classes.empty="{Binding !HasActions}" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="6,-3,0,-5">
                                 <Button Classes="icon-button" IsVisible="{Binding HasCopy}" ToolTip.Tip="{Binding CopyTitle}" Click="OnCopyClicked">

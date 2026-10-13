@@ -89,17 +89,6 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void AnswerButton_OneAnswer_PostsItsAnswerAction()
-    {
-        var (window, _) = Open();
-
-        hub.ActReplies.Enqueue(null);
-        Click(RowOf(window, "item:8").GetVisualDescendants().OfType<Button>().Single((button) => button.Classes.Contains("option")));
-
-        Assert.Equal(["act {\"type\":\"answer\",\"workItemId\":8,\"nativeSessionId\":\"aaaa1111-native\",\"question\":\"Which branch?\",\"answer\":\"main\"}"], hub.Calls);
-    }
-
-    [AvaloniaFact]
     public void ReportButton_ApprovalRow_RunsOpenReportInVsCode()
     {
         var (window, model) = Open();

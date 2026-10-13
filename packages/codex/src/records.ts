@@ -3,34 +3,23 @@ import { join } from 'node:path';
 import type { CodexPermissionMode } from '@switchboard/core';
 import type { ProcessIdentity } from './processes.js';
 
-/** An answer being sent to a waiting session: reserved before its process exists, then spawned, or failed (mechanics M31). */
-export interface ReplyState {
-  questionId: string;
-  attempt: number;
-  state: 'reserved' | 'spawned' | 'failed';
-}
+/** The run record's format; a record of another version is not read, so its session ends at the next roster read. */
+export const RUN_RECORD_VERSION = 2;
 
-/**
- * What the hub keeps about one Codex session's runs, in `<switchboard home>/codex/<session id>.json`. Each start or reply is an
- * attempt with its own log, so a later attempt never reads an earlier attempt's events.
- */
+/** What the hub keeps about one Codex session's run, in `<switchboard home>/codex/<session id>.json`. */
 export interface RunRecord {
-  v: 1;
+  v: typeof RUN_RECORD_VERSION;
   sessionId: string;
   cwd: string;
   mode: CodexPermissionMode;
   model: string | null;
-  /** The report contract, passed again with every resume, because a compaction rebuilds the developer instructions from config. */
+  /** The report contract, passed as developer instructions, because a compaction rebuilds them from config. */
   contract: string;
   threadId: string | null;
-  attempt: number;
-  /** When the current attempt was spawned; a hook marker older than it is from an earlier process. */
-  attemptAt: number;
-  /** The current attempt's process; null between the record and the spawn, or when the spawn failed. */
+  /** When the run was spawned; a hook marker older than it is from an earlier process. */
+  spawnedAt: number;
+  /** The run's process; null between the record and the spawn, or when the spawn failed. */
   process: ProcessIdentity | null;
-  /** The attempt before the current one, while its process may still be exiting. */
-  previous: ProcessIdentity | null;
-  reply: ReplyState | null;
 }
 
 export function codexDir(home: string): string {
@@ -41,9 +30,9 @@ export function recordPath(home: string, sessionId: string): string {
   return join(codexDir(home), `${sessionId}.json`);
 }
 
-/** The stdout and stderr files of one attempt. */
-export function attemptFiles(home: string, sessionId: string, attempt: number): { stdout: string; stderr: string } {
-  const base = join(codexDir(home), `${sessionId}-${attempt}`);
+/** The stdout and stderr files of the session's run. */
+export function runFiles(home: string, sessionId: string): { stdout: string; stderr: string } {
+  const base = join(codexDir(home), sessionId);
 
   return { stdout: `${base}.jsonl`, stderr: `${base}.err` };
 }
@@ -52,7 +41,7 @@ export function readRecord(home: string, sessionId: string): RunRecord | null {
   try {
     const record = JSON.parse(readFileSync(recordPath(home, sessionId), 'utf8')) as RunRecord;
 
-    return record.v === 1 ? record : null;
+    return record.v === RUN_RECORD_VERSION ? record : null;
   } catch {
     return null;
   }

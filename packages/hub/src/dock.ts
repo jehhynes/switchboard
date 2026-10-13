@@ -125,7 +125,7 @@ export interface DockRow {
   url: string;
   /** The mark, its codicon glyph and its meaning in words. */
   mark: { kind: Mark; glyph: string; title: string } | null;
-  /** Line 3 after the mark: waits, wake time, warning and error, the parent, and the stage, approval summary or question. */
+  /** Line 3 after the mark: waits, wake time, warning and error, the parent, and the stage or approval summary. */
   details: DockText[];
   /** The left stripe's colour (PRD R27): failed, blocked or asking, the operator's turn, or none on the agent's turn. */
   stripe: 'error' | 'warning' | 'turn' | null;
@@ -148,8 +148,6 @@ export interface DockRow {
   mainGlyph: string | null;
   /** The main control's tooltip, which for Approve names the prompt it runs (PRD R27). */
   mainTitle: string | null;
-  /** A one-part question's options, each with the `answer` action it posts (PRD R70); empty otherwise. */
-  answers: { label: string; description: string; action: Record<string, unknown> }[];
   /** The drafted texts Copy offers on an `awaiting-approval` row (PRD R60); empty otherwise. */
   pastes: { label: string; file: string }[];
   /** The controls that run in VS Code, each with the message a window runs: Open Changes, Open in terminal, History, Open report. */
@@ -226,8 +224,6 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
   const kind = markOf(item);
   const controls = order === null ? controlsOf(item) : [...controlsOf(item), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
-  const question = item.question ?? null;
-  const sessionId = activeSession(item)?.nativeSessionId ?? null;
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
   const main = mainControl(item);
 
@@ -246,7 +242,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
       ...wake(item.ticket),
       ...[item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped(note, CAPS.note, 'warning')),
       ...(item.parent === null ? [] : [{ text: `From ${ticketKey(item.parent)}`, title: item.parent.title, tone: null }]),
-      ...progress(item, now),
+      ...(kind === 'question' ? [] : progress(item, now)),
     ]),
     stripe: stripeOf(item),
     turn,
@@ -258,14 +254,6 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     main: main?.label ?? null,
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main === null ? null : mainTitle(item, main),
-    answers:
-      question !== null && question.parts === 1 && sessionId !== null
-        ? question.options.map((option) => ({
-            label: option.label,
-            description: option.description,
-            action: { type: 'answer', workItemId: item.id, nativeSessionId: sessionId, question: question.text, answer: option.label, ...(question.id === undefined ? {} : { questionId: question.id }) },
-          }))
-        : [],
     pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],
     commands: [...windowCommands(controls), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
   };
@@ -302,7 +290,6 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     main: main?.label ?? null,
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main?.label ?? null,
-    answers: [],
     pastes: [],
     commands: windowCommands(controls),
   };
@@ -341,14 +328,8 @@ function wake(ticket: { snoozed: boolean; snoozedUntil: number | null }): DockTe
   return ticket.snoozed && ticket.snoozedUntil !== null ? [{ text: `Wakes ${wakeText(ticket.snoozedUntil)}`, title: null, tone: null }] : [];
 }
 
-/** The question, else the approval summary, else the stage, each with its age, for line 3 (PRD R27, R58, R70). */
+/** The approval summary, else the stage, each with its age, for line 3 (PRD R27, R58). */
 function progress(item: WorkItemView, now: number): DockText[] {
-  const question = item.question ?? null;
-
-  if (question !== null) {
-    return [clipped(question.text, CAPS.question)];
-  }
-
   const summary = item.status === 'awaiting-approval' ? item.approvalSummary : null;
 
   if (summary !== null) {

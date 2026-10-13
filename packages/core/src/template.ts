@@ -78,8 +78,7 @@ export function triagePrompt(template: string, choices: readonly PlaybookChoice[
 
 /** Each report's lines in the contract, in contract order. The task report is accepted but not listed, so only the operator starts one (PRD R68). */
 const REPORT_LINES: Record<Exclude<ReportKind, 'task'>, string> = {
-  question: `- {{report}} question {{session.id}} --text <question> [--option <choice>]..., when you need the operator's answer or choice, or cannot continue without them; write the question and its choices as your final message too, then end your turn.
-  - Give each choice as its own --option; the operator can also answer in their own words.`,
+  question: `- {{report}} question {{session.id}} --text <question>, when you need the operator's answer or choice, or cannot continue without them; write the question and its choices as your final message too, then end your turn.`,
   stage: `- {{report}} stage {{session.id}} <stage>, when you start a new phase of the work.
   - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
   worktree: '- {{report}} worktree {{session.id}} <path>, when you create a worktree.',

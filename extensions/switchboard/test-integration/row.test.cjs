@@ -59,7 +59,6 @@ function item(id, cwd, state = 'waiting') {
     parent: null,
     returned: 0,
     approvalSends: false,
-    question: state !== 'waiting' ? null : { text: 'Which tree?', options: [{ label: 'Oak', description: 'sturdy' }], parts: 1 },
   };
 }
 

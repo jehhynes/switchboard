@@ -243,12 +243,12 @@ function waitsInBackground(session: SessionView | null): session is SessionView 
 
 /**
  * Open in Claude or Codex: the hub stops the session, which then opens in the item window's view of its provider (PRD R70). A Codex session offers it
- * only while the hub shows its question, which it does once the asking turn has ended; Claude's stays offered when its job state cannot be read.
+ * only while it waits on a question it reported, not on a permission prompt.
  */
 export function openQuestion(item: WorkItemView): { type: 'open-question'; workItemId: number; sessionId: string; cwd: string; provider: Provider } | null {
   const session = activeSession(item);
 
-  return waitsInBackground(session) && (session.provider !== 'codex' || item.question !== null) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider } : null;
+  return waitsInBackground(session) && (session.provider !== 'codex' || session.question !== null) ? { type: 'open-question', workItemId: item.id, sessionId: session.nativeSessionId, cwd: session.cwd, provider: session.provider } : null;
 }
 
 /** How labels name each provider. */
@@ -270,7 +270,7 @@ function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
 }
 
 /** Character caps for the texts sessions report; the contract asks for less, and a longer text is cut here with its whole in the tooltip. */
-export const CAPS = { stage: 24, approval: 60, note: 80, question: 80 } as const;
+export const CAPS = { stage: 24, approval: 60, note: 80 } as const;
 
 /** The text cut at `max` characters on a word boundary with an ellipsis, and the whole text for the tooltip when it was cut. */
 export function clip(text: string, max: number): { text: string; full: string | null } {

@@ -752,14 +752,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    async void OnAnswerClicked(object? sender, RoutedEventArgs e)
-    {
-        if ((sender as Control)?.DataContext is DockAnswer answer)
-        {
-            await Act(answer.Action);
-        }
-    }
-
     async void OnCopyClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is not Control button || button.DataContext is not RowViewModel row)

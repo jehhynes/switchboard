@@ -59,11 +59,6 @@ export function startArgs(cwd: string, prompt: string, options: RunOptions): str
   return ['exec', '--json', ...sharedArgs(options), '-C', cwd, '--', codexPrompt(prompt)];
 }
 
-/** The next turn of a thread in the background, with the same mode, model and contract as its start. */
-export function resumeArgs(threadId: string, text: string, options: RunOptions): string[] {
-  return ['exec', 'resume', '--json', ...sharedArgs(options), threadId, '--', text];
-}
-
 /** An ephemeral, read-only fork for a friction debrief, with its prompt on stdin: it writes no rollout and leaves the thread unchanged (mechanics M31). */
 export function forkArgs(threadId: string): string[] {
   return ['exec', 'fork', '--json', '--ephemeral', ...modeArgs('plan'), threadId, '-'];

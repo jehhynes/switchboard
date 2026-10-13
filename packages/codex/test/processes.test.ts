@@ -13,7 +13,7 @@ describe('sameProcess and runTag', () => {
     expect(sameProcess({ pid: 1, created: '5' }, { pid: 1, created: '5' })).toBe(true);
     expect(sameProcess({ pid: 1, created: '5' }, { pid: 1, created: '6' })).toBe(false);
     expect(sameProcess(null, { pid: 1, created: '5' })).toBe(false);
-    expect(runTag('s1', 2)).toBe('s1-2');
+    expect(runTag('s1')).toBe('s1');
   });
 });
 
@@ -53,10 +53,10 @@ describe('findTagged', () => {
   it('finds none, refuses two and refuses a tag that is not plain', async () => {
     const recorded = JSON.parse(CIM) as object;
 
-    expect(await findTagged(vi.fn<Exec>().mockResolvedValue(ran({ stdout: '[]' })), 's1-1')).toBeNull();
+    expect(await findTagged(vi.fn<Exec>().mockResolvedValue(ran({ stdout: '[]' })), 's1')).toBeNull();
     expect(await findTagged(vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([recorded, { ...recorded, pid: 2 }]) })), 'sbtest42-1')).toEqual({ error: '2 Codex processes carry the run tag sbtest42-1.' });
     expect(await findTagged(vi.fn<Exec>(), "s1'1")).toEqual({ error: "Invalid run tag s1'1." });
-    expect(await findTagged(vi.fn<Exec>().mockResolvedValue(ran({ code: 1, stderr: 'x' })), 's1-1')).toEqual({ error: 'x' });
+    expect(await findTagged(vi.fn<Exec>().mockResolvedValue(ran({ code: 1, stderr: 'x' })), 's1')).toEqual({ error: 'x' });
   });
 });
 

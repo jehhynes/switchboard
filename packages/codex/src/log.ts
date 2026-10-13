@@ -1,7 +1,6 @@
-/** What one `codex exec --json` attempt's stdout log says so far (mechanics M31). */
-export interface AttemptLog {
+/** What a `codex exec --json` run's stdout log says so far (mechanics M31). */
+export interface RunLog {
   threadId: string | null;
-  turnStarted: boolean;
   /** How the turn ended, or null while it runs or when the process died first. */
   end: { state: 'idle' } | { state: 'failed'; message: string } | null;
 }
@@ -22,9 +21,9 @@ export function failureMessage(raw: string): string {
   }
 }
 
-/** Reads the events of an attempt's log; a partial last line, still being written, is skipped. */
-export function parseAttemptLog(text: string): AttemptLog {
-  const log: AttemptLog = { threadId: null, turnStarted: false, end: null };
+/** Reads the events of a run's log; a partial last line, still being written, is skipped. */
+export function parseRunLog(text: string): RunLog {
+  const log: RunLog = { threadId: null, end: null };
 
   for (const line of text.split('\n')) {
     let event: unknown;
@@ -42,9 +41,6 @@ export function parseAttemptLog(text: string): AttemptLog {
     switch (event['type']) {
       case 'thread.started':
         log.threadId = typeof event['thread_id'] === 'string' ? event['thread_id'] : log.threadId;
-        break;
-      case 'turn.started':
-        log.turnStarted = true;
         break;
       case 'turn.completed':
         log.end = { state: 'idle' };

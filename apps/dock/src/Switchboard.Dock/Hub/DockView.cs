@@ -40,7 +40,6 @@ public sealed record DockRow(
     IReadOnlyList<DockControl> Controls,
     string? Main,
     string? MainTitle,
-    IReadOnlyList<DockAnswer> Answers,
     IReadOnlyList<DockPaste> Pastes,
     IReadOnlyList<DockCommand> Commands,
     string Search,
@@ -73,9 +72,6 @@ public sealed record DockLink(string Label, string Url, string Kind = "url", str
     [JsonIgnore]
     public string Text => Badge ?? Label;
 }
-
-/// <summary>A one-part question's option and the <c>answer</c> action it posts (PRD R70).</summary>
-public sealed record DockAnswer(string Label, string Description, JsonObject Action);
 
 /// <summary>A drafted text Copy puts on the clipboard (PRD R60).</summary>
 public sealed record DockPaste(string Label, string File);

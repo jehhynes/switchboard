@@ -1,24 +1,24 @@
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Exec, MarkerReading, ObservedSession, Reconciled, ReplyRequest, Session, SessionQuestion, SessionRunner, SessionTarget, StartAction, StartResult, StopReason } from '@switchboard/core';
+import type { Exec, MarkerReading, ObservedSession, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason } from '@switchboard/core';
 import { isCodexPermissionMode } from '@switchboard/core';
-import { resumeArgs, startArgs } from './args.js';
+import { startArgs } from './args.js';
 import type { RunOptions } from './args.js';
 import { CODEX_HOOK_SOURCE, codexHookCommands, parseCodexMarker, planCodexHooks } from './hooks.js';
 import type { CodexMarker } from './hooks.js';
-import { lastErrorLine, parseAttemptLog } from './log.js';
-import type { AttemptLog } from './log.js';
+import { lastErrorLine, parseRunLog } from './log.js';
+import type { RunLog } from './log.js';
 import { carriesTag, findTagged, killTree, pidAlive, queryProcesses, runTag, sameProcess, spawnDetached } from './processes.js';
 import type { DetachedSpawn, ProcessIdentity, ProcessInfo } from './processes.js';
-import { attemptFiles, readRecord, readText, writeRecord } from './records.js';
+import { readRecord, readText, RUN_RECORD_VERSION, runFiles, writeRecord } from './records.js';
 import type { RunRecord } from './records.js';
 import { readTail, reduce, turnEndOf } from './reducer.js';
 import type { Reduced } from './reducer.js';
 import { trustHooks } from './trust.js';
 
-/** How long a start or a reply waits for Codex's first event of the run. */
+/** How long a start waits for Codex's first event of the run. */
 export const START_TIMEOUT_MS = 60_000;
-/** How long a release, an open or a reply waits for a run's process to exit after its turn, before it is ended. */
+/** How long a release or an open waits for a run's process to exit after its turn, before it is ended. */
 export const EXIT_WAIT_MS = 15_000;
 const POLL_MS = 250;
 /** How often a spawn tries to read the new process's creation time before it leaves the identity to the run tag. */
@@ -37,8 +37,6 @@ export interface CodexRunnerDeps {
   env: Record<string, string>;
   /** Whether Switchboard's hooks are on (`sessions.installHooks`). */
   hooks(): boolean;
-  /** The question the session reported, or null; the store's by default. */
-  questionOf?(session: Session): { id: string; text: string; options: string[] } | null;
   spawn?: (file: string, args: string[], options: { cwd: string; stdout: string; stderr: string; env?: Record<string, string> }) => Promise<DetachedSpawn>;
   processes?: (pids: number[]) => Promise<Map<number, ProcessInfo> | { error: string }>;
   tagged?: (tag: string) => Promise<ProcessIdentity | null | { error: string }>;
@@ -53,20 +51,14 @@ type Spawned = { pid: number; identity: ProcessIdentity | null } | { error: stri
 export class CodexRunner implements SessionRunner {
   /** Process creation times from the last roster read, so the marker pass can tell a reused PID without a query. */
   private known = new Map<number, string>();
-  /** The operation in flight per session, so a read, a stop, a reply and a reconcile of one session never interleave. */
+  /** The operation in flight per session, so a read, a stop and a reconcile of one session never interleave. */
   private queues = new Map<string, Promise<unknown>>();
-  /** Replies in flight in this hub by session; a reservation without one was left by a hub that stopped. */
-  private replying = new Set<string>();
 
   constructor(private readonly deps: CodexRunnerDeps) {}
 
   /** Every Codex process reads the same home as the hooks Switchboard installs. */
   private get env(): Record<string, string> {
     return { ...this.deps.env, CODEX_HOME: this.deps.codexHome };
-  }
-
-  private questionOf(session: Session) {
-    return this.deps.questionOf ? this.deps.questionOf(session) : session.question;
   }
 
   private get spawn() {
@@ -103,21 +95,21 @@ export class CodexRunner implements SessionRunner {
     return run;
   }
 
-  private options(record: RunRecord, attempt: number): RunOptions {
-    return { mode: record.mode, model: record.model, contract: record.contract, tag: runTag(record.sessionId, attempt) };
+  private options(record: RunRecord): RunOptions {
+    return { mode: record.mode, model: record.model, contract: record.contract, tag: runTag(record.sessionId) };
   }
 
-  private log(record: RunRecord): AttemptLog {
-    return parseAttemptLog(readText(attemptFiles(this.deps.home, record.sessionId, record.attempt).stdout));
+  private log(record: RunRecord): RunLog {
+    return parseRunLog(readText(runFiles(this.deps.home, record.sessionId).stdout));
   }
 
   private failure(record: RunRecord, fallback: string): string {
-    return lastErrorLine(readText(attemptFiles(this.deps.home, record.sessionId, record.attempt).stderr)) ?? fallback;
+    return lastErrorLine(readText(runFiles(this.deps.home, record.sessionId).stderr)) ?? fallback;
   }
 
-  /** Spawns an attempt and reads its creation time; a process whose time cannot be read yet is found later by its run tag. */
-  private async spawnAttempt(record: RunRecord, attempt: number, args: string[]): Promise<Spawned> {
-    const files = attemptFiles(this.deps.home, record.sessionId, attempt);
+  /** Spawns the run and reads its creation time; a process whose time cannot be read yet is found later by its run tag. */
+  private async spawnRun(record: RunRecord, args: string[]): Promise<Spawned> {
+    const files = runFiles(this.deps.home, record.sessionId);
     const spawned = await this.spawn(this.deps.codexPath, args, { cwd: record.cwd, ...files, env: this.env });
 
     if (spawned.pid === null) {
@@ -131,7 +123,7 @@ export class CodexRunner implements SessionRunner {
         const info = found.get(spawned.pid);
 
         // A process that already exited has no creation time, and one without the run's tag took the PID after it; the log and stderr say what the run did.
-        return { pid: spawned.pid, identity: info === undefined || !carriesTag(info.commandLine, runTag(record.sessionId, attempt)) ? null : { pid: info.pid, created: info.created } };
+        return { pid: spawned.pid, identity: info === undefined || !carriesTag(info.commandLine, runTag(record.sessionId)) ? null : { pid: info.pid, created: info.created } };
       }
 
       await this.deps.sleep(POLL_MS);
@@ -140,16 +132,16 @@ export class CodexRunner implements SessionRunner {
     return { pid: spawned.pid, identity: null };
   }
 
-  /** Waits until the attempt's log holds the event, the process exits, or the time runs out. The PID is the one just spawned. */
-  private async waitFor(record: RunRecord, pid: number, until: (log: AttemptLog) => boolean): Promise<'seen' | 'exited' | 'timeout'> {
+  /** Waits until the run's log holds the thread ID, the process exits, or the time runs out. The PID is the one just spawned. */
+  private async waitForThread(record: RunRecord, pid: number): Promise<'seen' | 'exited' | 'timeout'> {
     for (const deadline = this.deps.now() + START_TIMEOUT_MS; ; await this.deps.sleep(POLL_MS)) {
-      if (until(this.log(record))) {
+      if (this.log(record).threadId !== null) {
         return 'seen';
       }
 
       if (!this.alive(pid)) {
-        // The process may have written the event just before it exited.
-        return until(this.log(record)) ? 'seen' : 'exited';
+        // The process may have written the thread ID just before it exited.
+        return this.log(record).threadId !== null ? 'seen' : 'exited';
       }
 
       if (this.deps.now() >= deadline) {
@@ -165,23 +157,20 @@ export class CodexRunner implements SessionRunner {
 
     return this.serial(action.sessionId, async () => {
       const record: RunRecord = {
-        v: 1,
+        v: RUN_RECORD_VERSION,
         sessionId: action.sessionId,
         cwd: action.cwd,
         mode: action.permissionMode as RunRecord['mode'],
         model: action.model,
         contract: action.contract,
         threadId: null,
-        attempt: 1,
-        attemptAt: this.deps.now(),
+        spawnedAt: this.deps.now(),
         process: null,
-        previous: null,
-        reply: null,
       };
 
       writeRecord(this.deps.home, record);
 
-      const spawned = await this.spawnAttempt(record, 1, startArgs(action.cwd, action.prompt, this.options(record, 1)));
+      const spawned = await this.spawnRun(record, startArgs(action.cwd, action.prompt, this.options(record)));
 
       if ('error' in spawned) {
         return { error: spawned.error };
@@ -196,7 +185,7 @@ export class CodexRunner implements SessionRunner {
 
   /** Waits for the thread ID of a start whose process was spawned. */
   private async awaitStart(record: RunRecord, pid: number): Promise<StartResult> {
-    const seen = await this.waitFor(record, pid, (log) => log.threadId !== null);
+    const seen = await this.waitForThread(record, pid);
 
     if (seen === 'seen') {
       record.threadId = this.log(record).threadId;
@@ -262,21 +251,21 @@ export class CodexRunner implements SessionRunner {
   }
 
   private reduceOne(session: Session, record: RunRecord, marker: CodexMarker | null, fresh: Map<number, ProcessInfo> | null): Reduced | null {
-    const attemptAlive = this.lives(record.process, fresh);
+    const runAlive = this.lives(record.process, fresh);
     const ownerIdentity = marker?.pid != null && marker.created !== null ? { pid: marker.pid, created: marker.created } : null;
     const ownerAlive = this.lives(ownerIdentity, fresh);
 
     // Without a query, a PID whose creation time is unknown cannot be told from a reused one.
-    if (attemptAlive === null || ownerAlive === null) {
+    if (runAlive === null || ownerAlive === null) {
       return null;
     }
 
     return reduce({
       released: session.released,
-      question: this.questionOf(session)?.id ?? null,
+      question: session.question !== null,
       record,
       log: this.log(record),
-      attemptAlive,
+      runAlive,
       marker,
       markerOwnerAlive: ownerAlive,
       rolloutEnd: (held) => (held.turnId === null || held.transcriptPath === null ? null : turnEndOf(readTail(held.transcriptPath), held.turnId)),
@@ -284,8 +273,8 @@ export class CodexRunner implements SessionRunner {
   }
 
   /**
-   * Brings the record up to date before it is read or acted on, inside the session's queue: finds by its tag the process of an attempt the record
-   * holds no identity for, and settles a reply reservation a stopped hub left, adopting its process when it was spawned and failing it otherwise.
+   * Brings the record up to date before it is read or acted on, inside the session's queue: finds by its tag the run's process when the record
+   * holds no identity for it.
    */
   private async refresh(sessionId: string): Promise<RunRecord | null | { error: string }> {
     const record = readRecord(this.deps.home, sessionId);
@@ -294,28 +283,11 @@ export class CodexRunner implements SessionRunner {
       return null;
     }
 
-    if (record.reply?.state === 'reserved' && !this.replying.has(sessionId)) {
-      const found = await this.tagged(runTag(sessionId, record.reply.attempt));
-
-      if (found !== null && 'error' in found) {
-        return { error: `The Codex process query failed: ${found.error}` };
-      }
-
-      // A reply whose turn started ran, even when its process has exited since; adopting it keeps an answer from running twice.
-      const started = parseAttemptLog(readText(attemptFiles(this.deps.home, sessionId, record.reply.attempt).stdout)).turnStarted;
-      const reply = { ...record.reply, state: found === null && !started ? ('failed' as const) : ('spawned' as const) };
-      const next: RunRecord = reply.state === 'failed' ? { ...record, reply } : { ...record, attempt: reply.attempt, attemptAt: this.deps.now(), process: found, previous: record.process, reply };
-
-      writeRecord(this.deps.home, next);
-      return next;
-    }
-
-    // A reply whose spawn failed has no process to find.
-    if (record.process !== null || (record.reply?.state === 'failed' && record.reply.attempt === record.attempt)) {
+    if (record.process !== null) {
       return record;
     }
 
-    const found = await this.tagged(runTag(sessionId, record.attempt));
+    const found = await this.tagged(runTag(sessionId));
 
     if (found !== null && 'error' in found) {
       return { error: `The Codex process query failed: ${found.error}` };
@@ -329,7 +301,7 @@ export class CodexRunner implements SessionRunner {
     return record;
   }
 
-  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; acknowledged: { sessionId: string; questionId: string }[] } | { error: string }> {
+  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[] } | { error: string }> {
     const records = new Map<string, RunRecord>();
 
     for (const session of sessions) {
@@ -364,7 +336,6 @@ export class CodexRunner implements SessionRunner {
     this.known = new Map([...fresh.values()].map((info) => [info.pid, info.created]));
 
     const observed: ObservedSession[] = [];
-    const acknowledged: { sessionId: string; questionId: string }[] = [];
 
     for (const session of sessions) {
       const record = records.get(session.id);
@@ -372,14 +343,10 @@ export class CodexRunner implements SessionRunner {
 
       if (reduced?.listed === true) {
         observed.push({ sessionId: session.id, state: reduced.state, detail: reduced.detail, interactive: reduced.interactive });
-
-        if (reduced.acknowledge !== null) {
-          acknowledged.push({ sessionId: session.id, questionId: reduced.acknowledge });
-        }
       }
     }
 
-    return { sessions: observed, acknowledged };
+    return { sessions: observed };
   }
 
   markers(sessions: Session[]): Map<string, MarkerReading> {
@@ -397,8 +364,8 @@ export class CodexRunner implements SessionRunner {
       const reduced = this.reduceOne(session, record, marker, null);
       const at = marker?.at ?? 0;
 
-      if (reduced === null || !reduced.listed || reduced.acknowledge !== null || (reduced.interactive && !session.released)) {
-        // Only the roster read can end the session, take it as the operator's, or acknowledge its reply first.
+      if (reduced === null || !reduced.listed || (reduced.interactive && !session.released)) {
+        // Only the roster read can end the session or take it as the operator's.
         readings.set(session.nativeSessionId, { at, observed: null, recheck: true });
       } else {
         readings.set(session.nativeSessionId, { at, observed: { state: reduced.state, detail: reduced.detail }, recheck: false });
@@ -418,7 +385,7 @@ export class CodexRunner implements SessionRunner {
     const marker = this.readMarkers().get(record.threadId) ?? null;
     const owner = marker?.pid != null && marker.created !== null ? { pid: marker.pid, created: marker.created } : null;
 
-    if (marker === null || owner === null || marker.at < record.attemptAt || sameProcess(owner, record.process)) {
+    if (marker === null || owner === null || marker.at < record.spawnedAt || sameProcess(owner, record.process)) {
       return true;
     }
 
@@ -463,8 +430,9 @@ export class CodexRunner implements SessionRunner {
     return this.serial(target.sessionId, async () => {
       const record = await this.refresh(target.sessionId);
 
+      // A missing record, or one of another format, does not say which process to end, so the stop cannot be confirmed.
       if (record === null) {
-        return target.shortId === null ? { error: 'The session has not started yet.' } : null;
+        return { error: target.shortId === null ? 'The session has not started yet.' : "The session's run record cannot be read, so Switchboard cannot stop its Codex process." };
       }
 
       if ('error' in record) {
@@ -474,85 +442,6 @@ export class CodexRunner implements SessionRunner {
       // A release or an open follows the turn's end, so the process exits on its own; an operator stop ends it now.
       return reason === 'operator' ? (record.process === null ? null : this.killVerified(record.process)) : this.settle(record.process);
     });
-  }
-
-  /**
-   * The question the session waits on: shown and answerable only once the turn that reported it has ended, as the reducer decides from the run
-   * as it is now. Its ID is the version, so a question is answered once even when the next has the same text.
-   */
-  question(session: Session): { question: SessionQuestion | null; version: string } | null {
-    const reported = this.questionOf(session);
-    const record = reported === null ? null : readRecord(this.deps.home, session.id);
-    const reduced = record === null ? null : this.reduceOne(session, record, null, null);
-
-    if (reported === null || reduced?.listed !== true || reduced.state !== 'waiting') {
-      return null;
-    }
-
-    return { question: { text: reported.text, options: reported.options.map((label) => ({ label, description: '' })), parts: 1, id: reported.id }, version: reported.id };
-  }
-
-  forgetQuestion(_target: SessionTarget): void {}
-
-  /** Runs the answer as the thread's next turn, once the turn that asked has exited (mechanics M31). */
-  reply(request: ReplyRequest): Promise<{ error: string } | null> {
-    if (this.replying.has(request.sessionId)) {
-      return Promise.resolve({ error: 'An answer to this session is already being sent.' });
-    }
-
-    this.replying.add(request.sessionId);
-
-    return this.serial(request.sessionId, async () => {
-      const record = await this.refresh(request.sessionId);
-
-      if (record !== null && 'error' in record) {
-        return record;
-      }
-
-      if (record === null || record.threadId === null || request.questionId === null) {
-        return { error: 'The session has no Codex run to answer.' };
-      }
-
-      const attempt = record.attempt + 1;
-      const fail = (error: string) => {
-        writeRecord(this.deps.home, { ...readRecord(this.deps.home, request.sessionId)!, reply: { questionId: request.questionId!, attempt, state: 'failed' } });
-        return { error };
-      };
-
-      // The reservation is kept apart from the current attempt until the new process exists.
-      writeRecord(this.deps.home, { ...record, reply: { questionId: request.questionId, attempt, state: 'reserved' } });
-
-      const ended = await this.settle(record.process);
-
-      if (ended !== null) {
-        return fail(`The asking turn's process did not end: ${ended.error}`);
-      }
-
-      const text = `Answering your earlier question "${request.question}": ${request.answer}`;
-      const spawned = await this.spawnAttempt(record, attempt, resumeArgs(record.threadId!, text, this.options(record, attempt)));
-
-      if ('error' in spawned) {
-        return fail(spawned.error);
-      }
-
-      const next: RunRecord = { ...record, attempt, attemptAt: this.deps.now(), process: spawned.identity, previous: record.process, reply: { questionId: request.questionId, attempt, state: 'spawned' } };
-
-      writeRecord(this.deps.home, next);
-
-      const seen = await this.waitFor(next, spawned.pid, (log) => log.turnStarted);
-
-      if (seen === 'seen') {
-        return null;
-      }
-
-      if (seen === 'timeout') {
-        const killed = next.process === null ? { error: 'its process could not be identified' } : await this.killVerified(next.process);
-
-        return fail(`Codex did not start the answer's turn within ${START_TIMEOUT_MS / 1000} seconds${killed === null ? '' : `, and it may still be running: ${killed.error}`}.`);
-      }
-
-      return fail(this.failure(next, "Codex exited before it started the answer's turn."));
-    }).finally(() => this.replying.delete(request.sessionId));
   }
 
   /**

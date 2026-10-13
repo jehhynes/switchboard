@@ -269,7 +269,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - With two questions in one call, the reply answered only the first; the tool returned at once and the second question was lost.
   - A reply while the session is idle runs as its next prompt; a reply during a running tool is queued and absorbed into that turn.
 - **Limits:** the pipe name, the frame, the key, the job state's shape and how a reply resolves to an answer are undocumented and can change with any CLI update. Only one control pipe was listed; how its hash is derived was not inspected.
-- **Current use:** answering on the row (PRD R70; architecture.md § Claude Code runner).
+- **Current use:** none. Switchboard does not read the job state or send `reply`; the operator answers in Claude (PRD R70).
 
 ## M25. Opening a waiting session in a Claude tab
 

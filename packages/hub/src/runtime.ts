@@ -3,8 +3,8 @@ import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
-import type { Exec, ServiceDeps } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionQuestion, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { Exec } from '@switchboard/claude';
+import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -23,8 +23,6 @@ const FIXED_TIMERS = 3;
 export const DONE_DAYS = 7;
 /** How long a done or link report waits for the source read that checks it (PRD R10, R52). */
 export const REPORT_CHECK_MS = 6_000;
-/** The job state can be written after the waiting marker, so the hub reads the question again this long after a session starts waiting (PRD R70). */
-export const QUESTION_READ_MS = 1_000;
 
 export interface RuntimeDeps {
   /** The operator's home; the Switchboard home is `<home>/.switchboard`. */
@@ -39,10 +37,8 @@ export interface RuntimeDeps {
   now(): number;
   sleep(ms: number): Promise<void>;
   newSessionId(): string;
-  /** Claude's settings.json, from the operator's profile even when the Switchboard home is overridden; its folder holds the job states. */
+  /** Claude's settings.json, where the hooks are installed: the operator's profile's even when the Switchboard home is overridden. */
   claudeSettings: string;
-  /** Reaches Claude's background service, which answers a session's question (PRD R70). */
-  service: ServiceDeps;
   /** The Codex CLI, Codex's home (`CODEX_HOME` or `~/.codex`), and the variables Codex runs need; defaults for tests that run no Codex session. */
   codex?: { path: string; home: string; env: Record<string, string> };
   /** Stand-in runners for tests; each runner is built from the fields above otherwise. */
@@ -66,11 +62,6 @@ export interface WorkItemView extends WorkItem {
   approvalSends: boolean;
   /** What keeps a queued work item from starting; empty for every other status (PRD R34). */
   waits: QueueWait[];
-  /**
-   * The question the active session waits on in its background process, from Claude's job state: the first part's text and options, and
-   * how many parts the call has. Null when the job state holds none (PRD R70).
-   */
-  question: SessionQuestion | null;
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
@@ -111,7 +102,7 @@ export type ReportBody =
   | { sessionId: string; kind: 'playbook'; playbook: string }
   | { sessionId: string; kind: 'paste'; label: string; file: string }
   | { sessionId: string; kind: 'task'; prompt: string; repo: string | null; title: string | null }
-  | { sessionId: string; kind: 'question'; text: string; options: string[] };
+  | { sessionId: string; kind: 'question'; text: string };
 
 /** Runs the core: turns timers, source reads, CLI results and requests into events, and runs the actions they decide. */
 export class Runtime {
@@ -135,14 +126,10 @@ export class Runtime {
   private rosterAgain = false;
   /** The read in flight per source; reads run one at a time, so their results apply in order. */
   private reads = new Map<string, Promise<void>>();
-  /** The question's version when the hub sent an answer, by short ID, so a question is answered once (PRD R70). */
-  private answered = new Map<string, string>();
   /** Sessions a stopped hub left starting that a runner could not settle yet. */
   private unreconciled = new Set<string>();
   /** One runner per agent, chosen by each session's provider (PRD R22). */
   private readonly runners: Record<Provider, SessionRunner>;
-  /** Background sessions waiting on the operator by short ID, each with the timer that reads its question again. */
-  private waitingReads = new Map<string, { target: { sessionId: string; shortId: string }; provider: Provider; timer: NodeJS.Timeout }>();
 
   constructor(
     private readonly deps: RuntimeDeps,
@@ -156,7 +143,7 @@ export class Runtime {
     this.runners = {
       claude:
         deps.runners?.claude ??
-        new ClaudeRunner({ claudePath: deps.claudePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, service: deps.service, hooks }),
+        new ClaudeRunner({ claudePath: deps.claudePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
       codex:
         deps.runners?.codex ??
         new CodexRunner({ codexPath: codex.path, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
@@ -190,110 +177,9 @@ export class Runtime {
       this.track(this.run(action));
     }
 
-    this.watchQuestions();
     this.changed();
 
     return result;
-  }
-
-  /** Sends the snapshot again `QUESTION_READ_MS` after a background session starts waiting, so its question shows without another event. */
-  private watchQuestions(): void {
-    const waiting = new Map(this.deps.store.activeSessions().flatMap((session) => (waitsInBackground(session) ? [[session.shortId, session] as const] : [])));
-
-    for (const [id, read] of this.waitingReads) {
-      if (!waiting.has(id)) {
-        clearTimeout(read.timer);
-        this.waitingReads.delete(id);
-        this.answered.delete(id);
-        // A later wait reads its question afresh, even if the job state keeps its modification time.
-        this.runners[read.provider].forgetQuestion(read.target);
-      }
-    }
-
-    for (const [id, session] of waiting) {
-      if (!this.waitingReads.has(id)) {
-        const timer = setTimeout(() => this.changed(), QUESTION_READ_MS);
-
-        timer.unref();
-        this.waitingReads.set(id, { target: { sessionId: session.id, shortId: id }, provider: session.provider, timer });
-      }
-    }
-  }
-
-  /**
-   * Sends an answer only while the job state still shows the question the row showed, and once per question, because the service
-   * takes a reply to a session no longer waiting as its next prompt (PRD R70, mechanics M24).
-   */
-  answer(event: Extract<FlowEvent, { type: 'answer' }>): FlowResult {
-    const store = this.deps.store;
-    const session = activeSession({ sessions: store.sessionsFor(event.workItemId) });
-
-    if (session === null || !waitsInBackground(session) || session.nativeSessionId !== event.nativeSessionId) {
-      return this.send(event);
-    }
-
-    const read = this.runners[session.provider].question(session);
-    const question = read?.question ?? null;
-    const version = read?.version;
-
-    // A Codex row names its question's ID; a click on an earlier question with the same text is refused.
-    if (question?.id !== undefined && question.id !== event.questionId) {
-      const refused = 'The session no longer waits on that question.';
-
-      store.transaction(() => recordRefusal(store, event, this.deps.now(), refused));
-      this.changed();
-
-      return { actions: [], refused };
-    }
-    // A reply answers only the first part of a question with several and loses the rest (mechanics M24).
-    const refused =
-      question?.text !== event.question
-        ? 'The session no longer waits on that question.'
-        : question.parts !== 1
-          ? 'The question has several parts; answer it with Open in Claude.'
-          : this.answered.get(session.shortId) === version
-            ? 'The answer to that question was already sent.'
-            : null;
-
-    if (refused !== null) {
-      store.transaction(() => recordRefusal(store, event, this.deps.now(), refused));
-      this.changed();
-
-      return { actions: [], refused };
-    }
-
-    const result = this.send(event);
-
-    if (result.refused === null && version !== undefined) {
-      this.answered.set(session.shortId, version);
-    }
-
-    return result;
-  }
-
-  /**
-   * Open in Codex only while the session waits on its question as its run is now: a reply's turn that runs, before the roster sees it, must not be
-   * stopped. Claude's open stays offered when its job state cannot be read (PRD R70).
-   */
-  openQuestion(event: Extract<FlowEvent, { type: 'open-question' }>): FlowResult {
-    const store = this.deps.store;
-    const session = activeSession({ sessions: store.sessionsFor(event.workItemId) });
-
-    if (session?.provider === 'codex' && waitsInBackground(session) && session.nativeSessionId === event.nativeSessionId && this.runners.codex.question(session) === null) {
-      const refused = 'The session is not waiting on a question.';
-
-      store.transaction(() => recordRefusal(store, event, this.deps.now(), refused));
-      this.changed();
-
-      return { actions: [], refused };
-    }
-
-    return this.send(event);
-  }
-
-  /** The question a background session waits on (PRD R70). */
-  private questionOf(session: Session | null): WorkItemView['question'] {
-    return session === null || !waitsInBackground(session) ? null : (this.runners[session.provider].question(session)?.question ?? null);
   }
 
   /** Resolves when every action started so far, and the events they caused, have finished. */
@@ -373,12 +259,6 @@ export class Runtime {
     for (const timer of this.timers.splice(0)) {
       clearInterval(timer);
     }
-
-    for (const read of this.waitingReads.values()) {
-      clearTimeout(read.timer);
-    }
-
-    this.waitingReads.clear();
 
     this.markerWatcher?.close();
     this.markerWatcher = null;
@@ -612,11 +492,6 @@ export class Runtime {
         this.rosterAgain = true;
       }
 
-      // An answer whose turn started ends the wait before the states that follow it apply (PRD R70).
-      for (const { sessionId, questionId } of (roster.acknowledged ?? []).filter((entry) => !stale.has(entry.sessionId))) {
-        this.send({ type: 'reply-started', sessionId, questionId });
-      }
-
       observed.push(...roster.sessions.filter((entry) => !stale.has(entry.sessionId)));
       checked.push(...own.filter((session) => !stale.has(session.id)).map((session) => session.id));
     }
@@ -753,7 +628,7 @@ export class Runtime {
                 : body.kind === 'task'
                   ? { kind: body.kind, prompt: body.prompt, repo: body.repo, title: body.title }
                   : body.kind === 'question'
-                    ? { kind: body.kind, text: body.text, options: body.options }
+                    ? { kind: body.kind, text: body.text }
                     : { kind: body.kind, label: body.label, target: body.target };
 
     return { refused: this.send({ type: 'report', sessionId: body.sessionId, report }).refused };
@@ -789,7 +664,6 @@ export class Runtime {
         parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
         approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
         waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
-        question: item.status === 'done' ? null : this.questionOf(activeSession({ sessions: store.sessionsFor(item.id) })),
       })),
       pool: store
         .poolTickets()
@@ -963,27 +837,8 @@ export class Runtime {
         this.send(failure === null ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason } : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error });
         return;
       }
-      case 'reply-session': {
-        const failure = await this.runners[action.provider].reply({ sessionId: action.sessionId, shortId: action.shortId, question: action.question, questionId: action.questionId, answer: action.text });
-
-        if (failure === null && action.questionId !== null) {
-          this.send({ type: 'reply-started', sessionId: action.sessionId, questionId: action.questionId });
-        }
-
-        if (failure !== null) {
-          this.answered.delete(action.shortId);
-          this.send({ type: 'reply-failed', sessionId: action.sessionId, message: failure.error });
-        }
-
-        return;
-      }
     }
   }
-}
-
-/** A session running in its background process and waiting on the operator; a released session that is active again runs elsewhere. */
-function waitsInBackground(session: Session): session is Session & { shortId: string } {
-  return session.state === 'waiting' && session.shortId !== null && !session.released;
 }
 
 /** The source's triage context led by the current UTC time, in the form sources use, so triage can judge how recent each event is. */

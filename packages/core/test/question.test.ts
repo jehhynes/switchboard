@@ -18,41 +18,27 @@ function waiting(h: Harness, key = '1'): { item: number; session: string } {
   return { item, session };
 }
 
-describe('answering on the row (PRD R70)', () => {
-  it('sends the answer through the background service and changes nothing until the session runs', () => {
+describe('Open in Claude refusals (PRD R70)', () => {
+  it('refuses a session that is not waiting, a released or interactive one, and a work item without a session', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
-
-    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual([{ type: 'reply-session', sessionId: session, provider: 'claude', shortId: 'abc12341', question: 'Which?', questionId: null, text: 'Birch' }]);
-    expect(h.item(item)).toMatchObject({ status: 'running', error: null });
-    expect(h.store.session(session)?.state).toBe('waiting');
-  });
-
-  it('refuses an empty answer, a session that is not waiting, a released or interactive one, and a work item without a session', () => {
-    const h = new Harness();
-    const { item, session } = waiting(h);
-
-    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: '  ' })).toEqual({ actions: [], refused: 'The answer is empty.' });
 
     h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
-    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' })).toEqual({ actions: [], refused: 'The session is not waiting on a question.' });
     expect(h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' })).toEqual({ actions: [], refused: 'The session is not waiting on a question.' });
 
-    // The operator resumed it in a VS Code tab, where it waits: that tab answers it, not the background service.
+    // The operator resumed it in a VS Code tab, where it waits: that tab answers it.
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null, interactive: true }] });
     expect(h.store.session(session)).toMatchObject({ state: 'waiting', released: true });
-    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' }).refused).toBe('The work item has no session running in its background process.');
     expect(h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' }).refused).toBe('The work item has no session running in its background process.');
 
     h.poll(issue('1'), issue('2'));
     const triage = h.act({ type: 'triage-succeeded', triageId: 2, context: 'c', playbook: 'dev:question', immediacy: null, severity: null, model: null });
     expect(triage).toEqual([]);
-    expect(h.send({ type: 'answer', workItemId: 2, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' }).refused).toBe('The work item has no session running in its background process.');
     expect(h.send({ type: 'open-question', workItemId: 2, nativeSessionId: 'native-1' }).refused).toBe('The work item has no session running in its background process.');
-    expect(h.send({ type: 'answer', workItemId: 99, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' }).refused).toBe('Unknown work item 99.');
+    expect(h.send({ type: 'open-question', workItemId: 99, nativeSessionId: 'native-1' }).refused).toBe('Unknown work item 99.');
   });
 
-  it("refuses an answer or Open in Claude for a session other than the row's, such as a newer one after the row was drawn", () => {
+  it("refuses a session other than the row's, such as a newer one after the row was drawn", () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
@@ -64,7 +50,6 @@ describe('answering on the row (PRD R70)', () => {
     h.act({ type: 'marker', sessionId: next, state: 'waiting', detail: null });
 
     expect(h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' })).toEqual({ actions: [], refused: 'The work item has another session now.' });
-    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Oak' }).refused).toBe('The work item has another session now.');
     expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-new' })).toEqual([{ type: 'stop-session', sessionId: next, provider: 'claude', shortId: 'def12345', reason: 'open' }]);
   });
 
@@ -74,18 +59,7 @@ describe('answering on the row (PRD R70)', () => {
     h.triaged(triage, 'dev:question');
     h.act({ type: 'start', workItemId: 1 });
 
-    expect(h.send({ type: 'answer', workItemId: 1, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' }).refused).toBe('The work item has no session running in its background process.');
-  });
-
-  it('notes a failed answer on the work item and leaves the session waiting, so it can be answered again', () => {
-    const h = new Harness();
-    const { item, session } = waiting(h);
-
-    h.act({ type: 'reply-failed', sessionId: session, message: "Claude's background service is not running." });
-
-    expect(h.item(item)).toMatchObject({ status: 'running', error: "Answer failed: Claude's background service is not running." });
-    expect(h.store.session(session)?.state).toBe('waiting');
-    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Oak' })).toHaveLength(1);
+    expect(h.send({ type: 'open-question', workItemId: 1, nativeSessionId: 'native-1' }).refused).toBe('The work item has no session running in its background process.');
   });
 });
 
@@ -136,28 +110,23 @@ describe('Open in Claude (PRD R70)', () => {
   });
 });
 
-describe('History of answers (PRD R59, R70)', () => {
-  it('logs the answer, Open in Claude, refusals and a failed answer', () => {
+describe('History of Open in Claude (PRD R59, R70)', () => {
+  it('logs Open in Claude, its refusal and the stop', () => {
     const h = new Harness();
     const { item, session } = waiting(h);
 
-    h.act({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: 'Birch' });
-    h.send({ type: 'answer', workItemId: item, nativeSessionId: 'native-1', question: 'Which?', answer: '' });
-    h.act({ type: 'reply-failed', sessionId: session, message: 'no such session' });
+    h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-other' });
     h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' });
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
 
-    const events = h.store.ticketHistory(1)!.events.filter((event) => ['answer', 'reply-failed', 'open-question', 'stop-succeeded'].includes(event.type));
+    const events = h.store.ticketHistory(1)!.events.filter((event) => ['open-question', 'stop-succeeded'].includes(event.type));
 
     expect(events.map((event) => ({ type: event.type, actor: event.actor, detail: event.detail, refused: event.refused }))).toEqual([
-      { type: 'answer', actor: 'operator', detail: { answer: 'Birch' }, refused: null },
-      { type: 'answer', actor: 'operator', detail: { answer: '' }, refused: 'The answer is empty.' },
-      { type: 'reply-failed', actor: 'hub', detail: { message: 'no such session' }, refused: null },
+      { type: 'open-question', actor: 'operator', detail: null, refused: 'The work item has another session now.' },
       { type: 'open-question', actor: 'operator', detail: null, refused: null },
       { type: 'stop-succeeded', actor: 'hub', detail: { reason: 'open' }, refused: null },
     ]);
-    expect(events[2]!.changes[0]!.fields).toEqual({ error: [null, 'Answer failed: no such session'] });
-    expect(events[4]!.changes.find((change) => change.entity === 'workItem')!.fields).toMatchObject({ status: ['running', 'blocked'], error: ['Answer failed: no such session', MESSAGES.openedToAnswer] });
+    expect(events[2]!.changes.find((change) => change.entity === 'workItem')!.fields).toMatchObject({ status: ['running', 'blocked'], error: [null, MESSAGES.openedToAnswer] });
   });
 });
 
@@ -178,40 +147,23 @@ describe('Codex questions (PRD R70)', () => {
 
   const codexHarness = () => new Harness({ settings: settings({ sessions: { provider: 'codex', codex: { permissionMode: 'plan', model: '' } } }) });
 
-  it('keeps the reported question with an ID, answers it with that ID, and clears it only for that ID once the answer runs', () => {
+  it('keeps the reported question with a new ID for each report, so a report of the same text is told apart', () => {
     const h = codexHarness();
-    const { item, session } = codexRunning(h);
+    const { session } = codexRunning(h);
 
-    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: ['Oak', 'Birch'] } });
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?' } });
     const asked = h.store.session(session)!.question!;
 
-    expect(asked).toMatchObject({ text: 'Which tree?', options: ['Oak', 'Birch'] });
-    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
-
-    // A click without the row's question ID, as from an older row, is refused.
-    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'thread-1', question: 'Which tree?', answer: 'Birch' }).refused).toBe('The session no longer waits on that question.');
-    expect(h.act({ type: 'answer', workItemId: item, nativeSessionId: 'thread-1', question: 'Which tree?', answer: 'Birch', questionId: asked.id })).toEqual([
-      { type: 'reply-session', sessionId: session, provider: 'codex', shortId: 'thread-1', question: 'Which tree?', questionId: asked.id, text: 'Birch' },
-    ]);
-
-    // A second question with the same text, reported before the first answer was acknowledged, keeps its own ID and survives.
-    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: [] } });
-    const second = h.store.session(session)!.question!;
-
-    expect(second.id).not.toBe(asked.id);
-    // A click on the first question's row cannot answer the second, though its text is the same.
-    expect(h.send({ type: 'answer', workItemId: item, nativeSessionId: 'thread-1', question: 'Which tree?', answer: 'Oak', questionId: asked.id }).refused).toBe('The session no longer waits on that question.');
-    h.act({ type: 'reply-started', sessionId: session, questionId: asked.id });
-    expect(h.store.session(session)!.question).toEqual(second);
-    h.act({ type: 'reply-started', sessionId: session, questionId: second.id });
-    expect(h.store.session(session)!.question).toBeNull();
+    expect(asked).toMatchObject({ text: 'Which tree?' });
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?' } });
+    expect(h.store.session(session)!.question!.id).not.toBe(asked.id);
   });
 
   it("opens a waiting Codex question in Codex, blocking the work item with Codex's reason and dropping the question", () => {
     const h = codexHarness();
     const { item, session } = codexRunning(h);
 
-    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: [] } });
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?' } });
     h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
     expect(h.act({ type: 'open-question', workItemId: item, nativeSessionId: 'thread-1' })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'codex', shortId: 'thread-1', reason: 'open' }]);
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'open' });
@@ -224,11 +176,11 @@ describe('Codex questions (PRD R70)', () => {
     const h = codexHarness();
     const { session } = codexRunning(h);
 
-    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?', options: [] } });
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which tree?' } });
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
     expect(h.store.session(session)).toMatchObject({ released: true, question: null });
 
-    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Again?', options: [] } });
+    h.act({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Again?' } });
     expect(h.store.session(session)!.question).toBeNull();
   });
 
@@ -236,6 +188,6 @@ describe('Codex questions (PRD R70)', () => {
     const h = new Harness();
     const { session } = waiting(h);
 
-    expect(h.send({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which?', options: [] } }).refused).toBe("This session's report contract does not offer the question report.");
+    expect(h.send({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which?' } }).refused).toBe("This session's report contract does not offer the question report.");
   });
 });

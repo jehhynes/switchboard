@@ -58,8 +58,8 @@ export async function queryProcesses(exec: Exec, pids: number[]): Promise<Map<nu
 }
 
 /** The tag every Codex run Switchboard starts carries, so a restarted hub can find its process (mechanics M31). */
-export function runTag(sessionId: string, attempt: number): string {
-  return `${sessionId}-${attempt}`;
+export function runTag(sessionId: string): string {
+  return sessionId;
 }
 
 /** Whether the command line carries exactly this run tag, as `-c switchboard_run="<tag>"` quoted for Windows. */

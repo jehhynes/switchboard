@@ -113,7 +113,8 @@ describe('dockView', () => {
         triage: triage({ immediacy: 'URGENT', severity: 'HIGH' }),
         warning: 'Ticket left the assigned state',
         sessions: [session({ state: 'waiting', stateAt: NOW - 25 * 60_000 })],
-        question: { text: 'Which account should I use for the refund?', options: [], parts: 1 },
+        stage: 'checking refunds',
+        stageAt: NOW - 30 * 60_000,
         parent: { ...item(3).ticket },
         parentId: 3,
       }),
@@ -133,9 +134,10 @@ describe('dockView', () => {
       details: [
         { text: 'Ticket left the assigned state', title: null, tone: 'warning' },
         { text: 'From gh 103', title: 'Issue <3>', tone: null },
-        { text: 'Which account should I use for the refund?', title: null, tone: null },
       ],
     });
+    // The question is answered in Claude, so line 3 names the mark in place of the stage.
+    expect(row(item(7, { sessions: [session({ state: 'waiting' })], stage: 'checking refunds', stageAt: NOW - 60_000 })).details).toEqual([{ text: 'Answer a question', title: null, tone: null }]);
   });
 
   it('shows the approval summary with its age, or the stage, coloured when stale', () => {
@@ -190,12 +192,11 @@ describe('dockView', () => {
     expect(row(item(7, { status: 'unstarted', ticket: { ...item(7).ticket, source: 'adhoc', url: '' } })).open).toBeNull();
   });
 
-  it('gives a row its main control, answers, pastes, VS Code commands and search text', () => {
+  it('gives a row its main control, pastes, VS Code commands and search text', () => {
     const waiting = row(
       item(7, {
         worktree,
         sessions: [session({ state: 'waiting' })],
-        question: { text: 'Which fruit?', options: [{ label: 'Apple', description: 'red' }, { label: 'Plum', description: '' }], parts: 1 },
         links: [{ id: 1, ticketId: 7, label: 'PR', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW }],
       }),
     );
@@ -203,17 +204,12 @@ describe('dockView', () => {
     expect(waiting.main).toBe('Open in Claude');
     expect(waiting.mainTitle).toBe('Open in Claude');
     expect(waiting.mainGlyph).toBe('\u{eac7}');
-    expect(waiting.answers).toEqual([
-      { label: 'Apple', description: 'red', action: { type: 'answer', workItemId: 7, nativeSessionId: 'aaaa1111-native', question: 'Which fruit?', answer: 'Apple' } },
-      { label: 'Plum', description: '', action: { type: 'answer', workItemId: 7, nativeSessionId: 'aaaa1111-native', question: 'Which fruit?', answer: 'Plum' } },
-    ]);
     expect(waiting.commands).toEqual([
       { label: 'Open Changes', glyph: '\u{ec23}', command: { type: 'changes', path: 'D:/git/widgets/.worktrees/107-fix', key: 'gh 107', title: 'Issue <7>' } },
       { label: 'Open in terminal', glyph: '\u{ea85}', command: { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false } },
       { label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 7, key: 'gh 107' } },
     ]);
     expect(waiting.search).toBe('Issue <7> · gh 107 · PR #19002 · dev:develop · Blocked on you · 107-fix');
-    expect(row(item(7, { sessions: [session({ state: 'waiting' })], question: { text: 'Two parts', options: [{ label: 'A', description: '' }], parts: 2 } })).answers).toEqual([]);
 
     const approval = row(item(7, { status: 'awaiting-approval', approvalReport: 'D:/drafts/reply.md', pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] }));
 
@@ -289,7 +285,7 @@ describe('dockView', () => {
             links: [{ id: 1, ticketId: 7, label: 'Pull request', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW }],
             returned: 2,
           }),
-          item(8, { sessions: [session({ state: 'waiting', cwd: 'D:/git/widgets' })], question: { text: 'Which branch?', options: [{ label: 'main', description: 'The default branch' }], parts: 1 } }),
+          item(8, { sessions: [session({ state: 'waiting', cwd: 'D:/git/widgets' })] }),
           item(9, { status: 'unstarted', triage: triage({ immediacy: 'BLOCKING', severity: 'MED' }) }),
           item(10, {
             status: 'awaiting-approval',

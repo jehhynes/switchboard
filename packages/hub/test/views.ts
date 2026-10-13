@@ -65,7 +65,6 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     parent: null,
     approvalSends: false,
     waits: [],
-    question: null,
     ...patch,
   };
 }

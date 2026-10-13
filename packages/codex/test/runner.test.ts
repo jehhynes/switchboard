@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Session, StartAction } from '@switchboard/core';
 import { CODEX_HOOK_SOURCE } from '../src/hooks.js';
 import type { ProcessIdentity, ProcessInfo } from '../src/processes.js';
-import { attemptFiles, readRecord, writeRecord } from '../src/records.js';
+import { readRecord, runFiles, writeRecord } from '../src/records.js';
 import type { RunRecord } from '../src/records.js';
 import { CodexRunner, EXIT_WAIT_MS, START_TIMEOUT_MS } from '../src/runner.js';
 
@@ -40,7 +40,7 @@ const ACTION: StartAction = {
   model: null,
 };
 
-/** A fake process table, spawner and clock. Each spawn runs `onSpawn` with the attempt's files. */
+/** A fake process table, spawner and clock. Each spawn runs `onSpawn` with the run's files. */
 class Fake {
   now = 0;
   nextPid = 100;
@@ -62,7 +62,6 @@ class Fake {
   spawnError: string | null = null;
   trusted: ReadonlySet<string>[] = [];
   trustResult: string | null = null;
-  question: { id: string; text: string; options: string[] } | null = null;
   onSpawn: (files: { stdout: string; stderr: string }, pid: number) => void = (files) => writeFileSync(files.stdout, STARTED + TURN);
 
   runner(): CodexRunner {
@@ -79,7 +78,6 @@ class Fake {
       codexHome,
       env: { CODEX_HOME: codexHome },
       hooks: () => true,
-      questionOf: () => this.question,
       spawn: async (_file, args, options) => {
         if (this.spawnError !== null) {
           return { pid: null, error: this.spawnError };
@@ -155,7 +153,7 @@ const session = (patch: Partial<Session> = {}): Session => ({
   ...patch,
 });
 
-const append = (record: RunRecord, text: string) => writeFileSync(attemptFiles(home, record.sessionId, record.attempt).stdout, readFileSync(attemptFiles(home, record.sessionId, record.attempt).stdout, 'utf8') + text);
+const append = (record: RunRecord, text: string) => writeFileSync(runFiles(home, record.sessionId).stdout, readFileSync(runFiles(home, record.sessionId).stdout, 'utf8') + text);
 
 async function started(fake: Fake): Promise<{ runner: CodexRunner; record: RunRecord }> {
   const runner = fake.runner();
@@ -183,7 +181,7 @@ describe('start', () => {
       '-c',
       'developer_instructions="Report to Switchboard with these commands:"',
       '-c',
-      'switchboard_run="s1-1"',
+      'switchboard_run="s1"',
       '-C',
       'D:/git/widgets',
       '--',
@@ -191,7 +189,7 @@ describe('start', () => {
     ]);
     expect(fake.spawns[0]!).toMatchObject({ cwd: 'D:/git/widgets', env: { CODEX_HOME: codexHome } });
     expect(fake.spawns[0]!.env).toEqual({ CODEX_HOME: codexHome });
-    expect(record).toMatchObject({ threadId: THREAD, attempt: 1, process: { pid: 100, created: 'c100' }, mode: 'bypassPermissions', contract: ACTION.contract });
+    expect(record).toMatchObject({ threadId: THREAD, process: { pid: 100, created: 'c100' }, mode: 'bypassPermissions', contract: ACTION.contract });
   });
 
   it("refuses a mode a background run cannot finish in, and fails with Codex's refusal or a spawn error", async () => {
@@ -259,6 +257,15 @@ describe('observe', () => {
     expect(await runner.observe([session()])).toMatchObject({ sessions: [] });
   });
 
+  it('ends a session whose record has another format, such as one written before a session had one run', async () => {
+    const fake = new Fake();
+    const { runner, record } = await started(fake);
+
+    writeFileSync(join(home, 'codex', 's1.json'), JSON.stringify({ ...record, v: 1, attempt: 2 }));
+    expect(readRecord(home, 's1')).toBeNull();
+    expect(await runner.observe([session()])).toMatchObject({ sessions: [] });
+  });
+
   it('gives a failed turn with its message', async () => {
     const fake = new Fake();
     const { runner, record } = await started(fake);
@@ -290,7 +297,7 @@ describe('observe', () => {
     const record = readRecord(home, 's1')!;
 
     writeRecord(home, { ...record, process: null });
-    fake.tags.set('s1-1', { pid: 100, created: 'c100' });
+    fake.tags.set('s1', { pid: 100, created: 'c100' });
     expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
     expect(readRecord(home, 's1')!.process).toEqual({ pid: 100, created: 'c100' });
 
@@ -302,12 +309,13 @@ describe('observe', () => {
     const fake = new Fake();
     const { runner, record } = await started(fake);
 
-    fake.question = { id: 'q1', text: 'Which tree?', options: [] };
-    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
+    const asking = session({ question: { id: 'q1', text: 'Which tree?' } });
+
+    expect(await runner.observe([asking])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
 
     append(record, DONE);
     fake.alive.delete(100);
-    expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }] });
+    expect(await runner.observe([asking])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }] });
   });
 });
 
@@ -327,8 +335,8 @@ describe('markers', () => {
     expect(fake.queries).toBe(queries);
 
     // The process died without a turn end: only the roster read ends the session.
-    rmSync(attemptFiles(home, 's1', 1).stdout);
-    writeFileSync(attemptFiles(home, 's1', 1).stdout, STARTED);
+    rmSync(runFiles(home, 's1').stdout);
+    writeFileSync(runFiles(home, 's1').stdout, STARTED);
     fake.alive.delete(100);
     expect(runner.markers([session()]).get(THREAD)).toEqual({ at: 0, observed: null, recheck: true });
   });
@@ -395,70 +403,18 @@ describe('stop', () => {
     expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'operator')).toEqual({ error: 'The Codex process query failed: denied' });
   });
 
-  it('refuses a session that has not started, and has nothing to stop without a record', async () => {
-    const runner = new Fake().runner();
-
-    expect(await runner.stop({ sessionId: 's9', shortId: null }, 'operator')).toEqual({ error: 'The session has not started yet.' });
-    expect(await runner.stop({ sessionId: 's9', shortId: 'x' }, 'operator')).toBeNull();
-  });
-});
-
-describe('reply', () => {
-  const REQUEST = { sessionId: 's1', shortId: THREAD, question: 'Which tree?', questionId: 'q1', answer: 'Birch' };
-
-  it('resumes the thread with the answer once the asking run exited, and keeps the earlier process in the record', async () => {
+  it('refuses a session that has not started, and one whose record is missing or of another format', async () => {
     const fake = new Fake();
     const { runner, record } = await started(fake);
+    const unreadable = { error: "The session's run record cannot be read, so Switchboard cannot stop its Codex process." };
 
-    append(record, DONE);
-    fake.alive.delete(100);
-    fake.onSpawn = (files) => writeFileSync(files.stdout, STARTED + TURN);
-    expect(await runner.reply(REQUEST)).toBeNull();
-    expect(fake.spawns[1]!.args).toEqual([
-      'exec',
-      'resume',
-      '--json',
-      '--dangerously-bypass-approvals-and-sandbox',
-      '-c',
-      'developer_instructions="Report to Switchboard with these commands:"',
-      '-c',
-      'switchboard_run="s1-2"',
-      THREAD,
-      '--',
-      'Answering your earlier question "Which tree?": Birch',
-    ]);
-    expect(readRecord(home, 's1')).toMatchObject({ attempt: 2, process: { pid: 101, created: 'c101' }, previous: { pid: 100, created: 'c100' }, reply: { questionId: 'q1', attempt: 2, state: 'spawned' } });
-  });
+    expect(await runner.stop({ sessionId: 's9', shortId: null }, 'operator')).toEqual({ error: 'The session has not started yet.' });
+    expect(await runner.stop({ sessionId: 's9', shortId: 'x' }, 'operator')).toEqual(unreadable);
 
-  it("marks a reply whose turn never started as failed, with Codex's message, so it can be sent again", async () => {
-    const fake = new Fake();
-    const { runner } = await started(fake);
-
-    fake.alive.delete(100);
-    fake.onSpawn = (files, pid) => {
-      writeFileSync(files.stderr, 'This is open in another app.\n');
-      fake.alive.delete(pid);
-    };
-    expect(await runner.reply(REQUEST)).toEqual({ error: 'This is open in another app.' });
-    expect(readRecord(home, 's1')!.reply).toEqual({ questionId: 'q1', attempt: 2, state: 'failed' });
-
-    fake.onSpawn = (files) => writeFileSync(files.stdout, STARTED + TURN);
-    expect(await runner.reply(REQUEST)).toBeNull();
-    expect(readRecord(home, 's1')!.reply).toEqual({ questionId: 'q1', attempt: 3, state: 'spawned' });
-  });
-
-  it('refuses a second answer while one is being sent, and a session without a run or question ID', async () => {
-    const fake = new Fake();
-    const { runner } = await started(fake);
-
-    fake.alive.delete(100);
-    fake.onSpawn = (files) => writeFileSync(files.stdout, STARTED + TURN);
-    const first = runner.reply(REQUEST);
-
-    expect(await runner.reply(REQUEST)).toEqual({ error: 'An answer to this session is already being sent.' });
-    expect(await first).toBeNull();
-    expect(await runner.reply({ ...REQUEST, questionId: null })).toEqual({ error: 'The session has no Codex run to answer.' });
-    expect(await runner.reply({ ...REQUEST, sessionId: 's9' })).toEqual({ error: 'The session has no Codex run to answer.' });
+    writeFileSync(join(home, 'codex', 's1.json'), JSON.stringify({ ...record, v: 1, attempt: 2 }));
+    expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'operator')).toEqual(unreadable);
+    expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'open')).toEqual(unreadable);
+    expect(fake.kills).toEqual([]);
   });
 });
 
@@ -470,10 +426,10 @@ describe('reconcile', () => {
     const record = readRecord(home, 's1')!;
 
     writeRecord(home, { ...record, sessionId: 's2', process: null, threadId: null });
-    writeFileSync(attemptFiles(home, 's2', 1).stdout, STARTED);
-    fake.tags.set('s2-1', { pid: 100, created: 'c100' });
+    writeFileSync(runFiles(home, 's2').stdout, STARTED);
+    fake.tags.set('s2', { pid: 100, created: 'c100' });
     writeRecord(home, { ...record, sessionId: 's3', process: null, threadId: null });
-    writeFileSync(attemptFiles(home, 's3', 1).stdout, '');
+    writeFileSync(runFiles(home, 's3').stdout, '');
 
     const runner = fake.runner();
 
@@ -512,7 +468,6 @@ describe('installHooks', () => {
 });
 
 describe('lifecycle races and recovery', () => {
-  const REQUEST = { sessionId: 's1', shortId: THREAD, question: 'Which tree?', questionId: 'q1', answer: 'Birch' };
   const ROLLOUT = readFileSync(join(import.meta.dirname, 'fixtures', 'rollout-failed.jsonl'), 'utf8');
 
   it("keeps a failed turn that only the rollout shows, in the roster read and in the marker pass after it", async () => {
@@ -533,59 +488,18 @@ describe('lifecycle races and recovery', () => {
     expect(runner.markers([session({ released: true })]).get(THREAD)).toEqual({ at: 50, observed: failed, recheck: false });
   });
 
-  it('leaves a reply to acknowledge to the roster read', async () => {
-    const fake = new Fake();
-    const { runner } = await started(fake);
-
-    fake.question = { id: 'q1', text: 'Which tree?', options: [] };
-    fake.alive.delete(100);
-    expect(await runner.reply(REQUEST)).toBeNull();
-    await runner.observe([session()]);
-    expect(runner.markers([session()]).get(THREAD)).toEqual({ at: 0, observed: null, recheck: true });
-  });
-
-  it('never lets a slow tag recovery write over a reply that ran meanwhile', async () => {
+  it('finds an untracked run by its tag before a stop acts on it, and returns a failed query', async () => {
     const fake = new Fake();
     const { runner } = await started(fake);
 
     writeRecord(home, { ...readRecord(home, 's1')!, process: null });
-    fake.tags.set('s1-1', { pid: 100, created: 'c100' });
-    let release!: () => void;
-    fake.tagGate = new Promise((done) => (release = done));
-
-    const reading = runner.observe([session()]);
-    fake.alive.delete(100);
-    const replying = runner.reply(REQUEST);
-
-    release();
-    await reading;
-    expect(await replying).toBeNull();
-    expect(readRecord(home, 's1')).toMatchObject({ attempt: 2, process: { pid: 101, created: 'c101' }, reply: { questionId: 'q1', attempt: 2, state: 'spawned' } });
-  });
-
-  it('finds an untracked run by its tag before a stop or a reply acts on it, and returns a failed query', async () => {
-    const fake = new Fake();
-    const { runner } = await started(fake);
-
-    writeRecord(home, { ...readRecord(home, 's1')!, process: null });
-    fake.tags.set('s1-1', { pid: 100, created: 'c100' });
+    fake.tags.set('s1', { pid: 100, created: 'c100' });
     expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'operator')).toBeNull();
     expect(fake.kills).toEqual([100]);
 
     writeRecord(home, { ...readRecord(home, 's1')!, process: null });
     fake.tagError = 'WMI is down';
     expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'operator')).toEqual({ error: 'The Codex process query failed: WMI is down' });
-    expect(await runner.reply(REQUEST)).toEqual({ error: 'The Codex process query failed: WMI is down' });
-  });
-
-  it('fails a reply whose asking process cannot be ended, keeping the current attempt', async () => {
-    const fake = new Fake();
-    const { runner } = await started(fake);
-
-    fake.killError = 'Access denied';
-    expect(await runner.reply(REQUEST)).toEqual({ error: "The asking turn's process did not end: Access denied" });
-    expect(readRecord(home, 's1')).toMatchObject({ attempt: 1, process: { pid: 100, created: 'c100' }, reply: { questionId: 'q1', attempt: 2, state: 'failed' } });
-    expect(fake.spawns).toHaveLength(1);
   });
 
   it('waits on a spawned process whose creation time cannot be read yet, and leaves it to be found by its tag', async () => {
@@ -597,43 +511,8 @@ describe('lifecycle races and recovery', () => {
     expect(await runner.start(ACTION)).toEqual({ shortId: THREAD, nativeSessionId: THREAD });
     expect(readRecord(home, 's1')!.process).toBeNull();
 
-    fake.tags.set('s1-1', { pid: 100, created: 'c100' });
+    fake.tags.set('s1', { pid: 100, created: 'c100' });
     expect(await runner.observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
-  });
-
-  it('adopts a reply a stopped hub spawned, and fails one it only reserved, so the question can be answered again', async () => {
-    const fake = new Fake();
-
-    await started(fake);
-    fake.question = { id: 'q1', text: 'Which tree?', options: [] };
-    append(readRecord(home, 's1')!, DONE);
-    fake.alive.delete(100);
-    writeRecord(home, { ...readRecord(home, 's1')!, reply: { questionId: 'q1', attempt: 2, state: 'reserved' } });
-
-    expect(await fake.runner().observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }] });
-    expect(readRecord(home, 's1')!.reply).toEqual({ questionId: 'q1', attempt: 2, state: 'failed' });
-
-    writeRecord(home, { ...readRecord(home, 's1')!, reply: { questionId: 'q1', attempt: 2, state: 'reserved' } });
-    writeFileSync(attemptFiles(home, 's1', 2).stdout, STARTED + TURN);
-    fake.alive.add(300);
-    fake.created.set(300, 'c300');
-    fake.tags.set('s1-2', { pid: 300, created: 'c300' });
-    expect(await fake.runner().observe([session()])).toMatchObject({ sessions: [{ sessionId: 's1', state: 'running', detail: null, interactive: false }] });
-    expect(readRecord(home, 's1')).toMatchObject({ attempt: 2, process: { pid: 300, created: 'c300' }, previous: { pid: 100, created: 'c100' }, reply: { state: 'spawned' } });
-  });
-
-  it('adopts a reply a stopped hub spawned that already finished, so the answer is not sent twice', async () => {
-    const fake = new Fake();
-
-    await started(fake);
-    fake.question = { id: 'q1', text: 'Which tree?', options: [] };
-    append(readRecord(home, 's1')!, DONE);
-    fake.alive.delete(100);
-    writeRecord(home, { ...readRecord(home, 's1')!, reply: { questionId: 'q1', attempt: 2, state: 'reserved' } });
-    writeFileSync(attemptFiles(home, 's1', 2).stdout, STARTED + TURN + DONE);
-
-    expect(await fake.runner().observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }], acknowledged: [{ sessionId: 's1', questionId: 'q1' }] });
-    expect(readRecord(home, 's1')).toMatchObject({ attempt: 2, process: null, reply: { questionId: 'q1', attempt: 2, state: 'spawned' } });
   });
 
   it('leaves a start whose process cannot be checked for a later read', async () => {
@@ -641,8 +520,8 @@ describe('lifecycle races and recovery', () => {
 
     await started(fake);
     writeRecord(home, { ...readRecord(home, 's1')!, threadId: null });
-    rmSync(attemptFiles(home, 's1', 1).stdout);
-    writeFileSync(attemptFiles(home, 's1', 1).stdout, '');
+    rmSync(runFiles(home, 's1').stdout);
+    writeFileSync(runFiles(home, 's1').stdout, '');
     fake.queryError = 'WMI is down';
     expect(await fake.runner().reconcile([session({ state: 'starting' })])).toEqual([{ sessionId: 's1', pending: 'The Codex process query failed: WMI is down' }]);
   });

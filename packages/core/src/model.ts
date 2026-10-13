@@ -162,16 +162,16 @@ export interface Session {
   released: boolean;
   /** The release stop was sent and has not finished, so the background process may still hold the session. */
   releasing: boolean;
-  /** The question a Codex session reported and waits on once its turn ends, with an ID its answer names (PRD R70). */
+  /** The question a Codex session reported and waits on once its turn ends (PRD R70). */
   question: SessionQuestionReport | null;
   /** The reports its prompt offers; the hub refuses the rest (PRD R23). */
   reports: ReportKind[];
 }
 
 export interface SessionQuestionReport {
+  /** Tells apart two reports of the same text, so a roster read that ran across a report is not applied (architecture.md § Codex runner). */
   id: string;
   text: string;
-  options: string[];
 }
 
 /** Why a queued work item has not started (PRD R17, R38, R49). */

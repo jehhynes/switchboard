@@ -108,9 +108,8 @@ export function reportBody(argv: readonly string[], root: string | null = null):
     }
     case 'question': {
       const question = valueOf(argv, 'text');
-      const options = argv.flatMap((argument, at) => (argument === '--option' && argv[at + 1] !== undefined && !argv[at + 1]!.startsWith('--') ? [argv[at + 1]!] : argument.startsWith('--option=') ? [argument.slice('--option='.length)] : []));
 
-      return question === null || question.trim() === '' ? null : { sessionId, kind, text: question, options };
+      return question === null || question.trim() === '' ? null : { sessionId, kind, text: question };
     }
     case 'paste': {
       const label = valueOf(argv, 'label');

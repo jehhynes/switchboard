@@ -3,7 +3,7 @@ import type { LiveState } from '@switchboard/core';
 import { codexMarkerState } from './hooks.js';
 import type { CodexMarker } from './hooks.js';
 import { failureMessage } from './log.js';
-import type { AttemptLog } from './log.js';
+import type { RunLog } from './log.js';
 import { sameProcess } from './processes.js';
 import type { ProcessIdentity } from './processes.js';
 import type { RunRecord } from './records.js';
@@ -82,13 +82,13 @@ export function readTail(path: string, bytes = ROLLOUT_TAIL_BYTES): string {
 
 export interface ReducerInput {
   released: boolean;
-  /** The question the session reported and waits on, by ID, or null. */
-  question: string | null;
+  /** Whether the session reported a question it waits on. */
+  question: boolean;
   record: RunRecord;
-  /** The current attempt's log. */
-  log: AttemptLog;
-  /** Whether the current attempt's process, as the record names it, is alive. */
-  attemptAlive: boolean;
+  /** The run's log. */
+  log: RunLog;
+  /** Whether the run's process, as the record names it, is alive. */
+  runAlive: boolean;
   marker: CodexMarker | null;
   /** Whether the process the marker names is alive and is that process. */
   markerOwnerAlive: boolean;
@@ -103,15 +103,13 @@ export type Reduced =
       state: LiveState;
       detail: string | null;
       interactive: boolean;
-      /** The question whose reply has started, which the runtime acknowledges before it applies the state. */
-      acknowledge: string | null;
     };
 
 function markerIdentity(marker: CodexMarker): ProcessIdentity | null {
   return marker.pid === null || marker.created === null ? null : { pid: marker.pid, created: marker.created };
 }
 
-function ended(log: AttemptLog): { state: LiveState; detail: string | null } | null {
+function ended(log: RunLog): { state: LiveState; detail: string | null } | null {
   if (log.end === null) {
     return null;
   }
@@ -122,45 +120,36 @@ function ended(log: AttemptLog): { state: LiveState; detail: string | null } | n
 /**
  * The one place that decides a Codex session's liveness and state, for the roster read and the marker pass alike, so the two never
  * disagree (mechanics M31):
- * 1. A live process other than the current attempt's that wrote a marker since the attempt started is the operator's: interactive.
- * 2. A question whose turn has ended keeps the session waiting until a reply for it starts its turn.
- * 3. A live attempt runs until its log holds the turn's end.
+ * 1. A live process other than the run's that wrote a marker since the run started is the operator's: interactive.
+ * 2. A question whose turn has ended keeps the session waiting.
+ * 3. A live run is running until its log holds the turn's end.
  * 4. A turn end is delivered once, before the session ends: listed until released.
  * 5. Otherwise the process is gone without a turn end, and the session has ended.
  */
 export function reduce(input: ReducerInput): Reduced {
   const { record, log, marker } = input;
-  const listed = (state: LiveState, detail: string | null, interactive = false, acknowledge: string | null = null): Reduced => ({ listed: true, state, detail, interactive, acknowledge });
+  const listed = (state: LiveState, detail: string | null, interactive = false): Reduced => ({ listed: true, state, detail, interactive });
 
-  if (marker !== null && marker.at >= record.attemptAt && input.markerOwnerAlive && !sameProcess(markerIdentity(marker), record.process)) {
+  if (marker !== null && marker.at >= record.spawnedAt && input.markerOwnerAlive && !sameProcess(markerIdentity(marker), record.process)) {
     const state = codexMarkerState(marker) ?? 'idle';
     const end = state === 'running' ? input.rolloutEnd(marker) : null;
 
     return end === null ? listed(state, null, true) : end.state === 'failed' ? listed('failed', end.message, true) : listed('idle', null, true);
   }
 
-  let acknowledge: string | null = null;
-
-  if (input.question !== null) {
-    const reply = record.reply?.questionId === input.question ? record.reply : null;
-    const replyStarted = reply !== null && reply.state === 'spawned' && reply.attempt === record.attempt && log.turnStarted;
-
-    if (replyStarted) {
-      acknowledge = input.question;
-    } else if (reply !== null || log.end !== null || !input.attemptAlive) {
-      // The reporting turn has ended, and no reply has started a turn: reserved, spawning, failed or gone.
-      return listed('waiting', null);
-    }
+  // The reporting turn has ended or its process is gone.
+  if (input.question && (log.end !== null || !input.runAlive)) {
+    return listed('waiting', null);
   }
 
   const end = ended(log);
 
-  if (input.attemptAlive) {
-    return end === null ? listed('running', null, false, acknowledge) : listed(end.state, end.detail, false, acknowledge);
+  if (input.runAlive) {
+    return end === null ? listed('running', null) : listed(end.state, end.detail);
   }
 
   if (end !== null && !input.released) {
-    return listed(end.state, end.detail, false, acknowledge);
+    return listed(end.state, end.detail);
   }
 
   return { listed: false };

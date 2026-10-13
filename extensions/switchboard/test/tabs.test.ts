@@ -40,7 +40,6 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     parent: null,
     approvalSends: false,
     waits: [],
-    question: null,
     ticket: { id: 7, source: 'github', sourceKey: '107', ref: '#107', sourceId: null, title: 'Issue 7', url: ISSUE, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '' },
     triage: null,
     sessions: [],

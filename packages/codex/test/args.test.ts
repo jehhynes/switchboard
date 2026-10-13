@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { isCodexPermissionMode } from '@switchboard/core';
-import { codexPrompt, forkArgs, modeArgs, resumeArgs, startArgs, tomlString } from '../src/args.js';
+import { codexPrompt, forkArgs, modeArgs, startArgs, tomlString } from '../src/args.js';
 
-const OPTIONS = { mode: 'auto' as const, model: null, contract: 'Report to Switchboard with these commands:', tag: 's1-1' };
+const OPTIONS = { mode: 'auto' as const, model: null, contract: 'Report to Switchboard with these commands:', tag: 's1' };
 
 describe('modeArgs', () => {
   it('gives each mode as config overrides, which exec resume also takes', () => {
@@ -39,7 +39,7 @@ describe('codexPrompt', () => {
   });
 });
 
-describe('startArgs, resumeArgs and forkArgs', () => {
+describe('startArgs and forkArgs', () => {
   it('starts with the mode, contract, tag and model, then the work directory and the prompt after --', () => {
     expect(startArgs('D:/git/widgets', '/gc-plan 1', { ...OPTIONS, model: 'gpt-6' })).toEqual([
       'exec',
@@ -48,7 +48,7 @@ describe('startArgs, resumeArgs and forkArgs', () => {
       '-c',
       'developer_instructions="Report to Switchboard with these commands:"',
       '-c',
-      'switchboard_run="s1-1"',
+      'switchboard_run="s1"',
       '-m',
       'gpt-6',
       '-C',
@@ -57,22 +57,6 @@ describe('startArgs, resumeArgs and forkArgs', () => {
       '$gc-plan 1',
     ]);
     expect(startArgs('D:/git/widgets', 'x', OPTIONS)).not.toContain('-m');
-  });
-
-  it('resumes the thread with the same options and the text after --', () => {
-    expect(resumeArgs('thread-1', '/not-a-skill-here', OPTIONS)).toEqual([
-      'exec',
-      'resume',
-      '--json',
-      ...modeArgs('auto'),
-      '-c',
-      'developer_instructions="Report to Switchboard with these commands:"',
-      '-c',
-      'switchboard_run="s1-1"',
-      'thread-1',
-      '--',
-      '/not-a-skill-here',
-    ]);
   });
 
   it('forks read-only without persisting, with the prompt on stdin', () => {

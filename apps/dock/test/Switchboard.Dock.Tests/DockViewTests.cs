@@ -61,7 +61,7 @@ public sealed class DockViewTests
     }
 
     [Fact]
-    public void Parse_RecordedMessage_ReadsControlsAnswersPastesCommandsAndHeader()
+    public void Parse_RecordedMessage_ReadsControlsPastesCommandsAndHeader()
     {
         var view = Fixtures.View;
         var question = Fixtures.Row("item:8");
@@ -70,8 +70,6 @@ public sealed class DockViewTests
         Assert.Equal([new SourceState("github", true), new SourceState("zoho", false)], view.Sources);
         Assert.Equal(["D:/git/widgets", "D:/git/support"], view.RepoRoots);
         Assert.Equal("Open in Claude", question.Main);
-        Assert.Equal("main", question.Answers.Single().Label);
-        Assert.Equal("{\"type\":\"answer\",\"workItemId\":8,\"nativeSessionId\":\"aaaa1111-native\",\"question\":\"Which branch?\",\"answer\":\"main\"}", question.Answers.Single().Action.ToJsonString());
         Assert.Equal("Approve", approval.Main);
         Assert.Equal([new DockPaste("Customer reply", "D:/drafts/reply.md")], approval.Pastes);
         Assert.Equal(["Open in terminal", "History", "Open report"], approval.Commands.Select((command) => command.Label));

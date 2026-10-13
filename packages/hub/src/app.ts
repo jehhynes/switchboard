@@ -3,7 +3,7 @@ import { mkdirSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
-import { claudeService, claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
+import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { Store, switchboardHome } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
@@ -24,7 +24,7 @@ import { WindowQueue } from './windowQueue.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the dock may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'answer', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 
@@ -85,11 +85,8 @@ export function parseReport(body: unknown): ReportBody | null {
 
   if (body['kind'] === 'question') {
     const text = body['text'];
-    const options = body['options'] ?? [];
 
-    return typeof text === 'string' && text.trim() !== '' && Array.isArray(options) && options.every((option) => typeof option === 'string' && option.trim() !== '')
-      ? { sessionId: body['sessionId'], kind: 'question', text: text.trim(), options: (options as string[]).map((option) => option.trim()) }
-      : null;
+    return typeof text === 'string' && text.trim() !== '' ? { sessionId: body['sessionId'], kind: 'question', text: text.trim() } : null;
   }
 
   const optional = (field: string, valid: (value: unknown) => boolean) => body[field] === undefined || body[field] === null || valid(body[field]);
@@ -128,22 +125,10 @@ export function parseAction(body: unknown): FlowEvent | null {
   }
 
   // Only the fields the core reads, because a `sessionId` field would make the activity log name another subject.
-  if (body['type'] === 'answer' || body['type'] === 'open-question') {
+  if (body['type'] === 'open-question') {
     const { workItemId, nativeSessionId } = body;
 
-    if (!Number.isInteger(workItemId) || typeof nativeSessionId !== 'string') {
-      return null;
-    }
-
-    if (body['type'] === 'open-question') {
-      return { type: 'open-question', workItemId: workItemId as number, nativeSessionId };
-    }
-
-    const questionId = body['questionId'];
-
-    return typeof body['answer'] === 'string' && typeof body['question'] === 'string' && (questionId === undefined || questionId === null || typeof questionId === 'string')
-      ? { type: 'answer', workItemId: workItemId as number, nativeSessionId, question: body['question'], answer: body['answer'], questionId: questionId ?? null }
-      : null;
+    return Number.isInteger(workItemId) && typeof nativeSessionId === 'string' ? { type: 'open-question', workItemId: workItemId as number, nativeSessionId } : null;
   }
 
   if (body['type'] === 'move') {
@@ -184,7 +169,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     newSessionId: () => randomUUID().slice(0, 8),
     claudeSettings: claudeSettingsPath(homedir(), process.env),
-    service: claudeService,
     // Codex reads CODEX_HOME when the operator set it, else ~/.codex.
     codex: { path: 'codex', home: process.env['CODEX_HOME'] || join(homedir(), '.codex'), env: {} },
     log: options.log,
@@ -418,7 +402,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error: 'Unknown action.' } };
         }
 
-        const { refused } = event.type === 'answer' ? runtime.answer(event) : event.type === 'open-question' ? runtime.openQuestion(event) : runtime.send(event);
+        const { refused } = runtime.send(event);
 
         return refused === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: refused } };
       },

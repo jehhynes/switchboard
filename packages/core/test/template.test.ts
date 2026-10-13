@@ -61,7 +61,7 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
   it('offers a Codex session the question report in place of AskUserQuestion, because its background run cannot wait on the operator (mechanics M31)', () => {
     const codex = sessionContract('s-5', 'R', ['stage', 'done', 'question'], 'codex');
 
-    expect(codex).toContain("- R question s-5 --text <question> [--option <choice>]..., when you need the operator's answer or choice, or cannot continue without them; write the question and its choices as your final message too, then end your turn.");
+    expect(codex).toContain("- R question s-5 --text <question>, when you need the operator's answer or choice, or cannot continue without them; write the question and its choices as your final message too, then end your turn.");
     expect(codex.endsWith('Ask the operator only with the question report. Do not write a file for a question.')).toBe(true);
     expect(codex).not.toContain('AskUserQuestion');
     expect(sessionContract('s-5', 'R', ['stage', 'done'], 'claude')).not.toContain('question s-5');
