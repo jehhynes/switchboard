@@ -298,7 +298,7 @@
     <DockPanel Name="ListPanel" Grid.Column="1">
       <StackPanel DockPanel.Dock="Top" Margin="8,0,0,0" Spacing="4">
         <!-- 35px, the height of VS Code's title bar on Windows. -->
-        <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor under the pointer as it moves. -->
           <TextBlock Name="MoveHandle" Text="Switchboard" FontSize="12" Classes="muted" VerticalAlignment="Center" Cursor="SizeAll" Background="Transparent"
                      ToolTip.Tip="Drag to the left or right half of a monitor to dock there" PointerPressed="OnMovePressed" PointerMoved="OnMoveMoved" PointerReleased="OnMoveReleased" PointerCaptureLost="OnMoveCaptureLost" />
@@ -327,12 +327,15 @@
           <Button Name="AdhocButton" Grid.Column="4" Classes="header" Click="OnAdhocClicked" ToolTip.Tip="New Ad-hoc Session…" AutomationProperties.Name="New Ad-hoc Session">
             <TextBlock Classes="icon" Text="&#xEA60;" />
           </Button>
-          <Button Name="SettingsButton" Grid.Column="5" Classes="header" Click="OnSettingsClicked" ToolTip.Tip="Open Settings" AutomationProperties.Name="Open Settings">
+          <Button Name="AutoHideButton" Grid.Column="5" Classes="header" Click="OnAutoHideClicked" ToolTip.Tip="{Binding AutoHideTip}" AutomationProperties.Name="Auto-hide">
+            <TextBlock Classes="icon" Text="{Binding AutoHideGlyph}" />
+          </Button>
+          <Button Name="SettingsButton" Grid.Column="6" Classes="header" Click="OnSettingsClicked" ToolTip.Tip="Open Settings" AutomationProperties.Name="Open Settings">
             <TextBlock Classes="icon" Text="&#xEB51;" />
           </Button>
           <!-- Set apart, so Close is not clicked by mistake for Settings. -->
-          <Border Grid.Column="6" Classes="separator" Margin="8,0" />
-          <Button Name="CloseButton" Grid.Column="7" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock" AutomationProperties.Name="Close the dock">
+          <Border Grid.Column="7" Classes="separator" Margin="8,0" />
+          <Button Name="CloseButton" Grid.Column="8" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock" AutomationProperties.Name="Close the dock">
             <TextBlock Classes="icon" Text="&#xEA76;" />
           </Button>
         </Grid>
@@ -491,5 +494,7 @@
     <!-- The inner edge of a dock on the left: dragging it sets the dock's width. -->
     <Border Name="Grip" Grid.Column="2" Width="5" Background="Transparent" Cursor="SizeWestEast" BorderBrush="{DynamicResource DockBorder}" BorderThickness="1,0,0,0"
             IsVisible="{Binding GripOnRight}" PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" PointerCaptureLost="OnGripCaptureLost" />
+    <!-- Covers the outer edge while the dock is auto-hidden; 4 pixels wide, so it covers the 2-pixel sliver at any scale. -->
+    <views:SliverView Name="Sliver" Grid.ColumnSpan="3" Width="4" HorizontalAlignment="Left" IsVisible="False" IsHitTestVisible="False" Background="{DynamicResource DockBackground}" />
   </Grid>
 </Window>

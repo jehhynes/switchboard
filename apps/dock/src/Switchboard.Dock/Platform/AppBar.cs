@@ -3,7 +3,8 @@ using System.Runtime.Versioning;
 namespace Switchboard.Dock.Platform;
 
 /// <summary>
-/// Reserves a strip at the left or right edge of a monitor as a Windows app bar, so maximized windows fill the rest (switcher spike Q3).
+/// Reserves a strip at the left or right edge of a monitor as a Windows app bar, so maximized windows fill the rest (switcher spike Q3),
+/// or registers as that edge's auto-hide bar, which reserves nothing.
 /// Registering moves every window on the monitor. Explorer forgets app bars when it restarts, so the bar registers again on <c>TaskbarCreated</c>.
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -16,6 +17,9 @@ internal sealed class AppBar : IDisposable
     readonly Native.SubclassProc subclass;
     DockEdge edge;
     nint monitor;
+    // Whether ABM_SETPOS reserved a strip, and the edge and monitor the bar is registered as auto-hide on.
+    bool reserved;
+    (DockEdge Edge, nint Monitor)? autoHidden;
 
     /// <summary>
     /// The strip the window must keep, in physical pixels, or null before the first placement. Any move or resize, Avalonia's own included,
@@ -52,9 +56,28 @@ internal sealed class AppBar : IDisposable
     /// <summary>The monitor the strip is on, where item windows are placed.</summary>
     public nint Monitor => monitor;
 
-    /// <summary>Reserves a strip <paramref name="widthPixels"/> wide at <paramref name="at"/> of <paramref name="on"/> and returns its bounds, which the window takes.</summary>
-    public Native.Rect Dock(DockEdge at, nint on, int widthPixels)
+    /// <summary>
+    /// Places the bar <paramref name="widthPixels"/> wide at <paramref name="at"/> of <paramref name="on"/> and returns its bounds, which the window takes.
+    /// It reserves the strip, or with <paramref name="autoHide"/> reserves nothing and registers as the auto-hide bar of that edge (PRD R71).
+    /// </summary>
+    public Native.Rect Dock(DockEdge at, nint on, int widthPixels, bool autoHide)
     {
+        if (autoHidden is { } registered && (!autoHide || registered != (at, on)))
+        {
+            SetAutoHide(registered.Edge, registered.Monitor, false);
+            autoHidden = null;
+        }
+
+        // A bar keeps its reserved strip until it registers again.
+        if (autoHide && reserved)
+        {
+            var old = Data();
+
+            Native.SHAppBarMessage(Native.AbmRemove, ref old);
+            Register();
+            reserved = false;
+        }
+
         edge = at;
         monitor = on;
 
@@ -74,9 +97,32 @@ internal sealed class AppBar : IDisposable
             data.Bounds.Left = data.Bounds.Right - widthPixels;
         }
 
-        Native.SHAppBarMessage(Native.AbmSetPos, ref data);
+        if (autoHide)
+        {
+            // Refused when another auto-hide bar, such as the taskbar, holds the edge; the dock still hides itself.
+            if (autoHidden is null && SetAutoHide(edge, monitor, true))
+            {
+                autoHidden = (edge, monitor);
+            }
+        }
+        else
+        {
+            Native.SHAppBarMessage(Native.AbmSetPos, ref data);
+            reserved = true;
+        }
 
         return data.Bounds;
+    }
+
+    bool SetAutoHide(DockEdge at, nint on, bool register)
+    {
+        var data = Data();
+
+        data.Edge = at == DockEdge.Left ? Native.AbeLeft : Native.AbeRight;
+        data.Bounds = Native.RectOf(Native.Bounds(on));
+        data.Param = register ? 1 : 0;
+
+        return Native.SHAppBarMessage(Native.AbmSetAutoHideBarEx, ref data) != 0;
     }
 
     nint Proc(nint hwnd, uint message, nint wParam, nint lParam, nuint id, nuint reference)
@@ -104,6 +150,8 @@ internal sealed class AppBar : IDisposable
         else if (message == taskbarCreated)
         {
             Register();
+            reserved = false;
+            autoHidden = null;
             Moved?.Invoke();
         }
         else if (message == Native.WmDisplayChange)
@@ -160,6 +208,11 @@ internal sealed class AppBar : IDisposable
 
     public void Dispose()
     {
+        if (autoHidden is { } registered)
+        {
+            SetAutoHide(registered.Edge, registered.Monitor, false);
+        }
+
         var data = Data();
 
         Native.SHAppBarMessage(Native.AbmRemove, ref data);

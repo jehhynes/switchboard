@@ -28,6 +28,57 @@ public static class DockPlacement
     /// <summary>The width the inner edge of <paramref name="strip"/> has when dragged to <paramref name="x"/>; the outer edge stays.</summary>
     public static int WidthAt(DockEdge edge, PixelRect strip, int x) => edge == DockEdge.Left ? x - strip.Left : strip.Right - x;
 
+    /// <summary>The pixels an auto-hidden dock leaves on screen at its outer edge, as many as the Windows taskbar leaves.</summary>
+    public const int SliverWidth = 2;
+
+    /// <summary>The part of a <paramref name="width"/> by <paramref name="height"/> window an auto-hidden dock shows, in window coordinates: its outer edge.</summary>
+    public static PixelRect Sliver(DockEdge edge, int width, int height) =>
+        edge == DockEdge.Left ? new(0, 0, SliverWidth, height) : new(width - SliverWidth, 0, width, height);
+
     /// <summary>Device-independent pixels at a monitor's scale, rounded to whole pixels.</summary>
     public static int Pixels(double dips, double scale) => (int)Math.Round(dips * scale);
+}
+
+/// <summary>
+/// When a shown auto-hidden dock hides again (PRD R71): once nothing has kept it open, neither the pointer, its focus nor a drag, for <see cref="Delay"/>.
+/// </summary>
+public sealed class HideDelay
+{
+    public static readonly TimeSpan Delay = TimeSpan.FromMilliseconds(400);
+
+    TimeSpan? since;
+
+    /// <summary>Records whether the dock is kept open at <paramref name="now"/>, a monotonic time; returns whether it should hide.</summary>
+    public bool Hides(bool kept, TimeSpan now)
+    {
+        if (kept)
+        {
+            since = null;
+            return false;
+        }
+
+        since ??= now;
+
+        return now - since >= Delay;
+    }
+
+    /// <summary>Starts over, as when the dock shows.</summary>
+    public void Reset() => since = null;
+
+    /// <summary>
+    /// Whether <paramref name="window"/>, a top-level window, is the dock or owned by it through any chain of owners: its menus are owned popups
+    /// and its dialogs owned windows, whose root owner is themselves.
+    /// </summary>
+    public static bool OwnedBy(nint window, nint dock, Func<nint, nint> ownerOf)
+    {
+        for (var at = window; at != 0; at = ownerOf(at))
+        {
+            if (at == dock)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

@@ -58,6 +58,29 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         Placed();
     }
 
+    /// <summary>Auto-hide (PRD R71): the header's pin shows <c>pin</c> while it is on and <c>pinned</c> while the dock keeps its strip.</summary>
+    public bool AutoHide
+    {
+        get => settings.AutoHide;
+        set
+        {
+            if (settings.AutoHide == value)
+            {
+                return;
+            }
+
+            settings.AutoHide = value;
+            SaveSettings();
+            Changed(nameof(AutoHide));
+            Changed(nameof(AutoHideGlyph));
+            Changed(nameof(AutoHideTip));
+        }
+    }
+
+    public string AutoHideGlyph => settings.AutoHide ? "\uEB2B" : "\uEBA0";
+
+    public string AutoHideTip => settings.AutoHide ? "Keep the dock open" : "Auto-hide the dock";
+
     void Placed()
     {
         Changed(nameof(GripOnLeft));

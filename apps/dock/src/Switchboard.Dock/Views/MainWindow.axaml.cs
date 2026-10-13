@@ -30,6 +30,11 @@ public sealed partial class MainWindow : Window
     // The strip the docked window last took, in physical pixels.
     Native.Rect? placed;
     bool resizing;
+    // Auto-hide (PRD R71): whether the dock shows only its sliver, and the check that hides it while it shows.
+    bool hidden;
+    readonly HideDelay hideDelay = new();
+    readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+    DispatcherTimer? hideTimer;
     /// <summary>Where the pointer last moved or pressed, in window coordinates; a row's menu opens there.</summary>
     Point pointer;
     // The width the pointer has dragged to, in device-independent pixels, before rounding to physical pixels.
@@ -68,7 +73,13 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         // After the XAML, whose width is the default.
         Width = model.Settings.Width;
-        AddHandler(PointerMovedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerMovedEvent, (_, e) =>
+        {
+            pointer = e.GetPosition(this);
+            Expand();
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        // Alt+Tab or a VS Code status bar item (ShowRequested) shows a hidden dock.
+        Activated += (_, _) => Expand();
         AddHandler(PointerPressedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
         // A pressed button handles the press, so it starts no drag.
@@ -77,14 +88,28 @@ public sealed partial class MainWindow : Window
         GroupList.AddHandler(PointerReleasedEvent, OnListReleased, handledEventsToo: true);
         GroupList.AddHandler(PointerCaptureLostEvent, OnListCaptureLost);
         // A hub update, a note above the list or a scroll moves the rows under a still pointer, so the drop line is placed again after each layout.
-        LayoutUpdated += (_, _) => RedrawDrop();
+        LayoutUpdated += (_, _) =>
+        {
+            RedrawDrop();
+
+            // A hub update or a selection while hidden moves the rows, so the sliver follows them.
+            if (hidden)
+            {
+                Sliver.Bars = SliverBars();
+            }
+        };
         RowScroller.ScrollChanged += (_, _) => RedrawDrop();
 
         if (stream is not null)
         {
             stream.Changed += () => Dispatcher.UIThread.Post(Refresh);
             // A VS Code window's status bar item asks for the dock (PRD R71).
-            stream.ShowRequested += () => Dispatcher.UIThread.Post(Activate);
+            // Shown first, because Windows can refuse the activation to a dock that does not have the latest input.
+            stream.ShowRequested += () => Dispatcher.UIThread.Post(() =>
+            {
+                Expand();
+                Activate();
+            });
         }
 
         // Hidden until it is in its strip, so it does not show at Avalonia's first size and position and then jump (the window exists before it is shown).
@@ -127,6 +152,8 @@ public sealed partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        hideTimer?.Stop();
+
         if (OperatingSystem.IsWindows())
         {
             appBar?.Dispose();
@@ -135,14 +162,29 @@ public sealed partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    /// <summary>Reserves the strip at the kept edge and monitor, at the kept width (PRD R71).</summary>
+    /// <summary>Reserves the strip at the kept edge and monitor, at the kept width, or with auto-hide takes it without reserving it (PRD R71).</summary>
     void Dock()
     {
         if (OperatingSystem.IsWindows() && appBar is not null)
         {
             var monitor = Native.MonitorNamed(model.Settings.Monitor);
-            Place(appBar.Dock(model.Settings.DockEdge, monitor, DockPlacement.Pixels(model.Settings.Width, Native.Scale(monitor))));
+            Place(appBar.Dock(model.Settings.DockEdge, monitor, DockPlacement.Pixels(model.Settings.Width, Native.Scale(monitor)), model.Settings.AutoHide));
             DockedOn?.Invoke(appBar.Monitor);
+
+            if (!model.Settings.AutoHide)
+            {
+                Expand();
+                hideTimer?.Stop();
+            }
+            else if (hidden)
+            {
+                // The strip may have changed size or edge, so the sliver is cut again.
+                Collapse();
+            }
+            else
+            {
+                WatchHide();
+            }
         }
         else
         {
@@ -172,6 +214,98 @@ public sealed partial class MainWindow : Window
 
             Native.SetWindowPos(handle.Handle, 0, bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, Native.SwpNoZOrder | Native.SwpNoActivate);
         }
+    }
+
+    /// <summary>Checks every 100 ms whether the shown dock is still kept open, and hides it once it has not been for <see cref="HideDelay.Delay"/>.</summary>
+    void WatchHide()
+    {
+        hideDelay.Reset();
+
+        if (hideTimer is null)
+        {
+            hideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            hideTimer.Tick += (_, _) =>
+            {
+                if (hideDelay.Hides(KeptOpen(), clock.Elapsed))
+                {
+                    Collapse();
+                }
+            };
+        }
+
+        hideTimer.Start();
+    }
+
+    /// <summary>The pointer is over the dock or a window it owns, such as a menu or dialog, one of them has the focus, or a drag is under way.</summary>
+    bool KeptOpen()
+    {
+        if (resizing || moving || dragging is not null || !OperatingSystem.IsWindows() || TryGetPlatformHandle() is not { } handle)
+        {
+            return true;
+        }
+
+        bool Ours(nint window) => window != 0 && HideDelay.OwnedBy(Native.GetAncestor(window, Native.GaRoot), handle.Handle, (at) => Native.GetWindow(at, Native.GwOwner));
+
+        return (Native.GetCursorPos(out var at) && Ours(Native.WindowFromPoint(at))) || Ours(Native.GetForegroundWindow());
+    }
+
+    /// <summary>Shows only the sliver at the outer edge; the window keeps its strip and its layout, so it shows again at once.</summary>
+    void Collapse()
+    {
+        hideTimer?.Stop();
+
+        if (OperatingSystem.IsWindows() && placed is { } bounds && TryGetPlatformHandle() is { } handle)
+        {
+            var sliver = DockPlacement.Sliver(model.Settings.DockEdge, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top);
+
+            Sliver.HorizontalAlignment = model.Settings.DockEdge == DockEdge.Left ? Avalonia.Layout.HorizontalAlignment.Left : Avalonia.Layout.HorizontalAlignment.Right;
+            Sliver.Bars = SliverBars();
+            Sliver.IsVisible = true;
+            Native.SetWindowRgn(handle.Handle, Native.CreateRectRgn(sliver.Left, sliver.Top, sliver.Right, sliver.Bottom), true);
+            hidden = true;
+        }
+    }
+
+    /// <summary>The coloured stripe of each row in the list's view, cut to the view, at its height in the window.</summary>
+    internal List<SliverBar> SliverBars()
+    {
+        var view = new Rect(RowScroller.Bounds.Size);
+        List<SliverBar> bars = [];
+
+        foreach (var stripe in GroupList.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("stripe") && border.Background is not null && border.IsEffectivelyVisible))
+        {
+            if (stripe.TranslatePoint(default, RowScroller) is not { } corner || new Rect(corner, stripe.Bounds.Size).Intersect(view) is not { Height: > 0 } seen
+                || RowScroller.TranslatePoint(seen.TopLeft, this) is not { } top)
+            {
+                continue;
+            }
+
+            bars.Add(new SliverBar(top.Y, seen.Height, stripe.Background!));
+        }
+
+        return bars;
+    }
+
+    void Expand()
+    {
+        if (!hidden || !OperatingSystem.IsWindows() || TryGetPlatformHandle() is not { } handle)
+        {
+            return;
+        }
+
+        Sliver.IsVisible = false;
+        Native.SetWindowRgn(handle.Handle, 0, true);
+        // The composition surface keeps the clipped frame until Avalonia draws again.
+        InvalidateVisual();
+        hidden = false;
+        WatchHide();
+    }
+
+    /// <summary>The header's pin turns auto-hide on or off (PRD R71); turning it off reserves the strip again.</summary>
+    void OnAutoHideClicked(object? sender, RoutedEventArgs e)
+    {
+        model.AutoHide = !model.AutoHide;
+        Dock();
     }
 
     void OnMovePressed(object? sender, PointerPressedEventArgs e)

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Switchboard.Dock;
 
 /// <summary>
-/// What the dock keeps between runs in <c>&lt;Switchboard home&gt;/dock.json</c>: its edge, monitor and width, and the groups
+/// What the dock keeps between runs in <c>&lt;Switchboard home&gt;/dock.json</c>: its edge, monitor, width and auto-hide, and the groups
 /// the operator opened or closed.
 /// </summary>
 public sealed class DockSettings
@@ -21,6 +21,9 @@ public sealed class DockSettings
 
     /// <summary>The monitor's device name, such as <c>\\.\DISPLAY2</c>, or null for the primary monitor.</summary>
     public string? Monitor { get; set; }
+
+    /// <summary>Hides the dock to a sliver at its edge instead of reserving a strip, and shows it while the pointer is over it (PRD R71).</summary>
+    public bool AutoHide { get; set; }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public Platform.DockEdge DockEdge => Edge == "right" ? Platform.DockEdge.Right : Platform.DockEdge.Left;

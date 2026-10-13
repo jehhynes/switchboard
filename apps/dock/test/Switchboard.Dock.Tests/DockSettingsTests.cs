@@ -11,6 +11,18 @@ public sealed class DockSettingsTests
         Assert.Empty(settings.Groups);
         Assert.Equal(Platform.DockEdge.Left, settings.DockEdge);
         Assert.Null(settings.Monitor);
+        Assert.False(settings.AutoHide);
+    }
+
+    [Fact]
+    public void Save_ThenLoad_KeepsAutoHide()
+    {
+        var home = Fixtures.TempFolder();
+
+        new DockSettings { AutoHide = true }.Save(home);
+
+        Assert.True(DockSettings.Load(home).AutoHide);
+        Assert.Contains("\"autoHide\": true", File.ReadAllText(Path.Combine(home, "dock.json")));
     }
 
     [Fact]

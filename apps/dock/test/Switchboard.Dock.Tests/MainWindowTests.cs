@@ -36,6 +36,9 @@ public sealed class MainWindowTests
     static Border RowNamed(Window window, string title) =>
         window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel row && row.Title == title);
 
+    static Color Resource(Window window, string key) =>
+        window.TryFindResource(key, window.ActualThemeVariant, out var brush) ? ((ISolidColorBrush)brush!).Color : throw new KeyNotFoundException(key);
+
     static void Tap(Window window, Control control)
     {
         var point = control.TranslatePoint(new Point(Math.Min(20, control.Bounds.Width / 2), Math.Min(8, control.Bounds.Height / 2)), window)!.Value;
@@ -422,7 +425,90 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var names = window.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("header")).Select((button) => Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(button).GetName());
 
-        Assert.Equal(["github", "zoho", "Search", "New Ad-hoc Session", "Open Settings", "Close the dock"], names);
+        Assert.Equal(["github", "zoho", "Search", "New Ad-hoc Session", "Auto-hide", "Open Settings", "Close the dock"], names);
+    }
+
+    [AvaloniaFact]
+    public void AutoHideButton_Click_TurnsAutoHideOnAndOffAndKeepsIt()
+    {
+        var (window, model) = Open();
+        var button = window.FindControl<Button>("AutoHideButton")!;
+        string Glyph() => ((TextBlock)button.Presenter!.Child!).Text!;
+
+        Assert.Equal("\uEBA0", Glyph());
+        Assert.Equal("Auto-hide the dock", ToolTip.GetTip(button));
+
+        Tap(window, button);
+
+        Assert.True(model.Settings.AutoHide);
+        Assert.Single(saved);
+        Assert.Equal("\uEB2B", Glyph());
+        Assert.Equal("Keep the dock open", ToolTip.GetTip(button));
+
+        Tap(window, button);
+
+        Assert.False(model.Settings.AutoHide);
+        Assert.Equal(2, saved.Count);
+        Assert.Equal("\uEBA0", Glyph());
+    }
+
+    [AvaloniaFact]
+    public void SliverBars_RowsWithStripes_GiveTheirStripeAtTheRowsHeightInItsColour()
+    {
+        var (window, _) = Open();
+        var striped = window.GetVisualDescendants().OfType<Border>()
+            .Where((border) => border.Classes.Contains("row") && border.IsEffectivelyVisible && border.DataContext is RowViewModel row && (row.StripeWarning || row.StripeError || row.StripeTurn))
+            .ToList();
+        var bars = window.SliverBars();
+        string Tone(RowViewModel row) => row.StripeError ? "DockError" : row.StripeWarning ? "DockWarning" : "DockTurn";
+
+        Assert.NotEmpty(striped);
+        Assert.Equal(striped.Count, bars.Count);
+
+        foreach (var (row, bar) in striped.Zip(bars))
+        {
+            var stripe = row.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("stripe"));
+
+            Assert.Equal(stripe.TranslatePoint(default, window)!.Value.Y, bar.Top, 3);
+            Assert.Equal(stripe.Bounds.Height, bar.Height, 3);
+            Assert.True(bar.Height < row.Bounds.Height);
+            Assert.Equal(Resource(window, Tone((RowViewModel)row.DataContext!)), ((ISolidColorBrush)bar.Brush).Color);
+        }
+    }
+
+    [AvaloniaFact]
+    public void SliverBars_RowsBelowTheView_AreLeftOut()
+    {
+        var (window, _) = Open();
+        var all = window.SliverBars().Count;
+
+        window.Height = window.SliverBars()[0].Top + 20;
+        Dispatcher.UIThread.RunJobs();
+
+        var bars = window.SliverBars();
+
+        Assert.True(all > 1);
+        Assert.Single(bars);
+        Assert.True(bars[0].Top + bars[0].Height <= window.Height + 0.001);
+    }
+
+    [AvaloniaFact]
+    public void SliverBars_RowScrolledPartlyAboveTheView_IsCutAtTheViewTop()
+    {
+        var (window, _) = Open();
+        var scroller = window.FindControl<ScrollViewer>("RowScroller")!;
+        var first = window.SliverBars()[0];
+        var viewTop = scroller.TranslatePoint(default, window)!.Value.Y;
+
+        window.Height = 300;
+        Dispatcher.UIThread.RunJobs();
+        scroller.Offset = new Vector(0, first.Top - viewTop + 10);
+        Dispatcher.UIThread.RunJobs();
+
+        var cut = window.SliverBars()[0];
+
+        Assert.Equal(viewTop, cut.Top, 3);
+        Assert.Equal(first.Height - 10, cut.Height, 3);
     }
 
     [AvaloniaFact]
@@ -431,7 +517,7 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var sizes = window.GetVisualDescendants().OfType<Button>().Where((button) => button.Classes.Contains("header")).Select((button) => button.Bounds.Size).ToList();
 
-        Assert.Equal(6, sizes.Count);
+        Assert.Equal(7, sizes.Count);
         Assert.All(sizes, (size) => Assert.Equal(new Size(28, 28), size));
     }
 

@@ -160,17 +160,31 @@ static partial class Native
     [DllImport("user32.dll")]
     public static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
 
+    [DllImport("gdi32.dll")]
+    public static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+
+    /// <summary>Limits the window's drawing and hit testing to the region, or none when it is 0; Windows owns the region afterwards.</summary>
+    [DllImport("user32.dll")]
+    public static extern int SetWindowRgn(nint window, nint region, bool redraw);
+
+    [DllImport("user32.dll")]
+    public static extern nint WindowFromPoint(System.Drawing.Point point);
+
+    [DllImport("user32.dll")]
+    public static extern nint GetAncestor(nint window, uint flags);
+
     [DllImport("comctl32.dll")]
     public static extern nint DefSubclassProc(nint window, uint message, nint wParam, nint lParam);
 
     public const int SwMaximize = 3;
     public const int SwRestore = 9;
     public const uint GwOwner = 4;
+    public const uint GaRoot = 2;
     public const uint MonitorDefaultToPrimary = 1, MonitorDefaultToNearest = 2;
     public const uint SwpNoSize = 0x1, SwpNoMove = 0x2, SwpNoZOrder = 0x4, SwpNoActivate = 0x10;
     public const uint EventSystemForeground = 3, EventObjectDestroy = 0x8001, EventObjectNameChange = 0x800C, WinEventOutOfContext = 0;
     public const int ObjIdWindow = 0, ChildIdSelf = 0;
-    public const uint AbmNew = 0, AbmRemove = 1, AbmQueryPos = 2, AbmSetPos = 3, AbmActivate = 6, AbmWindowPosChanged = 9;
+    public const uint AbmNew = 0, AbmRemove = 1, AbmQueryPos = 2, AbmSetPos = 3, AbmActivate = 6, AbmWindowPosChanged = 9, AbmSetAutoHideBarEx = 12;
     public const uint AbeLeft = 0, AbeRight = 2;
     public const int AbnPosChanged = 1, AbnFullScreenApp = 2;
     public const uint WmActivate = 0x0006, WmWindowPosChanging = 0x0046, WmWindowPosChanged = 0x0047, WmDisplayChange = 0x007E, WmSize = 0x0005, WmDpiChanged = 0x02E0;
