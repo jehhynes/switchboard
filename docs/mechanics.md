@@ -420,6 +420,18 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Limits:** the recordings pass messages to the methods directly, without the extension's transcript loading. Live, a fork of a session waiting in its background process, a fork after compaction and the contract restore for an unadopted fork were not run.
 - **Current use:** fork detection by the first `requestId`, and the report command's `nativeSessionId` (PRD R78, architecture.md § Claude Code runner).
 
+## M37. Registering a VS Code Claude session
+
+- **Date:** 2026-10-14.
+- **Versions:** Claude Code extension and CLI in use on the operator's machine that day, VS Code 1.141.1.
+- **Experiment:** an isolated hub (`.wip/acc` in the worktree, `sessions.installHooks` off, no browser port) ran the built bundle. From the Bash tool of a Claude session in a VS Code tab on `d:\git\switchboard`, `node <home>/hub.js register --title "Register skill live check"`, then `report stage <id> "checking the roster"`, a wait of 40 seconds for a roster read, and a second `register`.
+- **Result:**
+  - `CLAUDE_CODE_SESSION_ID` held the tab's session ID, and `claude agents --json` listed it with a pid and no short ID, so the session's short ID became the first 8 characters of its ID.
+  - The command printed `Registered as adhoc 1.` and the ad-hoc report contract. The store held a `running` work item with the stage, and the session `running`, released and external, with the roster's `cwd` (`d:\git\switchboard`, in the case the roster gives it) as its directory and the ticket's repo, after the roster read.
+  - The second `register` exited 0 with `Already registered as adhoc 1.` and the same contract, and added no work item.
+- **Limits:** the end of a registered session, its turn end, a compaction and the row's click were not run.
+- **Current use:** the register command and `ClaudeRunner.live` (PRD R81, architecture.md § Session reports).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

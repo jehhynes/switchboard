@@ -272,9 +272,11 @@ export const MIGRATIONS = [
   // Forks (PRD R78): the native IDs a fork retired, and the short ID of a fork waiting for the background process's release.
   `ALTER TABLE sessions ADD COLUMN retiredIds TEXT NOT NULL DEFAULT '';
   ALTER TABLE sessions ADD COLUMN pendingFork TEXT;`,
+  // A session the operator registered from their own window, until it ends (PRD R81).
+  `ALTER TABLE sessions ADD COLUMN external INTEGER NOT NULL DEFAULT 0;`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -416,7 +418,8 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The start or pick event's detail holds the guidance (PRD R77).
   workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance']),
   // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds']),
+  // The register event names an external session, and its end already shows when it was cleared.
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

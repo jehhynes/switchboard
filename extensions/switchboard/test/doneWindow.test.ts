@@ -24,7 +24,7 @@ function session(id: number, state: SessionState): Session {
     outcomeDetail: null,
     startedAt: NOW,
     endedAt: null,
-    released: true, releasing: false, question: null, retiredIds: [], pendingFork: null,
+    released: true, releasing: false, question: null, retiredIds: [], pendingFork: null, external: false,
     reports: ['done'],
   };
 }

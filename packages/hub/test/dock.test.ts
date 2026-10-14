@@ -366,6 +366,20 @@ describe('windowOf', () => {
     expect(windowOf(item(7), W)).toBeNull();
   });
 
+  it('gives a registered session no item window or terminal while it lives in the operator window, and both once it ends (PRD R81)', () => {
+    const adhoc = { ...item(7).ticket, source: 'adhoc', sourceKey: '3', url: '' };
+    const live = item(7, { ticket: adhoc, focus: null, sessions: [session({ released: true, external: true, cwd: 'D:/git/widgets' })] });
+    const ended = item(7, { ticket: adhoc, focus: null, status: 'blocked', sessions: [session({ released: true, external: false, state: 'ended', cwd: 'D:/git/widgets' })] });
+    const terminal = (entry: WorkItemView) => row(entry).commands.some((command) => command.label === 'Open in terminal');
+
+    expect(windowOf(live, W)).toBeNull();
+    expect(row(live)).toMatchObject({ window: null, open: null });
+    expect(terminal(live)).toBe(false);
+    expect(windowOf(ended, W)).toMatchObject({ folders: ['D:/git/widgets'] });
+    expect(row(ended).open).toMatchObject({ type: 'session', sessionId: 'aaaa1111-native' });
+    expect(terminal(ended)).toBe(true);
+  });
+
   it('gives each first folder its own name, so a window never changes its first folder', () => {
     const names = ['D:/one/review', 'D:/two/review'].map((cwd) => windowOf(item(7, { sessions: [session({ cwd })] }), W)!.name);
     const moved = windowOf(item(7, { worktree: { ...worktree, path: 'E:/wt/107-fix' } }), W)!.name;

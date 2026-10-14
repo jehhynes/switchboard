@@ -1231,6 +1231,64 @@ describe('task reports (PRD R68)', () => {
   });
 });
 
+describe('registered sessions (PRD R81)', () => {
+  const NATIVE = '9273f594-1111-4222-8333-444455556666';
+  const register = (h: Harness, title = ' Fix the badge ') => h.send({ type: 'register', nativeSessionId: NATIVE, shortId: '9273f594', cwd: 'D:/git/widgets.worktrees/18941', title });
+
+  it('creates a running ad-hoc work item in the session directory, whose session is released, external and offered the ad-hoc reports', () => {
+    const h = new Harness();
+
+    expect(register(h)).toEqual({ actions: [], refused: null });
+    expect(h.store.ticket(1)).toMatchObject({ source: 'adhoc', sourceKey: '1', ref: '#1', title: 'Fix the badge', url: '', assigned: true, repoRoot: 'D:/git/widgets.worktrees/18941', scopeAt: T0 });
+    expect(h.item(1)).toMatchObject({ ticketId: 1, playbook: null, status: 'running', taskPrompt: null, queuedAt: null, runStartedAt: T0, statusAt: T0, parentId: null });
+    expect(h.store.sessionsFor(1)).toEqual([
+      expect.objectContaining({ id: 's1', kind: 'task', provider: 'claude', nativeSessionId: NATIVE, shortId: '9273f594', cwd: 'D:/git/widgets.worktrees/18941', state: 'running', released: true, releasing: false, external: true, reports: ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task'] }),
+    ]);
+    expect(h.store.ticketHistory(1)!.events.map((event) => [event.type, event.actor, event.detail])).toEqual([['register', 'operator', { cwd: 'D:/git/widgets.worktrees/18941' }]]);
+  });
+
+  it('ends a turn without a done report as an ad-hoc session does, with no release stop, and stays external until its process ends', () => {
+    const h = new Harness();
+    register(h);
+
+    expect(h.act({ type: 'roster', sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: true }] })).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.turnEnded });
+    expect(h.store.session('s1')).toMatchObject({ state: 'idle', external: true });
+
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended', external: false });
+  });
+
+  it('refuses Stop, because the session runs in the operator window', () => {
+    const h = new Harness();
+    register(h);
+
+    expect(h.send({ type: 'stop', workItemId: 1 })).toEqual({ actions: [], refused: 'The session runs in your own window; stop it there.' });
+  });
+
+  it('is done by its done report', () => {
+    const h = new Harness();
+    register(h);
+
+    expect(h.report('s1', { kind: 'done' }).refused).toBeNull();
+    expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'session' });
+  });
+
+  it('refuses an empty title, a session already registered, and a copy a fork retired', () => {
+    const h = new Harness();
+
+    expect(register(h, ' ').refused).toBe('The title is empty.');
+    expect(h.store.tickets('adhoc')).toEqual([]);
+
+    register(h);
+    expect(register(h).refused).toBe('This session is already in Switchboard as adhoc 1.');
+
+    h.store.updateSession('s1', { nativeSessionId: 'aa2285b2-0000-4000-8000-000000000000', retiredIds: [NATIVE] });
+    expect(register(h).refused).toBe('This session is already in Switchboard as adhoc 1.');
+    expect(h.store.tickets('adhoc')).toHaveLength(1);
+  });
+});
+
 describe('in-queue times (PRD R27)', () => {
   const entered = (key: string, enteredAt: number | null, assigned = true): PolledTicket => ({ ...issue(key, assigned), enteredAt });
 

@@ -181,8 +181,9 @@ function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
       : { type: 'terminal', provider: session.provider, sessionId: session.nativeSessionId ?? session.shortId, cwd: session.cwd, name, shortId: session.shortId, active: false };
   }
 
-  // A session whose release stop has not finished may still be held by its background process (PRD R39).
-  if (latest?.nativeSessionId == null || (session !== null && (session.state === 'starting' || !session.released || session.releasing))) {
+  // A session whose release stop has not finished may still be held by its background process (PRD R39), and a registered one by the
+  // operator's window, which the terminal cannot find (PRD R81).
+  if (latest?.nativeSessionId == null || (session !== null && (session.state === 'starting' || !session.released || session.releasing || session.external === true))) {
     return null;
   }
 

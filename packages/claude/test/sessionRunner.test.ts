@@ -35,7 +35,7 @@ function session(patch: Partial<Session> = {}): Session {
     outcomeDetail: null,
     startedAt: 0,
     endedAt: null,
-    released: false, releasing: false, question: null, retiredIds: [], pendingFork: null,
+    released: false, releasing: false, question: null, retiredIds: [], pendingFork: null, external: false,
     reports: ['stage'],
     ...patch,
   };
@@ -143,5 +143,34 @@ describe('ClaudeRunner', () => {
 
     writeFileSync(settings, '{ not json');
     expect(await runner(vi.fn<Exec>()).installHooks()).toMatch(/settings/i);
+  });
+});
+
+describe('ClaudeRunner.live (PRD R81)', () => {
+  const NATIVE = '9273f594-1111-4222-8333-444455556666';
+
+  it('finds the session the roster lists with a process by its full native ID, with its directory, and a tab by its first 8 characters', async () => {
+    const roster = [
+      { sessionId: '9273f594-ffff-4fff-8fff-ffffffffffff', pid: 1, kind: 'interactive', cwd: 'D:/other' },
+      { sessionId: NATIVE, pid: 2, kind: 'interactive', status: 'busy', cwd: 'D:/git/widgets' },
+    ];
+    const exec = vi.fn<Exec>(async () => ran({ stdout: JSON.stringify(roster) }));
+
+    expect(await runner(exec).live(NATIVE)).toEqual({ shortId: '9273f594', cwd: 'D:/git/widgets' });
+    expect(exec).toHaveBeenCalledWith('claude', ['agents', '--json'], expect.anything());
+  });
+
+  it("takes a background entry's short ID, and finds no session without a process or not listed", async () => {
+    const listed = async (entries: unknown[]) => runner(async () => ran({ stdout: JSON.stringify(entries) })).live(NATIVE);
+
+    expect(await listed([{ id: 'bg123456', sessionId: NATIVE, pid: 3, kind: 'background', cwd: 'D:/git/widgets' }])).toEqual({ shortId: 'bg123456', cwd: 'D:/git/widgets' });
+    expect(await listed([{ sessionId: NATIVE, kind: 'interactive', cwd: 'D:/git/widgets' }])).toBeNull();
+    expect(await listed([])).toBeNull();
+  });
+
+  it('answers a failed roster read with its error', async () => {
+    const result = await runner(async () => ran({ code: 1, stderr: 'boom' })).live(NATIVE);
+
+    expect(result).toMatchObject({ error: expect.stringContaining('boom') });
   });
 });

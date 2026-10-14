@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { buildOf, createHubApp, findHub, gitBashRoot, postToHub, reportBody, serveHub, stopHub } from '@switchboard/hub';
+import { buildOf, createHubApp, findHub, gitBashRoot, postToHub, registerTitle, reportBody, serveHub, stopHub } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -9,6 +9,8 @@ declare const __SWITCHBOARD_VERSION__: string | undefined;
 const VERSION = typeof __SWITCHBOARD_VERSION__ === 'string' ? __SWITCHBOARD_VERSION__ : '0.0.0-dev';
 
 const REPORT_TIMEOUT_MS = 10_000;
+/** Longer than the hub's Claude roster read, 15 seconds, which a registration waits for. */
+const REGISTER_TIMEOUT_MS = 30_000;
 
 const REPORT_USAGE = `Usage:
   report stage <sessionId> <stage>
@@ -58,15 +60,53 @@ async function report(home: string, argv: readonly string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * Registers the Claude session that runs the command as a work item and prints its report contract (PRD R81). The usage text of `report` does not
+ * name it, so only the skill the operator invokes runs it. Exit codes as for a report.
+ */
+async function register(home: string, argv: readonly string[]): Promise<number> {
+  const title = registerTitle(argv);
+  const native = process.env['CLAUDE_CODE_SESSION_ID'];
+
+  if (title === null) {
+    process.stderr.write('Usage: register --title <text>\n');
+    return 1;
+  }
+
+  if (!native) {
+    process.stderr.write('Only a Claude Code session can register: CLAUDE_CODE_SESSION_ID is not set.\n');
+    return 1;
+  }
+
+  const hub = await findHub(home);
+  const reply = hub === null ? null : await postToHub(hub, '/register', { nativeSessionId: native, title }, REGISTER_TIMEOUT_MS);
+
+  if (reply === null) {
+    process.stderr.write('The Switchboard hub is not running or did not answer; run the command again, which answers the contract of a session it registered.\n');
+    return 2;
+  }
+
+  if (reply.status !== 200) {
+    process.stderr.write(`Refused: ${reply.error ?? `status ${reply.status}`}\n`);
+    return reply.status === 400 ? 1 : 3;
+  }
+
+  const { key, contract, already } = reply.body as { key: string; contract: string; already: boolean };
+
+  process.stdout.write(`${already ? 'Already registered' : 'Registered'} as ${key}.\n\n${contract}\n`);
+  return 0;
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report') {
+  if (argv[0] === 'report' || argv[0] === 'register') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home.
     const home = flag(argv, 'home') || (bundle === undefined ? homedir() : dirname(dirname(resolve(bundle))));
+    const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    return report(home, argv.slice(1).filter((argument) => !argument.startsWith('--home')));
+    return argv[0] === 'report' ? report(home, rest) : register(home, rest);
   }
 
   const home = flag(argv, 'home') || homedir();

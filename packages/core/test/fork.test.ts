@@ -38,7 +38,7 @@ describe('forks (PRD R78)', () => {
     expect(h.item(item).status).toBe('blocked');
 
     expect(h.act({ type: 'roster', sessions: [], forks: [fork(session)] })).toEqual([]);
-    expect(h.store.session(session)).toMatchObject({ ...FORK, retiredIds: [ORIGINAL], pendingFork: null, state: 'running', released: true, endedAt: null });
+    expect(h.store.session(session)).toMatchObject({ ...FORK, retiredIds: [ORIGINAL], pendingFork: null, external: false, state: 'running', released: true, endedAt: null });
     expect(h.store.sessionByNativeId(FORK.nativeSessionId)?.id).toBe(session);
     expect(h.item(item)).toMatchObject({ status: 'running', error: null });
 
@@ -78,7 +78,7 @@ describe('forks (PRD R78)', () => {
 
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release', shortId: ORIGINAL.slice(0, 8) });
     h.act({ type: 'roster', sessions: [], forks: [fork(session)] });
-    expect(h.store.session(session)).toMatchObject({ ...FORK, pendingFork: null, retiredIds: [ORIGINAL], state: 'running' });
+    expect(h.store.session(session)).toMatchObject({ ...FORK, pendingFork: null, external: false, retiredIds: [ORIGINAL], state: 'running' });
     expect(h.item(item).status).toBe('running');
   });
 
@@ -93,7 +93,7 @@ describe('forks (PRD R78)', () => {
     h.act({ type: 'stop', workItemId: item });
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator', shortId: ORIGINAL.slice(0, 8) });
     h.act({ type: 'roster', sessions: [], forks: [fork(session)] });
-    expect(h.store.session(session)).toMatchObject({ ...FORK, state: 'running', pendingFork: null });
+    expect(h.store.session(session)).toMatchObject({ ...FORK, state: 'running', pendingFork: null, external: false });
     expect(h.item(item).status).toBe('running');
   });
 
@@ -105,7 +105,7 @@ describe('forks (PRD R78)', () => {
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null }], checked: [] });
     expect(h.store.session(session)?.pendingFork).toBe(FORK.shortId);
     h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null }], checked: [session] });
-    expect(h.store.session(session)).toMatchObject({ pendingFork: null, nativeSessionId: ORIGINAL });
+    expect(h.store.session(session)).toMatchObject({ pendingFork: null, external: false, nativeSessionId: ORIGINAL });
   });
 
   it('ends a held copy that exits while its fork waits', () => {

@@ -196,6 +196,9 @@ describe('History model', () => {
     expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
     expect(sessionOpen({ ...session, state: 'ended', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
     expect(sessionOpen({ ...session, state: 'ended', nativeSessionId: null })).toBeNull();
+    // A registered session opens only once it has left the operator's window (PRD R81).
+    expect(sessionOpen({ ...session, state: 'idle', released: true, external: true })).toBeNull();
+    expect(sessionOpen({ ...session, state: 'ended', released: true, external: false })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude' });
     expect(sessionOpen({ ...session, state: 'idle', released: true, releasing: true })).toBeNull();
   });
 
@@ -233,6 +236,7 @@ describe('History model', () => {
       [event('start', 'operator', { guidance: 'Check the 2024 thread.' }, [], null), { text: 'You started it with guidance', detail: 'Check the 2024 thread.', category: 'you', tone: 'accent' }],
       [event('pick', 'operator', { guidance: 'Reply in Spanish.' }, [], null), { text: 'You picked it from the pool with guidance', detail: 'Reply in Spanish.', category: 'you' }],
       [event('start', 'operator', null, [], null), { text: 'You started it', detail: null, category: 'you' }],
+      [event('register', 'operator', { cwd: 'D:/git/widgets' }, [], null), { text: 'You registered the session', category: 'you' }],
       [event('triage-failed', 'triage', { triageId: 1, error: 'Timed out' }, [change('triage', 'update', { error: [null, 'Timed out'] })], null), { text: 'Triage failed', detail: 'Timed out', category: 'triage', tone: 'error' }],
       [event('triage-cancelled', 'hub', { triageId: 1 }, [change('triage', 'update', { error: [null, 'Cancelled.'] })], null), { text: 'Triage cancelled because the hub stopped', lines: [] }],
       [event('worktree-found', 'hub', { path: 'D:/wt/77', branch: '77-fix' }, [change('worktree', 'insert', { path: [null, 'D:/wt/77'] })], null), { text: 'Found the worktree D:/wt/77 (77-fix)', lines: [] }],

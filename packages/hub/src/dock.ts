@@ -358,9 +358,11 @@ function progress(item: WorkItemView, now: number): DockText[] {
  * elsewhere; null with neither. The name is the ticket key, the first folder's name when that folder is not the worktree, and a hash of the first folder.
  */
 export function windowOf(item: WorkItemView, windows: string): DockWindow | null {
-  const first = item.sessions.at(-1)?.cwd ?? item.worktree?.path ?? null;
+  const latest = item.sessions.at(-1);
+  const first = latest?.cwd ?? item.worktree?.path ?? null;
 
-  if (first === null || first === '') {
+  // A registered session lives in the operator's own window until it ends; an item window would open it again as a copy (PRD R81).
+  if (first === null || first === '' || (latest?.external === true && latest.state !== 'ended')) {
     return null;
   }
 
@@ -405,6 +407,11 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
     return { type: 'question', workItemId: question.workItemId, sessionId: question.sessionId, cwd: question.cwd, provider: question.provider };
   }
 
+  // A row with no window opens its focus (PRD R71, R79), and a registered session opens nowhere while it lives in the operator's window (PRD R81).
+  if (windowOf(item, windows) === null) {
+    return item.focus === null ? null : { type: 'url', url: item.focus };
+  }
+
   const latest = item.sessions.at(-1) ?? null;
   const active = activeSession(item);
 
@@ -413,8 +420,7 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
     return { type: 'session', sessionId: latest.nativeSessionId, cwd: latest.cwd, provider: latest.provider };
   }
 
-  // A row with no window opens its focus (PRD R71, R79).
-  return windowOf(item, windows) === null && item.focus !== null ? { type: 'url', url: item.focus } : null;
+  return null;
 }
 
 /** The controls the hub runs; Copy and the VS Code controls are in `pastes` and `commands` (PRD R71). */

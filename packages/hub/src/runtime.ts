@@ -691,6 +691,50 @@ export class Runtime {
   }
 
   /**
+   * Registers a live Claude session the operator started outside Switchboard as a work item (PRD R81), and answers its work item's key and its
+   * report contract; a session Switchboard has answers them again, so a retry after a lost reply recovers the contract. A copy of a Switchboard
+   * session's family, newer or older, is refused, because a fork continues that session (PRD R78).
+   */
+  async register(nativeSessionId: string, title: string): Promise<{ key: string; contract: string; already: boolean } | { refused: string }> {
+    const keyOf = (session: Session) => {
+      const ticket = this.deps.store.ticket(this.deps.store.workItem(session.workItemId)!.ticketId)!;
+
+      return `${ticket.source} ${ticket.sourceKey}`;
+    };
+    const known = this.deps.store.sessionByNativeId(nativeSessionId);
+
+    if (known !== null) {
+      return { key: keyOf(known), contract: sessionContract(known.id, this.reportCommand, known.reports, known.provider), already: true };
+    }
+
+    const family = this.deps.store.startedSessions().find((session) => session.provider === 'claude' && (session.retiredIds.includes(nativeSessionId) || (this.runners.claude.relation?.(nativeSessionId, session) ?? 'unrelated') !== 'unrelated'));
+
+    if (family !== undefined) {
+      return { refused: `This session is a copy of ${keyOf(family)}, which Switchboard continues in its latest copy.` };
+    }
+
+    const live = this.runners.claude.live === undefined ? { error: 'The Claude runner cannot register sessions.' } : await this.runners.claude.live(nativeSessionId);
+
+    if (live === null) {
+      return { refused: `Claude does not list session ${nativeSessionId} as running.` };
+    }
+
+    if ('error' in live) {
+      return { refused: live.error };
+    }
+
+    const { refused } = this.send({ type: 'register', nativeSessionId, shortId: live.shortId, cwd: live.cwd, title });
+
+    if (refused !== null) {
+      return { refused };
+    }
+
+    const session = this.deps.store.sessionByNativeId(nativeSessionId)!;
+
+    return { key: keyOf(session), contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider), already: false };
+  }
+
+  /**
    * A report from the `report` command, from the Claude copy `nativeSessionId` names when the command knows it. A worktree must be one
    * `git worktree list` shows in that path.
    */

@@ -7,7 +7,7 @@ import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
 import { listenHub } from '../src/server.js';
-import { gitBashRoot, isPastePath, reportBody } from '../src/report.js';
+import { gitBashRoot, isPastePath, registerTitle, reportBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
 
 let temp: ReturnType<typeof tempHome>;
@@ -116,6 +116,15 @@ describe('parseReport and reportBody', () => {
 
     for (const patch of [{ prompt: '' }, { prompt: 3 }, { repo: 'git/widgets' }, { title: 2 }]) {
       expect(parseReport({ sessionId: 's1', kind: 'task', prompt: 'Fix it', ...patch })).toBeNull();
+    }
+  });
+
+  it('reads the register title in either flag form and refuses a missing or blank one (PRD R81)', () => {
+    expect(registerTitle(['--title', 'Fix the badge'])).toBe('Fix the badge');
+    expect(registerTitle(['--title=Fix it'])).toBe('Fix it');
+
+    for (const argv of [[], ['--title'], ['--title', ' '], ['--title='], ['--title', '--home']]) {
+      expect(registerTitle(argv)).toBeNull();
     }
   });
 
@@ -228,6 +237,30 @@ describe('createHubApp', () => {
     expect(await app.post['/contract']!({ sessionId: 'n' })).toEqual({ status: 400, body: { error: 'Expected {nativeSessionId}.' } });
     expect(app.busy()).toBe(false);
     expect((app.snapshot() as { repoRoots: string[] }).repoRoots).toEqual(['D:/scratch']);
+  });
+
+  it('registers a session the Claude roster lists, answering its key and contract, and refuses a bad body (PRD R81)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const native = '9273f594-1111-4222-8333-444455556666';
+    const roster: Exec = async (file, args) => {
+      if (file === 'claude' && args.join(' ') === 'agents --json') {
+        return { code: 0, stdout: JSON.stringify([{ sessionId: native, pid: 7, kind: 'interactive', status: 'busy', cwd: 'D:/git/widgets' }]), stderr: '', missing: false, timedOut: false };
+      }
+
+      throw new Error(`unexpected call ${file} ${args.join(' ')}`);
+    };
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: roster } });
+    closers.push(() => app.close());
+
+    expect(await app.post['/register']!({ nativeSessionId: native })).toEqual({ status: 400, body: { error: 'Expected {nativeSessionId, title}.' } });
+    expect(await app.post['/register']!({ nativeSessionId: '', title: 'x' })).toEqual({ status: 400, body: { error: 'Expected {nativeSessionId, title}.' } });
+    expect(await app.post['/register']!({ nativeSessionId: 'not-listed', title: 'x' })).toEqual({ status: 409, body: { error: 'Claude does not list session not-listed as running.' } });
+
+    const registered = await app.post['/register']!({ nativeSessionId: native, title: 'Fix the badge' });
+
+    expect(registered).toEqual({ status: 200, body: { key: 'adhoc 1', already: false, contract: expect.stringContaining('Report to Switchboard with these commands:') } });
+    expect(await app.post['/contract']!({ nativeSessionId: native })).toEqual({ status: 200, body: { contract: (registered.body as { contract: string }).contract } });
+    expect(app.busy()).toBe(true);
   });
 
   it('reloads settings and playbooks when settings.json changes', async () => {

@@ -8,7 +8,7 @@ function ticket(id: number, source: string, url: string, snoozed = false): Ticke
 }
 
 function session(state: Session['state']): Session {
-  return { id: 's', workItemId: 0, kind: 'task', provider: 'claude', nativeSessionId: null, shortId: null, cwd: '', state, stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null };
+  return { id: 's', workItemId: 0, kind: 'task', provider: 'claude', nativeSessionId: null, shortId: null, cwd: '', state, stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false };
 }
 
 function item(id: number, owner: Ticket, status: WorkItemView['status'], playbook: string | null, sessions: Session[] = []): WorkItemView {

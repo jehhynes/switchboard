@@ -267,6 +267,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return contract === null ? { status: 404, body: { error: 'No Switchboard session has this Claude session ID.' } } : { status: 200, body: { contract } };
       },
+      // The register command (PRD R81), which no report contract or usage text lists.
+      '/register': async (body) => {
+        if (!isRecord(body) || typeof body['nativeSessionId'] !== 'string' || body['nativeSessionId'] === '' || typeof body['title'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {nativeSessionId, title}.' } };
+        }
+
+        const result = await runtime.register(body['nativeSessionId'], body['title']);
+
+        return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
+      },
       '/open': async (body) => {
         if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace'])) {
           return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?}.' } };

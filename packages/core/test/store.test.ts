@@ -217,7 +217,7 @@ describe('Store', () => {
     store.close();
   });
 
-  it('gives a version 25 session no retired copies and no waiting fork, and keeps the retired copies across a reopen (PRD R78)', () => {
+  it('gives a version 25 session no retired copies, no waiting fork and no external flag, and keeps them across a reopen (PRD R78, R81)', () => {
     const path = join(dir, 'v25.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS.slice(0, 25).join(';'));
@@ -229,12 +229,12 @@ describe('Store', () => {
 
     const store = Store.open(path);
 
-    expect(store.session('s1')).toMatchObject({ retiredIds: [], pendingFork: null });
-    store.updateSession('s1', { nativeSessionId: 'n3', shortId: 'n3', retiredIds: ['n1', 'n2'], pendingFork: 'n4' });
+    expect(store.session('s1')).toMatchObject({ retiredIds: [], pendingFork: null, external: false });
+    store.updateSession('s1', { nativeSessionId: 'n3', shortId: 'n3', retiredIds: ['n1', 'n2'], pendingFork: 'n4', external: true });
     store.close();
 
     const reopened = Store.open(path);
-    expect(reopened.session('s1')).toMatchObject({ nativeSessionId: 'n3', retiredIds: ['n1', 'n2'], pendingFork: 'n4' });
+    expect(reopened.session('s1')).toMatchObject({ nativeSessionId: 'n3', retiredIds: ['n1', 'n2'], pendingFork: 'n4', external: true });
     reopened.close();
   });
 

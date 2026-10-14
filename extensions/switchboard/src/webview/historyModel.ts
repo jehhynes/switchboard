@@ -83,6 +83,7 @@ const NEEDS_YOU: ReadonlySet<string> = new Set(['unstarted', 'awaiting-approval'
 
 const OPERATOR: Record<string, { text: string; icon: string }> = {
   adhoc: { text: 'You created the ad-hoc prompt', icon: 'add' },
+  register: { text: 'You registered the session', icon: 'plug' },
   start: { text: 'You started it', icon: 'play' },
   approve: { text: 'You approved it', icon: 'check' },
   retry: { text: 'You retried it', icon: 'refresh' },
@@ -136,9 +137,12 @@ function oneLine(text: string): string {
 
 const str = (value: unknown): string => (value === null || value === undefined ? '' : String(value));
 
-/** What a click on a session opens: the session in Claude, unless it runs in its background process or has no native ID yet; then null. */
+/**
+ * What a click on a session opens: the session in Claude, unless it runs in its background process, lives in the operator's window it was
+ * registered from (PRD R81), or has no native ID yet; then null.
+ */
 export function sessionOpen(session: Session): Record<string, unknown> | null {
-  if (session.state !== 'starting' && session.state !== 'ended' && session.shortId !== null && (!session.released || session.releasing)) {
+  if (session.state !== 'starting' && session.state !== 'ended' && session.shortId !== null && (!session.released || session.releasing || session.external === true)) {
     return null;
   }
 

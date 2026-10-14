@@ -144,6 +144,8 @@ export type FlowEvent =
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string; shortId?: string | null }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
+  /** A live Claude session the operator started outside Switchboard, as the roster lists it (PRD R81). */
+  | { type: 'register'; nativeSessionId: string; shortId: string; cwd: string; title: string }
   | { type: 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
   /** `guidance` is added to the task session's prompt (PRD R77). */
   | { type: 'start'; workItemId: number; guidance?: string | null }
@@ -259,7 +261,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -323,6 +325,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { path: event.path, branch: event.branch };
     case 'adhoc':
       return { repoRoot: event.repoRoot };
+    case 'register':
+      return { cwd: event.cwd };
     case 'start':
     case 'pick':
       return guidanceOf(event.guidance) === null ? null : { guidance: guidanceOf(event.guidance) };
@@ -467,6 +471,8 @@ class Flow {
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
         return this.adhoc(event.prompt, event.repoRoot);
+      case 'register':
+        return this.register(event);
       case 'start':
         return this.start(this.openItem(event.workItemId), guidanceOf(event.guidance));
       case 'approve':
@@ -677,7 +683,53 @@ class Flow {
       throw new Refusal('Choose a repo for the prompt.');
     }
 
-    this.insertAdhoc(prompt, title, repoRoot, null);
+    this.insertAdhoc(prompt, title, repoRoot, null, 'queued');
+  }
+
+  /**
+   * PRD R81: a live Claude session the operator started outside Switchboard becomes a running ad-hoc work item in its own directory. The session
+   * counts as released, because its process is the operator's, and stays external until it ends.
+   */
+  private register(event: Extract<FlowEvent, { type: 'register' }>): void {
+    const title = event.title.trim();
+
+    if (title === '') {
+      throw new Refusal('The title is empty.');
+    }
+
+    const known = this.store.sessionByNativeId(event.nativeSessionId) ?? this.store.startedSessions().find((session) => session.retiredIds.includes(event.nativeSessionId)) ?? null;
+
+    if (known !== null) {
+      const ticket = this.store.ticket(this.store.workItem(known.workItemId)!.ticketId)!;
+
+      throw new Refusal(`This session is already in Switchboard as ${ticket.source} ${ticket.sourceKey}.`);
+    }
+
+    const item = this.insertAdhoc(null, title, event.cwd, null, 'running');
+
+    this.store.insertSession({
+      id: this.context.newSessionId(),
+      workItemId: item.id,
+      kind: 'task',
+      provider: 'claude',
+      nativeSessionId: event.nativeSessionId,
+      shortId: event.shortId,
+      cwd: event.cwd,
+      state: 'running',
+      stateAt: this.now,
+      stateDetail: null,
+      outcome: null,
+      outcomeDetail: null,
+      startedAt: this.now,
+      endedAt: null,
+      released: true,
+      releasing: false,
+      question: null,
+      reports: sessionReports('task', false, null, 'claude'),
+      retiredIds: [],
+      pendingFork: null,
+      external: true,
+    });
   }
 
   /**
@@ -705,24 +757,27 @@ class Flow {
       return;
     }
 
-    this.insertAdhoc(report.prompt, report.title?.trim() || line, repoRoot, parent.id);
+    this.insertAdhoc(report.prompt, report.title?.trim() || line, repoRoot, parent.id, 'unstarted');
   }
 
-  /** An ad-hoc ticket and work item: queued when the operator typed the prompt, unstarted when a session reported it (PRD R6, R68). */
-  private insertAdhoc(prompt: string, title: string, repoRoot: string, parentId: number | null): void {
+  /**
+   * An ad-hoc ticket and work item: queued when the operator typed the prompt, unstarted when a session reported it, and running, with no
+   * prompt, for a registered session (PRD R6, R68, R81).
+   */
+  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running'): WorkItem {
     const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
     const sourceKey = String(Math.max(0, ...keys) + 1);
     const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
-    const queued = parentId === null;
+    const queued = status === 'queued';
 
     if (parentId !== null) {
       this.store.noteEvent({ childTicketId: ticket.id, childRef: ticket.ref, childTitle: title });
     }
 
-    this.store.insertWorkItem({
+    return this.store.insertWorkItem({
       ticketId: ticket.id,
       playbook: null,
-      status: queued ? 'queued' : 'unstarted',
+      status,
       stage: null,
       stageAt: null,
       taskPrompt: prompt,
@@ -739,7 +794,7 @@ class Flow {
       statusAt: this.now,
       readyAt: null,
       orderAt: null,
-      runStartedAt: queued ? this.now : null,
+      runStartedAt: status === 'unstarted' ? null : this.now,
       scopeAt: null,
       doneAt: null,
       doneReason: null,
@@ -981,7 +1036,7 @@ class Flow {
     for (const session of this.store.activeSessions()) {
       if (session.state !== 'starting' && !listed.has(session.id) && (looked === null || looked.has(session.id))) {
         // Its background process is gone, so a later resume (such as in a VS Code tab) is never released (PRD R39).
-        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true, releasing: false, question: null });
+        this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true, releasing: false, question: null, external: false });
         this.ended({ ...session, state: 'ended' });
       }
     }
@@ -1245,6 +1300,11 @@ class Flow {
 
     if (session === null) {
       throw new Refusal('The work item has no active session.');
+    }
+
+    // A registered session runs in the operator's window, so Switchboard never stops it (PRD R81).
+    if (session.external) {
+      throw new Refusal('The session runs in your own window; stop it there.');
     }
 
     this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
@@ -1773,6 +1833,7 @@ class Flow {
       reports,
       retiredIds: [],
       pendingFork: null,
+      external: false,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     this.actions.push({

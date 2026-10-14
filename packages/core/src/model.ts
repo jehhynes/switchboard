@@ -175,6 +175,8 @@ export interface Session {
   retiredIds: string[];
   /** The short ID of a fork that waits for the session's background process to be released (PRD R78). */
   pendingFork: string | null;
+  /** Registered from a window Switchboard did not open, until it ends, so no item window opens it as a copy (PRD R81). */
+  external: boolean;
 }
 
 export interface SessionQuestionReport {

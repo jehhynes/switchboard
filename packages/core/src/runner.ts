@@ -46,6 +46,8 @@ export interface SessionRunner {
   relation?(nativeSessionId: string, session: Session): CopyRelation;
   /** The session of which the native session is a newer fork, among the given sessions, or null. */
   forkOf?(nativeSessionId: string, sessions: Session[]): Session | null;
+  /** The live session with this native ID, which the operator started outside Switchboard, or null; a provider that cannot register leaves it out (PRD R81). */
+  live?(nativeSessionId: string): Promise<{ shortId: string; cwd: string } | null | { error: string }>;
   /** Fast readings of the given started sessions by native session ID, read without starting a process. */
   markers(sessions: Session[]): Map<string, MarkerReading>;
   /** Whether the session runs in Switchboard's background process, so a release may stop it (PRD R39). */

@@ -6,7 +6,7 @@ import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
 import { markOf } from '@switchboard/core/group';
-import type { ContextResult, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source } from '@switchboard/core';
+import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import { REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
@@ -1246,7 +1246,7 @@ describe('Runtime', () => {
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);
     const review = store.insertWorkItem({ ...done, playbook: 'dev:review' });
-    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, pendingFork: null } as const;
+    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, pendingFork: null, external: false } as const;
     store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123', reports: [], retiredIds: [] });
     store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null, reports: [], retiredIds: [] });
     store.insertSession({ ...session, id: 'review', workItemId: review.id, shortId: 'def456', reports: [], retiredIds: [] });
@@ -1382,7 +1382,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned])).toEqual([[4, 1], [3, 1], [2, 1]]);
 
     // Counting runs one way: a later dev:develop work item does not count the started dev:review one.
-    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null });
+    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false });
     const later = store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
 
     expect(runtime.snapshot().workItems.find((item) => item.id === later.id)?.returned).toBe(1);
@@ -1723,5 +1723,50 @@ describe('forks (PRD R78)', () => {
     await runtime.settled();
     expect(send).toHaveBeenCalledWith({ type: 'stop-succeeded', sessionId: 's1', reason: 'operator', shortId: 'abc12345' });
     runtime.stop();
+  });
+});
+
+describe('registered sessions (PRD R81)', () => {
+  const NATIVE = '9273f594-1111-4222-8333-444455556666';
+
+  /** A Claude runner whose roster lists `live` and whose transcripts relate a native ID to a session by `relation`. */
+  function registering(live: Awaited<ReturnType<NonNullable<SessionRunner['live']>>>, relation: (native: string) => CopyRelation = () => 'unrelated') {
+    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+
+    return Object.assign(Object.create(real) as SessionRunner, { live: async () => live, relation });
+  }
+
+  it('registers a live session in its directory and answers its key and contract, which the compaction hook also gets', async () => {
+    const { runtime, store } = setup(config(), () => T0, { claude: registering({ shortId: '9273f594', cwd: 'D:/git/widgets' }) });
+
+    const result = await runtime.register(NATIVE, 'Fix the badge');
+
+    expect(result).toEqual({ key: 'adhoc 1', already: false, contract: expect.stringMatching(/^Report to Switchboard with these commands:\n- node ".*hub\.js" report stage s1 /) });
+    expect(runtime.contract(NATIVE)).toBe((result as { contract: string }).contract);
+    expect(store.session('s1')).toMatchObject({ nativeSessionId: NATIVE, shortId: '9273f594', cwd: 'D:/git/widgets', released: true, external: true });
+    expect(runtime.snapshot().workItems).toMatchObject([{ status: 'running', ticket: { title: 'Fix the badge', repoRoot: 'D:/git/widgets' } }]);
+  });
+
+  it('refuses a session the roster does not list, a failed roster read, and a newer, older or retired copy of a Switchboard session, and answers a second registration again', async () => {
+    const unlisted = setup(config(), () => T0, { claude: registering(null) });
+    expect(await unlisted.runtime.register(NATIVE, 'x')).toEqual({ refused: `Claude does not list session ${NATIVE} as running.` });
+
+    const failed = setup(config(), () => T0, { claude: registering({ error: 'claude agents timed out' }) });
+    expect(await failed.runtime.register(NATIVE, 'x')).toEqual({ refused: 'claude agents timed out' });
+
+    const copies: Record<string, CopyRelation> = { 'newer-copy': 'newer', 'older-copy': 'older' };
+    const { runtime, store } = setup(config(), () => T0, { claude: registering({ shortId: '9273f594', cwd: 'D:/git/widgets' }, (native) => copies[native] ?? 'unrelated') });
+
+    const first = await runtime.register(NATIVE, 'First');
+    expect(await runtime.register(NATIVE, 'Again')).toEqual({ ...first, already: true });
+
+    for (const copy of ['newer-copy', 'older-copy']) {
+      expect(await runtime.register(copy, 'Copy')).toEqual({ refused: 'This session is a copy of adhoc 1, which Switchboard continues in its latest copy.' });
+    }
+
+    store.updateSession('s1', { retiredIds: ['retired-copy'] });
+    expect(await runtime.register('retired-copy', 'Copy')).toEqual({ refused: 'This session is a copy of adhoc 1, which Switchboard continues in its latest copy.' });
+    expect(store.tickets('adhoc')).toHaveLength(1);
+    expect(unlisted.store.tickets('adhoc')).toEqual([]);
   });
 });

@@ -60,6 +60,19 @@ export class ClaudeRunner implements SessionRunner {
     return forkTargets(sessions).find((session) => relationOf(this.transcripts, nativeSessionId, null, session) === 'newer') ?? null;
   }
 
+  /** A session the roster lists with a process: a VS Code tab or terminal has no short ID, so its native ID's first 8 characters match it (M7). */
+  async live(nativeSessionId: string): Promise<{ shortId: string; cwd: string } | null | { error: string }> {
+    const roster = await readRoster(this.deps.claudePath, this.deps.exec);
+
+    if ('error' in roster) {
+      return roster;
+    }
+
+    const entry = roster.entries.find((candidate) => candidate.sessionId === nativeSessionId && candidate.pid !== undefined);
+
+    return entry === undefined ? null : { shortId: entry.id ?? nativeSessionId.slice(0, 8), cwd: entry.cwd };
+  }
+
   /** Hook markers, or none when hooks are off, so the roster alone decides state. */
   private rawMarkers(): Map<string, Marker> {
     return this.deps.hooks() ? readMarkers(this.deps.home) : new Map();

@@ -62,6 +62,13 @@ function hasFlag(argv: readonly string[], name: string): boolean {
   return argv.some((argument) => argument === `--${name}` || argument.startsWith(`--${name}=`));
 }
 
+/** The title from `register --title <text>`, or null for bad usage (PRD R81). */
+export function registerTitle(argv: readonly string[]): string | null {
+  const title = valueOf(argv, 'title');
+
+  return title === null || title.trim() === '' ? null : title;
+}
+
 /** A report body from `report <kind> <sessionId> …`, or null for bad usage. `root` is the Git Bash root the CLI ran under. */
 export function reportBody(argv: readonly string[], root: string | null = null): Record<string, unknown> | null {
   const [kind, sessionId, text] = argv;

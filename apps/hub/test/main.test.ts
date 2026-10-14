@@ -42,7 +42,7 @@ function startWith(extra: Record<string, string | undefined>, ...args: string[])
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' || args[0] === 'register' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -204,6 +204,53 @@ describe('hub entry point', () => {
         { sessionId: 's1', kind: 'stage', stage: 'Planning', nativeSessionId: 'old-copy' },
         { sessionId: 's1', kind: 'stage', stage: 'Planning' },
       ]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('registers the Claude session from CLAUDE_CODE_SESSION_ID and prints its contract, with exit codes for usage, no hub and refusal (PRD R81)', async () => {
+    const native = { CLAUDE_CODE_SESSION_ID: '9273f594-1111-4222-8333-444455556666' };
+
+    expect(await startWith(native, 'register').exited).toMatchObject({ code: 1, stderr: 'Usage: register --title <text>\n' });
+    expect(await startWith({ CLAUDE_CODE_SESSION_ID: undefined }, 'register', '--title', 'Fix it').exited).toMatchObject({ code: 1, stderr: 'Only a Claude Code session can register: CLAUDE_CODE_SESSION_ID is not set.\n' });
+    expect(await startWith(native, 'register', '--title', 'Fix it').exited).toMatchObject({ code: 2, stderr: 'The Switchboard hub is not running or did not answer; run the command again, which answers the contract of a session it registered.\n' });
+
+    const bodies: unknown[] = [];
+    const replies = [
+      { status: 200, body: { key: 'adhoc 4', already: false, contract: 'Report to Switchboard with these commands:\n- node hub.js report done s9, when the work is finished.' } },
+      { status: 200, body: { key: 'adhoc 4', already: true, contract: 'Report to Switchboard with these commands:' } },
+      { status: 409, body: { error: 'This session is a copy of adhoc 4, which Switchboard continues in its latest copy.' } },
+    ];
+    const server = createServer((req, res) => {
+      let text = '';
+      req.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      req.on('end', () => {
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid }));
+          return;
+        }
+
+        bodies.push({ path: req.url, body: JSON.parse(text) });
+        const reply = replies.shift()!;
+        res.statusCode = reply.status;
+        res.end(JSON.stringify(reply.body));
+      });
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+
+    try {
+      expect(await startWith(native, 'register', '--title', 'Fix the badge').exited).toMatchObject({
+        code: 0,
+        stdout: 'Registered as adhoc 4.\n\nReport to Switchboard with these commands:\n- node hub.js report done s9, when the work is finished.\n',
+      });
+      expect(await startWith(native, 'register', '--title=Again').exited).toMatchObject({ code: 0, stdout: 'Already registered as adhoc 4.\n\nReport to Switchboard with these commands:\n' });
+      expect(await startWith(native, 'register', '--title', 'Copy').exited).toMatchObject({ code: 3, stderr: 'Refused: This session is a copy of adhoc 4, which Switchboard continues in its latest copy.\n' });
+      expect(bodies.map((entry) => (entry as { body: { title: string } }).body.title)).toEqual(['Fix the badge', 'Again', 'Copy']);
+      expect(bodies[0]).toEqual({ path: '/register', body: { nativeSessionId: native.CLAUDE_CODE_SESSION_ID, title: 'Fix the badge' } });
     } finally {
       server.close();
     }
