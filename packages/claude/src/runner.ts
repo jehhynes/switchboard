@@ -159,5 +159,10 @@ export function observeForks(forks: ReadonlyMap<string, RosterEntry>, markers: R
 function stateOf(entry: RosterEntry, markers: ReadonlyMap<string, Marker>): { state: LiveState; detail: string | null } {
   const marker = markers.get(entry.sessionId);
 
+  // A tab or terminal that resumed the session has run no turn yet, though the roster lists it as busy while it loads (M25).
+  if (entry.kind !== 'background' && marker?.event === 'SessionStart' && marker.source !== 'compact') {
+    return { state: 'idle', detail: null };
+  }
+
   return (marker === undefined ? null : markerState(marker)) ?? { state: rosterState(entry), detail: null };
 }

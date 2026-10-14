@@ -268,6 +268,7 @@ Actions are `triage`, `start-session` and `stop-session`. `open-question` gives 
   - `UserPromptSubmit`, `PostToolBatch` and `PermissionDenied` mean `running`, as do `SessionStart` with `source=compact` and `PostToolUse` or `PostToolUseFailure` for `AskUserQuestion` or `ExitPlanMode`, which end a question's wait before the rest of its batch resolves. A result of another tool does not end a wait, because a parallel tool can finish while one still waits for permission. After the operator approves a permission, the session stays `waiting` until the approved tool's batch resolves.
   - `PermissionRequest`, `Elicitation`, `PreToolUse` for `AskUserQuestion` or `ExitPlanMode`, and `Notification` of type `permission_prompt`, `worker_permission_prompt` or `agent_needs_input` mean `waiting`.
   - `Stop` means `idle`, or `running` while background tasks remain.
+  - On an interactive roster entry, `SessionStart` with another source means `idle`: a tab or terminal that resumed the session has run no turn, though the roster lists it `busy` while it loads (mechanics M25).
   - `StopFailure` means `failed`, with its error kind and message.
 - Hooks:
   - The hub installs async command hooks for those events plus `SessionEnd` in `<CLAUDE_CONFIG_DIR or ~/.claude>/settings.json`. It preserves other entries, refuses to edit malformed JSON, and adds missing entries at startup. The `sessions.installHooks` setting is on by default; when it is off, the roster alone decides state.

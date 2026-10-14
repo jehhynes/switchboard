@@ -281,7 +281,9 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The tab showed the history and asked the question again with its options and Other. The roster listed the same session ID as `kind: interactive` with a new pid and no short ID.
   - On the answer, the CLI recorded a synthetic error `tool_result` ("Tool call interrupted…"), an assistant "No response requested.", then the answer as the user message `Answering your earlier question "<q>": <answer>`. The session used its earlier context and kept its session ID. The hook markers ran in the tab's process.
   - The tab ran in the operator's default mode (`auto`) both times, not the mode the session started with.
-- **Current use:** Open in Claude (PRD R70).
+  - 2026-10-14, the operator's hub, Claude Code CLI and extension 2.1.299, VS Code 1.141.1: the tab's process wrote a `SessionStart` marker with `source: resume`, and `claude agents --json` listed it `status: busy` while it loaded and `idle` 24 seconds later, while the tab showed the unanswered question. The answer is saved as a prompt (with a `promptId`), and an earlier answer on 2026-10-09 gave a `running` marker. Source inspection of extension 2.1.299: the tab sends the answer as a prompt, so `UserPromptSubmit` fires.
+- **Limits:** the hooks run asynchronously, so a resume given its prompt at once, such as `claude -p --resume`, can write its `SessionStart` marker after `UserPromptSubmit`; the session then shows `idle` until its next marker. Switchboard starts no such resume.
+- **Current use:** Open in Claude (PRD R70); a resumed interactive session with only its `SessionStart` marker is `idle`.
 
 ## M26. Finding, docking beside and switching to VS Code windows
 

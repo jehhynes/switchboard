@@ -149,6 +149,20 @@ describe('roster', () => {
     expect(observe(ENTRIES, [{ id: 's-tab', shortId: '3e065e9f' }], new Map())).toEqual([{ sessionId: 's-tab', state: 'running', detail: null, interactive: true }]);
   });
 
+  it('observes a resumed tab as idle until its first turn, though the roster lists it as busy', () => {
+    const tab = ENTRIES.find((entry) => entry.sessionId.startsWith('3e065e9f'))!;
+    const marker = (event: string, source: string | null): Marker => ({ sessionId: tab.sessionId, event, notificationType: null, source, toolName: null, backgroundTasks: 0, error: null, errorMessage: null });
+    const sessions = [{ id: 's-tab', shortId: '3e065e9f' }];
+    const background = [{ id: 's-roster', shortId: 'a54bd2e6' }];
+    const backgroundId = 'a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9';
+
+    expect(observe(ENTRIES, sessions, new Map([[tab.sessionId, marker('SessionStart', 'resume')]]))).toEqual([{ sessionId: 's-tab', state: 'idle', detail: null, interactive: true }]);
+    expect(observe(ENTRIES, sessions, new Map([[tab.sessionId, marker('SessionStart', 'compact')]]))).toMatchObject([{ state: 'running' }]);
+    expect(observe(ENTRIES, sessions, new Map([[tab.sessionId, marker('UserPromptSubmit', null)]]))).toMatchObject([{ state: 'running' }]);
+    // A background session's start is followed by its prompt, so the roster's state stands.
+    expect(observe(ENTRIES, background, new Map([[backgroundId, { ...marker('SessionStart', 'startup'), sessionId: backgroundId }]]))).toMatchObject([{ state: 'waiting' }]);
+  });
+
   it("observes each fork with its own marker's state, else the roster's, and names it by its ID", () => {
     const fork: RosterEntry = { pid: 9, cwd: 'D:/git/widgets', kind: 'interactive', sessionId: '9e8d7c6b-0000-4000-8000-000000000002', status: 'idle' };
     const marker: Marker = { sessionId: fork.sessionId, event: 'UserPromptSubmit', notificationType: null, source: null, toolName: null, backgroundTasks: 0, error: null, errorMessage: null };
