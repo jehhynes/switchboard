@@ -1,4 +1,4 @@
-import type { LiveState, ObservedSession, StartAction, StartResult } from '@switchboard/core';
+import type { LiveState, ObservedFork, ObservedSession, StartAction, StartResult } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { failureOf } from './exec.js';
 import { markerState } from './hooks.js';
@@ -145,11 +145,19 @@ export function observe(entries: RosterEntry[], sessions: { id: string; shortId:
       continue;
     }
 
-    const marker = markers.get(entry.sessionId);
-    const fromMarker = marker === undefined ? null : markerState(marker);
-
-    observed.push({ sessionId: session.id, ...(fromMarker ?? { state: rosterState(entry), detail: null }), interactive: entry.kind !== 'background' });
+    observed.push({ sessionId: session.id, ...stateOf(entry, markers), interactive: entry.kind !== 'background' });
   }
 
   return observed;
+}
+
+/** The roster event's forks: each session's fork entry with the state its own marker gives, else the roster's (PRD R78). */
+export function observeForks(forks: ReadonlyMap<string, RosterEntry>, markers: ReadonlyMap<string, Marker>): ObservedFork[] {
+  return [...forks].map(([sessionId, entry]) => ({ sessionId, nativeSessionId: entry.sessionId, shortId: entry.id ?? entry.sessionId.slice(0, 8), ...stateOf(entry, markers) }));
+}
+
+function stateOf(entry: RosterEntry, markers: ReadonlyMap<string, Marker>): { state: LiveState; detail: string | null } {
+  const marker = markers.get(entry.sessionId);
+
+  return (marker === undefined ? null : markerState(marker)) ?? { state: rosterState(entry), detail: null };
 }

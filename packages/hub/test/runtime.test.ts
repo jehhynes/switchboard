@@ -1246,10 +1246,10 @@ describe('Runtime', () => {
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);
     const review = store.insertWorkItem({ ...done, playbook: 'dev:review' });
-    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null } as const;
-    store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123', reports: [] });
-    store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null, reports: [] });
-    store.insertSession({ ...session, id: 'review', workItemId: review.id, shortId: 'def456', reports: [] });
+    const session = { kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, pendingFork: null } as const;
+    store.insertSession({ ...session, id: 'ran', workItemId: ran.id, shortId: 'abc123', reports: [], retiredIds: [] });
+    store.insertSession({ ...session, id: 'refused', workItemId: refused.id, shortId: null, reports: [], retiredIds: [] });
+    store.insertSession({ ...session, id: 'review', workItemId: review.id, shortId: 'def456', reports: [], retiredIds: [] });
 
     expect(runtime.snapshot().pool.map((entry) => [entry.ticket.sourceKey, entry.returned])).toEqual([['5', 0], ['1', 1], ['2', 0], ['4', 0], ['3', 0]]);
 
@@ -1382,7 +1382,7 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems.map((item) => [item.id, item.returned])).toEqual([[4, 1], [3, 1], [2, 1]]);
 
     // Counting runs one way: a later dev:develop work item does not count the started dev:review one.
-    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, reports: [] });
+    store.insertSession({ id: 'review', workItemId: 4, shortId: 'def456', kind: 'task', provider: 'claude', nativeSessionId: null, cwd: 'C:/repo', state: 'ended', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: T0, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null });
     const later = store.insertWorkItem({ ...first, status: 'triaging', createdAt: T0 });
 
     expect(runtime.snapshot().workItems.find((item) => item.id === later.id)?.returned).toBe(1);
@@ -1506,5 +1506,174 @@ describe('focus (PRD R79)', () => {
     expect(JSON.parse(cli.calls.find((call) => call[1] === '-p')![5]!).properties).not.toHaveProperty('focus');
     expect(store.triage(1)?.focus).toBeNull();
     expect(runtime.snapshot().workItems[0]?.focus).toBe(ISSUE);
+  });
+});
+
+describe('forks (PRD R78)', () => {
+  const FORK = { nativeSessionId: '9e8d7c6b-0000', shortId: '9e8d7c6b' };
+
+  /** A Claude runner whose roster, markers and transcript answers the test sets. */
+  function forking() {
+    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const state = {
+      reads: 0,
+      listed: true,
+      forks: [] as { sessionId: string; nativeSessionId: string; shortId: string; state: 'running' | 'idle'; detail: null }[],
+      markers: new Map<string, { at: number; cwd: string | null; observed: null; recheck: false }>(),
+      relation: 'unrelated' as 'newer' | 'older' | 'unrelated',
+      forkOf: null as Session | null,
+    };
+    const runner: SessionRunner = Object.assign(Object.create(real) as SessionRunner, {
+      start: async () => ({ shortId: 'abc12345', nativeSessionId: 'native-1' }),
+      isBackground: async () => true,
+      stop: async () => null,
+      markers: () => state.markers,
+      observe: async (sessions: Session[]) => {
+        state.reads += 1;
+        return { sessions: state.listed ? sessions.filter((session) => session.state !== 'ended').map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) : [], forks: state.forks };
+      },
+      relation: () => state.relation,
+      forkOf: () => state.forkOf,
+    });
+
+    return { runner, state };
+  }
+
+  async function released() {
+    const fake = forking();
+    const setUp = setup(config(), () => T0, { claude: fake.runner });
+
+    setUp.runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets' });
+    await setUp.runtime.settled();
+    // The turn ends, and the release stop ends the background process.
+    await setUp.runtime.readRoster();
+    await setUp.runtime.settled();
+    fake.state.listed = false;
+    expect(setUp.store.session('s1')).toMatchObject({ nativeSessionId: 'native-1', released: true, releasing: false });
+
+    return { ...setUp, ...fake };
+  }
+
+  it("sends the runner's forks with the roster, and the flow continues the session as the fork", async () => {
+    const { runtime, store, state } = await released();
+
+    state.forks = [{ sessionId: 's1', ...FORK, state: 'running', detail: null }];
+    await runtime.readRoster();
+    expect(store.session('s1')).toMatchObject({ ...FORK, retiredIds: ['native-1'], state: 'running' });
+    runtime.stop();
+  });
+
+  it("reads the roster when an unknown copy's marker changes in a session's project directory", async () => {
+    const { runtime, state } = await released();
+    const reads = async () => {
+      runtime.readMarkers();
+      await new Promise((done) => setImmediate(done));
+      return state.reads;
+    };
+    const before = state.reads;
+
+    state.markers.set(FORK.nativeSessionId, { at: 1, cwd: 'd:\\git\\widgets', observed: null, recheck: false });
+    expect(await reads()).toBe(before + 1);
+    expect(await reads()).toBe(before + 1);
+    state.markers.set(FORK.nativeSessionId, { at: 2, cwd: 'd:\\git\\widgets', observed: null, recheck: false });
+    expect(await reads()).toBe(before + 2);
+    state.markers.set('other', { at: 1, cwd: 'D:/git/other', observed: null, recheck: false });
+    state.markers.set('old', { at: 1, cwd: null, observed: null, recheck: false });
+    expect(await reads()).toBe(before + 2);
+    runtime.stop();
+  });
+
+  it('refuses a report from a retired copy, records one from a newer fork and reads the roster, and records one from an unrelated copy', async () => {
+    const { runtime, store, state } = await released();
+    const before = state.reads;
+
+    state.relation = 'older';
+    expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Planning' }, 'old-copy')).toEqual({ refused: 'Session old-copy was replaced by fork abc12345, so the report was not recorded.' });
+    expect(store.workItem(1)?.stage).toBeNull();
+
+    state.relation = 'newer';
+    expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Planning' }, 'new-copy')).toEqual({ refused: null });
+    expect(state.reads).toBe(before + 1);
+
+    state.relation = 'unrelated';
+    expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Testing' }, 'other')).toEqual({ refused: null });
+    // The current copy, or a report without a copy, is not resolved.
+    state.relation = 'older';
+    expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Testing' }, 'native-1')).toEqual({ refused: null });
+    expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Testing' })).toEqual({ refused: null });
+    runtime.stop();
+  });
+
+  it('refuses a report from the copy a fork retired while its worktree check ran', async () => {
+    const { runtime, store, state, cli } = await released();
+    const gate = deferred();
+    const entered = deferred();
+
+    cli.gitGate = gate.promise;
+    cli.gitEntered = entered.resolve;
+    const report = runtime.report({ sessionId: 's1', kind: 'worktree', path: 'D:/git/widgets-wt/7-fix' }, 'native-1');
+    await entered.promise;
+    state.forks = [{ sessionId: 's1', ...FORK, state: 'running', detail: null }];
+    state.relation = 'older';
+    await runtime.readRoster();
+    gate.resolve();
+
+    expect(await report).toEqual({ refused: 'Session native-1 was replaced by fork 9e8d7c6b, so the report was not recorded.' });
+    expect(store.worktreeFor(1)).toBeNull();
+    runtime.stop();
+  });
+
+  it('refuses a done report from the copy a fork retired while the assignment read ran', async () => {
+    const fake = forking();
+    const { runtime, store, source } = setup(config(), () => T0, { claude: fake.runner });
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    await runtime.readRoster();
+    await runtime.settled();
+    fake.state.listed = false;
+    const gate = deferred();
+
+    source.gate = gate.promise;
+    const report = runtime.report({ sessionId: 's1', kind: 'done' }, 'native-1');
+    await new Promise((done) => setImmediate(done));
+    fake.state.forks = [{ sessionId: 's1', ...FORK, state: 'running', detail: null }];
+    fake.state.relation = 'older';
+    await runtime.readRoster();
+    gate.resolve();
+
+    expect(await report).toEqual({ refused: 'Session native-1 was replaced by fork 9e8d7c6b, so the report was not recorded.' });
+    expect(store.session('s1')).toMatchObject({ ...FORK, outcome: null });
+    expect(store.workItem(1)?.status).toBe('running');
+    runtime.stop();
+  });
+
+  it("ignores the Claude copy a Codex session's report names, which it inherited", async () => {
+    const { runtime, store, state } = await released();
+
+    store.updateSession('s1', { provider: 'codex' });
+    state.relation = 'older';
+    expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Planning' }, 'inherited')).toEqual({ refused: null });
+    runtime.stop();
+  });
+
+  it('restores the contract of a session to a newer fork that compacts before it is adopted', async () => {
+    const { runtime, store, state } = await released();
+
+    expect(runtime.contract(FORK.nativeSessionId)).toBeNull();
+    state.forkOf = store.session('s1');
+    expect(runtime.contract(FORK.nativeSessionId)).toContain('report stage s1');
+    runtime.stop();
+  });
+
+  it('names the copy a stop targeted in its result', async () => {
+    const { runtime, store } = await released();
+    const send = vi.spyOn(runtime, 'send');
+
+    store.updateSession('s1', { state: 'idle', released: false });
+    runtime.send({ type: 'stop', workItemId: 1 });
+    await runtime.settled();
+    expect(send).toHaveBeenCalledWith({ type: 'stop-succeeded', sessionId: 's1', reason: 'operator', shortId: 'abc12345' });
+    runtime.stop();
   });
 });

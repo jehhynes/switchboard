@@ -33,6 +33,7 @@ try {
         sessionId: id,
         event: text(payload.hook_event_name),
         at: Date.now(),
+        cwd: text(payload.cwd),
         notificationType: text(payload.notification_type),
         source: text(payload.source),
         toolName: text(payload.tool_name),
@@ -169,6 +170,8 @@ export interface Marker {
   event: string | null;
   /** When the hook wrote the marker. */
   at?: number;
+  /** The session's working directory; markers written before Switchboard recorded it have none. */
+  cwd?: string | null;
   notificationType: string | null;
   source: string | null;
   toolName: string | null;

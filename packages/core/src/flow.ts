@@ -88,6 +88,15 @@ export interface ObservedSession {
   interactive?: boolean;
 }
 
+/** A live fork that may replace a session (PRD R78), with the fork's own state. */
+export interface ObservedFork {
+  sessionId: string;
+  nativeSessionId: string;
+  shortId: string;
+  state: LiveState;
+  detail: string | null;
+}
+
 export type FlowEvent =
   | { type: 'poll'; source: string; tickets: PolledTicket[] }
   | { type: 'poll-failed'; source: string; error: string }
@@ -110,14 +119,15 @@ export type FlowEvent =
   | { type: 'session-started'; sessionId: string; nativeSessionId: string | null; shortId: string }
   | { type: 'session-start-failed'; sessionId: string; message: string }
   /** `checked` lists the sessions the read looked for, so a session whose start completed during the read is not ended; all when absent. */
-  | { type: 'roster'; sessions: ObservedSession[]; checked?: string[] }
+  | { type: 'roster'; sessions: ObservedSession[]; checked?: string[]; forks?: ObservedFork[] }
   | { type: 'marker'; sessionId: string; state: LiveState; detail: string | null }
   | { type: 'report'; sessionId: string; report: Report }
   /** The hub's recheck of a done report whose first read still listed the ticket as assigned (PRD R10). */
   /** 	oken is the session's outcomeDetail when the hub scheduled the read, so a check of a superseded report changes nothing. */
   | { type: 'done-checked'; sessionId: string; token: string; assigned: boolean }
-  | { type: 'stop-succeeded'; sessionId: string; reason: StopReason }
-  | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string }
+  /** `shortId` is the copy the stop targeted; a result for a copy a fork retired changes nothing (PRD R78). */
+  | { type: 'stop-succeeded'; sessionId: string; reason: StopReason; shortId?: string | null }
+  | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string; shortId?: string | null }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   | { type: 'adhoc'; prompt: string; repoRoot: string }
   | { type: 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
@@ -258,6 +268,11 @@ function actorOf(type: FlowEvent['type']): Actor {
     default:
       return 'hub';
   }
+}
+
+/** A stop result for a copy that a fork retired after the stop was sent. */
+function retiredStop(session: Session, shortId: string | null | undefined): boolean {
+  return shortId !== undefined && shortId !== session.shortId;
 }
 
 /** The event's own fields for the log: no prompt, context or polled list. */
@@ -421,7 +436,7 @@ class Flow {
       case 'session-start-failed':
         return this.sessionStartFailed(event.sessionId, event.message);
       case 'roster':
-        return this.roster(event.sessions, event.checked);
+        return this.roster(event.sessions, event.checked, event.forks ?? []);
       case 'marker':
         return this.marker(event.sessionId, event.state, event.detail);
       case 'report':
@@ -429,9 +444,9 @@ class Flow {
       case 'done-checked':
         return this.doneChecked(event.sessionId, event.token, event.assigned);
       case 'stop-succeeded':
-        return this.stopSucceeded(event.sessionId, event.reason);
+        return this.stopSucceeded(event.sessionId, event.reason, event.shortId);
       case 'stop-failed':
-        return this.stopFailed(event.sessionId, event.reason, event.message);
+        return this.stopFailed(event.sessionId, event.reason, event.message, event.shortId);
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
@@ -884,10 +899,27 @@ class Flow {
   }
 
   /** Liveness comes from the roster alone (GC M20): a listed session is alive, an unlisted one has ended. */
-  private roster(observed: ObservedSession[], checked?: string[]): void {
+  private roster(observed: ObservedSession[], checked: string[] | undefined, forks: ObservedFork[]): void {
     const listed = new Map(observed.map((entry) => [entry.sessionId, entry]));
 
-    for (const entry of observed) {
+    for (const fork of forks) {
+      const adopted = this.adoptFork(fork);
+
+      if (adopted) {
+        listed.set(fork.sessionId, { sessionId: fork.sessionId, state: fork.state, detail: fork.detail, interactive: true });
+      }
+    }
+
+    const forked = new Set(forks.map((fork) => fork.sessionId));
+
+    // A waiting fork the operator closed no longer holds back Open in Claude.
+    for (const session of this.store.activeSessions()) {
+      if (session.pendingFork !== null && !forked.has(session.id) && (checked === undefined || checked.includes(session.id))) {
+        this.store.updateSession(session.id, { pendingFork: null });
+      }
+    }
+
+    for (const entry of listed.values()) {
       const session = this.store.session(entry.sessionId);
 
       if (session !== null && session.state !== 'starting') {
@@ -916,6 +948,34 @@ class Flow {
         this.ended({ ...session, state: 'ended' });
       }
     }
+  }
+
+  /**
+   * A fork replaces the work item's latest session, whose current copy is retired (PRD R78). While that copy holds Switchboard's background
+   * process, the fork waits for its release (R39), so its work is never cut off.
+   */
+  private adoptFork(fork: ObservedFork): boolean {
+    const session = this.store.session(fork.sessionId);
+
+    if (session === null || session.state === 'starting' || session.nativeSessionId === null || session.nativeSessionId === fork.nativeSessionId || session.retiredIds.includes(fork.nativeSessionId)) {
+      return false;
+    }
+
+    if (this.store.sessionsFor(session.workItemId).at(-1)?.id !== session.id) {
+      return false;
+    }
+
+    if (!session.released || session.releasing) {
+      if (session.pendingFork !== fork.shortId) {
+        this.store.updateSession(session.id, { pendingFork: fork.shortId });
+      }
+
+      return false;
+    }
+
+    this.store.updateSession(session.id, { nativeSessionId: fork.nativeSessionId, shortId: fork.shortId, retiredIds: [...session.retiredIds, session.nativeSessionId], pendingFork: null });
+
+    return true;
   }
 
   /** A hook marker sets the state of a live session only, because a killed process leaves its marker behind. */
@@ -1179,10 +1239,10 @@ class Flow {
     }
   }
 
-  private stopSucceeded(sessionId: string, reason: StopReason): void {
+  private stopSucceeded(sessionId: string, reason: StopReason, shortId: string | null | undefined): void {
     const session = this.session(sessionId);
 
-    if (session.state === 'ended') {
+    if (session.state === 'ended' || retiredStop(session, shortId)) {
       return;
     }
 
@@ -1226,9 +1286,9 @@ class Flow {
   }
 
   /** The session stays as it was, so the operator can stop it again. */
-  private stopFailed(sessionId: string, reason: StopReason, message: string): void {
+  private stopFailed(sessionId: string, reason: StopReason, message: string, shortId: string | null | undefined): void {
     const session = this.session(sessionId);
-    const item = this.latest(session);
+    const item = retiredStop(session, shortId) ? null : this.latest(session);
 
     if (item !== null) {
       this.store.updateWorkItem(item.id, { error: `${reason === 'release' ? 'Release' : 'Stop'} failed: ${message}` });
@@ -1245,6 +1305,10 @@ class Flow {
 
     if (session.nativeSessionId !== nativeSessionId) {
       throw new Refusal('The work item has another session now.');
+    }
+
+    if (session.pendingFork !== null) {
+      throw new Refusal(`Fork ${session.pendingFork} waits to continue this session; stop the session to continue in the fork.`);
     }
 
     if (session.state !== 'waiting') {
@@ -1670,6 +1734,8 @@ class Flow {
       releasing: false,
       question: null,
       reports,
+      retiredIds: [],
+      pendingFork: null,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     this.actions.push({

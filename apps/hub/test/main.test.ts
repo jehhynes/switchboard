@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { request } from 'node:http';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, request } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { hubRecordPath, parseHubRecord, switchboardHome } from '@switchboard/core';
@@ -27,10 +28,20 @@ afterEach(() => {
 });
 
 function start(...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
+  return startWith({}, ...args);
+}
+
+function startWith(extra: Record<string, string | undefined>, ...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
   // CLAUDE_CONFIG_DIR and CODEX_HOME keep hook installation inside the temporary home. PATH holds only Node and Windows, so the hub runs no
   // real Claude or Codex: an orphaned Codex app-server from the hook trust exchange held <home>/.codex past the cleanup.
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
-  const env = { ...inherited, PATH: [dirname(process.execPath), join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')].join(delimiter), CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex') };
+  const env: Record<string, string | undefined> = { ...inherited, PATH: [dirname(process.execPath), join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')].join(delimiter), CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex'), ...extra };
+
+  // A variable set to undefined is removed, such as the CLAUDE_CODE_SESSION_ID of a Claude session running the tests.
+  for (const key of Object.keys(extra).filter((name) => extra[name] === undefined)) {
+    delete env[key];
+  }
+
   const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
@@ -161,6 +172,41 @@ describe('hub entry point', () => {
 
     await start('--stop').exited;
     expect((await hub.exited).code).toBe(0);
+  });
+
+  it("sends the reporting Claude copy from CLAUDE_CODE_SESSION_ID, and prints the hub's refusal (PRD R78)", async () => {
+    const bodies: unknown[] = [];
+    const server = createServer((req, res) => {
+      let text = '';
+      req.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      req.on('end', () => {
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid }));
+          return;
+        }
+
+        bodies.push(JSON.parse(text));
+        res.statusCode = 409;
+        res.end(JSON.stringify({ error: 'Session old was replaced by fork new, so the report was not recorded.' }));
+      });
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+
+    try {
+      const refused = await startWith({ CLAUDE_CODE_SESSION_ID: 'old-copy' }, 'report', 'stage', 's1', 'Planning').exited;
+      await startWith({ CLAUDE_CODE_SESSION_ID: undefined }, 'report', 'stage', 's1', 'Planning').exited;
+
+      expect(refused).toMatchObject({ code: 3, stderr: 'Refused: Session old was replaced by fork new, so the report was not recorded.\n' });
+      expect(bodies).toEqual([
+        { sessionId: 's1', kind: 'stage', stage: 'Planning', nativeSessionId: 'old-copy' },
+        { sessionId: 's1', kind: 'stage', stage: 'Planning' },
+      ]);
+    } finally {
+      server.close();
+    }
   });
 
   it('exits after the idle time with no client and removes its record', async () => {

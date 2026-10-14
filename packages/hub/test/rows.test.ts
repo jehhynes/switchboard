@@ -8,6 +8,7 @@ import {
   doneBand,
   doneStamp,
   mainControl,
+  openQuestion,
   poolControls,
   priorityTitle,
   queueTime,
@@ -82,6 +83,15 @@ describe('controlsOf', () => {
     expect(confirm(item(7, { status: 'done', sessions: [session({ state: 'ended' })] }))?.detail).toBe(`${kept} ${returns}`);
     expect(confirm(item(7, { status: 'failed', ticket: { ...item(7).ticket, source: 'adhoc' } }))?.detail).toBe(kept);
     expect(confirm(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).toBeNull();
+  });
+
+  it('offers Stop in place of Open in Claude while a fork waits for the session to be released (PRD R78)', () => {
+    const waiting = item(7, { status: 'blocked', sessions: [session({ state: 'waiting', pendingFork: '9e8d7c6b' })] });
+
+    expect(openQuestion(waiting)).toBeNull();
+    expect(labels(waiting)).not.toContain('Open in Claude');
+    expect(labels(waiting)).toContain('Stop');
+    expect(mainControl(waiting)?.label).not.toBe('Open in Claude');
   });
 
   it('attaches a terminal to a background session, resumes the latest ended session, shows one the operator resumed, and offers none while a session starts (PRD R28)', () => {

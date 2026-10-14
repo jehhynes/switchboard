@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Exec, ExecResult } from '../src/exec.js';
 import type { Marker } from '../src/hooks.js';
-import { entryFor, observe, readRoster, rosterState, shortIdFrom, startArgs, startSession, stopSession } from '../src/runner.js';
+import { entryFor, observe, observeForks, readRoster, rosterState, shortIdFrom, startArgs, startSession, stopSession } from '../src/runner.js';
 import type { StartAction } from '@switchboard/core';
 import type { RosterEntry } from '../src/runner.js';
 
@@ -147,6 +147,15 @@ describe('roster', () => {
     expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('Stop')]]))).toEqual([{ sessionId: 's-roster', state: 'idle', detail: null, interactive: false }]);
     expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('SessionStart')]]))).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null, interactive: false }]);
     expect(observe(ENTRIES, [{ id: 's-tab', shortId: '3e065e9f' }], new Map())).toEqual([{ sessionId: 's-tab', state: 'running', detail: null, interactive: true }]);
+  });
+
+  it("observes each fork with its own marker's state, else the roster's, and names it by its ID", () => {
+    const fork: RosterEntry = { pid: 9, cwd: 'D:/git/widgets', kind: 'interactive', sessionId: '9e8d7c6b-0000-4000-8000-000000000002', status: 'idle' };
+    const marker: Marker = { sessionId: fork.sessionId, event: 'UserPromptSubmit', notificationType: null, source: null, toolName: null, backgroundTasks: 0, error: null, errorMessage: null };
+    const forks = new Map([['s1', fork]]);
+
+    expect(observeForks(forks, new Map())).toEqual([{ sessionId: 's1', nativeSessionId: fork.sessionId, shortId: '9e8d7c6b', state: 'idle', detail: null }]);
+    expect(observeForks(forks, new Map([[fork.sessionId, marker]]))).toMatchObject([{ state: 'running' }]);
   });
 });
 

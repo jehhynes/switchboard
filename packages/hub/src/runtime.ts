@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -131,6 +131,8 @@ export class Runtime {
   private markerWatchFailed = false;
   /** The marker time last checked per ended session, so each marker an ended session writes reads the roster once. */
   private markerSeen = new Map<string, number>();
+  /** The marker time last checked per native ID that is no session's, in a session's project directory: it may be a fork (PRD R78). */
+  private unknownSeen = new Map<string, number>();
   /** The roster read in flight; reads run one at a time, so an older result never overwrites a newer one. */
   private rosterRead: Promise<void> | null = null;
   /** A read was asked for while one ran, so it runs again once that read finishes. */
@@ -529,6 +531,7 @@ export class Runtime {
     await this.findSetupWorktrees();
 
     const observed: ObservedSession[] = [];
+    const forks: ObservedFork[] = [];
     const checked: string[] = [];
 
     for (const provider of PROVIDERS) {
@@ -555,11 +558,12 @@ export class Runtime {
       }
 
       observed.push(...roster.sessions.filter((entry) => !stale.has(entry.sessionId)));
+      forks.push(...(roster.forks ?? []).filter((fork) => !stale.has(fork.sessionId)));
       checked.push(...own.filter((session) => !stale.has(session.id)).map((session) => session.id));
     }
 
     if (checked.length > 0) {
-      this.send({ type: 'roster', sessions: observed, checked });
+      this.send({ type: 'roster', sessions: observed, checked, ...(forks.length > 0 ? { forks } : {}) });
     }
   }
 
@@ -606,11 +610,24 @@ export class Runtime {
       return true;
     });
 
+    const known = new Set(started.flatMap((session) => [...(session.nativeSessionId === null ? [] : [session.nativeSessionId]), ...session.retiredIds]));
+    const projects = new Set(started.filter((session) => session.provider === 'claude').map((session) => projectOf(session.cwd)));
+    // A marker from an unknown copy in a session's project directory may be a fork, which only a roster read can adopt.
+    const forked = [...markers].filter(([id, reading]) => {
+      if (known.has(id) || reading.cwd == null || !projects.has(projectOf(reading.cwd)) || this.unknownSeen.get(id) === reading.at) {
+        return false;
+      }
+
+      this.unknownSeen.set(id, reading.at);
+
+      return true;
+    });
+
     const active = this.deps.store.activeSessions();
     // Only a roster read can decide a session whose process may have ended or moved, such as to an interactive process.
     const recheck = active.some((session) => session.nativeSessionId !== null && markers.get(session.nativeSessionId)?.recheck === true);
 
-    if (changed.length > 0 || recheck) {
+    if (changed.length > 0 || recheck || forked.length > 0) {
       void this.readRoster();
     }
 
@@ -637,9 +654,32 @@ export class Runtime {
     this.changed();
   }
 
-  /** The report contract of the Switchboard session with this Claude session ID, for the hook that restores it after compaction, or null. */
+  /**
+   * Why a report from a Claude copy is refused: the copy is one a fork retired (PRD R78). A report from a newer fork not adopted yet is
+   * recorded and starts a roster read; one from an unrelated copy is recorded as before.
+   */
+  private retiredCopy(sessionId: string, nativeSessionId: string): string | null {
+    const session = this.deps.store.session(sessionId);
+
+    if (session === null || session.provider !== 'claude' || session.nativeSessionId === null || session.nativeSessionId === nativeSessionId) {
+      return null;
+    }
+
+    const relation = this.runners.claude.relation?.(nativeSessionId, session) ?? 'unrelated';
+
+    if (relation === 'newer') {
+      void this.readRoster();
+    }
+
+    return relation === 'older' ? `Session ${nativeSessionId.slice(0, 8)} was replaced by fork ${session.shortId ?? session.nativeSessionId.slice(0, 8)}, so the report was not recorded.` : null;
+  }
+
+  /**
+   * The report contract of the Switchboard session with this Claude session ID, or of which it is a newer fork not adopted yet (PRD R78),
+   * for the hook that restores it after compaction, or null.
+   */
   contract(nativeSessionId: string): string | null {
-    const session = this.deps.store.sessionByNativeId(nativeSessionId);
+    const session = this.deps.store.sessionByNativeId(nativeSessionId) ?? this.runners.claude.forkOf?.(nativeSessionId, this.deps.store.startedSessions()) ?? null;
 
     if (session === null) {
       return null;
@@ -650,8 +690,28 @@ export class Runtime {
     return sessionContract(session.id, this.reportCommand, session.reports, session.provider);
   }
 
-  /** A report from the `report` command. A worktree must be one `git worktree list` shows in that path. */
-  async report(body: ReportBody): Promise<{ refused: string | null }> {
+  /**
+   * A report from the `report` command, from the Claude copy `nativeSessionId` names when the command knows it. A worktree must be one
+   * `git worktree list` shows in that path.
+   */
+  async report(body: ReportBody, nativeSessionId: string | null = null): Promise<{ refused: string | null }> {
+    // Checked again before the report is applied, because a roster read can continue the session as a fork during the checks.
+    const retired = () => {
+      const refused = nativeSessionId === null ? null : this.retiredCopy(body.sessionId, nativeSessionId);
+
+      if (refused !== null) {
+        const { sessionId: _sessionId, ...fields } = body;
+        this.refuseReport(body.sessionId, fields, refused);
+      }
+
+      return refused;
+    };
+    const early = retired();
+
+    if (early !== null) {
+      return { refused: early };
+    }
+
     if (body.kind === 'worktree') {
       const worktree = await reportedWorktree(body.path, this.deps.exec);
 
@@ -663,7 +723,7 @@ export class Runtime {
         return { refused };
       }
 
-      return { refused: this.send({ type: 'report', sessionId: body.sessionId, report: { kind: 'worktree', path: worktree.path, branch: worktree.branch } }).refused };
+      return { refused: retired() ?? this.send({ type: 'report', sessionId: body.sessionId, report: { kind: 'worktree', path: worktree.path, branch: worktree.branch } }).refused };
     }
 
     if (body.kind === 'link') {
@@ -692,6 +752,12 @@ export class Runtime {
                   : body.kind === 'question'
                     ? { kind: body.kind, text: body.text }
                     : { kind: body.kind, label: body.label, target: body.target };
+
+    const late = retired();
+
+    if (late !== null) {
+      return { refused: late };
+    }
 
     const refused = this.send({ type: 'report', sessionId: body.sessionId, report }).refused;
 
@@ -921,11 +987,20 @@ export class Runtime {
           this.deps.log(`stop of deleted session ${action.sessionId} (${action.shortId}) failed; it may still be running: ${failure.error}`);
         }
 
-        this.send(failure === null ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason } : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error });
+        this.send(
+          failure === null
+            ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason, shortId: action.shortId }
+            : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error, shortId: action.shortId },
+        );
         return;
       }
     }
   }
+}
+
+/** Claude's project directory name for a working directory, ignoring case. */
+function projectOf(cwd: string): string {
+  return cwd.replace(/[^A-Za-z0-9]/g, '-').toLowerCase();
 }
 
 /** The source's triage context led by the current UTC time, in the form sources use, so triage can judge how recent each event is. */

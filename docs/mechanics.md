@@ -408,6 +408,16 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** scrolling inside VS Code's integrated browser on a signed-in GitHub page; an outdated review thread; a comment of a private repository.
 - **Current use:** the focus URLs that triage chooses (PRD R79; architecture.md § Triage).
 
+## M36. Forked Claude sessions
+
+- **Date:** 2026-10-13.
+- **Versions:** Claude Code CLI 2.1.296, Claude Code extension 2.1.296, VS Code 1.141.1.
+- **Source inspection:** the extension's Fork conversation (`fork_conversation` → `Sessions.forkSession`) writes `<new uuid>.jsonl` in the project directory of the window's workspace, then copies the source's permission mode. It copies the message chain `getTranscript` returns: from the last compaction boundary for a plain fork, and back through boundaries by `logicalParentUuid` for a fork from a message; progress records are dropped. Each copied message gets a new `uuid`, `parentUuid` and `sessionId`, loses `sessionKind`, and the last one takes the current time; `requestId` and the other fields are copied, and the title becomes `<title> (fork)`. Nothing in the fork names its source.
+- **Experiment:** `packages/claude/test/fixtures/fork-fixtures.mjs` ran the installed extension's own `forkSession` and `getTranscript` on synthetic transcripts: a plain fork, a fork from the first reply, and a fork after a compaction boundary, whose first `requestId` (`req_after`) is not the source's first (`req_first`). A CLI copy, which `claude --resume` of a live background session starts (M18), kept the source's uuids and `requestId`s. `CLAUDE_CODE_SESSION_ID` holds the native session ID in a Claude session's Bash tool environment.
+- **Live acceptance:** an isolated hub (`.wip/acceptance-home`) ran an ad-hoc session in `.wip/mech`, which ended its turn and was released. In a separate VS Code instance with the extension under development, driven over its debugging port, the session was opened in a Claude tab and given a second prompt, then forked with Fork conversation from here on that prompt. The fork's transcript `9273f594…` had new uuids and the source's first `requestId`. After a prompt in the fork, the next roster read continued session `d6b775e2` as fork `9273f594`, with `aa2285b2` in `retiredIds`; History logged the change of `nativeSessionId` and `shortId` alone, because both copies were idle. Asked in the original tab, the original ran `report stage` and the CLI exited 3 with "Refused: Session aa2285b2 was replaced by fork 9273f594, so the report was not recorded."; the session stayed on the fork. The same report from the fork set the stage. The acceptance hub's hook entries were removed afterwards, leaving `~/.claude/settings.json` identical to its copy from before the run. Screenshots are in `.wip/fork-acceptance/`.
+- **Limits:** the recordings pass messages to the methods directly, without the extension's transcript loading. Live, a fork of a session waiting in its background process, a fork after compaction and the contract restore for an unadopted fork were not run.
+- **Current use:** fork detection by the first `requestId`, and the report command's `nativeSessionId` (PRD R78, architecture.md § Claude Code runner).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

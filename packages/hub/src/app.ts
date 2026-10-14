@@ -253,7 +253,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 400, body: { error } };
         }
 
-        const { refused } = await runtime.report(report);
+        const native = isRecord(body) && typeof body['nativeSessionId'] === 'string' ? body['nativeSessionId'] : null;
+        const { refused } = await runtime.report(report, native);
 
         return refused === null ? { status: 200, body: { recorded: true } } : { status: 409, body: { error: refused } };
       },

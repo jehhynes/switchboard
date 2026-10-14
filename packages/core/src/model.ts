@@ -171,6 +171,10 @@ export interface Session {
   question: SessionQuestionReport | null;
   /** The reports its prompt offers; the hub refuses the rest (PRD R23). */
   reports: ReportKind[];
+  /** Native IDs of the copies a fork replaced; they no longer change the session (PRD R78). */
+  retiredIds: string[];
+  /** The short ID of a fork that waits for the session's background process to be released (PRD R78). */
+  pendingFork: string | null;
 }
 
 export interface SessionQuestionReport {

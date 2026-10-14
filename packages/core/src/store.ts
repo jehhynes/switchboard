@@ -269,11 +269,14 @@ export const MIGRATIONS = [
   `ALTER TABLE workItems ADD COLUMN guidance TEXT;`,
   // The URL triage chose as the work item's focus (PRD R79).
   `ALTER TABLE triages ADD COLUMN focus TEXT;`,
+  // Forks (PRD R78): the native IDs a fork retired, and the short ID of a fork waiting for the background process's release.
+  `ALTER TABLE sessions ADD COLUMN retiredIds TEXT NOT NULL DEFAULT '';
+  ALTER TABLE sessions ADD COLUMN pendingFork TEXT;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld']);
 /** Stored as comma-separated text. */
-const LISTS = new Set(['reports']);
+const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
 const OBJECTS = new Set(['question']);
 
@@ -412,8 +415,8 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt']),
   // The start or pick event's detail holds the guidance (PRD R77).
   workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance']),
-  // The question report's event names the question; its ID and its clearing are bookkeeping.
-  sessions: new Set(['stateAt', 'releasing', 'question']),
+  // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

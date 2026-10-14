@@ -124,6 +124,7 @@ describe('hook writer', () => {
       sessionId: 'abc-123',
       event: 'StopFailure',
       at: expect.any(Number),
+      cwd: 'D:/x',
       notificationType: null,
       source: null,
       toolName: null,

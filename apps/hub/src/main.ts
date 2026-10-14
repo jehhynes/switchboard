@@ -39,8 +39,10 @@ async function report(home: string, argv: readonly string[]): Promise<number> {
     return 1;
   }
 
+  // Claude names the reporting copy, so the hub can refuse a copy a fork retired (PRD R78).
+  const native = process.env['CLAUDE_CODE_SESSION_ID'];
   const hub = await findHub(home);
-  const reply = hub === null ? null : await postToHub(hub, '/report', body, REPORT_TIMEOUT_MS);
+  const reply = hub === null ? null : await postToHub(hub, '/report', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
 
   if (reply === null) {
     process.stderr.write('The Switchboard hub is not running, so the report was not recorded.\n');

@@ -68,6 +68,39 @@ function texts(entries: Entry[]): string[] {
 }
 
 describe('History model', () => {
+  it("names each entry by the copy the session had then, and shows a fork waiting for the background process (PRD R78)", () => {
+    const run = new Run();
+    const fork = { sessionId: 's1', nativeSessionId: '9e8d7c6b-0000', shortId: '9e8d7c6b', state: 'running' as const, detail: null };
+
+    run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
+    run.send({ type: 'triage-succeeded', triageId: 1, context: 'ctx', playbook: 'dev:question', immediacy: null, severity: null, model: 'claude-sonnet-5' });
+    run.send({ type: 'start', workItemId: 1 });
+    run.send({ type: 'session-started', sessionId: 's1', nativeSessionId: 'native-1', shortId: 'abc12345' });
+    run.now += MINUTE;
+    run.send({ type: 'roster', sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }], forks: [fork] });
+    run.now += MINUTE;
+    run.send({ type: 'stop-succeeded', sessionId: 's1', reason: 'release', shortId: 'abc12345' });
+    run.now += MINUTE;
+    run.send({ type: 'roster', sessions: [], forks: [fork] });
+    run.now += MINUTE;
+    run.send({ type: 'marker', sessionId: 's1', state: 'idle', detail: null });
+
+    const entries = historyView(run.history(), run.now).sections[0]!.entries;
+
+    expect(texts(entries)).toEqual([
+      'Work item created: Triaging',
+      'Triage chose dev:question',
+      'You started it',
+      'Session abc12345 started',
+      'Session abc12345 finished its turn',
+      'Switchboard released session abc12345 so it can resume in VS Code',
+      'The session continues in fork 9e8d7c6b',
+      'Session 9e8d7c6b finished its turn',
+    ]);
+    expect(entries[6]).toMatchObject({ detail: 'Session abc12345 is retired.', lines: ['session 9e8d7c6b: ended → running', 'Status: Blocked → Running'] });
+    expect(entries[4]!.lines).toContain('Fork 9e8d7c6b waits for the background session to be released; Stop releases one waiting on a question');
+  });
+
   it('turns a run into a work item section of plain entries, with the ticket in its own section', () => {
     const run = approvedRun();
     const view = historyView(run.history(), run.now);
@@ -192,6 +225,14 @@ describe('History model', () => {
       [event('roster', 'hub', null, [change('session', 'update', { state: ['running', 'failed'], stateDetail: [null, 'overloaded'] }, { sessionId: 's1' })]), { text: "Session abc12345's turn failed", detail: 'overloaded', tone: 'error' }],
       [event('roster', 'hub', null, [change('session', 'update', { state: ['idle', 'ended'] }, { sessionId: 's1' })]), { text: 'Session abc12345 ended', stateChange: false }],
       [event('roster', 'hub', null, [change('session', 'update', { released: [false, true] }, { sessionId: 's1' })]), { text: 'Background process released', category: 'session' }],
+      [
+        event('roster', 'hub', null, [change('session', 'update', { nativeSessionId: ['0f1e2d3c-0000', '9e8d7c6b-0000'], shortId: ['0f1e2d3c', '9e8d7c6b'], state: ['ended', 'running'] }, { sessionId: 's1' })]),
+        { text: 'The session continues in fork 9e8d7c6b', detail: 'Session 0f1e2d3c is retired.', lines: ['session abc12345: ended → running'], category: 'session', stateChange: false },
+      ],
+      [
+        event('roster', 'hub', null, [change('session', 'update', { nativeSessionId: ['0f1e2d3c-0000', '9e8d7c6b-0000'], shortId: ['0f1e2d3c', '9e8d7c6b'] }, { sessionId: 's1' })]),
+        { text: 'The session continues in fork 9e8d7c6b', lines: [], stateChange: false },
+      ],
       [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [null, 5] })], null), { text: 'Left the assigned state while a session was active', category: 'ticket' }],
       [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [5, null], warning: [null, 'Odd'], stage: ['a', 'b'], approvalSummary: [null, 'Ship'], custom: [1, 2] })], null), { text: 'Assigned to you again', lines: ['Warning: Odd', 'Stage: b', 'Approval: Ship', 'custom: 1 → 2'] }],
       [event('pick', 'operator', null, [change('triage', 'update', { workItemId: [null, 1] }), change('triage', 'delete', {}, { workItemId: null })], null), { text: 'You picked it from the pool', lines: ['Pool triage attached to the work item', 'Pool triage discarded'] }],

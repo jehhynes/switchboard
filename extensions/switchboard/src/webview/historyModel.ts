@@ -155,6 +155,10 @@ class Builder {
   readonly sessions = new Map<string, Session>();
   /** Each session's state as of the event being worded, so a change of the question alone keeps its state. */
   readonly states = new Map<string, string>();
+  /** Each session's short ID changes from a fork (PRD R78), oldest first, so an entry names the copy the session had then. */
+  readonly forks = new Map<string, { eventId: number; before: string }[]>();
+  /** The event being worded. */
+  eventId = 0;
 
   constructor(readonly history: TicketHistory) {
     for (const item of history.workItems) {
@@ -162,12 +166,23 @@ class Builder {
         this.sessions.set(session.id, session);
       }
     }
+
+    for (const event of history.events) {
+      for (const change of event.changes) {
+        const before = change.fields['shortId']?.[0];
+
+        if (change.entity === 'session' && change.sessionId !== null && typeof before === 'string') {
+          this.forks.set(change.sessionId, [...(this.forks.get(change.sessionId) ?? []), { eventId: event.id, before }]);
+        }
+      }
+    }
   }
 
   /** A Codex session's short ID is its whole thread ID, so the page shows its last 8 characters. */
   shortId(sessionId: string | null): string | null {
     const session = sessionId === null ? undefined : this.sessions.get(sessionId);
-    const id = session?.shortId ?? null;
+    const later = sessionId === null ? undefined : this.forks.get(sessionId)?.find((fork) => fork.eventId > this.eventId);
+    const id = later?.before ?? session?.shortId ?? null;
 
     return id !== null && session?.provider === 'codex' ? id.slice(-8) : id;
   }
@@ -304,6 +319,11 @@ class Builder {
         case 'paste.file':
           lines.push(`Draft replaced: ${str(after)}`);
           break;
+        case 'session.pendingFork':
+          if (after !== null) {
+            lines.push(`Fork ${str(after)} waits for the background session to be released; Stop releases one waiting on a question`);
+          }
+          break;
         // Shown with the status, state, outcome or snooze they belong to, or internal.
         case 'workItem.failedStep':
         case 'workItem.approvalHeld':
@@ -334,6 +354,7 @@ class Builder {
 
   /** The entry for an event's changes to one work item, or to the ticket when `workItemId` is null. */
   entry(event: HistoryEvent, changes: HistoryChange[], workItemId: number | null): Entry {
+    this.eventId = event.id;
     const detail = event.detail ?? {};
     const base: Entry = {
       key: `${event.id}:${workItemId ?? 't'}`,
@@ -351,7 +372,7 @@ class Builder {
       stateChange: false,
     };
     const skip = new Set<string>();
-    const sessionChange = changes.find((change) => change.entity === 'session' && change.op === 'update' && ('state' in change.fields || 'stateDetail' in change.fields));
+    const sessionChange = changes.find((change) => change.entity === 'session' && change.op === 'update' && ('state' in change.fields || 'stateDetail' in change.fields || 'shortId' in change.fields));
     // A question changed alone keeps the session's state: the last one seen, or the marker's.
     const state = sessionChange === undefined ? undefined : str(sessionChange.fields['state']?.[1] ?? this.states.get(sessionChange.sessionId!) ?? detail['state']);
     const status = changes.find((change) => change.entity === 'workItem' && 'status' in change.fields)?.fields['status']?.[1];
@@ -379,7 +400,7 @@ class Builder {
     }
 
     entry.lines = lines;
-    entry.stateChange = (event.type === 'marker' || event.type === 'roster') && changes.length === 1 && sessionChange !== undefined && state !== 'ended';
+    entry.stateChange = (event.type === 'marker' || event.type === 'roster') && changes.length === 1 && sessionChange !== undefined && state !== 'ended' && !('shortId' in sessionChange.fields);
     entry.tone =
       entry.refused !== null || status === 'failed' || state === 'failed'
         ? 'error'
@@ -441,6 +462,14 @@ class Builder {
       case 'roster': {
         if (sessionChange === undefined) {
           return {};
+        }
+
+        const [from, to] = sessionChange.fields['shortId'] ?? [];
+
+        // A fork replaced the session (PRD R78); the state it took shows as a line.
+        if (typeof from === 'string' && typeof to === 'string') {
+          skip.add('nativeSessionId').add('shortId');
+          return { category: 'session', icon: 'repo-forked', text: `The session continues in fork ${to}`, detail: `Session ${from} is retired.` };
         }
 
         skip.add('state').add('stateDetail');

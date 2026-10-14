@@ -1,5 +1,8 @@
-import type { FlowAction, LiveState, ObservedSession, StopReason } from './flow.js';
+import type { FlowAction, LiveState, ObservedFork, ObservedSession, StopReason } from './flow.js';
 import type { Session } from './model.js';
+
+/** `newer` and `older`: a fork of the session's family created after or before its current copy, or a retired copy (PRD R78). */
+export type CopyRelation = 'newer' | 'older' | 'unrelated';
 
 export type StartAction = Extract<FlowAction, { type: 'start-session' }>;
 
@@ -18,6 +21,8 @@ export interface SessionTarget {
  */
 export interface MarkerReading {
   at: number;
+  /** The session's working directory, when the marker records it. */
+  cwd?: string | null;
   observed: { state: LiveState; detail: string | null } | null;
   recheck: boolean;
 }
@@ -32,8 +37,15 @@ export type Reconciled =
 export interface SessionRunner {
   /** Starts a background session and resolves once it runs. */
   start(action: StartAction): Promise<StartResult>;
-  /** Liveness and state of the given started sessions; a session left out has ended. A failed read changes nothing. */
-  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[] } | { error: string }>;
+  /**
+   * Liveness and state of the given started sessions; a session left out has ended. `forks` holds live forks that may replace a session
+   * (PRD R78). A failed read changes nothing.
+   */
+  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks?: ObservedFork[] } | { error: string }>;
+  /** How a native session relates to the session's current copy; a provider without forks leaves it out (PRD R78). */
+  relation?(nativeSessionId: string, session: Session): CopyRelation;
+  /** The session of which the native session is a newer fork, among the given sessions, or null. */
+  forkOf?(nativeSessionId: string, sessions: Session[]): Session | null;
   /** Fast readings of the given started sessions by native session ID, read without starting a process. */
   markers(sessions: Session[]): Map<string, MarkerReading>;
   /** Whether the session runs in Switchboard's background process, so a release may stop it (PRD R39). */

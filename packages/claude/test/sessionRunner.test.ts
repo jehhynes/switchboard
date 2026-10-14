@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,7 +35,7 @@ function session(patch: Partial<Session> = {}): Session {
     outcomeDetail: null,
     startedAt: 0,
     endedAt: null,
-    released: false, releasing: false, question: null,
+    released: false, releasing: false, question: null, retiredIds: [], pendingFork: null,
     reports: ['stage'],
     ...patch,
   };
@@ -67,15 +67,48 @@ describe('ClaudeRunner', () => {
     const exec = vi.fn<Exec>().mockResolvedValueOnce(ran({ stdout: JSON.stringify([ENTRY]) })).mockResolvedValueOnce(ran({ code: 1, stderr: 'boom' }));
     const claude = runner(exec);
 
-    expect(await claude.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }] });
+    expect(await claude.observe([session()])).toEqual({ sessions: [{ sessionId: 's1', state: 'idle', detail: null, interactive: false }], forks: [] });
     expect(await claude.observe([session()])).toEqual({ error: 'boom' });
     expect(exec).toHaveBeenCalledWith('claude', ['agents', '--json'], expect.anything());
+  });
+
+  describe('forks', () => {
+    const FORK = '9e8d7c6b-0000-4000-8000-000000000002';
+    const fork = { pid: 9, cwd: 'D:\\git\\widgets', kind: 'interactive', sessionId: FORK, status: 'idle' };
+
+    async function transcripts(): Promise<void> {
+      const project = join(root, '.claude', 'projects', 'D--git-widgets');
+      mkdirSync(project, { recursive: true });
+      copyFileSync(join(import.meta.dirname, 'fixtures', 'fork-plain-original.jsonl'), join(project, `${session().nativeSessionId}.jsonl`));
+      // The fork's file is created after the session's own, as Fork conversation writes it.
+      await new Promise((done) => setTimeout(done, 20));
+      copyFileSync(join(import.meta.dirname, 'fixtures', 'fork-plain-copy.jsonl'), join(project, `${FORK}.jsonl`));
+    }
+
+    it("observes a session's live fork from the transcripts in Claude's projects directory", async () => {
+      await transcripts();
+      const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: JSON.stringify([fork]) }));
+
+      expect(await runner(exec).observe([session({ state: 'ended' })])).toEqual({ sessions: [], forks: [{ sessionId: 's1', nativeSessionId: FORK, shortId: '9e8d7c6b', state: 'idle', detail: null }] });
+    });
+
+    it('tells how a copy relates to the session, and finds the session a fork belongs to', async () => {
+      await transcripts();
+      const claude = runner(vi.fn<Exec>());
+
+      expect(claude.relation(FORK, session())).toBe('newer');
+      expect(claude.relation(session().nativeSessionId!, session({ nativeSessionId: FORK, retiredIds: [session().nativeSessionId!] }))).toBe('older');
+      expect(claude.relation(FORK, session({ nativeSessionId: FORK }))).toBe('unrelated');
+      expect(claude.relation(FORK, session({ nativeSessionId: null }))).toBe('unrelated');
+      expect(claude.forkOf(FORK, [session()])?.id).toBe('s1');
+      expect(claude.forkOf('ffffffff-0000-4000-8000-000000000000', [session()])).toBeNull();
+    });
   });
 
   it('reads markers only while hooks are on', () => {
     marker('UserPromptSubmit', 9);
 
-    expect(runner(vi.fn<Exec>()).markers([session()]).get(session().nativeSessionId!)).toEqual({ at: 9, observed: { state: 'running', detail: null }, recheck: false });
+    expect(runner(vi.fn<Exec>()).markers([session()]).get(session().nativeSessionId!)).toEqual({ at: 9, cwd: null, observed: { state: 'running', detail: null }, recheck: false });
     expect(runner(vi.fn<Exec>(), { hooks: () => false }).markers([session()]).size).toBe(0);
   });
 

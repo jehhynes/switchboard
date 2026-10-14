@@ -1,9 +1,11 @@
-import type { MarkerReading, ObservedSession, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason } from '@switchboard/core';
+import { dirname } from 'node:path';
+import type { CopyRelation, MarkerReading, ObservedFork, ObservedSession, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason } from '@switchboard/core';
 import type { Exec } from './exec.js';
+import { findForks, forkTargets, relationOf, Transcripts } from './fork.js';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
 import { installHooks, readMarkers } from './install.js';
-import { entryFor, observe, readRoster, startSession, stopSession } from './runner.js';
+import { entryFor, observe, observeForks, readRoster, startSession, stopSession } from './runner.js';
 
 export interface ClaudeRunnerDeps {
   claudePath: string;
@@ -20,16 +22,42 @@ export interface ClaudeRunnerDeps {
 
 /** Claude Code's background sessions (architecture.md § Claude Code runner). */
 export class ClaudeRunner implements SessionRunner {
-  constructor(private readonly deps: ClaudeRunnerDeps) {}
+  private readonly transcripts: Transcripts;
+
+  constructor(private readonly deps: ClaudeRunnerDeps) {
+    this.transcripts = new Transcripts(`${dirname(deps.claudeSettings).replaceAll('\\', '/')}/projects`, deps.now);
+  }
 
   start(action: StartAction): Promise<StartResult> {
     return startSession(this.deps.claudePath, action, { exec: this.deps.exec, sleep: this.deps.sleep, now: this.deps.now });
   }
 
-  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[] } | { error: string }> {
+  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[] } | { error: string }> {
     const roster = await readRoster(this.deps.claudePath, this.deps.exec);
 
-    return 'error' in roster ? roster : { sessions: observe(roster.entries, sessions, this.rawMarkers()) };
+    if ('error' in roster) {
+      return roster;
+    }
+
+    const markers = this.rawMarkers();
+
+    return { sessions: observe(roster.entries, sessions, markers), forks: observeForks(findForks(this.transcripts, roster.entries, sessions), markers) };
+  }
+
+  relation(nativeSessionId: string, session: Session): CopyRelation {
+    if (session.nativeSessionId === null || session.nativeSessionId === nativeSessionId) {
+      return 'unrelated';
+    }
+
+    this.transcripts.pass();
+
+    return relationOf(this.transcripts, nativeSessionId, null, session as Session & { nativeSessionId: string });
+  }
+
+  forkOf(nativeSessionId: string, sessions: Session[]): Session | null {
+    this.transcripts.pass();
+
+    return forkTargets(sessions).find((session) => relationOf(this.transcripts, nativeSessionId, null, session) === 'newer') ?? null;
   }
 
   /** Hook markers, or none when hooks are off, so the roster alone decides state. */
@@ -41,7 +69,7 @@ export class ClaudeRunner implements SessionRunner {
     const readings = new Map<string, MarkerReading>();
 
     for (const [id, marker] of this.rawMarkers()) {
-      readings.set(id, { at: marker.at ?? 0, observed: markerState(marker), recheck: false });
+      readings.set(id, { at: marker.at ?? 0, cwd: marker.cwd ?? null, observed: markerState(marker), recheck: false });
     }
 
     return readings;

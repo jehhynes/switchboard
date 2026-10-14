@@ -248,9 +248,12 @@ function isBackground(session: SessionView | null): session is SessionView & { s
   return session !== null && session.state !== 'starting' && session.shortId !== null && (!session.released || session.releasing);
 }
 
-/** A session waiting on the operator in its background process, which Open in Claude or Codex stops and opens in a tab (PRD R70). */
+/**
+ * A session waiting on the operator in its background process, which Open in Claude or Codex stops and opens in a tab (PRD R70). While a fork
+ * waits for its release (PRD R78) Stop is offered instead, as Open would open the retired copy; a hub older than forks sends no `pendingFork`.
+ */
 function waitsInBackground(session: SessionView | null): session is SessionView & { shortId: string; nativeSessionId: string } {
-  return isBackground(session) && session.state === 'waiting' && session.nativeSessionId !== null;
+  return isBackground(session) && session.state === 'waiting' && session.nativeSessionId !== null && (session.pendingFork ?? null) === null;
 }
 
 /**
