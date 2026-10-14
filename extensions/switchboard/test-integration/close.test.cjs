@@ -73,6 +73,8 @@ describe('Closing done item windows (PRD R76)', () => {
   }
 
   before(async () => {
+    // The tests close at once; one restores the default delay.
+    await vscode.workspace.getConfiguration('switchboard').update('closeDoneWindowsAfterMinutes', 0, vscode.ConfigurationTarget.Global);
     extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     hubState = extension.state();
     const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
@@ -87,7 +89,8 @@ describe('Closing done item windows (PRD R76)', () => {
     vscode.window.showErrorMessage = (...args) => (errors.push(args[0]), Promise.resolve(undefined));
   });
 
-  after(() => {
+  after(async () => {
+    await vscode.workspace.getConfiguration('switchboard').update('closeDoneWindowsAfterMinutes', undefined, vscode.ConfigurationTarget.Global);
     vscode.commands.executeCommand = realExecute;
     vscode.window.showErrorMessage = realError;
     extension.itemWindow(null);
@@ -114,6 +117,50 @@ describe('Closing done item windows (PRD R76)', () => {
     await extension.windowStateChanged(false);
     await finish(join(windows, 'gh-8-workspace-aaaaaa.code-workspace'));
     assert.deepStrictEqual(closed, []);
+  });
+
+  it('stays open for switchboard.closeDoneWindowsAfterMinutes, 30 by default, after the work is done and the window unfocused', async () => {
+    const settings = vscode.workspace.getConfiguration('switchboard');
+
+    await settings.update('closeDoneWindowsAfterMinutes', undefined, vscode.ConfigurationTarget.Global);
+
+    try {
+      assert.strictEqual(vscode.workspace.getConfiguration('switchboard').get('closeDoneWindowsAfterMinutes'), 30);
+      await finish(file);
+      await extension.windowStateChanged(true);
+      await extension.windowStateChanged(false);
+      assert.deepStrictEqual(closed, []);
+    } finally {
+      await settings.update('closeDoneWindowsAfterMinutes', 0, vscode.ConfigurationTarget.Global);
+    }
+  });
+
+  it('closes when the wait passes with no other event, waiting while focused or while the work is open again', async () => {
+    const settings = vscode.workspace.getConfiguration('switchboard');
+    const wait = () => new Promise((resolve) => setTimeout(resolve, 400));
+
+    // 0.002 minutes is 120 ms.
+    await settings.update('closeDoneWindowsAfterMinutes', 0.002, vscode.ConfigurationTarget.Global);
+
+    try {
+      await finish(file);
+      await extension.receive(running);
+      await wait();
+      assert.deepStrictEqual(closed, []);
+
+      extension.itemWindow(file);
+      await extension.windowStateChanged(true);
+      await extension.receive(running);
+      await extension.receive(done);
+      await wait();
+      assert.deepStrictEqual(closed, []);
+      await extension.windowStateChanged(false);
+      assert.deepStrictEqual(closed, []);
+      await wait();
+      assert.deepStrictEqual(closed, ['workbench.action.closeWindow']);
+    } finally {
+      await settings.update('closeDoneWindowsAfterMinutes', 0, vscode.ConfigurationTarget.Global);
+    }
   });
 
   it('stays open with switchboard.closeDoneWindows off', async () => {

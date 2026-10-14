@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub, windowsDir } from '@switchboard/hub';
-import { closeIfDone } from './closeWindow.js';
+import { closeDueAt, closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
 import { DoneWindow } from './doneWindow.js';
 import { openChanges } from './git.js';
@@ -92,9 +92,26 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   const state = new HubState();
   const tabs = new ItemTabs(workspaceFile(), windowsDir(home), openTab);
-  let done = new DoneWindow(workspaceFile(), windowsDir(home));
-  const closeDone = (focused?: boolean): Promise<boolean> =>
-    closeIfDone(done, focused).catch((error: unknown) => (void vscode.window.showErrorMessage(`Switchboard: the window did not close: ${String(error)}`), false));
+  let done = new DoneWindow(workspaceFile(), windowsDir(home), vscode.window.state.focused, Date.now());
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Records a focus change, then closes a done window or checks again when its close is due; a window with unsaved changes is checked each minute. */
+  const closeDone = async (focused?: boolean): Promise<boolean> => {
+    clearTimeout(closeTimer);
+
+    const closed = await closeIfDone(done, focused).catch((error: unknown) => (void vscode.window.showErrorMessage(`Switchboard: the window did not close: ${String(error)}`), false));
+    const at = closed ? null : closeDueAt(done);
+
+    if (at !== null) {
+      const wait = at - Date.now();
+
+      // Another call may have set a timer while this one awaited.
+      clearTimeout(closeTimer);
+      // setTimeout runs at once for a wait over 2^31 - 1 ms; the next check sets the rest.
+      closeTimer = setTimeout(() => void closeDone(), wait > 0 ? Math.min(wait, 2 ** 31 - 1) : 60_000);
+    }
+
+    return closed;
+  };
   const history = new HistoryPanels(context.extensionUri, () => keeper.current(), (link) => openHistoryLink(link));
   /** Runs a command the dock left for this window (PRD R71). */
   const runCommand = async (command: WindowCommand): Promise<unknown> => {
@@ -138,12 +155,10 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   };
 
   const windowStateChanged = (focused: boolean): Promise<unknown> => {
-    if (focused) {
-      return Promise.resolve(vscode.commands.executeCommand('switchboard.claim')).catch(() => {});
-    }
+    // Focus restarts the wait before a done window closes (PRD R76).
+    const closing = closeDone(focused);
 
-    // A window focused when its work became done closes once the operator leaves it (PRD R76).
-    return closeDone(false);
+    return focused ? Promise.resolve(vscode.commands.executeCommand('switchboard.claim')).catch(() => {}) : closing;
   };
 
   status.name = 'Switchboard';
@@ -189,7 +204,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     history.changed();
     toasts.update(snapshot);
     void tabs.update(snapshot).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
-    done.update(snapshot);
+    done.update(snapshot, Date.now());
 
     return closeDone();
   };
@@ -215,7 +230,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     onFailed: (message) => void vscode.window.showErrorMessage(`Switchboard: ${message}`),
   });
 
-  context.subscriptions.push({ dispose: () => keeper.dispose() });
+  context.subscriptions.push({ dispose: () => keeper.dispose() }, { dispose: () => clearTimeout(closeTimer) });
 
   return {
     hub: () => keeper.current(),
@@ -233,7 +248,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     run: runCommand,
     openTab,
     itemWindow: (file) => {
-      done = new DoneWindow(file ?? workspaceFile(), windowsDir(home));
+      done = new DoneWindow(file ?? workspaceFile(), windowsDir(home), vscode.window.state.focused, Date.now());
     },
     receive: stateReceived,
     windowStateChanged,

@@ -87,93 +87,134 @@ function snapshot(items: WorkItemView[]): Snapshot {
   };
 }
 
-function windowAfter(...states: WorkItemView[][]): DoneWindow {
-  const window = new DoneWindow(FILE, WINDOWS);
+const DELAY = 30 * 60_000;
+const MINUTE = 60_000;
 
-  states.forEach((items) => window.update(snapshot(items)));
+/** A window, unfocused since `NOW`, after a snapshot at `NOW` for each of `states`. */
+function windowAfter(...states: WorkItemView[][]): DoneWindow {
+  const window = new DoneWindow(FILE, WINDOWS, false, NOW);
+
+  states.forEach((items) => window.update(snapshot(items), NOW));
 
   return window;
 }
 
+/** Whether the window closes once the delay has passed since `NOW`. */
+const closesLater = (window: DoneWindow): boolean => window.close(false, NOW + DELAY, DELAY);
+
 describe('DoneWindow', () => {
-  it('closes once when its work item becomes done while it is open and its session has ended its turn', () => {
+  it('closes once, after its work has been done and the window unfocused for the delay', () => {
     const window = windowAfter([item()], [done('idle')]);
 
-    expect(window.close(false, false)).toBe(true);
-    expect(window.close(false, false)).toBe(false);
+    expect(window.closeAt(DELAY)).toBe(NOW + DELAY);
+    expect(window.close(false, NOW + DELAY - 1, DELAY)).toBe(false);
+    expect(window.close(false, NOW + DELAY, DELAY)).toBe(true);
+    expect(window.close(false, NOW + DELAY, DELAY)).toBe(false);
+    expect(window.closeAt(DELAY)).toBeNull();
+  });
+
+  it('closes at once with no delay', () => {
+    expect(windowAfter([item()], [done()]).close(false, NOW, 0)).toBe(true);
+  });
+
+  it('counts the delay from when the window lost focus, when that is later than the work becoming done', () => {
+    const window = new DoneWindow(FILE, WINDOWS, true, NOW);
+
+    window.update(snapshot([item()]), NOW);
+    window.update(snapshot([done()]), NOW);
+    expect(window.closeAt(DELAY)).toBeNull();
+    expect(window.close(false, NOW + DELAY, DELAY)).toBe(false);
+    window.focus(false, NOW + 10 * MINUTE);
+    expect(window.close(false, NOW + DELAY, DELAY)).toBe(false);
+    expect(window.close(false, NOW + 10 * MINUTE + DELAY, DELAY)).toBe(true);
+  });
+
+  it('counts the delay from when the work became done, when that is later than the window losing focus', () => {
+    const window = new DoneWindow(FILE, WINDOWS, false, NOW);
+
+    window.update(snapshot([item()]), NOW);
+    window.update(snapshot([done()]), NOW + 10 * MINUTE);
+    window.update(snapshot([done()]), NOW + 20 * MINUTE);
+    expect(window.closeAt(DELAY)).toBe(NOW + 10 * MINUTE + DELAY);
+  });
+
+  it('restarts the delay when the window is focused, and keeps the first blur of an unfocused window', () => {
+    const window = windowAfter([item()], [done()]);
+
+    window.focus(true, NOW + 29 * MINUTE);
+    expect(window.close(false, NOW + DELAY, DELAY)).toBe(false);
+    window.focus(false, NOW + 40 * MINUTE);
+    window.focus(false, NOW + 50 * MINUTE);
+    expect(window.closeAt(DELAY)).toBe(NOW + 40 * MINUTE + DELAY);
+  });
+
+  it('restarts the delay when its work item opens again and becomes done again', () => {
+    const window = windowAfter([item()], [done()]);
+
+    window.update(snapshot([item({ status: 'blocked', sessions: [session(1, 'ended')] })]), NOW + 5 * MINUTE);
+    expect(window.closeAt(DELAY)).toBeNull();
+    window.update(snapshot([done()]), NOW + 20 * MINUTE);
+    expect(window.closeAt(DELAY)).toBe(NOW + 20 * MINUTE + DELAY);
   });
 
   it('closes when the session process has ended or its turn failed', () => {
-    expect(windowAfter([item()], [done('ended')]).close(false, false)).toBe(true);
-    expect(windowAfter([item()], [done('failed')]).close(false, false)).toBe(true);
+    expect(closesLater(windowAfter([item()], [done('ended')]))).toBe(true);
+    expect(closesLater(windowAfter([item()], [done('failed')]))).toBe(true);
   });
 
-  it('waits for a session that reported done to end its turn', () => {
+  it('waits for a session that reported done to end its turn, and counts the delay from then', () => {
     const window = windowAfter([item()], [done('running')]);
 
-    expect(window.close(false, false)).toBe(false);
-    window.update(snapshot([done('waiting')]));
-    expect(window.close(false, false)).toBe(false);
-    window.update(snapshot([done('idle')]));
-    expect(window.close(false, false)).toBe(true);
+    expect(window.closeAt(DELAY)).toBeNull();
+    window.update(snapshot([done('waiting')]), NOW + MINUTE);
+    expect(window.closeAt(DELAY)).toBeNull();
+    window.update(snapshot([done('idle')]), NOW + 2 * MINUTE);
+    expect(window.closeAt(DELAY)).toBe(NOW + 2 * MINUTE + DELAY);
   });
 
   it('waits for a session that is starting, even an earlier one', () => {
-    const window = windowAfter([item()], [done('idle', { sessions: [session(1, 'starting'), session(2, 'idle')] })]);
-
-    expect(window.close(false, false)).toBe(false);
+    expect(closesLater(windowAfter([item()], [done('idle', { sessions: [session(1, 'starting'), session(2, 'idle')] })]))).toBe(false);
   });
 
-  it('waits while focused or holding unsaved changes, then closes', () => {
+  it('waits while holding unsaved changes, then closes', () => {
     const window = windowAfter([item()], [done()]);
 
-    expect(window.close(true, false)).toBe(false);
-    expect(window.close(false, true)).toBe(false);
-    expect(window.close(false, false)).toBe(true);
+    expect(window.close(true, NOW + DELAY, DELAY)).toBe(false);
+    expect(window.close(false, NOW + DELAY, DELAY)).toBe(true);
   });
 
   it('never closes a window opened on work that was already done', () => {
-    const window = windowAfter([done()], [done()]);
-
-    expect(window.close(false, false)).toBe(false);
+    expect(closesLater(windowAfter([done()], [done()]))).toBe(false);
   });
 
   it('waits until every work item that uses the window is done', () => {
     const earlier = done('ended', { id: 6 });
     const window = windowAfter([earlier, item()]);
 
-    expect(window.close(false, false)).toBe(false);
-    window.update(snapshot([earlier, done()]));
-    expect(window.close(false, false)).toBe(true);
+    expect(closesLater(window)).toBe(false);
+    window.update(snapshot([earlier, done()]), NOW);
+    expect(closesLater(window)).toBe(true);
   });
 
   it('stays open when an open work item moves to another window and leaves only work that was already done', () => {
     const earlier = done('ended', { id: 6 });
     const moved = item({ sessions: [session(1, 'idle'), { ...session(2, 'running'), cwd: 'D:/git/widgets' }] });
-    const window = windowAfter([earlier, item()], [earlier, moved]);
 
-    expect(window.close(false, false)).toBe(false);
-  });
-
-  it('stays open when its work item opens again before it closes', () => {
-    const window = windowAfter([item()], [done()], [item({ status: 'blocked', sessions: [session(1, 'ended')] })]);
-
-    expect(window.close(false, false)).toBe(false);
+    expect(closesLater(windowAfter([earlier, item()], [earlier, moved]))).toBe(false);
   });
 
   it("ignores another window's work items and a window with none", () => {
     const other = item({ id: 8, worktree: { id: 2, ticketId: 8, path: 'D:/git/widgets/.worktrees/108-other', branch: '108-other', linkedBy: 'report' }, sessions: [] });
-    const window = windowAfter([item(), other], [item(), { ...other, status: 'done' }]);
 
-    expect(window.close(false, false)).toBe(false);
-    expect(windowAfter([item()], []).close(false, false)).toBe(false);
+    expect(closesLater(windowAfter([item(), other], [item(), { ...other, status: 'done' }]))).toBe(false);
+    expect(closesLater(windowAfter([item()], []))).toBe(false);
   });
 
   it('does nothing in a window that is not an item window', () => {
-    const window = new DoneWindow(null, WINDOWS);
+    const window = new DoneWindow(null, WINDOWS, false, NOW);
 
-    window.update(snapshot([item()]));
-    window.update(snapshot([done()]));
-    expect(window.close(false, false)).toBe(false);
+    window.update(snapshot([item()]), NOW);
+    window.update(snapshot([done()]), NOW);
+    expect(closesLater(window)).toBe(false);
   });
 });

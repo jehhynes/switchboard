@@ -45,7 +45,13 @@
         "switchboard.closeDoneWindows": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Close an item window once all its work items are done and their sessions have ended their turns, while it is not focused and has no unsaved changes."
+          "markdownDescription": "Close an item window once all its work items are done, their sessions have ended their turns and it has not been focused for `#switchboard.closeDoneWindowsAfterMinutes#`, unless it has unsaved changes."
+        },
+        "switchboard.closeDoneWindowsAfterMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "markdownDescription": "Minutes a done item window waits, unfocused, before `#switchboard.closeDoneWindows#` closes it."
         }
       }
     },
