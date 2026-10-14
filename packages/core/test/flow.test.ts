@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
-import { MESSAGES, UNCONFIRMED_DONE } from '../src/flow.js';
-import { Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
+import { MESSAGES, nothingNew, UNCONFIRMED_DONE } from '../src/flow.js';
+import { HOUR, Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 
 /** The report contract offering `reports`, written out so a change to the contract shows here. */
 const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 'approval', 'link', 'task']) => {
@@ -64,6 +64,7 @@ describe('assigned-state transitions', () => {
       rates: false,
       model: null,
       timeoutSeconds: 180,
+      handled: null,
     });
     expect([1, 2, 3].map((id) => h.status(id))).toEqual(['triaging', 'triaging', 'triaging']);
     expect(h.store.workItem(4)).toBeNull();
@@ -266,6 +267,85 @@ describe('triage', () => {
     unset.settings.sources['github']!.triagePlaybook = '';
     unset.poll(issue('1'));
     expect(unset.item(1)).toMatchObject({ status: 'failed', error: 'sources.github.triagePlaybook is not set.' });
+  });
+
+  it('leaves an auto-starting playbook unstarted when the triage found nothing newer than the earlier work item, and logs why (PRD R80)', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'), issue('2'));
+    const succeeded = (triageId: number, stale?: boolean) => h.act({ type: 'triage-succeeded', triageId, context: 'c', playbook: 'support:defect', immediacy: null, severity: null, model: null, ...(stale === undefined ? {} : { stale }) });
+
+    expect(succeeded((triage as Extract<FlowAction, { type: 'triage' }>).triageId, true)).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'unstarted', playbook: 'support:defect', error: MESSAGES.nothingNew });
+    expect(only(h.act({ type: 'start', workItemId: 1 }), 'start-session').workItemId).toBe(1);
+    expect(h.item(1).error).toBeNull();
+    expect(h.store.ticketHistory(1)?.events.find((event) => event.type === 'triage-succeeded')?.detail).toMatchObject({ playbook: 'support:defect', stale: true });
+
+    expect(only(succeeded(2, false), 'start-session').workItemId).toBe(2);
+    expect(h.store.ticketHistory(2)?.events.find((event) => event.type === 'triage-succeeded')?.detail).not.toHaveProperty('stale');
+  });
+
+  it('finds nothing new only after an earlier work item, when the source reports no later activity (PRD R80)', () => {
+    const handled = { at: T0, playbook: 'dev:develop' };
+
+    expect([null, T0 - 1, T0, T0 + 1, undefined].map((activityAt) => nothingNew(handled, activityAt))).toEqual([true, true, true, false, false]);
+    expect(nothingNew(null, null)).toBe(false);
+  });
+
+  it('keeps the first started task session as the cutoff after an approval starts another (PRD R80)', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    h.triaged(triage, 'dev:question');
+    const first = h.started(only(h.act({ type: 'start', workItemId: 1 }), 'start-session'));
+
+    h.report(first, { kind: 'approval', prompt: '/publish', summary: 'Post it', report: null });
+    h.act({ type: 'marker', sessionId: first, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: first, reason: 'release' });
+    h.now = T0 + 10 * MINUTE;
+    h.started(only(h.act({ type: 'approve', workItemId: 1 }), 'start-session'));
+    expect(h.store.sessionsFor(1).filter((session) => session.kind === 'task').map((session) => session.startedAt)).toEqual([T0, T0 + 10 * MINUTE]);
+
+    h.act({ type: 'mark-done', workItemId: 1 });
+    h.poll();
+    h.now = T0 + HOUR;
+    const again = h.poll(issue('1')).find((action) => action.type === 'triage');
+
+    expect(again).toMatchObject({ handled: { at: T0, playbook: 'dev:question' } });
+  });
+  it("gives triage the latest earlier work item's first task session start, or the operator's Mark done without a session, and skips a setup-only one and a task session that failed to start (PRD R80)", () => {
+    const h = new Harness();
+    const triageOf = (actions: FlowAction[]) => actions.find((action): action is Extract<FlowAction, { type: 'triage' }> => action.type === 'triage');
+    const returned = (at: number) => {
+      h.poll();
+      h.now = at;
+      return triageOf(h.poll(issue('1')))!;
+    };
+
+    const first = triageOf(h.poll(issue('1')))!;
+    expect(first.handled).toBeNull();
+    const session = h.started(only(h.triaged(first, 'support:defect'), 'start-session'));
+    h.now = T0 + MINUTE;
+    h.report(session, { kind: 'done' });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+
+    const second = returned(T0 + HOUR);
+    expect(second.handled).toEqual({ at: T0, playbook: 'support:defect' });
+    h.act({ type: 'mark-done', workItemId: second.workItemId! });
+
+    const third = returned(T0 + 2 * HOUR);
+    expect(third.handled).toEqual({ at: T0 + HOUR, playbook: null });
+    h.started(only(h.triaged(third, 'dev:develop'), 'start-session'));
+    h.poll();
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.item(third.workItemId!)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
+
+    const fourth = returned(T0 + 3 * HOUR);
+    expect(fourth.handled).toEqual({ at: T0 + HOUR, playbook: null });
+    const failed = only(h.triaged(fourth, 'support:defect'), 'start-session');
+    h.act({ type: 'session-start-failed', sessionId: failed.sessionId, message: 'Untrusted folder.' });
+    h.now = T0 + 3 * HOUR + 30 * MINUTE;
+    h.act({ type: 'mark-done', workItemId: fourth.workItemId! });
+
+    expect(returned(T0 + 4 * HOUR).handled).toEqual({ at: T0 + 3 * HOUR + 30 * MINUTE, playbook: 'support:defect' });
   });
 
 });

@@ -33,6 +33,7 @@ export const MESSAGES = {
   sessionEndedWithoutApproval: 'The session ended without an approval report.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
+  nothingNew: 'Nothing is newer than the earlier work item',
 } as const;
 
 /** Starts a task session's `outcomeDetail` while its done report waits for the hub's second read of the ticket (PRD R10). */
@@ -41,6 +42,17 @@ export const UNCONFIRMED_DONE = 'Waiting to read the ticket again';
 /** A task session's done report whose first read still listed the ticket, on a work item the second read can still settle. */
 export function awaitsRecheck(item: Pick<WorkItem, 'status'>, session: Pick<Session, 'kind' | 'outcome' | 'outcomeDetail'>): boolean {
   return session.kind === 'task' && session.outcome === 'done' && !!session.outcomeDetail?.startsWith(UNCONFIRMED_DONE) && (item.status === 'running' || item.status === 'awaiting-approval');
+}
+
+/** When an earlier work item of the ticket took in its activity, and that work item's playbook (PRD R80). */
+export interface HandledWork {
+  at: number;
+  playbook: string | null;
+}
+
+/** True when the source reports no activity after the earlier work item took it in, so nothing new asks for an action (PRD R80). */
+export function nothingNew(handled: HandledWork | null, activityAt: number | null | undefined): boolean {
+  return handled !== null && activityAt !== undefined && (activityAt === null || activityAt <= handled.at);
 }
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
@@ -112,6 +124,8 @@ export type FlowEvent =
       /** The anchor id the classifier chose, resolved against `anchors` and the playbook's page (PRD R79). */
       focus?: string | null;
       anchors?: Anchor[];
+      /** `nothingNew` held, so the work item waits for Start whatever the playbook's `autoStart` (PRD R80). */
+      stale?: boolean;
     }
   | { type: 'triage-failed'; triageId: number; error: string; context: string | null }
   /** The hub stopped during triage. Nothing failed, so the work item is triaged again. */
@@ -160,6 +174,8 @@ export type FlowAction =
       rates: boolean;
       model: string | null;
       timeoutSeconds: number;
+      /** The latest earlier work item's handling; null for a pool triage or a ticket without one (PRD R80). */
+      handled: HandledWork | null;
     }
   | {
       type: 'start-session';
@@ -282,7 +298,7 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
     case 'poll-failed':
       return { source: event.source };
     case 'triage-succeeded':
-      return { triageId: event.triageId, playbook: event.playbook, immediacy: event.immediacy, severity: event.severity, model: event.model };
+      return { triageId: event.triageId, playbook: event.playbook, immediacy: event.immediacy, severity: event.severity, model: event.model, ...(event.stale ? { stale: true } : {}) };
     case 'triage-failed':
       return { triageId: event.triageId, error: event.error };
     case 'triage-cancelled':
@@ -769,10 +785,11 @@ class Flow {
 
     this.store.updateWorkItem(item.id, { playbook: playbook.name, taskPrompt: null, error: null });
 
-    if (playbook.autoStart) {
+    if (playbook.autoStart && !event.stale) {
       this.queue(item);
     } else {
-      this.setStatus(item.id, { status: 'unstarted' });
+      // The row says why the work item waits; Start and Triage again clear it (PRD R80).
+      this.setStatus(item.id, { status: 'unstarted', error: event.stale ? MESSAGES.nothingNew : null });
     }
   }
 
@@ -855,7 +872,27 @@ class Flow {
       rates: playbook.rates,
       model: this.context.settings.triage.model || null,
       timeoutSeconds: this.context.settings.triage.timeoutSeconds,
+      handled: item === null ? null : this.handled(item),
     });
+  }
+
+  /**
+   * The latest earlier work item of the ticket and when it took in the ticket's activity: the start of its first task session that the runner
+   * started, or when the operator marked it done without one (PRD R80). A work item with neither, such as one unassigned during setup, did not act on it.
+   */
+  private handled(item: WorkItem): HandledWork | null {
+    let latest: HandledWork | null = null;
+
+    for (const other of this.store.workItemsForTicket(item.ticketId)) {
+      const starts = this.store.sessionsFor(other.id).filter((session) => session.kind === 'task' && session.shortId !== null).map((session) => session.startedAt);
+      const at = starts.length > 0 ? Math.min(...starts) : other.doneReason === 'operator' ? other.doneAt : null;
+
+      if (other.id !== item.id && at !== null && (latest === null || at > latest.at)) {
+        latest = { at, playbook: other.playbook };
+      }
+    }
+
+    return latest;
   }
 
   // Sessions

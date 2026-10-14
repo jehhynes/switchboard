@@ -226,10 +226,12 @@ describe('GithubSource.context', () => {
     expect(text).toContain('Issue body ends here.\n\n## Status and assignment history\n2026-09-07 12:18 user-b: status (none) → 🆕 New\n2026-09-07 12:18 user-a: status 🆕 New → 🔖 Planned\n2026-09-07 12:18 user-a: assigned user-a\n');
     expect(text.match(/\[…\d+ characters omitted…\]/g)).toEqual(['[…39262 characters omitted…]', '[…984 characters omitted…]', '[…50924 characters omitted…]', '[…8178 characters omitted…]', '[…1335 characters omitted…]']);
     expect(text.match(/^### .*, \d{4}-\d\d-\d\d \d\d:\d\d \[c\d+\]$/gm)).toHaveLength(5 + 5 + 10);
-    expect(text).toContain('## Pull request #19515: Pull request 19515 [pr]\nhttps://github.com/acme/widgets/pull/19515\nAuthor: user-a. State: OPEN. Checks: SUCCESS.\n\nPR body starts here.');
+    expect(text).toContain('## Pull request #19515: Pull request 19515 [pr]\nhttps://github.com/acme/widgets/pull/19515\nAuthor: user-a. State: OPEN. Checks: SUCCESS. Head commit: user-a, 2026-09-22 14:50.\n\nPR body starts here.');
     expect(text).toContain('### Last 5 pull request comments\n### user-a, 2026-09-10 12:01 [c11]\nComment starts here.');
     expect(text).toContain('### Reviews\n2026-09-07 20:31 user-e: COMMENTED\n');
     expect(text).toContain('### Last 5 review threads\n\n#### Resolved thread\n### ');
+    // The last issue comment is the latest activity; the recorded issue has no operator comment to leave out.
+    expect(result).toMatchObject({ activityAt: Date.parse('2026-10-02T22:06:55Z') });
   });
 
   it('tags the issue, the pull request and each comment, numbering comments by time across sections, and returns their anchors (PRD R79)', async () => {
@@ -328,6 +330,35 @@ describe('GithubSource.context', () => {
     expect(await contextAt('2026-09-22T14:56:13Z')).not.toContain('(no timeline event)');
     expect(await contextAt('2026-09-22T14:56:14Z')).toContain('\n2026-09-22 14:56 someone: status → ⚒️ Dev (no timeline event)');
     expect(await contextAt('2026-09-07T12:18:00Z', true)).toContain('\n2026-09-07 12:18 someone: status → ⚒️ Dev (no timeline event)\n');
+  });
+
+  it("reports the latest comment, review or head commit by anyone but the operator's logins, bots included, and not status or assignment changes (PRD R80)", async () => {
+    const at = (minute: number) => `2026-10-14T14:${String(minute).padStart(2, '0')}:00Z`;
+    const comment = (login: string, minute: number) => ({ body: 'x', createdAt: at(minute), url: `https://github.com/acme/widgets/issues/7#issuecomment-${minute}`, author: { login } });
+    const review = (login: string, minute: number | null) => ({ state: 'COMMENTED', submittedAt: minute === null ? null : at(minute), author: { login } });
+    const commit = (login: string | null, minute: number) => ({ commit: { committedDate: at(minute), author: { user: login === null ? null : { login } }, statusCheckRollup: null } });
+    const pr = (reviews: object[], comments: object[], threads: object[], commits: object[] = []) => ({
+      number: 8, title: 'P', url: 'https://github.com/acme/widgets/pull/8', state: 'OPEN', isDraft: false, updatedAt: at(0), body: '', author: { login: 'work-login' },
+      reviewRequests: { nodes: [] }, comments: { nodes: comments }, commits: { nodes: commits }, reviews: { nodes: reviews }, reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: threads } }] },
+    });
+    const activityAt = async (comments: object[], closing: object | null = null) => {
+      const issue = {
+        number: 7, title: 'T', url: 'https://github.com/acme/widgets/issues/7', body: '', projectItems: { nodes: [] }, assignees: { nodes: [{ login: 'work-login' }] }, comments: { nodes: comments },
+        timelineItems: { nodes: [{ __typename: 'AssignedEvent', createdAt: at(59), actor: { login: 'user-b' }, assignee: { login: 'work-login' } }] },
+        closedByPullRequestsReferences: { nodes: closing === null ? [] : [closing] },
+      };
+      return ((await new GithubSource(config(), fakeGh({ json: { data: { repository: { issue } } } })).context(ticket('7'))) as { activityAt?: number | null }).activityAt;
+    };
+
+    expect(await activityAt([])).toBeNull();
+    expect(await activityAt([comment('work-login', 10), comment('Work-AI-Login', 20)])).toBeNull();
+    expect(await activityAt([comment('acme-gh-actions', 10), comment('work-login', 20)])).toBe(Date.parse(at(10)));
+    expect(await activityAt([comment('user-a', 5)], pr([review('claude', 30), review('work-login', 40), review('user-c', null)], [comment('user-b', 12)], [comment('claude', 25)]))).toBe(Date.parse(at(30)));
+    expect(await activityAt([comment('user-a', 5)], pr([], [comment('user-b', 12)], [comment('claude', 25), comment('work-login', 50)]))).toBe(Date.parse(at(25)));
+    expect(await activityAt([comment('user-a', 5)], pr([], [comment('user-b', 42)], []))).toBe(Date.parse(at(42)));
+    expect(await activityAt([comment('user-a', 5)], pr([], [comment('user-b', 12)], [], [commit('user-b', 44)]))).toBe(Date.parse(at(44)));
+    expect(await activityAt([comment('user-a', 5)], pr([], [comment('user-b', 12)], [], [commit('WORK-LOGIN', 44)]))).toBe(Date.parse(at(12)));
+    expect(await activityAt([], pr([], [], [], [commit(null, 46)]))).toBe(Date.parse(at(46)));
   });
 
   it('fails when the issue is missing, gh fails, or the response is malformed', async () => {

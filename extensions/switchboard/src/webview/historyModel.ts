@@ -516,7 +516,14 @@ class Builder {
       case 'triage-succeeded': {
         skip.add('playbook');
         const rating = [detail['immediacy'], detail['severity']].filter((part) => part != null).join(' · ');
-        return { category: 'triage', icon: 'filter', text: `Triage chose ${str(detail['playbook'])}${rating === '' ? '' : ` (${rating})`}`, detail: detail['model'] ? `Model: ${str(detail['model'])}` : null };
+        const stale = detail['stale'] === true ? '; it waits for Start, because nothing is newer than the earlier work item' : '';
+
+        if (stale !== '') {
+          // The headline says why; the row's note is the same text.
+          skip.add('error');
+        }
+
+        return { category: 'triage', icon: 'filter', text: `Triage chose ${str(detail['playbook'])}${rating === '' ? '' : ` (${rating})`}${stale}`, detail: detail['model'] ? `Model: ${str(detail['model'])}` : null };
       }
       case 'triage-failed':
         skip.add('error');

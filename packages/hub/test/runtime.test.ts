@@ -1509,6 +1509,54 @@ describe('focus (PRD R79)', () => {
   });
 });
 
+describe('activity since the earlier work item (PRD R80)', () => {
+  const NOTE = 'Earlier work: a dev:question work item for this ticket handled the activity up to 2026-10-03 12:00 UTC, so that activity is background.';
+
+  /** Marks issue 7's first work item done at T0, then reassigns it an hour later, so work item 2 triages to the auto-starting dev:develop. */
+  async function reassigned(activityAt: number | null | undefined) {
+    let now = T0;
+    const cfg = { ...config(), playbooks: new Map([...PLAYBOOKS, playbook('dev:question', { description: 'Answer it', template: 'Answer {{ticket.sourceKey}}.' })]) };
+    const env = setup(cfg, () => now);
+    env.source.result = { tickets: [issue('7')] };
+    env.source.context = async () => ({ context: 'Issue 7 text', ...(activityAt === undefined ? {} : { activityAt }) });
+    env.cli.classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:question' } }));
+
+    await env.runtime.pollSource('github');
+    await env.runtime.settled();
+    env.runtime.send({ type: 'mark-done', workItemId: 1 });
+    env.source.result = { tickets: [] };
+    await env.runtime.pollSource('github');
+
+    now = T0 + 60 * 60_000;
+    env.cli.classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop' } }));
+    env.source.result = { tickets: [issue('7')] };
+    await env.runtime.pollSource('github');
+    await env.runtime.settled();
+
+    return env;
+  }
+
+  it('tells triage that nothing is newer and leaves an auto-starting playbook unstarted when no activity is newer, or there is none', async () => {
+    for (const activityAt of [T0 - 60_000, T0, null]) {
+      const { store } = await reassigned(activityAt);
+
+      expect(store.triage(2)?.context).toBe(`Current time: 2026-10-03 13:00 UTC\n\n${NOTE} Nothing from anyone else in the activity below is newer, so nothing new asks for an action.\n\nIssue 7 text`);
+      expect({ activityAt, ...store.workItem(2) }).toMatchObject({ activityAt, status: 'unstarted', playbook: 'dev:develop' });
+      expect(store.ticketHistory(1)?.events.find((event) => event.type === 'triage-succeeded' && event.workItemId === 2)?.detail).toMatchObject({ playbook: 'dev:develop', stale: true });
+    }
+  });
+
+  it('starts the playbook, naming the earlier work item without saying nothing is newer, when activity is newer or the source reports none', async () => {
+    for (const activityAt of [T0 + 1, undefined]) {
+      const { store } = await reassigned(activityAt);
+
+      expect(store.triage(2)?.context).toBe(`Current time: 2026-10-03 13:00 UTC\n\n${NOTE}\n\nIssue 7 text`);
+      expect({ activityAt, status: store.workItem(2)?.status }).toEqual({ activityAt, status: 'running' });
+      expect(store.ticketHistory(1)?.events.find((event) => event.type === 'triage-succeeded' && event.workItemId === 2)?.detail).not.toHaveProperty('stale');
+    }
+  });
+});
+
 describe('forks (PRD R78)', () => {
   const FORK = { nativeSessionId: '9e8d7c6b-0000', shortId: '9e8d7c6b' };
 

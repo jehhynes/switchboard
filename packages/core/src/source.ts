@@ -19,8 +19,11 @@ export interface Anchor {
   page: FocusPage;
 }
 
-/** A warning does not fail triage; the hub logs it. Without `anchors`, the ticket is the only focus. */
-export type ContextResult = { context: string; links?: SourceLink[]; anchors?: Anchor[]; warning?: string } | { error: string };
+/**
+ * A warning does not fail triage; the hub logs it. Without `anchors`, the ticket is the only focus. `activityAt` is the time of the latest
+ * activity by anyone but the operator that can ask for an action, such as a comment, or null when there is none (PRD R80); a source without it omits it.
+ */
+export type ContextResult = { context: string; links?: SourceLink[]; anchors?: Anchor[]; warning?: string; activityAt?: number | null } | { error: string };
 
 /** A reported link checked against its ticket: refused with the reason, or not (PRD R52); an error leaves it unchecked. */
 export type LinkCheck = { refused: string | null } | { error: string };

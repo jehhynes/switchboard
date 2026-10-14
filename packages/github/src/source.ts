@@ -90,7 +90,7 @@ interface PullRequest {
   author: Actor | null;
   reviewRequests: { nodes: { requestedReviewer: { login?: string; slug?: string } | null }[] };
   comments: { nodes: Comment[] };
-  commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
+  commits: { nodes: { commit: { committedDate?: string; author?: { user: Actor | null } | null; statusCheckRollup: { state: string } | null } }[] };
   reviews: { nodes: { state: string; submittedAt: string | null; author: Actor | null }[] };
   reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: Comment[] } }[] };
 }
@@ -296,8 +296,30 @@ export class GithubSource implements Source {
     const links = pr === null ? [] : [{ label: `Pull request #${pr.number}`, target: pr.url }];
     const { anchors, ids } = anchorsOf(issue, pr);
     const context = this.format(issue, pr, 'roles' in roles ? roles.roles : new Map(), ids);
+    const activityAt = this.activityAt(issue, pr);
 
-    return 'error' in roles ? { context, links, anchors, warning: `${roles.error} Comment authors show no roles.` } : { context, links, anchors };
+    return 'error' in roles ? { context, links, anchors, activityAt, warning: `${roles.error} Comment authors show no roles.` } : { context, links, anchors, activityAt };
+  }
+
+  /**
+   * The latest comment, review or pull request head commit in the context by anyone but the operator's logins, bots included (PRD R80). A status
+   * or assignment change asks for no action on its own, and the operator's own comments and commits, such as a session's, ask nothing of the operator.
+   */
+  private activityAt(issue: ContextIssue, pr: PullRequest | null): number | null {
+    const own = new Set(this.config.logins.map((login) => login.toLowerCase()));
+    const comments = [...issue.comments.nodes, ...(pr === null ? [] : [...pr.comments.nodes, ...pr.reviewThreads.nodes.flatMap((thread) => thread.comments.nodes)])];
+    const entries = [
+      ...comments.map((comment) => ({ author: comment.author, at: comment.createdAt })),
+      ...(pr?.reviews.nodes ?? []).map((review) => ({ author: review.author, at: review.submittedAt })),
+      // A commit whose author has no GitHub account counts as someone else's.
+      ...(pr?.commits.nodes ?? []).map(({ commit }) => ({ author: commit.author?.user ?? null, at: commit.committedDate })),
+    ];
+    const times = entries
+      .filter((entry) => !own.has((entry.author?.login ?? 'ghost').toLowerCase()))
+      .map((entry) => Date.parse(entry.at ?? ''))
+      .filter((time) => !Number.isNaN(time));
+
+    return times.length === 0 ? null : Math.max(...times);
   }
 
   /** Why the configured project's status field cannot hold a status, or null when it is a single-select field. */
@@ -441,11 +463,14 @@ function pullRequestOf(nodes: PullRequest[]): PullRequest | null {
 }
 
 function pullRequestLines(pr: PullRequest, roles: Roles, ids: CommentIds): string[] {
-  const checks = pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? 'none';
+  const head = pr.commits.nodes[0]?.commit;
+  const checks = head?.statusCheckRollup?.state ?? 'none';
+  // The head commit's author and time let triage see a push since earlier work (PRD R80).
+  const pushed = head?.committedDate === undefined ? '' : ` Head commit: ${head.author?.user?.login ?? 'ghost'}, ${head.committedDate.slice(0, 16).replace('T', ' ')}.`;
   const lines = [
     `## Pull request #${pr.number}: ${pr.title} [pr]`,
     pr.url,
-    `Author: ${pr.author?.login ?? 'ghost'}. State: ${pr.state}${pr.isDraft ? ' (draft)' : ''}. Checks: ${checks}.`,
+    `Author: ${pr.author?.login ?? 'ghost'}. State: ${pr.state}${pr.isDraft ? ' (draft)' : ''}. Checks: ${checks}.${pushed}`,
     '',
     clip(pr.body, TEXT_LIMIT) || '(empty)',
   ];

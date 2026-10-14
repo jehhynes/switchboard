@@ -48,7 +48,7 @@ query($owner:String!, $name:String!, $number:Int!, $status:String!){
         author{ login }
         reviewRequests(first:10){ nodes{ requestedReviewer{ ... on User{ login } ... on Team{ slug } } } }
         comments(last:5){ nodes{ body createdAt url author{ login } } }
-        commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } }
+        commits(last:1){ nodes{ commit{ committedDate author{ user{ login } } statusCheckRollup{ state } } } }
         reviews(last:20){ nodes{ state submittedAt author{ login } } }
         reviewThreads(last:5){ nodes{ isResolved comments(first:3){ nodes{ body createdAt url author{ login } } } } }
       }}

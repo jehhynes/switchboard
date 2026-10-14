@@ -518,6 +518,12 @@
                 "nodes": [
                   {
                     "commit": {
+                      "committedDate": "2026-09-22T14:50:03Z",
+                      "author": {
+                        "user": {
+                          "login": "user-a"
+                        }
+                      },
                       "statusCheckRollup": {
                         "state": "SUCCESS"
                       }

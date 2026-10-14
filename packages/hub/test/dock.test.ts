@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MESSAGES } from '@switchboard/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dockView, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
@@ -138,6 +139,10 @@ describe('dockView', () => {
     });
     // The question is answered in Claude, so line 3 names the mark in place of the stage.
     expect(row(item(7, { sessions: [session({ state: 'waiting' })], stage: 'checking refunds', stageAt: NOW - 60_000 })).details).toEqual([{ text: 'Answer a question', title: null, tone: null }]);
+  });
+
+  it('says why an unstarted work item waits when nothing is newer than the earlier work item (PRD R80)', () => {
+    expect(row(item(1, { status: 'unstarted', error: MESSAGES.nothingNew })).details).toEqual([{ text: 'Nothing is newer than the earlier work item', title: null, tone: 'warning' }]);
   });
 
   it('shows the approval summary with its age, or the stage, coloured when stale', () => {

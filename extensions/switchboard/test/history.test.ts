@@ -101,6 +101,21 @@ describe('History model', () => {
     expect(entries[4]!.lines).toContain('Fork 9e8d7c6b waits for the background session to be released; Stop releases one waiting on a question');
   });
 
+  it('says a triage waits for Start when nothing is newer than the earlier work item (PRD R80)', () => {
+    const run = new Run();
+
+    run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
+    run.send({ type: 'triage-succeeded', triageId: 1, context: 'ctx', playbook: 'dev:question', immediacy: null, severity: null, model: 'claude-sonnet-5', stale: true });
+
+    const entries = historyView(run.history(), run.now).sections[0]!.entries;
+
+    expect(entries[1]!.lines.some((line) => line.startsWith('Error'))).toBe(false);
+    expect(texts(entries)).toEqual([
+      'Work item created: Triaging',
+      'Triage chose dev:question; it waits for Start, because nothing is newer than the earlier work item',
+    ]);
+  });
+
   it('turns a run into a work item section of plain entries, with the ticket in its own section', () => {
     const run = approvedRun();
     const view = historyView(run.history(), run.now);

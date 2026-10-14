@@ -55,7 +55,7 @@ public static partial class SettingsFields
         ("paste", "Paste", "The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row."),
     ];
 
-    public const string AutoStartHelp = "Start the session after triage. Off, the work item waits in Unstarted for you to start it.";
+    public const string AutoStartHelp = "Start the session after triage, unless nothing is newer than the ticket’s earlier work item. Off, the work item waits in Unstarted for you to start it.";
     public const string RequiresWorktreeHelp = "Run the source’s setup prompt first when the ticket has no worktree.";
     public const string FocusHelp = "The page an item window opens for this playbook’s work, at the earliest comment there that asks for it.";
     public const string ReturnOfHelp = "One playbook per line, such as dev:review-pr for dev:review-pr-followup. Returned also counts the ticket’s earlier work items with these playbooks.";

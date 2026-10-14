@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -925,7 +925,8 @@ export class Runtime {
           this.deps.log(`triage context for ${action.ticket.ref}: ${context.warning}`);
         }
 
-        const text = triageText(context.context, this.deps.now());
+        const stale = nothingNew(action.handled, context.activityAt);
+        const text = triageText(context.context, this.deps.now(), action.handled, stale);
         const result = await classify(
           {
             claudePath: this.deps.claudePath,
@@ -955,6 +956,7 @@ export class Runtime {
                 links: context.links ?? [],
                 focus: result.focus,
                 anchors: context.anchors ?? [],
+                stale,
               },
         );
         return;
@@ -1003,7 +1005,17 @@ function projectOf(cwd: string): string {
   return cwd.replace(/[^A-Za-z0-9]/g, '-').toLowerCase();
 }
 
-/** The source's triage context led by the current UTC time, in the form sources use, so triage can judge how recent each event is. */
-export function triageText(context: string, now: number): string {
-  return `Current time: ${new Date(now).toISOString().slice(0, 16).replace('T', ' ')} UTC\n\n${context}`;
+/**
+ * The source's triage context led by the current UTC time, in the form sources use, so triage can judge how recent each event is, then by
+ * the earlier work item's handling, saying when `stale` that nothing is newer (PRD R80).
+ */
+export function triageText(context: string, now: number, handled: HandledWork | null = null, stale = false): string {
+  const earlier = handled === null ? '' : `Earlier work: ${handled.playbook === null ? 'a work item' : `a ${handled.playbook} work item`} for this ticket handled the activity up to ${utc(handled.at)} UTC, so that activity is background.`;
+  const note = earlier === '' ? '' : `${earlier}${stale ? ' Nothing from anyone else in the activity below is newer, so nothing new asks for an action.' : ''}\n\n`;
+
+  return `Current time: ${utc(now)} UTC\n\n${note}${context}`;
+}
+
+function utc(time: number): string {
+  return new Date(time).toISOString().slice(0, 16).replace('T', ' ');
 }
