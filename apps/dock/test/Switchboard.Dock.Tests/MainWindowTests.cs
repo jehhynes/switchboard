@@ -585,6 +585,52 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void Tooltip_PointerMoved_OpensAtThePointerAwayFromTheEdgeAndAdjustsOnlyVertically()
+    {
+        var (window, _) = Open();
+        var close = window.FindControl<Button>("CloseButton")!;
+
+        var text = new TextBlock { Text = "Close the dock" };
+        ToolTip.SetTip(close, text);
+
+        window.MouseMove(new Point(30, 40));
+        ToolTip.SetIsOpen(close, true);
+        Dispatcher.UIThread.RunJobs();
+        var at = text.GetVisualAncestors().OfType<ToolTip>().Single().TranslatePoint(default, window);
+        var placement = Placement(close);
+        ToolTip.GetCustomPopupPlacementCallback(close)!(placement);
+
+        Assert.Equal(PlacementMode.Custom, ToolTip.GetPlacement(close));
+        // Below the pointer by the tooltip's default VerticalOffset of 20.
+        Assert.Equal(new Point(30, 60), at);
+        Assert.Equal(new Rect(30, 40, 1, 1), placement.AnchorRectangle);
+        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomRight, placement.Gravity);
+        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.FlipY | Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.SlideY, placement.ConstraintAdjustment);
+    }
+
+    [AvaloniaFact]
+    public void PlaceTip_DockOnRight_ExtendsLeftOfThePointer()
+    {
+        var target = new Button();
+        var placement = Placement(target);
+
+        MainWindow.PlaceTip(placement, dockOnRight: true, new Point(30, 40));
+
+        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupAnchor.TopLeft, placement.Anchor);
+        Assert.Equal(Avalonia.Controls.Primitives.PopupPositioning.PopupGravity.BottomLeft, placement.Gravity);
+    }
+
+    // Avalonia builds the placement only while positioning a popup, with the popup's default adjustments.
+    static Avalonia.Controls.Primitives.PopupPositioning.CustomPopupPlacement Placement(Visual target)
+    {
+        var placement = (Avalonia.Controls.Primitives.PopupPositioning.CustomPopupPlacement)Activator.CreateInstance(
+            typeof(Avalonia.Controls.Primitives.PopupPositioning.CustomPopupPlacement),
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null, [new Size(200, 30), default(Thickness), target], null)!;
+        placement.ConstraintAdjustment = Avalonia.Controls.Primitives.PopupPositioning.PopupPositionerConstraintAdjustment.All;
+        return placement;
+    }
+
+    [AvaloniaFact]
     public void TapPill_KeyAndPullRequest_OpenTheirLinksWithoutTheRowClick()
     {
         var (window, _) = Open();

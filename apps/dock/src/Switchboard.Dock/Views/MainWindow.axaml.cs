@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Switchboard.Dock.Hub;
@@ -35,7 +36,7 @@ public sealed partial class MainWindow : Window
     readonly HideDelay hideDelay = new();
     readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
     DispatcherTimer? hideTimer;
-    /// <summary>Where the pointer last moved or pressed, in window coordinates; a row's menu opens there.</summary>
+    /// <summary>Where the pointer last moved or pressed, in window coordinates; a row's menu and a tooltip open there.</summary>
     Point pointer;
     // The width the pointer has dragged to, in device-independent pixels, before rounding to physical pixels.
     double? dragged;
@@ -81,6 +82,14 @@ public sealed partial class MainWindow : Window
         // Alt+Tab or a VS Code status bar item (ShowRequested) shows a hidden dock.
         Activated += (_, _) => Expand();
         AddHandler(PointerPressedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
+        Styles.Add(new Style((x) => x.Is<Control>())
+        {
+            Setters =
+            {
+                new Setter(ToolTip.PlacementProperty, PlacementMode.Custom),
+                new Setter(ToolTip.CustomPopupPlacementCallbackProperty, (CustomPopupPlacementCallback)((placement) => PlaceTip(placement, model.GripOnLeft, pointer))),
+            },
+        });
         AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
         // A pressed button handles the press, so it starts no drag.
         GroupList.AddHandler(PointerPressedEvent, OnListPressed);
@@ -660,6 +669,15 @@ public sealed partial class MainWindow : Window
         var at = e.TryGetPosition(this, out _) ? pointer : target.TranslatePoint(default, this) ?? default;
 
         RowMenu(MenuOf(row.Row), model.GripOnLeft, at).Open(this);
+    }
+
+    /// <summary>A tooltip at the pointer, placed as a row's menu is, because the default horizontal slide moved it beside the dock.</summary>
+    internal static void PlaceTip(CustomPopupPlacement placement, bool dockOnRight, Point at)
+    {
+        placement.AnchorRectangle = new Rect(at, new Size(1, 1));
+        placement.Anchor = PopupAnchor.TopLeft;
+        placement.Gravity = dockOnRight ? PopupGravity.BottomLeft : PopupGravity.BottomRight;
+        placement.ConstraintAdjustment = PopupPositionerConstraintAdjustment.FlipY | PopupPositionerConstraintAdjustment.SlideY;
     }
 
     /// <summary>
