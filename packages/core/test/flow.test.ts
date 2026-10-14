@@ -1115,9 +1115,9 @@ describe('operator actions', () => {
 });
 
 describe('ad-hoc', () => {
-  it('starts the typed prompt in the chosen repo as the operator, numbering tickets locally', () => {
+  it('starts the typed prompt in the chosen repo as the operator when asked to, numbering tickets locally', () => {
     const h = new Harness({ settings: settings({ sessions: { concurrency: 1 } }) });
-    const start = only(h.act({ type: 'adhoc', prompt: '  Write hello.txt\nthen report done', repoRoot: 'D:/scratch' }), 'start-session');
+    const start = only(h.act({ type: 'adhoc', prompt: '  Write hello.txt\nthen report done', repoRoot: 'D:/scratch', start: true }), 'start-session');
 
     expect(start).toEqual({
       type: 'start-session',
@@ -1135,12 +1135,24 @@ describe('ad-hoc', () => {
     expect(h.store.ticket(1)).toMatchObject({ source: 'adhoc', sourceKey: '1', title: 'Write hello.txt', repoRoot: 'D:/scratch' });
     expect(h.item(1)).toMatchObject({ playbook: null, taskPrompt: '  Write hello.txt\nthen report done', status: 'running' });
 
-    h.act({ type: 'adhoc', prompt: 'Second', repoRoot: 'D:/scratch' });
+    h.act({ type: 'adhoc', prompt: 'Second', repoRoot: 'D:/scratch', start: true });
     expect(h.store.ticket(2)).toMatchObject({ sourceKey: '2', ref: '#2' });
     expect(h.status(2)).toBe('queued');
 
     expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('The work item has an active session.');
     expect(h.send({ type: 'retriage', workItemId: 2 }).refused).toBe('An ad-hoc work item is not triaged.');
+  });
+
+  it('leaves the work item unstarted until Start when not asked to start', () => {
+    const h = new Harness();
+
+    expect(h.act({ type: 'adhoc', prompt: 'Write hello.txt', repoRoot: 'D:/scratch' })).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'unstarted', queuedAt: null, runStartedAt: null, taskPrompt: 'Write hello.txt' });
+
+    const start = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
+
+    expect(start).toMatchObject({ workItemId: 1, kind: 'task', cwd: 'D:/scratch', prompt: 'Write hello.txt' });
+    expect(h.status(1)).toBe('running');
   });
 
   it('refuses an empty prompt or no repo', () => {
@@ -1409,7 +1421,7 @@ describe('agents (PRD R22)', () => {
   it("takes sessions.provider for a playbook that names none and for an ad-hoc prompt, and a playbook's own mode and model over the provider's", () => {
     const h = new Harness({ settings: settings({ sessions: { provider: 'codex' } }), playbooks: playbooks(['triage:github', 'dev:question']) });
 
-    const adhoc = only(h.act({ type: 'adhoc', prompt: 'Fix it', repoRoot: 'D:/git/widgets' }), 'start-session');
+    const adhoc = only(h.act({ type: 'adhoc', prompt: 'Fix it', repoRoot: 'D:/git/widgets', start: true }), 'start-session');
 
     expect(adhoc).toMatchObject({ provider: 'codex', permissionMode: 'bypassPermissions', model: null });
 

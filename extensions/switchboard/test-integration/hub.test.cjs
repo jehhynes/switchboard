@@ -227,7 +227,7 @@ describe("the notification of work on the operator's turn (PRD R65)", () => {
   async function failAdhoc(title) {
     const hub = extension.hub();
 
-    assert.strictEqual((await call(hub.port, '/action', hub.token, 'POST', { type: 'adhoc', prompt: title, repoRoot: missingRepo })).status, 200);
+    assert.strictEqual((await call(hub.port, '/action', hub.token, 'POST', { type: 'adhoc', prompt: title, repoRoot: missingRepo, start: true })).status, 200);
 
     const item = await until(() => extension.state()?.workItems.find((entry) => entry.ticket.title === title && entry.status === 'failed'), `${title} never reached the window as failed`);
 

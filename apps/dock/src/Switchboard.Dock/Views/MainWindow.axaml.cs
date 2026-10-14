@@ -957,46 +957,25 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    void OnAdhocClicked(object? sender, RoutedEventArgs e)
+    /// <summary>Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked.</summary>
+    async void OnAdhocClicked(object? sender, RoutedEventArgs e)
     {
-        if (model.RepoRoots.Count == 0)
+        if (model.RepoRoots.Count == 0 || model.AdhocRepo is not { } repo)
         {
             model.Status = "Set a repoRoot on a source to start an ad-hoc session.";
             return;
         }
 
-        model.AdhocOpen = !model.AdhocOpen;
-    }
+        model.Status = null;
 
-    /// <summary>Starts the ad-hoc session (PRD R6); a refusal keeps the form and its prompt.</summary>
-    async void OnAdhocStart(object? sender, RoutedEventArgs e)
-    {
-        var prompt = model.AdhocPrompt.Trim();
+        var created = await AdhocDialog.Ask(this, [.. model.RepoRoots], repo, (prompt, repoRoot, start) =>
+            hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start }));
 
-        if (prompt == "" || model.AdhocRepo is not { } repo || model.AdhocBusy)
+        if (created is not null)
         {
-            return;
-        }
-
-        model.AdhocBusy = true;
-
-        try
-        {
-            model.Status = await hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = model.AdhocPrompt, ["repoRoot"] = repo });
-        }
-        finally
-        {
-            model.AdhocBusy = false;
-        }
-
-        if (model.Status is null)
-        {
-            model.AdhocPrompt = "";
-            model.AdhocOpen = false;
+            model.AdhocRepo = created;
         }
     }
-
-    void OnAdhocCancel(object? sender, RoutedEventArgs e) => model.AdhocOpen = false;
 
     /// <summary>Opens the Settings window (PRD R54), or brings the open one forward.</summary>
     async void OnSettingsClicked(object? sender, RoutedEventArgs e)

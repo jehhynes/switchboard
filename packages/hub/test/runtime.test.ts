@@ -508,7 +508,7 @@ describe('Runtime', () => {
     });
     const { runtime, store } = setup(config(), () => T0, { claude: runner });
 
-    runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
     runtime.readMarkers();
     await new Promise((done) => setImmediate(done));
@@ -959,7 +959,7 @@ describe('Runtime', () => {
   it('reconciles at startup and installs hooks when enabled', async () => {
     const { store, runtime } = setup(config({ installHooks: true }));
     store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
-    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch' });
+    runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
     await runtime.settled();
     store.updateSession('s1', { state: 'starting', shortId: null });
 
@@ -987,7 +987,7 @@ describe('Runtime', () => {
     const cfg = config({ provider: 'codex' });
     const { store, runtime } = setup(cfg, () => T0, undefined, codex);
 
-    runtime.send({ type: 'adhoc', prompt: '/sb-plan 1', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: '/sb-plan 1', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
 
     expect(codex.spawned[0]!.slice(0, 2)).toEqual(['exec', '--json']);
@@ -1011,7 +1011,7 @@ describe('Runtime', () => {
     const codex = new FakeCodex();
     const { store, runtime, logs } = setup(config({ provider: 'codex' }), () => T0, undefined, codex);
 
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
 
     // As a hub that stopped before the thread appeared would leave it.
@@ -1039,7 +1039,7 @@ describe('Runtime', () => {
     await runtime.pollSource('github');
     await runtime.settled();
     runtime.reload({ ...config({ provider: 'codex' }), playbooks: PLAYBOOKS });
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
     expect(store.session('s2')).toMatchObject({ provider: 'codex', state: 'running' });
 
@@ -1060,7 +1060,7 @@ describe('Runtime', () => {
     await runtime.pollSource('github');
     await runtime.settled();
     runtime.reload({ ...config({ concurrency: 1, provider: 'codex' }), playbooks: PLAYBOOKS });
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
 
     expect(store.workItem(2)).toMatchObject({ status: 'queued' });
@@ -1073,7 +1073,7 @@ describe('Runtime', () => {
     const log = join(home, '.switchboard', 'codex', 's1.jsonl');
     const opens = () => controlsOf(runtime.snapshot().workItems[0]!).filter((control) => control.message['type'] === 'open-question');
 
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
     expect(await runtime.report({ sessionId: 's1', kind: 'question', text: 'Which tree?' })).toEqual({ refused: null });
     expect(store.session('s1')!.question).toEqual({ id: 's2', text: 'Which tree?' });
@@ -1105,7 +1105,7 @@ describe('Runtime', () => {
       const codex = new FakeCodex();
       const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, undefined, codex);
 
-      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
       await runtime.settled();
 
       const entered = deferred();
@@ -1133,7 +1133,7 @@ describe('Runtime', () => {
       const cfg = config({ provider: 'codex', concurrency: 1 });
       const { store, runtime } = setup(cfg, () => T0, undefined, codex);
 
-      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+      runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
       await runtime.settled();
       await runtime.report({ sessionId: 's1', kind: 'approval', prompt: '/sb-ship 1', summary: 'Ship it', report: null });
       await runtime.report({ sessionId: 's1', kind: 'question', text: 'Ship now?' });
@@ -1145,7 +1145,7 @@ describe('Runtime', () => {
       expect(store.workItem(1)).toMatchObject({ status: 'awaiting-approval', approvalPrompt: '/sb-ship 1' });
       expect(store.session('s1')).toMatchObject({ state: 'waiting' });
 
-      runtime.send({ type: 'adhoc', prompt: 'Other work', repoRoot: 'D:/git/widgets' });
+      runtime.send({ type: 'adhoc', prompt: 'Other work', repoRoot: 'D:/git/widgets', start: true });
       await runtime.settled();
       expect(store.workItem(2)).toMatchObject({ status: 'running' });
     });
@@ -1155,7 +1155,7 @@ describe('Runtime', () => {
     const codex = new FakeCodex();
     const { store, runtime } = setup(config({ provider: 'codex' }), () => T0, undefined, codex);
 
-    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets' });
+    runtime.send({ type: 'adhoc', prompt: 'Work', repoRoot: 'D:/git/widgets', start: true });
     await runtime.settled();
     await runtime.readRoster();
 
@@ -1591,7 +1591,7 @@ describe('forks (PRD R78)', () => {
     const fake = forking();
     const setUp = setup(config(), () => T0, { claude: fake.runner });
 
-    setUp.runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets' });
+    setUp.runtime.send({ type: 'adhoc', prompt: 'test', repoRoot: 'D:/git/widgets', start: true });
     await setUp.runtime.settled();
     // The turn ends, and the release stop ends the background process.
     await setUp.runtime.readRoster();

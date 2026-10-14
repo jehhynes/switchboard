@@ -143,7 +143,8 @@ export type FlowEvent =
   | { type: 'stop-succeeded'; sessionId: string; reason: StopReason; shortId?: string | null }
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string; shortId?: string | null }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
-  | { type: 'adhoc'; prompt: string; repoRoot: string }
+  /** `start` queues the work item to run now; otherwise it waits `unstarted` for Start (PRD R6). */
+  | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean }
   /** A live Claude session the operator started outside Switchboard, as the roster lists it (PRD R81). */
   | { type: 'register'; nativeSessionId: string; shortId: string; cwd: string; title: string }
   | { type: 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
@@ -324,7 +325,7 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
     case 'worktree-found':
       return { path: event.path, branch: event.branch };
     case 'adhoc':
-      return { repoRoot: event.repoRoot };
+      return { repoRoot: event.repoRoot, start: event.start === true };
     case 'register':
       return { cwd: event.cwd };
     case 'start':
@@ -470,7 +471,7 @@ class Flow {
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
-        return this.adhoc(event.prompt, event.repoRoot);
+        return this.adhoc(event.prompt, event.repoRoot, event.start === true);
       case 'register':
         return this.register(event);
       case 'start':
@@ -672,7 +673,7 @@ class Flow {
     }
   }
 
-  private adhoc(prompt: string, repoRoot: string): void {
+  private adhoc(prompt: string, repoRoot: string, start: boolean): void {
     const title = firstLine(prompt);
 
     if (title === '') {
@@ -683,7 +684,7 @@ class Flow {
       throw new Refusal('Choose a repo for the prompt.');
     }
 
-    this.insertAdhoc(prompt, title, repoRoot, null, 'queued');
+    this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted');
   }
 
   /**
@@ -761,7 +762,7 @@ class Flow {
   }
 
   /**
-   * An ad-hoc ticket and work item: queued when the operator typed the prompt, unstarted when a session reported it, and running, with no
+   * An ad-hoc ticket and work item: queued when the operator chose Start automatically, otherwise unstarted, and running, with no
    * prompt, for a registered session (PRD R6, R68, R81).
    */
   private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running'): WorkItem {

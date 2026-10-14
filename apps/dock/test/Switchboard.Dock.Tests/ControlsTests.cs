@@ -200,50 +200,83 @@ public sealed class ControlsTests
         Assert.False(model.Groups.Single((group) => group.Key == "done").IsOpen);
     }
 
+    static Window DialogOf(Window window) => Assert.Single(window.OwnedWindows);
+
+    static T Named<T>(Window dialog, string name) where T : Control => dialog.GetVisualDescendants().OfType<T>().Single((control) => control.Name == name);
+
     [AvaloniaFact]
-    public void Adhoc_PromptStarted_PostsItAndClosesTheForm()
+    public void Adhoc_PromptCreated_PostsItUnstartedAndClosesTheDialog()
     {
         var (window, model) = Open();
 
         Click(window.FindControl<Button>("AdhocButton")!);
-        Assert.True(window.FindControl<StackPanel>("AdhocForm")!.IsVisible);
-        Assert.True(window.FindControl<ComboBox>("AdhocRepoBox")!.IsVisible);
+        var dialog = DialogOf(window);
 
-        model.AdhocRepo = "D:/git/support";
-        model.AdhocPrompt = "Check the log";
+        Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
+        Assert.False(Named<CheckBox>(dialog, "AdhocStartAutomatically").IsChecked);
+        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+
+        Named<ComboBox>(dialog, "AdhocRepoBox").SelectedItem = "D:/git/support";
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
         hub.ActReplies.Enqueue(null);
-        Click(window.FindControl<Button>("AdhocStart")!);
+        Click(Named<Button>(dialog, "AdhocCreate"));
 
-        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/support\"}"], hub.Calls);
-        Assert.False(model.AdhocOpen);
-        Assert.Equal("", model.AdhocPrompt);
+        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/support\",\"start\":false}"], hub.Calls);
+        Assert.Empty(window.OwnedWindows);
+        Assert.Equal("D:/git/support", model.AdhocRepo);
     }
 
     [AvaloniaFact]
-    public void Adhoc_Refused_KeepsTheFormAndPrompt()
+    public void Adhoc_StartAutomaticallyChecked_PostsStart()
+    {
+        var (window, _) = Open();
+
+        Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
+
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
+        Named<CheckBox>(dialog, "AdhocStartAutomatically").IsChecked = true;
+        hub.ActReplies.Enqueue(null);
+        Click(Named<Button>(dialog, "AdhocCreate"));
+
+        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/widgets\",\"start\":true}"], hub.Calls);
+        Assert.Empty(window.OwnedWindows);
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_Refused_KeepsTheDialogAndShowsTheReason()
     {
         var (window, model) = Open();
 
-        model.AdhocOpen = true;
-        model.AdhocPrompt = "Check the log";
-        hub.ActReplies.Enqueue("D:/elsewhere is not a configured repo root.");
-        Click(window.FindControl<Button>("AdhocStart")!);
+        Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
 
-        Assert.Equal("D:/elsewhere is not a configured repo root.", model.Status);
-        Assert.True(model.AdhocOpen);
-        Assert.Equal("Check the log", model.AdhocPrompt);
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
+        hub.ActReplies.Enqueue("D:/elsewhere is not a configured repo root.");
+        Click(Named<Button>(dialog, "AdhocCreate"));
+
+        Assert.Same(dialog, DialogOf(window));
+        Assert.True(Named<TextBlock>(dialog, "AdhocError").IsVisible);
+        Assert.Equal("D:/elsewhere is not a configured repo root.", Named<TextBlock>(dialog, "AdhocError").Text);
+        Assert.Equal("Check the log", Named<TextBox>(dialog, "AdhocPromptBox").Text);
+        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
         Assert.Equal("D:/git/widgets", model.AdhocRepo);
     }
 
     [AvaloniaFact]
-    public void Adhoc_EmptyPrompt_PostsNothing()
+    public void Adhoc_EmptyPromptOrCancel_PostsNothing()
     {
-        var (window, model) = Open();
+        var (window, _) = Open();
 
-        model.AdhocOpen = true;
-        model.AdhocPrompt = "   ";
-        Click(window.FindControl<Button>("AdhocStart")!);
+        Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
 
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "   ";
+        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+        Click(Named<Button>(dialog, "AdhocCreate"));
+        Click(Named<Button>(dialog, "AdhocCancel"));
+
+        Assert.Empty(window.OwnedWindows);
         Assert.Empty(hub.Calls);
     }
 
@@ -254,19 +287,20 @@ public sealed class ControlsTests
 
         Click(window.FindControl<Button>("AdhocButton")!);
 
-        Assert.False(model.AdhocOpen);
+        Assert.Empty(window.OwnedWindows);
         Assert.Equal("Set a repoRoot on a source to start an ad-hoc session.", model.Status);
     }
 
     [AvaloniaFact]
     public void Adhoc_OneRepoRoot_AsksOnlyForThePrompt()
     {
-        var (window, model) = Open(Fixtures.View with { RepoRoots = ["D:/git/widgets"] });
+        var (window, _) = Open(Fixtures.View with { RepoRoots = ["D:/git/widgets"] });
 
         Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
 
-        Assert.False(window.FindControl<ComboBox>("AdhocRepoBox")!.IsVisible);
-        Assert.Equal("D:/git/widgets", model.AdhocRepo);
+        Assert.False(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
+        Assert.Equal("D:/git/widgets", Named<ComboBox>(dialog, "AdhocRepoBox").SelectedItem);
     }
 
     [AvaloniaFact]
@@ -314,25 +348,53 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void Adhoc_StartClickedTwiceWhileTheHubAnswers_PostsOnce()
+    public void Adhoc_CreateClickedTwiceWhileTheHubAnswers_PostsOnce()
     {
-        var (window, model) = Open();
-        var start = window.FindControl<Button>("AdhocStart")!;
+        var (window, _) = Open();
 
-        model.AdhocOpen = true;
-        model.AdhocPrompt = "Check the log";
+        Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
+        var create = Named<Button>(dialog, "AdhocCreate");
+
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
         hub.ActReplies.Enqueue(null);
         hub.HoldAct = new TaskCompletionSource();
-        Click(start);
+        Click(create);
 
-        Assert.False(start.IsEnabled);
-        Click(start);
+        Assert.False(create.IsEnabled);
+        Click(create);
         hub.HoldAct.SetResult();
         Dispatcher.UIThread.RunJobs();
 
         Assert.Single(hub.Calls);
-        Assert.True(start.IsEnabled);
-        Assert.False(model.AdhocOpen);
+        Assert.Empty(window.OwnedWindows);
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_ClosedWhileTheHubAnswers_StaysOpenToShowTheRefusal()
+    {
+        var (window, _) = Open();
+
+        Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
+
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
+        hub.ActReplies.Enqueue("D:/elsewhere is not a configured repo root.");
+        hub.HoldAct = new TaskCompletionSource();
+        Click(Named<Button>(dialog, "AdhocCreate"));
+
+        Assert.False(Named<Button>(dialog, "AdhocCancel").IsEnabled);
+        dialog.Close();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Same(dialog, DialogOf(window));
+
+        hub.HoldAct.SetResult();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("D:/elsewhere is not a configured repo root.", Named<TextBlock>(dialog, "AdhocError").Text);
+        Assert.True(Named<Button>(dialog, "AdhocCancel").IsEnabled);
+        Click(Named<Button>(dialog, "AdhocCancel"));
+        Assert.Empty(window.OwnedWindows);
     }
 
     [AvaloniaFact]

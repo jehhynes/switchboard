@@ -340,14 +340,6 @@
           </Button>
         </Grid>
         <TextBox Name="SearchBox" Text="{Binding Filter}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,8" FontSize="13" />
-        <StackPanel Name="AdhocForm" IsVisible="{Binding AdhocOpen}" Spacing="4" Margin="0,0,8,8">
-          <ComboBox Name="AdhocRepoBox" ItemsSource="{Binding RepoRoots}" SelectedItem="{Binding AdhocRepo}" IsVisible="{Binding AdhocChoosesRepo}" HorizontalAlignment="Stretch" />
-          <TextBox Name="AdhocPromptBox" Text="{Binding AdhocPrompt}" PlaceholderText="Prompt for a new session" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
-          <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
-            <Button Name="AdhocCancel" Click="OnAdhocCancel">Cancel</Button>
-            <Button Name="AdhocStart" Classes="accent" IsEnabled="{Binding AdhocIdle}" Click="OnAdhocStart">Start</Button>
-          </StackPanel>
-        </StackPanel>
       </StackPanel>
       <TextBlock Name="StatusLine" DockPanel.Dock="Bottom" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}"
                  TextWrapping="Wrap" Margin="8" Classes="warning" />

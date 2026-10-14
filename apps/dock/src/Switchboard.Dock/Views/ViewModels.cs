@@ -37,10 +37,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     string? selected;
     string filter = "";
     bool searchOpen;
-    bool adhocOpen;
-    string adhocPrompt = "";
     string? adhocRepo;
-    bool adhocBusy;
 
     public DockSettings Settings => settings;
 
@@ -130,40 +127,12 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
     }
 
-    /// <summary>Whether the New Ad-hoc Session form shows.</summary>
-    public bool AdhocOpen
-    {
-        get => adhocOpen;
-        set => Set(ref adhocOpen, value);
-    }
-
-    public string AdhocPrompt
-    {
-        get => adhocPrompt;
-        set => Set(ref adhocPrompt, value ?? "");
-    }
-
+    /// <summary>The repo the New Ad-hoc Session window offers first: the last one used, else the first repo root.</summary>
     public string? AdhocRepo
     {
         get => adhocRepo;
         set => Set(ref adhocRepo, value);
     }
-
-    /// <summary>True while a Start waits for the hub, so a second click cannot start a second session.</summary>
-    public bool AdhocBusy
-    {
-        get => adhocBusy;
-        set
-        {
-            Set(ref adhocBusy, value);
-            Changed(nameof(AdhocIdle));
-        }
-    }
-
-    public bool AdhocIdle => !adhocBusy;
-
-    /// <summary>The form asks for the repo only when there is more than one (PRD R6).</summary>
-    public bool AdhocChoosesRepo => RepoRoots.Count > 1;
 
     /// <summary>What the last click could not do, shown until the next click.</summary>
     public string? Status
@@ -228,7 +197,6 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
             }
 
             AdhocRepo = RepoRoots.Contains(AdhocRepo ?? "") ? AdhocRepo : RepoRoots.FirstOrDefault();
-            Changed(nameof(AdhocChoosesRepo));
         }
 
         Notes.Clear();
