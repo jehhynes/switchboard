@@ -123,7 +123,7 @@
     <Style Selector="Border.row StackPanel.actions.empty">
       <Setter Property="IsVisible" Value="False" />
     </Style>
-    <!-- Group headings are a tinted bar of the focus blue, and Done's date bands a lighter tint with a left accent, as in the VS Code panel. -->
+    <!-- Group headings are a tinted bar of the focus blue, as in the VS Code panel. -->
     <Style Selector="Border.group">
       <Setter Property="Background" Value="{DynamicResource DockGroupBar}" />
       <Setter Property="Padding" Value="6,5,8,5" />
@@ -135,16 +135,25 @@
     <Style Selector="TextBlock.group-icon">
       <Setter Property="FontSize" Value="16" />
     </Style>
+    <!-- Done's date bands are a muted label and a rule, with no tint or left edge, so they do not look like a row's status stripe. -->
     <Style Selector="Border.band">
-      <Setter Property="Background" Value="{DynamicResource DockBandBar}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource DockFocus}" />
-      <Setter Property="BorderThickness" Value="3,0,0,0" />
-      <Setter Property="Padding" Value="5,3,8,3" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="8,3" />
       <Setter Property="Margin" Value="0,6,0,0" />
       <Setter Property="Cursor" Value="Hand" />
     </Style>
     <Style Selector="Border.band:pointerover">
-      <Setter Property="Background" Value="{DynamicResource DockBandBarHover}" />
+      <Setter Property="Background" Value="{DynamicResource DockHover}" />
+    </Style>
+    <Style Selector="Border.band TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
+    </Style>
+    <Style Selector="Border.band-rule">
+      <Setter Property="Height" Value="1" />
+      <Setter Property="Margin" Value="8,0,0,0" />
+      <Setter Property="Background" Value="{DynamicResource DockMuted}" />
+      <Setter Property="Opacity" Value="0.3" />
+      <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <!-- A rule across the top of each row after the first in its band. -->
     <Style Selector="Border.row">
@@ -377,10 +386,11 @@
                           <StackPanel>
                             <!-- Done's date bands (PRD R27); other groups have one band with no heading. -->
                             <Border Classes="band" IsVisible="{Binding HasTitle}" Tapped="OnBandTapped">
-                              <Grid ColumnDefinitions="Auto,Auto,*">
+                              <Grid ColumnDefinitions="Auto,Auto,Auto,*">
                                 <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
                                 <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="12" Classes="muted" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="12" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                <Border Grid.Column="3" Classes="band-rule" />
                               </Grid>
                             </Border>
                     <ItemsControl ItemsSource="{Binding Rows}" IsVisible="{Binding ShowsRows}">

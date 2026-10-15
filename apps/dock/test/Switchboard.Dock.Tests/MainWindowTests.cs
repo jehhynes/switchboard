@@ -406,6 +406,22 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void OpenDone_RecordedView_DrawsBandsAsMutedLabelAndRuleWithoutStripe()
+    {
+        var (window, _) = Open(new DockSettings { Groups = { ["done"] = true } });
+        var band = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("band") && border.IsEffectivelyVisible);
+        var title = band.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Text == "Today");
+        var rule = band.GetVisualDescendants().OfType<Border>().Single((border) => border.Classes.Contains("band-rule"));
+
+        Assert.Equal(default, band.BorderThickness);
+        Assert.Equal(Colors.Transparent, Assert.IsAssignableFrom<ISolidColorBrush>(band.Background).Color);
+        Assert.Equal(window.FindResource(window.ActualThemeVariant, "DockMuted"), title.Foreground);
+        Assert.True(rule.IsEffectivelyVisible);
+        Assert.Equal(1, rule.Bounds.Height);
+        Assert.True(rule.Bounds.Width > band.Bounds.Width / 2);
+    }
+
+    [AvaloniaFact]
     public void SelectRow_TwoLineRowWithButton_KeepsTheRowHeight()
     {
         var (window, model) = Open();
