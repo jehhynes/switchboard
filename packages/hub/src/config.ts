@@ -100,6 +100,19 @@ export function checkSettings(value: unknown, enabled: ReadonlySet<string>): str
     errors.push(...playbookErrors(name, entry, parsed.settings.sessions.provider).map((error) => `playbooks.${name}: ${error}`));
   }
 
+  const loaded = parsePlaybooks(playbooks, parsed.settings.sessions.provider).playbooks;
+
+  // A run of a playbook that is missing or needs a worktree would fail, because a schedule has no source to set one up (PRD R82).
+  for (const [name, schedule] of Object.entries(parsed.settings.schedules)) {
+    const playbook = loaded.get(schedule.playbook);
+
+    if (playbook?.kind !== 'task') {
+      errors.push(`schedules.${name}.playbook names no task playbook: ${schedule.playbook}.`);
+    } else if (playbook.requiresWorktree) {
+      errors.push(`schedules.${name}.playbook names ${schedule.playbook}, which needs a worktree that a schedule cannot set up.`);
+    }
+  }
+
   return errors;
 }
 

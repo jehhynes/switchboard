@@ -80,6 +80,7 @@ export function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): 
       { name: 'support:defect', description: 'Research a defect' },
     ],
     repoRoots: ['D:/git/widgets', 'D:/git/support'],
+    schedules: [{ name: 'self-review', playbook: 'ops:performance-review' }],
     sources: ['github'],
     sourceStates: [{ name: 'github', enabled: true }],
     namespaces: { github: 'dev', zoho: 'support', adhoc: '' },

@@ -2,17 +2,34 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Switchboard.Dock.Hub;
 
 namespace Switchboard.Dock.Views;
 
-/// <summary>The modal New Ad-hoc Session window (PRD R6). <c>AdhocCreate</c> sends the prompt; a refusal keeps the window open with the hub's reason.</summary>
+/// <summary>
+/// The modal New Ad-hoc Session window (PRD R6). <c>AdhocCreate</c> sends the prompt, or runs the schedule chosen in <c>AdhocRunBox</c> now (PRD R82);
+/// a refusal keeps the window open with the hub's reason.
+/// </summary>
 static class AdhocDialog
 {
-    /// <summary>Returns the repo of the created work item, or null when the operator cancelled.</summary>
+    /// <summary>
+    /// Returns the repo of the created work item, the given repo after a schedule's run, or null when the operator cancelled. With no repo, only a
+    /// schedule can run.
+    /// </summary>
     /// <param name="create">Sends the prompt, repo and Start automatically; returns the hub's refusal, or null.</param>
-    public static Task<string?> Ask(Window owner, IReadOnlyList<string> repos, string repo, Func<string, string, bool, Task<string?>> create)
+    /// <param name="run">Runs the named schedule now; returns the hub's refusal, or null.</param>
+    public static Task<string?> Ask(Window owner, IReadOnlyList<string> repos, string? repo, Func<string, string, bool, Task<string?>> create, IReadOnlyList<ScheduleEntry>? schedules = null, Func<string, Task<string?>>? run = null)
     {
         var dialog = new Window { Title = "New Ad-hoc Session", Width = 480, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var choices = schedules ?? [];
+        var runBox = new ComboBox
+        {
+            Name = "AdhocRunBox",
+            ItemsSource = (string[])["A prompt", .. choices.Select((entry) => $"Run {entry.Name} now · {entry.Playbook}")],
+            SelectedIndex = repo is null && choices.Count > 0 ? 1 : 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsVisible = choices.Count > 0 && run is not null,
+        };
         var repoBox = new ComboBox { Name = "AdhocRepoBox", ItemsSource = repos, SelectedItem = repo, HorizontalAlignment = HorizontalAlignment.Stretch, IsVisible = repos.Count > 1 };
         var prompt = new TextBox { Name = "AdhocPromptBox", PlaceholderText = "Prompt for a new session", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 120, MaxHeight = 400 };
         var start = new CheckBox { Name = "AdhocStartAutomatically", Content = "Start automatically", IsChecked = false };
@@ -21,7 +38,24 @@ static class AdhocDialog
         var cancel = new Button { Name = "AdhocCancel", Content = "Cancel", IsCancel = true };
         var busy = false;
 
-        void Enable() => go.IsEnabled = !busy && !string.IsNullOrWhiteSpace(prompt.Text);
+        ScheduleEntry? Chosen() => runBox.SelectedIndex > 0 ? choices[runBox.SelectedIndex - 1] : null;
+
+        void Enable() => go.IsEnabled = !busy && (Chosen() is not null || (repoBox.SelectedItem is string && !string.IsNullOrWhiteSpace(prompt.Text)));
+
+        // A schedule's run takes its playbook's prompt and the schedule's repo, and starts at once.
+        void Show()
+        {
+            var typed = Chosen() is null;
+
+            repoBox.IsVisible = typed && repos.Count > 1;
+            prompt.IsVisible = typed;
+            start.IsVisible = typed;
+            go.Content = typed ? "Create" : "Run";
+            error.IsVisible = false;
+            Enable();
+        }
+
+        runBox.SelectionChanged += (_, _) => Show();
 
         go.Classes.Add("accent");
         prompt.PropertyChanged += (_, e) =>
@@ -33,7 +67,11 @@ static class AdhocDialog
         };
         go.Click += async (_, _) =>
         {
-            if (busy || string.IsNullOrWhiteSpace(prompt.Text) || repoBox.SelectedItem is not string chosen)
+            var schedule = Chosen();
+
+            var chosen = repoBox.SelectedItem as string;
+
+            if (busy || (schedule is null && (string.IsNullOrWhiteSpace(prompt.Text) || chosen is null)))
             {
                 return;
             }
@@ -42,7 +80,7 @@ static class AdhocDialog
             cancel.IsEnabled = false;
             Enable();
 
-            var refused = await create(prompt.Text, chosen, start.IsChecked == true);
+            var refused = schedule is null ? await create(prompt.Text!, chosen!, start.IsChecked == true) : await run!(schedule.Name);
 
             busy = false;
             cancel.IsEnabled = true;
@@ -50,13 +88,14 @@ static class AdhocDialog
 
             if (refused is null)
             {
-                dialog.Close(chosen);
+                dialog.Close(schedule is null ? chosen : repo);
                 return;
             }
 
             error.Text = refused;
             error.IsVisible = true;
         };
+        Show();
         cancel.Click += (_, _) => dialog.Close(null);
         // A close while the hub answers would lose its refusal.
         dialog.Closing += (_, e) => e.Cancel = busy && e.CloseReason == WindowCloseReason.WindowClosing;
@@ -70,6 +109,7 @@ static class AdhocDialog
             Children =
             {
                 new TextBlock { Text = "New Ad-hoc Session", FontWeight = FontWeight.SemiBold },
+                runBox,
                 repoBox,
                 prompt,
                 start,

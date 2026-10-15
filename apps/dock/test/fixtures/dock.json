@@ -1048,5 +1048,11 @@
   "repoRoots": [
     "D:/git/widgets",
     "D:/git/support"
+  ],
+  "schedules": [
+    {
+      "name": "self-review",
+      "playbook": "ops:performance-review"
+    }
   ]
 }

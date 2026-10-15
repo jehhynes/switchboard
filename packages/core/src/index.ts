@@ -11,6 +11,7 @@ export * from './template.js';
 export * from './source.js';
 export * from './clip.js';
 export * from './snooze.js';
+export * from './schedule.js';
 export * from './githubLinks.js';
 export * from './queue.js';
 export * from './runner.js';

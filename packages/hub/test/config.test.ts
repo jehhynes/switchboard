@@ -53,6 +53,21 @@ describe('checkSettings', () => {
     ]);
   });
 
+  it('reports a schedule whose playbook is missing, is a triage playbook, or needs a worktree (PRD R82)', () => {
+    const schedule = (playbook: string) => ({ playbook, repoRoot: 'D:/git/widgets', every: 'week', day: 'mon', at: '09:00' });
+
+    expect(
+      checkSettings({
+        schedules: { ok: schedule('ops:cleanup'), gone: schedule('ops:gone'), triage: schedule('triage:github'), worktree: schedule('dev:develop') },
+        playbooks: { 'ops:cleanup': { description: 'Clean up', template: '/cleanup-worktrees' }, 'triage:github': { description: 'Triage', kind: 'triage', template: 'Classify.' }, 'dev:develop': TASK },
+      }, new Set()),
+    ).toEqual([
+      'schedules.gone.playbook names no task playbook: ops:gone.',
+      'schedules.triage.playbook names no task playbook: triage:github.',
+      'schedules.worktree.playbook names dev:develop, which needs a worktree that a schedule cannot set up.',
+    ]);
+  });
+
   it("reports each playbook's errors and unknown template variables under its name", () => {
     expect(
       checkSettings({

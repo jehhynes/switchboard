@@ -42,8 +42,11 @@ public sealed record PlaybookTable(IReadOnlyList<TableColumn> Columns, IReadOnly
 /// <summary>A playbook's row: its full and short name, its description, its cells, and its unsaved and error state.</summary>
 public sealed record TableRow(string Name, string Label, string Description, IReadOnlyList<TableCell?> Cells, bool Dirty, IReadOnlyList<string> Errors);
 
-/// <summary>The New playbook page's name fields and the name's error, shown once a name is typed or Create was pressed.</summary>
-public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<string> Namespaces, string? Error);
+/// <summary>
+/// The New playbook or New schedule page's name fields and the name's error, shown once a name is typed or Create was pressed. A schedule's name
+/// has no namespace (<see cref="Schedule"/>).
+/// </summary>
+public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<string> Namespaces, string? Error, bool Schedule = false);
 
 /// <summary>What each page of the Settings window and its bar show, from the editor state alone (PRD R54).</summary>
 public static class SettingsPages
@@ -63,6 +66,9 @@ public static class SettingsPages
         }
 
         nav.AddRange(missing.Select((kind) => new NavEntry("add", $"Add {SettingsFields.SourceLabel(kind)}", "add-source", kind)));
+        nav.Add(new NavEntry("heading", "Schedules"));
+        nav.AddRange(state.ScheduleNames.Select((name) => Item(state, $"schedule:{name}", name)));
+        nav.Add(new NavEntry("add", "New schedule", "navigate", "new-schedule", Current: state.Page == "new-schedule"));
         nav.Add(new NavEntry("heading", "Playbooks"));
 
         foreach (var group in state.PlaybookNames.GroupBy((full) => full.Split(':')[0]))
@@ -110,12 +116,14 @@ public static class SettingsPages
             return state.PlaybookDirty(page["playbook:".Length..]);
         }
 
-        if (page == "new-playbook" || state.Draft is null)
+        if (page is "new-playbook" or "new-schedule" || state.Draft is null)
         {
             return false;
         }
 
-        string[] paths = page == "general" ? ["sessions", "triage"] : [$"sources.{page["source:".Length..]}"];
+        string[] paths = page == "general" ? ["sessions", "triage"]
+            : page.StartsWith("schedule:", StringComparison.Ordinal) ? [$"schedules.{page["schedule:".Length..]}"]
+            : [$"sources.{page["source:".Length..]}"];
 
         return paths.Any((path) => Json(SettingsFields.GetAt(state.Draft, path)) != Json(SettingsFields.GetAt(state.Config.Settings.Value, path)));
     }
@@ -148,6 +156,23 @@ public static class SettingsPages
             var notes = state.Config.SourceKinds.Contains(name) ? [] : new[] { $"Switchboard has no source named {name}." };
 
             return SettingsPage(state, SettingsFields.SourceLabel(name), SettingsFields.SourceFields(state, name), [new PageButton("remove-source", "Remove source", true, Argument: name)], notes);
+        }
+
+        if (page.StartsWith("schedule:", StringComparison.Ordinal))
+        {
+            var name = page["schedule:".Length..];
+
+            return state.ScheduleNames.Contains(name)
+                ? SettingsPage(state, name, SettingsFields.ScheduleFields(state, name), [new PageButton("remove-schedule", "Remove schedule", true, Argument: name)], [])
+                : new PageView(name, state.Config.Settings.Path, [], [], [], "This schedule no longer exists.", [], null);
+        }
+
+        if (page == "new-schedule")
+        {
+            var (name, touched) = state.NewSchedule;
+            var error = name == "" && !touched ? null : state.NewScheduleError;
+
+            return new PageView("New schedule", null, [new PageButton("create", "Create", true, Primary: true)], [], [], null, [], new NewNameView("", name, [], error, Schedule: true));
         }
 
         if (page.StartsWith("namespace:", StringComparison.Ordinal))

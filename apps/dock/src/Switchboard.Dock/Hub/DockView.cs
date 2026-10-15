@@ -7,12 +7,15 @@ namespace Switchboard.Dock.Hub;
 
 // The hub's dock view (architecture.md § Dock), built by `dockView` in packages/hub/src/dock.ts; the dock adds no rules of its own.
 
-public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceState> Sources, IReadOnlyList<string> RepoRoots)
+public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceState> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null)
 {
     static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 
     public static DockView Parse(string json) => JsonSerializer.Deserialize<DockView>(json, Options) ?? throw new JsonException("The dock view is null.");
 }
+
+/// <summary>A schedule Run now can start, and the playbook it runs (PRD R82).</summary>
+public sealed record ScheduleEntry(string Name, string Playbook);
 
 /// <summary>A configured source and whether it is polled (PRD R3).</summary>
 public sealed record SourceState(string Name, bool Enabled);

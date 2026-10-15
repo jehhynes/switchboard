@@ -187,6 +187,8 @@ export interface DockView {
   sources: { name: string; enabled: boolean }[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
   repoRoots: string[];
+  /** The schedules the New Ad-hoc Session window can run now (PRD R82). */
+  schedules: { name: string; playbook: string }[];
 }
 
 /** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
@@ -217,6 +219,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     snooze: snoozeChoices(new Date(now)),
     sources: snapshot.sourceStates,
     repoRoots: snapshot.repoRoots,
+    schedules: snapshot.schedules,
   };
 }
 

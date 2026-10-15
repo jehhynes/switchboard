@@ -24,7 +24,7 @@ import { WindowQueue } from './windowQueue.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the dock may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 
@@ -133,6 +133,10 @@ export function parseAction(body: unknown): FlowEvent | null {
 
   if ((body['type'] === 'start' || body['type'] === 'pick') && body['guidance'] != null && typeof body['guidance'] !== 'string') {
     return null;
+  }
+
+  if (body['type'] === 'run-schedule') {
+    return typeof body['name'] === 'string' ? { type: 'run-schedule', name: body['name'] } : null;
   }
 
   if (body['type'] === 'move') {

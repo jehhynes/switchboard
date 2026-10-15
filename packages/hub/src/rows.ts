@@ -1,4 +1,4 @@
-import { activeSession, blocksOnYou, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion } from '@switchboard/core/group';
+import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion } from '@switchboard/core/group';
 import type { Provider } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -97,7 +97,8 @@ export function mainTitle(item: WorkItemView, control: Control): string {
 export function controlsOf(item: WorkItemView): Control[] {
   const controls: Control[] = [];
   const session = activeSession(item);
-  const adhoc = item.ticket.source === 'adhoc';
+  // Ad-hoc and scheduled work items name their prompt or playbook themselves, so there is nothing to triage (PRD R6, R82).
+  const untriaged = item.ticket.source === 'adhoc' || item.ticket.source === 'schedule';
   const action = (type: string) => ({ type: 'action', action: { type, workItemId: item.id } });
 
   if (item.status === 'unstarted') {
@@ -123,7 +124,7 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop') });
   }
 
-  if (item.status !== 'done' && session === null && !adhoc && item.status !== 'triaging') {
+  if (item.status !== 'done' && session === null && !untriaged && item.status !== 'triaging') {
     controls.push({ label: 'Triage again', icon: 'search', message: action('retriage') });
   }
 
@@ -159,7 +160,7 @@ function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control[
   const detail = [
     stops ? 'Its running session is stopped.' : null,
     `Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and ${PROVIDER_NAMES[item.sessions.at(-1)?.provider ?? 'claude']}'s session files stay.`,
-    item.ticket.source === 'adhoc' ? null : 'The ticket gets a new work item only when it is assigned to you again.',
+    item.ticket.source === 'adhoc' ? null : item.ticket.source === 'schedule' ? 'Its schedule makes the next work item at its next time or Run now.' : 'The ticket gets a new work item only when it is assigned to you again.',
   ];
 
   return { question: `Delete ${ticketKey(item.ticket)}?`, detail: detail.filter((text) => text !== null).join(' '), action: 'Delete' };
@@ -439,10 +440,10 @@ export function priorityTitle(triage: Rating): string | null {
   return isPriority(triage) ? `Immediacy: ${triage!.immediacy ?? '?'}   Severity: ${triage!.severity ?? '?'}` : null;
 }
 
-/** The playbook a row names: `<namespace>:triage` while triage runs, else the chosen playbook, `ad-hoc`, or empty before triage. */
+/** The playbook a row names: `<namespace>:triage` while triage runs, else the chosen playbook, an ad-hoc work item's origin, or empty before triage. */
 export function playbookText(entry: WorkItemView | PoolView, namespaces: Record<string, string>): string {
   if ('status' in entry) {
-    return entry.status === 'triaging' ? triageLabel(entry.ticket.source, namespaces) : (entry.playbook ?? (entry.ticket.source === 'adhoc' ? 'ad-hoc' : ''));
+    return entry.status === 'triaging' ? triageLabel(entry.ticket.source, namespaces) : (entry.playbook ?? (entry.ticket.source === 'adhoc' ? adhocLabel({ parentId: entry.parentId, prompted: entry.taskPrompt !== null }, entry.ticket) : ''));
   }
 
   // A snoozed ticket is never triaged, so a missing triage is not shown as running.

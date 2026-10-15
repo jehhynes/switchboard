@@ -68,6 +68,32 @@ function texts(entries: Entry[]): string[] {
 }
 
 describe('History model', () => {
+  it('says when a schedule came due and when its open run kept it from making another (PRD R82)', () => {
+    const store = Store.open(':memory:');
+    const settings: Settings = { ...SETTINGS, schedules: { cleanup: { playbook: 'dev:question', repoRoot: 'D:/git/widgets', every: 'day', day: null, at: 10 * 60 } } };
+    const tick = (now: number) => store.transaction(() => handle(store, { type: 'tick' }, { now, settings, playbooks: playbooks(), report: 'report', newSessionId: () => 's1' }));
+
+    tick(T0);
+    tick(T0 + 61 * MINUTE);
+    tick(T0 + 25 * 60 * MINUTE);
+
+    const view = historyView(JSON.parse(JSON.stringify(store.ticketHistory(1))) as TicketHistory, T0 + 25 * 60 * MINUTE);
+
+    expect(view.sections[0]!.title).toBe('dev:question');
+    expect(texts(view.sections[0]!.entries)).toEqual([`The schedule came due at ${timeText(T0 + 60 * MINUTE)}`]);
+    expect(texts(view.sections.at(-1)!.entries)).toEqual(['Switchboard first saw the ticket, assigned to you', `The schedule came due at ${timeText(T0 + 25 * 60 * MINUTE)}; it made no work item, because one is still open`]);
+  });
+
+  it('titles an ad-hoc section by how the work item was made (PRD R6, R68, R81)', () => {
+    const run = new Run();
+
+    run.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/git/widgets' });
+    run.send({ type: 'register', nativeSessionId: 'native-9', shortId: 'feed1234', cwd: 'D:/git/widgets', title: 'My session' });
+
+    expect(historyView(run.history(), run.now).sections[0]!.title).toBe('Ad-hoc prompt');
+    expect(historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections[0]!.title).toBe('Registered session');
+  });
+
   it("names each entry by the copy the session had then, and shows a fork waiting for the background process (PRD R78)", () => {
     const run = new Run();
     const fork = { sessionId: 's1', nativeSessionId: '9e8d7c6b-0000', shortId: '9e8d7c6b', state: 'running' as const, detail: null };

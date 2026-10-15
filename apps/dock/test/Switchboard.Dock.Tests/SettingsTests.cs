@@ -364,7 +364,7 @@ public sealed class SettingsPagesTests
         var nav = SettingsPages.Nav(SettingsConfigs.State());
 
         Assert.Equal(
-            ["heading Settings", "item Sessions and triage", "heading Sources", "item GitHub", "item Zoho Desk off", "add Add Forum", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook"],
+            ["heading Settings", "item Sessions and triage", "heading Sources", "item GitHub", "item Zoho Desk off", "add Add Forum", "heading Schedules", "add New schedule", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook"],
             nav.Select((entry) => $"{entry.Kind} {entry.Label}{(entry.Note is null ? "" : $" {entry.Note}")}"));
         Assert.True(nav[1].Current);
         Assert.Equal("add-source", nav[5].Command);
@@ -611,6 +611,84 @@ public sealed class SettingsPagesTests
         Assert.Empty(page.Buttons);
     }
 
+    /// <summary>A state whose settings hold one weekly schedule, <c>cleanup</c> (PRD R82).</summary>
+    static EditorState WithSchedule()
+    {
+        var state = SettingsConfigs.State();
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "schedules.cleanup", new JsonObject { ["playbook"] = "dev:review", ["repoRoot"] = "D:/git/widgets", ["every"] = "week", ["day"] = "fri", ["at"] = "12:00" }));
+        return state;
+    }
+
+    [Fact]
+    public void Nav_Schedule_ListsItUnderSchedulesAndMarksItsEditsAndErrors()
+    {
+        var state = WithSchedule();
+
+        state.Errors = ["schedules.cleanup.playbook names no task playbook: dev:gone."];
+
+        var entry = Assert.Single(SettingsPages.Nav(state), (entry) => entry.Argument == "schedule:cleanup");
+
+        Assert.Equal(("item", "cleanup", true, true), (entry.Kind, entry.Label, entry.Dirty, entry.HasErrors));
+        Assert.False(SettingsPages.PageDirty(state, "general"));
+    }
+
+    [Theory]
+    [InlineData(null, new[] { "playbook", "repoRoot", "every" })]
+    [InlineData("day", new[] { "playbook", "repoRoot", "every", "at" })]
+    [InlineData("week", new[] { "playbook", "repoRoot", "every", "day", "at" })]
+    [InlineData("month", new[] { "playbook", "repoRoot", "every", "day", "at" })]
+    public void ScheduleFields_Period_ShowsTheDayAndTimeItUses(string? every, string[] keys)
+    {
+        var state = WithSchedule();
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "schedules.cleanup.every", every is null ? null : JsonValue.Create(every)));
+
+        var fields = Assert.Single(SettingsFields.ScheduleFields(state, "cleanup")).Fields;
+
+        Assert.Equal(keys.Select((key) => $"schedules.cleanup.{key}"), fields.Select((field) => field.Path));
+        Assert.Equal(["", "dev:develop", "dev:review"], fields[0].Options!.Select((option) => option.Value));
+
+        if (every is "week" or "month")
+        {
+            Assert.Equal(every == "week" ? FieldKind.Select : FieldKind.Integer, fields[3].Kind);
+        }
+    }
+
+    [Fact]
+    public void Page_Schedule_PlacesItsErrorsOnItsFieldsAndOffersRemove()
+    {
+        var state = WithSchedule();
+
+        state.Page = "schedule:cleanup";
+        state.Errors = ["schedules.cleanup.at must be a time from 00:00 to 23:59, such as 09:00."];
+
+        var page = SettingsPages.Page(state);
+
+        Assert.Equal("cleanup", page.Title);
+        Assert.Empty(page.Errors);
+        Assert.Equal(["schedules.cleanup.at must be a time from 00:00 to 23:59, such as 09:00."], page.Sections[0].Fields.Single((field) => field.Field.Path == "schedules.cleanup.at").Errors);
+        Assert.Equal(("remove-schedule", "cleanup"), (page.Buttons[0].Command, page.Buttons[0].Argument));
+
+        state.Page = "schedule:gone";
+        Assert.Equal("This schedule no longer exists.", SettingsPages.Page(state).Message);
+    }
+
+    [Fact]
+    public void Page_NewSchedule_ShowsTheNameErrorOnlyOnceTyped()
+    {
+        var state = WithSchedule();
+
+        state.Page = "new-schedule";
+        Assert.Equal((true, null), (SettingsPages.Page(state).NewName!.Schedule, SettingsPages.Page(state).NewName!.Error));
+
+        state.NewSchedule = ("cleanup", false);
+        Assert.Equal("A schedule named cleanup already exists.", SettingsPages.Page(state).NewName!.Error);
+
+        state.NewSchedule = ("Self Review", false);
+        Assert.Equal("The name must be lowercase letters, digits and hyphens.", SettingsPages.Page(state).NewName!.Error);
+    }
+
     [Fact]
     public void Page_NewPlaybook_ShowsTheNameErrorOnlyOnceTyped()
     {
@@ -746,6 +824,44 @@ public sealed class SettingsEditorTests
         Assert.NotNull(check["playbooks"]!["dev:review"]);
         Assert.NotNull(check["sources"]!["github"]);
         Assert.True(editor.State!.Dirty);
+    }
+
+    [Fact]
+    public async Task Schedule_CreateEditPeriodAndRemove_ChangesOnlyTheDraft()
+    {
+        var editor = await Loaded();
+        var redraws = new List<bool>();
+
+        editor.Changed += redraws.Add;
+        editor.Navigate("new-schedule");
+        editor.Create();
+        Assert.Equal("The name must be lowercase letters, digits and hyphens.", SettingsPages.Page(editor.State!).NewName!.Error);
+
+        editor.EditNewName(null, "cleanup");
+        editor.Create();
+
+        Assert.Equal("schedule:cleanup", editor.State!.Page);
+        Assert.Equal("{}", editor.State.Draft!["schedules"]!["cleanup"]!.ToJsonString());
+
+        var every = SettingsFields.ScheduleFields(editor.State, "cleanup")[0].Fields.Single((field) => field.Path.EndsWith(".every", StringComparison.Ordinal));
+
+        editor.Edit(every, "week");
+        editor.Edit(SettingsFields.ScheduleFields(editor.State, "cleanup")[0].Fields.Single((field) => field.Path.EndsWith(".day", StringComparison.Ordinal)), "fri");
+        redraws.Clear();
+        editor.Edit(every, "month");
+
+        Assert.Equal("""{"every":"month"}""", editor.State.Draft!["schedules"]!["cleanup"]!.ToJsonString());
+        Assert.Equal([true], redraws);
+
+        editor.Edit(SettingsFields.ScheduleFields(editor.State, "cleanup")[0].Fields.Single((field) => field.Path.EndsWith(".at", StringComparison.Ordinal)), "09:00");
+        editor.Edit(every, "");
+        Assert.Equal("{}", editor.State.Draft!["schedules"]!["cleanup"]!.ToJsonString());
+
+        editor.RemoveSchedule("cleanup");
+
+        Assert.Equal("general", editor.State.Page);
+        Assert.Equal("{}", editor.State.Draft!["schedules"]!.ToJsonString());
+        Assert.Empty(hub.Calls);
     }
 
     [Fact]

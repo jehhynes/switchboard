@@ -48,6 +48,7 @@ describe('controlsOf', () => {
     expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'schedule' } }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
@@ -82,6 +83,7 @@ describe('controlsOf', () => {
     expect(confirm(item(7, { sessions: [session({ state: 'idle', released: true })] }))?.detail).toBe(`${kept} ${returns}`);
     expect(confirm(item(7, { status: 'done', sessions: [session({ state: 'ended' })] }))?.detail).toBe(`${kept} ${returns}`);
     expect(confirm(item(7, { status: 'failed', ticket: { ...item(7).ticket, source: 'adhoc' } }))?.detail).toBe(kept);
+    expect(confirm(item(7, { status: 'failed', ticket: { ...item(7).ticket, source: 'schedule' } }))?.detail).toBe(`${kept} Its schedule makes the next work item at its next time or Run now.`);
     expect(confirm(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).toBeNull();
   });
 

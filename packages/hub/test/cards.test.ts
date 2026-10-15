@@ -24,7 +24,7 @@ function triage(playbook: string | null, endedAt: number | null, error: string |
 }
 
 function snapshot(workItems: WorkItemView[], pool: PoolView[], sources: string[]): Snapshot {
-  return { workItems, pool, playbooks: [], repoRoots: [], sources, sourceStates: [], namespaces: { github: 'dev', zoho: 'support' }, configDir: '', errors: { settings: null, playbooks: [], hooks: null, sources: {} } };
+  return { workItems, pool, playbooks: [], repoRoots: [], schedules: [], sources, sourceStates: [], namespaces: { github: 'dev', zoho: 'support' }, configDir: '', errors: { settings: null, playbooks: [], hooks: null, sources: {} } };
 }
 
 const issue = (n: number) => `https://github.com/o/r/issues/${n}`;

@@ -357,6 +357,40 @@ public static partial class SettingsFields
         return sections;
     }
 
+    static readonly IReadOnlyList<FieldOption> Weekdays = new[] { "mon", "tue", "wed", "thu", "fri", "sat", "sun" }.Select((day) => new FieldOption(day, day)).ToList();
+
+    /// <summary>A schedule's fields (PRD R82); the day and time show only for the period that uses them.</summary>
+    public static IReadOnlyList<Section> ScheduleFields(EditorState state, string name)
+    {
+        var path = $"schedules.{name}";
+        var every = GetAt(state.SettingsValue, $"{path}.every") is JsonValue value && value.TryGetValue<string>(out var text) ? text : "";
+        var tasks = state.PlaybookNames.Where((entry) => state.PlaybookValue(entry)?.Kind == "task").Select((entry) => new FieldOption(entry, entry));
+        List<Field> fields =
+        [
+            new Field($"{path}.playbook", "Playbook", FieldKind.Select, "The task playbook each run starts. It cannot need a worktree.",
+                Options: WithCurrent([new FieldOption("", "None"), .. tasks], GetAt(state.SettingsValue, $"{path}.playbook"))),
+            new Field($"{path}.repoRoot", "Repo root", FieldKind.Text, "The directory its sessions run in."),
+            new Field($"{path}.every", "Runs", FieldKind.Select, "Off, it runs only when you choose it in New Ad-hoc Session.",
+                Options: [new FieldOption("", "Only by hand"), new FieldOption("day", "Every day"), new FieldOption("week", "Every week"), new FieldOption("month", "Every month")]),
+        ];
+
+        if (every == "week")
+        {
+            fields.Add(new Field($"{path}.day", "Day", FieldKind.Select, "", Options: WithCurrent(Weekdays, GetAt(state.SettingsValue, $"{path}.day"))));
+        }
+        else if (every == "month")
+        {
+            fields.Add(new Field($"{path}.day", "Day of the month", FieldKind.Integer, "1 to 31. A month without that day runs on its last day."));
+        }
+
+        if (every != "")
+        {
+            fields.Add(new Field($"{path}.at", "Time", FieldKind.Text, "Local time, 24-hour. A run whose time passed while Switchboard was stopped starts once when it starts again.", "09:00"));
+        }
+
+        return [new Section("Schedule", fields)];
+    }
+
     public static IReadOnlyList<Field> PlaybookFieldsOf(EditorState state, PlaybookFields playbook)
     {
         var sessions = state.SettingsValue;
@@ -422,7 +456,7 @@ public static partial class SettingsFields
         foreach (var path in paths)
         {
             var segments = path.Split('.');
-            var shortest = segments[0] == "sources" ? 2 : segments.Length;
+            var shortest = segments[0] is "sources" or "schedules" ? 2 : segments.Length;
 
             for (var length = segments.Length; length >= shortest; length--)
             {
@@ -440,12 +474,13 @@ public static partial class SettingsFields
     public static string? PlaybookFieldOfError(string error, IEnumerable<string> paths) =>
         paths.FirstOrDefault((path) => error.StartsWith($"{path} ", StringComparison.Ordinal)) ?? (error.Contains("template", StringComparison.OrdinalIgnoreCase) ? "template" : null);
 
-    /// <summary>Every settings field path of the general and source pages.</summary>
+    /// <summary>Every settings field path of the general, source and schedule pages.</summary>
     public static IReadOnlyList<string> AllSettingsPaths(EditorState state)
     {
         var sources = state.SettingsValue?["sources"] is JsonObject configured ? configured.Select((entry) => entry.Key).ToList() : [];
 
-        return GeneralFields(state).Concat(sources.SelectMany((name) => SourceFields(state, name))).SelectMany((section) => section.Fields).Select((field) => field.Path).ToList();
+        return GeneralFields(state).Concat(sources.SelectMany((name) => SourceFields(state, name))).Concat(state.ScheduleNames.SelectMany((name) => ScheduleFields(state, name)))
+            .SelectMany((section) => section.Fields).Select((field) => field.Path).ToList();
     }
 
     /// <summary>The page that holds each settings error's field; an error with no field maps to null and shows on every settings page.</summary>
@@ -458,7 +493,10 @@ public static partial class SettingsFields
         {
             var path = FieldOfError(error, paths);
 
-            pages[error] = path is null ? null : path.StartsWith("sources.", StringComparison.Ordinal) ? $"source:{path.Split('.')[1]}" : "general";
+            pages[error] = path is null ? null
+                : path.StartsWith("sources.", StringComparison.Ordinal) ? $"source:{path.Split('.')[1]}"
+                : path.StartsWith("schedules.", StringComparison.Ordinal) ? $"schedule:{path.Split('.')[1]}"
+                : "general";
         }
 
         return pages;

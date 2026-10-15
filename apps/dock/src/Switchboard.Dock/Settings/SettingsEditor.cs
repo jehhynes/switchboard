@@ -111,23 +111,41 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
                 return;
             }
         }
-        else if (page == "general" || page.StartsWith("source:", StringComparison.Ordinal))
+        else if (page == "general" || page.StartsWith("source:", StringComparison.Ordinal) || page.StartsWith("schedule:", StringComparison.Ordinal))
         {
             if (state.SettingsValue is not { } value)
             {
                 return;
             }
 
-            state.SetDraft(SettingsFields.SetAt(value, field.Path, SettingsFields.ReadField(field.Kind, text, isChecked, field.ListDefault is not null)));
+            var next = SettingsFields.SetAt(value, field.Path, SettingsFields.ReadField(field.Kind, text, isChecked, field.ListDefault is not null));
+
+            // A weekday and a day of the month are different values, so a new period starts without the old one's day; by hand takes no time.
+            if (Every(field.Path))
+            {
+                var schedule = field.Path[..^".every".Length];
+
+                next = SettingsFields.SetAt(next, $"{schedule}.day", null);
+
+                if (text == "")
+                {
+                    next = SettingsFields.SetAt(next, $"{schedule}.at", null);
+                }
+            }
+
+            state.SetDraft(next);
         }
         else
         {
             return;
         }
 
-        // The kind and the approval report decide which playbook fields show, and the agent which modes and defaults they offer.
-        Edited(field.Path is "kind" or "reports.approval" or "provider");
+        // The kind and the approval report decide which playbook fields show, the agent which modes and defaults they offer, and a schedule's
+        // period which of its day and time fields show.
+        Edited(field.Path is "kind" or "reports.approval" or "provider" || Every(field.Path));
     }
+
+    static bool Every(string path) => path.StartsWith("schedules.", StringComparison.Ordinal) && path.EndsWith(".every", StringComparison.Ordinal);
 
     /// <summary>A checkbox in a namespace page's table, for one of its playbooks.</summary>
     public void EditCell(string name, string path, bool isChecked)
@@ -174,11 +192,18 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         CheckSoon();
     }
 
-    /// <summary>The New playbook page's namespace or name; null leaves that part as it is.</summary>
+    /// <summary>The New playbook page's namespace or name, or the New schedule page's name; null leaves that part as it is.</summary>
     public void EditNewName(string? space, string? name)
     {
         if (State is not { } state)
         {
+            return;
+        }
+
+        if (state.Page == "new-schedule")
+        {
+            state.NewSchedule = (name ?? state.NewSchedule.Name, state.NewSchedule.Touched);
+            Changed?.Invoke(false);
             return;
         }
 
@@ -207,11 +232,43 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         }
     }
 
-    /// <summary>Adds the New playbook page's playbook to the draft and opens its page; refuses an invalid or taken name.</summary>
+    /// <summary>Removes a schedule from the draft; its work items stay, and Discard restores it.</summary>
+    public void RemoveSchedule(string name)
+    {
+        if (State?.SettingsValue is { } value)
+        {
+            State.SetDraft(SettingsFields.SetAt(value, $"schedules.{name}", null));
+            State.Page = "general";
+            Edited(true);
+        }
+    }
+
+    /// <summary>
+    /// Adds the New playbook page's playbook to the draft and opens its page, or on the New schedule page an empty schedule, whose errors name the
+    /// fields to fill; refuses an invalid or taken name.
+    /// </summary>
     public void Create()
     {
         if (State is not { } state)
         {
+            return;
+        }
+
+        if (state.Page == "new-schedule")
+        {
+            if (state.NewScheduleError is not null)
+            {
+                state.NewSchedule = (state.NewSchedule.Name, true);
+                Changed?.Invoke(false);
+                return;
+            }
+
+            var schedule = state.NewSchedule.Name.Trim();
+
+            state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, $"schedules.{schedule}", new JsonObject()));
+            state.NewSchedule = ("", false);
+            state.Page = $"schedule:{schedule}";
+            Edited(true);
             return;
         }
 

@@ -1216,6 +1216,31 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems).toMatchObject([{ status: 'running', playbook: 'dev:develop', triage: { playbook: 'dev:develop' } }]);
   });
 
+  it('runs a schedule now in its repo root, accepts its done report without a source read, and counts no earlier run as a return (PRD R82)', async () => {
+    const cfg = config();
+    cfg.settings.schedules = { cleanup: { playbook: 'ops:cleanup', repoRoot: 'D:/git/widgets', every: null, day: null, at: null } };
+    cfg.playbooks = new Map([...PLAYBOOKS, playbook('ops:cleanup', { description: 'Remove finished worktrees', reports: ['done'], template: '/cleanup-worktrees' })]);
+    const { store, cli, source, runtime } = setup(cfg);
+
+    expect(runtime.snapshot().schedules).toEqual([{ name: 'cleanup', playbook: 'ops:cleanup' }]);
+
+    for (const run of [1, 2]) {
+      expect(runtime.send({ type: 'run-schedule', name: 'cleanup' }).refused).toBeNull();
+      await runtime.settled();
+
+      const sessionId = `s${run}`;
+      const reads = source.polls;
+
+      expect(store.session(sessionId)).toMatchObject({ cwd: 'D:/git/widgets', state: 'running' });
+      expect(await runtime.report({ sessionId, kind: 'done' })).toEqual({ refused: null });
+      expect(source.polls).toBe(reads);
+      expect(runtime.snapshot().workItems.find((item) => item.sessions[0]?.id === sessionId)).toMatchObject({ status: 'done', returned: 0, ticket: { source: 'schedule', sourceKey: 'cleanup' } });
+      runtime.send({ type: 'roster', sessions: [], checked: [sessionId] });
+    }
+
+    expect(cli.calls.filter((call) => call[1] === '--bg')).toHaveLength(2);
+  });
+
   it('lists the pool oldest first with each rating, counts the started done work items of a returned ticket with the same playbook or one it is a return of, and hides a disabled source (PRD R50, R51)', async () => {
     const cfg = config();
     cfg.playbooks = new Map([...PLAYBOOKS, playbook('triage:github', { description: 'Triage', kind: 'triage', rates: true, template: 'Classify and rate.' })]);

@@ -36,7 +36,7 @@ export function playbooks(names: string[] = Object.keys(PLAYBOOKS), extra: Recor
   return result;
 }
 
-export function settings(patch: { sessions?: Partial<Settings['sessions']>; triage?: Partial<Settings['triage']> } = {}): Settings {
+export function settings(patch: { sessions?: Partial<Settings['sessions']>; triage?: Partial<Settings['triage']>; schedules?: Settings['schedules'] } = {}): Settings {
   return {
     sessions: { ...DEFAULT_SETTINGS.sessions, ...patch.sessions },
     triage: { ...DEFAULT_SETTINGS.triage, ...patch.triage },
@@ -44,6 +44,7 @@ export function settings(patch: { sessions?: Partial<Settings['sessions']>; tria
       github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', namespace: '', options: {} },
       zoho: { pollIntervalSeconds: 300, repoRoot: 'D:/git/support', triagePlaybook: 'triage:zoho', setupPrompt: '', namespace: 'support', options: {} },
     },
+    schedules: patch.schedules ?? {},
   };
 }
 

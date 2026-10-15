@@ -63,6 +63,7 @@ function snapshot(items: WorkItemView[]): Snapshot {
     pool: [],
     playbooks: [],
     repoRoots: [],
+    schedules: [],
     sources: ['github'],
     sourceStates: [{ name: 'github', enabled: true }],
     namespaces: { github: 'dev' },

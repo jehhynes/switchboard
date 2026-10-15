@@ -1,8 +1,9 @@
 import type { Playbook } from './playbook.js';
 import { activeSession, groupOf, reviewKey } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
+import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { repoRoots } from './settings.js';
-import type { PermissionMode, Provider, Settings } from './settings.js';
+import type { PermissionMode, Provider, ScheduleSettings, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
 import { focusUrl } from './focus.js';
@@ -147,6 +148,8 @@ export type FlowEvent =
   | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean }
   /** A live Claude session the operator started outside Switchboard, as the roster lists it (PRD R81). */
   | { type: 'register'; nativeSessionId: string; shortId: string; cwd: string; title: string }
+  /** Run now: a queued work item for the named schedule (PRD R82). */
+  | { type: 'run-schedule'; name: string }
   | { type: 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
   /** `guidance` is added to the task session's prompt (PRD R77). */
   | { type: 'start'; workItemId: number; guidance?: string | null }
@@ -262,7 +265,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -328,6 +331,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { repoRoot: event.repoRoot, start: event.start === true };
     case 'register':
       return { cwd: event.cwd };
+    case 'run-schedule':
+      return { name: event.name };
     case 'start':
     case 'pick':
       return guidanceOf(event.guidance) === null ? null : { guidance: guidanceOf(event.guidance) };
@@ -377,6 +382,10 @@ function subjectOf(store: Store, event: FlowEvent): Pick<EventRecord, 'ticketId'
     return { ...none, ticketId: store.findTicket(event.source, event.sourceKey)?.id ?? null };
   }
 
+  if (event.type === 'run-schedule') {
+    return { ...none, ticketId: store.findTicket(SCHEDULE_SOURCE, event.name)?.id ?? null };
+  }
+
   return none;
 }
 
@@ -404,6 +413,12 @@ export function handle(store: Store, event: FlowEvent, context: FlowContext): Fl
   try {
     store.beginEvent({ at: context.now, type: 'wake', actor: 'hub', ticketId: null, workItemId: null, sessionId: null, detail: null });
     flow.wake();
+
+    // The hub ticks every minute, so a schedule's run starts within a minute of its time (PRD R82).
+    if (event.type === 'tick') {
+      flow.runSchedules();
+    }
+
     const record = eventRecord(store, event, context.now);
 
     store.beginEvent(record, ALWAYS_LOGGED.has(event.type) && record.ticketId !== null);
@@ -474,6 +489,8 @@ class Flow {
         return this.adhoc(event.prompt, event.repoRoot, event.start === true);
       case 'register':
         return this.register(event);
+      case 'run-schedule':
+        return this.runSchedule(event.name);
       case 'start':
         return this.start(this.openItem(event.workItemId), guidanceOf(event.guidance));
       case 'approve':
@@ -768,7 +785,8 @@ class Flow {
   private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running'): WorkItem {
     const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
     const sourceKey = String(Math.max(0, ...keys) + 1);
-    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: null, title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
+    // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R76).
+    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: parentId === null ? null : 'task', title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
     const queued = status === 'queued';
 
     if (parentId !== null) {
@@ -800,6 +818,119 @@ class Flow {
       doneAt: null,
       doneReason: null,
       parentId,
+    });
+  }
+
+  // Schedules
+
+  /**
+   * PRD R82: keeps a ticket for each schedule, and gives each schedule that came due since the last tick a work item, unless it has an open one.
+   * The ticket's `lastPolledAt` is when its schedule was last checked, so a time that passed while the hub was stopped runs once at the next tick,
+   * and its `sourceId` is the schedule's `scheduleText`, so a schedule added again or moved starts from now instead of catching up.
+   */
+  runSchedules(): void {
+    const configured = this.context.settings.schedules;
+
+    for (const ticket of this.store.tickets(SCHEDULE_SOURCE)) {
+      if (configured[ticket.sourceKey] === undefined && ticket.sourceId !== null) {
+        this.store.beginEvent({ at: this.now, type: 'schedule', actor: 'hub', ticketId: ticket.id, workItemId: null, sessionId: null, detail: { name: ticket.sourceKey } });
+        this.store.updateTicket(ticket.id, { sourceId: null });
+      }
+    }
+
+    for (const [name, schedule] of Object.entries(configured)) {
+      this.store.beginEvent({ at: this.now, type: 'schedule', actor: 'hub', ticketId: this.store.findTicket(SCHEDULE_SOURCE, name)?.id ?? null, workItemId: null, sessionId: null, detail: { name } });
+
+      const ticket = this.scheduleTicket(name, schedule);
+      const due = latestDue(schedule, this.now);
+      const when = scheduleText(schedule);
+      const checked = ticket.sourceId === when ? ticket.lastPolledAt : null;
+
+      if (ticket.sourceId !== when) {
+        this.store.updateTicket(ticket.id, { sourceId: when });
+      }
+
+      this.store.updateTicket(ticket.id, { lastPolledAt: this.now });
+
+      if (due === null || checked === null || due <= checked) {
+        continue;
+      }
+
+      const skipped = this.hasOpenWorkItem(ticket.id);
+
+      this.store.beginEvent({ at: this.now, type: 'schedule', actor: 'hub', ticketId: ticket.id, workItemId: null, sessionId: null, detail: { name, dueAt: due, skipped } }, true);
+
+      if (!skipped) {
+        this.insertRun(ticket, schedule, false);
+      }
+    }
+  }
+
+  private runSchedule(name: string): void {
+    const schedule = this.context.settings.schedules[name];
+
+    if (schedule === undefined) {
+      throw new Refusal(`settings.json has no schedule named ${name}.`);
+    }
+
+    const ticket = this.scheduleTicket(name, schedule);
+
+    if (this.hasOpenWorkItem(ticket.id)) {
+      throw new Refusal(`${name} already has an open work item.`);
+    }
+
+    this.insertRun(ticket, schedule, true);
+  }
+
+  /** The schedule's ticket, titled by its playbook's description, made when first seen. */
+  private scheduleTicket(name: string, schedule: ScheduleSettings): Ticket {
+    const title = this.context.playbooks.get(schedule.playbook)?.description || name;
+    const known = this.store.findTicket(SCHEDULE_SOURCE, name);
+
+    if (known === null) {
+      return this.store.insertTicket({ source: SCHEDULE_SOURCE, sourceKey: name, ref: name, sourceId: scheduleText(schedule), title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: this.now, repoRoot: schedule.repoRoot });
+    }
+
+    if (known.title !== title || known.repoRoot !== schedule.repoRoot) {
+      this.store.updateTicket(known.id, { title, repoRoot: schedule.repoRoot });
+    }
+
+    return { ...known, title, repoRoot: schedule.repoRoot };
+  }
+
+  /** A run of a schedule: queued when its playbook starts automatically or the operator asked for it, else unstarted, and failed without a task playbook. */
+  private insertRun(ticket: Ticket, schedule: ScheduleSettings, start: boolean): void {
+    const playbook = this.context.playbooks.get(schedule.playbook);
+    const error = playbook === undefined ? `Playbook ${schedule.playbook} is not loaded.` : playbook.kind !== 'task' ? `${schedule.playbook} is not a task playbook.` : null;
+    const status: WorkItemStatus = error !== null ? 'failed' : start || playbook!.autoStart ? 'queued' : 'unstarted';
+
+    // The in-queue time counts from the run's start, not the schedule's first one (PRD R27).
+    this.store.updateTicket(ticket.id, { scopeAt: this.now });
+    this.store.insertWorkItem({
+      ticketId: ticket.id,
+      playbook: schedule.playbook,
+      status,
+      stage: null,
+      stageAt: null,
+      taskPrompt: null,
+      guidance: null,
+      warning: null,
+      error,
+      unassignedAt: null,
+      queuedAt: status === 'queued' ? this.now : null,
+      approvalPrompt: null,
+      approvalSummary: null,
+      approvalReport: null,
+      approvalHeld: false,
+      createdAt: this.now,
+      statusAt: this.now,
+      readyAt: null,
+      orderAt: null,
+      runStartedAt: status === 'queued' ? this.now : null,
+      scopeAt: null,
+      doneAt: null,
+      doneReason: null,
+      parentId: null,
     });
   }
 
@@ -1327,6 +1458,11 @@ class Flow {
       this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
     }
 
+    // Its follow-ups lose their parentId, so their tickets keep the origin, as tickets made before it was stored did not (PRD R27).
+    for (const child of this.store.workItemsWithParent(item.id)) {
+      this.store.updateTicket(child.ticketId, { sourceId: 'task' });
+    }
+
     this.store.deleteWorkItem(item.id);
 
     // A snoozed ticket with no row left would stay hidden on GitHub boards (PRD R56) until it left scope.
@@ -1600,8 +1736,10 @@ class Flow {
   private retriage(item: WorkItem): void {
     this.requireNoSession(item);
 
-    if (this.store.ticket(item.ticketId)!.source === ADHOC_SOURCE) {
-      throw new Refusal('An ad-hoc work item is not triaged.');
+    const source = this.store.ticket(item.ticketId)!.source;
+
+    if (source === ADHOC_SOURCE || source === SCHEDULE_SOURCE) {
+      throw new Refusal(`${source === ADHOC_SOURCE ? 'An ad-hoc' : 'A scheduled'} work item is not triaged.`);
     }
 
     if (this.store.runningTriages().some((triage) => triage.workItemId === item.id)) {

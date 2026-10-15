@@ -399,7 +399,8 @@ export interface HistoryEvent extends EventRecord {
 export interface TicketHistory {
   ticket: Ticket;
   /** Newest first, each with its sessions, triages and pastes oldest first; no task or approval prompt. */
-  workItems: (Omit<WorkItem, 'taskPrompt' | 'approvalPrompt'> & { sessions: Session[]; triages: HistoryTriage[]; pastes: Paste[] })[];
+  /** `prompted`: the work item has a task prompt, which a registered session's lacks (PRD R81). */
+  workItems: (Omit<WorkItem, 'taskPrompt' | 'approvalPrompt'> & { prompted: boolean; sessions: Session[]; triages: HistoryTriage[]; pastes: Paste[] })[];
   /** Pool triages no pick attached to a work item, oldest first. */
   poolTriages: HistoryTriage[];
   worktree: Worktree | null;
@@ -920,8 +921,9 @@ export class Store {
     }
 
     const triages = this.#all<Triage>('SELECT * FROM triages WHERE ticketId = ? ORDER BY startedAt, id', ticketId).map(({ context: _context, ...triage }) => triage);
-    const workItems = this.#all<WorkItem>('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id DESC', ticketId).map(({ taskPrompt: _task, approvalPrompt: _approval, ...item }) => ({
+    const workItems = this.#all<WorkItem>('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id DESC', ticketId).map(({ taskPrompt, approvalPrompt: _approval, ...item }) => ({
       ...item,
+      prompted: taskPrompt !== null,
       sessions: this.sessionsFor(item.id),
       triages: triages.filter((triage) => triage.workItemId === item.id),
       pastes: this.pastesFor(item.id),

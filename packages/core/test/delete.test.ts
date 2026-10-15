@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { adhocLabel } from '../src/group.js';
 import { Harness, MINUTE, issue, settings } from './flowHarness.js';
 
 /** A started dev:question task session for ticket 1, running in its background process. */
@@ -119,10 +120,14 @@ describe('delete (PRD R76)', () => {
     const session = running(h);
     h.report(session, { kind: 'task', prompt: 'Fix the flaky test', repo: null, title: null });
     expect(h.item(2).parentId).toBe(1);
+    // A follow-up made before its ticket stored the origin.
+    h.store.updateTicket(h.item(2).ticketId, { sourceId: null });
 
     h.act({ type: 'delete', workItemId: 1 });
 
     expect(h.item(2)).toMatchObject({ parentId: null, status: 'unstarted' });
+    // The row keeps naming it a task (PRD R27).
+    expect(adhocLabel({ parentId: null, prompted: true }, h.store.ticket(h.item(2).ticketId)!)).toBe('task');
   });
 
   it("removes the work item's activity and logs the delete on the ticket", () => {

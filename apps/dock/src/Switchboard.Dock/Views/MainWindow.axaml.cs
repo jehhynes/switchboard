@@ -960,16 +960,20 @@ public sealed partial class MainWindow : Window
     /// <summary>Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked.</summary>
     async void OnAdhocClicked(object? sender, RoutedEventArgs e)
     {
-        if (model.RepoRoots.Count == 0 || model.AdhocRepo is not { } repo)
+        // A schedule names its own repo root, so Run now needs no source's.
+        if ((model.RepoRoots.Count == 0 || model.AdhocRepo is null) && model.Schedules.Count == 0)
         {
             model.Status = "Set a repoRoot on a source to start an ad-hoc session.";
             return;
         }
 
+        var repo = model.AdhocRepo;
+
         model.Status = null;
 
         var created = await AdhocDialog.Ask(this, [.. model.RepoRoots], repo, (prompt, repoRoot, start) =>
-            hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start }));
+            hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start }),
+            model.Schedules, (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }));
 
         if (created is not null)
         {

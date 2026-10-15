@@ -618,6 +618,9 @@ public sealed class SettingsWindow : Window
                 case "remove-source":
                     editor.RemoveSource(spec.Argument!);
                     break;
+                case "remove-schedule":
+                    editor.RemoveSchedule(spec.Argument!);
+                    break;
             }
         };
 
@@ -627,7 +630,7 @@ public sealed class SettingsWindow : Window
     Control NameFields(NewNameView names)
     {
         var space = new AutoCompleteBox { Name = "NewNamespace", Text = names.Namespace, ItemsSource = names.Namespaces, PlaceholderText = "dev", MinWidth = 160 };
-        var name = new TextBox { Name = "NewName", Text = names.Name, PlaceholderText = "develop", MinWidth = 200, VerticalContentAlignment = VerticalAlignment.Center };
+        var name = new TextBox { Name = "NewName", Text = names.Name, PlaceholderText = names.Schedule ? "cleanup-worktrees" : "develop", MinWidth = 200, VerticalContentAlignment = VerticalAlignment.Center };
         var nameErrors = new StackPanel();
 
         space.TextChanged += (_, _) =>
@@ -639,12 +642,17 @@ public sealed class SettingsWindow : Window
         };
         name.TextChanged += (_, _) =>
         {
-            if ((name.Text ?? "") != editor.State?.NewPlaybook.Name)
+            if ((name.Text ?? "") != (names.Schedule ? editor.State?.NewSchedule.Name : editor.State?.NewPlaybook.Name))
             {
                 editor.EditNewName(null, name.Text ?? "");
             }
         };
         fieldErrors["name"] = nameErrors;
+
+        if (names.Schedule)
+        {
+            return Row("Name", "Lowercase letters, digits and hyphens. Create adds the schedule to settings.json when you save.", new StackPanel { Spacing = 3, Children = { name, nameErrors } });
+        }
 
         var parts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { space, new TextBlock { Text = ":", VerticalAlignment = VerticalAlignment.Center }, name } };
 

@@ -72,6 +72,7 @@ function snapshot(workItems: WorkItemView[]): Snapshot {
     pool: [],
     playbooks: [],
     repoRoots: [],
+    schedules: [],
     sources: [],
     sourceStates: [],
     namespaces: {},

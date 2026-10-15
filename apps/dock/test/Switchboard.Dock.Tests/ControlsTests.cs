@@ -244,6 +244,76 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void Adhoc_ScheduleChosen_RunsItNowWithoutAPrompt()
+    {
+        var (window, model) = Open();
+
+        Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
+        var run = Named<ComboBox>(dialog, "AdhocRunBox");
+
+        Assert.True(run.IsVisible);
+        Assert.Equal(["A prompt", "Run self-review now · ops:performance-review"], run.ItemsSource!.Cast<string>());
+
+        run.SelectedIndex = 1;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(Named<TextBox>(dialog, "AdhocPromptBox").IsVisible);
+        Assert.False(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
+        Assert.False(Named<CheckBox>(dialog, "AdhocStartAutomatically").IsVisible);
+        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+        Assert.Equal("Run", Named<Button>(dialog, "AdhocCreate").Content);
+
+        hub.ActReplies.Enqueue("self-review already has an open work item.");
+        Click(Named<Button>(dialog, "AdhocCreate"));
+
+        Assert.Equal("self-review already has an open work item.", Named<TextBlock>(dialog, "AdhocError").Text);
+
+        hub.ActReplies.Enqueue(null);
+        Click(Named<Button>(dialog, "AdhocCreate"));
+
+        Assert.Equal(["act {\"type\":\"run-schedule\",\"name\":\"self-review\"}", "act {\"type\":\"run-schedule\",\"name\":\"self-review\"}"], hub.Calls);
+        Assert.Empty(window.OwnedWindows);
+        Assert.Equal("D:/git/widgets", model.AdhocRepo);
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_NoRepoRoots_OpensOnAScheduleAndCreatesNoPrompt()
+    {
+        var (window, model) = Open(Fixtures.View with { RepoRoots = [] });
+
+        Click(window.FindControl<Button>("AdhocButton")!);
+        var dialog = DialogOf(window);
+
+        Assert.Equal(1, Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex);
+        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+
+        Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex = 0;
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+
+        Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex = 1;
+        hub.ActReplies.Enqueue(null);
+        Click(Named<Button>(dialog, "AdhocCreate"));
+
+        Assert.Equal(["act {\"type\":\"run-schedule\",\"name\":\"self-review\"}"], hub.Calls);
+        Assert.Empty(window.OwnedWindows);
+        Assert.Null(model.AdhocRepo);
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_NoRepoRootsOrSchedules_SaysToSetARepoRoot()
+    {
+        var (window, model) = Open(Fixtures.View with { RepoRoots = [], Schedules = [] });
+
+        Click(window.FindControl<Button>("AdhocButton")!);
+
+        Assert.Empty(window.OwnedWindows);
+        Assert.Equal("Set a repoRoot on a source to start an ad-hoc session.", model.Status);
+    }
+
+    [AvaloniaFact]
     public void Adhoc_Refused_KeepsTheDialogAndShowsTheReason()
     {
         var (window, model) = Open();
@@ -278,17 +348,6 @@ public sealed class ControlsTests
 
         Assert.Empty(window.OwnedWindows);
         Assert.Empty(hub.Calls);
-    }
-
-    [AvaloniaFact]
-    public void Adhoc_NoRepoRoots_SaysWhatIsMissing()
-    {
-        var (window, model) = Open(Fixtures.View with { RepoRoots = [] });
-
-        Click(window.FindControl<Button>("AdhocButton")!);
-
-        Assert.Empty(window.OwnedWindows);
-        Assert.Equal("Set a repoRoot on a source to start an ad-hoc session.", model.Status);
     }
 
     [AvaloniaFact]

@@ -5,7 +5,7 @@ import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, sessionContract, switchboardHome } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 
@@ -89,6 +89,8 @@ export interface Snapshot {
   playbooks: { name: string; description: string }[];
   /** Repos an ad-hoc prompt can run in: each source's repo root, the first being the default. */
   repoRoots: string[];
+  /** The schedules Run now offers, in settings order (PRD R82). */
+  schedules: { name: string; playbook: string }[];
   /** Sources being polled. */
   sources: string[];
   /** Every configured source but ad-hoc, for the operator's source filter. */
@@ -818,8 +820,9 @@ export class Runtime {
     const enabled = this.enabledSources();
     // Returned counts earlier work items with the same playbook, or one it is a return of, that started a session; a failed launch has no shortId.
     const started = (item: WorkItem) => store.sessionsFor(item.id).some((session) => session.shortId !== null);
-    const returned = (items: WorkItem[], playbook: string | null) => {
-      if (playbook === null) {
+    const returned = (items: WorkItem[], playbook: string | null, ticket: Ticket) => {
+      // A schedule's runs repeat by design, so they are not returns (PRD R82).
+      if (playbook === null || ticket.source === SCHEDULE_SOURCE) {
         return 0;
       }
 
@@ -843,7 +846,7 @@ export class Runtime {
           worktree: store.worktreeFor(item.ticketId),
           links: store.linksFor(item.ticketId),
           pastes: store.pastesFor(item.id),
-          returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook),
+          returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook, ticket),
           parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
           approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
           waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
@@ -858,10 +861,11 @@ export class Runtime {
           const triages = store.poolTriages(ticket.id);
           const triage = triages.at(-1) ?? null;
 
-          return { ticket, triage, focus: effectiveFocus(triages, ticket.url), links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null) };
+          return { ticket, triage, focus: effectiveFocus(triages, ticket.url), links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null, ticket) };
         }),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: repoRoots(settings),
+      schedules: Object.entries(settings.schedules).map(([name, schedule]) => ({ name, playbook: schedule.playbook })),
       sources: [...this.sources.keys()],
       sourceStates: Object.entries(settings.sources)
         .filter(([name]) => name !== ADHOC_SOURCE)

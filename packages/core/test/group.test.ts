@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, groupOf, holdsSlot, markOf, needsYou, reviewOrder, triageLabel, turnOf, urlKey } from '../src/group.js';
+import { activeSession, adhocLabel, groupOf, holdsSlot, markOf, needsYou, reviewOrder, triageLabel, turnOf, urlKey } from '../src/group.js';
 import type { DoneReason, SessionOutcome, SessionState, WorkItemStatus } from '../src/model.js';
 
 const item = (status: WorkItemStatus, ...states: SessionState[]) => ({
@@ -163,5 +163,16 @@ describe('urlKey', () => {
     expect(urlKey('https://Desk.Example.test/agent/tickets/123/')).toBe('https://desk.example.test/agent/tickets/123');
     expect(urlKey('https://desk.example.test/t?id=5#c')).toBe('https://desk.example.test/t?id=5#c');
     expect(urlKey('not a url/')).toBe('not a url/');
+  });
+});
+
+describe('adhocLabel', () => {
+  it('names an ad-hoc work item by how it was made (PRD R6, R68, R81)', () => {
+    const none = { sourceId: null };
+
+    expect(adhocLabel({ parentId: null, prompted: true }, none)).toBe('ad-hoc');
+    expect(adhocLabel({ parentId: 4, prompted: true }, none)).toBe('task');
+    expect(adhocLabel({ parentId: null, prompted: true }, { sourceId: 'task' })).toBe('task');
+    expect(adhocLabel({ parentId: null, prompted: false }, none)).toBe('registered');
   });
 });

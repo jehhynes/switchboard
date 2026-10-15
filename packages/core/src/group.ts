@@ -164,6 +164,14 @@ export function triageLabel(source: string, namespaces: Record<string, string>):
 }
 
 /**
+ * The playbook slot of an ad-hoc work item, by how it was made: `task` from a session's task report, whose ticket's `sourceId` keeps it after
+ * Delete clears the parent, `registered` for a registered session, else `ad-hoc`.
+ */
+export function adhocLabel(item: { parentId: number | null; prompted: boolean }, ticket: { sourceId: string | null }): 'ad-hoc' | 'task' | 'registered' {
+  return item.parentId !== null || ticket.sourceId === 'task' ? 'task' : item.prompted ? 'ad-hoc' : 'registered';
+}
+
+/**
  * A URL as Open in Switchboard compares it (PRD R69): a GitHub issue or pull request page, any tab such as `/files` included, as
  * `github.com/<owner>/<repo>/<issues|pull>/<number>` in lower case; any other URL as parsed, without a trailing slash.
  */

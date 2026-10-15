@@ -1,5 +1,5 @@
 import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
-import { DONE_WORDS } from '@switchboard/core/group';
+import { adhocLabel, DONE_WORDS } from '@switchboard/core/group';
 import { ticketKey } from '@switchboard/hub/rows';
 
 /** The filter chips of History (PRD R59). */
@@ -78,12 +78,16 @@ export const STATUS_WORDS: Record<WorkItemStatus, string> = {
   done: 'Done',
 };
 
+/** An ad-hoc work item's section title, by how it was made. */
+const ADHOC_SECTIONS: Record<ReturnType<typeof adhocLabel>, string> = { 'ad-hoc': 'Ad-hoc prompt', task: 'Follow-up task', registered: 'Registered session' };
+
 /** Statuses that wait for the operator. */
 const NEEDS_YOU: ReadonlySet<string> = new Set(['unstarted', 'awaiting-approval', 'finished', 'blocked', 'failed']);
 
 const OPERATOR: Record<string, { text: string; icon: string }> = {
   adhoc: { text: 'You created the ad-hoc prompt', icon: 'add' },
   register: { text: 'You registered the session', icon: 'plug' },
+  'run-schedule': { text: 'You ran it now', icon: 'play' },
   start: { text: 'You started it', icon: 'play' },
   approve: { text: 'You approved it', icon: 'check' },
   retry: { text: 'You retried it', icon: 'refresh' },
@@ -307,6 +311,11 @@ class Builder {
           break;
         case 'ticket.pool':
           lines.push(after === true ? 'Entered the pool' : 'Left the pool');
+          break;
+        case 'ticket.sourceId':
+          if (this.history.ticket.source === 'schedule') {
+            lines.push(after === null ? 'The schedule was removed from settings.json' : `Runs ${str(after)}`);
+          }
           break;
         case 'ticket.title':
           lines.push(`Title: ${str(before)} → ${str(after)}`);
@@ -546,6 +555,15 @@ class Builder {
       case 'wake':
         skip.add('snoozed');
         return { category: 'ticket', icon: 'bell', text: 'Snooze ended' };
+      // A schedule's change of title or directory has no headline; its change lines say it (PRD R82).
+      case 'schedule':
+        if (typeof detail['dueAt'] !== 'number') {
+          return {};
+        }
+
+        return detail['skipped'] === true
+          ? { category: 'ticket', icon: 'calendar', text: `The schedule came due at ${timeText(detail['dueAt'])}; it made no work item, because one is still open`, tone: 'warning' }
+          : { category: 'ticket', icon: 'calendar', text: `The schedule came due at ${timeText(detail['dueAt'])}` };
       default:
         return {};
     }
@@ -737,7 +755,7 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
 
   const waiting = waitingTimes(history, now);
   const sections: Section[] = history.workItems.map((item) => {
-    const playbook = item.playbook ?? (ticket.source === 'adhoc' ? 'Ad-hoc prompt' : 'No playbook yet');
+    const playbook = item.playbook ?? (ticket.source === 'adhoc' ? ADHOC_SECTIONS[adhocLabel(item, ticket)] : 'No playbook yet');
     const facts = [`Created ${timeText(item.createdAt)}`];
 
     if (item.doneAt !== null) {

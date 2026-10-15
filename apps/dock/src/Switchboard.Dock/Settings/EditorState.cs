@@ -12,8 +12,8 @@ public sealed record NewPlaybook(string Namespace, string Name, PlaybookFields P
 
 /// <summary>
 /// The Settings window's state: settings.json as read, one unsaved draft of the whole file with the version it started from, the page, and the
-/// errors. Pages are <c>general</c>, <c>source:&lt;name&gt;</c>, <c>namespace:&lt;namespace&gt;</c>, <c>playbook:&lt;namespace:name&gt;</c> and
-/// <c>new-playbook</c>.
+/// errors. Pages are <c>general</c>, <c>source:&lt;name&gt;</c>, <c>schedule:&lt;name&gt;</c>, <c>new-schedule</c>, <c>namespace:&lt;namespace&gt;</c>,
+/// <c>playbook:&lt;namespace:name&gt;</c> and <c>new-playbook</c>.
 /// </summary>
 public sealed class EditorState(EditorConfig config)
 {
@@ -28,6 +28,9 @@ public sealed class EditorState(EditorConfig config)
     public string? DraftVersion { get; private set; }
 
     public NewPlaybook NewPlaybook { get; set; } = NewPlaybook.Empty;
+
+    /// <summary>The name typed on the New schedule page, and whether Create was pressed, so an empty name shows its error.</summary>
+    public (string Name, bool Touched) NewSchedule { get; set; } = ("", false);
 
     /// <summary>The last check's errors for the whole draft.</summary>
     public IReadOnlyList<string> Errors { get; set; } = [];
@@ -103,6 +106,30 @@ public sealed class EditorState(EditorConfig config)
 
     /// <summary>What the current page shows from the file and draft; equal before and after a read when the read changes nothing there.</summary>
     public string PageSignature() => string.Join('\n', Page, Config.ConfigDir, SettingsValue?.ToJsonString(), Config.Settings.Path, Config.Settings.Error);
+
+    /// <summary>The schedule names in the settings being edited, in file order.</summary>
+    public IReadOnlyList<string> ScheduleNames => SettingsValue?["schedules"] is JsonObject schedules ? schedules.Select((entry) => entry.Key).ToList() : [];
+
+    /// <summary>Why the new schedule's name cannot be used, or null.</summary>
+    public string? NewScheduleError
+    {
+        get
+        {
+            var name = NewSchedule.Name.Trim();
+
+            if (!SettingsFields.IsSegment(name))
+            {
+                return "The name must be lowercase letters, digits and hyphens.";
+            }
+
+            if (SettingsValue is not { } value || (value["schedules"] is { } schedules && schedules is not JsonObject))
+            {
+                return "settings.json must hold an object with a schedules object.";
+            }
+
+            return ScheduleNames.Contains(name) ? $"A schedule named {name} already exists." : null;
+        }
+    }
 
     /// <summary>Why the new playbook's name cannot be used, or null.</summary>
     public string? NewNameError

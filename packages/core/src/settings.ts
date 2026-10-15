@@ -55,10 +55,33 @@ export interface SourceSettings {
   options: Record<string, unknown>;
 }
 
+/** Weekday names in `Date.getDay()` order. */
+export const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+export type Weekday = (typeof WEEKDAYS)[number];
+
+export const SCHEDULE_PERIODS = ['day', 'week', 'month'] as const;
+
+export type SchedulePeriod = (typeof SCHEDULE_PERIODS)[number];
+
+/** A playbook that runs on a calendar or by hand, with no ticket from a source (PRD R82). */
+export interface ScheduleSettings {
+  playbook: string;
+  /** The directory its sessions run in. */
+  repoRoot: string;
+  /** Null when it runs only by hand. */
+  every: SchedulePeriod | null;
+  /** A weekly schedule's weekday or a monthly one's day of the month, 1 to 31; null otherwise. */
+  day: Weekday | number | null;
+  /** Local time of day in minutes after midnight; null when it runs only by hand. */
+  at: number | null;
+}
+
 export interface Settings {
   sessions: SessionSettings;
   triage: TriageSettings;
   sources: Record<string, SourceSettings>;
+  schedules: Record<string, ScheduleSettings>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -66,6 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
+  schedules: {},
 };
 
 /** The repos an ad-hoc prompt or a task report can run in: each source's repo root, the first being the default. */
@@ -182,7 +206,7 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const read = new Reader();
-  read.unknown(root, ['sessions', 'triage', 'sources', 'playbooks'], 'settings');
+  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'playbooks'], 'settings');
   // Each playbook is checked on its own by `parsePlaybooks`, so an invalid one is left out rather than rejecting the file.
   read.section(root, 'playbooks', 'playbooks');
 
@@ -235,5 +259,70 @@ export function parseSettings(text: string): SettingsResult {
     };
   }
 
-  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources } };
+  const schedulesIn = read.section(root, 'schedules', 'schedules');
+  const schedules: Record<string, ScheduleSettings> = {};
+
+  for (const name of Object.keys(schedulesIn)) {
+    const path = `schedules.${name}`;
+
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      read.errors.push(`${path}: a schedule's name must be lowercase letters, digits and hyphens.`);
+      continue;
+    }
+
+    schedules[name] = parseSchedule(read, read.section(schedulesIn, name, path), path);
+  }
+
+  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules } };
+}
+
+function parseSchedule(read: Reader, entry: Json, path: string): ScheduleSettings {
+  read.unknown(entry, ['playbook', 'repoRoot', 'every', 'day', 'at'], path);
+
+  const playbook = read.string(entry, 'playbook', path, '');
+  const repoRoot = read.string(entry, 'repoRoot', path, '');
+  const every = entry['every'] === undefined ? null : read.choice(entry, 'every', path, SCHEDULE_PERIODS, 'day');
+  let day: Weekday | number | null = null;
+  let at: number | null = null;
+
+  if (playbook === '') {
+    read.errors.push(`${path}.playbook must name a task playbook.`);
+  }
+
+  if (repoRoot === '') {
+    read.errors.push(`${path}.repoRoot must be set.`);
+  }
+
+  if (every === 'week') {
+    // Listed from Monday, so the error names the days in the order people read a week.
+    day = read.choice(entry, 'day', path, [...WEEKDAYS.slice(1), WEEKDAYS[0]], 'mon');
+
+    if (entry['day'] === undefined) {
+      read.errors.push(`${path}.day must be one of mon, tue, wed, thu, fri, sat, sun.`);
+    }
+  } else if (every === 'month') {
+    day = read.integer(entry, 'day', path, 1, 1, 31);
+
+    if (entry['day'] === undefined) {
+      read.errors.push(`${path}.day must be a whole number from 1 to 31.`);
+    }
+  } else if (entry['day'] !== undefined) {
+    read.errors.push(`${path}.day applies only to a weekly or monthly schedule.`);
+  }
+
+  if (every === null) {
+    if (entry['at'] !== undefined) {
+      read.errors.push(`${path}.at applies only with every.`);
+    }
+  } else {
+    const match = typeof entry['at'] === 'string' ? /^([01]\d|2[0-3]):([0-5]\d)$/.exec(entry['at']) : null;
+
+    if (match === null) {
+      read.errors.push(`${path}.at must be a time from 00:00 to 23:59, such as 09:00.`);
+    } else {
+      at = Number(match[1]) * 60 + Number(match[2]);
+    }
+  }
+
+  return { playbook, repoRoot, every, day, at };
 }

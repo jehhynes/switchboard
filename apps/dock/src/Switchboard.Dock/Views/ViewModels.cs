@@ -96,6 +96,9 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     /// <summary>The repos an ad-hoc prompt can run in, the first being the default (PRD R6).</summary>
     public ObservableCollection<string> RepoRoots { get; } = [];
 
+    /// <summary>The schedules the New Ad-hoc Session window can run now (PRD R82).</summary>
+    public IReadOnlyList<ScheduleEntry> Schedules { get; private set; } = [];
+
     /// <summary>The search box's text: only rows whose search text holds every word show, and every group with one shows open (PRD R71).</summary>
     public string Filter
     {
@@ -176,6 +179,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     {
         Show(Hub.Connection.Connected);
         Snooze = view.Snooze;
+        Schedules = view.Schedules ?? [];
 
         if (!Sources.Select((source) => (source.Name, source.Enabled)).SequenceEqual(view.Sources.Select((source) => (source.Name, source.Enabled))))
         {

@@ -366,6 +366,15 @@ describe('windowOf', () => {
     expect(windowOf(item(7), W)).toBeNull();
   });
 
+  it('names an ad-hoc row by how it was made, and a scheduled row by its playbook (PRD R27, R82)', () => {
+    const adhoc = { ...item(7).ticket, source: 'adhoc', sourceKey: '3', url: '' };
+
+    expect(row(item(7, { status: 'unstarted', playbook: null, taskPrompt: 'Fix it', ticket: adhoc, focus: null })).playbook).toBe('ad-hoc');
+    expect(row(item(7, { status: 'unstarted', playbook: null, taskPrompt: 'Fix it', parentId: 2, ticket: adhoc, focus: null })).playbook).toBe('task');
+    expect(row(item(7, { playbook: null, taskPrompt: null, ticket: adhoc, focus: null })).playbook).toBe('registered');
+    expect(row(item(7, { status: 'unstarted', playbook: 'ops:cleanup', ticket: { ...adhoc, source: 'schedule', sourceKey: 'cleanup' }, focus: null })).ticket).toBe('schedule cleanup');
+  });
+
   it('gives a registered session no item window or terminal while it lives in the operator window, and both once it ends (PRD R81)', () => {
     const adhoc = { ...item(7).ticket, source: 'adhoc', sourceKey: '3', url: '' };
     const live = item(7, { ticket: adhoc, focus: null, sessions: [session({ released: true, external: true, cwd: 'D:/git/widgets' })] });
