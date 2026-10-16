@@ -518,7 +518,7 @@ export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | nul
 }
 
 /** How long a running session goes without a stage report before the dock colours the stage age (PRD R58). */
-export const STALE_STAGE_MS = 20 * 60_000;
+export const STALE_STAGE_MS = 30 * 60_000;
 
 /**
  * When a running work item's session last reported a stage, or began running if it has reported none since: null unless the row is

@@ -150,6 +150,7 @@ describe('dockView', () => {
       { text: 'Post the reply · 2h', title: 'Post the reply\nLast stage: drafting', tone: null },
     ]);
     expect(row(item(1, { stage: 'fixing tests', stageAt: NOW - 5 * 60_000, sessions: [session()] })).details).toEqual([{ text: 'fixing tests · 5m', title: null, tone: null }]);
+    expect(row(item(1, { stage: 'fixing tests', stageAt: NOW - 29 * 60_000, runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([{ text: 'fixing tests · 29m', title: null, tone: null }]);
     expect(row(item(1, { stage: 'fixing tests', stageAt: NOW - 30 * 60_000, runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([
       { text: 'fixing tests · 30m', title: 'No stage report for 30m', tone: 'warning' },
     ]);
