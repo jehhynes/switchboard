@@ -377,10 +377,20 @@ export function queuedTime(clock: Clock | null, until: number | null, now: numbe
   return { text: queueTime(clock.since, until ?? now), title };
 }
 
-/** Done's date bands, as in Windows Explorer: Today, Yesterday, Earlier this week, Last week and Older, with weeks starting on Monday (PRD R27). */
+/** Local midnight on the Monday that starts the week of `time`. */
+function weekStart(time: number): number {
+  return midnight(time, -((new Date(time).getDay() + 6) % 7));
+}
+
+/** The start of Done's list: local midnight on the Monday two weeks before this week's, so Two weeks ago holds a whole week (PRD R27). */
+export function doneSince(now: number): number {
+  return midnight(weekStart(now), -14);
+}
+
+/** Done's date bands: Today, Yesterday, Earlier this week, Last week and Two weeks ago, with weeks starting on Monday (PRD R27). */
 export function doneBand(doneAt: number, now: number): string {
   const today = midnight(now);
-  const week = midnight(now, -((new Date(now).getDay() + 6) % 7));
+  const week = weekStart(now);
 
   if (doneAt >= today) {
     return 'Today';
@@ -394,7 +404,7 @@ export function doneBand(doneAt: number, now: number): string {
     return 'Earlier this week';
   }
 
-  return doneAt >= midnight(week, -7) ? 'Last week' : 'Older';
+  return doneAt >= midnight(week, -7) ? 'Last week' : 'Two weeks ago';
 }
 
 /** When a Done row was done, in local time: 24-hour `HH:mm` today, else `m/d` (PRD R27). */

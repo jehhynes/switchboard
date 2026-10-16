@@ -6,6 +6,7 @@ import {
   listGroups,
   moveControls,
   doneBand,
+  doneSince,
   doneStamp,
   mainControl,
   openQuestion,
@@ -191,7 +192,15 @@ describe('doneStamp and doneBand', () => {
   it('bands by local day, with weeks starting on Monday', () => {
     const times = [at(7), at(6, 23), at(6), at(5), at(4, 23), new Date(2026, 8, 28).getTime(), new Date(2026, 8, 27, 23).getTime()];
 
-    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'Earlier this week', 'Last week', 'Last week', 'Older']);
+    expect(times.map((time) => doneBand(time, now))).toEqual(['Today', 'Yesterday', 'Yesterday', 'Earlier this week', 'Last week', 'Last week', 'Two weeks ago']);
+  });
+
+  it('lists Done from the Monday two weeks before this week’s, so Two weeks ago is a whole week', () => {
+    expect(doneSince(now)).toBe(new Date(2026, 8, 21).getTime());
+    expect(doneSince(at(5))).toBe(new Date(2026, 8, 21).getTime());
+    expect(doneSince(at(11, 23))).toBe(new Date(2026, 8, 21).getTime());
+    expect(doneSince(at(12))).toBe(new Date(2026, 8, 28).getTime());
+    expect(doneBand(doneSince(now), now)).toBe('Two weeks ago');
   });
 
   it('puts Monday’s yesterday in Yesterday, not Last week', () => {

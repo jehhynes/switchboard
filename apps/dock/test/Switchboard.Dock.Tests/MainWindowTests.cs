@@ -385,18 +385,18 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void OpenDone_RecordedView_ShowsTodayOpenAndOlderClosedUntilTapped()
+    public void OpenDone_RecordedView_ShowsTodayOpenAndTwoWeeksAgoClosedUntilTapped()
     {
         var settings = new DockSettings { Groups = { ["done"] = true } };
         var (window, model) = Open(settings);
 
-        // Tall enough that the Older band is on screen to tap.
+        // Tall enough that the Two weeks ago band is on screen to tap.
         window.Height = 1400;
         Dispatcher.UIThread.RunJobs();
 
         var bands = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("band") && border.IsEffectivelyVisible).ToList();
 
-        Assert.Equal(["Today", "Older"], bands.Select((band) => ((BandViewModel)band.DataContext!).Title));
+        Assert.Equal(["Today", "Two weeks ago"], bands.Select((band) => ((BandViewModel)band.DataContext!).Title));
         Assert.Contains("Issue <11>", VisibleTexts(window));
         Assert.DoesNotContain("Issue <12>", VisibleTexts(window));
 
@@ -409,18 +409,18 @@ public sealed class MainWindowTests
 
         Assert.Contains("Issue <12>", VisibleTexts(window));
         Assert.Empty(saved);
-        Assert.DoesNotContain("done:Older", settings.Groups.Keys);
+        Assert.DoesNotContain("done:Two weeks ago", settings.Groups.Keys);
     }
 
     [AvaloniaFact]
-    public void OpenDone_NewRun_StartsOlderClosedAfterTheLastRunOpenedIt()
+    public void OpenDone_NewRun_StartsTwoWeeksAgoClosedAfterTheLastRunOpenedIt()
     {
         var settings = new DockSettings { Groups = { ["done"] = true } };
         var (first, _) = Open(settings);
 
         first.Height = 1400;
         Dispatcher.UIThread.RunJobs();
-        Tap(first, first.GetVisualDescendants().OfType<Border>().Single((border) => border.DataContext is BandViewModel { Title: "Older" } && border.Classes.Contains("band")));
+        Tap(first, first.GetVisualDescendants().OfType<Border>().Single((border) => border.DataContext is BandViewModel { Title: "Two weeks ago" } && border.Classes.Contains("band")));
         first.Close();
 
         var (second, _) = Open(settings);

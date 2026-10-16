@@ -74,7 +74,7 @@ public sealed class DockSettingsTests
     {
         var home = Fixtures.TempFolder();
 
-        File.WriteAllText(Path.Combine(home, "dock.json"), "{\"groups\": {\"done\": true, \"done:Today\": false, \"done:Older\": true}}");
+        File.WriteAllText(Path.Combine(home, "dock.json"), "{\"groups\": {\"done\": true, \"done:Today\": false, \"done:Two weeks ago\": true}}");
 
         Assert.Equal(new Dictionary<string, bool> { ["done"] = true }, DockSettings.Load(home).Groups);
     }

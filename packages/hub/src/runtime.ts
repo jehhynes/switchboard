@@ -8,6 +8,7 @@ import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReadin
 import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
+import { doneSince } from './rows.js';
 
 export const ROSTER_MS = 30_000;
 export const MARKER_MS = 5_000;
@@ -19,8 +20,6 @@ export const MARKER_WATCH_RETRY_MS = 1_000;
 export const WAKE_MS = 60_000;
 /** The roster, marker and wake timers `start` sets before the poll timers. */
 const FIXED_TIMERS = 3;
-/** How long the dock lists done work items. */
-export const DONE_DAYS = 7;
 /** How long a done or link report waits for the source read that checks it (PRD R10, R52). */
 export const REPORT_CHECK_MS = 6_000;
 /** When the source is read again after a done report it lists as assigned; GitHub issue search lags an unassignment by seconds (mechanics M34). */
@@ -833,7 +832,7 @@ export class Runtime {
     const used = heldSlots(store);
 
     return {
-      workItems: store.workItems(this.deps.now() - DONE_DAYS * 24 * 60 * 60 * 1000).map((item) => {
+      workItems: store.workItems(doneSince(this.deps.now())).map((item) => {
         const ticket = store.ticket(item.ticketId)!;
         const triages = store.triagesFor(item.id);
 

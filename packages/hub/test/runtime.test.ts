@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import { REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
-import { controlsOf } from '../src/rows.js';
+import { controlsOf, doneSince } from '../src/rows.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -1373,6 +1373,19 @@ describe('Runtime', () => {
         'link report for #8 accepted unchecked: the github check took over 6 seconds',
       ]),
     );
+  });
+
+  it('lists a done work item from the Monday two weeks before this week, and not before (PRD R27)', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    store.updateWorkItem(1, { status: 'done', doneAt: doneSince(T0), doneReason: 'operator' });
+    expect(runtime.snapshot().workItems.map((item) => item.id)).toEqual([1]);
+
+    store.updateWorkItem(1, { doneAt: doneSince(T0) - 1 });
+    expect(runtime.snapshot().workItems).toEqual([]);
   });
 
   it('records a link report and lists the ticket links and earlier work items, with those of playbooks it is a return of, on the work item (PRD R51, R52)', async () => {
