@@ -180,6 +180,9 @@ export interface Marker {
   errorMessage: string | null;
 }
 
+/** The detail of a turn that ended while background tasks remain: the session is `running`, but not on a prompt or tool call. */
+export const BACKGROUND_DETAIL = 'turn ended with background tasks';
+
 const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 const WAITING_NOTIFICATIONS = new Set(['permission_prompt', 'worker_permission_prompt', 'agent_needs_input']);
 
@@ -204,7 +207,7 @@ export function markerState(marker: Marker): { state: LiveState; detail: string 
     case 'Notification':
       return marker.notificationType !== null && WAITING_NOTIFICATIONS.has(marker.notificationType) ? { state: 'waiting', detail: null } : null;
     case 'Stop':
-      return { state: marker.backgroundTasks > 0 ? 'running' : 'idle', detail: null };
+      return marker.backgroundTasks > 0 ? { state: 'running', detail: BACKGROUND_DETAIL } : { state: 'idle', detail: null };
     case 'StopFailure':
       return { state: 'failed', detail: marker.error ?? marker.errorMessage };
     default:

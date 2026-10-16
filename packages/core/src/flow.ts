@@ -1329,8 +1329,9 @@ class Flow {
     } else if (resumed && (item.status === 'blocked' || item.status === 'finished')) {
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
       this.setStatus(item.id, { status: 'running', error: null });
-    } else if (state === 'running' && item.status === 'awaiting-approval') {
+    } else if (state === 'running' && detail === null && item.status === 'awaiting-approval') {
       // The operator gave the session more work after its approval report; the report waits until the run ends (PRD R34).
+      // A turn that ends with background tasks stays `running` with a detail, so the next prompt or tool call still counts.
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
       this.setStatus(item.id, { status: 'running', approvalHeld: true, error: null });
     }

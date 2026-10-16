@@ -111,6 +111,26 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false, error: null, ...APPROVAL });
   });
 
+  it('runs again when the operator prompts a session whose approval turn ended with background tasks', () => {
+    const h = harness();
+    const { item, session } = running(h);
+    const background = 'turn ended with background tasks';
+
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
+    // Claude keeps the session running while a background task remains; that turn end does not hold the approval.
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: background });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false });
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true, ...APPROVAL });
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: background });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true });
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false, ...APPROVAL });
+  });
+
   it('waits for approval again with the cause when the held turn fails or the operator stops it', () => {
     const h = harness();
     const { item, session } = awaitingApproval(h);

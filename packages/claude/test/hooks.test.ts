@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CONTRACT_HOOK_SOURCE, CONTRACT_HOOK_WAIT_MS, HOOK_EVENTS, HOOK_SOURCE, markerState, planHooks } from '../src/hooks.js';
+import { BACKGROUND_DETAIL, CONTRACT_HOOK_SOURCE, CONTRACT_HOOK_WAIT_MS, HOOK_EVENTS, HOOK_SOURCE, markerState, planHooks } from '../src/hooks.js';
 import type { Marker } from '../src/hooks.js';
 
 const HOOK = 'C:/Users/me/.switchboard/hook.mjs';
@@ -78,7 +78,7 @@ describe('markerState', () => {
     [{ event: 'Notification', notificationType: 'permission_prompt' }, { state: 'waiting', detail: null }],
     [{ event: 'Notification', notificationType: 'idle_prompt' }, null],
     [{ event: 'Stop' }, { state: 'idle', detail: null }],
-    [{ event: 'Stop', backgroundTasks: 2 }, { state: 'running', detail: null }],
+    [{ event: 'Stop', backgroundTasks: 2 }, { state: 'running', detail: BACKGROUND_DETAIL }],
     [{ event: 'StopFailure', error: 'rate_limit', errorMessage: 'API Error' }, { state: 'failed', detail: 'rate_limit' }],
     [{ event: 'StopFailure', errorMessage: 'API Error' }, { state: 'failed', detail: 'API Error' }],
     [{ event: 'SessionEnd' }, null],
