@@ -337,7 +337,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
       '/window': async (body) => {
         if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'], body['workspace'] ?? null)) {
-          return { status: 400, body: { error: 'Expected {workspace, command} with a changes, terminal, history or openUrl command, or openTabs for a workspace.' } };
+          return { status: 400, body: { error: 'Expected {workspace, command} with a changes, terminal, history, log or openUrl command, or openTabs for a workspace.' } };
         }
 
         const id = windowQueue.recordCommand(body['command'], body['workspace'] ?? null);
@@ -509,6 +509,8 @@ function isWindowCommand(value: unknown, workspace: string | null): value is Rec
       return text('sessionId') && text('cwd') && text('name') && (value['shortId'] === null || text('shortId')) && typeof value['active'] === 'boolean';
     case 'openUrl':
       return text('url');
+    case 'log':
+      return true;
     // An item window opens its own tabs (PRD R72), so another window cannot take the command.
     case 'openTabs':
       return workspace !== null;

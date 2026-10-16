@@ -40,6 +40,16 @@ public sealed class ControlsTests
         Dispatcher.UIThread.RunJobs();
     }
 
+    /// <summary>Opens More Actions and clicks the item with the header.</summary>
+    static void Choose(Window window, string header)
+    {
+        var more = window.FindControl<Button>("MoreButton")!;
+
+        Click(more);
+        more.ContextMenu!.Items.OfType<MenuItem>().Single((item) => (string)item.Header! == header).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+    }
+
     static List<string> VisibleTitles(Window window) =>
         window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("row") && border.IsEffectivelyVisible).Select((border) => ((RowViewModel)border.DataContext!).Title).ToList();
 
@@ -209,7 +219,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
         Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
@@ -231,7 +241,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
@@ -248,7 +258,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
         var run = Named<ComboBox>(dialog, "AdhocRunBox");
 
@@ -282,7 +292,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open(Fixtures.View with { RepoRoots = [] });
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
         Assert.Equal(1, Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex);
@@ -307,7 +317,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open(Fixtures.View with { RepoRoots = [], Schedules = [] });
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
 
         Assert.Empty(window.OwnedWindows);
         Assert.Equal("Set a repoRoot on a source to start an ad-hoc session.", model.Status);
@@ -318,7 +328,7 @@ public sealed class ControlsTests
     {
         var (window, model) = Open();
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
@@ -338,7 +348,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "   ";
@@ -355,7 +365,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open(Fixtures.View with { RepoRoots = ["D:/git/widgets"] });
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
         Assert.False(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
@@ -363,13 +373,36 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void MoreActions_Clicked_OpensTheMenuOfAdhocSettingsAndHubLog()
+    {
+        var (window, _) = Open();
+        var more = window.FindControl<Button>("MoreButton")!;
+
+        Click(more);
+
+        Assert.True(more.ContextMenu!.IsOpen);
+        Assert.Equal(["New Ad-hoc Session…", "Open Settings", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+    }
+
+    [AvaloniaFact]
+    public void ShowHubLog_Chosen_RunsTheLogCommandInTheVsCodeWindowUsedLast()
+    {
+        var (window, _) = Open();
+
+        Choose(window, "Show Hub Log");
+
+        Assert.Equal(["none {\"type\":\"log\"}"], actions.Runs);
+        Assert.Empty(hub.Calls);
+    }
+
+    [AvaloniaFact]
     public void Settings_ClickedTwice_OpensOneSettingsWindowWithTheFiles()
     {
         var (window, _) = Open();
 
-        Click(window.FindControl<Button>("SettingsButton")!);
+        Choose(window, "Open Settings");
         var first = window.Settings;
-        Click(window.FindControl<Button>("SettingsButton")!);
+        Choose(window, "Open Settings");
 
         Assert.NotNull(first);
         Assert.Same(first, window.Settings);
@@ -411,7 +444,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
         var create = Named<Button>(dialog, "AdhocCreate");
 
@@ -434,7 +467,7 @@ public sealed class ControlsTests
     {
         var (window, _) = Open();
 
-        Click(window.FindControl<Button>("AdhocButton")!);
+        Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";

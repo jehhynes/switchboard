@@ -307,7 +307,7 @@
     <DockPanel Name="ListPanel" Grid.Column="1">
       <StackPanel DockPanel.Dock="Top" Margin="8,0,0,0" Spacing="4">
         <!-- 35px, the height of VS Code's title bar on Windows. -->
-        <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor under the pointer as it moves. -->
           <TextBlock Name="MoveHandle" Text="Switchboard" FontSize="12" Classes="muted" VerticalAlignment="Center" Cursor="SizeAll" Background="Transparent"
                      ToolTip.Tip="Drag to the left or right half of a monitor to dock there" PointerPressed="OnMovePressed" PointerMoved="OnMoveMoved" PointerReleased="OnMoveReleased" PointerCaptureLost="OnMoveCaptureLost" />
@@ -333,18 +333,16 @@
           <Button Name="SearchButton" Grid.Column="3" Classes="header" Click="OnSearchClicked" ToolTip.Tip="Search" AutomationProperties.Name="Search">
             <TextBlock Classes="icon" Text="&#xEA6D;" />
           </Button>
-          <Button Name="AdhocButton" Grid.Column="4" Classes="header" Click="OnAdhocClicked" ToolTip.Tip="New Ad-hoc Session…" AutomationProperties.Name="New Ad-hoc Session">
-            <TextBlock Classes="icon" Text="&#xEA60;" />
-          </Button>
-          <Button Name="AutoHideButton" Grid.Column="5" Classes="header" Click="OnAutoHideClicked" ToolTip.Tip="{Binding AutoHideTip}" AutomationProperties.Name="Auto-hide">
+          <Button Name="AutoHideButton" Grid.Column="4" Classes="header" Click="OnAutoHideClicked" ToolTip.Tip="{Binding AutoHideTip}" AutomationProperties.Name="Auto-hide">
             <TextBlock Classes="icon" Text="{Binding AutoHideGlyph}" />
           </Button>
-          <Button Name="SettingsButton" Grid.Column="6" Classes="header" Click="OnSettingsClicked" ToolTip.Tip="Open Settings" AutomationProperties.Name="Open Settings">
-            <TextBlock Classes="icon" Text="&#xEB51;" />
+          <!-- New Ad-hoc Session, Open Settings and Show Hub Log, in a menu to keep the title row short. -->
+          <Button Name="MoreButton" Grid.Column="5" Classes="header" Click="OnMoreClicked" ToolTip.Tip="More Actions…" AutomationProperties.Name="More Actions">
+            <TextBlock Classes="icon" Text="&#xEA7C;" />
           </Button>
-          <!-- Set apart, so Close is not clicked by mistake for Settings. -->
-          <Border Grid.Column="7" Classes="separator" Margin="8,0" />
-          <Button Name="CloseButton" Grid.Column="8" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock" AutomationProperties.Name="Close the dock">
+          <!-- Set apart, so Close is not clicked by mistake for another control. -->
+          <Border Grid.Column="6" Classes="separator" Margin="8,0" />
+          <Button Name="CloseButton" Grid.Column="7" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock" AutomationProperties.Name="Close the dock">
             <TextBlock Classes="icon" Text="&#xEA76;" />
           </Button>
         </Grid>

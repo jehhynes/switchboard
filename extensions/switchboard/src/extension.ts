@@ -1,3 +1,4 @@
+import { unwatchFile, watchFile } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import * as vscode from 'vscode';
@@ -10,6 +11,7 @@ import { DoneWindow } from './doneWindow.js';
 import { openChanges } from './git.js';
 import { HistoryPanels } from './historyPanel.js';
 import type { HistoryMessage } from './historyPanel.js';
+import { LogTail } from './hubLog.js';
 import { startHub } from './hubProcess.js';
 import { needsStatus } from './needs.js';
 import { NeedsYouToasts } from './notify.js';
@@ -38,7 +40,7 @@ export interface SwitchboardApi {
   openRow(key: string, options?: { hub?: HubRecord; waitMs?: number }): Promise<OpenResult>;
   /** Claims what the dock left for this window from a hub, as focus or a connection does, and runs it, by default with `run` (PRD R71). */
   claim(hub: HubRecord, run?: (command: WindowCommand) => Promise<unknown>): Promise<string | null>;
-  /** Runs a command the dock leaves for a window: Open Changes, History or Open report (PRD R71). */
+  /** Runs a command the dock leaves for a window: Open Changes, History, Open report or Show Hub Log (PRD R71). */
   run(command: WindowCommand): Promise<unknown>;
   /** Opens a URL or file as an item window's tab; the suite's window is not an item window (PRD R72). */
   openTab(target: string): Promise<void>;
@@ -90,6 +92,18 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     logPath: hubLogPath(home),
   });
 
+  // Every window follows hub.log, so the Output view's channel is current whichever window shows it.
+  const hubLog = vscode.window.createOutputChannel('Switchboard Hub', 'log');
+  const logTail = new LogTail(hubLogPath(home), (text) => hubLog.append(text));
+  const readLog = (): void => logTail.read();
+  const showHubLog = (): void => {
+    readLog();
+    hubLog.show(true);
+  };
+
+  readLog();
+  watchFile(hubLogPath(home), { interval: 1000 }, readLog);
+
   const state = new HubState();
   const tabs = new ItemTabs(workspaceFile(), windowsDir(home), openTab);
   let done = new DoneWindow(workspaceFile(), windowsDir(home), vscode.window.state.focused, Date.now());
@@ -126,6 +140,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         return openLink(String(command['url']));
       case 'openTabs':
         return tabs.openAll(await state.first(TABS_STATE_WAIT_MS));
+      case 'log':
+        return showHubLog();
       default:
         return undefined;
     }
@@ -168,7 +184,10 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   context.subscriptions.push(
     status,
+    hubLog,
+    { dispose: () => unwatchFile(hubLogPath(home), readLog) },
     history.register(),
+    vscode.commands.registerCommand('switchboard.showHubLog', showHubLog),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
     vscode.window.registerUriHandler({ handleUri: (uri) => void openUri(opening(), uri) }),

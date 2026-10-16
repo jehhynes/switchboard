@@ -786,9 +786,12 @@ public sealed partial class MainWindow : Window
         return items;
     }
 
-    // Codicons the dock draws itself: copy and link-external.
+    // Codicons the dock draws itself: copy, link-external, add, settings-gear and output.
     const string CopyGlyph = "\uEBCC";
     const string LinkGlyph = "\uEB14";
+    const string AddGlyph = "\uEA60";
+    const string SettingsGlyph = "\uEB51";
+    const string OutputGlyph = "\uEB9D";
 
     static MenuItem Item(string header, Func<Task> run, string? glyph = null)
     {
@@ -957,8 +960,26 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>The header's More Actions menu, below the button and opening away from the screen edge the dock is on.</summary>
+    void OnMoreClicked(object? sender, RoutedEventArgs e)
+    {
+        var dockOnRight = model.GripOnLeft;
+        var menu = RowMenu(HeaderMenu(), dockOnRight, new Point(dockOnRight ? MoreButton.Bounds.Width : 0, MoreButton.Bounds.Height));
+
+        MoreButton.ContextMenu = menu;
+        menu.Open(MoreButton);
+    }
+
+    /// <summary>New Ad-hoc Session, Open Settings and Show Hub Log, which shows the hub log in the VS Code window used last.</summary>
+    internal List<Control> HeaderMenu() =>
+    [
+        Item("New Ad-hoc Session…", NewAdhoc, AddGlyph),
+        Item("Open Settings", OpenSettings, SettingsGlyph),
+        Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
+    ];
+
     /// <summary>Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked.</summary>
-    async void OnAdhocClicked(object? sender, RoutedEventArgs e)
+    async Task NewAdhoc()
     {
         // A schedule names its own repo root, so Run now needs no source's.
         if ((model.RepoRoots.Count == 0 || model.AdhocRepo is null) && model.Schedules.Count == 0)
@@ -982,7 +1003,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>Opens the Settings window (PRD R54), or brings the open one forward.</summary>
-    async void OnSettingsClicked(object? sender, RoutedEventArgs e)
+    async Task OpenSettings()
     {
         if (settingsWindow is not null)
         {

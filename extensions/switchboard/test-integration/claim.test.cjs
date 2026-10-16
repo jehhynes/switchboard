@@ -1,6 +1,6 @@
 const assert = require('node:assert');
 const { createServer } = require('node:http');
-const { mkdtempSync, writeFileSync } = require('node:fs');
+const { appendFileSync, mkdtempSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const vscode = require('vscode');
@@ -98,6 +98,25 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
     } finally {
       hub.server.close();
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    }
+  });
+
+  it('shows the hub log in the Switchboard Hub output channel, which follows lines the hub adds', async () => {
+    const hub = await claimingHub([{ type: 'log' }]);
+    const log = join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'hub.log');
+    const line = `${new Date().toISOString()} test line ${Date.now()}`;
+    const shown = () => vscode.workspace.textDocuments.find((document) => document.uri.scheme === 'output' && document.getText().includes(line));
+
+    try {
+      await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' });
+      appendFileSync(log, `${line}\n`);
+
+      await until(shown, 'the output view never showed the line added to hub.log');
+      assert.match(shown().getText(), / listening on 127\.0\.0\.1:\d+ as pid /);
+      assert.deepStrictEqual(errors, []);
+    } finally {
+      hub.server.close();
+      await vscode.commands.executeCommand('workbench.action.closePanel');
     }
   });
 
