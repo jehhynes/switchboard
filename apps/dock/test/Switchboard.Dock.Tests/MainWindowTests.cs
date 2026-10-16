@@ -387,7 +387,8 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void OpenDone_RecordedView_ShowsTodayOpenAndOlderClosedUntilTapped()
     {
-        var (window, _) = Open(new DockSettings { Groups = { ["done"] = true } });
+        var settings = new DockSettings { Groups = { ["done"] = true } };
+        var (window, model) = Open(settings);
 
         // Tall enough that the Older band is on screen to tap.
         window.Height = 1400;
@@ -402,7 +403,33 @@ public sealed class MainWindowTests
         Tap(window, bands[1]);
 
         Assert.Contains("Issue <12>", VisibleTexts(window));
-        Assert.Contains("done:Older=True", saved.Last().Split(','));
+
+        model.Show(Fixtures.View);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains("Issue <12>", VisibleTexts(window));
+        Assert.Empty(saved);
+        Assert.DoesNotContain("done:Older", settings.Groups.Keys);
+    }
+
+    [AvaloniaFact]
+    public void OpenDone_NewRun_StartsOlderClosedAfterTheLastRunOpenedIt()
+    {
+        var settings = new DockSettings { Groups = { ["done"] = true } };
+        var (first, _) = Open(settings);
+
+        first.Height = 1400;
+        Dispatcher.UIThread.RunJobs();
+        Tap(first, first.GetVisualDescendants().OfType<Border>().Single((border) => border.DataContext is BandViewModel { Title: "Older" } && border.Classes.Contains("band")));
+        first.Close();
+
+        var (second, _) = Open(settings);
+
+        second.Height = 1400;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains("Issue <11>", VisibleTexts(second));
+        Assert.DoesNotContain("Issue <12>", VisibleTexts(second));
     }
 
     [AvaloniaFact]

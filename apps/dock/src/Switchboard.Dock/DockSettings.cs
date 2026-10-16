@@ -48,7 +48,8 @@ public sealed class DockSettings
         }
 
         settings.Width = double.IsFinite(settings.Width) ? Math.Clamp(settings.Width, MinWidth, MaxWidth) : DefaultWidth;
-        settings.Groups ??= [];
+        // Done's date bands (done:<band>) start at their defaults each run (PRD R27).
+        settings.Groups = (settings.Groups ?? []).Where((entry) => !entry.Key.Contains(':', StringComparison.Ordinal)).ToDictionary();
         settings.Edge = settings.Edge == "right" ? "right" : "left";
 
         return settings;

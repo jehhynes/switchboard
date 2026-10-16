@@ -69,6 +69,16 @@ public sealed class DockSettingsTests
         Assert.Equal(["dock.json"], Directory.GetFiles(home).Select(Path.GetFileName));
     }
 
+    [Fact]
+    public void Load_FileWithDoneBands_DropsTheBandsAndKeepsTheGroups()
+    {
+        var home = Fixtures.TempFolder();
+
+        File.WriteAllText(Path.Combine(home, "dock.json"), "{\"groups\": {\"done\": true, \"done:Today\": false, \"done:Older\": true}}");
+
+        Assert.Equal(new Dictionary<string, bool> { ["done"] = true }, DockSettings.Load(home).Groups);
+    }
+
     [Theory]
     [InlineData("{\"width\": 50}", 200)]
     [InlineData("{\"width\": 5000}", 800)]

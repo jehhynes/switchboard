@@ -26,11 +26,14 @@ public abstract class Observable : INotifyPropertyChanged
 public sealed class DockViewModel(DockSettings settings, Action<DockSettings> save) : Observable
 {
     /// <summary>Blocked on you, Ready for review, In progress and Unstarted start open; Done and Snoozed start closed (PRD R27).</summary>
-    // Done's older date bands start closed, so the recent ones show first (PRD R27).
+    // Done's older date bands start closed each run, so the recent ones show first (PRD R27).
     static readonly HashSet<string> OpenByDefault = ["blocked", "review", "progress", "unstarted", "done:Today", "done:Yesterday"];
 
     /// <summary>The groups whose operator-turn rows F8 visits (PRD R73).</summary>
     static readonly HashSet<string> TurnGroups = ["blocked", "review"];
+
+    /// <summary>Done's date bands the operator opened or closed this run, by key; not kept in <c>dock.json</c> (PRD R27).</summary>
+    readonly Dictionary<string, bool> bandsOpen = [];
 
     string? status;
     string? connection = "Connecting to Switchboard…";
@@ -216,7 +219,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
         foreach (var group in view.Groups)
         {
-            var model = kept.GetValueOrDefault(group.Key) ?? new GroupViewModel(group.Key, IsOpen(group.Key), Toggled, IsOpen, BandToggled);
+            var model = kept.GetValueOrDefault(group.Key) ?? new GroupViewModel(group.Key, IsOpen(group.Key), Toggled, IsBandOpen, BandToggled);
 
             model.Show(group, selected, filter);
             Groups.Add(model);
@@ -226,17 +229,15 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
     bool IsOpen(string key) => settings.Groups.TryGetValue(key, out var open) ? open : OpenByDefault.Contains(key);
 
+    bool IsBandOpen(string key) => bandsOpen.TryGetValue(key, out var open) ? open : OpenByDefault.Contains(key);
+
     void Toggled(GroupViewModel group)
     {
         settings.Groups[group.Key] = group.IsOpen;
         SaveSettings();
     }
 
-    void BandToggled(BandViewModel band)
-    {
-        settings.Groups[band.Key] = band.IsOpen;
-        SaveSettings();
-    }
+    void BandToggled(BandViewModel band) => bandsOpen[band.Key] = band.IsOpen;
 
     /// <summary>Keeps the settings; a failure shows on the status line and changes nothing else.</summary>
     public void SaveSettings()
@@ -335,7 +336,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
 /// <summary>
 /// A group's rows under one date band of Done, such as <c>Today</c>, or all of another group's rows under no heading (PRD R27). A band's open
-/// state is kept under <c>done:&lt;band&gt;</c>.
+/// state lasts until the dock exits.
 /// </summary>
 public sealed class BandViewModel(string key, string? title, bool open, Action<BandViewModel> toggled) : Observable
 {
