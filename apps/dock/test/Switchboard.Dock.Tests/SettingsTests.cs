@@ -41,6 +41,9 @@ public sealed class SettingsFieldsTests
         Assert.Equal(["", "dev", "triage"], fields["sources.github.namespace"].Options!.Select((option) => option.Value));
         Assert.Equal(["None", "triage:github", "triage:gone (missing)"], fields["sources.github.triagePlaybook"].Options!.Select((option) => option.Label));
         Assert.Equal(FieldKind.List, fields["sources.github.logins"].Kind);
+        Assert.Equal(FieldKind.Boolean, fields["sources.github.requireAssignee"].Kind);
+        Assert.True(SettingsPages.FieldViewOf(fields["sources.github.requireAssignee"], null, []).Checked);
+        Assert.DoesNotContain(sections[2].Fields, (field) => field.Path == "sources.github.requireAssignee");
         Assert.Equal("^(\\d+)-", sections[2].Fields.Single((field) => field.Path == "sources.github.branchPattern").Placeholder);
         Assert.DoesNotContain("sources.github.enabled", fields.Keys);
         Assert.Equal("sources.github.pollIntervalSeconds", sections[0].Fields[0].Path);

@@ -117,7 +117,11 @@ export class GithubSource implements Source {
     private readonly readRoles: (path: string) => Promise<RolesResult> = async () => ({ roles: new Map() }),
   ) {}
 
-  /** Reads every open issue assigned to a configured login on the project. An issue whose status is not configured is listed as not assigned. A malformed response is a failed read. */
+  /**
+   * Reads every open issue assigned to a configured login on the project, and lists an issue whose status is not configured as not
+   * assigned. With `requireAssignee` off, reads every open issue on the project and lists only those on a configured status. A malformed
+   * response is a failed read.
+   */
   async poll(): Promise<PollResult> {
     try {
       return await this.readIssues();
@@ -226,8 +230,9 @@ export class GithubSource implements Source {
   }
 
   private async readIssues(): Promise<PollResult> {
-    const { repo, logins, project, assignedStatuses, maxPages } = this.config;
-    const q = [`repo:${repo}`, 'is:issue', 'is:open', ...logins.map((login) => `assignee:${login}`), `project:${project.owner}/${project.number}`].join(' ');
+    const { repo, logins, requireAssignee, project, assignedStatuses, maxPages } = this.config;
+    const assignees = requireAssignee ? logins.map((login) => `assignee:${login}`) : [];
+    const q = [`repo:${repo}`, 'is:issue', 'is:open', ...assignees, `project:${project.owner}/${project.number}`].join(' ');
     const tickets: PolledTicket[] = [];
     let after: string | null = null;
     // A field that cannot hold a status would read every issue as unassigned and end its work item.
@@ -253,6 +258,13 @@ export class GithubSource implements Source {
 
         const field = node.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName;
         const status = field?.name;
+        const assigned = status !== undefined && assignedStatuses.includes(status);
+
+        // Without the assignee filter the search returns the whole board, so only issues in scope are listed. The flow reads an unlisted
+        // ticket as having left the assigned state.
+        if (!requireAssignee && !assigned) {
+          continue;
+        }
 
         tickets.push({
           sourceKey: String(node.number),
@@ -260,10 +272,11 @@ export class GithubSource implements Source {
           sourceId: null,
           title: node.title,
           url: node.url,
-          assigned: status !== undefined && assignedStatuses.includes(status),
+          assigned,
           pool: false,
           sortAt: this.waitingSince(node.timelineItems, field?.updatedAt),
-          enteredAt: this.assignedSince(node as IssueNode),
+          // Scope then starts at a status change, which the timeline no longer logs, so core keeps the time it first saw the issue.
+          enteredAt: requireAssignee ? this.assignedSince(node as IssueNode) : null,
         });
       }
 
@@ -274,7 +287,7 @@ export class GithubSource implements Source {
       after = search.pageInfo.endCursor;
     }
 
-    return { error: `More than ${maxPages} pages of assigned issues; raise sources.github.maxPages.` };
+    return { error: `More than ${maxPages} pages of searched issues; raise sources.github.maxPages.` };
   }
 
   private async readContext(ticket: Ticket): Promise<ContextResult> {

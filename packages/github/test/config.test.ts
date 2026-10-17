@@ -12,6 +12,7 @@ describe('parseGithubConfig', () => {
         ghPath: 'gh',
         repo: 'acme/widgets',
         logins: ['work-login'],
+        requireAssignee: true,
         project: { owner: 'acme', number: 3, statusField: 'Status' },
         assignedStatuses: ['⚒️ Dev'],
         branchPattern: /^(\d+)-/,
@@ -19,6 +20,10 @@ describe('parseGithubConfig', () => {
         rolesFile: null,
       },
     });
+  });
+
+  it('keeps requireAssignee off', () => {
+    expect(parseGithubConfig({ ...VALID, requireAssignee: false })).toMatchObject({ config: { requireAssignee: false } });
   });
 
   it('keeps a roles file that is absolute or starts with ~', () => {
@@ -32,6 +37,7 @@ describe('parseGithubConfig', () => {
     [{ repo: '' }, 'sources.github.repo must be set to owner/name.'],
     [{ logins: [] }, 'sources.github.logins must list at least one login.'],
     [{ logins: [''] }, 'sources.github.logins must list at least one login.'],
+    [{ requireAssignee: 'no' }, 'sources.github.requireAssignee must be true or false.'],
     [{ project: { owner: 'acme' } }, 'sources.github.project must give owner and number.'],
     [{ assignedStatuses: 'Dev' }, 'sources.github.assignedStatuses must list at least one status.'],
     [{ ghPath: '' }, 'sources.github.ghPath must be a path.'],

@@ -295,7 +295,8 @@ public static partial class SettingsFields
         ["github"] =
         [
             ("repo", new Field("", "Repository", FieldKind.Text, "", "owner/name"), false),
-            ("logins", new Field("", "Logins", FieldKind.List, "One per line. An issue assigned to any of them is yours."), false),
+            ("logins", new Field("", "Logins", FieldKind.List, "One per line. Your GitHub logins: comments and commits by them are yours, and with Require assignee on, an issue assigned to any of them is yours."), false),
+            ("requireAssignee", new Field("", "Require assignee", FieldKind.Boolean, "Off, an issue in an assigned status is yours whoever is assigned.", Fallback: true), false),
             ("project.owner", new Field("", "Project owner", FieldKind.Text, ""), false),
             ("project.number", new Field("", "Project number", FieldKind.Integer, ""), false),
             ("project.statusField", new Field("", "Status field", FieldKind.Text, "", "Status"), false),

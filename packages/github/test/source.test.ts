@@ -120,6 +120,32 @@ describe('GithubSource.poll', () => {
     expect(ISSUES_QUERY).toContain('assignees(first:10){ nodes{ login } }');
   });
 
+  it('without requireAssignee, searches the whole board and lists only issues in an assigned status, with no scope entry', async () => {
+    const node = (number: number, project: number, status: string, assignee: string | null) => ({
+      number,
+      title: `Issue ${number}`,
+      url: `u${number}`,
+      projectItems: { nodes: [{ project: { number: project, owner: { login: 'acme' } }, fieldValueByName: { name: status, updatedAt: '2026-10-04T00:00:00Z' } }] },
+      assignees: { nodes: assignee === null ? [] : [{ login: assignee }] },
+      timelineItems: { nodes: assignee === null ? [] : [{ __typename: 'AssignedEvent', createdAt: '2026-10-01T00:00:00Z', assignee: { login: assignee } }] },
+    });
+    const json = {
+      data: {
+        search: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          // Listed, whoever is assigned: an assigned status. Left out: an unconfigured status, and a configured status on another project.
+          nodes: [node(1, 3, '⚒️ Dev', 'work-login'), node(2, 3, '⚒️ Dev', null), node(3, 3, '🔍 Review', 'someone'), node(4, 3, 'Backlog', 'work-login'), node(5, 4, '⚒️ Dev', 'work-login')],
+        },
+      },
+    };
+    const gh = fakeGh(SINGLE_SELECT, { json });
+    const result = await new GithubSource(config({ requireAssignee: false }), gh).poll();
+    const listed = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Issue ${number}`, url: `u${number}`, assigned: true, pool: false, sortAt: Date.parse('2026-10-04T00:00:00Z'), enteredAt: null });
+
+    expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'repo:acme/widgets is:issue is:open project:acme/3', status: 'Status' });
+    expect(result).toEqual({ tickets: [listed(1), listed(2), listed(3)] });
+  });
+
   it('treats a status on another project as not assigned', async () => {
     const result = await new GithubSource(config({ project: { owner: 'acme', number: 4, statusField: 'Status' } }), fakeGh(SINGLE_SELECT, { json: fixture('issues') })).poll();
 
@@ -144,7 +170,7 @@ describe('GithubSource.poll', () => {
     expect(gh.mock.calls[2]?.[1]).toEqual(expect.objectContaining({ after: 'c1' }));
     expect(ISSUES_QUERY).toContain('search(query:$q, type:ISSUE, first:100, after:$after)');
 
-    expect(await new GithubSource(config({ maxPages: 1 }), fakeGh(SINGLE_SELECT, page(1, 'c1'))).poll()).toEqual({ error: 'More than 1 pages of assigned issues; raise sources.github.maxPages.' });
+    expect(await new GithubSource(config({ maxPages: 1 }), fakeGh(SINGLE_SELECT, page(1, 'c1'))).poll()).toEqual({ error: 'More than 1 pages of searched issues; raise sources.github.maxPages.' });
   });
 
   it("fails the read when the configured project's status field is missing or not single-select, so no issue reads as unassigned", async () => {
