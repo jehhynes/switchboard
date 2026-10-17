@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseGithubConfig } from '../src/config.js';
 import { ghArgs, ghError, spawnGh } from '../src/gh.js';
@@ -22,7 +23,7 @@ describe('parseGithubConfig', () => {
 
   it('keeps a roles file that is absolute or starts with ~', () => {
     expect(parseGithubConfig({ ...VALID, rolesFile: ' ~/.claude/skills/sb-handoff/roster.json ' })).toMatchObject({ config: { rolesFile: '~/.claude/skills/sb-handoff/roster.json' } });
-    expect(parseGithubConfig({ ...VALID, rolesFile: 'C:/roles.json' })).toMatchObject({ config: { rolesFile: 'C:/roles.json' } });
+    expect(parseGithubConfig({ ...VALID, rolesFile: resolve('/roles.json') })).toMatchObject({ config: { rolesFile: resolve('/roles.json') } });
     expect(parseGithubConfig({ ...VALID, rolesFile: '' })).toMatchObject({ config: { rolesFile: null } });
   });
 

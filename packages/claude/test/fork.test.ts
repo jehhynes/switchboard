@@ -223,20 +223,23 @@ describe('findForks', () => {
     const list = vi.spyOn(spied, 'list');
     const read = vi.spyOn(spied, 'read');
 
-    findForks(index, [entry()], sessions);
+    // The roster's directory in the transcripts' own case, so the exact lookup finds them on a case-sensitive file system too.
+    const exact = entry({ cwd: 'D:\\git\\repo' });
+
+    findForks(index, [exact], sessions);
     // The fork has no key, so no session's transcript is read for it.
     expect(locate).toHaveBeenCalledTimes(1);
-    findForks(index, [entry()], sessions);
+    findForks(index, [exact], sessions);
     expect(locate).toHaveBeenCalledTimes(1);
 
     copyFileSync(fixture('plain-copy'), file(FORK));
-    findForks(index, [entry()], sessions);
+    findForks(index, [exact], sessions);
     // Every session is a target in the project; each session's transcript is looked for once, found or not.
     expect(locate).toHaveBeenCalledTimes(101);
     // The fork and the original are in their exact directory; each of the 99 missing transcripts lists the projects once.
     expect(list).toHaveBeenCalledTimes(99);
     const reads = read.mock.calls.length;
-    findForks(index, [entry()], sessions);
+    findForks(index, [exact], sessions);
     expect(locate).toHaveBeenCalledTimes(101);
     expect(list).toHaveBeenCalledTimes(99);
     // One read per transcript per pass: the fork and the original, although 100 sessions compare against them.

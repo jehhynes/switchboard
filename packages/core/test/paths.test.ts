@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { hubBundlePath, hubLogPath, hubRecordPath, resolveConfigDir, switchboardHome } from '../src/paths.js';
 
@@ -18,7 +18,7 @@ describe('paths', () => {
 
     expect(resolveConfigDir('  ', home, profile)).toEqual({ dir: switchboardHome(home) });
     expect(resolveConfigDir('~/.claude/switchboard', home, profile)).toEqual({ dir: resolve(profile, '.claude', 'switchboard') });
-    expect(resolveConfigDir('~\\cfg', home, profile)).toEqual({ dir: resolve(profile, 'cfg') });
+    expect(resolveConfigDir(`~${sep}cfg`, home, profile)).toEqual({ dir: resolve(profile, 'cfg') });
     expect(resolveConfigDir('~', home, profile)).toEqual({ dir: resolve(profile) });
     expect(resolveConfigDir(resolve('D:/git/cfg/'), home, profile)).toEqual({ dir: resolve('D:/git/cfg') });
     expect(resolveConfigDir('cfg', home, profile)).toEqual({ error: 'switchboard.configDir must be an absolute path or start with ~: cfg' });

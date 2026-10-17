@@ -51,10 +51,14 @@ class Fake {
   /** Each spawned process's command line; another process that takes a PID has another. */
   commandLines = new Map<number, string>();
   tags = new Map<string, ProcessIdentity>();
+  /** Process names other than codex.exe, such as npm's launcher on Linux. */
+  names = new Map<number, string>();
   queries = 0;
   queryError: string | null = null;
   /** Fails this many process queries before answering. */
   queryFailures = 0;
+  /** Answers this many tag searches with no process first. */
+  tagMisses = 0;
   /** Holds the next tag search until released. */
   tagGate: Promise<void> | null = null;
   killError: string | null = null;
@@ -106,13 +110,19 @@ class Fake {
           return { error: 'WMI busy' };
         }
 
-        return new Map(pids.filter((pid) => this.alive.has(pid)).map((pid): [number, ProcessInfo] => [pid, { pid, created: this.created.get(pid)!, name: 'codex.exe', commandLine: this.commandLines.get(pid) ?? '' }]));
+        return new Map(pids.filter((pid) => this.alive.has(pid)).map((pid): [number, ProcessInfo] => [pid, { pid, created: this.created.get(pid)!, name: this.names.get(pid) ?? 'codex.exe', commandLine: this.commandLines.get(pid) ?? '' }]));
       },
       tagged: async (tag) => {
         const gate = this.tagGate;
 
         this.tagGate = null;
         await gate;
+
+        if (this.tagMisses > 0) {
+          this.tagMisses -= 1;
+          return null;
+        }
+
         return this.tagError === null ? (this.tags.get(tag) ?? null) : { error: this.tagError };
       },
       alive: (pid) => this.alive.has(pid),
@@ -228,6 +238,19 @@ describe('start', () => {
     fake.onSpawn = () => {};
     expect(await fake.runner().start(ACTION)).toEqual({ error: `Codex did not start the session within ${START_TIMEOUT_MS / 1000} seconds.` });
     expect(fake.kills).toEqual([100]);
+  });
+
+  it("ends a launcher's Codex child that started only after the spawn's checks, when the start times out", async () => {
+    const fake = new Fake();
+
+    fake.onSpawn = (_files, pid) => fake.names.set(pid, 'MainThread');
+    fake.tagMisses = 3;
+    fake.tags.set('s1', { pid: 150, created: 'c150' });
+    fake.alive.add(150);
+    fake.created.set(150, 'c150');
+    expect(await fake.runner().start(ACTION)).toEqual({ error: `Codex did not start the session within ${START_TIMEOUT_MS / 1000} seconds.` });
+    expect(readRecord(home, 's1')!.process).toEqual({ pid: 150, created: 'c150' });
+    expect(fake.kills).toEqual([150]);
   });
 });
 
@@ -500,6 +523,20 @@ describe('lifecycle races and recovery', () => {
     writeRecord(home, { ...readRecord(home, 's1')!, process: null });
     fake.tagError = 'WMI is down';
     expect(await runner.stop({ sessionId: 's1', shortId: THREAD }, 'operator')).toEqual({ error: 'The Codex process query failed: WMI is down' });
+  });
+
+  it("records the Codex child of a launcher, such as npm's on Linux, and leaves a child not started yet to be found by its tag", async () => {
+    const fake = new Fake();
+
+    fake.names.set(100, 'MainThread');
+    fake.tags.set('s1', { pid: 101, created: 'c101' });
+    expect((await started(fake)).record.process).toEqual({ pid: 101, created: 'c101' });
+
+    const later = new Fake();
+
+    later.names.set(100, 'MainThread');
+    expect(await later.runner().start(ACTION)).toEqual({ shortId: THREAD, nativeSessionId: THREAD });
+    expect(readRecord(home, 's1')!.process).toBeNull();
   });
 
   it('waits on a spawned process whose creation time cannot be read yet, and leaves it to be found by its tag', async () => {

@@ -79,7 +79,7 @@ describe('the status bar item (PRD R64, R71)', () => {
     vscode.window.showWarningMessage = (...args) => (warned.push(args[0]), Promise.resolve(undefined));
     try {
       assert.strictEqual(await vscode.commands.executeCommand('switchboard.showDock'), 'missing');
-      assert.match(warned[0], /^Switchboard: the dock is not installed at .*\\.switchboard\\dock\\Switchboard\.Dock\.exe\.$/);
+      assert.match(warned[0], process.platform === 'win32' ? /^Switchboard: the dock is not installed at .*\\.switchboard\\dock\\Switchboard\.Dock\.exe\.$/ : /^Switchboard: the dock is not installed at .*\/\.switchboard\/dock\/Switchboard\.Dock\.$/);
     } finally {
       vscode.window.showWarningMessage = realWarning;
     }

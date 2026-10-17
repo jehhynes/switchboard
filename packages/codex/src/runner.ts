@@ -8,7 +8,7 @@ import { CODEX_HOOK_SOURCE, codexHookCommands, parseCodexMarker, planCodexHooks 
 import type { CodexMarker } from './hooks.js';
 import { lastErrorLine, parseRunLog } from './log.js';
 import type { RunLog } from './log.js';
-import { carriesTag, findTagged, killTree, pidAlive, queryProcesses, runTag, sameProcess, spawnDetached } from './processes.js';
+import { carriesTag, findTagged, isCodex, killTree, pidAlive, queryProcesses, runTag, sameProcess, spawnDetached } from './processes.js';
 import type { DetachedSpawn, ProcessIdentity, ProcessInfo } from './processes.js';
 import { readRecord, readText, RUN_RECORD_VERSION, runFiles, writeRecord } from './records.js';
 import type { RunRecord } from './records.js';
@@ -123,7 +123,20 @@ export class CodexRunner implements SessionRunner {
         const info = found.get(spawned.pid);
 
         // A process that already exited has no creation time, and one without the run's tag took the PID after it; the log and stderr say what the run did.
-        return { pid: spawned.pid, identity: info === undefined || !carriesTag(info.commandLine, runTag(record.sessionId)) ? null : { pid: info.pid, created: info.created } };
+        if (info === undefined || !carriesTag(info.commandLine, runTag(record.sessionId))) {
+          return { pid: spawned.pid, identity: null };
+        }
+
+        if (isCodex(info.name)) {
+          return { pid: spawned.pid, identity: { pid: info.pid, created: info.created } };
+        }
+
+        // A launcher, such as npm's codex.js on Linux, whose Codex child carries the same tag once it has started.
+        const child = await this.tagged(runTag(record.sessionId));
+
+        if (child !== null && !('error' in child)) {
+          return { pid: spawned.pid, identity: child };
+        }
       }
 
       await this.deps.sleep(POLL_MS);
@@ -196,6 +209,16 @@ export class CodexRunner implements SessionRunner {
 
     if (seen === 'exited') {
       return { error: this.failure(record, 'Codex exited before it started the session.') };
+    }
+
+    // A launcher's Codex child may have started after the spawn's identity checks.
+    if (record.process === null) {
+      const found = await this.tagged(runTag(record.sessionId));
+
+      if (found !== null && !('error' in found)) {
+        record.process = found;
+        writeRecord(this.deps.home, record);
+      }
     }
 
     const ended = record.process === null ? { error: 'its process could not be identified' } : await this.killVerified(record.process);

@@ -636,13 +636,16 @@ export function snapshotErrors(snapshot: Snapshot): string[] {
 
 /** What an unconfigured home is missing, said plainly. */
 export function setupNotes(snapshot: Snapshot): string[] {
+  // The webview bundles this module, so the path is joined with the separator the folder already uses, not node:path.
+  const settings = `${snapshot.configDir}${snapshot.configDir.includes('\\') ? '\\' : '/'}settings.json`;
+
   return [
     snapshot.sources.length > 0
       ? null
       : snapshot.sourceStates.length > 0
         ? 'No source is polled. Turn one on in the header.'
-        : `No source is configured. Add one in ${snapshot.configDir}\\settings.json.`,
-    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under playbooks in ${snapshot.configDir}\\settings.json.` : null,
+        : `No source is configured. Add one in ${settings}.`,
+    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under playbooks in ${settings}.` : null,
   ].filter((line): line is string => line !== null);
 }
 

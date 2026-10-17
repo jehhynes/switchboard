@@ -6,9 +6,9 @@ import { switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { postToHub } from '@switchboard/hub';
 
-/** Where `npm run publish --workspace @switchboard/dock` puts the dock: `<Switchboard home>/dock/Switchboard.Dock.exe`. */
-export function dockPath(home: string): string {
-  return join(switchboardHome(home), 'dock', 'Switchboard.Dock.exe');
+/** Where `npm run publish --workspace @switchboard/dock` puts the dock: `<Switchboard home>/dock/Switchboard.Dock`, with `.exe` on Windows. */
+export function dockPath(home: string, platform: NodeJS.Platform = process.platform): string {
+  return join(switchboardHome(home), 'dock', platform === 'win32' ? 'Switchboard.Dock.exe' : 'Switchboard.Dock');
 }
 
 /** Starts the dock on the window's home; it outlives the window. */

@@ -324,7 +324,8 @@ describe('dockView', () => {
       W,
     );
 
-    expect(view).toEqual(recorded);
+    // The fixture was recorded on Windows; elsewhere the workspace file is joined to the windows folder with '/'.
+    expect(JSON.parse(JSON.stringify(view).replaceAll(`${JSON.stringify(W).slice(1, -1)}/`, `${JSON.stringify(W).slice(1, -1)}\\\\`))).toEqual(recorded);
   });
 });
 
@@ -343,25 +344,25 @@ describe('windowOf', () => {
       name: 'gh-107-58c609',
       title: 'Issue <7>',
       folders: ['D:\\git\\widgets\\.worktrees\\107-fix\\'],
-      file: `${W}\\gh-107-58c609.code-workspace`,
+      file: join(W, 'gh-107-58c609.code-workspace'),
     });
     expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:/git/widgets' })] }), W)).toEqual({
       name: 'gh-107-widgets-655280',
       title: 'Issue <7>',
       folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'],
-      file: `${W}\\gh-107-widgets-655280.code-workspace`,
+      file: join(W, 'gh-107-widgets-655280.code-workspace'),
     });
     expect(windowOf(item(7, { worktree }), W)).toEqual({
       name: 'gh-107-58c609',
       title: 'Issue <7>',
       folders: ['D:/git/widgets/.worktrees/107-fix'],
-      file: `${W}\\gh-107-58c609.code-workspace`,
+      file: join(W, 'gh-107-58c609.code-workspace'),
     });
     expect(windowOf(item(7, { sessions: [session({ cwd: 'D:/git/support' })], ticket: { ...item(7).ticket, source: 'zoho', sourceKey: '4521/a b' } }), W)).toEqual({
       name: 'zoho-4521-a-b-support-c6262c',
       title: 'Issue <7>',
       folders: ['D:/git/support'],
-      file: `${W}\\zoho-4521-a-b-support-c6262c.code-workspace`,
+      file: join(W, 'zoho-4521-a-b-support-c6262c.code-workspace'),
     });
     expect(windowOf(item(7), W)).toBeNull();
   });

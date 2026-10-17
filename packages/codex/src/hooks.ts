@@ -23,8 +23,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// The first codex process among the hook's nearest ancestors, as "<pid> <creation file time>".
+// The first codex process among the hook's nearest ancestors, with its creation time as the hub reads it.
 function codexProcess() {
+  if (process.platform !== 'win32') {
+    return codexProcessFromProc();
+  }
+
   const script = [
     '$id = ' + process.ppid,
     'for ($i = 0; $i -lt ${PID_WALK_HOPS} -and $id; $i++) {',
@@ -43,6 +47,32 @@ function codexProcess() {
   } catch {
     return null;
   }
+}
+
+// The creation time is the start time in clock ticks since boot, field 22 of /proc/<pid>/stat.
+function codexProcessFromProc() {
+  let id = process.ppid;
+
+  for (let i = 0; i < ${PID_WALK_HOPS} && id > 1; i++) {
+    let stat;
+
+    try {
+      stat = readFileSync('/proc/' + id + '/stat', 'utf8');
+    } catch {
+      return null;
+    }
+
+    const close = stat.lastIndexOf(')');
+    const fields = stat.slice(close + 2).split(' ');
+
+    if (stat.slice(stat.indexOf('(') + 1, close) === 'codex') {
+      return /^\\d+$/.test(fields[19] ?? '') ? { pid: id, created: fields[19] } : null;
+    }
+
+    id = Number.parseInt(fields[1], 10);
+  }
+
+  return null;
 }
 
 try {

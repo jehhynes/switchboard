@@ -432,6 +432,16 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Limits:** the end of a registered session, its turn end, a compaction and the row's click were not run.
 - **Current use:** the register command and `ClaudeRunner.live` (PRD R81, architecture.md § Session reports).
 
+## M38. Running on Linux under GNOME on Wayland
+
+- **Date:** 2026-10-17.
+- **Versions:** Ubuntu 26.04.1 LTS, kernel 7.0.0, GNOME Shell 50.1 on Wayland; the operator's VS Code 1.139.1 (`/usr/share/code/code`) and the integration suite's VS Code 1.142.0 (`.vscode-test/vscode-linux-x64-1.142.0`); Codex CLI 0.163.0 installed with npm under nvm; Node 24.18.0; Claude Code CLI 2.1.300.
+- **Codex processes.** `codex` on PATH is npm's `@openai/codex/bin/codex.js`, run by Node. A `codex app-server -c switchboard_run="sbtest42-1"` started with open stdin, which makes no model call, ran as two processes whose command lines both carry the tag: the launcher, whose `/proc/<pid>/stat` name is `MainThread` because Node renames its main thread, and its child, the native `vendor/x86_64-unknown-linux-musl/bin/codex`, named `codex`, whose parent is the launcher. Field 22 of `stat`, the start time in clock ticks since boot, differed between them (52195984 and 52195987). Recorded in `packages/codex/test/fixtures/proc/`.
+- **Windows.** The operator's VS Code runs with `--ozone-platform=wayland`, as a Wayland client. `xprop -root _NET_CLIENT_LIST` listed no windows, so an X11 app, such as an Avalonia app under XWayland, cannot see VS Code's windows. Wayland gives an app no way to list, raise or watch another app's windows, or to reserve a screen edge; under GNOME only GNOME Shell, or a GNOME Shell extension, can.
+- **Checks.** Every workspace's Vitest suite passed, with the Windows-only paste test skipped and a POSIX one run in its place; `npm run test:integration --workspace switchboard` passed 56 tests in VS Code 1.142.0, including the hub outliving its window (PRD R33), with the hub run by VS Code's executable in Node mode. The dock was not built: no .NET SDK was installed.
+- **Not verified:** a `codex exec` run through a hub, and the hook script's walk from a real Codex hook; `claude --bg`, the roster, `claude attach` and Claude's hooks on Linux; the installed extension and a hub in the operator's VS Code.
+- **Current use:** the Codex process table on Linux (architecture.md § Codex runner, § Hub lifecycle).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

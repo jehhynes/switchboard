@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -110,6 +110,17 @@ describe('the hook script', () => {
 
     run({ session_id: 't1', hook_event_name: 'SessionEnd' });
     expect(existsSync(join(dir, 'activity', 't1.json'))).toBe(false);
+  });
+
+  it.skipIf(process.platform !== 'linux')('records the nearest ancestor named codex with its /proc start time', async () => {
+    // A shell started as `codex` is named codex, and runs the hook as its child because a command follows it.
+    symlinkSync('/bin/sh', join(dir, 'codex'));
+    writeFileSync(join(dir, 'payload.json'), JSON.stringify({ session_id: 't1', hook_event_name: 'UserPromptSubmit' }));
+    const shell = spawn(join(dir, 'codex'), ['-c', `"${process.execPath}" codex-hook.mjs < payload.json; true`], { cwd: dir, stdio: 'ignore' });
+    const created = await new Promise<string>((done) => shell.once('spawn', () => done(readFileSync(`/proc/${shell.pid}/stat`, 'utf8').split(') ')[1]!.split(' ')[19]!)));
+
+    expect(await new Promise((done) => shell.once('exit', done))).toBe(0);
+    expect(read()).toMatchObject({ event: 'UserPromptSubmit', pid: shell.pid, created });
   });
 
   it('writes nothing for a debrief fork, a malformed ID or a payload that is not JSON, and still exits 0', () => {

@@ -82,7 +82,7 @@ code --install-extension extensions/switchboard/switchboard-0.0.0.vsix --force
 
 Package with `vsce package --no-dependencies`; the workspace script includes the flag. Build first, because packaging does not build. A repository build alone does not update the installed VSIX.
 
-Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` contains the change, then report that the developer can reload when ready. Do not reload their window. Activation copies the hub bundle to the Switchboard home and can replace a running hub.
+Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` (`~/.vscode/extensions/…` on Linux) contains the change, then report that the developer can reload when ready. Do not reload their window. Activation copies the hub bundle to the Switchboard home and can replace a running hub.
 
 For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `%USERPROFILE%/.switchboard/dock/`, and report that the operator can start `Switchboard.Dock.exe` there.
 

@@ -14,6 +14,8 @@ Use automated checks for behavior and integration, and visual inspection for pre
 
 `npm run verify` builds, typechecks, and runs workspace tests with coverage thresholds. Build first: spawn tests run built bundles.
 
+On Linux the dock does not build, so `npm run verify` and `npm run test:integration` stop at `@switchboard/dock`. Run `npm run build`, `npm run typecheck` and `npm test` with `--workspace` for each other workspace, then `npm run test:integration --workspace switchboard`.
+
 ## What earns a test
 
 Test behavior that types cannot establish:
@@ -63,6 +65,7 @@ Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, V
 
 - Record and scrub source payloads and Claude and Codex CLI output (`claude agents --json`, `--bg` output, classifier JSON, `codex exec --json` output and stderr, rollout records, the process query's answer). Never call GitHub, Zoho, the Forum database or a real Claude session from a test.
 - Inject the Switchboard home, clock and process spawner.
+- Test each platform's process table and path rules on any platform by passing the platform and recorded fixtures, such as `packages/codex/test/fixtures/proc/`. A test that needs real processes or the platform's own path rules runs only on that platform (`it.runIf`, `it.skipIf`), with a counterpart for the other platform.
 - Give a spawned hub its own `CLAUDE_CONFIG_DIR` and `CODEX_HOME`; it installs hooks in both. Every vitest config's `testTemp()` ([vitest-temp.ts](../tools/vitest-temp.ts)) points both at the shared test temp folder, so a test that forgets cannot reach the operator's.
 - Use literal expected values. Do not derive an expectation by calling the code under test.
 - Assert counts where an empty result would pass a contents check.

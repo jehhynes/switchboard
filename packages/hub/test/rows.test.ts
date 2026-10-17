@@ -380,5 +380,6 @@ describe('snapshotErrors and setupNotes', () => {
       'No task playbooks are loaded. Add them under playbooks in C:\\Users\\me\\.claude\\switchboard\\settings.json.',
     ]);
     expect(setupNotes(snapshot([], { sources: [], sourceStates: [] }))).toEqual(['No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.']);
+    expect(setupNotes(snapshot([], { sources: [], sourceStates: [], configDir: '/home/me/.claude/switchboard' }))).toEqual(['No source is configured. Add one in /home/me/.claude/switchboard/settings.json.']);
   });
 });
