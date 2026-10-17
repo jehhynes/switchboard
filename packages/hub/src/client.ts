@@ -36,9 +36,10 @@ export const OPEN_TIMEOUT_MS = 5000;
 
 /**
  * Open the hub's event stream, which keeps the hub from exiting idle. `onEvent` gets each named event and its data line. Null when the hub refuses, or does not send
- * response headers within `timeoutMs`. `onEnd` runs once if the stream ends for any reason other than `close()`.
+ * response headers within `timeoutMs`. `onEnd` runs once if the stream ends for any reason other than `close()`. `query` tells the hub about the window, as
+ * `workspace` and `focused`.
  */
-export function openEvents(record: HubRecord, onEnd: () => void, timeoutMs = OPEN_TIMEOUT_MS, onEvent?: (event: string, data: string) => void): Promise<EventStream | null> {
+export function openEvents(record: HubRecord, onEnd: () => void, timeoutMs = OPEN_TIMEOUT_MS, onEvent?: (event: string, data: string) => void, query?: Record<string, string>): Promise<EventStream | null> {
   return new Promise((resolve) => {
     let opened = false;
     let ended = false;
@@ -58,7 +59,7 @@ export function openEvents(record: HubRecord, onEnd: () => void, timeoutMs = OPE
     };
 
     const outbound = request(
-      { host: '127.0.0.1', port: record.port, method: 'GET', path: '/events', headers: { Authorization: `Bearer ${record.token}` } },
+      { host: '127.0.0.1', port: record.port, method: 'GET', path: query === undefined ? '/events' : `/events?${new URLSearchParams(query).toString()}`, headers: { Authorization: `Bearer ${record.token}` } },
       (response) => {
         clearTimeout(deadline);
 

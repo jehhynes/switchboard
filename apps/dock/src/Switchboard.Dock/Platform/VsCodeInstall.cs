@@ -12,7 +12,7 @@ public sealed class VsCodeInstall : IVsCode
 
         start.ArgumentList.Add(workspaceFile);
 
-        // A dock started from a VS Code terminal would pass these on and make Code.exe run as Node.
+        // A dock started from a VS Code terminal would pass these on and make VS Code run as Node.
         foreach (var name in start.Environment.Keys.Where((name) => name.StartsWith("ELECTRON_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("VSCODE_", StringComparison.OrdinalIgnoreCase)).ToList())
         {
             start.Environment.Remove(name);
@@ -21,9 +21,20 @@ public sealed class VsCodeInstall : IVsCode
         Process.Start(start)?.Dispose();
     }
 
-    /// <summary><c>Code.exe</c> beside the <c>bin\code.cmd</c> found on PATH, else in the per-user install folder.</summary>
+    /// <summary>
+    /// On Windows, <c>Code.exe</c> beside the <c>bin\code.cmd</c> found on PATH, else in the per-user install folder. Elsewhere, <c>code</c> on PATH,
+    /// the script that starts VS Code.
+    /// </summary>
     static string Executable()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            return (Environment.GetEnvironmentVariable("PATH") ?? "")
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+                .Select((folder) => Path.Combine(folder, "code"))
+                .FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("code was not found on PATH.");
+        }
+
         var onPath = (Environment.GetEnvironmentVariable("PATH") ?? "")
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select((folder) => Path.Combine(folder, "code.cmd"))

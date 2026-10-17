@@ -36,7 +36,7 @@ sealed class FakeHub : IHub
 
     public Task<WindowReply> Window(JsonObject command, string? workspace)
     {
-        Calls.Add($"window {(workspace is null ? "any" : Path.GetFileName(workspace))} {command.ToJsonString()}");
+        Calls.Add($"window {(workspace is null ? "any" : Paths.FileName(workspace))} {command.ToJsonString()}");
 
         return Task.FromResult(WindowReply is null ? new WindowReply(null, 40 + Calls.Count) : new WindowReply(WindowReply, null));
     }
@@ -57,7 +57,7 @@ sealed class FakeHub : IHub
 
     public Task<string?> Open(string sessionId, string cwd, string workspace)
     {
-        Calls.Add($"open {sessionId} {cwd} {Path.GetFileName(workspace)}");
+        Calls.Add($"open {sessionId} {cwd} {Paths.FileName(workspace)}");
 
         return Task.FromResult(OpenReply);
     }
@@ -80,6 +80,12 @@ sealed class FakeHub : IHub
 
         return Ended is { } view && test(view) ? view : null;
     }
+}
+
+static class Paths
+{
+    /// <summary>The file name in a path with either separator, because the recorded paths are Windows paths and the tests also run on Linux.</summary>
+    public static string FileName(string path) => path[(path.LastIndexOfAny(['\\', '/']) + 1)..];
 }
 
 sealed class FakeWindows : IWindows
@@ -135,7 +141,7 @@ sealed class FakeVsCode : IVsCode
 
     public void Open(string workspaceFile)
     {
-        Calls.Add($"open {Path.GetFileName(workspaceFile)}");
+        Calls.Add($"open {Paths.FileName(workspaceFile)}");
 
         if (Fails is not null)
         {

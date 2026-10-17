@@ -2,10 +2,10 @@
   "name": "@switchboard/dock",
   "version": "0.0.0",
   "private": true,
-  "description": "The dock (PRD R71): a native Windows app in C# and Avalonia that lists the work beside VS Code and switches to each work item's window.",
+  "description": "The dock (PRD R71): a native app in C# and Avalonia that lists the work beside VS Code and switches to each work item's window; it docks only on Windows.",
   "scripts": {
     "build": "dotnet build Switchboard.Dock.slnx --nologo -v q",
     "test": "dotnet test Switchboard.Dock.slnx --nologo -v q",
-    "publish": "dotnet publish src/Switchboard.Dock/Switchboard.Dock.csproj -c Release --nologo -v q -o %USERPROFILE%\\.switchboard\\dock"
+    "publish": "node publish.mjs"
   }
 }

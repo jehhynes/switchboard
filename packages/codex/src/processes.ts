@@ -178,10 +178,13 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** Ends the process and its descendants at once, as `taskkill /T /F` does. A process that is already gone counts as ended. */
-export async function killTree(exec: Exec, pid: number, table: ProcessTable = {}): Promise<{ error: string } | null> {
+/**
+ * Ends the process and its descendants at once, as `taskkill /T /F` does. A process that is already gone counts as ended. Off Windows, with
+ * `created`, a root PID that another process took since its identity was read counts as ended too.
+ */
+export async function killTree(exec: Exec, pid: number, table: ProcessTable = {}, created?: string): Promise<{ error: string } | null> {
   if ((table.platform ?? process.platform) !== 'win32') {
-    return killProcTree(table.proc ?? '/proc', pid, table.signal ?? ((member) => process.kill(member, 'SIGKILL')));
+    return killProcTree(table.proc ?? '/proc', pid, table.signal ?? ((member) => process.kill(member, 'SIGKILL')), created);
   }
 
   const result = await exec('taskkill', ['/pid', String(pid), '/T', '/F'], { timeoutMs: QUERY_TIMEOUT_MS });
@@ -190,7 +193,7 @@ export async function killTree(exec: Exec, pid: number, table: ProcessTable = {}
   return result.code === 0 || result.code === 128 ? null : { error: result.stderr.trim() || result.stdout.trim() || `taskkill exited with code ${String(result.code)}.` };
 }
 
-function killProcTree(proc: string, pid: number, signal: (pid: number) => void): { error: string } | null {
+function killProcTree(proc: string, pid: number, signal: (pid: number) => void, expected?: string): { error: string } | null {
   const pids = procPids(proc);
 
   if ('error' in pids) {
@@ -209,7 +212,7 @@ function killProcTree(proc: string, pid: number, signal: (pid: number) => void):
     }
   }
 
-  const tree = created.has(pid) ? [pid] : [];
+  const tree = created.has(pid) && (expected === undefined || created.get(pid) === expected) ? [pid] : [];
 
   for (let index = 0; index < tree.length; index++) {
     tree.push(...(children.get(tree[index]!) ?? []));

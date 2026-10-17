@@ -14,7 +14,7 @@ export interface HubApp {
   post: Record<string, (body: unknown) => Promise<Reply>>;
   snapshot(): unknown;
   /** The dock view (PRD R71). */
-  dock(): unknown;
+  dock(): object;
   /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
   snoozedUrls(): string[];
   /** Each ticket's playbook and group, for the Chrome extension (PRD R67). */
@@ -167,6 +167,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       log(`stopping: ${reason}`);
       clearInterval(idle);
       process.off('exit', unclaim);
+      server.stopViews();
       app?.close();
       await browser?.close();
       await server.close();

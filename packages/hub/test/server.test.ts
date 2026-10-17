@@ -155,12 +155,12 @@ describe('listenHub routes and state', () => {
     const panel = read('/events');
     const docked = read('/dock/events');
 
-    await until(() => (panel.text().includes('event: state\ndata: {"n":1}') && docked.text().includes('event: dock\ndata: {"d":1}') ? true : null));
+    await until(() => (panel.text().includes('event: state\ndata: {"n":1}') && docked.text().includes('event: dock\ndata: {"d":1,"windows":') ? true : null));
     expect(server.clients()).toBe(2);
     state = { n: 2 };
     dock = { d: 2 };
     server.update();
-    await until(() => (panel.text().includes('event: state\ndata: {"n":2}') && docked.text().includes('event: dock\ndata: {"d":2}') ? true : null));
+    await until(() => (panel.text().includes('event: state\ndata: {"n":2}') && docked.text().includes('event: dock\ndata: {"d":2,"windows":') ? true : null));
     expect(panel.text()).not.toContain('event: dock');
     expect(docked.text()).not.toContain('event: state');
     expect(docked.text()).toMatch(/^event: hello\ndata: \{"hub":"switchboard"/);
@@ -212,6 +212,180 @@ describe('listenHub routes and state', () => {
     expect(server.notifyDock('show', { a: 1 })).toBe(1);
     await until(() => (chunks['/dock/events']!.join('').includes('event: show\ndata: {"a":1}\n\n') ? true : null));
     expect(chunks['/events']!.join('')).not.toContain('event: show');
+  });
+
+  it('tells the dock which item windows are open and which has focus, as windows connect, report focus and close', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({ d: 1 }) });
+
+    const open = (path: string) => {
+      const chunks: string[] = [];
+      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => chunks.push(chunk));
+      });
+
+      outbound.on('error', () => {});
+      outbound.end();
+
+      return { text: () => chunks.join(''), close: () => outbound.destroy() };
+    };
+    const docked = open('/dock/events');
+    const sees = (windows: object) => until(() => (docked.text().endsWith(`event: dock\ndata: ${JSON.stringify({ d: 1, windows })}\n\n`) ? true : null));
+    const focus = (body: unknown) => call(server.port, 'POST', '/window/focus', server.token, 2000, body);
+    const item = '/home/op/.switchboard/windows/gh-107-58c609.code-workspace';
+
+    await sees({ open: [], front: null, count: 0 });
+
+    const itemWindow = open(`/events?workspace=${encodeURIComponent(item)}&focused=1`);
+
+    await sees({ open: [item], front: item, count: 1 });
+
+    const other = open('/events');
+
+    await sees({ open: [item], front: item, count: 2 });
+    expect((await focus({ workspace: null, focused: true }))?.status).toBe(200);
+    await sees({ open: [item], front: null, count: 2 });
+    // The item window's late blur does not clear the other window's focus.
+    await focus({ workspace: item, focused: false });
+    await sees({ open: [item], front: null, count: 2 });
+    await focus({ workspace: item, focused: true });
+    await sees({ open: [item], front: item, count: 2 });
+
+    // A reload opens the window's new stream before the old one closes; the window stays listed once and keeps its focus.
+    const reloaded = open(`/events?workspace=${encodeURIComponent(item)}&focused=1`);
+
+    await sees({ open: [item], front: item, count: 3 });
+    itemWindow.close();
+    await sees({ open: [item], front: item, count: 2 });
+    reloaded.close();
+    await sees({ open: [], front: null, count: 1 });
+
+    // A report of an earlier change that arrives late changes nothing.
+    const later = Date.now() + 60_000;
+    const messages = () => docked.text().split('event: dock').length;
+    const resent = async () => {
+      const before = messages();
+
+      server.update();
+      await until(() => (messages() > before ? true : null));
+    };
+    const again = open(`/events?workspace=${encodeURIComponent(item)}&focused=0&at=${later - 100}`);
+
+    await sees({ open: [item], front: null, count: 2 });
+    await focus({ workspace: item, focused: true, at: later });
+    await sees({ open: [item], front: item, count: 2 });
+    expect((await focus({ workspace: null, focused: true, at: later - 1 }))?.status).toBe(200);
+    expect((await focus({ workspace: item, focused: false, at: later - 1 }))?.status).toBe(200);
+    await resent();
+    await sees({ open: [item], front: item, count: 2 });
+    await focus({ workspace: null, focused: true, at: later + 1 });
+    await sees({ open: [item], front: null, count: 2 });
+
+    // A window that is not an item window has no workspace, as no front has none; its blur does not hold back the item window's earlier focus.
+    await focus({ workspace: null, focused: false, at: later + 30 });
+    await focus({ workspace: item, focused: true, at: later + 20 });
+    await sees({ open: [item], front: item, count: 2 });
+
+    // A window's blur that arrives before its own earlier focus leaves that focus ignored.
+    await focus({ workspace: item, focused: false, at: later + 50 });
+    await focus({ workspace: item, focused: true, at: later + 40 });
+    await resent();
+    await sees({ open: [item], front: null, count: 2 });
+
+    // A stream opens with the time the window read its focus, so an older reading does not take the front.
+    const stale = open(`/events?workspace=${encodeURIComponent(item)}&focused=1&at=${later}`);
+
+    await sees({ open: [item], front: null, count: 3 });
+    stale.close();
+    await sees({ open: [item], front: null, count: 2 });
+
+    // A report that arrives after its window's stream closed does not bring the window back.
+    again.close();
+    await sees({ open: [], front: null, count: 1 });
+    expect((await focus({ workspace: item, focused: true, at: later + 100 }))?.status).toBe(200);
+    await resent();
+    await sees({ open: [], front: null, count: 1 });
+
+    expect((await focus({ workspace: item, focused: true, at: 'now' }))?.status).toBe(400);
+    expect((await focus({ workspace: 3, focused: true }))?.status).toBe(400);
+    expect((await focus({ workspace: item }))?.status).toBe(400);
+    expect((await call(server.port, 'POST', '/window/focus', null, 2000, { workspace: item, focused: true }))?.status).toBe(401);
+    other.close();
+    docked.close();
+  });
+
+  it("drops a closed window from the front, and still takes another window's focus that happened before the close but arrives after it", async () => {
+    let clock = 1_000;
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}), now: () => clock });
+
+    const chunks: string[] = [];
+    const docked = request({ host: '127.0.0.1', port: server.port, path: '/dock/events', headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => chunks.push(chunk));
+    });
+
+    docked.on('error', () => {});
+    docked.end();
+
+    const sees = (windows: object) => until(() => (chunks.join('').endsWith(`data: ${JSON.stringify({ windows })}\n\n`) ? true : null));
+    const a = '/w/a.code-workspace';
+    const itemWindow = request({ host: '127.0.0.1', port: server.port, path: `/events?workspace=${encodeURIComponent(a)}&focused=1&at=1000`, headers: { Authorization: `Bearer ${server.token}` } });
+
+    itemWindow.on('error', () => {});
+    itemWindow.end();
+    await sees({ open: [a], front: a, count: 1 });
+
+    const b = '/w/b.code-workspace';
+    const other = request({ host: '127.0.0.1', port: server.port, path: `/events?workspace=${encodeURIComponent(b)}&focused=0&at=1010`, headers: { Authorization: `Bearer ${server.token}` } });
+
+    other.on('error', () => {});
+    other.end();
+    await sees({ open: [a, b], front: a, count: 2 });
+    clock = 1_100;
+    itemWindow.destroy();
+    await sees({ open: [b], front: null, count: 1 });
+    // B gained focus at 1060, before A's stream closed at 1100.
+    await call(server.port, 'POST', '/window/focus', server.token, 2000, { workspace: b, focused: true, at: 1_060 });
+    await sees({ open: [b], front: b, count: 1 });
+    other.destroy();
+    docked.destroy();
+  });
+
+  it('builds no view once views stop, because the hub then closes the app that builds them', async () => {
+    let appClosed = false;
+    let builtAfterClose = 0;
+    const local = await listenHub({
+      identity,
+      onShutdown: () => {},
+      snapshot: () => {
+        builtAfterClose += appClosed ? 1 : 0;
+        return {};
+      },
+      dock: () => {
+        builtAfterClose += appClosed ? 1 : 0;
+        return {};
+      },
+    });
+    const connect = (path: string) => {
+      const outbound = request({ host: '127.0.0.1', port: local.port, path, headers: { Authorization: `Bearer ${local.token}` } }, (response) => response.resume());
+
+      outbound.on('error', () => {});
+      outbound.end();
+    };
+
+    connect('/dock/events');
+    connect(`/events?workspace=${encodeURIComponent('/w/a.code-workspace')}&focused=1`);
+    await until(() => (local.clients() === 2 ? true : null));
+    // The hub's stop: views stop, the app closes, and requests on open connections still arrive before the server closes.
+    local.stopViews();
+    appClosed = true;
+    connect(`/events?workspace=${encodeURIComponent('/w/b.code-workspace')}&focused=1`);
+    await until(() => (local.clients() === 3 ? true : null));
+    expect((await call(local.port, 'POST', '/window/focus', local.token, 2000, { workspace: '/w/a.code-workspace', focused: false }))?.status).toBe(200);
+    await local.close();
+    await new Promise((done) => setTimeout(done, 100));
+    expect(builtAfterClose).toBe(0);
+    server = await listenHub({ identity, onShutdown: () => {} });
   });
 
   it('refuses the dock stream without the token', async () => {

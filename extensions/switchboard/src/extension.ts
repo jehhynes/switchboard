@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
-import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, stopHub, windowsDir } from '@switchboard/hub';
+import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowsDir } from '@switchboard/hub';
 import { closeDueAt, closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
 import { DoneWindow } from './doneWindow.js';
@@ -174,6 +174,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     // Focus restarts the wait before a done window closes (PRD R76).
     const closing = closeDone(focused);
 
+    const record = keeper.current();
+
+    // The dock follows the window in front through the hub where it cannot see other apps' windows (architecture.md § Dock).
+    if (record !== null) {
+      void postToHub(record, '/window/focus', { workspace: workspaceFile(), focused, at: Date.now() }, 5_000);
+    }
+
     return focused ? Promise.resolve(vscode.commands.executeCommand('switchboard.claim')).catch(() => {}) : closing;
   };
 
@@ -243,7 +250,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
           void claimOpen(record, runCommand).catch(() => {});
           history.connected(record);
         }
-      }),
+      }, { workspace: workspaceFile() ?? '', focused: vscode.window.state.focused ? '1' : '0', at: String(Date.now()) }),
     now: Date.now,
     sleep,
     onFailed: (message) => void vscode.window.showErrorMessage(`Switchboard: ${message}`),

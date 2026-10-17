@@ -1,6 +1,6 @@
 # Switchboard
 
-Switchboard is a local software factory for one developer. It ingests tickets assigned to the operator from GitHub, Zoho Desk, Forum and ad-hoc prompts, triages each into a playbook, runs the playbook in a background Claude Code session, and shows the work in the dock, a Windows app beside VS Code that switches to each work item's VS Code window. See [prd.md](docs/prd.md).
+Switchboard is a local software factory for one developer. It ingests tickets assigned to the operator from GitHub, Zoho Desk, Forum and ad-hoc prompts, triages each into a playbook, runs the playbook in a background Claude Code session, and shows the work in the dock, a native app beside VS Code that switches to each work item's VS Code window. See [prd.md](docs/prd.md).
 
 Switchboard replaces Ground Control (`D:\git\ground-control`), which no longer runs. Its session and triage mechanics come from there: read its code and [mechanics.md](../ground-control/docs/mechanics.md) before re-deriving a mechanism it already verified.
 
@@ -84,7 +84,7 @@ Package with `vsce package --no-dependencies`; the workspace script includes the
 
 Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard.switchboard-0.0.0/dist/` (`~/.vscode/extensions/…` on Linux) contains the change, then report that the developer can reload when ready. Do not reload their window. Activation copies the hub bundle to the Switchboard home and can replace a running hub.
 
-For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `%USERPROFILE%/.switchboard/dock/`, and report that the operator can start `Switchboard.Dock.exe` there.
+For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `~/.switchboard/dock/` (`%USERPROFILE%` on Windows), and report that the operator can start `Switchboard.Dock.exe`, or `Switchboard.Dock` on Linux, there.
 
 ## Commit messages
 

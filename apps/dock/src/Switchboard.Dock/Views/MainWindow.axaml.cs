@@ -43,6 +43,10 @@ public sealed partial class MainWindow : Window
     // The click that is running, which a click on another row replaces.
     (string Key, CancellationTokenSource Cancel)? running;
     bool moving;
+    // An ordinary window, where the dock cannot reserve a screen edge (Float).
+    bool floating;
+    // A floating resize's start: the pointer on the screen, the width and the window's position.
+    (int X, double Width, PixelPoint Position) resizeFrom;
     // A press on a movable row, which becomes a drag of that row once the pointer moves more than DragStart vertically (PRD R73).
     (string Key, Point Start, IPointer Pointer)? press;
     // The key of the row being dragged; rows are rebuilt on each hub update, so the row is found again by its key.
@@ -319,7 +323,12 @@ public sealed partial class MainWindow : Window
 
     void OnMovePressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (floating && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            BeginMoveDrag(e);
+            e.Handled = true;
+        }
+        else if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             moving = true;
             e.Pointer.Capture(sender as IInputElement);
@@ -374,15 +383,45 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Makes the dock an ordinary window, for a desktop where it cannot reserve a screen edge, such as GNOME on Wayland: it opens as tall as the
+    /// primary monitor's work area at the kept edge, its title moves it, and it has no auto-hide, which needs a reserved edge (architecture.md § Dock).
+    /// </summary>
+    public void Float()
+    {
+        floating = true;
+        ShowInTaskbar = true;
+        Topmost = false;
+        AutoHideButton.IsVisible = false;
+        ToolTip.SetTip(MoveHandle, "Drag to move");
+        Opened += (_, _) =>
+        {
+            if (Screens.Primary is { } screen)
+            {
+                var area = screen.WorkingArea;
+
+                Height = area.Height / screen.Scaling;
+                Position = new PixelPoint(model.Settings.DockEdge == DockEdge.Right ? area.Right - (int)(Width * screen.Scaling) : area.X, area.Y);
+            }
+        };
+    }
+
     /// <summary>Selects and scrolls to the row of an item window that came to the front by any means; other windows change nothing (PRD R71).</summary>
     public void ShowForeground(string title)
     {
-        if (DockWindow.NameOf(title) is not { } name || model.SelectWindow(name) is not { } key)
+        if (DockWindow.NameOf(title) is { } name)
         {
-            return;
+            ShowItemWindow(name);
         }
+    }
 
-        ScrollTo(key);
+    /// <summary>Selects and scrolls to the row of the named item window, which came to the front.</summary>
+    public void ShowItemWindow(string name)
+    {
+        if (model.SelectWindow(name) is { } key)
+        {
+            ScrollTo(key);
+        }
     }
 
     /// <summary>Scrolls the row into view once a group or band it opened has drawn its rows.</summary>
@@ -1069,6 +1108,7 @@ public sealed partial class MainWindow : Window
     void OnGripPressed(object? sender, PointerPressedEventArgs e)
     {
         resizing = true;
+        resizeFrom = (this.PointToScreen(e.GetPosition(this)).X, Width, Position);
         e.Pointer.Capture(sender as IInputElement);
     }
 
@@ -1088,6 +1128,21 @@ public sealed partial class MainWindow : Window
 
             dragged = width;
             Hold(Native.RectOf(DockPlacement.Strip(model.Settings.DockEdge, strip, DockPlacement.Pixels(width, scale))));
+        }
+        else if (floating)
+        {
+            // The pointer is read on the screen, because the window moves under it when the grip is on its left.
+            var scale = RenderScaling;
+            var moved = (this.PointToScreen(e.GetPosition(this)).X - resizeFrom.X) / scale;
+            var width = Math.Clamp(model.GripOnLeft ? resizeFrom.Width - moved : resizeFrom.Width + moved, DockSettings.MinWidth, DockSettings.MaxWidth);
+
+            dragged = width;
+            Width = width;
+
+            if (model.GripOnLeft)
+            {
+                Position = resizeFrom.Position.WithX(resizeFrom.Position.X + (int)Math.Round((resizeFrom.Width - width) * scale));
+            }
         }
         else
         {

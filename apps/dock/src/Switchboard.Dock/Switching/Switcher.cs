@@ -146,6 +146,12 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
             return cancel.IsCancellationRequested ? null : failed;
         }
 
+        // The command stays for the next VS Code window that gains focus, which the operator brings forward.
+        if (!windows.Raises)
+        {
+            return cancel.IsCancellationRequested ? await Withdrawn(forAny, null, cancel) : "Switch to a VS Code window to run it.";
+        }
+
         return await Withdrawn(forAny, cancel.IsCancellationRequested || windows.Show(any) ? null : "Windows kept another window in front. Try again.", cancel);
     }
 
@@ -232,7 +238,14 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
             }
         }
 
-        return windows.Show(handle) ? null : "Windows kept another window in front. Click the row again.";
+        try
+        {
+            return windows.Show(handle) ? null : "Windows kept another window in front. Click the row again.";
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or FileNotFoundException)
+        {
+            return $"VS Code did not start: {error.Message}";
+        }
     }
 
     const string Older = "The hub names no workspace file for this window. Reload a VS Code window to update the hub.";

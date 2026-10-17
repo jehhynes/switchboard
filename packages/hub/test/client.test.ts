@@ -1,3 +1,4 @@
+import { request } from 'node:http';
 import { createServer } from 'node:net';
 import type { AddressInfo, Socket } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
@@ -51,6 +52,29 @@ describe('openEvents', () => {
     } finally {
       for (const socket of sockets) socket.destroy();
       await new Promise((done) => silent.close(done));
+    }
+  });
+
+  it("tells the hub the window's workspace file and focus, which the dock view then lists", async () => {
+    const views: string[] = [];
+    const server = await listenHub({ identity, onShutdown: () => {}, dock: () => ({}) });
+
+    try {
+      const dock = request({ host: '127.0.0.1', port: server.port, path: '/dock/events', headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => views.push(...[...chunk.matchAll(/^event: dock\ndata: (.*)$/gm)].map((match) => match[1]!)));
+      });
+
+      dock.on('error', () => {});
+      dock.end();
+      const file = '/home/op/.switchboard/windows/gh-1 2.code-workspace';
+      const window = await openEvents(recordFor(server.port, server.token), () => {}, undefined, undefined, { workspace: file, focused: '1' });
+
+      await until(() => (views.at(-1) === JSON.stringify({ windows: { open: [file], front: file, count: 1 } }) ? true : null));
+      window?.close();
+      dock.destroy();
+    } finally {
+      await server.close();
     }
   });
 

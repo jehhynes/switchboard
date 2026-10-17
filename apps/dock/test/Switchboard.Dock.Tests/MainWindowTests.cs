@@ -30,6 +30,31 @@ public sealed class MainWindowTests
         return (window, model);
     }
 
+    [AvaloniaFact]
+    public void Float_GripOnTheLeftDraggedOut_WidensTheDockAndKeepsItsRightEdge()
+    {
+        var (window, model) = Open(new DockSettings { Edge = "right", Width = 320 });
+
+        window.Float();
+        window.Position = new PixelPoint(500, 0);
+        Dispatcher.UIThread.RunJobs();
+
+        var grip = window.FindControl<Border>("GripLeft")!;
+        var at = grip.TranslatePoint(new Point(2, 100), window)!.Value;
+
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseMove(at - new Point(50, 0));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(370, window.Width);
+        Assert.Equal(450, window.Position.X);
+
+        // The window moved 50 to the left under the still pointer, so the release is at the press's point in the window.
+        window.MouseUp(at, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(370, model.Settings.Width);
+    }
+
     static List<string> VisibleTexts(Control root) =>
         root.GetVisualDescendants().OfType<TextBlock>().Where((text) => text.IsEffectivelyVisible && !string.IsNullOrEmpty(text.Text)).Select((text) => text.Text!).ToList();
 

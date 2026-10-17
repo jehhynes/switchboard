@@ -110,6 +110,12 @@ describe('the Linux process table', () => {
       signaled.length = 0;
       expect(await killTree(unexpected, 7, table)).toBeNull();
       expect(signaled).toEqual([]);
+
+      // The launcher's PID was taken by another process after its identity was read and before the scan.
+      expect(await killTree(unexpected, 1223833, table, '52190000')).toBeNull();
+      expect(signaled).toEqual([]);
+      expect(await killTree(unexpected, 1223833, table, '52195984')).toBeNull();
+      expect(signaled).toEqual([1223833, 1223843]);
     } finally {
       rmSync(proc, { recursive: true, force: true });
     }

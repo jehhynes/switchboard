@@ -68,6 +68,22 @@ public sealed class DockViewTests
     }
 
     [Fact]
+    public void Parse_OpenWindows_ReadsTheFilesTheFrontAndTheCount()
+    {
+        Assert.Null(Fixtures.View.Windows);
+
+        var json = System.Text.Json.Nodes.JsonNode.Parse(Fixtures.DockJson)!.AsObject();
+
+        json["windows"] = System.Text.Json.Nodes.JsonNode.Parse("""{"open":["/home/op/.switchboard/windows/gh-107-58c609.code-workspace"],"front":null,"count":2}""");
+
+        var windows = DockView.Parse(json.ToJsonString()).Windows!;
+
+        Assert.Equal(["/home/op/.switchboard/windows/gh-107-58c609.code-workspace"], windows.Open);
+        Assert.Null(windows.Front);
+        Assert.Equal(2, windows.Count);
+    }
+
+    [Fact]
     public void Parse_NullView_Throws()
     {
         Assert.Throws<System.Text.Json.JsonException>(() => DockView.Parse("null"));

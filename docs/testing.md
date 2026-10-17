@@ -14,7 +14,7 @@ Use automated checks for behavior and integration, and visual inspection for pre
 
 `npm run verify` builds, typechecks, and runs workspace tests with coverage thresholds. Build first: spawn tests run built bundles.
 
-On Linux the dock does not build, so `npm run verify` and `npm run test:integration` stop at `@switchboard/dock`. Run `npm run build`, `npm run typecheck` and `npm test` with `--workspace` for each other workspace, then `npm run test:integration --workspace switchboard`.
+The dock's build and tests need the .NET 10 SDK, on Linux as on Windows.
 
 ## What earns a test
 
@@ -46,7 +46,7 @@ Do not test type declarations, pass-through property bags, or simple settings re
 | Extension host | Mocha inside real VS Code | Registration, hub process wiring, claims, the row click from VS Code, editor calls, the status bar item |
 | Dock | xUnit v3 with Avalonia.Headless, fakes of the hub, windows and VS Code, a test-owned loopback hub, and the recorded dock view in `apps/dock/test/fixtures/dock.json` | Parsing the hub's stream and view, the click's requests and switch, refusals, the list, its groups, clicks, menus, drag reordering and keys, placement arithmetic, and the Settings window's pages, checks and writes |
 
-Keep decisions in packages that do not import `vscode`, and the dock's rules in the hub's dock view, so the dock only draws them and moves windows. Win32 calls, the app bar, and moving it between edges and monitors are not covered by automated tests; the operator's live use checks them. Name each C# test `Subject_Action_Assertion`.
+Keep decisions in packages that do not import `vscode`, and the dock's rules in the hub's dock view, so the dock only draws them and moves windows. Win32 calls, the app bar, moving it between edges and monitors, and on Linux how GNOME places and sizes the floating window are not covered by automated tests (the floating resize's arithmetic is, headless); the operator's live use checks them. Name each C# test `Subject_Action_Assertion`.
 
 ## Live acceptance
 
@@ -65,7 +65,7 @@ Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, V
 
 - Record and scrub source payloads and Claude and Codex CLI output (`claude agents --json`, `--bg` output, classifier JSON, `codex exec --json` output and stderr, rollout records, the process query's answer). Never call GitHub, Zoho, the Forum database or a real Claude session from a test.
 - Inject the Switchboard home, clock and process spawner.
-- Test each platform's process table and path rules on any platform by passing the platform and recorded fixtures, such as `packages/codex/test/fixtures/proc/`. A test that needs real processes or the platform's own path rules runs only on that platform (`it.runIf`, `it.skipIf`), with a counterpart for the other platform.
+- Test each platform's process table and path rules on any platform by passing the platform and recorded fixtures, such as `packages/codex/test/fixtures/proc/`. A test that needs real processes or the platform's own path rules runs only on that platform (`it.runIf`, `it.skipIf`), and the other platform's code has a test of its own, against a recorded answer such as `cim-tagged.json` where it cannot run here. The Windows hook's process walk was verified by hand (mechanics M31), and `taskkill` through the hub's Stop in live acceptance (mechanics M32).
 - Give a spawned hub its own `CLAUDE_CONFIG_DIR` and `CODEX_HOME`; it installs hooks in both. Every vitest config's `testTemp()` ([vitest-temp.ts](../tools/vitest-temp.ts)) points both at the shared test temp folder, so a test that forgets cannot reach the operator's.
 - Use literal expected values. Do not derive an expectation by calling the code under test.
 - Assert counts where an empty result would pass a contents check.

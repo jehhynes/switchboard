@@ -77,8 +77,8 @@ export class CodexRunner implements SessionRunner {
     return this.deps.tagged ? this.deps.tagged(tag) : findTagged(this.deps.exec, tag);
   }
 
-  private kill(pid: number) {
-    return this.deps.kill ? this.deps.kill(pid) : killTree(this.deps.exec, pid);
+  private kill(identity: ProcessIdentity) {
+    return this.deps.kill ? this.deps.kill(identity.pid) : killTree(this.deps.exec, identity.pid, {}, identity.created);
   }
 
   /** Runs the operation after the session's earlier ones. */
@@ -441,7 +441,7 @@ export class CodexRunner implements SessionRunner {
       return { error: `The Codex process query failed: ${fresh.error}` };
     }
 
-    return fresh.get(identity.pid)?.created === identity.created ? this.kill(identity.pid) : null;
+    return fresh.get(identity.pid)?.created === identity.created ? this.kill(identity) : null;
   }
 
   /** Lets the process exit after its turn, and ends it when it does not in time. */

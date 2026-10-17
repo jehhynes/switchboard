@@ -1,8 +1,11 @@
 namespace Switchboard.Dock.Switching;
 
-/// <summary>Finding and showing windows. Only Windows is implemented (PRD R71).</summary>
+/// <summary>Finding and showing windows: Win32 on Windows, the hub's view of VS Code's windows on Linux (PRD R71).</summary>
 public interface IWindows
 {
+    /// <summary>Whether <see cref="Show"/> brings a window to the front itself; false where only VS Code can, and only for an item window.</summary>
+    bool Raises => true;
+
     /// <summary>The visible top-level item window whose title names <paramref name="name"/> (<c>DockWindow.NameOf</c>), or 0.</summary>
     nint Find(string name);
 
