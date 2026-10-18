@@ -5,9 +5,11 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.LogicalTree;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Switchboard.Dock.Hub;
+using Switchboard.Dock.Platform;
 using Switchboard.Dock.Views;
 
 namespace Switchboard.Dock.Tests;
@@ -53,6 +55,151 @@ public sealed class MainWindowTests
         window.MouseUp(at, MouseButton.Left);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(370, model.Settings.Width);
+    }
+
+    /// <summary>
+    /// A dock docked as an X11 dock window, opened on the headless platform's one screen, 1920 by 1280 pixels at scale 1 with its work area the whole
+    /// screen, where no X display is used.
+    /// </summary>
+    (MainWindow Window, DockViewModel Model) OpenOnEdge(DockSettings settings)
+    {
+        var model = new DockViewModel(settings, (_) => saved.Add("saved"));
+        var window = new MainWindow(model, null, hub, actions, docked: false);
+
+        window.DockOnX11();
+        model.Show(Fixtures.View);
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        return (window, model);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_Opened_TakesTheStripAtTheKeptEdgeAsTallAsTheWorkArea()
+    {
+        var (window, _) = OpenOnEdge(new DockSettings { Edge = "right", Width = 300 });
+
+        Assert.Equal(new PixelPoint(1620, 0), window.Position);
+        Assert.Equal(300, window.Width);
+        Assert.Equal(1280, window.Height);
+        Assert.False(window.ShowInTaskbar);
+        Assert.False(window.FindControl<Button>("AutoHideButton")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_TitleDraggedPastTheMiddle_DocksAtTheOtherEdgeAndKeepsIt()
+    {
+        var (window, model) = OpenOnEdge(new DockSettings { Edge = "left", Width = 320 });
+        var title = window.FindControl<TextBlock>("MoveHandle")!;
+        var at = title.TranslatePoint(new Point(10, 5), window)!.Value;
+
+        window.MouseDown(at, MouseButton.Left);
+        // Short of the middle, x = 940: the dock stays at the left edge.
+        window.MouseMove(new Point(940, at.Y));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(DockEdge.Left, model.Settings.DockEdge);
+        Assert.Equal(0, window.Position.X);
+
+        window.MouseMove(new Point(970, at.Y));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(DockEdge.Right, model.Settings.DockEdge);
+        Assert.Equal(1600, window.Position.X);
+        Assert.Contains("saved", saved);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_GripOnTheLeftDraggedOut_WidensTheDockAndKeepsTheScreensRightEdge()
+    {
+        var (window, model) = OpenOnEdge(new DockSettings { Edge = "right", Width = 320 });
+        var grip = window.FindControl<Border>("GripLeft")!;
+        var at = grip.TranslatePoint(new Point(2, 100), window)!.Value;
+
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseMove(at - new Point(100, 0));
+        Dispatcher.UIThread.RunJobs();
+        window.MouseUp(at, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(420, model.Settings.Width);
+        Assert.Equal(420, window.Width);
+        Assert.Equal(1500, window.Position.X);
+    }
+
+    [AvaloniaFact]
+    public void TakeFocus_ClickOffTheRows_AsksForTheFocusAfterTheRelease()
+    {
+        var (window, _) = Open();
+        var title = window.FindControl<TextBlock>("MoveHandle")!;
+        var at = title.TranslatePoint(new Point(10, 5), window)!.Value;
+
+        window.MouseDown(at, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(0, window.FocusRequests);
+
+        window.MouseUp(at, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(1, window.FocusRequests);
+    }
+
+    [AvaloniaFact]
+    public void TakeFocus_RowClickedWhileSearching_TakesTheCaretOutOfTheSearchBox()
+    {
+        var (window, _) = Open();
+        var search = window.FindControl<TextBox>("SearchBox")!;
+
+        Tap(window, window.FindControl<Button>("SearchButton")!);
+        search.Focus();
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(search.IsFocused);
+
+        Tap(window, RowNamed(window, "Issue <8>"));
+
+        Assert.False(search.IsFocused);
+        Assert.Single(actions.Clicked);
+    }
+
+    [AvaloniaFact]
+    public void TakeFocus_RowsMainControlClicked_LeavesTheFocusWhereItIs()
+    {
+        var (window, model) = Open();
+
+        model.Selected = "item:9";
+        Dispatcher.UIThread.RunJobs();
+
+        var main = window.GetVisualDescendants().OfType<Button>().Single((button) => button.Classes.Contains("main") && button.IsEffectivelyVisible);
+
+        hub.ActReplies.Enqueue(null);
+        Tap(window, main);
+
+        Assert.Equal(["act {\"type\":\"start\",\"workItemId\":9}"], hub.Calls);
+        Assert.Equal(0, window.FocusRequests);
+    }
+
+    [AvaloniaFact]
+    public void TakeFocus_RowClickedOnceAndTwice_LeavesTheFocusToVsCode()
+    {
+        var (window, _) = Open();
+        var row = RowNamed(window, "Issue <8>");
+
+        Tap(window, row);
+        // A double-click, whose second release raises no tap.
+        Tap(window, row);
+
+        Assert.NotEmpty(actions.Clicked);
+        Assert.Equal(0, window.FocusRequests);
+    }
+
+    [AvaloniaFact]
+    public void TakeFocus_RowClickFails_AsksForTheFocusToShowWhy()
+    {
+        var (window, model) = Open();
+
+        actions.ClickReply = "VS Code did not start: code was not found on PATH.";
+        Tap(window, RowNamed(window, "Issue <8>"));
+
+        Assert.Equal("VS Code did not start: code was not found on PATH.", model.Status);
+        Assert.Equal(1, window.FocusRequests);
     }
 
     static List<string> VisibleTexts(Control root) =>

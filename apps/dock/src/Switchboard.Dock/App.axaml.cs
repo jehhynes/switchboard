@@ -37,14 +37,44 @@ public sealed class App : Application
             }
             else
             {
-                // The dock cannot see other apps' windows or reserve a screen edge here, so it is an ordinary window that follows VS Code through the hub.
-                var windows = new HubWindows(new VsCodeInstall());
+                // Under GNOME on Wayland the dock cannot see other apps' windows: it follows VS Code's windows through the hub, and finds and brings
+                // them forward through the GNOME Shell extension when it is enabled. It runs under XWayland, so it docks as an X11 dock window.
+                var followed = new HubWindows(new VsCodeInstall());
+                var shell = GnomeShell.Connect();
+                IWindows windows = shell is null ? followed : new ShellWindows(shell, followed);
 
                 window = new MainWindow(model, hub, hub, new Switcher(hub, windows, new VsCodeInstall()), docked: false, config: hub) { Title = "Switchboard" };
-                window.Float();
-                hub.Changed += () => Dispatcher.UIThread.Post(() => windows.Update(hub.View?.Windows));
-                windows.WatchForeground(window.ShowItemWindow);
-                windows.WatchClosed(model.WindowClosed);
+
+                if (window.TryGetPlatformHandle() is { HandleDescriptor: "XID" })
+                {
+                    window.DockOnX11();
+                }
+                else
+                {
+                    window.Float();
+                }
+
+                if (shell is not null)
+                {
+                    // Only the extension sees full-screen windows; without it the dock stays above them.
+                    window.Opened += (_, _) =>
+                    {
+                        try
+                        {
+                            shell.WatchFullScreen((fullScreen) => Dispatcher.UIThread.Post(() => window.ShowFullScreen(fullScreen)));
+                            window.ShowFullScreen(shell.FullScreen());
+                        }
+                        catch (ShellException)
+                        {
+                            // The extension was turned off since the dock started; the dock stays above full-screen windows.
+                        }
+                    };
+                    desktop.Exit += (_, _) => shell.Dispose();
+                }
+
+                hub.Changed += () => Dispatcher.UIThread.Post(() => followed.Update(hub.View?.Windows));
+                followed.WatchForeground(window.ShowItemWindow);
+                followed.WatchClosed(model.WindowClosed);
             }
 
             desktop.MainWindow = window;

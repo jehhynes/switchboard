@@ -86,6 +86,8 @@ Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard
 
 For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `~/.switchboard/dock/` (`%USERPROFILE%` on Windows), and report that the operator can start `Switchboard.Dock.exe`, or `Switchboard.Dock` on Linux, there.
 
+For changes to the GNOME Shell extension, run `npm run publish --workspace @switchboard/gnome-shell`, which installs it to `~/.local/share/gnome-shell/extensions/switchboard@switchboard/` and enables it, and report that GNOME Shell loads the change at the operator's next login.
+
 ## Commit messages
 
 Use `type(scope): summary`, adding `(fixes #123)` on the same line when closing an issue.

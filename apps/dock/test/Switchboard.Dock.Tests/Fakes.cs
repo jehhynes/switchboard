@@ -133,6 +133,31 @@ sealed class FakeWindows : IWindows
     }
 }
 
+/// <summary>The GNOME Shell extension's windows, front first; a failing shell throws as a missing service does.</summary>
+sealed class FakeShell : Switchboard.Dock.Platform.IShell
+{
+    public List<Switchboard.Dock.Platform.ShellWindow> Open { get; } = [];
+
+    public List<string> Calls { get; } = [];
+
+    public bool Fails { get; set; }
+
+    public IReadOnlyList<Switchboard.Dock.Platform.ShellWindow> Windows() => Fails ? throw new Switchboard.Dock.Platform.ShellException("The name switchboard.Shell was not provided.") : Open;
+
+    public bool Activate(ulong id)
+    {
+        Calls.Add($"activate {id}");
+
+        return Fails ? throw new Switchboard.Dock.Platform.ShellException("The name switchboard.Shell was not provided.") : Open.Any((window) => window.Id == id);
+    }
+
+    public bool FullScreen() => false;
+
+    public void WatchFullScreen(Action<bool> changed)
+    {
+    }
+}
+
 sealed class FakeVsCode : IVsCode
 {
     public Exception? Fails { get; set; }

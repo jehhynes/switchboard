@@ -1,0 +1,33 @@
+import { describe, expect, it } from 'vitest';
+import { isListed, isVsCode } from '../src/windows.js';
+
+describe('isVsCode', () => {
+  it('takes VS Code as a Wayland client and under XWayland, in any case', () => {
+    expect(isVsCode('com.microsoft.VSCode')).toBe(true);
+    expect(isVsCode('Code')).toBe(true);
+    expect(isVsCode('code')).toBe(true);
+  });
+
+  it('refuses other windows, other builds of VS Code and a window with no class', () => {
+    expect(isVsCode('Switchboard.Dock')).toBe(false);
+    expect(isVsCode('code-oss')).toBe(false);
+    expect(isVsCode('com.microsoft.VSCodeInsiders')).toBe(false);
+    expect(isVsCode(null)).toBe(false);
+  });
+});
+
+describe('isListed', () => {
+  // A VS Code window as Mutter 50.1 reported it, its size kept while minimized or on another workspace (mechanics M39).
+  const shown = { normal: true, wmClass: 'com.microsoft.VSCode', width: 1440, height: 900 };
+
+  it('lists a VS Code window with a size', () => {
+    expect(isListed(shown)).toBe(true);
+  });
+
+  it('leaves out the 0 × 0 window VS Code never shows, its dialogs and other apps’ windows', () => {
+    expect(isListed({ ...shown, width: 0, height: 0 })).toBe(false);
+    expect(isListed({ ...shown, height: 0 })).toBe(false);
+    expect(isListed({ ...shown, normal: false })).toBe(false);
+    expect(isListed({ ...shown, wmClass: 'Switchboard.Dock' })).toBe(false);
+  });
+});

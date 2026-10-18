@@ -25,6 +25,14 @@ public static class DockPlacement
     public static PixelRect Strip(DockEdge edge, PixelRect area, int width) =>
         edge == DockEdge.Left ? area with { Right = area.Left + width } : area with { Left = area.Right - width };
 
+    /// <summary>
+    /// The X11 <c>_NET_WM_STRUT_PARTIAL</c> that reserves <paramref name="strip"/> at <paramref name="edge"/> of an X screen <paramref name="screenWidth"/>
+    /// pixels wide: the left, right, top and bottom widths from the screen's edges, then the rows or columns each covers, the end inclusive.
+    /// </summary>
+    public static nint[] Strut(DockEdge edge, PixelRect strip, int screenWidth) => edge == DockEdge.Left
+        ? [strip.Right, 0, 0, 0, strip.Top, strip.Bottom - 1, 0, 0, 0, 0, 0, 0]
+        : [0, screenWidth - strip.Left, 0, 0, 0, 0, strip.Top, strip.Bottom - 1, 0, 0, 0, 0];
+
     /// <summary>The width the inner edge of <paramref name="strip"/> has when dragged to <paramref name="x"/>; the outer edge stays.</summary>
     public static int WidthAt(DockEdge edge, PixelRect strip, int x) => edge == DockEdge.Left ? x - strip.Left : strip.Right - x;
 

@@ -45,6 +45,9 @@ public sealed partial class MainWindow : Window
     bool moving;
     // An ordinary window, where the dock cannot reserve a screen edge (Float).
     bool floating;
+    // Docked at an edge of the primary monitor as an X11 dock window (DockOnX11), and the X11 properties that reserve its strip, when an X display opened.
+    bool edgeDocked;
+    IDisposable? x11;
     // A floating resize's start: the pointer on the screen, the width and the window's position.
     (int X, double Width, PixelPoint Position) resizeFrom;
     // A press on a movable row, which becomes a drag of that row once the pointer moves more than DragStart vertically (PRD R73).
@@ -55,6 +58,8 @@ public sealed partial class MainWindow : Window
     Point dragAt;
     // A drag ended on this press, so the row's tap does not run its click.
     bool rowDragged;
+    // The last press was on a row, whose click and controls switch to VS Code or act on its work item, so the dock does not take the focus after it.
+    bool pressOnRow;
     const double DragStart = 4;
 
     /// <summary>Raised with the monitor the dock docked on, where item windows are placed.</summary>
@@ -85,7 +90,27 @@ public sealed partial class MainWindow : Window
         }, RoutingStrategies.Tunnel, handledEventsToo: true);
         // Alt+Tab or a VS Code status bar item (ShowRequested) shows a hidden dock.
         Activated += (_, _) => Expand();
-        AddHandler(PointerPressedEvent, (_, e) => pointer = e.GetPosition(this), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            pointer = e.GetPosition(this);
+            pressOnRow = (e.Source as Visual)?.GetSelfAndVisualAncestors().OfType<Border>().Any((border) => border.Classes.Contains("row")) == true;
+
+            // The keys go where the row's click switches to, so the search box shows no caret. As an X11 dock window the dock is not told when
+            // another app's window takes the focus, and would keep showing it.
+            if (pressOnRow && FocusManager?.GetFocusedElement() is TextBox)
+            {
+                FocusManager.Focus(null);
+            }
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        // After the release, because taking the focus between the press and the release lost the click on the operator's desktop (mechanics M39).
+        // Posted, so the release's tap runs first.
+        AddHandler(PointerReleasedEvent, (_, _) =>
+        {
+            if (!pressOnRow)
+            {
+                Dispatcher.UIThread.Post(TakeFocus);
+            }
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
         Styles.Add(new Style((x) => x.Is<Control>())
         {
             Setters =
@@ -122,6 +147,7 @@ public sealed partial class MainWindow : Window
             {
                 Expand();
                 Activate();
+                TakeFocus();
             });
         }
 
@@ -172,6 +198,8 @@ public sealed partial class MainWindow : Window
             appBar?.Dispose();
         }
 
+        x11?.Dispose();
+
         base.OnClosed(e);
     }
 
@@ -202,6 +230,34 @@ public sealed partial class MainWindow : Window
         else
         {
             Width = model.Settings.Width;
+
+            if (edgeDocked)
+            {
+                PlaceOnEdge();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Places the window in the strip at the kept edge of the primary monitor, as tall as its work area, and reserves the strip. The work area's
+    /// left and right are not used, because they leave out the dock's own strip.
+    /// </summary>
+    void PlaceOnEdge()
+    {
+        if (Screens.Primary is not { } screen)
+        {
+            return;
+        }
+
+        var area = new Platform.PixelRect(screen.Bounds.X, screen.WorkingArea.Y, screen.Bounds.Right, screen.WorkingArea.Bottom);
+        var strip = DockPlacement.Strip(model.Settings.DockEdge, area, DockPlacement.Pixels(model.Settings.Width, screen.Scaling));
+
+        Position = new PixelPoint(strip.Left, strip.Top);
+        Height = strip.Height / screen.Scaling;
+
+        if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
+        {
+            dock.Reserve(model.Settings.DockEdge, strip);
         }
     }
 
@@ -347,7 +403,7 @@ public sealed partial class MainWindow : Window
     {
         if (moving)
         {
-            DockAtPointer();
+            DockAtPointer(this.PointToScreen(e.GetPosition(this)));
         }
     }
 
@@ -360,19 +416,33 @@ public sealed partial class MainWindow : Window
 
         moving = false;
         e.Pointer.Capture(null);
-        DockAtPointer();
+        DockAtPointer(this.PointToScreen(e.GetPosition(this)));
     }
 
     /// <summary>
-    /// Docks at the nearer edge of the monitor under the pointer when that differs from where the dock is. The pointer is read from Windows,
-    /// because the window moves under it during the drag.
+    /// Docks at the nearer edge of the monitor under the pointer when that differs from where the dock is. On Windows the pointer is read from
+    /// Windows, because the window moves under it during the drag; as an X11 dock window, the dock stays on the primary monitor and the window holds
+    /// still, so <paramref name="at"/>, the pointer on the screen, is used.
     /// </summary>
-    void DockAtPointer()
+    void DockAtPointer(PixelPoint at)
     {
-        if (OperatingSystem.IsWindows() && appBar is not null && Native.GetCursorPos(out var at))
+        if (edgeDocked && Screens.Primary is { } screen)
         {
-            var monitor = Native.MonitorFromPoint(at, Native.MonitorDefaultToNearest);
-            var edge = DockPlacement.EdgeAt(at.X, Native.Bounds(monitor));
+            var edge = DockPlacement.EdgeAt(at.X, new Platform.PixelRect(screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Right, screen.Bounds.Bottom));
+
+            if (edge != model.Settings.DockEdge)
+            {
+                model.SetPlacement(edge, null);
+                Dock();
+            }
+
+            return;
+        }
+
+        if (OperatingSystem.IsWindows() && appBar is not null && Native.GetCursorPos(out var cursor))
+        {
+            var monitor = Native.MonitorFromPoint(cursor, Native.MonitorDefaultToNearest);
+            var edge = DockPlacement.EdgeAt(cursor.X, Native.Bounds(monitor));
             var name = monitor == Native.PrimaryMonitor() ? null : Native.MonitorName(monitor);
 
             if (edge != model.Settings.DockEdge || name != model.Settings.Monitor)
@@ -384,8 +454,9 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Makes the dock an ordinary window, for a desktop where it cannot reserve a screen edge, such as GNOME on Wayland: it opens as tall as the
-    /// primary monitor's work area at the kept edge, its title moves it, and it has no auto-hide, which needs a reserved edge (architecture.md § Dock).
+    /// Makes the dock an ordinary window, for a Linux desktop where its window is not an X11 window, so it cannot reserve a screen edge: it opens as
+    /// tall as the primary monitor's work area at the kept edge, its title moves it, and it has no auto-hide, which needs a reserved edge
+    /// (architecture.md § Dock).
     /// </summary>
     public void Float()
     {
@@ -404,6 +475,53 @@ public sealed partial class MainWindow : Window
                 Position = new PixelPoint(model.Settings.DockEdge == DockEdge.Right ? area.Right - (int)(Width * screen.Scaling) : area.X, area.Y);
             }
         };
+    }
+
+    /// <summary>
+    /// Docks at the kept edge of the primary monitor as an X11 dock window, where the dock runs under XWayland (architecture.md § Dock): it reserves
+    /// the strip, a drag of the title docks it at the nearer edge, and the grip sets its width. There is no auto-hide. Call before the window shows,
+    /// so the window manager maps it as a dock window.
+    /// </summary>
+    public void DockOnX11()
+    {
+        edgeDocked = true;
+        ShowInTaskbar = false;
+        AutoHideButton.IsVisible = false;
+
+        if (OperatingSystem.IsLinux() && TryGetPlatformHandle() is { HandleDescriptor: "XID" } handle)
+        {
+            x11 = X11Dock.Create(handle.Handle);
+        }
+
+        Opened += (_, _) => Dock();
+        // A monitor added, removed or rearranged moves the primary monitor's edge.
+        Screens.Changed += (_, _) => Dock();
+    }
+
+    /// <summary>A full-screen window covers the primary monitor, or no longer does: as an X11 dock window, the dock goes below it, as on Windows.</summary>
+    public void ShowFullScreen(bool fullScreen)
+    {
+        if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
+        {
+            dock.Below(fullScreen);
+        }
+    }
+
+    /// <summary>How many times the dock asked for the keyboard focus; for tests, where no X display is used.</summary>
+    internal int FocusRequests { get; private set; }
+
+    /// <summary>
+    /// As an X11 dock window, takes the keyboard focus, which the window manager does not give a dock window on a click. It does not check
+    /// <c>IsActive</c>, which can stay true after another app's window took the focus.
+    /// </summary>
+    void TakeFocus()
+    {
+        FocusRequests++;
+
+        if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
+        {
+            dock.Focus();
+        }
     }
 
     /// <summary>Selects and scrolls to the row of an item window that came to the front by any means; other windows change nothing (PRD R71).</summary>
@@ -684,12 +802,23 @@ public sealed partial class MainWindow : Window
 
         if (!cancel.IsCancellationRequested)
         {
-            model.Status = status;
+            ShowFailure(status);
         }
 
         if (running == mine)
         {
             running = null;
+        }
+    }
+
+    /// <summary>Shows why a click or control did not finish, or nothing; the dock takes the focus to show a reason, as it did not switch to VS Code.</summary>
+    void ShowFailure(string? status)
+    {
+        model.Status = status;
+
+        if (status is not null)
+        {
+            TakeFocus();
         }
     }
 
@@ -915,7 +1044,7 @@ public sealed partial class MainWindow : Window
 
         if (!cancel.IsCancellationRequested)
         {
-            model.Status = status;
+            ShowFailure(status);
         }
 
         if (running == mine)
@@ -1129,7 +1258,7 @@ public sealed partial class MainWindow : Window
             dragged = width;
             Hold(Native.RectOf(DockPlacement.Strip(model.Settings.DockEdge, strip, DockPlacement.Pixels(width, scale))));
         }
-        else if (floating)
+        else if (floating || edgeDocked)
         {
             // The pointer is read on the screen, because the window moves under it when the grip is on its left.
             var scale = RenderScaling;

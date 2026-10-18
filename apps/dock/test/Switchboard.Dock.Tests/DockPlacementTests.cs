@@ -22,6 +22,14 @@ public sealed class DockPlacementTests
     }
 
     [Fact]
+    public void Strut_EachEdge_ReservesTheStripFromTheScreensEdgeOverItsRows()
+    {
+        // A strip below a 32-pixel top bar on a 1920 by 1080 screen, the end row inclusive.
+        Assert.Equal([320, 0, 0, 0, 32, 1079, 0, 0, 0, 0, 0, 0], DockPlacement.Strut(DockEdge.Left, new PixelRect(0, 32, 320, 1080), 1920));
+        Assert.Equal([0, 420, 0, 0, 0, 0, 32, 1079, 0, 0, 0, 0], DockPlacement.Strut(DockEdge.Right, new PixelRect(1500, 32, 1920, 1080), 1920));
+    }
+
+    [Fact]
     public void WidthAt_DragOfTheInnerEdge_MeasuresFromTheOuterEdge()
     {
         Assert.Equal(400, DockPlacement.WidthAt(DockEdge.Left, new PixelRect(1920, 0, 2240, 1440), 2320));

@@ -11,6 +11,8 @@
     <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <!-- The D-Bus client Avalonia uses on Linux, for the GNOME Shell extension; the version Avalonia depends on. -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
   <ItemGroup>
     <!-- VS Code's icon font, so the dock draws the marks the Chrome pills draw (PRD R27). -->
