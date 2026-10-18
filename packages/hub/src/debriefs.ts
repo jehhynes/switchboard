@@ -161,11 +161,12 @@ export interface DebriefDeps {
   promptPath: string;
   /** Claude's `projects` directory, where transcripts are. */
   projectsDir: string;
-  claudePath: string;
+  /** The Claude Code CLI (`sessions.claudePath`). */
+  claudePath(): string;
   /** agent-delegate's debrief command for a Codex thread, run with `nodePath`; skipped when the file is missing. */
   codexScript: string;
-  /** The Codex CLI and Codex's home, whose `sessions` folder holds the rollouts, for Codex sessions' own debriefs. */
-  codexPath: string;
+  /** The Codex CLI (`sessions.codex.path`) and Codex's home, whose `sessions` folder holds the rollouts, for Codex sessions' own debriefs. */
+  codexPath(): string;
   codexHome: string;
   nodePath: string;
   exec: Exec;
@@ -407,7 +408,7 @@ export class Debriefs {
 
     const result = await runCodexDebrief(
       {
-        codexPath: this.deps.codexPath,
+        codexPath: this.deps.codexPath(),
         threadId: thread,
         cwd: candidate.session.cwd,
         // A Codex fork has no subagents to message.
@@ -477,7 +478,7 @@ export class Debriefs {
 
     const result: DebriefResult = await runDebrief(
       {
-        claudePath: this.deps.claudePath,
+        claudePath: this.deps.claudePath(),
         sessionId,
         forkId: this.deps.newId(),
         cwd: candidate.session.cwd,
@@ -598,7 +599,7 @@ export class Debriefs {
       }
     }
 
-    const error = result.code === NOTHING_TO_DEBRIEF || friction !== null ? null : result.code === 0 ? `the answer was not the friction JSON: ${result.stdout.slice(0, 200)}` : failureOf(this.deps.nodePath, result, DEBRIEF_TIMEOUT_MS);
+    const error = result.code === NOTHING_TO_DEBRIEF || friction !== null ? null : result.code === 0 ? `the answer was not the friction JSON: ${result.stdout.slice(0, 200)}` : failureOf(this.deps.nodePath, result, DEBRIEF_TIMEOUT_MS, { notFound: `${this.deps.nodePath} was not found.` });
 
     if (error !== null) {
       this.deps.log(`debrief: Codex thread ${thread} failed: ${error}`);

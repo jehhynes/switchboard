@@ -129,9 +129,9 @@ describe('Debriefs', () => {
       dir,
       promptPath: `${root}/skills/friction-review/prompt.md`,
       projectsDir: `${root}/projects`,
-      claudePath: 'claude',
+      claudePath: () => 'claude',
       codexScript: `${root}/tools/agent-delegate/debrief.mjs`,
-      codexPath: 'codex',
+      codexPath: () => 'codex',
       codexHome: `${root}/.codex`,
       nodePath: 'node',
       exec,
@@ -391,9 +391,9 @@ describe('Debriefs', () => {
       dir,
       promptPath: `${root}/skills/friction-review/prompt.md`,
       projectsDir: `${root}/projects`,
-      claudePath: 'claude',
+      claudePath: () => 'claude',
       codexScript: `${root}/tools/agent-delegate/debrief.mjs`,
-      codexPath: 'codex',
+      codexPath: () => 'codex',
       codexHome: `${root}/.codex`,
       nodePath: 'node',
       exec,
@@ -437,7 +437,7 @@ describe('Debriefs', () => {
     expect(readDebriefState(dir)?.sessions[NATIVE]?.lastError).toBe('The debrief failed: Error: spawn broke');
 
     const broken = new Debriefs({
-      dir, promptPath: `${root}/skills/friction-review/prompt.md`, projectsDir: `${root}/projects`, claudePath: 'claude', codexScript: '', codexPath: 'codex', codexHome: `${root}/.codex`, nodePath: 'node', exec, enabled: () => true,
+      dir, promptPath: `${root}/skills/friction-review/prompt.md`, projectsDir: `${root}/projects`, claudePath: () => 'claude', codexScript: '', codexPath: () => 'codex', codexHome: `${root}/.codex`, nodePath: 'node', exec, enabled: () => true,
       sessions: () => {
         throw new Error('store closed');
       },

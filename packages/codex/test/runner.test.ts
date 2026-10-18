@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Session, StartAction } from '@switchboard/core';
 import { CODEX_HOOK_SOURCE } from '../src/hooks.js';
@@ -64,13 +64,16 @@ class Fake {
   killError: string | null = null;
   tagError: string | null = null;
   spawnError: string | null = null;
+  spawnMissing = false;
+  codexPath = 'codex';
+  spawnedFiles: string[] = [];
   trusted: ReadonlySet<string>[] = [];
   trustResult: string | null = null;
   onSpawn: (files: { stdout: string; stderr: string }, pid: number) => void = (files) => writeFileSync(files.stdout, STARTED + TURN);
 
   runner(): CodexRunner {
     return new CodexRunner({
-      codexPath: 'codex',
+      codexPath: () => this.codexPath,
       exec: async () => {
         throw new Error('unexpected exec');
       },
@@ -82,9 +85,11 @@ class Fake {
       codexHome,
       env: { CODEX_HOME: codexHome },
       hooks: () => true,
-      spawn: async (_file, args, options) => {
+      spawn: async (file, args, options) => {
+        this.spawnedFiles.push(file);
+
         if (this.spawnError !== null) {
-          return { pid: null, error: this.spawnError };
+          return { pid: null, error: this.spawnError, missing: this.spawnMissing };
         }
 
         const pid = this.nextPid++;
@@ -218,6 +223,24 @@ describe('start', () => {
 
     fake.spawnError = 'spawn codex ENOENT';
     expect(await fake.runner().start(ACTION)).toEqual({ error: 'spawn codex ENOENT' });
+  });
+
+  it('spawns the Codex CLI the setting names at each start, and says when it is not found', async () => {
+    const fake = new Fake();
+    const runner = fake.runner();
+
+    fake.codexPath = '/opt/codex/bin/codex';
+    fake.spawnError = 'spawn /opt/codex/bin/codex ENOENT';
+    fake.spawnMissing = true;
+    expect(await runner.start(ACTION)).toEqual({ error: 'Codex was not found at /opt/codex/bin/codex. Install it or set sessions.codex.path.' });
+
+    fake.codexPath = '/usr/local/bin/codex';
+    fake.spawnError = null;
+    expect(await runner.start(ACTION)).toMatchObject({ shortId: THREAD });
+    expect(fake.spawnedFiles).toEqual(['/opt/codex/bin/codex', '/usr/local/bin/codex']);
+    // npm's launcher runs the node an nvm install keeps beside it.
+    const env = fake.spawns[0]!.env!;
+    expect(env[Object.keys(env).find((name) => name.toUpperCase() === 'PATH')!]!.split(delimiter)[0]).toBe(dirname('/usr/local/bin/codex'));
   });
 
   it('never adopts a process that took the PID before its creation time was read, so a timeout ends nothing', async () => {
@@ -484,7 +507,7 @@ describe('installHooks', () => {
     expect(fake.trusted).toHaveLength(0);
 
     rmSync(join(codexHome, 'hooks.json'));
-    fake.trustResult = 'no app-server';
+    fake.trustResult = "Codex did not trust Switchboard's hooks: no app-server";
     expect(await fake.runner().installHooks()).toBe("Codex did not trust Switchboard's hooks: no app-server");
     expect(existsSync(join(codexHome, 'hooks.json'))).toBe(true);
   });

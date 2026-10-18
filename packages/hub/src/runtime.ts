@@ -32,7 +32,6 @@ export interface RuntimeDeps {
   configDir: string;
   store: Store;
   exec: Exec;
-  claudePath: string;
   /** Builds a polling source from its settings, or says why it cannot. Null for a source Switchboard does not know. */
   makeSource(name: string, settings: SourceSettings): { source: Source } | { error: string } | null;
   now(): number;
@@ -40,8 +39,8 @@ export interface RuntimeDeps {
   newSessionId(): string;
   /** Claude's settings.json, where the hooks are installed: the operator's profile's even when the Switchboard home is overridden. */
   claudeSettings: string;
-  /** The Codex CLI, Codex's home (`CODEX_HOME` or `~/.codex`), and the variables Codex runs need; defaults for tests that run no Codex session. */
-  codex?: { path: string; home: string; env: Record<string, string> };
+  /** Codex's home (`CODEX_HOME` or `~/.codex`) and the variables Codex runs need; defaults for tests that run no Codex session. */
+  codex?: { home: string; env: Record<string, string> };
   /** Stand-in runners for tests; each runner is built from the fields above otherwise. */
   runners?: Partial<Record<Provider, SessionRunner>>;
   log(line: string): void;
@@ -119,7 +118,10 @@ export class Runtime {
   private config: Config;
   private sources = new Map<string, Source>();
   private sourceErrors: Record<string, string> = {};
-  private hookError: string | null = null;
+  /** Each runner's hook error from its last install. */
+  private hookErrors: Record<Provider, string | null> = { claude: null, codex: null };
+  /** Each runner's latest install; installs of one runner run in turn, so an older result never replaces a newer one. */
+  private hookInstalls: Record<Provider, Promise<void>> = { claude: Promise.resolve(), codex: Promise.resolve() };
   private pending = new Set<Promise<void>>();
   private listeners = new Set<() => void>();
   /** The roster, marker and wake timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
@@ -154,15 +156,17 @@ export class Runtime {
     this.config = config;
 
     const hooks = () => this.config.settings.sessions.installHooks;
-    const codex = deps.codex ?? { path: 'codex', home: join(deps.home, '.codex'), env: {} };
+    const codex = deps.codex ?? { home: join(deps.home, '.codex'), env: {} };
+    const claudePath = () => this.config.settings.sessions.claudePath;
+    const codexPath = () => this.config.settings.sessions.codex.path;
 
     this.runners = {
       claude:
         deps.runners?.claude ??
-        new ClaudeRunner({ claudePath: deps.claudePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
+        new ClaudeRunner({ claudePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
       codex:
         deps.runners?.codex ??
-        new CodexRunner({ codexPath: codex.path, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
+        new CodexRunner({ codexPath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
     };
     this.buildSources();
   }
@@ -206,7 +210,15 @@ export class Runtime {
   }
 
   reload(config: Config): void {
+    const codexPathChanged = config.settings.sessions.codex.path !== this.config.settings.sessions.codex.path;
+
     this.config = config;
+
+    // Clears a hook error from a Codex CLI that was not found, without a hub restart.
+    if (codexPathChanged && config.settings.sessions.installHooks) {
+      this.track(this.installHooks(['codex']));
+    }
+
     this.buildSources();
     this.restartPolls();
     this.send({ type: 'tick' });
@@ -243,9 +255,7 @@ export class Runtime {
   /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
   async startup(): Promise<void> {
     if (this.config.settings.sessions.installHooks) {
-      const errors = await Promise.all(PROVIDERS.map((provider) => this.runners[provider].installHooks()));
-
-      this.hookError = errors.filter((error) => error !== null).join(' ') || null;
+      await this.installHooks(PROVIDERS);
     }
 
     for (const triage of this.deps.store.runningTriages()) {
@@ -257,6 +267,20 @@ export class Runtime {
     await this.readRoster();
 
     this.recheckDoneReports();
+  }
+
+  private async installHooks(providers: readonly Provider[]): Promise<void> {
+    await Promise.all(
+      providers.map((provider) => {
+        const install = this.hookInstalls[provider].then(async () => {
+          this.hookErrors[provider] = await this.runners[provider].installHooks();
+          this.changed();
+        });
+
+        this.hookInstalls[provider] = install.catch(() => {});
+        return install;
+      }),
+    );
   }
 
   /** Settles sessions a stopped hub left starting; one the runner cannot tell about yet is asked about again at the next roster read. */
@@ -959,7 +983,7 @@ export class Runtime {
       errors: {
         settings: settingsError,
         playbooks: playbookErrors.map((entry) => `${entry.name}: ${entry.error}`),
-        hooks: this.hookError,
+        hooks: PROVIDERS.map((provider) => this.hookErrors[provider]).filter((error) => error !== null).join(' ') || null,
         sources: { ...this.sourceErrors },
       },
     };
@@ -1061,7 +1085,7 @@ export class Runtime {
         const text = triageText(context.context, this.deps.now(), action.handled, stale);
         const result = await classify(
           {
-            claudePath: this.deps.claudePath,
+            claudePath: this.config.settings.sessions.claudePath,
             systemPrompt: action.systemPrompt,
             choices: action.choices,
             rates: action.rates,

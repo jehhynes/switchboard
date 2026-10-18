@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { classifierArgs, classifierPrompt, classify, parseClassifierOutput } from '../src/classifier.js';
 import type { ClassifyInput } from '../src/classifier.js';
@@ -106,13 +107,23 @@ describe('classify', () => {
     const exec = vi.fn<Exec>(async () => ran({ stdout: OUTPUT }));
 
     expect(await classify(INPUT, exec)).toMatchObject({ playbook: 'dev:develop' });
-    expect(exec).toHaveBeenCalledWith('claude', classifierArgs(INPUT), { cwd: 'C:/home/.switchboard', stdin: 'Issue #1 text', timeoutMs: 180_000 });
+    expect(exec).toHaveBeenCalledWith('claude', classifierArgs(INPUT), { cwd: 'C:/home/.switchboard', stdin: 'Issue #1 text', timeoutMs: 180_000, env: {} });
+  });
+
+  it("runs an absolute claude path with its directory first on PATH", async () => {
+    const exec = vi.fn<Exec>(async () => ran({ stdout: OUTPUT }));
+    const claudePath = join(tmpdir(), 'nvm', 'bin', 'claude');
+
+    await classify({ ...INPUT, claudePath }, exec);
+
+    const env = exec.mock.calls[0]![2].env!;
+    expect(env[Object.keys(env).find((name) => name.toUpperCase() === 'PATH')!]!.split(delimiter)[0]).toBe(join(tmpdir(), 'nvm', 'bin'));
   });
 
   it('fails with the CLI error, a timeout, or a missing CLI', async () => {
     expect(await classify(INPUT, async () => ran({ code: 1, stderr: 'API Error: 529 Overloaded\n' }))).toEqual({ error: 'API Error: 529 Overloaded' });
     expect(await classify(INPUT, async () => ran({ code: null, timedOut: true }))).toEqual({ error: 'claude did not finish within 180 seconds.' });
-    expect(await classify(INPUT, async () => ran({ code: null, missing: true }))).toEqual({ error: 'claude was not found. Install Claude Code or set its path.' });
+    expect(await classify({ ...INPUT, cwd: tmpdir() }, async () => ran({ code: null, missing: true }))).toEqual({ error: 'Claude Code was not found at claude. Install it or set sessions.claudePath.' });
     expect(await classify(INPUT, async () => ran({ code: 2 }))).toEqual({ error: 'claude exited with code 2.' });
   });
 });

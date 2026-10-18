@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, openSync, readdirSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { cliEnvironment } from '@switchboard/core';
 import type { Exec } from '@switchboard/core';
 
@@ -239,6 +239,13 @@ function killProcTree(proc: string, pid: number, signal: (pid: number) => void, 
 export interface DetachedSpawn {
   pid: number | null;
   error: string | null;
+  /** The executable was not found; a missing working directory, which also fails with ENOENT, is not this. */
+  missing?: boolean;
+}
+
+/** The message for a Codex CLI the hub could not find. */
+export function codexNotFound(codexPath: string): string {
+  return `Codex was not found at ${codexPath}. Install it or set sessions.codex.path.`;
 }
 
 /**
@@ -253,7 +260,7 @@ export function spawnDetached(file: string, args: string[], options: { cwd: stri
     try {
       const child = spawn(file, args, { cwd: options.cwd, env: { ...cliEnvironment(process.env), ...options.env }, detached: true, windowsHide: true, stdio: ['ignore', out, err] });
 
-      child.once('error', (error) => resolve({ pid: null, error: error.message }));
+      child.once('error', (error: NodeJS.ErrnoException) => resolve({ pid: null, error: error.message, missing: error.code === 'ENOENT' && existsSync(options.cwd) }));
       child.once('spawn', () => {
         child.unref();
         resolve({ pid: child.pid ?? null, error: null });

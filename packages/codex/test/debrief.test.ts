@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Exec, ExecResult } from '@switchboard/core';
 import { codexDebriefRange, codexScopeOf, findRollout, runCodexDebrief } from '../src/debrief.js';
@@ -102,10 +102,26 @@ describe('runCodexDebrief', () => {
     expect(exec).toHaveBeenCalledWith('codex', ['exec', 'fork', '--json', '--ephemeral', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"', 't-1', '-'], { cwd: 'D:/w', stdin: 'Report friction.', env: { FRICTION_DEBRIEF: '1' }, timeoutMs: 1000 });
   });
 
+  it("runs an absolute Codex path with its directory first on PATH, for the node an nvm install keeps beside it", async () => {
+    const exec = vi.fn<Exec>().mockResolvedValue(ran({ stdout: answer('{"friction":[]}') }));
+    const codexPath = join(tmpdir(), 'nvm', 'bin', 'codex');
+
+    await runCodexDebrief({ ...input, codexPath }, exec);
+
+    const env = exec.mock.calls[0]![2].env!;
+    const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH')!;
+    expect(env[key]!.split(delimiter)[0]).toBe(join(tmpdir(), 'nvm', 'bin'));
+    expect(env['FRICTION_DEBRIEF']).toBe('1');
+  });
+
   it("reports a missing CLI, a timeout, a failed turn, Codex's refusal and a fork with no answer", async () => {
     const run = (result: ExecResult) => runCodexDebrief(input, vi.fn<Exec>().mockResolvedValue(result));
 
-    expect(await run(ran({ missing: true, code: null }))).toEqual({ error: 'codex was not found.' });
+    expect(await runCodexDebrief({ ...input, cwd: tmpdir() }, vi.fn<Exec>().mockResolvedValue(ran({ missing: true, code: null })))).toEqual({
+      error: 'Codex was not found at codex. Install it or set sessions.codex.path.',
+    });
+    const gone = join(tmpdir(), 'switchboard-no-such-dir');
+    expect(await runCodexDebrief({ ...input, cwd: gone }, vi.fn<Exec>().mockResolvedValue(ran({ missing: true, code: null })))).toEqual({ error: `The session's directory ${gone} was not found.` });
     expect(await run(ran({ timedOut: true }))).toEqual({ error: 'The Codex debrief did not finish within 1 seconds.' });
     expect(await run(ran({ code: 1, stdout: '{"type":"turn.failed","error":{"message":"quota"}}' }))).toEqual({ error: 'quota' });
     expect(await run(ran({ code: 1, stderr: 'No thread t-1.\n' }))).toEqual({ error: 'No thread t-1.' });

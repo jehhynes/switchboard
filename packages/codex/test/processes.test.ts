@@ -171,10 +171,16 @@ describe('spawnDetached', () => {
     expect(readFileSync(stdout, 'utf8').trim()).toBe('/sb-plan "1"');
   });
 
+  it('does not call a missing working directory a missing executable', async () => {
+    const spawned = await spawnDetached(process.execPath, [], { cwd: join(dir, 'gone'), stdout: join(dir, 'o'), stderr: join(dir, 'e') });
+
+    expect(spawned).toEqual({ pid: null, error: expect.stringContaining('ENOENT'), missing: false });
+  });
+
   it('reports a missing executable', async () => {
     const spawned = await spawnDetached(join(dir, 'missing.exe'), [], { cwd: dir, stdout: join(dir, 'o'), stderr: join(dir, 'e') });
 
-    expect(spawned).toEqual({ pid: null, error: expect.stringContaining('ENOENT') });
+    expect(spawned).toEqual({ pid: null, error: expect.stringContaining('ENOENT'), missing: true });
     expect(existsSync(join(dir, 'o'))).toBe(true);
   });
 });

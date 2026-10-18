@@ -103,9 +103,15 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => {
     expect(received()[2]!.params).toEqual({ edits: [{ keyPath: 'hooks.state', mergeStrategy: 'upsert', value: EDIT }] });
   });
 
-  it('reports a server that exits, does not answer or cannot start', async () => {
-    expect(await trustHooks(process.execPath, OURS, {}, 10_000, [server({ initialize: 'exit' })])).toBe('Codex stopped before it answered the hook trust request.');
-    expect(await trustHooks(process.execPath, OURS, {}, 300, [server({ initialize: 'silent' })])).toBe('Codex did not answer the hook trust request within 0.3 seconds.');
-    expect(await trustHooks(join(dir, 'missing.exe'), OURS, {}, 10_000)).toMatch(/ENOENT/);
+  it('reports a server that refuses, exits or does not answer as a trust failure', async () => {
+    expect(await trustHooks(process.execPath, OURS, {}, 10_000, [server({ initialize: { error: { message: 'no' } } })])).toBe("Codex did not trust Switchboard's hooks: no");
+    expect(await trustHooks(process.execPath, OURS, {}, 10_000, [server({ initialize: 'exit' })])).toBe("Codex did not trust Switchboard's hooks: Codex stopped before it answered the hook trust request.");
+    expect(await trustHooks(process.execPath, OURS, {}, 300, [server({ initialize: 'silent' })])).toBe("Codex did not trust Switchboard's hooks: Codex did not answer the hook trust request within 0.3 seconds.");
+  });
+
+  it('reports a Codex CLI that is not found as missing, not as a trust failure', async () => {
+    const missing = join(dir, 'missing.exe');
+
+    expect(await trustHooks(missing, OURS, {}, 10_000)).toBe(`Codex was not found at ${missing}. Install it or set sessions.codex.path.`);
   });
 });

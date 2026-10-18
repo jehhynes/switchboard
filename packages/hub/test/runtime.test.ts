@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ClaudeRunner } from '@switchboard/claude';
@@ -167,6 +167,8 @@ class FakeCodex {
   commandLines = new Map<number, string>();
   kills: number[] = [];
   trustError: string | null = null;
+  /** When set, each trust call waits here for its answer instead of answering `trustError`. */
+  heldTrust: ((answer: string | null) => void)[] | null = null;
   queryError: string | null = null;
   onSpawn: (stdout: string, pid: number, args: string[]) => string = () => '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.started"}\n';
   /** Holds the next process query until released. */
@@ -175,7 +177,7 @@ class FakeCodex {
 
   runner(): CodexRunner {
     return new CodexRunner({
-      codexPath: 'codex',
+      codexPath: () => 'codex',
       exec: async () => {
         throw new Error('unexpected exec');
       },
@@ -211,12 +213,13 @@ class FakeCodex {
         this.alive.delete(pid);
         return null;
       },
-      trust: async () => this.trustError,
+      trust: async () => (this.heldTrust === null ? this.trustError : new Promise((answer) => this.heldTrust!.push(answer))),
     });
   }
 }
 
-function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex = new FakeCodex()) {
+/** A null `codex` leaves the runtime to build its own Codex runner. */
+function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex: FakeCodex | null = new FakeCodex()) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
 
@@ -236,7 +239,6 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
       home,
       store,
       exec: cli.exec,
-      claudePath: 'claude',
       makeSource: (name) => (name === 'github' ? { source } : null),
       now,
       sleep: (ms) => (ms === REPORT_CHECK_MS ? late.promise : ms === RECHECK_MS ? recheck.promise : Promise.resolve()),
@@ -244,7 +246,7 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
       claudeSettings: join(home, '.claude', 'settings.json'),
       configDir: join(home, 'cfg'),
       log: (line) => logs.push(line),
-      runners: { codex: codex.runner(), ...runners },
+      runners: { ...(codex === null ? {} : { codex: codex.runner() }), ...runners },
     },
     cfg,
   );
@@ -495,7 +497,7 @@ describe('Runtime', () => {
   });
 
   it('leaves a marker reading that needs the roster read to it, without changing the session', async () => {
-    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ({ code: 0, stdout: '[]', stderr: '', missing: false, timedOut: false }), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ({ code: 0, stdout: '[]', stderr: '', missing: false, timedOut: false }), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
     const roster = deferred();
     let reads = 0;
     const runner: SessionRunner = Object.assign(Object.create(real) as SessionRunner, {
@@ -1027,11 +1029,119 @@ describe('Runtime', () => {
     const codex = new FakeCodex();
     const { runtime } = setup(config({ installHooks: true }), () => T0, undefined, codex);
 
-    codex.trustError = 'no app-server';
+    codex.trustError = "Codex did not trust Switchboard's hooks: no app-server";
     await runtime.startup();
 
     expect(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8')).toContain('codex-hook.mjs');
     expect(runtime.snapshot().errors.hooks).toBe("Codex did not trust Switchboard's hooks: no app-server");
+  });
+
+  it('trusts Codex hooks with the CLI sessions.codex.path names, and trusts them again when the setting changes', async () => {
+    const first = join(home, 'missing', 'codex');
+    const second = join(home, 'other', 'codex');
+    // The runtime's own Codex runner; neither path exists, so no Codex process starts.
+    const { runtime } = setup(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: first } }), () => T0, undefined, null);
+
+    await runtime.startup();
+    expect(runtime.snapshot().errors.hooks).toBe(`Codex was not found at ${first}. Install it or set sessions.codex.path.`);
+
+    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: second } }));
+    await runtime.settled();
+    expect(runtime.snapshot().errors.hooks).toBe(`Codex was not found at ${second}. Install it or set sessions.codex.path.`);
+  });
+
+  it('clears the Codex hook error when a new sessions.codex.path is trusted, and keeps it on a reload that leaves the path', async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config({ installHooks: true }), () => T0, undefined, codex);
+
+    codex.trustError = 'Codex was not found at codex. Install it or set sessions.codex.path.';
+    await runtime.startup();
+    codex.trustError = null;
+
+    runtime.reload(config({ installHooks: true, concurrency: 1 }));
+    await runtime.settled();
+    expect(runtime.snapshot().errors.hooks).toBe('Codex was not found at codex. Install it or set sessions.codex.path.');
+
+    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    await runtime.settled();
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
+  it('runs the Claude Code CLI that sessions.claudePath names, read again after a reload', async () => {
+    const { cli, source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    await runtime.readRoster();
+    runtime.reload(config({ claudePath: '/opt/claude/bin/claude' }));
+    await runtime.settled();
+    await runtime.readRoster();
+
+    source.result = { tickets: [issue('8'), issue('9')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const rosterReads = cli.calls.filter((call) => call[1] === 'agents').map((call) => call[0]);
+    expect(rosterReads[0]).toBe('claude');
+    expect(rosterReads.at(-1)).toBe('/opt/claude/bin/claude');
+    const triages = cli.calls.filter((call) => call.includes('--json-schema')).map((call) => call[0]);
+    expect(triages[0]).toBe('claude');
+    expect(triages.at(-1)).toBe('/opt/claude/bin/claude');
+  });
+
+  it('runs a Codex hook install a reload asks for after the one in flight, so the older result cannot replace it', async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config({ installHooks: true }), () => T0, undefined, codex);
+    const held: ((answer: string | null) => void)[] = [];
+
+    codex.heldTrust = held;
+    const startup = runtime.startup();
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+
+    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    await new Promise((done) => setImmediate(done));
+    expect(held).toHaveLength(1);
+
+    held[0]!('Codex was not found at codex. Install it or set sessions.codex.path.');
+    await vi.waitFor(() => expect(held).toHaveLength(2));
+    held[1]!(null);
+    await startup;
+    await runtime.settled();
+
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
+  it("keeps Claude's hook error when a path change installs Codex's hooks again", async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config({ installHooks: true }), () => T0, undefined, codex);
+
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'settings.json'), '[]');
+    codex.trustError = 'Codex was not found at codex. Install it or set sessions.codex.path.';
+    await runtime.startup();
+    const both = runtime.snapshot().errors.hooks!;
+    const claude = both.replace(' Codex was not found at codex. Install it or set sessions.codex.path.', '');
+    expect(claude).not.toBe(both);
+    expect(claude).not.toBe('');
+
+    codex.trustError = null;
+    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    await runtime.settled();
+
+    expect(runtime.snapshot().errors.hooks).toBe(claude);
+  });
+
+  it('does not install hooks on a path change while sessions.installHooks is off', async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config(), () => T0, undefined, codex);
+
+    codex.trustError = 'should not run';
+    runtime.reload(config({ codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    await runtime.settled();
+
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+    expect(existsSync(join(home, '.codex', 'hooks.json'))).toBe(false);
   });
 
   it('runs a Codex session through the Codex runner: started, running, released when its turn ends, then ended', async () => {
@@ -1652,7 +1762,7 @@ describe('forks (PRD R78)', () => {
 
   /** A Claude runner whose roster, markers and transcript answers the test sets. */
   function forking() {
-    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
     const state = {
       reads: 0,
       listed: true,
@@ -1821,7 +1931,7 @@ describe('registered sessions (PRD R81)', () => {
 
   /** A Claude runner whose roster lists `live` and whose transcripts relate a native ID to a session by `relation`. */
   function registering(live: Awaited<ReturnType<NonNullable<SessionRunner['live']>>>, relation: (native: string) => CopyRelation = () => 'unrelated') {
-    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
 
     return Object.assign(Object.create(real) as SessionRunner, { live: async () => live, relation });
   }
@@ -1867,7 +1977,7 @@ describe('ticket reports (PRD R83)', () => {
   const found = (open = true) => ({ ticket: { sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: URL, open } });
 
   async function registered() {
-    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
     // `old-copy` is a copy a fork retired, and so is the registered copy once a fork named `fork-copy` continues it (PRD R78).
     const claude = Object.assign(Object.create(real) as SessionRunner, {
       live: async () => ({ shortId: '9273f594', cwd: 'D:/git/widgets' }),

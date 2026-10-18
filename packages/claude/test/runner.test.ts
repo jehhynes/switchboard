@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Exec, ExecResult } from '../src/exec.js';
 import type { Marker } from '../src/hooks.js';
@@ -83,9 +84,33 @@ describe('startSession', () => {
     const exec = fakeExec(ran({ stdout: LAUNCHED }), ran({ stdout: AGENTS }), ran({ code: 1, stderr: 'busy' }), ran({ stdout: launching }), ran({ stdout: listed }));
 
     expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000-4000-8000-000000000000' });
-    expect(exec.mock.calls[0]).toEqual(['claude', startArgs(ACTION), { cwd: 'D:/git/widgets', timeoutMs: 60_000 }]);
-    expect(exec.mock.calls[1]).toEqual(['claude', ['agents', '--json'], { timeoutMs: 15_000 }]);
+    expect(exec.mock.calls[0]).toEqual(['claude', startArgs(ACTION), { cwd: 'D:/git/widgets', timeoutMs: 60_000, env: {} }]);
+    expect(exec.mock.calls[1]).toEqual(['claude', ['agents', '--json'], { timeoutMs: 15_000, env: {} }]);
     expect(exec).toHaveBeenCalledTimes(5);
+  });
+
+  it("runs an absolute claude path with its directory first on PATH, for the node an npm install's launcher runs", async () => {
+    const claudePath = join(tmpdir(), 'nvm', 'bin', 'claude');
+    const exec = fakeExec(ran({ code: 1, stderr: 'no' }));
+
+    const reads = fakeExec(ran({ stdout: AGENTS }), ran({}));
+
+    await startSession(claudePath, ACTION, { exec, ...clock() });
+    await readRoster(claudePath, reads);
+    await stopSession(claudePath, '1a2b3c4d', reads);
+
+    for (const call of [exec.mock.calls[0]!, ...reads.mock.calls]) {
+      const env = call[2].env!;
+      expect(env[Object.keys(env).find((name) => name.toUpperCase() === 'PATH')!]!.split(delimiter)[0]).toBe(join(tmpdir(), 'nvm', 'bin'));
+    }
+  });
+
+  it('names a missing Claude Code CLI, and a missing work directory as such', async () => {
+    const missing = () => fakeExec(ran({ code: null, missing: true }));
+
+    expect(await startSession('/opt/claude', { ...ACTION, cwd: tmpdir() }, { exec: missing(), ...clock() })).toEqual({ error: 'Claude Code was not found at /opt/claude. Install it or set sessions.claudePath.' });
+    const gone = join(tmpdir(), 'switchboard-no-such-dir');
+    expect(await startSession('/opt/claude', { ...ACTION, cwd: gone }, { exec: missing(), ...clock() })).toEqual({ error: `The directory ${gone} was not found.` });
   });
 
   it('fails when the entry never gets a pid', async () => {
@@ -223,7 +248,7 @@ describe('stopSession', () => {
     const exec = fakeExec(ran({}), ran({ code: 1, stderr: 'No such agent' }));
 
     expect(await stopSession('claude', '1a2b3c4d', exec)).toBeNull();
-    expect(exec.mock.calls[0]).toEqual(['claude', ['stop', '1a2b3c4d'], { timeoutMs: 15_000 }]);
+    expect(exec.mock.calls[0]).toEqual(['claude', ['stop', '1a2b3c4d'], { timeoutMs: 15_000, env: {} }]);
     expect(await stopSession('claude', '1a2b3c4d', exec)).toEqual({ error: 'No such agent' });
   });
 });

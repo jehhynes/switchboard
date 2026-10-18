@@ -43,7 +43,7 @@ function session(patch: Partial<Session> = {}): Session {
 
 function runner(exec: Exec, patch: Partial<ClaudeRunnerDeps> = {}): ClaudeRunner {
   return new ClaudeRunner({
-    claudePath: 'claude',
+    claudePath: () => 'claude',
     exec,
     sleep: async () => {},
     now: () => 0,

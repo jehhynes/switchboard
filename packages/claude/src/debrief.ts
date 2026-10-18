@@ -1,6 +1,6 @@
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import type { Exec } from './exec.js';
-import { failureOf } from './exec.js';
+import { claudeEnvironment, failureOf } from './exec.js';
 
 /** Set on every debrief fork; the hook writer ignores sessions that carry it. */
 export const DEBRIEF_ENV = 'FRICTION_DEBRIEF';
@@ -468,11 +468,11 @@ export async function runDebrief(input: DebriefInput, exec: Exec): Promise<Debri
       cwd: input.cwd,
       stdin: prompt,
       timeoutMs: input.timeoutMs,
-      env: { [DEBRIEF_ENV]: '1' },
+      env: { ...claudeEnvironment(input.claudePath), [DEBRIEF_ENV]: '1' },
     });
 
     if (result.code !== 0) {
-      return { error: `Claude could not run the debrief: ${failureOf(input.claudePath, result, input.timeoutMs)}` };
+      return { error: `Claude could not run the debrief: ${failureOf(input.claudePath, result, input.timeoutMs, { cwd: input.cwd })}` };
     }
 
     let output: unknown;

@@ -8,7 +8,8 @@ import { installHooks, readMarkers } from './install.js';
 import { entryFor, observe, observeForks, readRoster, startSession, stopSession } from './runner.js';
 
 export interface ClaudeRunnerDeps {
-  claudePath: string;
+  /** Read at each use, so a change to `sessions.claudePath` applies to the next command. */
+  claudePath(): string;
   exec: Exec;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -29,11 +30,11 @@ export class ClaudeRunner implements SessionRunner {
   }
 
   start(action: StartAction): Promise<StartResult> {
-    return startSession(this.deps.claudePath, action, { exec: this.deps.exec, sleep: this.deps.sleep, now: this.deps.now });
+    return startSession(this.deps.claudePath(), action, { exec: this.deps.exec, sleep: this.deps.sleep, now: this.deps.now });
   }
 
   async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[] } | { error: string }> {
-    const roster = await readRoster(this.deps.claudePath, this.deps.exec);
+    const roster = await readRoster(this.deps.claudePath(), this.deps.exec);
 
     if ('error' in roster) {
       return roster;
@@ -62,7 +63,7 @@ export class ClaudeRunner implements SessionRunner {
 
   /** A session the roster lists with a process: a VS Code tab or terminal has no short ID, so its native ID's first 8 characters match it (M7). */
   async live(nativeSessionId: string): Promise<{ shortId: string; cwd: string } | null | { error: string }> {
-    const roster = await readRoster(this.deps.claudePath, this.deps.exec);
+    const roster = await readRoster(this.deps.claudePath(), this.deps.exec);
 
     if ('error' in roster) {
       return roster;
@@ -93,13 +94,13 @@ export class ClaudeRunner implements SessionRunner {
       return false;
     }
 
-    const roster = await readRoster(this.deps.claudePath, this.deps.exec);
+    const roster = await readRoster(this.deps.claudePath(), this.deps.exec);
 
     return 'entries' in roster && entryFor(roster.entries, target.shortId)?.kind === 'background';
   }
 
   stop(target: SessionTarget, _reason: StopReason): Promise<{ error: string } | null> {
-    return target.shortId === null ? Promise.resolve({ error: 'The session has not started yet.' }) : stopSession(this.deps.claudePath, target.shortId, this.deps.exec);
+    return target.shortId === null ? Promise.resolve({ error: 'The session has not started yet.' }) : stopSession(this.deps.claudePath(), target.shortId, this.deps.exec);
   }
 
   /** A background session started by a hub that stopped cannot be matched to its roster entry, so its start fails (PRD R43). */

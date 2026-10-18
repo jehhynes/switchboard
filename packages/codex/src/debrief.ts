@@ -1,8 +1,10 @@
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Exec } from '@switchboard/core';
+import { executableDirOnPath } from '@switchboard/core';
 import { forkArgs } from './args.js';
 import { lastErrorLine } from './log.js';
+import { codexNotFound } from './processes.js';
 
 /** The rollout file of a thread and when it was last written. */
 export interface Rollout {
@@ -143,10 +145,12 @@ export async function runCodexDebrief(
   input: { codexPath: string; threadId: string; cwd: string; prompt: string; env: Record<string, string>; timeoutMs: number },
   exec: Exec,
 ): Promise<{ text: string } | { error: string }> {
-  const result = await exec(input.codexPath, forkArgs(input.threadId), { cwd: input.cwd, stdin: input.prompt, env: input.env, timeoutMs: input.timeoutMs });
+  const env = { ...executableDirOnPath(input.codexPath), ...input.env };
+  const result = await exec(input.codexPath, forkArgs(input.threadId), { cwd: input.cwd, stdin: input.prompt, env, timeoutMs: input.timeoutMs });
 
+  // A missing working directory also fails with ENOENT.
   if (result.missing) {
-    return { error: `${input.codexPath} was not found.` };
+    return { error: existsSync(input.cwd) ? codexNotFound(input.codexPath) : `The session's directory ${input.cwd} was not found.` };
   }
 
   if (result.timedOut) {

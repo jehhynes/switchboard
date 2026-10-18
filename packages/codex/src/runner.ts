@@ -1,14 +1,14 @@
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Exec, MarkerReading, ObservedSession, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason } from '@switchboard/core';
-import { isCodexPermissionMode } from '@switchboard/core';
+import { executableDirOnPath, isCodexPermissionMode } from '@switchboard/core';
 import { startArgs } from './args.js';
 import type { RunOptions } from './args.js';
 import { CODEX_HOOK_SOURCE, codexHookCommands, parseCodexMarker, planCodexHooks } from './hooks.js';
 import type { CodexMarker } from './hooks.js';
 import { lastErrorLine, parseRunLog } from './log.js';
 import type { RunLog } from './log.js';
-import { carriesTag, findTagged, isCodex, killTree, pidAlive, queryProcesses, runTag, sameProcess, spawnDetached } from './processes.js';
+import { carriesTag, codexNotFound, findTagged, isCodex, killTree, pidAlive, queryProcesses, runTag, sameProcess, spawnDetached } from './processes.js';
 import type { DetachedSpawn, ProcessIdentity, ProcessInfo } from './processes.js';
 import { readRecord, readText, RUN_RECORD_VERSION, runFiles, writeRecord } from './records.js';
 import type { RunRecord } from './records.js';
@@ -25,7 +25,8 @@ const POLL_MS = 250;
 const IDENTITY_TRIES = 3;
 
 export interface CodexRunnerDeps {
-  codexPath: string;
+  /** Read at each use, so a change to `sessions.codex.path` applies to the next run. */
+  codexPath(): string;
   exec: Exec;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -58,7 +59,7 @@ export class CodexRunner implements SessionRunner {
 
   /** Every Codex process reads the same home as the hooks Switchboard installs. */
   private get env(): Record<string, string> {
-    return { ...this.deps.env, CODEX_HOME: this.deps.codexHome };
+    return { ...this.deps.env, ...executableDirOnPath(this.deps.codexPath()), CODEX_HOME: this.deps.codexHome };
   }
 
   private get spawn() {
@@ -110,10 +111,11 @@ export class CodexRunner implements SessionRunner {
   /** Spawns the run and reads its creation time; a process whose time cannot be read yet is found later by its run tag. */
   private async spawnRun(record: RunRecord, args: string[]): Promise<Spawned> {
     const files = runFiles(this.deps.home, record.sessionId);
-    const spawned = await this.spawn(this.deps.codexPath, args, { cwd: record.cwd, ...files, env: this.env });
+    const codexPath = this.deps.codexPath();
+    const spawned = await this.spawn(codexPath, args, { cwd: record.cwd, ...files, env: this.env });
 
     if (spawned.pid === null) {
-      return { error: spawned.error ?? 'Codex did not start.' };
+      return { error: spawned.missing === true ? codexNotFound(codexPath) : (spawned.error ?? 'Codex did not start.') };
     }
 
     for (let tries = 0; tries < IDENTITY_TRIES; tries++) {
@@ -544,9 +546,8 @@ export class CodexRunner implements SessionRunner {
     }
 
     const commands = codexHookCommands(hookPath, contractPath);
-    const trust = this.deps.trust ?? ((wanted: ReadonlySet<string>) => trustHooks(this.deps.codexPath, wanted, this.env));
-    const failure = await trust(new Set([commands.hook, commands.contract]));
+    const trust = this.deps.trust ?? ((wanted: ReadonlySet<string>) => trustHooks(this.deps.codexPath(), wanted, this.env));
 
-    return failure === null ? null : `Codex did not trust Switchboard's hooks: ${failure}`;
+    return trust(new Set([commands.hook, commands.contract]));
   }
 }

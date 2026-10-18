@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { cliEnvironment } from '@switchboard/core';
+import { codexNotFound } from './processes.js';
 
 /** One step of the trust exchange: send the next request, finish with an error or null, or ignore the message. */
 export type TrustStep = { send: unknown } | { done: string | null } | null;
@@ -76,7 +77,12 @@ export function trustExchange(commands: ReadonlySet<string>): { start(): unknown
 
 const TRUST_TIMEOUT_MS = 20_000;
 
-/** Runs the trust exchange with `codex app-server` over stdio; resolves with the error to show, or null. Tests pass a stand-in server's arguments. */
+const failed = (reason: string) => `Codex did not trust Switchboard's hooks: ${reason}`;
+
+/**
+ * Runs the trust exchange with `codex app-server` over stdio; resolves with the error to show, or null. A missing executable is reported as such,
+ * not as a refusal. Tests pass a stand-in server's arguments.
+ */
 export function trustHooks(codexPath: string, commands: ReadonlySet<string>, env: Record<string, string> = {}, timeoutMs = TRUST_TIMEOUT_MS, args = ['app-server']): Promise<string | null> {
   return new Promise((resolve) => {
     const exchange = trustExchange(commands);
@@ -87,7 +93,7 @@ export function trustHooks(codexPath: string, commands: ReadonlySet<string>, env
     try {
       child = spawn(codexPath, args, { env: { ...cliEnvironment(process.env), ...env }, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
     } catch (error) {
-      resolve((error as Error).message);
+      resolve(failed((error as Error).message));
       return;
     }
 
@@ -96,13 +102,22 @@ export function trustHooks(codexPath: string, commands: ReadonlySet<string>, env
         settled = true;
         clearTimeout(timer);
         child.kill();
-        resolve(result);
+        resolve(result === null ? null : failed(result));
       }
     };
     const timer = setTimeout(() => finish(`Codex did not answer the hook trust request within ${timeoutMs / 1000} seconds.`), timeoutMs);
     const send = (message: unknown) => child.stdin?.write(`${JSON.stringify(message)}\n`);
 
-    child.on('error', (error) => finish(error.message));
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT' && !settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(codexNotFound(codexPath));
+        return;
+      }
+
+      finish(error.message);
+    });
     child.on('exit', () => finish('Codex stopped before it answered the hook trust request.'));
     child.stdin?.on('error', () => {});
     child.stdout?.setEncoding('utf8').on('data', (chunk: string) => {

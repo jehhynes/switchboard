@@ -1523,7 +1523,7 @@ describe('in-queue times (PRD R27)', () => {
 
 describe('agents (PRD R22)', () => {
   it("runs a Codex playbook's sessions in Codex, with Codex's defaults and contract, and its stops name Codex", () => {
-    const h = new Harness({ settings: settings({ sessions: { codex: { permissionMode: 'dontAsk', model: 'gpt-6' } } }), playbooks: playbooks(['triage:github'], { 'dev:codex': { description: 'Build it in Codex', provider: 'codex', template: '/sb-plan {{ticket.sourceKey}}' } }) });
+    const h = new Harness({ settings: settings({ sessions: { codex: { permissionMode: 'dontAsk', model: 'gpt-6', path: 'codex' } } }), playbooks: playbooks(['triage:github'], { 'dev:codex': { description: 'Build it in Codex', provider: 'codex', template: '/sb-plan {{ticket.sourceKey}}' } }) });
     const [triage] = h.poll(issue('1'));
 
     h.triaged(triage, 'dev:codex');

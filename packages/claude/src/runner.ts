@@ -1,7 +1,7 @@
 import { START_PROMPT } from '@switchboard/core';
 import type { LiveState, ObservedFork, ObservedSession, StartAction, StartResult } from '@switchboard/core';
 import type { Exec } from './exec.js';
-import { failureOf } from './exec.js';
+import { claudeEnvironment, failureOf } from './exec.js';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
 
@@ -52,7 +52,7 @@ export function shortIdFrom(stdout: string): string | null {
 export type RosterResult = { entries: RosterEntry[] } | { error: string };
 
 export async function readRoster(claudePath: string, exec: Exec): Promise<RosterResult> {
-  const result = await exec(claudePath, ['agents', '--json'], { timeoutMs: ROSTER_TIMEOUT_MS });
+  const result = await exec(claudePath, ['agents', '--json'], { timeoutMs: ROSTER_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
 
   if (result.code !== 0) {
     return { error: failureOf(claudePath, result, ROSTER_TIMEOUT_MS) };
@@ -104,10 +104,10 @@ export interface StartDeps {
  * the operator answers (mechanics M41). Two such reads in a row start it as waiting on that prompt, which the operator answers by attaching.
  */
 export async function startSession(claudePath: string, action: StartAction, deps: StartDeps): Promise<StartResult> {
-  const launched = await deps.exec(claudePath, startArgs(action), { cwd: action.cwd, timeoutMs: LAUNCH_TIMEOUT_MS });
+  const launched = await deps.exec(claudePath, startArgs(action), { cwd: action.cwd, timeoutMs: LAUNCH_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
 
   if (launched.code !== 0) {
-    return { error: failureOf(claudePath, launched, LAUNCH_TIMEOUT_MS) };
+    return { error: failureOf(claudePath, launched, LAUNCH_TIMEOUT_MS, { cwd: action.cwd }) };
   }
 
   const shortId = shortIdFrom(launched.stdout);
@@ -139,7 +139,7 @@ export async function startSession(claudePath: string, action: StartAction, deps
 
 /** `claude stop`, never `claude rm`, which can delete the session's worktree (GC M33). */
 export async function stopSession(claudePath: string, shortId: string, exec: Exec): Promise<{ error: string } | null> {
-  const result = await exec(claudePath, ['stop', shortId], { timeoutMs: STOP_TIMEOUT_MS });
+  const result = await exec(claudePath, ['stop', shortId], { timeoutMs: STOP_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
 
   return result.code === 0 ? null : { error: failureOf(claudePath, result, STOP_TIMEOUT_MS) };
 }

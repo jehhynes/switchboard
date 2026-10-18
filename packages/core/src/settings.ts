@@ -22,6 +22,8 @@ export interface CodexSettings {
   permissionMode: CodexPermissionMode;
   /** Empty means Codex's default model. */
   model: string;
+  /** The Codex CLI the hub runs; a bare name is looked up on the hub's PATH. */
+  path: string;
 }
 
 export interface SessionSettings {
@@ -32,6 +34,8 @@ export interface SessionSettings {
   permissionMode: PermissionMode;
   /** Empty means Claude's default model. */
   model: string;
+  /** The Claude Code CLI the hub runs; a bare name is looked up on the hub's PATH. */
+  claudePath: string;
   codex: CodexSettings;
   installHooks: boolean;
   /** Ask each finished Claude session what slowed it down, for the friction-review skill (PRD R55). */
@@ -86,7 +90,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   // Commands in Codex's sandbox cannot use the operator's credentials, such as gh's, so Codex sessions default to no sandbox (mechanics M31).
-  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false },
+  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codex: { permissionMode: 'bypassPermissions', model: '', path: 'codex' }, installHooks: true, debriefs: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
@@ -189,6 +193,22 @@ class Reader {
 
     return value as T;
   }
+
+  /** A non-empty string naming an executable. */
+  path(section: Json, key: string, path: string, fallback: string): string {
+    const value = section[key];
+
+    if (value === undefined) {
+      return fallback;
+    }
+
+    if (typeof value !== 'string' || value === '') {
+      this.errors.push(`${path}.${key} must be a path.`);
+      return fallback;
+    }
+
+    return value;
+  }
 }
 
 /** Parses `settings.json`. Any error outside `playbooks` rejects the whole file, so the hub keeps the last valid settings (PRD R42). */
@@ -212,17 +232,19 @@ export function parseSettings(text: string): SettingsResult {
 
   const sessionsIn = read.section(root, 'sessions', 'sessions');
   const defaults = DEFAULT_SETTINGS;
-  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'codex', 'installHooks', 'debriefs'], 'sessions');
+  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'claudePath', 'codex', 'installHooks', 'debriefs'], 'sessions');
   const codexIn = read.section(sessionsIn, 'codex', 'sessions.codex');
-  read.unknown(codexIn, ['permissionMode', 'model'], 'sessions.codex');
+  read.unknown(codexIn, ['permissionMode', 'model', 'path'], 'sessions.codex');
   const sessions: SessionSettings = {
     provider: read.choice(sessionsIn, 'provider', 'sessions', PROVIDERS, defaults.sessions.provider),
     concurrency: read.integer(sessionsIn, 'concurrency', 'sessions', defaults.sessions.concurrency, 1, 10),
     permissionMode: read.choice(sessionsIn, 'permissionMode', 'sessions', PERMISSION_MODES, defaults.sessions.permissionMode),
     model: read.string(sessionsIn, 'model', 'sessions', defaults.sessions.model),
+    claudePath: read.path(sessionsIn, 'claudePath', 'sessions', defaults.sessions.claudePath),
     codex: {
       permissionMode: read.choice(codexIn, 'permissionMode', 'sessions.codex', CODEX_PERMISSION_MODES, defaults.sessions.codex.permissionMode),
       model: read.string(codexIn, 'model', 'sessions.codex', defaults.sessions.codex.model),
+      path: read.path(codexIn, 'path', 'sessions.codex', defaults.sessions.codex.path),
     },
     installHooks: read.boolean(sessionsIn, 'installHooks', 'sessions', defaults.sessions.installHooks),
     debriefs: read.boolean(sessionsIn, 'debriefs', 'sessions', defaults.sessions.debriefs),

@@ -1,7 +1,7 @@
 import { IMMEDIACIES, SEVERITIES } from '@switchboard/core';
 import type { Immediacy, Severity, TriageChoice } from '@switchboard/core';
 import type { Exec } from './exec.js';
-import { failureOf } from './exec.js';
+import { claudeEnvironment, failureOf } from './exec.js';
 
 export interface ClassifyInput {
   claudePath: string;
@@ -105,10 +105,10 @@ export function parseClassifierOutput(stdout: string, choices: TriageChoice[], r
 
 export async function classify(input: ClassifyInput, exec: Exec): Promise<ClassifyResult> {
   const timeoutMs = input.timeoutSeconds * 1000;
-  const result = await exec(input.claudePath, classifierArgs(input), { cwd: input.cwd, stdin: input.context, timeoutMs });
+  const result = await exec(input.claudePath, classifierArgs(input), { cwd: input.cwd, stdin: input.context, timeoutMs, env: claudeEnvironment(input.claudePath) });
 
   if (result.code !== 0) {
-    return { error: failureOf(input.claudePath, result, timeoutMs) };
+    return { error: failureOf(input.claudePath, result, timeoutMs, { cwd: input.cwd }) };
   }
 
   return parseClassifierOutput(result.stdout, input.choices, input.rates, input.focusIds);

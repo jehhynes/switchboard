@@ -9,4 +9,11 @@ describe('failureOf', () => {
     expect(failureOf('claude', { ...base, stdout: 'out' }, 1000)).toBe('out');
     expect(failureOf('claude', base, 1000)).toBe('claude exited with code 1.');
   });
+
+  it('names a missing executable with the message given for one that is not Claude Code', () => {
+    const missing = { code: null, stdout: '', stderr: '', missing: true, timedOut: false };
+
+    expect(failureOf('/usr/bin/node', missing, 1000, { notFound: '/usr/bin/node was not found.' })).toBe('/usr/bin/node was not found.');
+    expect(failureOf('claude', missing, 1000)).toBe('Claude Code was not found at claude. Install it or set sessions.claudePath.');
+  });
 });
