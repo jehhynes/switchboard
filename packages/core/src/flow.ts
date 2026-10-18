@@ -211,7 +211,7 @@ export interface FlowContext {
   now: number;
   settings: Settings;
   playbooks: ReadonlyMap<string, Playbook>;
-  /** The report command prefix, `node "<home>/hub.js" report`. */
+  /** The report command prefix, `<sessions.nodePath> "<home>/hub.js" report`. */
   report: string;
   newSessionId(): string;
 }

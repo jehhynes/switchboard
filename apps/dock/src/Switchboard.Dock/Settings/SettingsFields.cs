@@ -270,6 +270,7 @@ public static partial class SettingsFields
                 new Field("sessions.provider", "Agent", FieldKind.Select, "The agent playbook and ad-hoc sessions run in. A playbook can name its own.", "claude", providers),
                 new Field("sessions.installHooks", "Install hooks", FieldKind.Boolean, "Add Switchboard’s hooks to your Claude and Codex settings, so the dock shows when a session waits for you or runs in VS Code. Off, the session list and Codex’s run output alone decide state.", Fallback: true),
                 new Field("sessions.debriefs", "Friction debriefs", FieldKind.Boolean, "Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.", Fallback: false),
+                new Field("sessions.nodePath", "Node.js path", FieldKind.Text, "The Node.js that Switchboard’s hooks and session reports run. Set its full path, with no spaces, when the agents’ PATH does not include it, such as a Node.js installed through nvm.", "node"),
             ]),
             new Section("Claude sessions",
             [

@@ -48,7 +48,7 @@ function writeAtomically(path: string, text: string): void {
  * Writes `<switchboard home>/hook.mjs` and `contract.mjs` and adds their entries to Claude's settings. Returns why settings were
  * left alone, or null.
  */
-export function installHooks(switchboardHome: string, settingsPath: string): string | null {
+export function installHooks(switchboardHome: string, settingsPath: string, nodePath: string): string | null {
   const hookPath = join(switchboardHome, 'hook.mjs').replaceAll('\\', '/');
   const contractPath = join(switchboardHome, 'contract.mjs').replaceAll('\\', '/');
 
@@ -63,7 +63,7 @@ export function installHooks(switchboardHome: string, settingsPath: string): str
     }
   }
 
-  const plan = planHooks(readText(settingsPath), hookPath, contractPath);
+  const plan = planHooks(readText(settingsPath), hookPath, contractPath, nodePath);
 
   if ('error' in plan) {
     return plan.error;

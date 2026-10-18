@@ -50,6 +50,7 @@ function runner(exec: Exec, patch: Partial<ClaudeRunnerDeps> = {}): ClaudeRunner
     home: join(root, '.switchboard'),
     claudeSettings: join(root, '.claude', 'settings.json'),
     hooks: () => true,
+    nodePath: () => 'node',
     ...patch,
   });
 }

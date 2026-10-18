@@ -1,4 +1,5 @@
 import type { LiveState } from '@switchboard/core';
+import { NODE_NAME } from '@switchboard/core';
 
 /** Longest error text a marker keeps. */
 export const ERROR_MESSAGE_LIMIT = 500;
@@ -113,8 +114,20 @@ function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isOurs(group: unknown, hookPath: string): boolean {
-  return isObject(group) && Array.isArray(group['hooks']) && group['hooks'].some((entry) => isObject(entry) && Array.isArray(entry['args']) && entry['args'][0] === hookPath);
+/** Whether an entry is one Switchboard wrote: Node.js running the script and nothing else, whichever Node.js it names. */
+function isOurEntry(entry: unknown, hookPath: string): boolean {
+  return (
+    isObject(entry) &&
+    typeof entry['command'] === 'string' &&
+    NODE_NAME.test(entry['command']) &&
+    Array.isArray(entry['args']) &&
+    entry['args'].length === 1 &&
+    entry['args'][0] === hookPath
+  );
+}
+
+function isOurs(group: unknown, hookPath: string): group is Json & { hooks: unknown[] } {
+  return isObject(group) && Array.isArray(group['hooks']) && group['hooks'].some((entry) => isOurEntry(entry, hookPath));
 }
 
 export type HookPlan = { text: string } | { unchanged: true } | { error: string };
@@ -122,10 +135,11 @@ export type HookPlan = { text: string } | { unchanged: true } | { error: string 
 /**
  * Adds Switchboard's hook entries to each event that lacks them, keeping every other entry, including Ground Control's: the
  * activity writer to every event in {@link HOOK_EVENTS}, and the contract hook to `SessionStart` after compaction. The contract
- * hook runs synchronously, because Claude reads its output. `text` is the settings file's content, or null when it does not
- * exist. Malformed settings are left alone.
+ * hook runs synchronously, because Claude reads its output. An entry of Switchboard's, found by its script, gets `nodePath`
+ * (`sessions.nodePath`) as its command. `text` is the settings file's content, or null when it does not exist. Malformed
+ * settings are left alone.
  */
-export function planHooks(text: string | null, hookPath: string, contractPath: string): HookPlan {
+export function planHooks(text: string | null, hookPath: string, contractPath: string, nodePath: string): HookPlan {
   let settings: unknown = {};
 
   if (text !== null && text.trim() !== '') {
@@ -141,11 +155,11 @@ export function planHooks(text: string | null, hookPath: string, contractPath: s
   }
 
   const hooks: Json = { ...((settings['hooks'] as Json | undefined) ?? {}) };
-  let added = 0;
+  let changed = 0;
 
   const entries = [
-    ...HOOK_EVENTS.map(([event, matcher]) => ({ event, matcher, path: hookPath, entry: { type: 'command', command: 'node', args: [hookPath], async: true, timeout: 5 } })),
-    { event: 'SessionStart', matcher: 'compact', path: contractPath, entry: { type: 'command', command: 'node', args: [contractPath], timeout: 10 } },
+    ...HOOK_EVENTS.map(([event, matcher]) => ({ event, matcher, path: hookPath, entry: { type: 'command', command: nodePath, args: [hookPath], async: true, timeout: 5 } })),
+    { event: 'SessionStart', matcher: 'compact', path: contractPath, entry: { type: 'command', command: nodePath, args: [contractPath], timeout: 10 } },
   ];
 
   for (const { event, matcher, path, entry } of entries) {
@@ -155,13 +169,25 @@ export function planHooks(text: string | null, hookPath: string, contractPath: s
       return { error: `Claude settings.json has an unexpected hooks.${event}, so Switchboard did not add its hooks.` };
     }
 
-    if (!groups.some((group) => isOurs(group, path))) {
+    const index = groups.findIndex((group) => isOurs(group, path));
+
+    if (index === -1) {
       hooks[event] = [...groups, matcher === null ? { hooks: [entry] } : { matcher, hooks: [entry] }];
-      added++;
+      changed++;
+      continue;
+    }
+
+    // Only the command of Switchboard's entry changes; the group's other entries and the entry's other keys stay.
+    const group = groups[index] as Json & { hooks: unknown[] };
+    const entries = group.hooks.map((other) => (isOurEntry(other, path) && (other as Json)['command'] !== nodePath ? { ...(other as Json), command: nodePath } : other));
+
+    if (entries.some((other, at) => other !== group.hooks[at])) {
+      hooks[event] = groups.map((other, at) => (at === index ? { ...group, hooks: entries } : other));
+      changed++;
     }
   }
 
-  return added === 0 ? { unchanged: true } : { text: `${JSON.stringify({ ...settings, hooks }, null, 2)}\n` };
+  return changed === 0 ? { unchanged: true } : { text: `${JSON.stringify({ ...settings, hooks }, null, 2)}\n` };
 }
 
 /** A marker the hook writer left. */

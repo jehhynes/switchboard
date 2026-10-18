@@ -1,3 +1,5 @@
+import { NODE_NAME } from '@switchboard/core';
+
 /** How far up the process tree the Codex process may be: a shell, then Codex (GC M40). */
 export const PID_WALK_HOPS = 3;
 /** The walk's limit, inside the hook's own timeout. */
@@ -193,15 +195,26 @@ function hookEntry(command: string, timeout: number): Record<string, unknown> {
 }
 
 /** The commands Switchboard installs, from the scripts' paths. */
-export function codexHookCommands(hookPath: string, contractPath: string): { hook: string; contract: string } {
-  return { hook: `node "${hookPath}"`, contract: `node "${contractPath}"` };
+export function codexHookCommands(hookPath: string, contractPath: string, nodePath: string): { hook: string; contract: string } {
+  return { hook: `${nodePath} "${hookPath}"`, contract: `${nodePath} "${contractPath}"` };
+}
+
+/** Whether a hook entry is one Switchboard wrote: Node.js running the script and nothing else, whichever Node.js it names. */
+function runsScript(hook: unknown, scriptPath: string): boolean {
+  if (!isRecord(hook) || typeof hook['command'] !== 'string' || !hook['command'].endsWith(` "${scriptPath}"`)) {
+    return false;
+  }
+
+  const node = hook['command'].slice(0, -` "${scriptPath}"`.length);
+
+  return !/\s/.test(node) && NODE_NAME.test(node);
 }
 
 /**
  * The hooks.json text with Switchboard's entries added, `{unchanged: true}` when all are there, or why the file is left alone.
- * Other hooks are kept as they are; an earlier Switchboard entry with other settings is replaced in place.
+ * Other hooks are kept as they are; an earlier Switchboard entry, found by its script, with another Node.js or other settings is replaced in place.
  */
-export function planCodexHooks(text: string | null, hookPath: string, contractPath: string): { text: string } | { unchanged: true } | { error: string } {
+export function planCodexHooks(text: string | null, hookPath: string, contractPath: string, nodePath: string): { text: string } | { unchanged: true } | { error: string } {
   let root: Record<string, unknown> = {};
 
   if (text !== null && text.trim() !== '') {
@@ -223,14 +236,14 @@ export function planCodexHooks(text: string | null, hookPath: string, contractPa
   }
 
   const hooks: Record<string, unknown> = { ...((root['hooks'] as Record<string, unknown> | undefined) ?? {}) };
-  const commands = codexHookCommands(hookPath, contractPath);
-  const wanted: [string, string, number][] = [
-    ...CODEX_HOOK_EVENTS.map((event): [string, string, number] => [event, commands.hook, event === 'SessionEnd' ? SESSION_END_TIMEOUT_SECONDS : HOOK_TIMEOUT_SECONDS]),
-    ['SessionStart', commands.contract, CONTRACT_TIMEOUT_SECONDS],
+  const commands = codexHookCommands(hookPath, contractPath, nodePath);
+  const wanted: [string, string, string, number][] = [
+    ...CODEX_HOOK_EVENTS.map((event): [string, string, string, number] => [event, hookPath, commands.hook, event === 'SessionEnd' ? SESSION_END_TIMEOUT_SECONDS : HOOK_TIMEOUT_SECONDS]),
+    ['SessionStart', contractPath, commands.contract, CONTRACT_TIMEOUT_SECONDS],
   ];
   let changed = false;
 
-  for (const [event, command, timeout] of wanted) {
+  for (const [event, scriptPath, command, timeout] of wanted) {
     const groups = hooks[event] === undefined ? [] : hooks[event];
 
     if (!Array.isArray(groups)) {
@@ -238,7 +251,7 @@ export function planCodexHooks(text: string | null, hookPath: string, contractPa
     }
 
     const entry = hookEntry(command, timeout);
-    const index = groups.findIndex((group) => isRecord(group) && Array.isArray(group['hooks']) && group['hooks'].some((hook) => isRecord(hook) && hook['command'] === command));
+    const index = groups.findIndex((group) => isRecord(group) && Array.isArray(group['hooks']) && group['hooks'].some((hook) => runsScript(hook, scriptPath)));
 
     if (index === -1) {
       hooks[event] = [...groups, { hooks: [entry] }];
@@ -248,7 +261,7 @@ export function planCodexHooks(text: string | null, hookPath: string, contractPa
 
     // Only Switchboard's entry is updated; the group's other entries and settings stay.
     const group = groups[index] as Record<string, unknown> & { hooks: unknown[] };
-    const entries = group.hooks.map((hook) => (isRecord(hook) && hook['command'] === command ? entry : hook));
+    const entries = group.hooks.map((hook) => (runsScript(hook, scriptPath) ? entry : hook));
 
     if (JSON.stringify(entries) !== JSON.stringify(group.hooks)) {
       hooks[event] = groups.map((other, at) => (at === index ? { ...group, hooks: entries } : other));

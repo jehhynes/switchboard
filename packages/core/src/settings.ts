@@ -36,6 +36,8 @@ export interface SessionSettings {
   model: string;
   /** The Claude Code CLI the hub runs; a bare name is looked up on the hub's PATH. */
   claudePath: string;
+  /** The Node.js that Switchboard's hooks and session reports run; a bare name is looked up on the running agent's PATH. */
+  nodePath: string;
   codex: CodexSettings;
   installHooks: boolean;
   /** Ask each finished Claude session what slowed it down, for the friction-review skill (PRD R55). */
@@ -90,7 +92,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   // Commands in Codex's sandbox cannot use the operator's credentials, such as gh's, so Codex sessions default to no sandbox (mechanics M31).
-  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codex: { permissionMode: 'bypassPermissions', model: '', path: 'codex' }, installHooks: true, debriefs: false },
+  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '', path: 'codex' }, installHooks: true, debriefs: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
@@ -110,6 +112,9 @@ type Json = Record<string, unknown>;
 function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+/** The name `sessions.nodePath` must end with, after any directory. */
+export const NODE_NAME = /(^|\/)node(\.exe)?$/i;
 
 class Reader {
   readonly errors: string[] = [];
@@ -194,6 +199,22 @@ class Reader {
     return value as T;
   }
 
+  /**
+   * A Node.js executable that hook commands and the report command name as their first word, run by bash, PowerShell or cmd. Those shells
+   * agree only on a word with no whitespace, quotes or shell characters, written with forward slashes, so a path is refused otherwise and its
+   * backslashes are turned to slashes. Its name must be `node` or `node.exe`, which is how Switchboard tells its own hook entries apart.
+   */
+  nodePath(section: Json, key: string, path: string, fallback: string): string {
+    const value = this.path(section, key, path, fallback).replaceAll('\\', '/');
+
+    if (!/^[A-Za-z0-9_.:/+-]+$/.test(value) || !NODE_NAME.test(value)) {
+      this.errors.push(`${path}.${key} must be a path to node or node.exe with no spaces or shell characters.`);
+      return fallback;
+    }
+
+    return value;
+  }
+
   /** A non-empty string naming an executable. */
   path(section: Json, key: string, path: string, fallback: string): string {
     const value = section[key];
@@ -232,7 +253,7 @@ export function parseSettings(text: string): SettingsResult {
 
   const sessionsIn = read.section(root, 'sessions', 'sessions');
   const defaults = DEFAULT_SETTINGS;
-  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'claudePath', 'codex', 'installHooks', 'debriefs'], 'sessions');
+  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'claudePath', 'nodePath', 'codex', 'installHooks', 'debriefs'], 'sessions');
   const codexIn = read.section(sessionsIn, 'codex', 'sessions.codex');
   read.unknown(codexIn, ['permissionMode', 'model', 'path'], 'sessions.codex');
   const sessions: SessionSettings = {
@@ -241,6 +262,7 @@ export function parseSettings(text: string): SettingsResult {
     permissionMode: read.choice(sessionsIn, 'permissionMode', 'sessions', PERMISSION_MODES, defaults.sessions.permissionMode),
     model: read.string(sessionsIn, 'model', 'sessions', defaults.sessions.model),
     claudePath: read.path(sessionsIn, 'claudePath', 'sessions', defaults.sessions.claudePath),
+    nodePath: read.nodePath(sessionsIn, 'nodePath', 'sessions', defaults.sessions.nodePath),
     codex: {
       permissionMode: read.choice(codexIn, 'permissionMode', 'sessions.codex', CODEX_PERMISSION_MODES, defaults.sessions.codex.permissionMode),
       model: read.string(codexIn, 'model', 'sessions.codex', defaults.sessions.codex.model),

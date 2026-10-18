@@ -16,7 +16,7 @@ const CONTRACT_ENTRY = { type: 'command', command: 'node', args: [CONTRACT_HOOK]
 
 describe('planHooks', () => {
   it('adds one entry per event to missing settings, and the synchronous contract hook after compaction', () => {
-    const plan = planHooks(null, HOOK, CONTRACT_HOOK);
+    const plan = planHooks(null, HOOK, CONTRACT_HOOK, 'node');
     const hooks = JSON.parse((plan as { text: string }).text).hooks;
 
     expect(Object.keys(hooks)).toEqual(HOOK_EVENTS.map(([event]) => event));
@@ -28,34 +28,57 @@ describe('planHooks', () => {
   it("keeps other settings and entries, including Ground Control's, and is unchanged once installed", () => {
     const gc = { hooks: [{ type: 'command', command: 'node', args: ['C:/Users/me/.ground-control/hook.mjs'], async: true, timeout: 5 }] };
     const existing = JSON.stringify({ model: 'opus', hooks: { Stop: [gc], PostToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'fmt' }] }] } });
-    const first = planHooks(existing, HOOK, CONTRACT_HOOK) as { text: string };
+    const first = planHooks(existing, HOOK, CONTRACT_HOOK, 'node') as { text: string };
     const settings = JSON.parse(first.text);
 
     expect(settings.model).toBe('opus');
     expect(settings.hooks.Stop).toEqual([gc, { hooks: [ENTRY] }]);
     expect(settings.hooks.PostToolUse).toEqual([{ matcher: 'Write', hooks: [{ type: 'command', command: 'fmt' }] }, { matcher: 'AskUserQuestion|ExitPlanMode', hooks: [ENTRY] }]);
-    expect(planHooks(first.text, HOOK, CONTRACT_HOOK)).toEqual({ unchanged: true });
+    expect(planHooks(first.text, HOOK, CONTRACT_HOOK, 'node')).toEqual({ unchanged: true });
   });
 
   it('adds only the missing entries', () => {
     const partial = { hooks: { Stop: [{ hooks: [ENTRY] }] } };
-    const settings = JSON.parse((planHooks(JSON.stringify(partial), HOOK, CONTRACT_HOOK) as { text: string }).text);
+    const settings = JSON.parse((planHooks(JSON.stringify(partial), HOOK, CONTRACT_HOOK, 'node') as { text: string }).text);
 
     expect(settings.hooks.Stop).toEqual([{ hooks: [ENTRY] }]);
     expect(settings.hooks.SessionEnd).toEqual([{ hooks: [ENTRY] }]);
 
     // Settings written before the contract hook existed get it, once.
     const older = { hooks: Object.fromEntries(HOOK_EVENTS.map(([event, matcher]) => [event, [matcher === null ? { hooks: [ENTRY] } : { matcher, hooks: [ENTRY] }]])) };
-    const upgraded = planHooks(JSON.stringify(older), HOOK, CONTRACT_HOOK) as { text: string };
+    const upgraded = planHooks(JSON.stringify(older), HOOK, CONTRACT_HOOK, 'node') as { text: string };
 
     expect(JSON.parse(upgraded.text).hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [CONTRACT_ENTRY] }]);
-    expect(planHooks(upgraded.text, HOOK, CONTRACT_HOOK)).toEqual({ unchanged: true });
+    expect(planHooks(upgraded.text, HOOK, CONTRACT_HOOK, 'node')).toEqual({ unchanged: true });
+  });
+
+  it("gives Switchboard's entries a new sessions.nodePath in place, keeping the other entries and keys", () => {
+    const node = '/home/me/.nvm/versions/node/v24.18.0/bin/node';
+    const gc = { type: 'command', command: 'node', args: ['C:/Users/me/.ground-control/hook.mjs'] };
+    const installed = JSON.parse((planHooks(null, HOOK, CONTRACT_HOOK, 'node') as { text: string }).text);
+    installed.hooks.Stop = [{ hooks: [gc, { ...ENTRY, extra: 1 }] }];
+
+    const moved = planHooks(JSON.stringify(installed), HOOK, CONTRACT_HOOK, node) as { text: string };
+    const hooks = JSON.parse(moved.text).hooks;
+
+    expect(hooks.Stop).toEqual([{ hooks: [gc, { ...ENTRY, extra: 1, command: node }] }]);
+    expect(hooks.SessionStart).toEqual([{ hooks: [{ ...ENTRY, command: node }] }, { matcher: 'compact', hooks: [{ ...CONTRACT_ENTRY, command: node }] }]);
+    expect(JSON.stringify(hooks)).not.toContain('"command":"node","args":["C:/Users/me/.switchboard');
+    expect(planHooks(moved.text, HOOK, CONTRACT_HOOK, node)).toEqual({ unchanged: true });
+  });
+
+  it("leaves the operator's entries that name Switchboard's script but do not run it with Node.js alone, and adds its own", () => {
+    const check = { type: 'command', command: 'sha256sum', args: [HOOK] };
+    const wrapped = { type: 'command', command: 'node', args: [HOOK, '--trace'] };
+    const settings = JSON.parse((planHooks(JSON.stringify({ hooks: { Stop: [{ hooks: [check] }, { hooks: [wrapped] }] } }), HOOK, CONTRACT_HOOK, 'node') as { text: string }).text);
+
+    expect(settings.hooks.Stop).toEqual([{ hooks: [check] }, { hooks: [wrapped] }, { hooks: [ENTRY] }]);
   });
 
   it('refuses malformed settings', () => {
-    expect(planHooks('{ "hooks": ', HOOK, CONTRACT_HOOK)).toEqual({ error: 'Claude settings.json is not valid JSON, so Switchboard did not add its hooks.' });
-    expect(planHooks('{ "hooks": [] }', HOOK, CONTRACT_HOOK)).toEqual({ error: 'Claude settings.json has an unexpected shape, so Switchboard did not add its hooks.' });
-    expect(planHooks('{ "hooks": { "Stop": {} } }', HOOK, CONTRACT_HOOK)).toEqual({ error: 'Claude settings.json has an unexpected hooks.Stop, so Switchboard did not add its hooks.' });
+    expect(planHooks('{ "hooks": ', HOOK, CONTRACT_HOOK, 'node')).toEqual({ error: 'Claude settings.json is not valid JSON, so Switchboard did not add its hooks.' });
+    expect(planHooks('{ "hooks": [] }', HOOK, CONTRACT_HOOK, 'node')).toEqual({ error: 'Claude settings.json has an unexpected shape, so Switchboard did not add its hooks.' });
+    expect(planHooks('{ "hooks": { "Stop": {} } }', HOOK, CONTRACT_HOOK, 'node')).toEqual({ error: 'Claude settings.json has an unexpected hooks.Stop, so Switchboard did not add its hooks.' });
   });
 });
 

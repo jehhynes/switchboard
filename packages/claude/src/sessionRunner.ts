@@ -19,6 +19,8 @@ export interface ClaudeRunnerDeps {
   claudeSettings: string;
   /** Whether hook markers decide state (`sessions.installHooks`); without them the roster alone does. */
   hooks(): boolean;
+  /** The Node.js the hooks run (`sessions.nodePath`). */
+  nodePath(): string;
 }
 
 /** Claude Code's background sessions (architecture.md § Claude Code runner). */
@@ -110,7 +112,7 @@ export class ClaudeRunner implements SessionRunner {
 
   installHooks(): Promise<string | null> {
     try {
-      return Promise.resolve(installHooks(this.deps.home, this.deps.claudeSettings));
+      return Promise.resolve(installHooks(this.deps.home, this.deps.claudeSettings, this.deps.nodePath()));
     } catch (error) {
       return Promise.resolve(`Switchboard could not add its hooks to ${this.deps.claudeSettings}: ${(error as Error).message}`);
     }

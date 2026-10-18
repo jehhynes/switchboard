@@ -13,7 +13,7 @@ public sealed class SettingsFieldsTests
         Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage"], sections.Select((section) => section.Heading));
         Assert.Equal(
             [
-                "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.permissionMode", "sessions.model", "sessions.claudePath", "sessions.codex.permissionMode", "sessions.codex.model", "sessions.codex.path",
+                "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.nodePath", "sessions.permissionMode", "sessions.model", "sessions.claudePath", "sessions.codex.permissionMode", "sessions.codex.model", "sessions.codex.path",
                 "triage.model", "triage.concurrency", "triage.timeoutSeconds",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));

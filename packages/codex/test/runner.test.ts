@@ -85,6 +85,7 @@ class Fake {
       codexHome,
       env: { CODEX_HOME: codexHome },
       hooks: () => true,
+      nodePath: () => 'node',
       spawn: async (file, args, options) => {
         this.spawnedFiles.push(file);
 

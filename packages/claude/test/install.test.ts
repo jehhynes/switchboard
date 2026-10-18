@@ -29,7 +29,7 @@ describe('installHooks', () => {
     mkdirSync(join(dir, '.claude'));
     writeFileSync(settings, JSON.stringify({ theme: 'dark' }));
 
-    expect(installHooks(home, settings)).toBeNull();
+    expect(installHooks(home, settings, 'node')).toBeNull();
     expect(readFileSync(join(home, 'hook.mjs'), 'utf8')).toBe(HOOK_SOURCE);
     expect(readFileSync(join(home, 'contract.mjs'), 'utf8')).toBe(CONTRACT_HOOK_SOURCE);
 
@@ -39,18 +39,18 @@ describe('installHooks', () => {
     expect(written.hooks.SessionStart[1].hooks[0].args).toEqual([join(home, 'contract.mjs').replaceAll('\\', '/')]);
 
     const before = readFileSync(settings, 'utf8');
-    expect(installHooks(home, settings)).toBeNull();
+    expect(installHooks(home, settings, 'node')).toBeNull();
     expect(readFileSync(settings, 'utf8')).toBe(before);
   });
 
   it('creates missing settings, and leaves malformed settings untouched with the reason', () => {
     const settings = join(dir, 'new', 'settings.json');
 
-    expect(installHooks(join(dir, 'sb'), settings)).toBeNull();
+    expect(installHooks(join(dir, 'sb'), settings, 'node')).toBeNull();
     expect(Object.keys(JSON.parse(readFileSync(settings, 'utf8')).hooks)).toHaveLength(13);
 
     writeFileSync(settings, '{ broken');
-    expect(installHooks(join(dir, 'sb'), settings)).toBe('Claude settings.json is not valid JSON, so Switchboard did not add its hooks.');
+    expect(installHooks(join(dir, 'sb'), settings, 'node')).toBe('Claude settings.json is not valid JSON, so Switchboard did not add its hooks.');
     expect(readFileSync(settings, 'utf8')).toBe('{ broken');
   });
 });

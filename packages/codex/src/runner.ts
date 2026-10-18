@@ -38,6 +38,8 @@ export interface CodexRunnerDeps {
   env: Record<string, string>;
   /** Whether Switchboard's hooks are on (`sessions.installHooks`). */
   hooks(): boolean;
+  /** The Node.js the hooks run (`sessions.nodePath`). */
+  nodePath(): string;
   spawn?: (file: string, args: string[], options: { cwd: string; stdout: string; stderr: string; env?: Record<string, string> }) => Promise<DetachedSpawn>;
   processes?: (pids: number[]) => Promise<Map<number, ProcessInfo> | { error: string }>;
   tagged?: (tag: string) => Promise<ProcessIdentity | null | { error: string }>;
@@ -523,6 +525,7 @@ export class CodexRunner implements SessionRunner {
     const hookPath = join(this.deps.home, 'codex-hook.mjs').replaceAll('\\', '/');
     const contractPath = join(this.deps.home, 'contract.mjs').replaceAll('\\', '/');
     const hooksPath = join(this.deps.codexHome, 'hooks.json');
+    const nodePath = this.deps.nodePath();
 
     try {
       mkdirSync(this.deps.home, { recursive: true });
@@ -531,7 +534,7 @@ export class CodexRunner implements SessionRunner {
         writeFileSync(hookPath, CODEX_HOOK_SOURCE);
       }
 
-      const plan = planCodexHooks(readText(hooksPath) || null, hookPath, contractPath);
+      const plan = planCodexHooks(readText(hooksPath) || null, hookPath, contractPath, nodePath);
 
       if ('error' in plan) {
         return plan.error;
@@ -545,7 +548,7 @@ export class CodexRunner implements SessionRunner {
       return `Switchboard could not add its hooks to ${hooksPath}: ${(error as Error).message}`;
     }
 
-    const commands = codexHookCommands(hookPath, contractPath);
+    const commands = codexHookCommands(hookPath, contractPath, nodePath);
     const trust = this.deps.trust ?? ((wanted: ReadonlySet<string>) => trustHooks(this.deps.codexPath(), wanted, this.env));
 
     return trust(new Set([commands.hook, commands.contract]));

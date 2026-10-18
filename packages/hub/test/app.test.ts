@@ -25,7 +25,12 @@ afterEach(async () => {
   temp.remove();
 });
 
+/** Answers only the hub's Node.js check. */
 const noCli: Exec = async (file, args) => {
+  if (file === 'node' && args.join(' ') === '--version') {
+    return { code: 0, stdout: 'v24.0.0\n', stderr: '', missing: false, timedOut: false };
+  }
+
   throw new Error(`unexpected call ${file} ${args.join(' ')}`);
 };
 
@@ -267,7 +272,7 @@ describe('createHubApp', () => {
         return { code: 0, stdout: JSON.stringify([{ sessionId: native, pid: 7, kind: 'interactive', status: 'busy', cwd: 'D:/git/widgets' }]), stderr: '', missing: false, timedOut: false };
       }
 
-      throw new Error(`unexpected call ${file} ${args.join(' ')}`);
+      return noCli(file, args, { timeoutMs: 0 });
     };
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: roster } });
     closers.push(() => app.close());

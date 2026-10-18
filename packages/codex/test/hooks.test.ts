@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CODEX_HOOK_SOURCE, codexMarkerState, parseCodexMarker, planCodexHooks } from '../src/hooks.js';
+import { CODEX_HOOK_SOURCE, codexHookCommands, codexMarkerState, parseCodexMarker, planCodexHooks } from '../src/hooks.js';
 import type { CodexMarker } from '../src/hooks.js';
 
 const HOOK = 'C:/Users/operator/.switchboard/codex-hook.mjs';
@@ -37,7 +37,7 @@ describe('planCodexHooks', () => {
   const ours = (text: string) => JSON.parse(text) as { hooks: Record<string, { hooks: { command: string; timeout: number }[] }[]> };
 
   it('adds synchronous entries for each event and the contract hook on SessionStart', () => {
-    const plan = planCodexHooks(null, HOOK, CONTRACT);
+    const plan = planCodexHooks(null, HOOK, CONTRACT, 'node');
 
     expect('text' in plan).toBe(true);
     const hooks = ours((plan as { text: string }).text).hooks;
@@ -50,33 +50,53 @@ describe('planCodexHooks', () => {
 
   it("keeps the operator's hooks before Switchboard's and reports a file that is complete", () => {
     const theirs = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node support.js', timeout: 10 }] }] }, other: true };
-    const plan = planCodexHooks(`\uFEFF${JSON.stringify(theirs)}`, HOOK, CONTRACT) as { text: string };
+    const plan = planCodexHooks(`\uFEFF${JSON.stringify(theirs)}`, HOOK, CONTRACT, 'node') as { text: string };
     const hooks = ours(plan.text);
 
     expect(hooks.hooks['Stop']).toEqual([theirs.hooks.Stop[0], { hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout: 5 }] }]);
     expect((JSON.parse(plan.text) as { other: boolean }).other).toBe(true);
-    expect(planCodexHooks(plan.text, HOOK, CONTRACT)).toEqual({ unchanged: true });
+    expect(planCodexHooks(plan.text, HOOK, CONTRACT, 'node')).toEqual({ unchanged: true });
   });
 
   it('replaces an earlier Switchboard entry with other settings in its place', () => {
     const old = { hooks: { Stop: [{ hooks: [{ type: 'command', command: `node "${HOOK}"`, async: true, timeout: 5 }] }, { hooks: [{ type: 'command', command: 'node support.js' }] }] } };
-    const hooks = ours((planCodexHooks(JSON.stringify(old), HOOK, CONTRACT) as { text: string }).text).hooks;
+    const hooks = ours((planCodexHooks(JSON.stringify(old), HOOK, CONTRACT, 'node') as { text: string }).text).hooks;
 
     expect(hooks['Stop']).toEqual([{ hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout: 5 }] }, { hooks: [{ type: 'command', command: 'node support.js' }] }]);
   });
 
   it("updates only Switchboard's entry in a group it shares, keeping the other entries and the group's settings", () => {
     const shared = { hooks: { Stop: [{ matcher: 'x', hooks: [{ type: 'command', command: 'node other.js' }, { type: 'command', command: `node "${HOOK}"`, timeout: 9 }] }] } };
-    const hooks = ours((planCodexHooks(JSON.stringify(shared), HOOK, CONTRACT) as { text: string }).text).hooks;
+    const hooks = ours((planCodexHooks(JSON.stringify(shared), HOOK, CONTRACT, 'node') as { text: string }).text).hooks;
 
     expect(hooks['Stop']).toEqual([{ matcher: 'x', hooks: [{ type: 'command', command: 'node other.js' }, { type: 'command', command: `node "${HOOK}"`, timeout: 5 }] }]);
   });
 
+  it('gives an entry of Switchboard\'s a new sessions.nodePath in place, and adds no second entry', () => {
+    const node = 'C:/nodejs/node.exe';
+    const installed = (planCodexHooks(null, HOOK, CONTRACT, 'node') as { text: string }).text;
+    const moved = planCodexHooks(installed, HOOK, CONTRACT, node) as { text: string };
+    const hooks = ours(moved.text).hooks;
+
+    expect(codexHookCommands(HOOK, CONTRACT, node)).toEqual({ hook: `${node} "${HOOK}"`, contract: `${node} "${CONTRACT}"` });
+    expect(hooks['SessionStart']).toEqual([{ hooks: [{ type: 'command', command: `${node} "${HOOK}"`, timeout: 5 }] }, { hooks: [{ type: 'command', command: `${node} "${CONTRACT}"`, timeout: 10 }] }]);
+    expect(hooks['Stop']).toHaveLength(1);
+    expect(planCodexHooks(moved.text, HOOK, CONTRACT, node)).toEqual({ unchanged: true });
+  });
+
+  it("leaves the operator's entries that name Switchboard's script but do not run it with Node.js, and adds its own", () => {
+    const check = { type: 'command', command: `sha256sum "${HOOK}"` };
+    const shell = { type: 'command', command: `bash -c node "${HOOK}"` };
+    const hooks = ours((planCodexHooks(JSON.stringify({ hooks: { Stop: [{ hooks: [check] }, { hooks: [shell] }] } }), HOOK, CONTRACT, 'node') as { text: string }).text).hooks;
+
+    expect(hooks['Stop']).toEqual([{ hooks: [check] }, { hooks: [shell] }, { hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout: 5 }] }]);
+  });
+
   it('leaves a file it cannot read as hooks alone', () => {
-    expect(planCodexHooks('{ not json', HOOK, CONTRACT)).toEqual({ error: 'Codex hooks.json is not valid JSON, so Switchboard left it alone.' });
-    expect(planCodexHooks('[]', HOOK, CONTRACT)).toEqual({ error: 'Codex hooks.json is not a JSON object, so Switchboard left it alone.' });
-    expect(planCodexHooks('{"hooks": 3}', HOOK, CONTRACT)).toEqual({ error: 'The hooks entry of Codex hooks.json is not an object, so Switchboard left it alone.' });
-    expect(planCodexHooks('{"hooks": {"Stop": {}}}', HOOK, CONTRACT)).toEqual({ error: 'The Stop entry of Codex hooks.json is not a list, so Switchboard left it alone.' });
+    expect(planCodexHooks('{ not json', HOOK, CONTRACT, 'node')).toEqual({ error: 'Codex hooks.json is not valid JSON, so Switchboard left it alone.' });
+    expect(planCodexHooks('[]', HOOK, CONTRACT, 'node')).toEqual({ error: 'Codex hooks.json is not a JSON object, so Switchboard left it alone.' });
+    expect(planCodexHooks('{"hooks": 3}', HOOK, CONTRACT, 'node')).toEqual({ error: 'The hooks entry of Codex hooks.json is not an object, so Switchboard left it alone.' });
+    expect(planCodexHooks('{"hooks": {"Stop": {}}}', HOOK, CONTRACT, 'node')).toEqual({ error: 'The Stop entry of Codex hooks.json is not a list, so Switchboard left it alone.' });
   });
 });
 

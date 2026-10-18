@@ -5,7 +5,7 @@ import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
@@ -24,6 +24,8 @@ const FIXED_TIMERS = 3;
 export const REPORT_CHECK_MS = 6_000;
 /** When the source is read again after a done report it lists as assigned; GitHub issue search lags an unassignment by seconds (mechanics M34). */
 export const RECHECK_MS = 30_000;
+/** How long `<sessions.nodePath> --version` may take. */
+const NODE_CHECK_TIMEOUT_MS = 10_000;
 
 export interface RuntimeDeps {
   /** The operator's home; the Switchboard home is `<home>/.switchboard`. */
@@ -120,6 +122,10 @@ export class Runtime {
   private sourceErrors: Record<string, string> = {};
   /** Each runner's hook error from its last install. */
   private hookErrors: Record<Provider, string | null> = { claude: null, codex: null };
+  /** Why `sessions.nodePath` cannot run, which the hooks and session reports need; shown with the hook errors. */
+  private nodeError: string | null = null;
+  /** Counts Node.js checks, so only the latest one sets `nodeError`. */
+  private nodeChecks = 0;
   /** Each runner's latest install; installs of one runner run in turn, so an older result never replaces a newer one. */
   private hookInstalls: Record<Provider, Promise<void>> = { claude: Promise.resolve(), codex: Promise.resolve() };
   private pending = new Set<Promise<void>>();
@@ -158,15 +164,16 @@ export class Runtime {
     const hooks = () => this.config.settings.sessions.installHooks;
     const codex = deps.codex ?? { home: join(deps.home, '.codex'), env: {} };
     const claudePath = () => this.config.settings.sessions.claudePath;
+    const nodePath = () => this.config.settings.sessions.nodePath;
     const codexPath = () => this.config.settings.sessions.codex.path;
 
     this.runners = {
       claude:
         deps.runners?.claude ??
-        new ClaudeRunner({ claudePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
+        new ClaudeRunner({ claudePath, nodePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, claudeSettings: deps.claudeSettings, hooks }),
       codex:
         deps.runners?.codex ??
-        new CodexRunner({ codexPath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
+        new CodexRunner({ codexPath, nodePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
     };
     this.buildSources();
   }
@@ -177,7 +184,7 @@ export class Runtime {
 
   /** The report command prefix sessions run (architecture.md § Session reports). */
   get reportCommand(): string {
-    return `node "${this.home.replaceAll('\\', '/')}/hub.js" report`;
+    return `${this.config.settings.sessions.nodePath} "${this.home.replaceAll('\\', '/')}/hub.js" report`;
   }
 
   onChange(listener: () => void): () => void {
@@ -210,13 +217,22 @@ export class Runtime {
   }
 
   reload(config: Config): void {
-    const codexPathChanged = config.settings.sessions.codex.path !== this.config.settings.sessions.codex.path;
+    const before = this.config.settings.sessions;
+    const after = config.settings.sessions;
 
     this.config = config;
 
-    // Clears a hook error from a Codex CLI that was not found, without a hub restart.
-    if (codexPathChanged && config.settings.sessions.installHooks) {
-      this.track(this.installHooks(['codex']));
+    // Hook commands name the Node.js, and Codex's trust needs its CLI; a change applies without a hub restart.
+    if (after.nodePath !== before.nodePath || after.claudePath !== before.claudePath || after.codex.path !== before.codex.path) {
+      this.track(this.checkNode());
+    }
+
+    if (after.installHooks) {
+      const providers = after.nodePath !== before.nodePath ? PROVIDERS : after.codex.path !== before.codex.path ? (['codex'] as const) : [];
+
+      if (providers.length > 0) {
+        this.track(this.installHooks(providers));
+      }
     }
 
     this.buildSources();
@@ -254,6 +270,8 @@ export class Runtime {
 
   /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
   async startup(): Promise<void> {
+    await this.checkNode();
+
     if (this.config.settings.sessions.installHooks) {
       await this.installHooks(PROVIDERS);
     }
@@ -267,6 +285,38 @@ export class Runtime {
     await this.readRoster();
 
     this.recheckDoneReports();
+  }
+
+  /**
+   * Runs `<sessions.nodePath> --version` with the PATH each agent the hub starts gets: the hub's, with an absolute path's directory of that
+   * agent first. A Claude background session started by an already running Claude service has that service's environment instead.
+   */
+  private async checkNode(): Promise<void> {
+    const check = ++this.nodeChecks;
+    const { nodePath, claudePath, codex } = this.config.settings.sessions;
+    const envs = new Map<string, { agents: string[]; env: Record<string, string> }>();
+
+    for (const [agent, env] of [['Claude Code', executableDirOnPath(claudePath)], ['Codex', executableDirOnPath(codex.path)]] as const) {
+      const key = JSON.stringify(env);
+      envs.set(key, { agents: [...(envs.get(key)?.agents ?? []), agent], env });
+    }
+
+    const results = await Promise.all([...envs.values()].map(async ({ agents, env }) => ({ agents, result: await this.deps.exec(nodePath, ['--version'], { timeoutMs: NODE_CHECK_TIMEOUT_MS, env }) })));
+
+    if (check !== this.nodeChecks) {
+      return;
+    }
+
+    const missing = results.filter(({ result }) => result.missing).flatMap(({ agents }) => agents);
+    const failed = results.find(({ result }) => !result.missing && result.code !== 0);
+
+    this.nodeError =
+      missing.length > 0
+        ? `Node.js was not found at ${nodePath} on the PATH ${missing.join(' and ')} get${missing.length === 1 ? 's' : ''} from the hub, so Switchboard's hooks and session reports there cannot run. Install it or set sessions.nodePath.`
+        : failed !== undefined
+          ? `${nodePath} --version failed, so Switchboard's hooks and session reports may not run: ${failed.result.timedOut ? 'it did not finish' : failed.result.stderr.trim() || `exit code ${String(failed.result.code)}`}.`
+          : null;
+    this.changed();
   }
 
   private async installHooks(providers: readonly Provider[]): Promise<void> {
@@ -983,7 +1033,7 @@ export class Runtime {
       errors: {
         settings: settingsError,
         playbooks: playbookErrors.map((entry) => `${entry.name}: ${entry.error}`),
-        hooks: PROVIDERS.map((provider) => this.hookErrors[provider]).filter((error) => error !== null).join(' ') || null,
+        hooks: [this.nodeError, ...PROVIDERS.map((provider) => this.hookErrors[provider])].filter((error) => error !== null).join(' ') || null,
         sources: { ...this.sourceErrors },
       },
     };

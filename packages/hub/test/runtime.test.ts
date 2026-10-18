@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
@@ -64,6 +64,13 @@ class FakeCli {
   /** When set, the next roster read lists the roster as it is now, then waits for this before returning. */
   rosterGate: Promise<void> | null = null;
   calls: string[][] = [];
+  /** What `<sessions.nodePath> --version` answers. */
+  nodeResult = ok('v24.0.0\n');
+  /** When set, each Node.js check waits here for its answer instead of answering `nodeResult`. */
+  heldNode: ((answer: ExecResult) => void)[] | null = null;
+  nodeEnvs: Record<string, string>[] = [];
+  /** Answers a Node.js check by its environment, before `nodeResult`. */
+  nodeAnswer: ((env: Record<string, string>) => ExecResult | undefined) | null = null;
   classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop' } }));
   /** Per-ticket classifier output by triage context, overriding `classifyResult`. */
   classifyByContext = new Map<string, ExecResult>();
@@ -114,6 +121,11 @@ class FakeCli {
     if (args[0] === 'stop') {
       this.roster = this.roster.filter((entry) => (entry as { id: string }).id !== args[1]);
       return this.stopResult;
+    }
+
+    if (args[0] === '--version') {
+      this.nodeEnvs.push(options.env ?? {});
+      return this.heldNode === null ? (this.nodeAnswer?.(options.env ?? {}) ?? this.nodeResult) : new Promise((answer) => this.heldNode!.push(answer));
     }
 
     throw new Error(`unexpected call ${file} ${args.join(' ')}`);
@@ -167,6 +179,7 @@ class FakeCodex {
   commandLines = new Map<number, string>();
   kills: number[] = [];
   trustError: string | null = null;
+  trustCalls = 0;
   /** When set, each trust call waits here for its answer instead of answering `trustError`. */
   heldTrust: ((answer: string | null) => void)[] | null = null;
   queryError: string | null = null;
@@ -187,6 +200,7 @@ class FakeCodex {
       codexHome: join(home, '.codex'),
       env: {},
       hooks: () => true,
+      nodePath: () => 'node',
       spawn: async (_file, args, options) => {
         const pid = this.nextPid++;
 
@@ -213,7 +227,10 @@ class FakeCodex {
         this.alive.delete(pid);
         return null;
       },
-      trust: async () => (this.heldTrust === null ? this.trustError : new Promise((answer) => this.heldTrust!.push(answer))),
+      trust: async () => {
+        this.trustCalls += 1;
+        return this.heldTrust === null ? this.trustError : new Promise((answer) => this.heldTrust!.push(answer));
+      },
     });
   }
 }
@@ -497,7 +514,7 @@ describe('Runtime', () => {
   });
 
   it('leaves a marker reading that needs the roster read to it, without changing the session', async () => {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ({ code: 0, stdout: '[]', stderr: '', missing: false, timedOut: false }), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ({ code: 0, stdout: '[]', stderr: '', missing: false, timedOut: false }), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
     const roster = deferred();
     let reads = 0;
     const runner: SessionRunner = Object.assign(Object.create(real) as SessionRunner, {
@@ -1132,6 +1149,82 @@ describe('Runtime', () => {
     expect(runtime.snapshot().errors.hooks).toBe(claude);
   });
 
+  it('shows a sessions.nodePath that cannot run with the hook errors, and clears it when a reload names one that runs', async () => {
+    const { cli, runtime } = setup();
+
+    cli.nodeResult = { code: null, stdout: '', stderr: 'spawn node ENOENT', missing: true, timedOut: false };
+    await runtime.startup();
+    expect(runtime.snapshot().errors.hooks).toBe("Node.js was not found at node on the PATH Claude Code and Codex get from the hub, so Switchboard's hooks and session reports there cannot run. Install it or set sessions.nodePath.");
+
+    cli.nodeResult = fail('bad option');
+    runtime.reload(config({ nodePath: '/opt/node/bin/node' }));
+    await runtime.settled();
+    expect(runtime.snapshot().errors.hooks).toBe("/opt/node/bin/node --version failed, so Switchboard's hooks and session reports may not run: bad option.");
+
+    cli.nodeResult = ok('v24.0.0\n');
+    runtime.reload(config({ nodePath: '/usr/local/bin/node' }));
+    await runtime.settled();
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+    expect(cli.calls.filter((call) => call[1] === '--version').map((call) => call[0])).toEqual(['node', '/opt/node/bin/node', '/usr/local/bin/node']);
+  });
+
+  it('keeps the latest Node.js check when an older one answers after it, as when a path changes and changes back', async () => {
+    const { cli, runtime } = setup();
+    const held: ((answer: ExecResult) => void)[] = [];
+    const missing: ExecResult = { code: null, stdout: '', stderr: '', missing: true, timedOut: false };
+
+    cli.heldNode = held;
+    const startup = runtime.startup();
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+    runtime.reload(config({ nodePath: '/opt/node' }));
+    runtime.reload(config());
+    await vi.waitFor(() => expect(held).toHaveLength(3));
+
+    held[2]!(ok('v24.0.0\n'));
+    held[0]!(missing);
+    held[1]!(missing);
+    await startup;
+    await runtime.settled();
+
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
+  it("checks Node.js on each agent's own PATH, with its absolute path's directory first, and names the agent that lacks it", async () => {
+    const { cli, runtime } = setup();
+    const bin = join(home, 'nvm', 'bin');
+    const firstOnPath = (env: Record<string, string>) => env[Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH']?.split(delimiter)[0];
+
+    cli.nodeResult = { code: null, stdout: '', stderr: '', missing: true, timedOut: false };
+    await runtime.startup();
+    expect(cli.nodeEnvs).toEqual([{}]);
+
+    // Node.js only beside Codex: Claude Code still lacks it.
+    cli.nodeAnswer = (env) => (firstOnPath(env) === bin ? ok('v24.0.0\n') : undefined);
+    runtime.reload(config({ codex: { ...DEFAULT_SETTINGS.sessions.codex, path: join(bin, 'codex') } }));
+    await runtime.settled();
+
+    expect(cli.nodeEnvs.slice(1).map(firstOnPath).sort()).toEqual([bin, undefined].sort());
+    expect(runtime.snapshot().errors.hooks).toBe("Node.js was not found at node on the PATH Claude Code gets from the hub, so Switchboard's hooks and session reports there cannot run. Install it or set sessions.nodePath.");
+  });
+
+  it("writes a new sessions.nodePath into both agents' hooks and the report command on reload", async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config({ installHooks: true }), () => T0, undefined, codex);
+    const node = 'C:/nodejs/node.exe';
+    const claudeCommands = () => [...new Set(Object.values(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks as { hooks: { command: string }[] }[][]).flat().flatMap((group) => group.hooks.map((hook) => hook.command)))];
+
+    await runtime.startup();
+    expect(claudeCommands()).toEqual(['node']);
+    expect(codex.trustCalls).toBe(1);
+
+    runtime.reload(config({ installHooks: true, nodePath: node }));
+    await runtime.settled();
+
+    expect(claudeCommands()).toEqual([node]);
+    expect(codex.trustCalls).toBe(2);
+    expect(runtime.reportCommand).toBe(`${node} "${join(home, '.switchboard').replaceAll('\\', '/')}/hub.js" report`);
+  });
+
   it('does not install hooks on a path change while sessions.installHooks is off', async () => {
     const codex = new FakeCodex();
     const { runtime } = setup(config(), () => T0, undefined, codex);
@@ -1762,7 +1855,7 @@ describe('forks (PRD R78)', () => {
 
   /** A Claude runner whose roster, markers and transcript answers the test sets. */
   function forking() {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
     const state = {
       reads: 0,
       listed: true,
@@ -1931,7 +2024,7 @@ describe('registered sessions (PRD R81)', () => {
 
   /** A Claude runner whose roster lists `live` and whose transcripts relate a native ID to a session by `relation`. */
   function registering(live: Awaited<ReturnType<NonNullable<SessionRunner['live']>>>, relation: (native: string) => CopyRelation = () => 'unrelated') {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
 
     return Object.assign(Object.create(real) as SessionRunner, { live: async () => live, relation });
   }
@@ -1977,7 +2070,7 @@ describe('ticket reports (PRD R83)', () => {
   const found = (open = true) => ({ ticket: { sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: URL, open } });
 
   async function registered() {
-    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
     // `old-copy` is a copy a fork retired, and so is the registered copy once a fork named `fork-copy` continues it (PRD R78).
     const claude = Object.assign(Object.create(real) as SessionRunner, {
       live: async () => ({ shortId: '9273f594', cwd: 'D:/git/widgets' }),

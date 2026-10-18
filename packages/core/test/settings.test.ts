@@ -5,7 +5,7 @@ describe('parseSettings', () => {
   it('fills defaults for an empty object', () => {
     expect(parseSettings('{}')).toEqual({
       settings: {
-        sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codex: { permissionMode: 'bypassPermissions', model: '', path: 'codex' }, installHooks: true, debriefs: false },
+        sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '', path: 'codex' }, installHooks: true, debriefs: false },
         triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
         sources: {},
         schedules: {},
@@ -16,7 +16,7 @@ describe('parseSettings', () => {
   it('reads every value and passes source-specific keys through', () => {
     const result = parseSettings(
       JSON.stringify({
-        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', codex: { permissionMode: 'plan', model: 'gpt-6', path: '/opt/codex/bin/codex' }, installHooks: false, debriefs: true },
+        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6', path: '/opt/codex/bin/codex' }, installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
@@ -26,7 +26,7 @@ describe('parseSettings', () => {
 
     expect(result).toEqual({
       settings: {
-        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', codex: { permissionMode: 'plan', model: 'gpt-6', path: '/opt/codex/bin/codex' }, installHooks: false, debriefs: true },
+        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6', path: '/opt/codex/bin/codex' }, installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: {
@@ -60,7 +60,7 @@ describe('parseSettings', () => {
     const result = parseSettings(
       JSON.stringify({
         extra: 1,
-        sessions: { provider: 'gemini', concurrency: 11, dailyLimit: 20, permissionMode: 'yolo', model: 3, claudePath: 7, codex: { permissionMode: 'manual', model: 1, path: '', sandbox: 'x' }, installHooks: 'yes', other: true },
+        sessions: { provider: 'gemini', concurrency: 11, dailyLimit: 20, permissionMode: 'yolo', model: 3, claudePath: 7, nodePath: '', codex: { permissionMode: 'manual', model: 1, path: '', sandbox: 'x' }, installHooks: 'yes', other: true },
         triage: { concurrency: 0, timeoutSeconds: 1.5 },
         sources: { github: { enabled: 'true', pollIntervalSeconds: 5 }, zoho: 'on' },
       }),
@@ -77,6 +77,7 @@ describe('parseSettings', () => {
         'sessions.permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.',
         'sessions.model must be a string.',
         'sessions.claudePath must be a path.',
+        'sessions.nodePath must be a path.',
         'sessions.codex.permissionMode must be one of auto, plan, dontAsk, bypassPermissions.',
         'sessions.codex.model must be a string.',
         'sessions.codex.path must be a path.',
@@ -88,6 +89,19 @@ describe('parseSettings', () => {
         'sources.zoho must be an object.',
       ],
     });
+  });
+
+  it('takes a sessions.nodePath with forward slashes, and refuses one a shell would split or that is not node', () => {
+    const nodePath = (value: string) => parseSettings(JSON.stringify({ sessions: { nodePath: value } }));
+    const refused = { errors: ['sessions.nodePath must be a path to node or node.exe with no spaces or shell characters.'] };
+
+    expect(nodePath('C:\\nodejs\\node.exe')).toMatchObject({ settings: { sessions: { nodePath: 'C:/nodejs/node.exe' } } });
+    expect(nodePath('/home/me/.nvm/versions/node/v24.18.0/bin/node')).toMatchObject({ settings: { sessions: { nodePath: '/home/me/.nvm/versions/node/v24.18.0/bin/node' } } });
+    expect(nodePath('C:/Program Files/nodejs/node.exe')).toEqual(refused);
+    expect(nodePath('/opt/node;rm/node')).toEqual(refused);
+    expect(nodePath('$HOME/bin/node')).toEqual(refused);
+    expect(nodePath('/usr/bin/bun')).toEqual(refused);
+    expect(nodePath('/usr/bin/nodejs')).toEqual(refused);
   });
 
   it('rejects a section that is not an object', () => {
