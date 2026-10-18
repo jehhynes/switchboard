@@ -732,18 +732,28 @@ public sealed partial class MainWindow : Window
     /// <summary>Closes the dock, which removes its strip, so other windows take the full screen again.</summary>
     void OnCloseClicked(object? sender, RoutedEventArgs e) => Close();
 
+    /// <summary>
+    /// A quick second click raises DoubleTapped, not Tapped, so headers toggle on both; a press that moves before release raises both, so each
+    /// press toggles once.
+    /// </summary>
+    bool pressToggled;
+
+    void OnHeaderPressed(object? sender, PointerPressedEventArgs e) => pressToggled = false;
+
     void OnGroupTapped(object? sender, TappedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is GroupViewModel group)
+        if (!pressToggled && (sender as Control)?.DataContext is GroupViewModel group)
         {
+            pressToggled = true;
             group.Toggle();
         }
     }
 
     void OnBandTapped(object? sender, TappedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is BandViewModel band)
+        if (!pressToggled && (sender as Control)?.DataContext is BandViewModel band)
         {
+            pressToggled = true;
             band.Toggle();
         }
     }

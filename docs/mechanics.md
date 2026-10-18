@@ -458,6 +458,15 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** more than one monitor; a scale other than 1; VS Code under XWayland.
 - **Current use:** the dock on Linux and the GNOME Shell extension (architecture.md § Dock).
 
+## M40. Quick clicks on a dock header
+
+- **Date:** 2026-10-16.
+- **Versions:** Avalonia 12.1.3, headless test platform.
+- **Source inspection:** `Avalonia.Input.Gestures` handles presses and releases after their routes finish. A left press with an even click count, on the element the previous press hit, raises `DoubleTapped`, and the release then raises no `Tapped`. Movement beyond the tap distance during that press clears the suppression, so a release back within the tap distance of the press point raises `Tapped` as well.
+- **Experiment:** four quick clicks on a group header and on a Done date band toggled only on the first and third while the headers handled `Tapped` alone. With `DoubleTapped` also handled, a second press that moved 8 pixels away and back raised `DoubleTapped` and `Tapped` and toggled twice; mouse and touch behaved alike.
+- **Limits:** pen input and a real double-click time on Windows were not run.
+- **Current use:** the dock's group and band headers toggle on `Tapped` and `DoubleTapped`, once per press (`MainWindow.OnHeaderPressed`).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

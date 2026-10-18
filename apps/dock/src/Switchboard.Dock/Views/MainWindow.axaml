@@ -366,7 +366,7 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="views:GroupViewModel">
                 <StackPanel IsVisible="{Binding IsShown}" Margin="0,0,0,8">
-                  <Border Classes="group" Tapped="OnGroupTapped">
+                  <Border Classes="group" PointerPressed="OnHeaderPressed" Tapped="OnGroupTapped" DoubleTapped="OnGroupTapped">
                     <Grid ColumnDefinitions="Auto,Auto,*,Auto">
                       <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
                       <TextBlock Grid.Column="1" Classes="icon group-icon" Text="{Binding Glyph}" Margin="0,0,6,0" />
@@ -383,7 +383,7 @@
                         <DataTemplate x:DataType="views:BandViewModel">
                           <StackPanel>
                             <!-- Done's date bands (PRD R27); other groups have one band with no heading. -->
-                            <Border Classes="band" IsVisible="{Binding HasTitle}" Tapped="OnBandTapped">
+                            <Border Classes="band" IsVisible="{Binding HasTitle}" PointerPressed="OnHeaderPressed" Tapped="OnBandTapped" DoubleTapped="OnBandTapped">
                               <Grid ColumnDefinitions="Auto,Auto,Auto,*">
                                 <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
                                 <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />

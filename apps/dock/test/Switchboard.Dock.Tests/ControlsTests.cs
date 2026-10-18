@@ -88,6 +88,35 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void GroupHeader_QuickClicks_TogglesOnEveryClick()
+    {
+        var (window, model) = Open();
+        var group = model.Groups.First();
+        var header = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("group") && border.DataContext == group);
+        var point = header.TranslatePoint(new Point(4, 4), window)!.Value;
+        var open = group.IsOpen;
+        var seen = new List<bool>();
+
+        for (var click = 0; click < 4; click++)
+        {
+            window.MouseDown(point, MouseButton.Left);
+
+            // A second press that moves past the tap distance and back raises DoubleTapped and then Tapped.
+            if (click == 3)
+            {
+                window.MouseMove(point + new Vector(8, 0), RawInputModifiers.LeftMouseButton);
+                window.MouseMove(point, RawInputModifiers.LeftMouseButton);
+            }
+
+            window.MouseUp(point, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
+            seen.Add(group.IsOpen);
+        }
+
+        Assert.Equal([!open, open, !open, open], seen);
+    }
+
+    [AvaloniaFact]
     public void MainButton_QuestionRow_RunsOpenInClaudeAsTheClick()
     {
         var (window, _) = Open();

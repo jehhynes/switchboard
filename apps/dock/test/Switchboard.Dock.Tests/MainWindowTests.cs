@@ -585,6 +585,38 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void OpenDone_QuickClicksOnBand_TogglesOnEveryClick()
+    {
+        var (window, _) = Open(new DockSettings { Groups = { ["done"] = true } });
+        var band = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("band") && border.IsEffectivelyVisible);
+        var model = (BandViewModel)band.DataContext!;
+        var seen = new List<bool>();
+
+        for (var click = 0; click < 4; click++)
+        {
+            if (click == 3)
+            {
+                // A second press that moves past the tap distance and back raises DoubleTapped and then Tapped.
+                var point = band.TranslatePoint(new Point(20, 8), window)!.Value;
+
+                window.MouseDown(point, MouseButton.Left);
+                window.MouseMove(point + new Vector(8, 0), RawInputModifiers.LeftMouseButton);
+                window.MouseMove(point, RawInputModifiers.LeftMouseButton);
+                window.MouseUp(point, MouseButton.Left);
+                Dispatcher.UIThread.RunJobs();
+            }
+            else
+            {
+                Tap(window, band);
+            }
+
+            seen.Add(model.IsOpen);
+        }
+
+        Assert.Equal([false, true, false, true], seen);
+    }
+
+    [AvaloniaFact]
     public void OpenDone_NewRun_StartsTwoWeeksAgoClosedAfterTheLastRunOpenedIt()
     {
         var settings = new DockSettings { Groups = { ["done"] = true } };
