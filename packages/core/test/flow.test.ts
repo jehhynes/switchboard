@@ -54,7 +54,7 @@ describe('assigned-state transitions', () => {
       type: 'triage',
       triageId: 1,
       workItemId: 1,
-      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '' },
+      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '', adhocKey: null },
       systemPrompt: 'Classify the GitHub issue.\n\nChoose one playbook:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change', focus: null },
@@ -1298,6 +1298,126 @@ describe('registered sessions (PRD R81)', () => {
     h.store.updateSession('s1', { nativeSessionId: 'aa2285b2-0000-4000-8000-000000000000', retiredIds: [NATIVE] });
     expect(register(h).refused).toBe('This session is already in Switchboard as adhoc 1.');
     expect(h.store.tickets('adhoc')).toHaveLength(1);
+  });
+});
+
+describe('ticket reports (PRD R83)', () => {
+  const NATIVE = '9273f594-1111-4222-8333-444455556666';
+  const URL = 'https://github.com/acme/widgets/issues/115';
+  const AD_HOC_REPORTS = ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task'];
+  const register = (h: Harness) => h.send({ type: 'register', nativeSessionId: NATIVE, shortId: '9273f594', cwd: 'D:/git/widgets.worktrees/115', title: 'Explore snapshots' });
+  const move = (h: Harness, playbook: string | null = 'dev:develop', sessionId = 's1') => h.send({ type: 'ticket', sessionId, source: 'github', sourceKey: '115', ref: '#115', title: 'Issue 115', url: URL, playbook });
+  const harness = () => {
+    const h = new Harness();
+    h.settings.sources['github']!.namespace = 'dev';
+    return h;
+  };
+  /** The ad-hoc ticket as it stands, to show a refusal changed nothing. */
+  const unmoved = { source: 'adhoc', sourceKey: '1', ref: '#1', title: 'Explore snapshots', url: '', assigned: true, adhocKey: null };
+
+  it("moves a registered session's work item onto the issue in place, out of the assigned state, and gives the session the playbook's reports", () => {
+    const h = harness();
+    register(h);
+
+    expect(move(h)).toEqual({ actions: [], refused: null });
+    expect(h.store.ticket(1)).toMatchObject({ source: 'github', sourceKey: '115', ref: '#115', sourceId: null, title: 'Issue 115', url: URL, assigned: false, pool: false, repoRoot: 'D:/git/widgets.worktrees/115', adhocKey: '1', scopeAt: T0 });
+    expect(h.store.findTicket('adhoc', '1')).toBeNull();
+    expect(h.item(1)).toMatchObject({ ticketId: 1, playbook: 'dev:develop', status: 'running' });
+    expect(h.store.session('s1')!.reports).toEqual(FINISHING_REPORTS);
+    expect(h.store.ticketHistory(1)!.events.map((event) => [event.type, event.actor, event.detail])).toEqual([
+      ['register', 'operator', { cwd: 'D:/git/widgets.worktrees/115' }],
+      ['ticket', 'session', { source: 'github', sourceKey: '115', playbook: 'dev:develop', adhocKey: '1' }],
+    ]);
+  });
+
+  it('creates no second work item when the issue enters the assigned state, and a retry changes nothing', () => {
+    const h = harness();
+    register(h);
+    move(h);
+
+    expect(h.poll(issue('115'))).toEqual([]);
+    expect(h.store.ticket(1)).toMatchObject({ assigned: true, adhocKey: '1' });
+    expect(h.store.workItemsForTicket(1)).toHaveLength(1);
+    expect(move(h, 'dev:question')).toEqual({ actions: [], refused: null });
+    expect(h.store.workItemsForTicket(1)).toHaveLength(1);
+    expect(h.store.ticket(1)).toMatchObject({ source: 'github', sourceKey: '115', assigned: true, adhocKey: '1' });
+    expect(h.item(1)).toMatchObject({ playbook: 'dev:develop' });
+    expect(h.store.session('s1')!.reports).toEqual(FINISHING_REPORTS);
+  });
+
+  it("keeps a started session's reports, because its contract is in its system prompt, and keeps the ad-hoc work item unplaybooked without --playbook", () => {
+    const h = harness();
+    h.act({ type: 'adhoc', prompt: 'Explore snapshots', repoRoot: 'D:/git/widgets', start: true });
+
+    expect(move(h).refused).toBeNull();
+    expect(h.item(1)).toMatchObject({ playbook: 'dev:develop', taskPrompt: 'Explore snapshots' });
+    expect(h.store.session('s1')!.reports).toEqual(AD_HOC_REPORTS);
+
+    const g = harness();
+    register(g);
+    expect(move(g, null).refused).toBeNull();
+    expect(g.item(1)).toMatchObject({ playbook: null });
+    expect(g.store.session('s1')!.reports).toEqual(AD_HOC_REPORTS);
+  });
+
+  it('takes the place of a ticket a poll stored with nothing on it, and refuses one with a work item', () => {
+    const h = harness();
+    // The issue is assigned on a status outside scope, so the poll stores a ticket with no work item.
+    h.poll(issue('115', false));
+    register(h);
+
+    expect(move(h).refused).toBeNull();
+    expect(h.store.findTicket('github', '115')).toMatchObject({ id: 2, adhocKey: '1' });
+    expect(h.store.ticket(1)).toBeNull();
+
+    const g = harness();
+    g.poll(issue('115'));
+    register(g);
+    expect(move(g).refused).toBe('Switchboard already has github 115.');
+    expect(g.store.ticket(2)).toMatchObject(unmoved);
+  });
+
+  it('refuses an unknown playbook, one outside the namespace, a work item that is not ad-hoc, a done one, and an earlier session, changing nothing', () => {
+    const h = harness();
+    register(h);
+
+    expect(move(h, 'dev:gone').refused).toBe('dev:gone is not a task playbook in the dev namespace.');
+    expect(move(h, 'support:defect').refused).toBe('support:defect is not a task playbook in the dev namespace.');
+    expect(move(h, 'triage:github').refused).toBe('triage:github is not a task playbook in the dev namespace.');
+    expect(h.store.ticket(1)).toMatchObject(unmoved);
+    expect(h.store.session('s1')!.reports).toEqual(AD_HOC_REPORTS);
+
+    h.report('s1', { kind: 'done' });
+    expect(move(h).refused).toBe('The work item is done.');
+
+    const g = harness();
+    const [triage] = g.poll(issue('20'));
+    g.triaged(triage, 'dev:question');
+    const session = g.started(g.act({ type: 'start', workItemId: 1 })[0]);
+    expect(move(g, null, session).refused).toBe('Only an ad-hoc or registered work item can move to a ticket.');
+
+    const k = harness();
+    const first = k.started(only(k.act({ type: 'adhoc', prompt: 'Explore snapshots', repoRoot: 'D:/git/widgets', start: true }), 'start-session'));
+    // Approve starts a second session, the work item's latest.
+    k.report(first, { kind: 'approval', prompt: '/ship', summary: null, report: null });
+    k.act({ type: 'marker', sessionId: first, state: 'idle', detail: null });
+    k.act({ type: 'stop-succeeded', sessionId: first, reason: 'release' });
+    k.started(only(k.act({ type: 'approve', workItemId: 1 }), 'start-session'));
+    expect(k.store.sessionsFor(1)).toHaveLength(2);
+    expect(move(k, null, first).refused).toBe("Only the work item's latest session can move it to a ticket.");
+  });
+
+  it('never gives a moved ad-hoc key to a new ad-hoc ticket, and offers Triage again once the session ends', () => {
+    const h = harness();
+    register(h);
+    move(h);
+    h.act({ type: 'adhoc', prompt: 'Second', repoRoot: 'D:/git/widgets' });
+
+    expect(h.store.ticket(2)).toMatchObject({ source: 'adhoc', sourceKey: '2' });
+
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBeNull();
+    expect(h.item(1)).toMatchObject({ status: 'triaging' });
   });
 });
 

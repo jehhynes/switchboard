@@ -92,6 +92,20 @@ describe('History model', () => {
 
     expect(historyView(run.history(), run.now).sections[0]!.title).toBe('Ad-hoc prompt');
     expect(historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections[0]!.title).toBe('Registered session');
+
+    // A ticket report keeps the section's origin, and its entry hides the ticket's own field changes (PRD R83).
+    run.send({ type: 'ticket', sessionId: 's1', source: 'github', sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: 'https://github.com/o/r/issues/115', playbook: null });
+    const moved = historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections[0]!;
+
+    expect(moved.title).toBe('Registered session');
+    expect(moved.entries.at(-1)).toMatchObject({ text: 'Moved this work from adhoc 2 to gh 115', lines: [] });
+
+    // A later work item of the ticket, here with no playbook loaded to triage it, is not the moved one.
+    run.send({ type: 'mark-done', workItemId: 2 });
+    run.send({ type: 'poll', source: 'github', tickets: [{ ...ISSUE, sourceKey: '115', ref: '#115', url: 'https://github.com/o/r/issues/115' }] });
+    const sections = historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections;
+
+    expect(sections.map((section) => section.title)).toEqual(['No playbook yet', 'Registered session', 'Ticket']);
   });
 
   it("names each entry by the copy the session had then, and shows a fork waiting for the background process (PRD R78)", () => {
@@ -251,6 +265,14 @@ describe('History model', () => {
       [event('report', 'session', { kind: 'task', childTicketId: 2, childRef: '#4', childTitle: 'Fix it' }), { text: 'Queued a follow-up: Fix it', detail: 'Ad-hoc #4' }],
       [event('report', 'session', { kind: 'task', childTicketId: 1, childRef: '#77', childTitle: 'Fix it' }), { text: 'A session queued this follow-up', detail: null }],
       [event('report', 'session', { kind: 'other' }), { text: 'Reported other' }],
+      [
+        event('ticket', 'session', { source: 'github', sourceKey: '115', playbook: 'dev:develop', adhocKey: '3' }, [change('ticket', 'update', { source: ['adhoc', 'github'], sourceKey: ['3', '115'], assigned: [true, false] }, { workItemId: null })]),
+        { text: 'Moved this work from adhoc 3 to gh 115 as dev:develop', lines: [], category: 'report' },
+      ],
+      [event('ticket', 'session', { source: 'github', sourceKey: '115', playbook: null, adhocKey: '3' }), { text: 'Moved this work from adhoc 3 to gh 115' }],
+      // A refused report or a retry for the ticket the work item already has moves nothing.
+      [event('ticket', 'session', { source: 'github', sourceKey: '115', playbook: 'dev:develop' }), { text: 'Asked to move this work to gh 115 as dev:develop' }],
+      [event('report', 'session', { kind: 'ticket', url: 'https://github.com/o/r/issues/115' }), { text: 'Asked to move this work to https://github.com/o/r/issues/115' }],
       [event('session-start-failed', 'hub', { message: 'Untrusted folder' }, [change('session', 'update', { state: ['starting', 'ended'], outcome: [null, 'failed'] }, { sessionId: 's1' }), change('workItem', 'update', { status: ['running', 'failed'], error: [null, 'Untrusted folder'] })]), { text: 'The session failed to start', detail: 'Untrusted folder', lines: ['Status: Running → Failed', 'Error: Untrusted folder'], tone: 'error' }],
       [event('stop-succeeded', 'hub', { reason: 'release' }, [change('session', 'update', { state: ['idle', 'ended'], released: [false, true] }, { sessionId: 's1' })]), { text: 'Switchboard released session abc12345 so it can resume in VS Code', lines: [] }],
       [event('stop-succeeded', 'hub', { reason: 'operator' }, [change('session', 'update', { outcome: [null, 'stopped'], outcomeDetail: [null, 'Stopped by you.'] }, { sessionId: 's1' })]), { text: 'Session abc12345 stopped', lines: ['Outcome: stopped, Stopped by you.'] }],

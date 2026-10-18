@@ -376,6 +376,22 @@ describe('windowOf', () => {
     expect(row(item(7, { status: 'unstarted', playbook: 'ops:cleanup', ticket: { ...adhoc, source: 'schedule', sourceKey: 'cleanup' }, focus: null })).ticket).toBe('schedule cleanup');
   });
 
+  it('keeps the ad-hoc label and item window name of a work item a ticket report moved, and names the ticket by its new key (PRD R83)', () => {
+    const adhoc = { ...item(7).ticket, source: 'adhoc', sourceKey: '3', url: '' };
+    const moved = { ...item(7).ticket, source: 'github', sourceKey: '115', adhocKey: '3' };
+    const ended = [session({ state: 'ended', cwd: 'D:/git/widgets' })];
+    const before = windowOf(item(7, { ticket: adhoc, sessions: ended }), W)!;
+    const after = windowOf(item(7, { ticket: moved, sessions: ended }), W)!;
+
+    expect(row(item(7, { playbook: null, taskPrompt: null, ticket: moved, moved: true, focus: null })).playbook).toBe('registered');
+    expect(row(item(7, { playbook: null, taskPrompt: null, ticket: moved, moved: true, focus: null })).ticket).toBe('gh 115');
+    // A later work item of the ticket whose triage chose no playbook is unnamed, not registered.
+    expect(row(item(8, { status: 'failed', playbook: null, taskPrompt: null, ticket: moved, moved: false, focus: null })).playbook).toBe('');
+    expect(after.name).toMatch(/^adhoc-3-widgets-[0-9a-f]{6}$/);
+    expect(after.name).toBe(before.name);
+    expect(after.file).toBe(before.file);
+  });
+
   it('gives a registered session no item window or terminal while it lives in the operator window, and both once it ends (PRD R81)', () => {
     const adhoc = { ...item(7).ticket, source: 'adhoc', sourceKey: '3', url: '' };
     const live = item(7, { ticket: adhoc, focus: null, sessions: [session({ released: true, external: true, cwd: 'D:/git/widgets' })] });

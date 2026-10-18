@@ -28,6 +28,9 @@ export type ContextResult = { context: string; links?: SourceLink[]; anchors?: A
 /** A reported link checked against its ticket: refused with the reason, or not (PRD R52); an error leaves it unchecked. */
 export type LinkCheck = { refused: string | null } | { error: string };
 
+/** The ticket at a URL a ticket report names (PRD R83), as the source reads it, or why the read failed. */
+export type TicketLookup = { ticket: { sourceKey: string; ref: string; title: string; url: string; open: boolean } } | { error: string };
+
 /** A source plugin (PRD R1). It reads and never writes. */
 export interface Source {
   /** The settings key, such as `github`. */
@@ -39,4 +42,6 @@ export interface Source {
   keyOfBranch(branch: string): string | null;
   /** Checks a link a session reports for the ticket; a source without it accepts every link (PRD R52). */
   checkLink?(ticket: Ticket, target: string): Promise<LinkCheck>;
+  /** Reads the ticket at `url`, or answers null when the URL is not one of this source's tickets (PRD R83). */
+  ticketAt?(url: string): Promise<TicketLookup | null>;
 }

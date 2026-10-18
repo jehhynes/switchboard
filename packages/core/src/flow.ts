@@ -148,6 +148,11 @@ export type FlowEvent =
   | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean }
   /** A live Claude session the operator started outside Switchboard, as the roster lists it (PRD R81). */
   | { type: 'register'; nativeSessionId: string; shortId: string; cwd: string; title: string }
+  /**
+   * A ticket report: the session's ad-hoc work item continues as the work item of the source's ticket the hub read, with `playbook` when
+   * the report names one (PRD R83).
+   */
+  | { type: 'ticket'; sessionId: string; source: string; sourceKey: string; ref: string; title: string; url: string; playbook: string | null }
   /** Run now: a queued work item for the named schedule (PRD R82). */
   | { type: 'run-schedule'; name: string }
   | { type: 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
@@ -271,7 +276,7 @@ const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'regis
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
  * roster reads, are logged only when they change a row.
  */
-const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'session-start-failed', 'stop-failed']);
+const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'ticket', 'session-start-failed', 'stop-failed']);
 
 function actorOf(type: FlowEvent['type']): Actor {
   if (OPERATOR_EVENTS.has(type)) {
@@ -280,6 +285,7 @@ function actorOf(type: FlowEvent['type']): Actor {
 
   switch (type) {
     case 'report':
+    case 'ticket':
       return 'session';
     case 'poll':
     case 'poll-failed':
@@ -331,6 +337,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { repoRoot: event.repoRoot, start: event.start === true };
     case 'register':
       return { cwd: event.cwd };
+    case 'ticket':
+      return { source: event.source, sourceKey: event.sourceKey, playbook: event.playbook };
     case 'run-schedule':
       return { name: event.name };
     case 'start':
@@ -489,6 +497,8 @@ class Flow {
         return this.adhoc(event.prompt, event.repoRoot, event.start === true);
       case 'register':
         return this.register(event);
+      case 'ticket':
+        return this.moveToTicket(event);
       case 'run-schedule':
         return this.runSchedule(event.name);
       case 'start':
@@ -751,6 +761,71 @@ class Flow {
   }
 
   /**
+   * PRD R83: the ad-hoc ticket of the session's work item becomes the source's ticket in place, so its work item, sessions, worktree, links and
+   * History stay with it. It is stored out of the assigned state, so the poll that first lists it in scope finds the open work item and creates
+   * none (PRD R7). A ticket a poll stored with nothing on it gives way. A registered session takes the playbook's reports at once, because its
+   * contract is only in its conversation; a session Switchboard started keeps the contract in its system prompt, and its later sessions get the
+   * playbook's.
+   */
+  private moveToTicket(event: Extract<FlowEvent, { type: 'ticket' }>): void {
+    const session = this.session(event.sessionId);
+    const item = this.store.workItem(session.workItemId)!;
+    const ticket = this.store.ticket(item.ticketId)!;
+    // A retry after a lost reply.
+    if (ticket.source === event.source && ticket.sourceKey === event.sourceKey) {
+      return;
+    }
+
+    if (ticket.source !== ADHOC_SOURCE) {
+      throw new Refusal('Only an ad-hoc or registered work item can move to a ticket.');
+    }
+
+    if (item.status === 'done') {
+      throw new Refusal('The work item is done.');
+    }
+
+    if (this.store.sessionsFor(item.id).at(-1)?.id !== session.id) {
+      throw new Refusal("Only the work item's latest session can move it to a ticket.");
+    }
+
+    const playbook = event.playbook === null ? null : this.ticketPlaybook(event.source, event.playbook);
+    const existing = this.store.findTicket(event.source, event.sourceKey);
+
+    if (existing !== null) {
+      const bare = this.store.workItemsForTicket(existing.id).length === 0 && this.store.worktreeFor(existing.id) === null && this.store.linksFor(existing.id).length === 0 && this.store.poolTriages(existing.id).length === 0;
+
+      if (!bare) {
+        throw new Refusal(`Switchboard already has ${event.source} ${event.sourceKey}.`);
+      }
+
+      this.store.deleteBareTicket(existing.id);
+    }
+
+    this.store.updateTicket(ticket.id, { source: event.source, sourceKey: event.sourceKey, ref: event.ref, sourceId: null, title: event.title, url: event.url, assigned: false, pool: false, adhocKey: ticket.sourceKey });
+    this.store.noteEvent({ adhocKey: ticket.sourceKey });
+
+    if (playbook !== null) {
+      this.store.updateWorkItem(item.id, { playbook: playbook.name });
+
+      if (session.external) {
+        this.store.updateSession(session.id, { reports: sessionReports('task', false, playbook, session.provider) });
+      }
+    }
+  }
+
+  /** A ticket report's playbook: a task playbook in the source's namespace, when the source has one (PRD R83). */
+  private ticketPlaybook(source: string, name: string): Playbook {
+    const namespace = this.context.settings.sources[source]?.namespace ?? '';
+    const playbook = this.context.playbooks.get(name);
+
+    if (playbook === undefined || playbook.kind !== 'task' || (namespace !== '' && name.split(':')[0] !== namespace)) {
+      throw new Refusal(namespace === '' ? `${name} is not a task playbook.` : `${name} is not a task playbook in the ${namespace} namespace.`);
+    }
+
+    return playbook;
+  }
+
+  /**
    * PRD R68: a session's follow-up becomes an unstarted ad-hoc work item, in the named repo or else the reporting ticket's, which must be
    * a configured repo root. A repeated report adds nothing while the earlier work item is open.
    */
@@ -783,7 +858,7 @@ class Flow {
    * prompt, for a registered session (PRD R6, R68, R81).
    */
   private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running'): WorkItem {
-    const keys = this.store.tickets(ADHOC_SOURCE).map((ticket) => Number(ticket.sourceKey));
+    const keys = this.store.adhocKeys().map(Number);
     const sourceKey = String(Math.max(0, ...keys) + 1);
     // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R76).
     const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: parentId === null ? null : 'task', title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });

@@ -373,7 +373,9 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   const inWorktree = worktree !== null && samePath(first, worktree);
   // The hash names the first folder, so a window's first folder never changes: another folder, or a moved worktree, gets another window.
   const hash = createHash('sha256').update(normalPath(first)).digest('hex').slice(0, 6);
-  const key = `${ticketKey(item.ticket).replace(' ', '-')}${inWorktree ? '' : `-${folderName(first)}`}-${hash}`;
+  // A ticket a ticket report moved keeps its ad-hoc name, so its open window is still found (PRD R83).
+  const named = item.ticket.adhocKey === null ? ticketKey(item.ticket) : `adhoc ${item.ticket.adhocKey}`;
+  const key = `${named.replace(' ', '-')}${inWorktree ? '' : `-${folderName(first)}`}-${hash}`;
   const name = key.replace(/[^A-Za-z0-9._-]+/g, '-');
 
   return { name, title: item.ticket.title, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };

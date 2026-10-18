@@ -7,7 +7,7 @@ import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
 import { listenHub } from '../src/server.js';
-import { gitBashRoot, isPastePath, registerTitle, reportBody } from '../src/report.js';
+import { gitBashRoot, isPastePath, registerTitle, reportBody, ticketBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
 
 let temp: ReturnType<typeof tempHome>;
@@ -133,6 +133,16 @@ describe('parseReport and reportBody', () => {
 
     for (const argv of [[], ['--title'], ['--title', ' '], ['--title='], ['--title', '--home']]) {
       expect(registerTitle(argv)).toBeNull();
+    }
+  });
+
+  it('reads a ticket report with or without a playbook, and refuses one without a session, an http(s) URL or a playbook value (PRD R83)', () => {
+    expect(ticketBody(['ticket', 's1', 'https://github.com/o/r/issues/115'])).toEqual({ sessionId: 's1', url: 'https://github.com/o/r/issues/115', playbook: null });
+    expect(ticketBody(['ticket', 's1', 'https://github.com/o/r/issues/115', '--playbook', 'dev:develop'])).toEqual({ sessionId: 's1', url: 'https://github.com/o/r/issues/115', playbook: 'dev:develop' });
+    expect(ticketBody(['ticket', 's1', 'https://github.com/o/r/issues/115', '--playbook=dev:develop'])).toMatchObject({ playbook: 'dev:develop' });
+
+    for (const argv of [['ticket'], ['ticket', '--playbook', 'x'], ['ticket', 's1'], ['ticket', 's1', 'github.com/o/r/issues/1'], ['ticket', 's1', 'https://github.com/o/r/issues/1', '--playbook'], ['ticket', 's1', 'https://github.com/o/r/issues/1', '--playbook='], ['ticket', 's1', 'https://github.com/o/r/issues/1', '--playbook', ''], ['stage', 's1', 'https://x']]) {
+      expect(ticketBody(argv)).toBeNull();
     }
   });
 
@@ -271,6 +281,15 @@ describe('createHubApp', () => {
     expect(registered).toEqual({ status: 200, body: { key: 'adhoc 1', already: false, contract: expect.stringContaining('Report to Switchboard with these commands:') } });
     expect(await app.post['/contract']!({ nativeSessionId: native })).toEqual({ status: 200, body: { contract: (registered.body as { contract: string }).contract } });
     expect(app.busy()).toBe(true);
+
+    // The ticket route (PRD R83): a bad body is refused before any lookup, and a URL no enabled source has is refused by the runtime.
+    for (const body of [{ url: 'https://github.com/o/r/issues/1' }, { sessionId: 's1' }, { sessionId: 's1', url: 'github.com/o/r/issues/1' }, { sessionId: 's1', url: 'https://x', playbook: 3 }, { sessionId: 's1', url: 'https://x', playbook: '' }]) {
+      expect(await app.post['/ticket']!(body)).toEqual({ status: 400, body: { error: 'Expected {sessionId, url, playbook?}.' } });
+    }
+
+    const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
+
+    expect(await app.post['/ticket']!({ sessionId, url: 'https://github.com/o/r/issues/1', nativeSessionId: native })).toEqual({ status: 409, body: { error: 'No enabled source has a ticket at https://github.com/o/r/issues/1.' } });
   });
 
   it('reloads settings and playbooks when settings.json changes', async () => {

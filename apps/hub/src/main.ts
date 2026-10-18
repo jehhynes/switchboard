@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { buildOf, createHubApp, findHub, gitBashRoot, postToHub, registerTitle, reportBody, serveHub, stopHub } from '@switchboard/hub';
+import { buildOf, createHubApp, findHub, gitBashRoot, postToHub, registerTitle, reportBody, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -32,8 +32,44 @@ function flag(argv: readonly string[], name: string): string | null {
   return match.includes('=') ? match.slice(match.indexOf('=') + 1) : '';
 }
 
+/**
+ * Moves the session's ad-hoc work item onto a source's ticket and prints its key and the session's report contract (PRD R83). The usage text
+ * does not name it, so only a skill the operator invokes runs it. Exit codes as for a report.
+ */
+async function ticket(home: string, argv: readonly string[]): Promise<number> {
+  const body = ticketBody(argv);
+
+  if (body === null) {
+    process.stderr.write('Usage: report ticket <sessionId> <ticket url> [--playbook <name>]\n');
+    return 1;
+  }
+
+  const native = process.env['CLAUDE_CODE_SESSION_ID'];
+  const hub = await findHub(home);
+  const reply = hub === null ? null : await postToHub(hub, '/ticket', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
+
+  if (reply === null) {
+    process.stderr.write('The Switchboard hub is not running or did not answer; run the command again, which answers the contract of a work item it moved.\n');
+    return 2;
+  }
+
+  if (reply.status !== 200) {
+    process.stderr.write(`Refused: ${reply.error ?? `status ${reply.status}`}\n`);
+    return reply.status === 400 ? 1 : 3;
+  }
+
+  const { key, contract } = reply.body as { key: string; contract: string };
+
+  process.stdout.write(`Moved to ${key}. Follow this report contract from now on, in place of any earlier one.\n\n${contract}\n`);
+  return 0;
+}
+
 /** Exit codes: 0 recorded, 1 usage, 2 no hub, 3 refused (architecture.md § Session reports). */
 async function report(home: string, argv: readonly string[]): Promise<number> {
+  if (argv[0] === 'ticket') {
+    return ticket(home, argv);
+  }
+
   const body = reportBody(argv, gitBashRoot(process.env));
 
   if (body === null) {

@@ -55,6 +55,8 @@ export interface Ticket {
   lastPolledAt: number | null;
   /** The repo an ad-hoc prompt chose. Empty takes the source's `repoRoot` setting. */
   repoRoot: string;
+  /** The ad-hoc key of a ticket a ticket report moved to a source (PRD R83), so the key is not used again and the item window keeps its name. */
+  adhocKey: string | null;
 }
 
 export interface WorkItem {

@@ -66,3 +66,9 @@ query($owner:String!, $name:String!, $number:Int!){
     }
   }
 }`;
+
+/** One issue's identity and state, for a ticket report (PRD R83). gh exits 1 when the number is not an issue of the repository. */
+export const ISSUE_QUERY = `
+query($owner:String!, $name:String!, $number:Int!){
+  repository(owner:$owner, name:$name){ issue(number:$number){ number title url state } }
+}`;

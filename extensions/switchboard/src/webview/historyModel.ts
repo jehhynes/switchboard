@@ -471,6 +471,13 @@ class Builder {
         return this.reconstructed(event, detail);
       case 'report':
         return this.report(detail, skip);
+      // The ticket's own field changes are the move itself (PRD R83). Only the move notes the ad-hoc key; a refusal or a retry is a request.
+      case 'ticket': {
+        const target = `${ticketKey({ source: str(detail['source']), sourceKey: str(detail['sourceKey']) })}${detail['playbook'] ? ` as ${str(detail['playbook'])}` : ''}`;
+
+        skip.add('*');
+        return { category: 'report', icon: 'issues', text: typeof detail['adhocKey'] === 'string' ? `Moved this work from adhoc ${detail['adhocKey']} to ${target}` : `Asked to move this work to ${target}` };
+      }
       case 'marker':
       case 'roster': {
         if (sessionChange === undefined) {
@@ -619,6 +626,9 @@ class Builder {
           text: detail['childTicketId'] === this.history.ticket.id ? 'A session queued this follow-up' : `Queued a follow-up${detail['childTitle'] ? `: ${str(detail['childTitle'])}` : ''}`,
           detail: detail['childRef'] && detail['childTicketId'] !== this.history.ticket.id ? `Ad-hoc ${str(detail['childRef'])}` : null,
         };
+      // A ticket report the hub refused before the move (PRD R83).
+      case 'ticket':
+        return { ...base, icon: 'issues', text: `Asked to move this work to ${str(detail['url'])}${detail['playbook'] ? ` as ${str(detail['playbook'])}` : ''}` };
       default:
         return { ...base, icon: 'comment', text: `Reported ${str(detail['kind'])}` };
     }
@@ -755,7 +765,8 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
 
   const waiting = waitingTimes(history, now);
   const sections: Section[] = history.workItems.map((item) => {
-    const playbook = item.playbook ?? (ticket.source === 'adhoc' ? ADHOC_SECTIONS[adhocLabel(item, ticket)] : 'No playbook yet');
+    // A moved ticket's ad-hoc work item is its first, because an ad-hoc ticket has one (PRD R83).
+    const playbook = item.playbook ?? (ticket.source === 'adhoc' || (ticket.adhocKey !== null && item.id === Math.min(...history.workItems.map((other) => other.id))) ? ADHOC_SECTIONS[adhocLabel(item, ticket)] : 'No playbook yet');
     const facts = [`Created ${timeText(item.createdAt)}`];
 
     if (item.doneAt !== null) {

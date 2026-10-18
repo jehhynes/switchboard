@@ -281,6 +281,18 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
       },
+      // The ticket report (PRD R83), which no report contract or usage text lists.
+      '/ticket': async (body) => {
+        const { sessionId, url, playbook, nativeSessionId } = isRecord(body) ? body : {};
+
+        if (typeof sessionId !== 'string' || typeof url !== 'string' || !/^https?:\/\//i.test(url) || !optionalString(playbook) || playbook === '' || !optionalString(nativeSessionId)) {
+          return { status: 400, body: { error: 'Expected {sessionId, url, playbook?}.' } };
+        }
+
+        const result = await runtime.ticket(sessionId, url, playbook ?? null, nativeSessionId || null);
+
+        return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
+      },
       '/open': async (body) => {
         if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace'])) {
           return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?}.' } };

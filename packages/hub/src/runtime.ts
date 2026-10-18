@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -62,6 +62,8 @@ export interface WorkItemView extends WorkItem {
   returned: number;
   /** The ticket of the work item whose session reported this one as a task (PRD R68). */
   parent: Ticket | null;
+  /** The ad-hoc work item a ticket report moved onto this ticket: its first work item, because an ad-hoc ticket has one (PRD R83). */
+  moved: boolean;
   /** The playbook's `approvalSends`: Approve sends the work (PRD R27). */
   approvalSends: boolean;
   /** What keeps a queued work item from starting; empty for every other status (PRD R34). */
@@ -648,7 +650,7 @@ export class Runtime {
    * Only the report's kind and its short text fields are kept: never a prompt.
    */
   refuseReport(sessionId: string, fields: Record<string, unknown>, message: string): void {
-    const kept = Object.fromEntries(['kind', 'stage', 'path', 'label', 'target', 'file', 'title'].filter((key) => typeof fields[key] === 'string').map((key) => [key, fields[key]]));
+    const kept = Object.fromEntries(['kind', 'stage', 'path', 'label', 'target', 'file', 'title', 'url', 'playbook'].filter((key) => typeof fields[key] === 'string').map((key) => [key, fields[key]]));
     const event = { type: 'report', sessionId, report: kept } as unknown as FlowEvent;
 
     this.deps.store.transaction(() => recordRefusal(this.deps.store, event, this.deps.now(), message));
@@ -733,6 +735,76 @@ export class Runtime {
     const session = this.deps.store.sessionByNativeId(nativeSessionId)!;
 
     return { key: keyOf(session), contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider), already: false };
+  }
+
+  /**
+   * A ticket report (PRD R83): moves the session's ad-hoc work item onto the ticket at `url`, which an enabled source reads, and answers the
+   * work item's key and the session's report contract, again for a retry. A lookup that fails or takes longer than REPORT_CHECK_MS refuses,
+   * because the move needs the ticket's title and state.
+   */
+  async ticket(sessionId: string, url: string, playbook: string | null, nativeSessionId: string | null = null): Promise<{ key: string; contract: string } | { refused: string }> {
+    const fields = { kind: 'ticket', url, playbook };
+    const refuse = (refused: string) => {
+      this.refuseReport(sessionId, fields, refused);
+
+      return { refused };
+    };
+    const retired = () => (nativeSessionId === null ? null : this.retiredCopy(sessionId, nativeSessionId));
+    const early = retired();
+
+    if (early !== null) {
+      return refuse(early);
+    }
+
+    if (this.deps.store.session(sessionId) === null) {
+      return refuse(`Unknown session ${sessionId}.`);
+    }
+
+    let found: { source: string; reader: Source; lookup: TicketLookup } | null = null;
+
+    for (const [name, source] of [...this.sources]) {
+      const lookup = source.ticketAt === undefined ? null : await Promise.race([source.ticketAt(url).catch((error: unknown) => ({ error: String(error) })), this.deps.sleep(REPORT_CHECK_MS).then(() => ({ error: `${name} did not answer within ${REPORT_CHECK_MS / 1000} seconds.` }))]);
+
+      if (lookup !== null) {
+        found = { source: name, reader: source, lookup };
+        break;
+      }
+    }
+
+    if (found === null) {
+      return refuse(`No enabled source has a ticket at ${url}.`);
+    }
+
+    if ('error' in found.lookup) {
+      return refuse(found.lookup.error);
+    }
+
+    const ticket = found.lookup.ticket;
+
+    if (!ticket.open) {
+      return refuse(`${ticket.ref} is closed.`);
+    }
+
+    const later = retired();
+
+    if (later !== null) {
+      return refuse(later);
+    }
+
+    // A source turned off or reconfigured during the lookup may no longer read the repository the ticket came from.
+    if (this.sources.get(found.source) !== found.reader) {
+      return refuse(`The ${found.source} source changed during the lookup. Send the report again.`);
+    }
+
+    const { refused } = this.send({ type: 'ticket', sessionId, source: found.source, sourceKey: ticket.sourceKey, ref: ticket.ref, title: ticket.title, url: ticket.url, playbook });
+
+    if (refused !== null) {
+      return { refused };
+    }
+
+    const session = this.deps.store.session(sessionId)!;
+
+    return { key: `${found.source} ${ticket.sourceKey}`, contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider) };
   }
 
   /**
@@ -847,6 +919,7 @@ export class Runtime {
           pastes: store.pastesFor(item.id),
           returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook, ticket),
           parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
+          moved: ticket.adhocKey !== null && store.workItemsForTicket(item.ticketId)[0]?.id === item.id,
           approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
           waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
         };

@@ -1,8 +1,8 @@
-import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket } from '@switchboard/core';
+import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket, TicketLookup } from '@switchboard/core';
 import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
-import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from './queries.js';
+import { CONTEXT_QUERY, FIELD_QUERY, ISSUE_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from './queries.js';
 import type { Roles, RolesResult } from './roles.js';
 
 /** Each issue body, comment and review-thread comment is clipped to this many characters (GC). */
@@ -14,12 +14,15 @@ const UNEXPECTED = 'GitHub returned an unexpected response.';
 const UNLOGGED_STATUS_MS = 60_000;
 
 const PULL_REQUEST_PATH = /^\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:\/|$)/;
+const ISSUE_PATH = /^\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)(?:\/|$)/;
 
 /** gh's stderr for a pull request number the repository does not have. */
 const NO_PULL_REQUEST = /Could not resolve to a PullRequest/;
+/** gh's stderr for an issue number the repository does not have, or that is a pull request. */
+const NO_ISSUE = /Could not resolve to an Issue/;
 
-/** The `owner/name` and number of a GitHub pull request URL, or null for any other URL. */
-function pullRequestOfUrl(target: string): { repo: string; number: number } | null {
+/** The `owner/name` and number of a GitHub URL whose path matches `path`, or null for any other URL. */
+function githubUrlOf(target: string, path: RegExp): { repo: string; number: number } | null {
   let url: URL;
 
   try {
@@ -28,9 +31,14 @@ function pullRequestOfUrl(target: string): { repo: string; number: number } | nu
     return null;
   }
 
-  const [, repo, number] = /^https?:$/.test(url.protocol) && url.hostname === 'github.com' ? (PULL_REQUEST_PATH.exec(url.pathname) ?? []) : [];
+  const [, repo, number] = /^https?:$/.test(url.protocol) && url.hostname === 'github.com' ? (path.exec(url.pathname) ?? []) : [];
 
   return repo === undefined ? null : { repo, number: Number(number) };
+}
+
+/** The `owner/name` and number of a GitHub pull request URL, or null for any other URL. */
+function pullRequestOfUrl(target: string): { repo: string; number: number } | null {
+  return githubUrlOf(target, PULL_REQUEST_PATH);
 }
 
 interface Actor {
@@ -158,6 +166,30 @@ export class GithubSource implements Source {
     } catch {
       return { error: UNEXPECTED };
     }
+  }
+
+  /** Reads the issue at an issue URL in the configured repository, in any spelling of the owner and name; null for any other URL (PRD R83). */
+  async ticketAt(target: string): Promise<TicketLookup | null> {
+    const issue = githubUrlOf(target, ISSUE_PATH);
+
+    if (issue?.repo.toLowerCase() !== this.config.repo.toLowerCase()) {
+      return null;
+    }
+
+    const [owner = '', name = ''] = this.config.repo.split('/');
+    const result = await this.gh(ISSUE_QUERY, { owner, name, number: issue.number });
+
+    if ('error' in result) {
+      return NO_ISSUE.test(result.error) ? { error: `#${issue.number} is not an issue in ${this.config.repo}.` } : result;
+    }
+
+    const found = (result.json as { data?: { repository?: { issue?: { number?: unknown; title?: unknown; url?: unknown; state?: unknown } | null } } } | null)?.data?.repository?.issue;
+
+    if (typeof found?.number !== 'number' || typeof found.title !== 'string' || typeof found.url !== 'string' || typeof found.state !== 'string') {
+      return { error: UNEXPECTED };
+    }
+
+    return { ticket: { sourceKey: String(found.number), ref: `#${found.number}`, title: found.title, url: found.url, open: found.state === 'OPEN' } };
   }
 
   private async checkPullRequest(ticket: Ticket, number: number): Promise<LinkCheck> {

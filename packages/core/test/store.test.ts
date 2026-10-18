@@ -29,8 +29,27 @@ describe('Store', () => {
     raw.close();
 
     const reopened = Store.open(path);
-    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '' });
+    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null });
     reopened.close();
+  });
+
+  it('lists ad-hoc keys with the moved ones, and deletes a ticket only when nothing is on it (PRD R83)', () => {
+    const store = Store.open(':memory:');
+    const ticket = { ref: '', sourceId: null, title: 'T', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' };
+    const bare = store.insertTicket({ ...ticket, source: 'github', sourceKey: '115' });
+    const held = store.insertTicket({ ...ticket, source: 'github', sourceKey: '116' });
+
+    store.insertTicket({ ...ticket, source: 'adhoc', sourceKey: '2' });
+    store.insertTicket({ ...ticket, source: 'github', sourceKey: '117', adhocKey: '5' });
+    store.addLink({ ticketId: held.id, label: 'Issue', target: 'https://github.com/o/r/issues/1', reportedAt: 1 });
+
+    expect(store.adhocKeys().sort()).toEqual(['2', '5']);
+    expect(() => store.deleteBareTicket(held.id)).toThrow('Ticket 2 has work items, triages, a worktree or links.');
+    expect(store.ticket(held.id)).not.toBeNull();
+
+    store.deleteBareTicket(bare.id);
+    expect(store.ticket(bare.id)).toBeNull();
+    store.close();
   });
 
   it('moves a version 1 database to the current schema, keeping each triage with its ticket, unrated, without its summary and with no focus', () => {

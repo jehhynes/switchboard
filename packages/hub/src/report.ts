@@ -69,6 +69,19 @@ export function registerTitle(argv: readonly string[]): string | null {
   return title === null || title.trim() === '' ? null : title;
 }
 
+/** The body of `report ticket <sessionId> <url> [--playbook <name>]` (PRD R83), or null for bad usage. */
+export function ticketBody(argv: readonly string[]): { sessionId: string; url: string; playbook: string | null } | null {
+  const [kind, sessionId, url] = argv;
+  const playbook = valueOf(argv, 'playbook');
+
+  // A --playbook flag without a value, or with an empty one, is bad usage, not a request for no playbook.
+  if (kind !== 'ticket' || sessionId === undefined || sessionId.startsWith('--') || url === undefined || !/^https?:\/\//i.test(url) || ((playbook === null || playbook === '') && hasFlag(argv, 'playbook'))) {
+    return null;
+  }
+
+  return { sessionId, url, playbook };
+}
+
 /** A report body from `report <kind> <sessionId> …`, or null for bad usage. `root` is the Git Bash root the CLI ran under. */
 export function reportBody(argv: readonly string[], root: string | null = null): Record<string, unknown> | null {
   const [kind, sessionId, text] = argv;

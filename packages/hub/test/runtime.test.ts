@@ -128,6 +128,7 @@ class FakeSource implements Source {
   polls = 0;
   context: (ticket: { sourceKey: string }) => Promise<ContextResult> = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text` });
   checkLink?: NonNullable<Source['checkLink']>;
+  ticketAt?: NonNullable<Source['ticketAt']>;
 
   async poll(): Promise<PollResult> {
     this.polls++;
@@ -1806,5 +1807,107 @@ describe('registered sessions (PRD R81)', () => {
     expect(await runtime.register('retired-copy', 'Copy')).toEqual({ refused: 'This session is a copy of adhoc 1, which Switchboard continues in its latest copy.' });
     expect(store.tickets('adhoc')).toHaveLength(1);
     expect(unlisted.store.tickets('adhoc')).toEqual([]);
+  });
+});
+
+describe('ticket reports (PRD R83)', () => {
+  const NATIVE = '9273f594-1111-4222-8333-444455556666';
+  const URL = 'https://github.com/o/r/issues/115';
+  const found = (open = true) => ({ ticket: { sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: URL, open } });
+
+  async function registered() {
+    const real = new ClaudeRunner({ claudePath: 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true });
+    // `old-copy` is a copy a fork retired, and so is the registered copy once a fork named `fork-copy` continues it (PRD R78).
+    const claude = Object.assign(Object.create(real) as SessionRunner, {
+      live: async () => ({ shortId: '9273f594', cwd: 'D:/git/widgets' }),
+      relation: (native: string, session: Session): CopyRelation => (native === 'old-copy' || (native === NATIVE && session.nativeSessionId === 'fork-copy') ? 'older' : 'unrelated'),
+    });
+    const harness = setup(config(), () => T0, { claude });
+
+    await harness.runtime.register(NATIVE, 'Explore snapshots');
+
+    return harness;
+  }
+
+  it("moves a registered session's work item onto the issue and answers its key and the playbook's contract, again for a retry and after compaction", async () => {
+    const { runtime, source, store } = await registered();
+    const urls: string[] = [];
+    source.ticketAt = async (url) => {
+      urls.push(url);
+      return found();
+    };
+
+    const result = await runtime.ticket('s1', URL, 'dev:develop', NATIVE);
+
+    expect(result).toEqual({ key: 'github 115', contract: expect.stringMatching(/^Report to Switchboard with these commands:\n/) });
+    const { contract } = result as { contract: string };
+    expect(contract).toContain('report approval s1 ');
+    expect(contract).not.toContain('report paste s1 ');
+    expect(runtime.contract(NATIVE)).toBe(contract);
+    expect(urls).toEqual([URL]);
+    expect(store.ticket(1)).toMatchObject({ source: 'github', sourceKey: '115', title: 'Snapshot wrapper', url: URL, assigned: false, adhocKey: '1' });
+    expect(runtime.snapshot().workItems).toMatchObject([{ playbook: 'dev:develop', status: 'running', moved: true, ticket: { source: 'github', sourceKey: '115' } }]);
+    expect(await runtime.ticket('s1', URL, 'dev:develop', NATIVE)).toEqual(result);
+
+    // Once the work is done, the issue's return to scope makes a work item of its own, which was not moved.
+    runtime.send({ type: 'mark-done', workItemId: 1 });
+    source.result = { tickets: [{ ...issue('115'), url: URL }] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(runtime.snapshot().workItems.map((item) => [item.id, item.moved])).toEqual([
+      [2, false],
+      [1, true],
+    ]);
+  });
+
+  it('refuses a URL no enabled source has, a closed issue, a failed or late lookup, an unknown session and a retired copy, and logs each refusal', async () => {
+    const { runtime, source, store, late } = await registered();
+    const refused = async (url = URL, native: string | null = NATIVE, sessionId = 's1') => ((await runtime.ticket(sessionId, url, null, native)) as { refused: string }).refused;
+
+    expect(await refused()).toBe(`No enabled source has a ticket at ${URL}.`);
+    source.ticketAt = async () => null;
+    expect(await refused()).toBe(`No enabled source has a ticket at ${URL}.`);
+    source.ticketAt = async () => found(false);
+    expect(await refused()).toBe('#115 is closed.');
+    source.ticketAt = async () => ({ error: 'Issue #115 was not found in o/r.' });
+    expect(await refused()).toBe('Issue #115 was not found in o/r.');
+    source.ticketAt = async () => {
+      throw new Error('boom');
+    };
+    expect(await refused()).toBe('Error: boom');
+    source.ticketAt = () => new Promise(() => {});
+    const pending = refused();
+    late.resolve();
+    expect(await pending).toBe(`github did not answer within ${REPORT_CHECK_MS / 1000} seconds.`);
+    expect(await refused(URL, null, 's9')).toBe('Unknown session s9.');
+
+    source.ticketAt = async () => found();
+    expect(await refused(URL, 'old-copy')).toBe('Session old-copy was replaced by fork 9273f594, so the report was not recorded.');
+    // A roster read continues the session as a fork while the lookup runs.
+    source.ticketAt = async () => {
+      store.updateSession('s1', { nativeSessionId: 'fork-copy', shortId: 'f0f0f0f0' });
+      return found();
+    };
+    expect(await refused()).toBe('Session 9273f594 was replaced by fork f0f0f0f0, so the report was not recorded.');
+    store.updateSession('s1', { nativeSessionId: NATIVE, shortId: '9273f594' });
+    // The operator turns the source off while the lookup runs.
+    source.ticketAt = async () => {
+      runtime.setSourceEnabled('github', false);
+      return found();
+    };
+    expect(await refused()).toBe('The github source changed during the lookup. Send the report again.');
+
+    expect(store.ticket(1)).toMatchObject({ source: 'adhoc', sourceKey: '1', adhocKey: null });
+    expect(store.ticketHistory(1)!.events.filter((event) => event.refused !== null).map((event) => [event.detail, event.refused])).toEqual([
+      [{ kind: 'ticket', url: URL }, `No enabled source has a ticket at ${URL}.`],
+      [{ kind: 'ticket', url: URL }, `No enabled source has a ticket at ${URL}.`],
+      [{ kind: 'ticket', url: URL }, '#115 is closed.'],
+      [{ kind: 'ticket', url: URL }, 'Issue #115 was not found in o/r.'],
+      [{ kind: 'ticket', url: URL }, 'Error: boom'],
+      [{ kind: 'ticket', url: URL }, `github did not answer within ${REPORT_CHECK_MS / 1000} seconds.`],
+      [{ kind: 'ticket', url: URL }, 'Session old-copy was replaced by fork 9273f594, so the report was not recorded.'],
+      [{ kind: 'ticket', url: URL }, 'Session 9273f594 was replaced by fork f0f0f0f0, so the report was not recorded.'],
+      [{ kind: 'ticket', url: URL }, 'The github source changed during the lookup. Send the report again.'],
+    ]);
   });
 });

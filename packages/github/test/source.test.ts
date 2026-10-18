@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseGithubConfig } from '../src/config.js';
 import type { GithubConfig } from '../src/config.js';
 import type { Gh, GhResult } from '../src/gh.js';
-import { CONTEXT_QUERY, FIELD_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from '../src/queries.js';
+import { CONTEXT_QUERY, FIELD_QUERY, ISSUE_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from '../src/queries.js';
 import { GithubSource } from '../src/source.js';
 
 function fixture(name: string): unknown {
@@ -36,7 +36,7 @@ function fakeGh(...answers: GhResult[]) {
 
 const SINGLE_SELECT: GhResult = { json: { data: { repositoryOwner: { projectV2: { field: { __typename: 'ProjectV2SingleSelectField' } } } } } };
 
-const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null });
 
 describe('GithubSource.poll', () => {
   it('lists every searched issue, assigned only when its project status is configured', async () => {
@@ -401,6 +401,35 @@ describe('GithubSource.keyOfBranch', () => {
     expect(source.keyOfBranch('15619-fix-foo')).toBe('15619');
     expect(source.keyOfBranch('master')).toBeNull();
     expect(new GithubSource(config({ branchPattern: /^issue-(\d+)$/ }), fakeGh()).keyOfBranch('issue-12')).toBe('12');
+  });
+});
+
+describe('GithubSource.ticketAt', () => {
+  const answer = (state: string): GhResult => ({ json: { data: { repository: { issue: { number: 115, title: 'Snapshot wrapper', url: 'https://github.com/acme/widgets/issues/115', state } } } } });
+
+  it('reads an issue of the configured repository in any spelling, and reports whether it is open (PRD R83)', async () => {
+    const gh = fakeGh(answer('OPEN'), answer('CLOSED'));
+    const source = new GithubSource(config(), gh);
+
+    expect(await source.ticketAt('https://github.com/Acme/Widgets/issues/115/')).toEqual({ ticket: { sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: 'https://github.com/acme/widgets/issues/115', open: true } });
+    expect(gh).toHaveBeenCalledWith(ISSUE_QUERY, { owner: 'acme', name: 'widgets', number: 115 });
+    expect(await source.ticketAt('https://github.com/acme/widgets/issues/115#issuecomment-1')).toMatchObject({ ticket: { open: false } });
+  });
+
+  it('answers null without a read for a pull request, another repository or another site', async () => {
+    const source = new GithubSource(config(), fakeGh());
+
+    for (const url of ['https://github.com/acme/widgets/pull/115', 'https://github.com/acme/other/issues/115', 'https://example.com/acme/widgets/issues/115', 'not a url']) {
+      expect(await source.ticketAt(url)).toBeNull();
+    }
+  });
+
+  it('names a number the repository has no issue for, passes other gh errors through, and fails a malformed response', async () => {
+    const source = new GithubSource(config(), fakeGh({ error: 'gh: Could not resolve to an Issue with the number of 9.' }, { error: 'GitHub did not answer within 30 seconds.' }, { json: { data: { repository: { issue: null } } } }));
+
+    expect(await source.ticketAt('https://github.com/acme/widgets/issues/9')).toEqual({ error: '#9 is not an issue in acme/widgets.' });
+    expect(await source.ticketAt('https://github.com/acme/widgets/issues/9')).toEqual({ error: 'GitHub did not answer within 30 seconds.' });
+    expect(await source.ticketAt('https://github.com/acme/widgets/issues/9')).toEqual({ error: 'GitHub returned an unexpected response.' });
   });
 });
 

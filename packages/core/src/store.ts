@@ -274,6 +274,8 @@ export const MIGRATIONS = [
   ALTER TABLE sessions ADD COLUMN pendingFork TEXT;`,
   // A session the operator registered from their own window, until it ends (PRD R81).
   `ALTER TABLE sessions ADD COLUMN external INTEGER NOT NULL DEFAULT 0;`,
+  // The ad-hoc key of a ticket a ticket report moved to a source (PRD R83).
+  `ALTER TABLE tickets ADD COLUMN adhocKey TEXT;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external']);
@@ -351,7 +353,7 @@ function toParams(values: Row): Record<string, SQLInputValue> {
   return result;
 }
 
-export type NewTicket = Omit<Ticket, 'id'>;
+export type NewTicket = Omit<Ticket, 'id' | 'adhocKey'> & { adhocKey?: string | null };
 export type NewWorkItem = Omit<WorkItem, 'id'>;
 export type NewTriage = Omit<Triage, 'id'>;
 export type NewWorktree = Omit<Worktree, 'id'>;
@@ -666,7 +668,33 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    return { id: this.#insert('tickets', ticket as unknown as Row), ...ticket };
+    const row = { adhocKey: null, ...ticket };
+
+    return { id: this.#insert('tickets', row as unknown as Row), ...row };
+  }
+
+  /**
+   * Deletes a ticket that has no work item, triage, worktree or link, with its activity, such as one a poll stored before a ticket report
+   * moved an ad-hoc ticket to the same key (PRD R83).
+   */
+  deleteBareTicket(id: number): void {
+    const held = this.#db
+      .prepare('SELECT (SELECT COUNT(*) FROM workItems WHERE ticketId = :id) + (SELECT COUNT(*) FROM triages WHERE ticketId = :id) + (SELECT COUNT(*) FROM worktrees WHERE ticketId = :id) + (SELECT COUNT(*) FROM links WHERE ticketId = :id) AS n')
+      .get({ id }) as { n: number };
+
+    if (held.n > 0) {
+      throw new Error(`Ticket ${id} has work items, triages, a worktree or links.`);
+    }
+
+    this.#db.prepare('DELETE FROM changes WHERE ticketId = ?').run(id);
+    this.#db.prepare('DELETE FROM events WHERE ticketId = ?').run(id);
+    this.#db.prepare('DELETE FROM historyRevisions WHERE ticketId = ?').run(id);
+    this.#db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
+  }
+
+  /** Every ad-hoc key in use, including those of tickets a ticket report moved to a source (PRD R83). */
+  adhocKeys(): string[] {
+    return (this.#db.prepare("SELECT sourceKey AS key FROM tickets WHERE source = 'adhoc' UNION SELECT adhocKey FROM tickets WHERE adhocKey IS NOT NULL").all() as { key: string }[]).map((row) => row.key);
   }
 
   updateTicket(id: number, patch: Partial<NewTicket>): void {
