@@ -32,6 +32,17 @@ public sealed class ShellWindowsTests
     }
 
     [Fact]
+    public void Show_DockOnAMonitor_MaximizesTheWindowOnIt()
+    {
+        var windows = new ShellWindows(shell, followed) { Monitor = "HDMI-2" };
+
+        shell.Open.Add(new(43, Item));
+
+        Assert.True(windows.Show(windows.Find("gh-107-58c609")));
+        Assert.Equal(["activate 43 on HDMI-2"], shell.Calls);
+    }
+
+    [Fact]
     public void FindVsCode_WindowsFrontFirst_IsTheFrontOneOrNone()
     {
         var windows = new ShellWindows(shell, followed);

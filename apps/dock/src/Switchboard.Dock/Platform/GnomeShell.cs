@@ -70,35 +70,38 @@ public sealed class GnomeShell : IShell, IDisposable
         }, null);
     }));
 
-    public bool Activate(ulong id) => Wait(Task.Run(() =>
+    public bool Activate(ulong id, string monitor) => Wait(Task.Run(() =>
     {
         using var writer = connection.GetMessageWriter();
 
-        writer.WriteMethodCallHeader(Service, ObjectPath, Service, "Activate", "t");
+        writer.WriteMethodCallHeader(Service, ObjectPath, Service, "Activate", "ts");
         writer.WriteUInt64(id);
+        writer.WriteString(monitor);
 
         return connection.CallMethodAsync(writer.CreateMessage(), static (message, _) => message.GetBodyReader().ReadBool(), null);
     }));
 
-    public bool FullScreen() => Wait(Task.Run(() =>
+    public IReadOnlyList<string> FullScreen() => Wait(Task.Run(() =>
     {
         using var writer = connection.GetMessageWriter();
 
         writer.WriteMethodCallHeader(Service, ObjectPath, Service, "FullScreen");
 
-        return connection.CallMethodAsync(writer.CreateMessage(), static (message, _) => message.GetBodyReader().ReadBool(), null);
+        return connection.CallMethodAsync(writer.CreateMessage(), static (message, _) => ReadMonitors(message), null);
     }));
 
+    static IReadOnlyList<string> ReadMonitors(Message message) => message.GetBodyReader().ReadArrayOfString();
+
     /// <remarks>
-    /// When the extension is turned off it reports false, as nothing then says otherwise, and when it is turned on again it reports the state it
-    /// reads then.
+    /// When the extension is turned off it reports no monitors, as nothing then says otherwise, and when it is turned on again it reports the
+    /// monitors it reads then.
     /// </remarks>
-    public void WatchFullScreen(Action<bool> changed)
+    public void WatchFullScreen(Action<IReadOnlyList<string>> changed)
     {
         var reports = new FullScreenReports(changed);
-        MessageValueReader<bool> read = static (message, _) => message.GetBodyReader().ReadBool();
+        MessageValueReader<IReadOnlyList<string>> read = static (message, _) => ReadMonitors(message);
         // Completions, such as the connection closing, are not reported without ObserverFlags asking for them.
-        Action<Notification<bool>> handle = (notification) =>
+        Action<Notification<IReadOnlyList<string>>> handle = (notification) =>
         {
             if (notification.HasValue)
             {
@@ -137,7 +140,7 @@ public sealed class GnomeShell : IShell, IDisposable
                 }
                 catch (ShellException)
                 {
-                    // Turned off again before it answered; that change reports false.
+                    // Turned off again before it answered; that change reports no monitors.
                 }
             });
         };

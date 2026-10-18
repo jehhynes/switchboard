@@ -1,4 +1,4 @@
-// Lists and brings forward VS Code's windows for the Switchboard dock, and tells it when a full-screen window covers the primary monitor, because
+// Lists and brings forward VS Code's windows for the Switchboard dock, and tells it which monitors a full-screen window covers, because
 // under GNOME on Wayland only GNOME Shell can see other apps' windows (architecture.md § Dock). Exports `switchboard.Shell` on the session bus.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -17,13 +17,14 @@ const INTERFACE = `
     </method>
     <method name="Activate">
       <arg name="id" type="t" direction="in"/>
+      <arg name="monitor" type="s" direction="in"/>
       <arg name="found" type="b" direction="out"/>
     </method>
     <method name="FullScreen">
-      <arg name="fullscreen" type="b" direction="out"/>
+      <arg name="monitors" type="as" direction="out"/>
     </method>
     <signal name="FullScreenChanged">
-      <arg name="fullscreen" type="b"/>
+      <arg name="monitors" type="as"/>
     </signal>
   </interface>
 </node>`;
@@ -44,10 +45,11 @@ const service = {
   },
 
   /**
-   * Brings the VS Code window forward on its workspace, unminimized and maximized, as the dock does on Windows; false when no VS Code window has
-   * the ID, so a caller cannot bring forward other apps' windows.
+   * Brings the VS Code window forward on its workspace, unminimized and maximized on the monitor named by its connector, as the dock does on
+   * Windows; an empty or unknown connector leaves it on its monitor. False when no VS Code window has the ID, so a caller cannot bring forward
+   * other apps' windows.
    */
-  Activate(id) {
+  Activate(id, monitor) {
     const window = vsCodeWindows().find((each) => each.get_id() === id);
 
     if (window === undefined) {
@@ -56,6 +58,12 @@ const service = {
 
     Main.activateWindow(window);
 
+    const index = monitor === '' ? -1 : global.backend.get_monitor_manager().get_monitor_for_connector(monitor);
+
+    if (index >= 0 && window.get_monitor() !== index) {
+      window.move_to_monitor(index);
+    }
+
     if (window.can_maximize()) {
       window.maximize();
     }
@@ -63,9 +71,14 @@ const service = {
     return true;
   },
 
-  /** Whether a full-screen window covers the primary monitor, where the dock goes below it, as on Windows. */
+  /**
+   * The monitors a full-screen window covers, by connector, which XWayland uses as the RandR name; the dock goes below a full-screen window on
+   * its monitor, as on Windows.
+   */
   FullScreen() {
-    return global.display.get_monitor_in_fullscreen(global.display.get_primary_monitor());
+    return global.backend.get_monitor_manager().get_logical_monitors()
+      .filter((logical) => global.display.get_monitor_in_fullscreen(logical.get_number()))
+      .flatMap((logical) => logical.get_monitors().map((monitor) => monitor.get_connector()));
   },
 };
 
@@ -74,14 +87,14 @@ export default class SwitchboardExtension extends Extension {
     this.exported = Gio.DBusExportedObject.wrapJSObject(INTERFACE, service);
     this.exported.export(Gio.DBus.session, PATH);
     this.owner = Gio.bus_own_name_on_connection(Gio.DBus.session, NAME, Gio.BusNameOwnerFlags.NONE, null, null);
-    this.fullScreen = service.FullScreen();
-    // Raised for any monitor, so only a change on the primary one is sent.
+    this.fullScreen = service.FullScreen().join('\n');
+    // Also raised when nothing changed for the dock, so only a change in the monitors is sent.
     this.fullScreenWatch = global.display.connect('in-fullscreen-changed', () => {
-      const fullScreen = service.FullScreen();
+      const monitors = service.FullScreen();
 
-      if (fullScreen !== this.fullScreen) {
-        this.fullScreen = fullScreen;
-        this.exported.emit_signal('FullScreenChanged', new GLib.Variant('(b)', [fullScreen]));
+      if (monitors.join('\n') !== this.fullScreen) {
+        this.fullScreen = monitors.join('\n');
+        this.exported.emit_signal('FullScreenChanged', new GLib.Variant('(as)', [monitors]));
       }
     });
   }

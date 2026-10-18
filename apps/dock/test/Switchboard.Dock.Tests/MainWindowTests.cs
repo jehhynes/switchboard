@@ -87,6 +87,27 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void DockOnX11_KeptMonitorMissing_DocksOnThePrimaryMonitor()
+    {
+        var (window, model) = OpenOnEdge(new DockSettings { Edge = "right", Width = 300, Monitor = "HDMI-9" });
+
+        Assert.Equal(new PixelPoint(1620, 0), window.Position);
+        Assert.Equal(1280, window.Height);
+        Assert.Equal("HDMI-9", model.Settings.Monitor);
+    }
+
+    [AvaloniaFact]
+    public void ShowFullScreen_OnAnotherMonitor_KeepsTheDockAbove()
+    {
+        // The headless platform's screen has no name, so no report names it.
+        var (window, _) = OpenOnEdge(new DockSettings());
+
+        window.ShowFullScreen(["HDMI-9"]);
+
+        Assert.False(window.Below);
+    }
+
+    [AvaloniaFact]
     public void DockOnX11_TitleDraggedPastTheMiddle_DocksAtTheOtherEdgeAndKeepsIt()
     {
         var (window, model) = OpenOnEdge(new DockSettings { Edge = "left", Width = 320 });
@@ -105,6 +126,7 @@ public sealed class MainWindowTests
 
         Assert.Equal(DockEdge.Right, model.Settings.DockEdge);
         Assert.Equal(1600, window.Position.X);
+        Assert.Null(model.Settings.Monitor);
         Assert.Contains("saved", saved);
     }
 

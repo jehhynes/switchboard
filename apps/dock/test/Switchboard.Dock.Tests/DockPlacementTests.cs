@@ -30,6 +30,54 @@ public sealed class DockPlacementTests
     }
 
     [Fact]
+    public void CanReserve_MonitorsStacked_ReservesEachEdge()
+    {
+        // A 5120 by 2880 monitor above a 3840 by 2160 one that starts 1280 pixels in; the gap left of the lower one is no monitor.
+        PixelRect top = new(0, 0, 5120, 2880), bottom = new(1280, 2880, 5120, 5040);
+        PixelRect[] all = [top, bottom];
+
+        Assert.True(DockPlacement.CanReserve(DockEdge.Left, new PixelRect(0, 0, 640, 2880), top, all));
+        Assert.True(DockPlacement.CanReserve(DockEdge.Right, new PixelRect(4480, 0, 5120, 2880), top, all));
+        Assert.True(DockPlacement.CanReserve(DockEdge.Left, new PixelRect(1280, 2880, 1920, 5040), bottom, all));
+        Assert.True(DockPlacement.CanReserve(DockEdge.Right, new PixelRect(4480, 2880, 5120, 5040), bottom, all));
+    }
+
+    [Fact]
+    public void CanReserve_EdgeBetweenMonitorsSideBySide_DoesNotReserve()
+    {
+        PixelRect left = new(0, 0, 1920, 1080), right = new(1920, 0, 4480, 1440);
+        PixelRect[] all = [left, right];
+
+        Assert.False(DockPlacement.CanReserve(DockEdge.Right, new PixelRect(1600, 0, 1920, 1080), left, all));
+        Assert.False(DockPlacement.CanReserve(DockEdge.Left, new PixelRect(1920, 0, 2240, 1440), right, all));
+        Assert.True(DockPlacement.CanReserve(DockEdge.Left, new PixelRect(0, 0, 320, 1080), left, all));
+        Assert.True(DockPlacement.CanReserve(DockEdge.Right, new PixelRect(4160, 0, 4480, 1440), right, all));
+        // The right monitor's rows below the left one have no monitor to their left.
+        Assert.True(DockPlacement.CanReserve(DockEdge.Left, new PixelRect(1920, 1080, 2240, 1440), right, all));
+    }
+
+    [Fact]
+    public void WorkAreaOn_MutterWorkAreas_TakesTheMonitorsOwn()
+    {
+        // The upper monitor has a 96-pixel panel at its bottom; the lower one's work area leaves out a dock strip at its left.
+        PixelRect[] areas = [new(1912, 2880, 5120, 5040), new(0, 0, 5120, 2784)];
+
+        Assert.Equal(new PixelRect(0, 0, 5120, 2784), DockPlacement.WorkAreaOn(new PixelRect(0, 0, 5120, 2880), areas));
+        Assert.Equal(new PixelRect(1912, 2880, 5120, 5040), DockPlacement.WorkAreaOn(new PixelRect(1280, 2880, 5120, 5040), areas));
+        Assert.Null(DockPlacement.WorkAreaOn(new PixelRect(5120, 0, 7680, 1440), areas));
+        Assert.Null(DockPlacement.WorkAreaOn(new PixelRect(0, 0, 5120, 2880), []));
+    }
+
+    [Fact]
+    public void Below_FullScreenOnTheDocksMonitorOnly_GoesBelow()
+    {
+        Assert.True(DockPlacement.Below("HDMI-2", ["HDMI-1", "HDMI-2"]));
+        Assert.False(DockPlacement.Below("HDMI-2", ["HDMI-1"]));
+        Assert.False(DockPlacement.Below("HDMI-2", []));
+        Assert.False(DockPlacement.Below(null, ["HDMI-1"]));
+    }
+
+    [Fact]
     public void WidthAt_DragOfTheInnerEdge_MeasuresFromTheOuterEdge()
     {
         Assert.Equal(400, DockPlacement.WidthAt(DockEdge.Left, new PixelRect(1920, 0, 2240, 1440), 2320));

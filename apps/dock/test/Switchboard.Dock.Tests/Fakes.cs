@@ -153,16 +153,16 @@ sealed class FakeShell : Switchboard.Dock.Platform.IShell
 
     public IReadOnlyList<Switchboard.Dock.Platform.ShellWindow> Windows() => Fails ? throw new Switchboard.Dock.Platform.ShellException("The name switchboard.Shell was not provided.") : Open;
 
-    public bool Activate(ulong id)
+    public bool Activate(ulong id, string monitor)
     {
-        Calls.Add($"activate {id}");
+        Calls.Add(monitor == "" ? $"activate {id}" : $"activate {id} on {monitor}");
 
         return Fails ? throw new Switchboard.Dock.Platform.ShellException("The name switchboard.Shell was not provided.") : Open.Any((window) => window.Id == id);
     }
 
-    public bool FullScreen() => false;
+    public IReadOnlyList<string> FullScreen() => [];
 
-    public void WatchFullScreen(Action<bool> changed)
+    public void WatchFullScreen(Action<IReadOnlyList<string>> changed)
     {
     }
 }

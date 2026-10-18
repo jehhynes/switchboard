@@ -41,13 +41,19 @@ public sealed class App : Application
                 // them forward through the GNOME Shell extension when it is enabled. It runs under XWayland, so it docks as an X11 dock window.
                 var followed = new HubWindows(new VsCodeInstall());
                 var shell = GnomeShell.Connect();
-                IWindows windows = shell is null ? followed : new ShellWindows(shell, followed);
+                var shellWindows = shell is null ? null : new ShellWindows(shell, followed);
+                IWindows windows = shellWindows ?? (IWindows)followed;
 
                 window = new MainWindow(model, hub, hub, new Switcher(hub, windows, new VsCodeInstall()), docked: false, config: hub) { Title = "Switchboard" };
 
                 if (window.TryGetPlatformHandle() is { HandleDescriptor: "XID" })
                 {
                     window.DockOnX11();
+
+                    if (shellWindows is not null)
+                    {
+                        window.DockedOnX11 += (monitor) => shellWindows.Monitor = monitor;
+                    }
                 }
                 else
                 {
@@ -61,7 +67,7 @@ public sealed class App : Application
                     {
                         try
                         {
-                            shell.WatchFullScreen((fullScreen) => Dispatcher.UIThread.Post(() => window.ShowFullScreen(fullScreen)));
+                            shell.WatchFullScreen((monitors) => Dispatcher.UIThread.Post(() => window.ShowFullScreen(monitors)));
                             window.ShowFullScreen(shell.FullScreen());
                         }
                         catch (ShellException)

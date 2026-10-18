@@ -45,9 +45,12 @@ public sealed partial class MainWindow : Window
     bool moving;
     // An ordinary window, where the dock cannot reserve a screen edge (Float).
     bool floating;
-    // Docked at an edge of the primary monitor as an X11 dock window (DockOnX11), and the X11 properties that reserve its strip, when an X display opened.
+    // Docked at a monitor's edge as an X11 dock window (DockOnX11), and the X11 properties that reserve its strip, when an X display opened.
     bool edgeDocked;
     IDisposable? x11;
+    // As an X11 dock window, the RandR name of the monitor the dock is on, and the monitors a full-screen window covers.
+    string? edgeMonitor;
+    IReadOnlyList<string> fullScreen = [];
     // A floating resize's start: the pointer on the screen, the width and the window's position.
     (int X, double Width, PixelPoint Position) resizeFrom;
     // A press on a movable row, which becomes a drag of that row once the pointer moves more than DragStart vertically (PRD R73).
@@ -64,6 +67,9 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Raised with the monitor the dock docked on, where item windows are placed.</summary>
     public event Action<nint>? DockedOn;
+
+    /// <summary>As an X11 dock window, raised with the RandR name of the monitor the dock docked on, where item windows are placed.</summary>
+    public event Action<string>? DockedOnX11;
 
     /// <summary>For the XAML previewer only.</summary>
     public MainWindow()
@@ -239,27 +245,44 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Places the window in the strip at the kept edge of the primary monitor, as tall as its work area, and reserves the strip. The work area's
-    /// left and right are not used, because they leave out the dock's own strip.
+    /// Places the window in the strip at the kept edge of the kept monitor, or the primary monitor when that is missing, as tall as its work area,
+    /// and reserves the strip unless the monitor has a neighbour beyond that edge (<see cref="DockPlacement.CanReserve"/>). Only the work area's
+    /// top and bottom are used, because its left and right leave out the dock's own strip. It is Mutter's work area for that monitor: Avalonia's
+    /// comes from <c>_NET_WORKAREA</c>, one work area for all monitors, which can leave out a panel on one monitor or a top bar's rows on another.
     /// </summary>
     void PlaceOnEdge()
     {
-        if (Screens.Primary is not { } screen)
+        if ((Screens.All.FirstOrDefault((each) => model.Settings.Monitor is { } name && each.DisplayName == name) ?? Screens.Primary) is not { } screen)
         {
             return;
         }
 
-        var area = new Platform.PixelRect(screen.Bounds.X, screen.WorkingArea.Y, screen.Bounds.Right, screen.WorkingArea.Bottom);
+        var bounds = PixelRectOf(screen.Bounds);
+        var work = (OperatingSystem.IsLinux() && x11 is X11Dock monitors ? DockPlacement.WorkAreaOn(bounds, monitors.WorkAreas()) : null) ?? PixelRectOf(screen.WorkingArea);
+        var area = bounds with { Top = work.Top, Bottom = work.Bottom };
         var strip = DockPlacement.Strip(model.Settings.DockEdge, area, DockPlacement.Pixels(model.Settings.Width, screen.Scaling));
 
         Position = new PixelPoint(strip.Left, strip.Top);
         Height = strip.Height / screen.Scaling;
+        edgeMonitor = screen.DisplayName;
+        DockedOnX11?.Invoke(edgeMonitor ?? "");
 
         if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
         {
-            dock.Reserve(model.Settings.DockEdge, strip);
+            if (DockPlacement.CanReserve(model.Settings.DockEdge, strip, bounds, Screens.All.Select((each) => PixelRectOf(each.Bounds))))
+            {
+                dock.Reserve(model.Settings.DockEdge, strip);
+            }
+            else
+            {
+                dock.Release();
+            }
         }
+
+        GoBelow();
     }
+
+    static Platform.PixelRect PixelRectOf(Avalonia.PixelRect bounds) => new(bounds.X, bounds.Y, bounds.Right, bounds.Bottom);
 
     /// <summary>Places the docked window in its reserved strip.</summary>
     void Place(Native.Rect bounds)
@@ -420,19 +443,31 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Docks at the nearer edge of the monitor under the pointer when that differs from where the dock is. On Windows the pointer is read from
-    /// Windows, because the window moves under it during the drag; as an X11 dock window, the dock stays on the primary monitor and the window holds
-    /// still, so <paramref name="at"/>, the pointer on the screen, is used.
+    /// Docks at the nearer edge of the monitor under the pointer when that differs from where the dock is. The pointer is read from the system,
+    /// because the window moves under it during the drag: from Windows, or as an X11 dock window from the X server. <paramref name="at"/>, the
+    /// pointer on the screen as the window places it, is used only when there is no X display, as in tests.
     /// </summary>
     void DockAtPointer(PixelPoint at)
     {
-        if (edgeDocked && Screens.Primary is { } screen)
+        if (edgeDocked)
         {
-            var edge = DockPlacement.EdgeAt(at.X, new Platform.PixelRect(screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Right, screen.Bounds.Bottom));
-
-            if (edge != model.Settings.DockEdge)
+            if (OperatingSystem.IsLinux() && x11 is X11Dock dock && dock.Pointer() is { } pointer)
             {
-                model.SetPlacement(edge, null);
+                at = pointer;
+            }
+
+            // Null in a gap between monitors.
+            if (Screens.ScreenFromPoint(at) is not { } screen)
+            {
+                return;
+            }
+
+            var edge = DockPlacement.EdgeAt(at.X, PixelRectOf(screen.Bounds));
+            var name = screen.IsPrimary ? null : screen.DisplayName;
+
+            if (edge != model.Settings.DockEdge || name != model.Settings.Monitor)
+            {
+                model.SetPlacement(edge, name);
                 Dock();
             }
 
@@ -478,8 +513,8 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Docks at the kept edge of the primary monitor as an X11 dock window, where the dock runs under XWayland (architecture.md § Dock): it reserves
-    /// the strip, a drag of the title docks it at the nearer edge, and the grip sets its width. There is no auto-hide. Call before the window shows,
+    /// Docks at the kept edge and monitor as an X11 dock window, where the dock runs under XWayland (architecture.md § Dock): it reserves the strip,
+    /// a drag of the title docks it at the nearer edge of the monitor under the pointer, and the grip sets its width. There is no auto-hide. Call before the window shows,
     /// so the window manager maps it as a dock window.
     /// </summary>
     public void DockOnX11()
@@ -494,16 +529,37 @@ public sealed partial class MainWindow : Window
         }
 
         Opened += (_, _) => Dock();
-        // A monitor added, removed or rearranged moves the primary monitor's edge.
+        // A monitor added, removed or rearranged moves the kept monitor's edge, or the kept monitor is gone.
         Screens.Changed += (_, _) => Dock();
     }
 
-    /// <summary>A full-screen window covers the primary monitor, or no longer does: as an X11 dock window, the dock goes below it, as on Windows.</summary>
-    public void ShowFullScreen(bool fullScreen)
+    /// <summary>
+    /// The monitors, by RandR name, that a full-screen window covers: as an X11 dock window, the dock goes below a full-screen window on its own
+    /// monitor, as on Windows.
+    /// </summary>
+    public void ShowFullScreen(IReadOnlyList<string> monitors)
     {
+        fullScreen = monitors;
+        GoBelow();
+    }
+
+    /// <summary>Whether the dock is below other windows, because a full-screen window covers its monitor; for tests, where no X display is used.</summary>
+    internal bool Below { get; private set; }
+
+    void GoBelow()
+    {
+        var below = DockPlacement.Below(edgeMonitor, fullScreen);
+
+        if (below == Below)
+        {
+            return;
+        }
+
+        Below = below;
+
         if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
         {
-            dock.Below(fullScreen);
+            dock.Below(below);
         }
     }
 

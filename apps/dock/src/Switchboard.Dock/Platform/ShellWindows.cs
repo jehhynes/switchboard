@@ -10,14 +10,17 @@ public interface IShell
     /// <summary>VS Code's top-level windows, front first.</summary>
     IReadOnlyList<ShellWindow> Windows();
 
-    /// <summary>Brings the window forward on its workspace, unminimized and maximized; false when no window has the ID.</summary>
-    bool Activate(ulong id);
+    /// <summary>
+    /// Brings the window forward on its workspace, unminimized and maximized, on the monitor named by <paramref name="monitor"/>, a connector, or
+    /// where it is when that is empty or unknown; false when no window has the ID.
+    /// </summary>
+    bool Activate(ulong id, string monitor);
 
-    /// <summary>Whether a full-screen window covers the primary monitor.</summary>
-    bool FullScreen();
+    /// <summary>The monitors a full-screen window covers, by connector, which is the monitor's RandR name under XWayland.</summary>
+    IReadOnlyList<string> FullScreen();
 
-    /// <summary>Calls <paramref name="changed"/>, on another thread, each time a full-screen window starts or stops covering the primary monitor.</summary>
-    void WatchFullScreen(Action<bool> changed);
+    /// <summary>Calls <paramref name="changed"/>, on another thread, with the monitors a full-screen window covers each time they change.</summary>
+    void WatchFullScreen(Action<IReadOnlyList<string>> changed);
 }
 
 /// <summary>A window as the shell names it: Mutter's window ID and its title.</summary>
@@ -40,6 +43,9 @@ public sealed class ShellWindows(IShell shell, IWindows fallback) : IWindows
 
     public bool Raises => !fellBack || fallback.Raises;
 
+    /// <summary>The connector of the monitor the dock is on, where an item window is maximized; empty leaves the window on its monitor.</summary>
+    public string Monitor { get; set; } = "";
+
     public nint Find(string name) => Answer((windows) => windows.FirstOrDefault((window) => DockWindow.NameOf(window.Title) == name).Id, () => fallback.Find(name));
 
     public bool Show(nint window)
@@ -53,7 +59,7 @@ public sealed class ShellWindows(IShell shell, IWindows fallback) : IWindows
 
         try
         {
-            return shell.Activate((ulong)window);
+            return shell.Activate((ulong)window, Monitor);
         }
         catch (ShellException)
         {

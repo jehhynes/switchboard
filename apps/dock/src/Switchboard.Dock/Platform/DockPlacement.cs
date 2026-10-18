@@ -21,6 +21,10 @@ public static class DockPlacement
     /// <summary>The edge a header dropped at <paramref name="x"/> docks to: the nearer of the monitor's left and right edges.</summary>
     public static DockEdge EdgeAt(int x, PixelRect monitor) => x < (monitor.Left + monitor.Right) / 2 ? DockEdge.Left : DockEdge.Right;
 
+    /// <summary>The work area among <paramref name="areas"/> that lies within <paramref name="monitor"/>; null when none does.</summary>
+    public static PixelRect? WorkAreaOn(PixelRect monitor, IEnumerable<PixelRect> areas) =>
+        areas.Cast<PixelRect?>().FirstOrDefault((area) => area is { } each && each.Width > 0 && each.Height > 0 && each.Left >= monitor.Left && each.Right <= monitor.Right && each.Top >= monitor.Top && each.Bottom <= monitor.Bottom);
+
     /// <summary>The strip <paramref name="width"/> pixels wide at <paramref name="edge"/> of <paramref name="area"/>, as tall as the area.</summary>
     public static PixelRect Strip(DockEdge edge, PixelRect area, int width) =>
         edge == DockEdge.Left ? area with { Right = area.Left + width } : area with { Left = area.Right - width };
@@ -32,6 +36,20 @@ public static class DockPlacement
     public static nint[] Strut(DockEdge edge, PixelRect strip, int screenWidth) => edge == DockEdge.Left
         ? [strip.Right, 0, 0, 0, strip.Top, strip.Bottom - 1, 0, 0, 0, 0, 0, 0]
         : [0, screenWidth - strip.Left, 0, 0, 0, 0, strip.Top, strip.Bottom - 1, 0, 0, 0, 0];
+
+    /// <summary>
+    /// Whether an X11 strut can reserve <paramref name="strip"/> at <paramref name="edge"/> of <paramref name="monitor"/>. A strut runs from the X
+    /// screen's edge to the strip, so at an edge between monitors it would also reserve the part of <paramref name="others"/> it crosses.
+    /// </summary>
+    public static bool CanReserve(DockEdge edge, PixelRect strip, PixelRect monitor, IEnumerable<PixelRect> others)
+    {
+        var strut = edge == DockEdge.Left ? strip with { Left = int.MinValue } : strip with { Right = int.MaxValue };
+
+        return !others.Any((other) => other != monitor && other.Left < strut.Right && strut.Left < other.Right && other.Top < strut.Bottom && strut.Top < other.Bottom);
+    }
+
+    /// <summary>Whether the dock on <paramref name="monitor"/>, a RandR name, goes below other windows: a full-screen window covers that monitor.</summary>
+    public static bool Below(string? monitor, IEnumerable<string> fullScreen) => monitor is not null && fullScreen.Contains(monitor);
 
     /// <summary>The width the inner edge of <paramref name="strip"/> has when dragged to <paramref name="x"/>; the outer edge stays.</summary>
     public static int WidthAt(DockEdge edge, PixelRect strip, int x) => edge == DockEdge.Left ? x - strip.Left : strip.Right - x;
