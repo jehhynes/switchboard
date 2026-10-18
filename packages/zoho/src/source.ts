@@ -126,8 +126,8 @@ export class ZohoSource implements Source {
         for (const ticket of rows) {
           const holder = this.classify(ticket.assigneeId, teamOf);
 
-          // Another engineer's ticket is neither assigned nor in the pool, so it is left out.
-          if (ticket.cf?.[this.config.escalationField] === this.config.escalationValue && holder !== 'engineer') {
+          // Other engineers' tickets are retained for volume, without becoming actionable.
+          if (ticket.cf?.[this.config.escalationField] === this.config.escalationValue) {
             // The customer has waited since their last message; a ticket without one falls back to its creation.
             const waiting = Date.parse(ticket.customerResponseTime ?? ticket.createdTime ?? '');
 
@@ -138,15 +138,17 @@ export class ZohoSource implements Source {
               title: ticket.subject,
               url: ticket.webUrl,
               assigned: holder === 'mine',
-              pool: holder !== 'mine',
+              pool: holder === 'none' || holder === 'support',
+              inQueue: true,
+              assigneeId: ticket.assigneeId,
               sortAt: Number.isNaN(waiting) ? null : waiting,
-              enteredAt: await this.enteredScope(ticket),
+              enteredAt: holder === 'engineer' ? null : await this.enteredScope(ticket),
             });
           }
         }
 
         if (rows.length < PAGE) {
-          const kept = new Set(tickets.map((ticket) => ticket.sourceId));
+          const kept = new Set(tickets.filter((ticket) => ticket.assigned || ticket.pool).map((ticket) => ticket.sourceId));
 
           for (const id of this.entered.keys()) {
             if (!kept.has(id)) {

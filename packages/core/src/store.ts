@@ -276,9 +276,16 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN external INTEGER NOT NULL DEFAULT 0;`,
   // The ad-hoc key of a ticket a ticket report moved to a source (PRD R83).
   `ALTER TABLE tickets ADD COLUMN adhocKey TEXT;`,
+  `ALTER TABLE tickets ADD COLUMN inQueue INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE tickets ADD COLUMN assigneeId TEXT;
+   ALTER TABLE sourceStates ADD COLUMN volumeStartedAt INTEGER;
+   ALTER TABLE sourceStates ADD COLUMN volumeLastAt INTEGER;
+   ALTER TABLE sourceStates ADD COLUMN volumeInterval INTEGER;
+   ALTER TABLE sourceStates ADD COLUMN volumeTimezone TEXT NOT NULL DEFAULT 'America/New_York';
+   CREATE INDEX currentQueue ON tickets(source, inQueue, assigned, pool);`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external']);
+const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -668,7 +675,7 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    const row = { adhocKey: null, ...ticket };
+    const row = { adhocKey: null, inQueue: false, assigneeId: null, ...ticket };
 
     return { id: this.#insert('tickets', row as unknown as Row), ...row };
   }
@@ -716,6 +723,44 @@ export class Store {
 
   tickets(source: string): Ticket[] {
     return this.#all('SELECT * FROM tickets WHERE source = ? ORDER BY id', source);
+  }
+
+  currentTickets(source: string): Ticket[] {
+    return this.#all('SELECT * FROM tickets WHERE source = ? AND (inQueue = 1 OR assigned = 1 OR pool = 1) ORDER BY id', source);
+  }
+
+  volumePoll(source: string, at: number, interval: number): void {
+    const previous = this.#one<{ volumeLastAt: number | null; volumeInterval: number | null }>('SELECT volumeLastAt, volumeInterval FROM sourceStates WHERE name = ?', source);
+    if (previous?.volumeLastAt != null && at - previous.volumeLastAt > 3 * (previous.volumeInterval ?? interval)) {
+      this.#db.prepare("INSERT INTO events(at, type, actor, detail) VALUES (?, 'volume-gap', 'hub', ?)").run(at, JSON.stringify({ source, from: previous.volumeLastAt, to: at }));
+    }
+    this.#db.prepare(`INSERT INTO sourceStates(name, enabled, volumeStartedAt, volumeLastAt, volumeInterval) VALUES (?, 1, ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET volumeStartedAt = COALESCE(volumeStartedAt, excluded.volumeStartedAt), volumeLastAt = excluded.volumeLastAt, volumeInterval = excluded.volumeInterval`).run(source, at, at, interval);
+  }
+
+  volumeWorked(ticketId: number, sessionId: string, at: number): void {
+    this.#db.prepare("INSERT INTO events(at, type, actor, ticketId, detail) VALUES (?, 'volume-worked', 'hub', ?, ?)").run(at, ticketId, JSON.stringify({ sessionId }));
+    this.#bump(ticketId);
+  }
+
+  /** Ticket-report identity consolidation preserves queue evidence on the surviving ticket. */
+  transferVolume(from: number, to: number): void {
+    const ticket = this.ticket(from)!;
+    this.#db.prepare("UPDATE changes SET ticketId = ?, entityId = CASE WHEN entity = 'ticket' THEN ? ELSE entityId END WHERE ticketId = ?").run(to, String(to), from);
+    this.#db.prepare('UPDATE events SET ticketId = ? WHERE ticketId = ?').run(to, from);
+    this.#db.prepare('UPDATE tickets SET inQueue = ?, assigneeId = ? WHERE id = ?').run(ticket.inQueue ? 1 : 0, ticket.assigneeId ?? null, to);
+    this.#bump(to);
+  }
+
+  volumeData(): import('./volume.js').VolumeData {
+    return {
+      sources: this.#db.prepare('SELECT name AS source, volumeStartedAt AS startedAt, volumeLastAt AS lastAt, volumeInterval AS interval, volumeTimezone AS timezone FROM sourceStates WHERE volumeStartedAt IS NOT NULL').all() as unknown as import('./volume.js').VolumeSource[],
+      tickets: this.#all<Ticket>("SELECT * FROM tickets WHERE source IN ('zoho', 'forum')"),
+      changes: this.#db.prepare(`SELECT c.ticketId, e.at, c.fields FROM changes c JOIN events e ON e.id = c.eventId JOIN tickets t ON t.id = c.ticketId
+        WHERE c.entity = 'ticket' AND t.source IN ('zoho', 'forum') AND (json_type(c.fields, '$.inQueue') IS NOT NULL OR json_type(c.fields, '$.assigned') IS NOT NULL) ORDER BY e.at, c.id`).all().map((r) => ({ ticketId: r['ticketId'] as number, at: r['at'] as number, fields: JSON.parse(r['fields'] as string) as Record<string, [unknown, unknown]> })),
+      worked: this.#db.prepare("SELECT ticketId, at FROM events WHERE type = 'volume-worked' ORDER BY at, id").all() as unknown as { ticketId: number; at: number }[],
+      gaps: this.#db.prepare("SELECT detail FROM events WHERE type = 'volume-gap' ORDER BY at, id").all().map((r) => JSON.parse(r['detail'] as string) as { source: string; from: number; to: number }),
+    };
   }
 
   insertWorkItem(item: NewWorkItem): WorkItem {
@@ -932,7 +977,8 @@ export class Store {
 
   /** Forgets the state of every source not in `names`, so a source removed and added again starts off (PRD R3). */
   keepSourceStates(names: string[]): void {
-    this.#db.prepare(`DELETE FROM sourceStates WHERE name NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names));
+    this.#db.prepare(`UPDATE sourceStates SET enabled = 0 WHERE name NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names));
+    this.#db.prepare(`DELETE FROM sourceStates WHERE volumeStartedAt IS NULL AND name NOT IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names));
   }
 
   /** When the activity log began; earlier work shows only as the facts its migration reconstructed. */

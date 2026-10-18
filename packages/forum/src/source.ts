@@ -140,7 +140,7 @@ export class ForumSource implements Source {
     private readonly query: Query,
   ) {}
 
-  /** Open topics in the forum: yours are assigned, unassigned ones are the pool, and anyone else's are left out (PRD R5, R47). */
+  /** All open topics; only yours and the unassigned pool are actionable (PRD R5, R47). */
   async poll(): Promise<PollResult> {
     const result = await this.query(
       'SELECT t.Id, t.Title, t.`Key`, t.AssigneeId, t.CreatedUtc, lp.CreatedUtc AS LastPublicPostUtc FROM Thread t ' +
@@ -165,7 +165,7 @@ export class ForumSource implements Source {
       return opened;
     }
 
-    for (const row of kept) {
+    for (const row of result.rows) {
       const assignee = row['AssigneeId'] === null || row['AssigneeId'] === undefined ? null : String(row['AssigneeId']);
 
       tickets.push({
@@ -174,11 +174,13 @@ export class ForumSource implements Source {
         sourceId: null,
         title: String(row['Title'] ?? ''),
         url: `https://forum.example.com/t/forum/${String(row['Key'] ?? '')}`,
-        assigned: assignee !== null,
+        assigned: assignee === this.config.userId,
         pool: assignee === null,
+        inQueue: true,
+        assigneeId: assignee,
         // The last public post is how long the asker has waited; a topic without one falls back to its creation.
         sortAt: utc(row['LastPublicPostUtc']) ?? utc(row['CreatedUtc']),
-        enteredAt: opened.at.get(String(row['Id'])) ?? utc(row['CreatedUtc']),
+        enteredAt: assignee !== null && assignee !== this.config.userId ? null : opened.at.get(String(row['Id'])) ?? utc(row['CreatedUtc']),
       });
     }
 

@@ -64,25 +64,27 @@ const search = fixture('search') as { data: { ticketNumber: string; id: string; 
 const support = search.data.filter((row) => row.cf.cf_queue === 'Support');
 
 describe('ZohoSource.poll', () => {
-  it('lists Support tickets by ticket number with the internal ID: none of them yours, the unclaimed ones in the pool, and another engineer’s left out', async () => {
+  it('retains all Support tickets without history reads for other engineers', async () => {
     const get = desk();
     const result = await new ZohoSource(CONFIG, get).poll();
 
     expect(get.mock.calls.map(([path]) => path)).toEqual(['/teams', '/tickets/search?status=Open&limit=100&from=1', ...support.slice(0, 3).map((row) => `/tickets/${row.id}/history?from=1&limit=100`)]);
     expect(search.data).toHaveLength(17);
-    // Recorded live: three Support tickets held by support agents, so in the pool, and two by an engineer, so left out.
+    // Recorded live: three Support tickets held by support agents, so in the pool, and two by an engineer, retained without pool eligibility.
     expect(result).toEqual({
-      tickets: support.slice(0, 3).map((row) => ({
+      tickets: support.map((row, index) => ({
         sourceKey: row.ticketNumber,
         ref: `#${row.ticketNumber}`,
         sourceId: row.id,
         title: `Ticket ${row.ticketNumber}`,
         url: `https://desk.example.test/tickets/${row.ticketNumber}`,
         assigned: false,
-        pool: true,
+        pool: index < 3,
+        inQueue: true,
+        assigneeId: row.assigneeId,
         sortAt: Date.parse(row.customerResponseTime ?? row.createdTime),
         // The recorded ticket's history returns it to Open at 00:53; the others have none, so they count from creation.
-        enteredAt: row.id === (fixture('ticket') as { id: string }).id ? Date.parse('2026-10-03T00:53:39.000Z') : Date.parse(row.createdTime),
+        enteredAt: index >= 3 ? null : row.id === (fixture('ticket') as { id: string }).id ? Date.parse('2026-10-03T00:53:39.000Z') : Date.parse(row.createdTime),
       })),
     });
     expect(support).toHaveLength(5);
@@ -112,7 +114,7 @@ describe('ZohoSource.poll', () => {
     const mine = { json: { data: [{ id: '1', ticketNumber: '9', subject: 's', webUrl: 'u', assigneeId: SELF, cf: { cf_queue: 'Support' } }] } };
 
     expect(await new ZohoSource(CONFIG, desk({ '/tickets/search?status=Open&limit=100&from=1': mine })).poll()).toEqual({
-      tickets: [{ sourceKey: '9', ref: '#9', sourceId: '1', title: 's', url: 'u', assigned: true, pool: false, sortAt: null, enteredAt: null }],
+      tickets: [{ sourceKey: '9', ref: '#9', sourceId: '1', title: 's', url: 'u', assigned: true, pool: false, inQueue: true, assigneeId: SELF, sortAt: null, enteredAt: null }],
     });
   });
 

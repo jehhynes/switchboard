@@ -410,7 +410,7 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Support Volume", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
     }
 
     [AvaloniaFact]

@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window
     readonly bool docked;
     readonly IConfigHub? config;
     SettingsWindow? settingsWindow;
+    VolumeWindow? volumeWindow;
     AppBar? appBar;
     // The strip the docked window last took, in physical pixels.
     Native.Rect? placed;
@@ -1214,6 +1215,7 @@ public sealed partial class MainWindow : Window
         Item("New Ad-hoc Session…", NewAdhoc, AddGlyph),
         Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
         Item("Open Settings", OpenSettings, SettingsGlyph),
+        Item("Support Volume", OpenVolume),
         Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
     ];
 
@@ -1282,6 +1284,25 @@ public sealed partial class MainWindow : Window
         };
         window.Show();
         await editor.Load();
+    }
+
+    async Task OpenVolume()
+    {
+        if (volumeWindow is not null)
+        {
+            volumeWindow.Activate();
+            return;
+        }
+        if (hub is not IVolumeHub volume)
+        {
+            model.Status = "Support volume needs the hub.";
+            return;
+        }
+        var window = new VolumeWindow(volume, actions);
+        volumeWindow = window;
+        window.Closed += (_, _) => volumeWindow = null;
+        window.Show();
+        await window.Load();
     }
 
     /// <summary>The open Settings window, or null.</summary>

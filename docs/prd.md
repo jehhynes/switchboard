@@ -21,7 +21,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 ## Non-goals
 
 - Writing to sources: no status moves, comments, assignments or labels. Only the skills that sessions run write, including the claim when the operator picks a pool ticket (R48).
-- Other people's work, team views, reporting, accounts or shared state.
+- Managing other people's work, team views, accounts or shared state. Support volume (R84) retains the whole observed active queue for weekly counts alongside the operator's workload.
 - Remote, cloud or multi-machine operation. One hub runs per machine.
 - Changing git state: no commits, branches, or creating, cleaning up or removing worktrees. Read-only git queries that validate and link worktrees are allowed.
 - Answering a session's permission prompts or questions for the operator.
@@ -260,6 +260,13 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - R43. On startup the hub reconciles sessions recorded as active against the Claude roster and Codex's run records. The hub stays running while any session is active, so sessions can always report, and while a debrief runs (R55).
 - R55. Friction debriefs. With the `sessions.debriefs` setting on (it is off by default), the hub asks each of its Claude and Codex sessions what slowed it down, for the operator's friction-review skill. It asks as soon as the session's work item is done, otherwise 45 minutes after the session's last turn, in case the operator resumes it; it does not ask 60 minutes or more after that turn, when the prompt cache has expired. It asks only when the session did at least 10 tool calls since its last debrief, and in a fork that leaves the session unchanged. A session continued by a fork (R78) is asked about the fork, including the turns it copied, which may already have been asked about. After each session's debrief it asks each Codex thread the session delegated to through agent-delegate in that work, about the thread's turns since its own last debrief. The answers and the record of what was asked are the files Ground Control wrote, so a session Ground Control asked is not asked again about the same work. A failed debrief is reported in the hub log, not on a work item, and is not tried again; the session's later work is asked about with it. The hub does not stay up for a debrief that is not yet due.
 
+## Support volume
+
+- R84. **Observed Support volume.** The dock's Support Volume command opens a weekly table for the last 12 Monday–Sunday weeks in the persisted reporting timezone, initially America/New_York. All, Zoho and Forum filters show distinct tickets seen, entered/returned to the active queue, left the active queue, open at the boundary, assigned to the operator during the week, worked by the operator in Switchboard, and held by the operator at the boundary. Each count opens its ticket list with source links and observed times. A ticket can count in several columns; distinct-ticket activity counts do not arithmetically reconcile. Linked Zoho and Forum records remain separate tickets.
+- Both Support sources retain all tickets their existing open-queue read returns, including other engineers' tickets. Queue membership is independent of assigned/pool eligibility: retention alone creates no work item, triage, session, notification or dock row. Queue-only tickets need no scope-history read. Queue and assignment changes remain in ticket history after the operational work item is deleted. Identity consolidation transfers that history. A successful task-session start records a ticket-level worked fact that also survives work-item deletion; setup, triage and failed starts do not count. Task sessions started by Approve do count.
+- The first successful full poll establishes a baseline, not an arrival spike. Counts use observation times, not source scope-entry times. Failed/incomplete polls change no queue state. The table shows tracking start and latest successful poll per source; untracked weeks show unavailable, the current and first partial weeks show partial, and gaps longer than three polling intervals mark affected weeks partial, including after hub restarts. Boundary counts use the last observed state. Combined coverage is partial until both sources have tracking data. Disabling or removing a source retains its volume history.
+- This measures the active queue going forward. Deferred and other deferrals can leave and re-enter it; leaving is not proof of resolution. Worked means a task started in Switchboard, not all manual work. Activity entirely between polls or while the hub is off can be missed. The hub keeps its existing lifetime. There is no historical backfill, separate collector, chart or export in this version.
+
 ## Delivery
 
 Each step ends with `npm run verify` passing and the PRD's affected requirements marked as implemented.
@@ -276,6 +283,7 @@ Each step ends with `npm run verify` passing and the PRD's affected requirements
 9. **Zoho Desk source** (R4, R26, R46) and `support:*` playbooks.
 10. **Forum source** (R5).
 11. **Dock** (R71), in parts: the dock and item windows; moving the dock to another edge or monitor; the panel's other controls in the dock; item windows laid out alike; then the dock replaces the panel.
+12. **Support volume** (R84): retain all observed active Support tickets and their assignment history; show weekly queue volume and the operator's workload without backfill or new source reads.
 
 Steps 1–7 deliver GitHub and ad-hoc end to end: R1–R4, R6–R25, R27–R45. Zoho Desk and Forum port the operator's Support board in `D:\git\support`.
 

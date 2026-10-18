@@ -58,6 +58,8 @@ export function nothingNew(handled: HandledWork | null, activityAt: number | nul
 
 /** One ticket from a complete poll. A ticket of the source missing from the poll is not in the assigned state. */
 export interface PolledTicket {
+  inQueue?: boolean;
+  assigneeId?: string | null;
   sourceKey: string;
   /** The reference people use, such as `#123` or `T456`; the source sets it (`{{ticket.ref}}`). */
   ref: string;
@@ -541,6 +543,9 @@ class Flow {
 
   private poll(source: string, polled: PolledTicket[]): void {
     const seen = new Set<string>();
+    if (source === 'zoho' || source === 'forum') {
+      this.store.volumePoll(source, this.now, (this.context.settings.sources[source]?.pollIntervalSeconds ?? 300) * 1000);
+    }
 
     for (const entry of polled) {
       seen.add(entry.sourceKey);
@@ -553,6 +558,8 @@ class Flow {
         url: entry.url,
         assigned: entry.assigned,
         pool: entry.pool,
+        inQueue: (source === 'zoho' || source === 'forum') && entry.inQueue === true,
+        assigneeId: entry.assigneeId ?? null,
         sortAt: entry.sortAt,
         scopeAt: this.scopeAt(known, entry),
         lastPolledAt: this.now,
@@ -582,9 +589,9 @@ class Flow {
       }
     }
 
-    for (const ticket of this.store.tickets(source)) {
-      if (!seen.has(ticket.sourceKey) && (ticket.assigned || ticket.pool)) {
-        this.store.updateTicket(ticket.id, { assigned: false, pool: false, lastPolledAt: this.now, ...UNSNOOZED });
+    for (const ticket of this.store.currentTickets(source)) {
+      if (!seen.has(ticket.sourceKey)) {
+        this.store.updateTicket(ticket.id, { assigned: false, pool: false, inQueue: false, assigneeId: null, lastPolledAt: this.now, ...UNSNOOZED });
 
         if (ticket.pool) {
           this.leftPool(ticket.id);
@@ -798,6 +805,7 @@ class Flow {
         throw new Refusal(`Switchboard already has ${event.source} ${event.sourceKey}.`);
       }
 
+      this.store.transferVolume(existing.id, ticket.id);
       this.store.deleteBareTicket(existing.id);
     }
 
@@ -1176,6 +1184,11 @@ class Flow {
       const state = startPrompt ? { state: 'waiting' as const, stateDetail: START_PROMPT } : { state: 'running' as const };
 
       this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now });
+      const item = this.store.workItem(session.workItemId)!;
+      const ticket = this.store.ticket(item.ticketId)!;
+      if (session.kind === 'task' && (ticket.source === 'zoho' || ticket.source === 'forum')) {
+        this.store.volumeWorked(ticket.id, session.id, this.now);
+      }
     }
   }
 

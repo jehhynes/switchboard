@@ -504,3 +504,13 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 These mechanisms are planned but not yet verified for Switchboard:
 
 - A real pick whose `/support-process` task session claims the pool ticket through `support-bind`. By the operator's rule no test claims a case; the operator makes the first real pick.
+
+## M41. Observed Support volume retention
+
+- **Date:** 2026-10-18.
+- **Versions:** Node 24.14.0, VS Code 1.142.0 (`6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1`), Claude CLI 2.1.301. No agent session or hook was used for these source/volume checks.
+- **Live source acceptance:** built Zoho and Forum adapters polled read-only into `.wip/support-live-home/switchboard.db`, isolated from the operator's database. Flow applied the polls without executing any returned actions. Zoho returned 17 active Support tickets: 16 pool, 0 assigned to the operator, 1 held by another engineer. Forum returned 3: 2 pool, 0 assigned to the operator, 1 held by another engineer. Forum's first attempt failed because the VPN was disconnected; after the operator connected it, the poll passed. No ticket was picked, claimed or written to, and no triage or task session ran.
+- **Results:** the two queue-only tickets had no work items. Each source's initial poll produced zero arrivals and retained every returned ticket. An isolated loopback hub serving `/volume` returned 401 without authorization and 200 with its token, with 12 weekly rows. Zoho and Forum logs are `.wip/support-live.log` and `.wip/support-live-forum.log`.
+- **Presentation:** an isolated native preview of the production `VolumeWindow`, using the scratch hub and database, displayed 20 tickets in the current partial week and unavailable previous weeks. Visual inspection found and corrected unwrapped help text; the corrected table and coverage text were inspected again. Count clicks, drill-down links, source filters, delayed refreshes and failure states are covered by Avalonia headless tests; the native preview was used for visual inspection.
+- **Automated checks:** `npm run verify` and `npm run test:integration`; final outputs are kept in `.wip/support-verify.log` and `.wip/support-integration.log`. Core tests cover retention, baseline and DST counts; source fixtures assert no additional scope-history/audit reads for other engineers. Integration uses the isolated real VS Code host.
+- **Current use:** R84; the existing source polls and ticket history provide observed weekly volume. These checks do not establish complete historical source coverage or activity while the hub is off.

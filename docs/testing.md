@@ -73,3 +73,7 @@ Record each run in [mechanics.md](mechanics.md) with the date, the Claude CLI, V
 - Assert counts where an empty result would pass a contents check.
 - Make fakes fail on unexpected calls.
 - Never run a skill that claims or writes to Zoho Desk or Forum in a test or a live check: no `/support-bind`, `/support-claim`, `/support-process`, Pick, or Approve on a Support work item. Test picks with fake runners. The operator makes the first real pick.
+
+## Support volume
+
+Core tests verify observed queue retention, initial baseline, assignment transfers, work-item deletion, identity consolidation, failed polls, coverage gaps, distinct-ticket counts and timezone/DST boundaries. Source fixtures verify all fetched Support tickets are retained with no additional history/audit reads for other engineers. Hub tests cover filter validation and bounded detail responses; dock headless tests cover counts, unavailable weeks, source filtering, ticket links and failed refreshes. Live acceptance uses isolated storage and read-only source polling; it must not pick or start any Support ticket.

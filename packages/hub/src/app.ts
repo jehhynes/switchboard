@@ -20,6 +20,7 @@ import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
 import { WindowQueue } from './windowQueue.js';
+import { volumeReply } from './volume.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 
@@ -322,6 +323,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
+      '/volume': async (body) => volumeReply(store, deps.now(), body),
       '/claim': async (body) => {
         if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean')) {
           return { status: 400, body: { error: 'Expected {folder, workspace?, focused?}.' } };

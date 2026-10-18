@@ -312,6 +312,12 @@ class Builder {
         case 'ticket.pool':
           lines.push(after === true ? 'Entered the pool' : 'Left the pool');
           break;
+        case 'ticket.inQueue':
+          if (before === true || after === true) lines.push(after === true ? 'Observed in the active Support queue' : 'Observed outside the active Support queue');
+          break;
+        case 'ticket.assigneeId':
+          if (before !== null || after !== null) lines.push(`Source assignee: ${str(before) || 'none'} → ${str(after) || 'none'}`);
+          break;
         case 'ticket.sourceId':
           if (this.history.ticket.source === 'schedule') {
             lines.push(after === null ? 'The schedule was removed from settings.json' : `Runs ${str(after)}`);
@@ -467,6 +473,8 @@ class Builder {
     const session = this.sessionName(event.sessionId);
 
     switch (event.type) {
+      case 'volume-worked':
+        return { category: 'ticket', icon: 'play', text: 'Worked in Switchboard' };
       case 'reconstructed':
         return this.reconstructed(event, detail);
       case 'report':
