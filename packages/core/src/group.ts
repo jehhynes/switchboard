@@ -5,6 +5,14 @@ import type { DoneReason, Session, WorkItem } from './model.js';
 /** Dock groups (PRD R27): Blocked on you, Ready for review, In progress, Unstarted and Done; Snoozed is the dock's own. */
 export type Group = 'blocked' | 'review' | 'progress' | 'unstarted' | 'done';
 
+/** The state detail of a `waiting` Claude session that waits on a prompt before it starts, such as approving the project's MCP servers (PRD R41). */
+export const START_PROMPT = 'start-prompt';
+
+/** A session waiting on a prompt before it starts, which the operator answers by attaching to it (PRD R41). */
+export function waitsToStart(session: Pick<Session, 'state' | 'stateDetail'> | null): boolean {
+  return session !== null && session.state === 'waiting' && session.stateDetail === START_PROMPT;
+}
+
 type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: Pick<Session, 'state' | 'outcome'>[] };
 
 /** The latest session while it has not ended; an earlier session left open idle in VS Code is not the work item's (PRD R17). */

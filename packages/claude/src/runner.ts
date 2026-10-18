@@ -1,3 +1,4 @@
+import { START_PROMPT } from '@switchboard/core';
 import type { LiveState, ObservedFork, ObservedSession, StartAction, StartResult } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { failureOf } from './exec.js';
@@ -97,7 +98,11 @@ export interface StartDeps {
   now(): number;
 }
 
-/** Starts a background session and waits for its roster entry to have a pid. Claude's own message explains a refusal, such as an untrusted directory. */
+/**
+ * Starts a background session and waits for its roster entry to have a pid. Claude's own message explains a refusal, such as an untrusted
+ * directory. A session waiting on a prompt before it starts, such as approving the project's MCP servers, is listed `blocked` with no pid until
+ * the operator answers (mechanics M41). Two such reads in a row start it as waiting on that prompt, which the operator answers by attaching.
+ */
 export async function startSession(claudePath: string, action: StartAction, deps: StartDeps): Promise<StartResult> {
   const launched = await deps.exec(claudePath, startArgs(action), { cwd: action.cwd, timeoutMs: LAUNCH_TIMEOUT_MS });
 
@@ -111,6 +116,8 @@ export async function startSession(claudePath: string, action: StartAction, deps
     return { error: `Claude started a session without printing its ID: ${launched.stdout.trim()}` };
   }
 
+  let blockedReads = 0;
+
   for (const deadline = deps.now() + START_TIMEOUT_MS; deps.now() < deadline; await deps.sleep(ROSTER_POLL_MS)) {
     const roster = await readRoster(claudePath, deps.exec);
     const entry = 'entries' in roster ? entryFor(roster.entries, shortId) : undefined;
@@ -118,6 +125,12 @@ export async function startSession(claudePath: string, action: StartAction, deps
     // A new entry has no pid for its first seconds (mechanics M5); the session is alive once it does.
     if (entry?.pid !== undefined) {
       return { shortId, nativeSessionId: entry.sessionId };
+    }
+
+    blockedReads = entry?.state === 'blocked' ? blockedReads + 1 : 0;
+
+    if (entry !== undefined && blockedReads === 2) {
+      return { shortId, nativeSessionId: entry.sessionId, startPrompt: true };
     }
   }
 
@@ -135,11 +148,18 @@ export async function stopSession(claudePath: string, shortId: string, exec: Exe
  * The roster event for Switchboard's sessions: those whose roster entry holds a process, with the state their hook
  * marker gives, else the roster's. A listed entry without a pid holds no process (GC M33).
  */
-export function observe(entries: RosterEntry[], sessions: { id: string; shortId: string | null }[], markers: ReadonlyMap<string, Marker>): ObservedSession[] {
+export function observe(entries: RosterEntry[], sessions: { id: string; shortId: string | null; state?: string; stateDetail?: string | null }[], markers: ReadonlyMap<string, Marker>): ObservedSession[] {
   const observed: ObservedSession[] = [];
 
   for (const session of sessions) {
     const entry = session.shortId === null ? undefined : entryFor(entries, session.shortId);
+
+    // A session that started waiting on a prompt has no pid until the operator answers it. The roster lists a gone process the same way, so
+    // only a session that started so is taken to wait (mechanics M41).
+    if (entry !== undefined && entry.pid === undefined && entry.state === 'blocked' && session.state === 'waiting' && session.stateDetail === START_PROMPT) {
+      observed.push({ sessionId: session.id, state: 'waiting', detail: START_PROMPT, interactive: false });
+      continue;
+    }
 
     if (entry?.pid === undefined) {
       continue;

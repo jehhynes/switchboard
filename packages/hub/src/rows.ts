@@ -1,4 +1,4 @@
-import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion } from '@switchboard/core/group';
+import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
 import type { Provider } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -77,6 +77,11 @@ export function mainControl(item: WorkItemView): Control | null {
   }
 
   const controls = controlsOf(item);
+
+  // A prompt before the session starts is answered by attaching to it (PRD R41).
+  if (isBackground(activeSession(item)) && waitsToStart(activeSession(item))) {
+    return controls.find((control) => control.label === 'Open in terminal') ?? null;
+  }
 
   // A question the session waits on comes before an approval it reported earlier, as the row's mark does.
   if (waitsInBackground(activeSession(item))) {
@@ -253,9 +258,10 @@ function isBackground(session: SessionView | null): session is SessionView & { s
 /**
  * A session waiting on the operator in its background process, which Open in Claude or Codex stops and opens in a tab (PRD R70). While a fork
  * waits for its release (PRD R78) Stop is offered instead, as Open would open the retired copy; a hub older than forks sends no `pendingFork`.
+ * A session waiting on a prompt before it starts has nothing to open in a tab yet (PRD R41).
  */
 function waitsInBackground(session: SessionView | null): session is SessionView & { shortId: string; nativeSessionId: string } {
-  return isBackground(session) && session.state === 'waiting' && session.nativeSessionId !== null && (session.pendingFork ?? null) === null;
+  return isBackground(session) && session.state === 'waiting' && !waitsToStart(session) && session.nativeSessionId !== null && (session.pendingFork ?? null) === null;
 }
 
 /**
@@ -482,6 +488,13 @@ export function sourceLabel(source: string): string {
 /** The ticket's source and key, such as `gh 18941`. */
 export function ticketKey(ticket: { source: string; sourceKey: string }): string {
   return `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
+}
+
+/** The prompt a session waits on before it starts, for line 2 (PRD R41). */
+export function startPromptText(item: WorkItemView): { text: string; title: string }[] {
+  return waitsToStart(activeSession(item))
+    ? [{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }]
+    : [];
 }
 
 /** Each reason a queued row has not started, with what ends it, for the tooltip (PRD R34). */

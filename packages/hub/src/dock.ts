@@ -33,6 +33,7 @@ import {
   setupNotes,
   snapshotErrors,
   staleSince,
+  startPromptText,
   stripeOf,
   ticketKey,
   waitTexts,
@@ -242,7 +243,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     url: item.ticket.url,
     mark: kind === null ? null : { kind, glyph: MARK_GLYPHS[kind], title: MARK_TITLES[kind] },
     details: orMarkTitle(kind, [
-      ...waitTexts(item).map(({ text, title }) => ({ text, title, tone: null })),
+      ...[...startPromptText(item), ...waitTexts(item)].map(({ text, title }) => ({ text, title, tone: null })),
       ...wake(item.ticket),
       ...[item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped(note, CAPS.note, 'warning')),
       ...(item.parent === null ? [] : [{ text: `From ${ticketKey(item.parent)}`, title: item.parent.title, tone: null }]),

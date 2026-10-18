@@ -48,7 +48,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The roster lists the new entry at once with `id` (the short ID), `sessionId`, `kind: background`, `state: working` and **no pid**; the pid appeared 1–4 seconds after launch. After the turn, the entry shows the pid with `status: idle` and `state: done`.
   - After `claude stop`, the entry leaves the roster; `--all` still lists it with `state: done` and no pid.
   - A Ground Control session started four days earlier is still listed with `state: blocked` and no pid: an entry without a pid can be a process that is gone.
-- **Current use:** the runner matches the short ID and treats a session as alive only while its entry has a pid. A start is confirmed only once the entry has a pid, so a roster read during the first seconds does not end a new session.
+- **Current use:** the runner matches the short ID and treats a session as alive only while its entry has a pid. A start is confirmed only once the entry has a pid, so a roster read during the first seconds does not end a new session. A session waiting on a prompt before it starts is the exception (M41).
 
 ## M6. Hooks inside background sessions
 
@@ -467,6 +467,20 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Experiment:** four quick clicks on a group header and on a Done date band toggled only on the first and third while the headers handled `Tapped` alone. With `DoubleTapped` also handled, a second press that moved 8 pixels away and back raised `DoubleTapped` and `Tapped` and toggled twice; mouse and touch behaved alike.
 - **Limits:** pen input and a real double-click time on Windows were not run.
 - **Current use:** the dock's group and band headers toggle on `Tapped` and `DoubleTapped`, once per press (`MainWindow.OnHeaderPressed`).
+
+## M41. A background session waiting on a prompt before it starts
+
+- **Date:** 2026-10-18.
+- **Versions:** Claude Code CLI 2.1.300, and 2.1.302 for the killed process and the second blocked start, Linux.
+- **Experiment:** M5's start, `claude --bg --permission-mode auto --settings <json> -n <name> <prompt>`, polling `claude agents --json` every 3–4 seconds, in two trusted directories: one with no `.mcp.json`, and one whose `.mcp.json` lists a server the operator had neither approved nor rejected. `claude logs <id>` for the second, then `claude stop <id>`.
+- **Result:**
+  - Without `.mcp.json`, as in M5: no pid at first, then a pid within 6 seconds, then `state: done`.
+  - With the unanswered server, the entry was `state: blocked` with no pid at 4 seconds and still at 24. `claude logs` showed Claude's "New MCP server found in this project" prompt with the choices to use the server, to use it and all future servers in the project, or to continue without it. `claude stop` ended it.
+  - The operator's two ad-hoc sessions in a repository whose `.mcp.json` lists 7 unanswered servers were still listed `blocked` with no pid a day after their starts failed. One's process was alive at the prompt; the other's was gone. The roster does not tell them apart.
+  - On 2.1.302 a new start was again `blocked` with no pid. It ran in a spare process the daemon had started earlier, whose arguments do not name the session. Killing that process left the entry unchanged; `claude stop` exited 0 and removed it.
+  - Switchboard's hooks were installed, and neither the live session at the prompt nor the probes wrote a hook marker while they waited.
+- **Not verified:** that answering the prompt in an interactive `claude` lets a later `--bg` start skip it; Claude Code saves each project's MCP choices, which `claude mcp reset-project-choices` clears. Other prompts before the start may block the same way.
+- **Current use:** a start whose entry is `blocked` with no pid on two reads in a row starts the session waiting on the operator, who answers through Open in terminal; only a session that started so is kept alive by such an entry, and one whose process died there waits until the operator stops it (architecture.md § Claude Code runner).
 
 ## Pending verification
 

@@ -1099,7 +1099,7 @@ export class Runtime {
         this.send(
           'error' in result
             ? { type: 'session-start-failed', sessionId: action.sessionId, message: result.error }
-            : { type: 'session-started', sessionId: action.sessionId, nativeSessionId: result.nativeSessionId, shortId: result.shortId },
+            : { type: 'session-started', sessionId: action.sessionId, nativeSessionId: result.nativeSessionId, shortId: result.shortId, ...(result.startPrompt ? { startPrompt: true as const } : {}) },
         );
         return;
       }

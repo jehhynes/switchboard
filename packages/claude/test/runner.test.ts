@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Exec, ExecResult } from '../src/exec.js';
 import type { Marker } from '../src/hooks.js';
 import { entryFor, observe, observeForks, readRoster, rosterState, shortIdFrom, startArgs, startSession, stopSession } from '../src/runner.js';
+import { START_PROMPT } from '@switchboard/core';
 import type { StartAction } from '@switchboard/core';
 import type { RosterEntry } from '../src/runner.js';
 
@@ -92,6 +93,38 @@ describe('startSession', () => {
     const exec = fakeExec(ran({ stdout: LAUNCHED }), ...Array.from({ length: 30 }, () => ran({ stdout: launching })));
 
     expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ error: 'Session 1a2b3c4d did not appear in claude agents within 60 seconds.' });
+    expect(exec).toHaveBeenCalledTimes(31);
+  });
+
+  it('fails when the roster cannot be read', async () => {
+    const exec = fakeExec(ran({ stdout: LAUNCHED }), ...Array.from({ length: 30 }, () => ran({ code: 1, stderr: 'busy' })));
+
+    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ error: 'Session 1a2b3c4d did not appear in claude agents within 60 seconds.' });
+  });
+
+  it('starts a session that waits on a prompt before it starts as such (mechanics M41)', async () => {
+    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: 'D:/git/widgets' };
+    const working = JSON.stringify([{ ...entry, state: 'working' }]);
+    const blocked = JSON.stringify([{ ...entry, state: 'blocked' }]);
+    const exec = fakeExec(ran({ stdout: LAUNCHED }), ran({ stdout: blocked }), ran({ stdout: working }), ran({ stdout: blocked }), ran({ stdout: blocked }));
+
+    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000', startPrompt: true });
+    expect(exec).toHaveBeenCalledTimes(5);
+  });
+
+  it('starts a session that is blocked once before its pid appears', async () => {
+    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: '' };
+    const exec = fakeExec(ran({ stdout: LAUNCHED }), ran({ stdout: JSON.stringify([{ ...entry, state: 'blocked' }]) }), ran({ stdout: JSON.stringify([{ ...entry, state: 'working', pid: 5 }]) }));
+
+    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000' });
+  });
+
+  it('starts a session whose blocked reads are not in a row', async () => {
+    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: '' };
+    const blocked = ran({ stdout: JSON.stringify([{ ...entry, state: 'blocked' }]) });
+    const exec = fakeExec(ran({ stdout: LAUNCHED }), blocked, ran({ code: 1, stderr: 'busy' }), blocked, ran({ stdout: JSON.stringify([{ ...entry, state: 'working', pid: 5 }]) }));
+
+    expect(await startSession('claude', ACTION, { exec, ...clock() })).toEqual({ shortId: '1a2b3c4d', nativeSessionId: '1a2b3c4d-0000' });
   });
 
   it("fails with Claude's message, such as the trust refusal", async () => {
@@ -147,6 +180,18 @@ describe('roster', () => {
     expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('Stop')]]))).toEqual([{ sessionId: 's-roster', state: 'idle', detail: null, interactive: false }]);
     expect(observe(ENTRIES, sessions, new Map([['a54bd2e6-d6aa-4867-bf31-e1fa0b9e8aa9', marker('SessionStart')]]))).toEqual([{ sessionId: 's-roster', state: 'waiting', detail: null, interactive: false }]);
     expect(observe(ENTRIES, [{ id: 's-tab', shortId: '3e065e9f' }], new Map())).toEqual([{ sessionId: 's-tab', state: 'running', detail: null, interactive: true }]);
+  });
+
+  it('observes a session that started waiting on a prompt while its entry is blocked without a pid (mechanics M41)', () => {
+    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', kind: 'background', cwd: '', state: 'blocked' };
+    const waiting = { id: 's1', shortId: '1a2b3c4d', state: 'waiting', stateDetail: START_PROMPT };
+
+    expect(observe([entry], [waiting], new Map())).toEqual([{ sessionId: 's1', state: 'waiting', detail: START_PROMPT, interactive: false }]);
+    // Answered: the pid appears and the roster's state takes over.
+    expect(observe([{ ...entry, pid: 5, state: 'working' }], [waiting], new Map())).toEqual([{ sessionId: 's1', state: 'running', detail: null, interactive: false }]);
+    // A gone process is listed the same way, so a session that did not start waiting has ended.
+    expect(observe([entry], [{ ...waiting, state: 'running', stateDetail: null }], new Map())).toEqual([]);
+    expect(observe([{ ...entry, state: 'done' }], [waiting], new Map())).toEqual([]);
   });
 
   it('observes a resumed tab as idle until its first turn, though the roster lists it as busy', () => {

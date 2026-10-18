@@ -6,7 +6,8 @@ export type CopyRelation = 'newer' | 'older' | 'unrelated';
 
 export type StartAction = Extract<FlowAction, { type: 'start-session' }>;
 
-export type StartResult = { shortId: string; nativeSessionId: string } | { error: string };
+/** `startPrompt`: the session runs but waits on a prompt before it starts, which the operator answers through Open in terminal (PRD R41). */
+export type StartResult = { shortId: string; nativeSessionId: string; startPrompt?: true } | { error: string };
 
 /** The session a stop acts on; a deleted session's row is gone, so the action carries what the runner needs. */
 export interface SessionTarget {

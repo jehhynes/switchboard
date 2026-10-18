@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { activeSession, groupOf, reviewKey } from './group.js';
+import { activeSession, groupOf, reviewKey, START_PROMPT, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { repoRoots } from './settings.js';
@@ -131,7 +131,7 @@ export type FlowEvent =
   | { type: 'triage-failed'; triageId: number; error: string; context: string | null }
   /** The hub stopped during triage. Nothing failed, so the work item is triaged again. */
   | { type: 'triage-cancelled'; triageId: number }
-  | { type: 'session-started'; sessionId: string; nativeSessionId: string | null; shortId: string }
+  | { type: 'session-started'; sessionId: string; nativeSessionId: string | null; shortId: string; startPrompt?: true }
   | { type: 'session-start-failed'; sessionId: string; message: string }
   /** `checked` lists the sessions the read looked for, so a session whose start completed during the read is not ended; all when absent. */
   | { type: 'roster'; sessions: ObservedSession[]; checked?: string[]; forks?: ObservedFork[] }
@@ -316,7 +316,7 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
     case 'triage-cancelled':
       return { triageId: event.triageId };
     case 'session-started':
-      return { shortId: event.shortId };
+      return { shortId: event.shortId, ...(event.startPrompt ? { startPrompt: true } : {}) };
     case 'session-start-failed':
       return { message: event.message };
     case 'marker':
@@ -476,7 +476,7 @@ class Flow {
       case 'triage-cancelled':
         return this.triageCancelled(event.triageId);
       case 'session-started':
-        return this.sessionStarted(event.sessionId, event.nativeSessionId, event.shortId);
+        return this.sessionStarted(event.sessionId, event.nativeSessionId, event.shortId, event.startPrompt === true);
       case 'session-start-failed':
         return this.sessionStartFailed(event.sessionId, event.message);
       case 'roster':
@@ -1169,11 +1169,13 @@ class Flow {
     return session;
   }
 
-  private sessionStarted(sessionId: string, nativeSessionId: string | null, shortId: string): void {
+  private sessionStarted(sessionId: string, nativeSessionId: string | null, shortId: string, startPrompt: boolean): void {
     const session = this.session(sessionId);
 
     if (session.state === 'starting') {
-      this.store.updateSession(sessionId, { nativeSessionId, shortId, state: 'running', stateAt: this.now });
+      const state = startPrompt ? { state: 'waiting' as const, stateDetail: START_PROMPT } : { state: 'running' as const };
+
+      this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now });
     }
   }
 
@@ -1277,11 +1279,14 @@ class Flow {
     return true;
   }
 
-  /** A hook marker sets the state of a live session only, because a killed process leaves its marker behind. */
+  /**
+   * A hook marker sets the state of a live session only, because a killed process leaves its marker behind. A session waiting on a prompt before
+   * it starts leaves that state only when the roster lists its process (PRD R41).
+   */
   private marker(sessionId: string, state: LiveState, detail: string | null): void {
     const session = this.session(sessionId);
 
-    if (session.state !== 'starting' && session.state !== 'ended') {
+    if (session.state !== 'starting' && session.state !== 'ended' && !waitsToStart(session)) {
       this.setState(session, state, detail);
     }
   }
@@ -1623,6 +1628,10 @@ class Flow {
 
     if (session.state !== 'waiting') {
       throw new Refusal('The session is not waiting on a question.');
+    }
+
+    if (waitsToStart(session)) {
+      throw new Refusal('The session waits on a prompt before it starts; open it in a terminal to answer it.');
     }
 
     return session as Session & { shortId: string };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupOf } from '@switchboard/core/group';
+import { groupOf, START_PROMPT } from '@switchboard/core/group';
 import {
   clockOf,
   controlsOf,
@@ -17,6 +17,7 @@ import {
   rowTime,
   setupNotes,
   snapshotErrors,
+  startPromptText,
   stripeOf,
   waitTexts,
 } from '../src/rows.js';
@@ -95,6 +96,18 @@ describe('controlsOf', () => {
     expect(labels(waiting)).not.toContain('Open in Claude');
     expect(labels(waiting)).toContain('Stop');
     expect(mainControl(waiting)?.label).not.toBe('Open in Claude');
+  });
+
+  it('offers Open in terminal, not Open in Claude, while a session waits on a prompt before it starts (PRD R41)', () => {
+    const waiting = item(7, { status: 'running', sessions: [session({ state: 'waiting', stateDetail: START_PROMPT })] });
+
+    expect(openQuestion(waiting)).toBeNull();
+    expect(labels(waiting)).not.toContain('Open in Claude');
+    expect(labels(waiting)).toContain('Stop');
+    expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
+    expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }]);
+    expect(startPromptText(item(7, { sessions: [session({ state: 'waiting' })] }))).toEqual([]);
+    expect(mainControl(item(7, { sessions: [session({ state: 'waiting' })] }))?.label).toBe('Open in Claude');
   });
 
   it('attaches a terminal to a background session, resumes the latest ended session, shows one the operator resumed, and offers none while a session starts (PRD R28)', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
-import { groupOf, holdsSlot, markOf } from '../src/group.js';
+import { groupOf, holdsSlot, markOf, START_PROMPT } from '../src/group.js';
 import { Harness, MINUTE, issue, settings } from './flowHarness.js';
 
 /** A dev:question task session for ticket `key`, started and waiting on a question in its background process. */
@@ -227,5 +227,41 @@ describe('Codex questions (PRD R70)', () => {
     const { session } = waiting(h);
 
     expect(h.send({ type: 'report', sessionId: session, report: { kind: 'question', text: 'Which?' } }).refused).toBe("This session's report contract does not offer the question report.");
+  });
+});
+
+describe('a session waiting on a prompt before it starts (PRD R41)', () => {
+  it('starts waiting, blocks on the operator, refuses Open in Claude, and runs once answered', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    const item = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId!;
+    h.triaged(triage, 'dev:question');
+    const session = (h.act({ type: 'start', workItemId: item })[0] as Extract<FlowAction, { type: 'start-session' }>).sessionId;
+
+    h.act({ type: 'session-started', sessionId: session, nativeSessionId: 'native-1', shortId: 'abc12341', startPrompt: true });
+    expect(h.store.session(session)).toMatchObject({ state: 'waiting', stateDetail: START_PROMPT, shortId: 'abc12341' });
+    expect(shown(h, item)).toEqual({ group: 'blocked', mark: 'question', holdsSlot: false });
+    expect(h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' }).refused).toBe('The session waits on a prompt before it starts; open it in a terminal to answer it.');
+
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: START_PROMPT, interactive: false }] });
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
+    expect(h.store.session(session)).toMatchObject({ state: 'waiting', stateDetail: START_PROMPT });
+
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: false }] });
+    expect(h.store.session(session)).toMatchObject({ state: 'running', stateDetail: null });
+    expect(h.item(item).status).toBe('running');
+  });
+
+  it('ends when the operator stops it, as for a process that died at the prompt', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    const item = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId!;
+    h.triaged(triage, 'dev:question');
+    const session = (h.act({ type: 'start', workItemId: item })[0] as Extract<FlowAction, { type: 'start-session' }>).sessionId;
+    h.act({ type: 'session-started', sessionId: session, nativeSessionId: 'native-1', shortId: 'abc12341', startPrompt: true });
+
+    expect(h.act({ type: 'stop', workItemId: item })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12341', reason: 'operator' }]);
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
+    expect(h.store.session(session)?.state).toBe('ended');
   });
 });
