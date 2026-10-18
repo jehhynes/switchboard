@@ -42,7 +42,7 @@ function item(id, url, cwd) {
     scopeAt: null,
     doneAt: null,
     doneReason: null,
-    ticket: { id, source: 'github', sourceKey: String(id), ref: `#${id}`, sourceId: null, title: `Issue ${id}`, url, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 1_791_000_000_000, repoRoot: '' },
+    ticket: { id, source: 'github', sourceKey: String(id), ref: `#${id}`, sourceId: null, adhocKey: null, title: `Issue ${id}`, url, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 1_791_000_000_000, repoRoot: '' },
     triage: null,
     focus: url,
     sessions: [

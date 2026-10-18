@@ -32,7 +32,7 @@ function item(cwd, done) {
     scopeAt: null,
     doneAt: done ? 1_791_000_000_000 : null,
     doneReason: done ? 'session' : null,
-    ticket: { id: 7, source: 'github', sourceKey: '7', ref: '#7', sourceId: null, title: 'Issue 7', url: 'https://github.com/o/r/issues/7', assigned: !done, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 1_791_000_000_000, repoRoot: '' },
+    ticket: { id: 7, source: 'github', sourceKey: '7', ref: '#7', sourceId: null, adhocKey: null, title: 'Issue 7', url: 'https://github.com/o/r/issues/7', assigned: !done, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 1_791_000_000_000, repoRoot: '' },
     triage: null,
     focus: 'https://github.com/o/r/issues/7',
     sessions: [
