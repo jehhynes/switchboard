@@ -112,6 +112,6 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => {
   it('reports a Codex CLI that is not found as missing, not as a trust failure', async () => {
     const missing = join(dir, 'missing.exe');
 
-    expect(await trustHooks(missing, OURS, {}, 10_000)).toBe(`Codex was not found at ${missing}. Install it or set sessions.codex.path.`);
+    expect(await trustHooks(missing, OURS, {}, 10_000)).toBe(`Codex was not found at ${missing}. Install it or set sessions.codexPath.`);
   });
 });

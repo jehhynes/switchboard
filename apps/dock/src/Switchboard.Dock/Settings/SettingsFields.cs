@@ -276,13 +276,13 @@ public static partial class SettingsFields
             [
                 new Field("sessions.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own.", "auto", modes),
                 new Field("sessions.model", "Model", FieldKind.Text, "A playbook can set its own.", "Claude's default"),
-                new Field("sessions.claudePath", "Claude Code path", FieldKind.Text, "The Claude Code CLI the hub runs for sessions and triage. Set its full path when the hub’s PATH does not include it.", "claude"),
+                new Field("sessions.claudePath", "Claude Code path", FieldKind.Text, "The Claude Code CLI the hub and Open in terminal run. Set its full path when their PATH does not include it.", "claude"),
             ]),
             new Section("Codex sessions",
             [
                 new Field("sessions.codex.permissionMode", "Permission mode", FieldKind.Select, "A playbook can set its own. Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s, so skills that call them need bypassPermissions.", "bypassPermissions", codexModes),
                 new Field("sessions.codex.model", "Model", FieldKind.Text, "A playbook can set its own.", "Codex's default"),
-                new Field("sessions.codex.path", "Codex path", FieldKind.Text, "The Codex CLI the hub runs. Set its full path when the hub’s PATH does not include it, such as a Codex installed through nvm.", "codex"),
+                new Field("sessions.codexPath", "Codex path", FieldKind.Text, "The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.", "codex"),
             ]),
             new Section("Triage",
             [

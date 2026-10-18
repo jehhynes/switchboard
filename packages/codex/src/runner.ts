@@ -25,7 +25,7 @@ const POLL_MS = 250;
 const IDENTITY_TRIES = 3;
 
 export interface CodexRunnerDeps {
-  /** Read at each use, so a change to `sessions.codex.path` applies to the next run. */
+  /** Read at each use, so a change to `sessions.codexPath` applies to the next run. */
   codexPath(): string;
   exec: Exec;
   sleep(ms: number): Promise<void>;

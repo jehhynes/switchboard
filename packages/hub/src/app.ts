@@ -191,7 +191,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     projectsDir: `${claudeRoot}/projects`,
     claudePath: () => config.settings.sessions.claudePath,
     codexScript: `${claudeRoot}/tools/agent-delegate/debrief.mjs`,
-    codexPath: () => config.settings.sessions.codex.path,
+    codexPath: () => config.settings.sessions.codexPath,
     codexHome: deps.codex?.home ?? join(homedir(), '.codex'),
     nodePath: process.execPath,
     exec: deps.exec,
@@ -329,7 +329,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         const workspace = body['workspace'] ?? null;
         const sessionId = windowQueue.claimOpen(body['folder'], workspace);
-        const commands = windowQueue.claimCommands(workspace, body['focused'] === true);
+        // A terminal runs the agent's CLI from `sessions.claudePath` or `sessions.codexPath` as they are when the window takes it.
+        const commands = windowQueue
+          .claimCommands(workspace, body['focused'] === true)
+          .map((command) => (command['type'] === 'terminal' ? { ...command, executable: command['provider'] === 'codex' ? config.settings.sessions.codexPath : config.settings.sessions.claudePath } : command));
         const claimant = workspace ?? (body['folder'] || 'a window with no folder');
 
         // The log shows whether a window took what the dock left for it (PRD R71).

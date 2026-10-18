@@ -104,4 +104,19 @@ describe("a row's Open in terminal", () => {
 
     assert.deepStrictEqual(created.map((terminal) => terminal.options), [{ name: 'Switchboard · gh 7', shellPath: 'codex', shellArgs: ['resume', 'thread-9'], cwd: 'D:/git/widgets-wt/7-fix' }]);
   });
+
+  it("runs the agent's CLI the hub names from sessions.claudePath or sessions.codexPath, and the bare name for an empty one", async () => {
+    await run({ sessionId: 'g-native', shortId: null, executable: '/opt/claude/bin/claude' });
+    await run({ sessionId: 'thread-10', shortId: null, provider: 'codex', executable: '/home/me/.nvm/versions/node/v24/bin/codex' });
+    await run({ sessionId: 'h-native', shortId: null, executable: '' });
+
+    assert.deepStrictEqual(
+      created.map((terminal) => terminal.options.shellPath),
+      ['/opt/claude/bin/claude', '/home/me/.nvm/versions/node/v24/bin/codex', 'claude'],
+    );
+    // npm's launcher finds the node an nvm install keeps beside it; a bare name changes no environment.
+    const pathOf = (env) => env[Object.keys(env).find((name) => name.toUpperCase() === 'PATH')];
+    assert.strictEqual(pathOf(created[1].options.env).split(require('node:path').delimiter)[0], '/home/me/.nvm/versions/node/v24/bin');
+    assert.strictEqual(created[2].options.env, undefined);
+  });
 });

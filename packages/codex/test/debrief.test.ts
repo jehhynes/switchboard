@@ -118,7 +118,7 @@ describe('runCodexDebrief', () => {
     const run = (result: ExecResult) => runCodexDebrief(input, vi.fn<Exec>().mockResolvedValue(result));
 
     expect(await runCodexDebrief({ ...input, cwd: tmpdir() }, vi.fn<Exec>().mockResolvedValue(ran({ missing: true, code: null })))).toEqual({
-      error: 'Codex was not found at codex. Install it or set sessions.codex.path.',
+      error: 'Codex was not found at codex. Install it or set sessions.codexPath.',
     });
     const gone = join(tmpdir(), 'switchboard-no-such-dir');
     expect(await runCodexDebrief({ ...input, cwd: gone }, vi.fn<Exec>().mockResolvedValue(ran({ missing: true, code: null })))).toEqual({ error: `The session's directory ${gone} was not found.` });

@@ -233,7 +233,7 @@ describe('start', () => {
     fake.codexPath = '/opt/codex/bin/codex';
     fake.spawnError = 'spawn /opt/codex/bin/codex ENOENT';
     fake.spawnMissing = true;
-    expect(await runner.start(ACTION)).toEqual({ error: 'Codex was not found at /opt/codex/bin/codex. Install it or set sessions.codex.path.' });
+    expect(await runner.start(ACTION)).toEqual({ error: 'Codex was not found at /opt/codex/bin/codex. Install it or set sessions.codexPath.' });
 
     fake.codexPath = '/usr/local/bin/codex';
     fake.spawnError = null;

@@ -570,7 +570,7 @@ describe('createHubApp', () => {
   });
 
   it('answers posts through the server', async () => {
-    writeSettings({ sessions: { installHooks: false } });
+    writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex' } });
     const logs: string[] = [];
     const app = await start((line) => logs.push(line));
     const claims: unknown[] = [];
@@ -614,8 +614,12 @@ describe('createHubApp', () => {
       const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId, active };
 
       expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: terminal }, 5000)).toMatchObject({ status: 200 });
-      expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toMatchObject({ body: { commands: [terminal] } });
+      // The claim adds the agent's CLI from the settings: Claude's for a command that names no provider.
+      expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toMatchObject({ body: { commands: [{ ...terminal, executable: '/opt/claude/bin/claude' }] } });
     }
+    const codexTerminal = { type: 'terminal', provider: 'codex', sessionId: 'thread-1', cwd: 'D:/wt', name: 'gh 7', shortId: null, active: false };
+    expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: codexTerminal }, 5000)).toMatchObject({ status: 200 });
+    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toMatchObject({ body: { commands: [{ ...codexTerminal, executable: '/opt/codex/bin/codex' }] } });
     // Only the item window opens its tabs (PRD R72).
     expect(await postToHub(record, '/window', { workspace: null, command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 400, error: 'Expected {workspace, command} with a changes, terminal, history, log or openUrl command, or openTabs for a workspace.' });
     const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId: null, active: false };
@@ -659,11 +663,13 @@ describe('createHubApp', () => {
       'window commands claimed by C:/h/w.code-workspace: terminal',
       'window command N terminal left for C:/h/w.code-workspace',
       'window commands claimed by C:/h/w.code-workspace: terminal',
+      'window command N terminal left for C:/h/w.code-workspace',
+      'window commands claimed by C:/h/w.code-workspace: terminal',
     ]);
     // A window that is already in front gets no focus change, so each open and command left for a workspace tells that window to claim.
     expect(claims).toEqual([
       { event: 'claim', data: { workspace: 'C:/h/windows/gh-7.code-workspace' } },
-      ...Array.from({ length: 4 }, () => ({ event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } })),
+      ...Array.from({ length: 5 }, () => ({ event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } })),
     ]);
   });
 });

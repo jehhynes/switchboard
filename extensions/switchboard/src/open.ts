@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
+import { executableDirOnPath } from '@switchboard/core';
 import type { DockRow, Snapshot } from '@switchboard/hub';
 import { dockView, postToHub, windowsDir, writeWorkspaceFile } from '@switchboard/hub';
 import { openUrlOf, rowFor, targetForUrl } from './search.js';
@@ -82,9 +83,10 @@ export function providerOf(value: unknown): Provider {
  * Open in terminal (PRD R28): shows the terminal this window already opened the session in while it runs, else opens `claude attach <short ID>`
  * for a Claude session in its background process, or `claude --resume <session ID>` or `codex resume <thread ID>` in its directory. A session
  * `active` elsewhere, such as in a VS Code tab, opens there instead, because resuming a live session starts a copy (mechanics M18). Closing an
- * attach leaves the session running (M7, M9).
+ * attach leaves the session running (M7, M9). `executable` is the agent's CLI from `sessions.claudePath` or `sessions.codexPath`; a hub that sends
+ * none leaves the bare name to the window's PATH.
  */
-export async function openTerminal(record: HubRecord | null, sessionId: string, cwd: string, name: string, shortId: string | null, active: boolean, provider: Provider = 'claude'): Promise<void> {
+export async function openTerminal(record: HubRecord | null, sessionId: string, cwd: string, name: string, shortId: string | null, active: boolean, provider: Provider = 'claude', executable: string = provider): Promise<void> {
   const key = `${shortId === null ? 'resume' : 'attach'}:${sessionId}`;
   const existing = terminals.get(key);
 
@@ -99,7 +101,9 @@ export async function openTerminal(record: HubRecord | null, sessionId: string, 
   }
 
   const args = provider === 'codex' ? ['resume', sessionId] : shortId === null ? ['--resume', sessionId] : ['attach', shortId];
-  const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: provider, shellArgs: args, cwd });
+  // npm's launcher runs `node` from PATH, and nvm installs it beside the agent's CLI.
+  const env = executableDirOnPath(executable);
+  const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: executable, shellArgs: args, cwd, ...(Object.keys(env).length > 0 ? { env } : {}) });
 
   terminals.set(key, terminal);
   terminal.show();

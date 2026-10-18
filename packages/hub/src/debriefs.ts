@@ -165,7 +165,7 @@ export interface DebriefDeps {
   claudePath(): string;
   /** agent-delegate's debrief command for a Codex thread, run with `nodePath`; skipped when the file is missing. */
   codexScript: string;
-  /** The Codex CLI (`sessions.codex.path`) and Codex's home, whose `sessions` folder holds the rollouts, for Codex sessions' own debriefs. */
+  /** The Codex CLI (`sessions.codexPath`) and Codex's home, whose `sessions` folder holds the rollouts, for Codex sessions' own debriefs. */
   codexPath(): string;
   codexHome: string;
   nodePath: string;

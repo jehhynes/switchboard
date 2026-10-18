@@ -165,7 +165,7 @@ export class Runtime {
     const codex = deps.codex ?? { home: join(deps.home, '.codex'), env: {} };
     const claudePath = () => this.config.settings.sessions.claudePath;
     const nodePath = () => this.config.settings.sessions.nodePath;
-    const codexPath = () => this.config.settings.sessions.codex.path;
+    const codexPath = () => this.config.settings.sessions.codexPath;
 
     this.runners = {
       claude:
@@ -222,17 +222,20 @@ export class Runtime {
 
     this.config = config;
 
-    // Hook commands name the Node.js, and Codex's trust needs its CLI; a change applies without a hub restart.
-    if (after.nodePath !== before.nodePath || after.claudePath !== before.claudePath || after.codex.path !== before.codex.path) {
+    // Hook commands name the Node.js, and Codex's trust needs its CLI; each change, and turning hooks on or off, applies without a hub restart.
+    if (after.nodePath !== before.nodePath || after.claudePath !== before.claudePath || after.codexPath !== before.codexPath) {
       this.track(this.checkNode());
     }
 
     if (after.installHooks) {
-      const providers = after.nodePath !== before.nodePath ? PROVIDERS : after.codex.path !== before.codex.path ? (['codex'] as const) : [];
+      const providers = !before.installHooks || after.nodePath !== before.nodePath ? PROVIDERS : after.codexPath !== before.codexPath ? (['codex'] as const) : [];
 
       if (providers.length > 0) {
         this.track(this.installHooks(providers));
       }
+    } else if (before.installHooks) {
+      // The hooks stay installed but their markers are no longer read, so an install error no longer applies.
+      this.track(this.clearHookErrors());
     }
 
     this.buildSources();
@@ -293,10 +296,10 @@ export class Runtime {
    */
   private async checkNode(): Promise<void> {
     const check = ++this.nodeChecks;
-    const { nodePath, claudePath, codex } = this.config.settings.sessions;
+    const { nodePath, claudePath, codexPath } = this.config.settings.sessions;
     const envs = new Map<string, { agents: string[]; env: Record<string, string> }>();
 
-    for (const [agent, env] of [['Claude Code', executableDirOnPath(claudePath)], ['Codex', executableDirOnPath(codex.path)]] as const) {
+    for (const [agent, env] of [['Claude Code', executableDirOnPath(claudePath)], ['Codex', executableDirOnPath(codexPath)]] as const) {
       const key = JSON.stringify(env);
       envs.set(key, { agents: [...(envs.get(key)?.agents ?? []), agent], env });
     }
@@ -317,6 +320,21 @@ export class Runtime {
           ? `${nodePath} --version failed, so Switchboard's hooks and session reports may not run: ${failed.result.timedOut ? 'it did not finish' : failed.result.stderr.trim() || `exit code ${String(failed.result.code)}`}.`
           : null;
     this.changed();
+  }
+
+  /** Clears each runner's hook error after any install in flight, so that install cannot bring its error back. */
+  private async clearHookErrors(): Promise<void> {
+    await Promise.all(
+      PROVIDERS.map((provider) => {
+        const clear = this.hookInstalls[provider].then(() => {
+          this.hookErrors[provider] = null;
+          this.changed();
+        });
+
+        this.hookInstalls[provider] = clear;
+        return clear;
+      }),
+    );
   }
 
   private async installHooks(providers: readonly Provider[]): Promise<void> {

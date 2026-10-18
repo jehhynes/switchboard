@@ -135,7 +135,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       case 'history':
         return history.open(command as unknown as HistoryMessage);
       case 'terminal':
-        return openTerminal(keeper.current(), String(command['sessionId']), String(command['cwd']), String(command['name']), typeof command['shortId'] === 'string' ? command['shortId'] : null, command['active'] === true, providerOf(command['provider']));
+        return openTerminal(keeper.current(), String(command['sessionId']), String(command['cwd']), String(command['name']), typeof command['shortId'] === 'string' ? command['shortId'] : null, command['active'] === true, providerOf(command['provider']), typeof command['executable'] === 'string' && command['executable'] !== '' ? command['executable'] : undefined);
       case 'openUrl':
         return openLink(String(command['url']));
       case 'openTabs':

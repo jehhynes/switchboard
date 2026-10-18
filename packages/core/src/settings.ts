@@ -22,8 +22,6 @@ export interface CodexSettings {
   permissionMode: CodexPermissionMode;
   /** Empty means Codex's default model. */
   model: string;
-  /** The Codex CLI the hub runs; a bare name is looked up on the hub's PATH. */
-  path: string;
 }
 
 export interface SessionSettings {
@@ -34,8 +32,10 @@ export interface SessionSettings {
   permissionMode: PermissionMode;
   /** Empty means Claude's default model. */
   model: string;
-  /** The Claude Code CLI the hub runs; a bare name is looked up on the hub's PATH. */
+  /** The Claude Code CLI the hub and Open in terminal run; a bare name is looked up on the hub's or the item window's PATH. */
   claudePath: string;
+  /** The Codex CLI the hub and Open in terminal run; a bare name is looked up on the hub's or the item window's PATH. */
+  codexPath: string;
   /** The Node.js that Switchboard's hooks and session reports run; a bare name is looked up on the running agent's PATH. */
   nodePath: string;
   codex: CodexSettings;
@@ -92,7 +92,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   // Commands in Codex's sandbox cannot use the operator's credentials, such as gh's, so Codex sessions default to no sandbox (mechanics M31).
-  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '', path: 'codex' }, installHooks: true, debriefs: false },
+  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
@@ -253,20 +253,20 @@ export function parseSettings(text: string): SettingsResult {
 
   const sessionsIn = read.section(root, 'sessions', 'sessions');
   const defaults = DEFAULT_SETTINGS;
-  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'claudePath', 'nodePath', 'codex', 'installHooks', 'debriefs'], 'sessions');
+  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'claudePath', 'codexPath', 'nodePath', 'codex', 'installHooks', 'debriefs'], 'sessions');
   const codexIn = read.section(sessionsIn, 'codex', 'sessions.codex');
-  read.unknown(codexIn, ['permissionMode', 'model', 'path'], 'sessions.codex');
+  read.unknown(codexIn, ['permissionMode', 'model'], 'sessions.codex');
   const sessions: SessionSettings = {
     provider: read.choice(sessionsIn, 'provider', 'sessions', PROVIDERS, defaults.sessions.provider),
     concurrency: read.integer(sessionsIn, 'concurrency', 'sessions', defaults.sessions.concurrency, 1, 10),
     permissionMode: read.choice(sessionsIn, 'permissionMode', 'sessions', PERMISSION_MODES, defaults.sessions.permissionMode),
     model: read.string(sessionsIn, 'model', 'sessions', defaults.sessions.model),
     claudePath: read.path(sessionsIn, 'claudePath', 'sessions', defaults.sessions.claudePath),
+    codexPath: read.path(sessionsIn, 'codexPath', 'sessions', defaults.sessions.codexPath),
     nodePath: read.nodePath(sessionsIn, 'nodePath', 'sessions', defaults.sessions.nodePath),
     codex: {
       permissionMode: read.choice(codexIn, 'permissionMode', 'sessions.codex', CODEX_PERMISSION_MODES, defaults.sessions.codex.permissionMode),
       model: read.string(codexIn, 'model', 'sessions.codex', defaults.sessions.codex.model),
-      path: read.path(codexIn, 'path', 'sessions.codex', defaults.sessions.codex.path),
     },
     installHooks: read.boolean(sessionsIn, 'installHooks', 'sessions', defaults.sessions.installHooks),
     debriefs: read.boolean(sessionsIn, 'debriefs', 'sessions', defaults.sessions.debriefs),

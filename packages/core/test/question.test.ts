@@ -177,7 +177,7 @@ describe('Codex questions (PRD R70)', () => {
     return { item, session: start.sessionId };
   }
 
-  const codexHarness = () => new Harness({ settings: settings({ sessions: { provider: 'codex', codex: { permissionMode: 'plan', model: '', path: 'codex' } } }) });
+  const codexHarness = () => new Harness({ settings: settings({ sessions: { provider: 'codex', codex: { permissionMode: 'plan', model: '' } } }) });
 
   it('keeps the reported question with a new ID for each report, so a report of the same text is told apart', () => {
     const h = codexHarness();

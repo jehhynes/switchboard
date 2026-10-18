@@ -1053,33 +1053,33 @@ describe('Runtime', () => {
     expect(runtime.snapshot().errors.hooks).toBe("Codex did not trust Switchboard's hooks: no app-server");
   });
 
-  it('trusts Codex hooks with the CLI sessions.codex.path names, and trusts them again when the setting changes', async () => {
+  it('trusts Codex hooks with the CLI sessions.codexPath names, and trusts them again when the setting changes', async () => {
     const first = join(home, 'missing', 'codex');
     const second = join(home, 'other', 'codex');
     // The runtime's own Codex runner; neither path exists, so no Codex process starts.
-    const { runtime } = setup(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: first } }), () => T0, undefined, null);
+    const { runtime } = setup(config({ installHooks: true, codexPath: first }), () => T0, undefined, null);
 
     await runtime.startup();
-    expect(runtime.snapshot().errors.hooks).toBe(`Codex was not found at ${first}. Install it or set sessions.codex.path.`);
+    expect(runtime.snapshot().errors.hooks).toBe(`Codex was not found at ${first}. Install it or set sessions.codexPath.`);
 
-    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: second } }));
+    runtime.reload(config({ installHooks: true, codexPath: second }));
     await runtime.settled();
-    expect(runtime.snapshot().errors.hooks).toBe(`Codex was not found at ${second}. Install it or set sessions.codex.path.`);
+    expect(runtime.snapshot().errors.hooks).toBe(`Codex was not found at ${second}. Install it or set sessions.codexPath.`);
   });
 
-  it('clears the Codex hook error when a new sessions.codex.path is trusted, and keeps it on a reload that leaves the path', async () => {
+  it('clears the Codex hook error when a new sessions.codexPath is trusted, and keeps it on a reload that leaves the path', async () => {
     const codex = new FakeCodex();
     const { runtime } = setup(config({ installHooks: true }), () => T0, undefined, codex);
 
-    codex.trustError = 'Codex was not found at codex. Install it or set sessions.codex.path.';
+    codex.trustError = 'Codex was not found at codex. Install it or set sessions.codexPath.';
     await runtime.startup();
     codex.trustError = null;
 
     runtime.reload(config({ installHooks: true, concurrency: 1 }));
     await runtime.settled();
-    expect(runtime.snapshot().errors.hooks).toBe('Codex was not found at codex. Install it or set sessions.codex.path.');
+    expect(runtime.snapshot().errors.hooks).toBe('Codex was not found at codex. Install it or set sessions.codexPath.');
 
-    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    runtime.reload(config({ installHooks: true, codexPath: '/usr/local/bin/codex' }));
     await runtime.settled();
     expect(runtime.snapshot().errors.hooks).toBeNull();
   });
@@ -1116,11 +1116,11 @@ describe('Runtime', () => {
     const startup = runtime.startup();
     await vi.waitFor(() => expect(held).toHaveLength(1));
 
-    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    runtime.reload(config({ installHooks: true, codexPath: '/usr/local/bin/codex' }));
     await new Promise((done) => setImmediate(done));
     expect(held).toHaveLength(1);
 
-    held[0]!('Codex was not found at codex. Install it or set sessions.codex.path.');
+    held[0]!('Codex was not found at codex. Install it or set sessions.codexPath.');
     await vi.waitFor(() => expect(held).toHaveLength(2));
     held[1]!(null);
     await startup;
@@ -1135,15 +1135,15 @@ describe('Runtime', () => {
 
     mkdirSync(join(home, '.claude'), { recursive: true });
     writeFileSync(join(home, '.claude', 'settings.json'), '[]');
-    codex.trustError = 'Codex was not found at codex. Install it or set sessions.codex.path.';
+    codex.trustError = 'Codex was not found at codex. Install it or set sessions.codexPath.';
     await runtime.startup();
     const both = runtime.snapshot().errors.hooks!;
-    const claude = both.replace(' Codex was not found at codex. Install it or set sessions.codex.path.', '');
+    const claude = both.replace(' Codex was not found at codex. Install it or set sessions.codexPath.', '');
     expect(claude).not.toBe(both);
     expect(claude).not.toBe('');
 
     codex.trustError = null;
-    runtime.reload(config({ installHooks: true, codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    runtime.reload(config({ installHooks: true, codexPath: '/usr/local/bin/codex' }));
     await runtime.settled();
 
     expect(runtime.snapshot().errors.hooks).toBe(claude);
@@ -1200,7 +1200,7 @@ describe('Runtime', () => {
 
     // Node.js only beside Codex: Claude Code still lacks it.
     cli.nodeAnswer = (env) => (firstOnPath(env) === bin ? ok('v24.0.0\n') : undefined);
-    runtime.reload(config({ codex: { ...DEFAULT_SETTINGS.sessions.codex, path: join(bin, 'codex') } }));
+    runtime.reload(config({ codexPath: join(bin, 'codex') }));
     await runtime.settled();
 
     expect(cli.nodeEnvs.slice(1).map(firstOnPath).sort()).toEqual([bin, undefined].sort());
@@ -1225,12 +1225,52 @@ describe('Runtime', () => {
     expect(runtime.reportCommand).toBe(`${node} "${join(home, '.switchboard').replaceAll('\\', '/')}/hub.js" report`);
   });
 
+  it('installs both agents\' hooks when sessions.installHooks turns on, and drops their errors when it turns off', async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config(), () => T0, undefined, codex);
+
+    await runtime.startup();
+    expect(existsSync(join(home, '.claude', 'settings.json'))).toBe(false);
+    expect(codex.trustCalls).toBe(0);
+
+    codex.trustError = 'Codex did not trust Switchboard\'s hooks: no app-server';
+    runtime.reload(config({ installHooks: true }));
+    await runtime.settled();
+    expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(13);
+    expect(codex.trustCalls).toBe(1);
+    expect(runtime.snapshot().errors.hooks).toBe("Codex did not trust Switchboard's hooks: no app-server");
+
+    runtime.reload(config({ installHooks: true, concurrency: 1 }));
+    await runtime.settled();
+    expect(codex.trustCalls).toBe(1);
+
+    runtime.reload(config());
+    await runtime.settled();
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
+  it('clears the hook error of an install still running when sessions.installHooks turns off', async () => {
+    const codex = new FakeCodex();
+    const { runtime } = setup(config(), () => T0, undefined, codex);
+    const held: ((answer: string | null) => void)[] = [];
+
+    await runtime.startup();
+    codex.heldTrust = held;
+    runtime.reload(config({ installHooks: true }));
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+    runtime.reload(config());
+    held[0]!("Codex did not trust Switchboard's hooks: no app-server");
+    await runtime.settled();
+
+    expect(runtime.snapshot().errors.hooks).toBeNull();
+  });
+
   it('does not install hooks on a path change while sessions.installHooks is off', async () => {
     const codex = new FakeCodex();
     const { runtime } = setup(config(), () => T0, undefined, codex);
 
     codex.trustError = 'should not run';
-    runtime.reload(config({ codex: { ...DEFAULT_SETTINGS.sessions.codex, path: '/usr/local/bin/codex' } }));
+    runtime.reload(config({ codexPath: '/usr/local/bin/codex' }));
     await runtime.settled();
 
     expect(runtime.snapshot().errors.hooks).toBeNull();

@@ -5,7 +5,7 @@ describe('parseSettings', () => {
   it('fills defaults for an empty object', () => {
     expect(parseSettings('{}')).toEqual({
       settings: {
-        sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '', path: 'codex' }, installHooks: true, debriefs: false },
+        sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false },
         triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
         sources: {},
         schedules: {},
@@ -16,7 +16,7 @@ describe('parseSettings', () => {
   it('reads every value and passes source-specific keys through', () => {
     const result = parseSettings(
       JSON.stringify({
-        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6', path: '/opt/codex/bin/codex' }, installHooks: false, debriefs: true },
+        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6' }, installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
@@ -26,7 +26,7 @@ describe('parseSettings', () => {
 
     expect(result).toEqual({
       settings: {
-        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6', path: '/opt/codex/bin/codex' }, installHooks: false, debriefs: true },
+        sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6' }, installHooks: false, debriefs: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: {
@@ -60,7 +60,7 @@ describe('parseSettings', () => {
     const result = parseSettings(
       JSON.stringify({
         extra: 1,
-        sessions: { provider: 'gemini', concurrency: 11, dailyLimit: 20, permissionMode: 'yolo', model: 3, claudePath: 7, nodePath: '', codex: { permissionMode: 'manual', model: 1, path: '', sandbox: 'x' }, installHooks: 'yes', other: true },
+        sessions: { provider: 'gemini', concurrency: 11, dailyLimit: 20, permissionMode: 'yolo', model: 3, claudePath: 7, codexPath: '', nodePath: '', codex: { permissionMode: 'manual', model: 1, sandbox: 'x' }, installHooks: 'yes', other: true },
         triage: { concurrency: 0, timeoutSeconds: 1.5 },
         sources: { github: { enabled: 'true', pollIntervalSeconds: 5 }, zoho: 'on' },
       }),
@@ -77,10 +77,10 @@ describe('parseSettings', () => {
         'sessions.permissionMode must be one of acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.',
         'sessions.model must be a string.',
         'sessions.claudePath must be a path.',
+        'sessions.codexPath must be a path.',
         'sessions.nodePath must be a path.',
         'sessions.codex.permissionMode must be one of auto, plan, dontAsk, bypassPermissions.',
         'sessions.codex.model must be a string.',
-        'sessions.codex.path must be a path.',
         'sessions.installHooks must be true or false.',
         'triage.concurrency must be a whole number of at least 1.',
         'triage.timeoutSeconds must be a whole number of at least 1.',
