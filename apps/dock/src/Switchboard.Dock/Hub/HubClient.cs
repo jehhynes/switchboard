@@ -207,6 +207,8 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IDispo
 
     public Task<string?> SetSource(string name, bool enabled) => Post("/sources", new JsonObject { ["name"] = name, ["enabled"] = enabled });
 
+    public Task<string?> Poll() => Post("/poll", []);
+
     public Task<string?> Open(string sessionId, string cwd, string workspace) => Post("/open", new JsonObject { ["sessionId"] = sessionId, ["cwd"] = cwd, ["workspace"] = workspace });
 
     async Task<string?> Post(string path, JsonObject body) => (await PostFor(path, body)).Error;

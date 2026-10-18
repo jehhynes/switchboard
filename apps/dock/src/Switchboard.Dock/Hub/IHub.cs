@@ -16,6 +16,9 @@ public interface IHub
     /// <summary>Turns a source's polling on or off (PRD R3).</summary>
     Task<string?> SetSource(string name, bool enabled);
 
+    /// <summary>Polls each source that is on now and restarts its poll interval.</summary>
+    Task<string?> Poll();
+
     /// <summary>
     /// Leaves a session for the window on <paramref name="cwd"/> opened from <paramref name="workspace"/> to open when it gains focus or connects;
     /// no other window claims it (architecture.md § Claude Code runner).

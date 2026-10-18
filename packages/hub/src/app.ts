@@ -390,6 +390,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },
+      '/poll': async () => {
+        const error = runtime.pollNow();
+
+        return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
+      },
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
       // The dock's Settings window (PRD R54): settings.json with its version, and what the editor offers.

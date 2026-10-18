@@ -228,6 +228,18 @@ export class Runtime {
     return null;
   }
 
+  /** Polls every source that is on now and restarts its poll interval, for the dock's Refresh; returns why it could not, or null. */
+  pollNow(): string | null {
+    if (this.sources.size === 0) {
+      const errors = Object.entries(this.sourceErrors).map(([name, error]) => `${name}: ${error}`);
+
+      return errors.length > 0 ? errors.join(' ') : 'No source is polled. Turn one on in the header.';
+    }
+
+    this.restartPolls();
+    return null;
+  }
+
   /** Startup reconciliation (PRD R43): triage the hub abandoned runs again, and a start it abandoned fails. */
   async startup(): Promise<void> {
     if (this.config.settings.sessions.installHooks) {

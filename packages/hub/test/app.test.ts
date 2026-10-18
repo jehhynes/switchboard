@@ -307,6 +307,23 @@ describe('createHubApp', () => {
     expect(changes).toBeGreaterThan(0);
   });
 
+  it('polls the sources that are on at POST /poll, and refuses when none is', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { github: { repoRoot: '' } } });
+    let polls = 0;
+    const makeSource = () => ({ source: { name: 'github', poll: async () => (polls++, { tickets: [] }), keyOfBranch: () => null, context: async () => ({ context: '' }) } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, makeSource } });
+    closers.push(() => app.close());
+
+    expect(await app.post['/poll']!({})).toEqual({ status: 409, body: { error: 'No source is polled. Turn one on in the header.' } });
+    expect(await app.post['/sources']!({ name: 'github', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    // A refresh while a read is in flight does not read again, so the first read finishes first.
+    await new Promise((done) => setImmediate(done));
+    expect(polls).toBe(1);
+
+    expect(await app.post['/poll']!({})).toEqual({ status: 200, body: { done: true } });
+    expect(polls).toBe(2);
+  });
+
   it('turns a source on and off in the store, leaving settings.json alone, and refuses an unknown source', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support', orgId: '1' }, adhoc: { repoRoot: 'D:/scratch' } } });
     const text = readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8');

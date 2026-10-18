@@ -55,6 +55,15 @@ sealed class FakeHub : IHub
         return Task.FromResult<string?>(null);
     }
 
+    public string? PollReply { get; set; }
+
+    public Task<string?> Poll()
+    {
+        Calls.Add("poll");
+
+        return Task.FromResult(PollReply);
+    }
+
     public Task<string?> Open(string sessionId, string cwd, string workspace)
     {
         Calls.Add($"open {sessionId} {cwd} {Paths.FileName(workspace)}");

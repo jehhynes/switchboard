@@ -869,6 +869,57 @@ describe('Runtime', () => {
     expect(runtime.snapshot().errors.sources).toEqual({ github: 'GitHub is down.' });
   });
 
+  it('polls each source now on Refresh and restarts its interval, and refuses when no source is on', async () => {
+    vi.useFakeTimers();
+    try {
+      const { source, runtime } = setup();
+      runtime.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(source.polls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect(runtime.pollNow()).toBeNull();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(source.polls).toBe(2);
+
+      // The 300-second interval counts from the refresh, not from the start.
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(source.polls).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(source.polls).toBe(3);
+
+      // A refresh during a read does not read again, and the interval still counts from the refresh.
+      const slow = deferred();
+      source.gate = slow.promise;
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(source.polls).toBe(4);
+      expect(runtime.pollNow()).toBeNull();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(source.polls).toBe(4);
+      slow.resolve();
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(source.polls).toBe(4);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(source.polls).toBe(5);
+
+      expect(runtime.setSourceEnabled('github', false)).toBeNull();
+      expect(runtime.pollNow()).toBe('No source is polled. Turn one on in the header.');
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(source.polls).toBe(5);
+      runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('names the build error on Refresh when the only source that is on cannot be built', () => {
+    const cfg = config();
+    cfg.settings.sources = { zoho: cfg.settings.sources['github']! };
+    const { runtime } = setup(cfg);
+
+    expect(runtime.pollNow()).toBe('zoho: Switchboard has no source named zoho.');
+  });
+
   it('drops a read that finishes after its source is turned off', async () => {
     const { store, source, runtime } = setup();
     const slow = deferred();

@@ -402,7 +402,7 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void MoreActions_Clicked_OpensTheMenuOfAdhocSettingsAndHubLog()
+    public void MoreActions_Clicked_OpensTheMenuOfAdhocRefreshSettingsAndHubLog()
     {
         var (window, _) = Open();
         var more = window.FindControl<Button>("MoreButton")!;
@@ -410,7 +410,29 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New Ad-hoc Session…", "Open Settings", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+    }
+
+    [AvaloniaFact]
+    public void RefreshSources_Chosen_PostsPoll()
+    {
+        var (window, model) = Open();
+
+        Choose(window, "Refresh Sources");
+
+        Assert.Equal(["poll"], hub.Calls);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void RefreshSources_Refused_ShowsTheHubsReason()
+    {
+        var (window, model) = Open();
+        hub.PollReply = "No source is polled. Turn one on in the header.";
+
+        Choose(window, "Refresh Sources");
+
+        Assert.Equal("No source is polled. Turn one on in the header.", model.Status);
     }
 
     [AvaloniaFact]

@@ -970,6 +970,7 @@ public sealed partial class MainWindow : Window
     const string AddGlyph = "\uEA60";
     const string SettingsGlyph = "\uEB51";
     const string OutputGlyph = "\uEB9D";
+    const string RefreshGlyph = "\uEB37";
 
     static MenuItem Item(string header, Func<Task> run, string? glyph = null)
     {
@@ -1148,10 +1149,14 @@ public sealed partial class MainWindow : Window
         menu.Open(MoreButton);
     }
 
-    /// <summary>New Ad-hoc Session, Open Settings and Show Hub Log, which shows the hub log in the VS Code window used last.</summary>
+    /// <summary>
+    /// New Ad-hoc Session, Refresh Sources, which polls each source that is on now, Open Settings and Show Hub Log, which shows the hub log in the
+    /// VS Code window used last.
+    /// </summary>
     internal List<Control> HeaderMenu() =>
     [
         Item("New Ad-hoc Session…", NewAdhoc, AddGlyph),
+        Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
         Item("Open Settings", OpenSettings, SettingsGlyph),
         Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
     ];
@@ -1336,6 +1341,8 @@ public sealed partial class MainWindow : Window
         public Task<string?> Withdraw(int id) => Task.FromResult<string?>(null);
 
         public Task<string?> SetSource(string name, bool enabled) => Task.FromResult<string?>(null);
+
+        public Task<string?> Poll() => Task.FromResult<string?>(null);
 
         public Task<string?> Open(string sessionId, string cwd, string workspace) => Task.FromResult<string?>(null);
 
