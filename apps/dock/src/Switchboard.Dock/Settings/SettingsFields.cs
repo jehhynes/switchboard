@@ -286,7 +286,7 @@ public static partial class SettingsFields
             ]),
             new Section("Triage",
             [
-                new Field("triage.model", "Model", FieldKind.Text, "", "Claude's default"),
+                new Field("triage.model", "Model", FieldKind.Text, "Triage uses the default provider. A model from the other provider falls back to its default.", "Provider's default"),
                 new Field("triage.concurrency", "Concurrency", FieldKind.Integer, "Triages that run at once.", "2"),
                 new Field("triage.timeoutSeconds", "Timeout (seconds)", FieldKind.Integer, "", "180"),
             ]),

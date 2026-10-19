@@ -7,3 +7,4 @@ export * from './reducer.js';
 export * from './runner.js';
 export * from './trust.js';
 export * from './debrief.js';
+export * from './classifier.js';

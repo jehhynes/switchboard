@@ -2,10 +2,10 @@ import { mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
-import { CodexRunner } from '@switchboard/codex';
+import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
@@ -1131,6 +1131,7 @@ export class Runtime {
   private async run(action: FlowAction): Promise<void> {
     switch (action.type) {
       case 'triage': {
+        const provider = this.config.settings.sessions.provider;
         const source = this.sources.get(action.ticket.source);
 
         if (source === undefined) {
@@ -1151,20 +1152,24 @@ export class Runtime {
 
         const stale = nothingNew(action.handled, context.activityAt);
         const text = triageText(context.context, this.deps.now(), action.handled, stale);
-        const result = await classify(
-          {
-            claudePath: this.config.settings.sessions.claudePath,
-            systemPrompt: action.systemPrompt,
-            choices: action.choices,
-            rates: action.rates,
-            focusIds: (context.anchors ?? []).map((anchor) => anchor.id),
-            context: text,
-            model: action.model,
-            timeoutSeconds: action.timeoutSeconds,
-            cwd: this.home,
-          },
-          this.deps.exec,
-        );
+        const model = triageModel(provider, action.model);
+        if (model !== action.model) {
+          this.deps.log(`Triage model ${action.model} does not match ${provider}; using its default model.`);
+        }
+        const input = {
+          systemPrompt: action.systemPrompt,
+          choices: action.choices,
+          rates: action.rates,
+          focusIds: (context.anchors ?? []).map((anchor) => anchor.id),
+          context: text,
+          model,
+          timeoutSeconds: action.timeoutSeconds,
+          cwd: this.home,
+        };
+        const result = provider === 'codex'
+          ? await classifyCodex({ ...input, codexPath: this.config.settings.sessions.codexPath, env: this.deps.codex?.env ?? {} }, this.deps.exec)
+          : await classify({ ...input, claudePath: this.config.settings.sessions.claudePath }, this.deps.exec);
+
 
         this.send(
           'error' in result
@@ -1176,7 +1181,7 @@ export class Runtime {
                 playbook: result.playbook,
                 immediacy: result.immediacy,
                 severity: result.severity,
-                model: action.model,
+                model,
                 links: context.links ?? [],
                 focus: result.focus,
                 anchors: context.anchors ?? [],

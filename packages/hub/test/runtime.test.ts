@@ -72,6 +72,7 @@ class FakeCli {
   /** Answers a Node.js check by its environment, before `nodeResult`. */
   nodeAnswer: ((env: Record<string, string>) => ExecResult | undefined) | null = null;
   classifyResult = ok(JSON.stringify({ subtype: 'success', structured_output: { playbook: 'dev:develop' } }));
+  codexClassifyResult = ok('{"type":"turn.completed"}\n');
   /** Per-ticket classifier output by triage context, overriding `classifyResult`. */
   classifyByContext = new Map<string, ExecResult>();
   startResult: ExecResult | null = null;
@@ -96,6 +97,11 @@ class FakeCli {
 
     if (args[0] === '-p') {
       return this.classifyByContext.get(options.stdin ?? '') ?? this.classifyResult;
+    }
+
+    if (args[0] === 'exec' && args.includes('--output-schema')) {
+      writeFileSync(args[args.indexOf('--output-last-message') + 1]!, '{"playbook":"dev:develop"}');
+      return this.codexClassifyResult;
     }
 
     if (args[0] === '--bg') {
@@ -272,6 +278,38 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
 }
 
 describe('Runtime', () => {
+  it('triages with the default provider, falls back from a mismatched model, and follows a provider reload', async () => {
+    const cfg = config({ provider: 'codex' });
+    cfg.settings.triage = { ...cfg.settings.triage, model: 'claude-sonnet-5-5' };
+    const { store, cli, source, runtime, logs } = setup(cfg);
+    source.result = { tickets: [issue('7')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    const codexCall = cli.calls.find((call) => call.includes('--output-schema'));
+    expect(codexCall?.[0]).toBe('codex');
+    expect(codexCall).not.toContain('--model');
+    expect(cli.calls.some((call) => call.includes('-p'))).toBe(false);
+    expect(store.triage(1)).toMatchObject({ playbook: 'dev:develop', model: null, error: null });
+    expect(logs).toContain('Triage model claude-sonnet-5-5 does not match codex; using its default model.');
+
+    runtime.reload({ ...cfg, settings: { ...cfg.settings, sessions: { ...cfg.settings.sessions, provider: 'claude' } } });
+    source.result = { tickets: [issue('7'), issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(cli.calls.find((call) => call.includes('-p'))?.slice(-2)).toEqual(['--model', 'claude-sonnet-5-5']);
+    expect(store.triage(2)).toMatchObject({ playbook: 'dev:develop', model: 'claude-sonnet-5-5', error: null });
+  });
+
+  it('records Codex triage failures without invoking Claude', async () => {
+    const { store, cli, source, runtime } = setup(config({ provider: 'codex' }));
+    cli.codexClassifyResult = fail('Codex quota exhausted');
+    source.result = { tickets: [issue('7')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(store.triage(1)?.error).toBe('Codex quota exhausted');
+    expect(store.workItem(1)?.status).toBe('failed');
+    expect(cli.calls.some((call) => call.includes('-p'))).toBe(false);
+  });
   it('wakes a due snooze on its minute tick, without any other event', async () => {
     vi.useFakeTimers();
     try {

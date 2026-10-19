@@ -28,7 +28,7 @@ Test behavior that types cannot establish:
 - Work item status transitions, the concurrency limit, and `queued`.
 - Hook installation: entries preserved, malformed settings refused, missing entries added. The event-to-state mapping from recorded markers, and the roster fallback.
 - Playbook loading from settings.json, playbook errors, and template rendering.
-- Classifier output validation, including an unknown playbook name.
+- Classifier output validation, including an unknown playbook name; default-provider routing and reload, model/provider fallback, Codex schema and temporary-file cleanup, and CLI failures.
 - Report command handling, including unknown session IDs and worktree paths `git worktree list` does not show.
 - Required CLI arguments for `claude --bg`, `claude -p`, `claude attach`, `claude stop`, `codex exec` and `codex exec fork`.
 
