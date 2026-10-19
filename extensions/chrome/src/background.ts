@@ -77,7 +77,8 @@ const tabs: Tabs = {
     await chrome.tabGroups.update(created, { title: GROUP_TITLE, color: 'cyan' });
   },
   move: async (tabId, index) => void (await chrome.tabs.move(tabId, { index })),
-  load: async (tabId, url) => void (await chrome.tabs.update(tabId, { url })),
+  // Firefox can commit the marked URL before the load restarts, so its unmarked load replaces that history entry (mechanics M42).
+  load: async (tabId, url) => void (await chrome.tabs.update(tabId, FIREFOX ? { url, loadReplace: true } : { url })),
   close: (tabId) => chrome.tabs.remove(tabId),
 };
 

@@ -1,4 +1,7 @@
 // The part of the Chrome extension API this extension uses.
+
+/** True in the Firefox build, set by esbuild's `define`. */
+declare const FIREFOX: boolean;
 declare namespace chrome.runtime {
   function sendMessage(message: unknown): Promise<unknown>;
 
@@ -17,7 +20,7 @@ declare namespace chrome.tabs {
   }
 
   function query(query: { groupId: number }): Promise<Tab[]>;
-  function update(tabId: number, properties: { url: string }): Promise<Tab | undefined>;
+  function update(tabId: number, properties: { url: string; loadReplace?: boolean }): Promise<Tab | undefined>;
   function move(tabId: number, properties: { index: number }): Promise<Tab>;
   function group(options: { tabIds: number; groupId?: number; createProperties?: { windowId: number } }): Promise<number>;
   function remove(tabId: number): Promise<void>;

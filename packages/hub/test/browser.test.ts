@@ -84,6 +84,7 @@ describe('listenBrowser', () => {
 
   describe('POST /snooze (PRD R66)', () => {
     const EXTENSION = 'chrome-extension://abcdefghijklmnop';
+    const FIREFOX = 'moz-extension://0d6f1c2e-5a4b-4c3d-8e9f-1a2b3c4d5e6f';
     const JSON_TYPE = 'application/json';
     const ISSUE = 'https://github.com/o/r/issues/1';
 
@@ -119,9 +120,11 @@ describe('listenBrowser', () => {
       expect([timed.status, JSON.parse(timed.body)]).toEqual([200, { done: true }]);
       expect(timed.headers['access-control-allow-origin']).toBeUndefined();
       expect(indefinite.status).toBe(200);
+      expect((await post(server.port, JSON.stringify({ url: ISSUE, until: 1 }), { Origin: FIREFOX, 'Content-Type': JSON_TYPE })).status).toBe(200);
       expect(fake.calls).toEqual([
         [ISSUE, 1_800_000_000_000],
         [ISSUE, null],
+        [ISSUE, 1],
       ]);
     });
 
@@ -143,6 +146,8 @@ describe('listenBrowser', () => {
 
       expect((await post(server.port, body, { Origin: 'https://github.com', 'Content-Type': JSON_TYPE })).status).toBe(403);
       expect((await post(server.port, body, { Origin: 'null', 'Content-Type': JSON_TYPE })).status).toBe(403);
+      expect((await post(server.port, body, { Origin: 'moz-extension:', 'Content-Type': JSON_TYPE })).status).toBe(403);
+      expect((await post(server.port, body, { Origin: 'https://moz-extension.example', 'Content-Type': JSON_TYPE })).status).toBe(403);
       expect((await post(server.port, body, { 'Content-Type': JSON_TYPE })).status).toBe(403);
       expect((await post(server.port, body, { Origin: EXTENSION, 'Content-Type': 'text/plain;charset=UTF-8' })).status).toBe(415);
       expect((await post(server.port, body, { Origin: EXTENSION, 'Content-Type': 'application/x-www-form-urlencoded' })).status).toBe(415);

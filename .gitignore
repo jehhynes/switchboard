@@ -7,3 +7,4 @@ coverage/
 .wip/
 bin/
 obj/
+*.xpi

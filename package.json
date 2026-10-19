@@ -18,6 +18,7 @@
     "apps/dock",
     "extensions/switchboard",
     "extensions/chrome",
+    "extensions/firefox",
     "extensions/gnome-shell"
   ],
   "scripts": {

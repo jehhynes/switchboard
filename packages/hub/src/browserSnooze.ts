@@ -31,15 +31,15 @@ function readBody(request: IncomingMessage): Promise<string | null> {
 }
 
 /**
- * Reads the JSON body of a request from the Chrome extension's service worker, or the refusal for any other sender. A web
- * page cannot send it: its JSON content type needs a CORS preflight, which fails because the endpoint sends no CORS headers,
+ * Reads the JSON body of a request from the Chrome or Firefox extension's background script, or the refusal for any other sender.
+ * A web page cannot send it: its JSON content type needs a CORS preflight, which fails because the endpoint sends no CORS headers,
  * and its Origin is not an extension.
  */
 async function readExtensionBody(request: IncomingMessage): Promise<{ body: Record<string, unknown> } | { reply: BrowserReply }> {
   const origin = request.headers.origin ?? '';
   const contentType = (request.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
 
-  if (!origin.startsWith('chrome-extension://')) {
+  if (!origin.startsWith('chrome-extension://') && !origin.startsWith('moz-extension://')) {
     request.resume();
 
     return { reply: { status: 403, body: { error: 'forbidden origin' } } };

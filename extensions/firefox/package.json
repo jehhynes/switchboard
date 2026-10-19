@@ -1,0 +1,21 @@
+{
+  "name": "@switchboard/firefox",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Firefox build of the Chrome extension in extensions/chrome, from the same source. Load dist/ from about:debugging, or install switchboard-firefox.xpi in Firefox Developer Edition or Nightly with xpinstall.signatures.required set to false.",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "package": "node package.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@switchboard/chrome": "*",
+    "@vitest/coverage-v8": "^3.2.7",
+    "@vscode/codicons": "^0.0.46-24",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.7",
+    "yazl": "^2.5.1"
+  }
+}

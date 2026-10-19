@@ -43,6 +43,7 @@ Do not test type declarations, pass-through property bags, or simple settings re
 | Built hub | Spawn the built hub under a temporary home | Startup, single instance, shutdown |
 | History webview | Vitest/jsdom with an `acquireVsCodeApi` stub | Rendering, filters and messages |
 | Chrome extension | Vitest/jsdom with a recorded board column, a recorded card and its More actions menu, and an injected hub read, snooze and unsnooze | Card marks, the column link, card pills, the card menu's items, the snooze popup, pill clicks, reads, requests and refusals, and the Switchboard tab group for the dock's links with fake Chrome calls |
+| Firefox extension | Vitest on the Chrome manifest and `content.css` | The Firefox manifest and CSS changes, and refusal of a Chrome manifest or CSS the build no longer recognises |
 | Extension host | Mocha inside real VS Code | Registration, hub process wiring, claims, the row click from VS Code, editor calls, the status bar item |
 | GNOME Shell extension | Vitest | The choice of VS Code's windows (`windows.js`) |
 | Dock | xUnit v3 with Avalonia.Headless, fakes of the hub, windows and VS Code, a test-owned loopback hub, and the recorded dock view in `apps/dock/test/fixtures/dock.json` | Parsing the hub's stream and view, the click's requests and switch, refusals, the list, its groups, clicks, menus, drag reordering and keys, placement arithmetic, and the Settings window's pages, checks and writes |

@@ -21,6 +21,7 @@ await build({
   format: 'iife',
   platform: 'browser',
   target: 'chrome120',
+  define: { FIREFOX: 'false' },
   outdir: 'dist',
   logLevel: 'info',
 });
