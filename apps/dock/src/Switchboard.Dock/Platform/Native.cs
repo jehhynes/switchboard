@@ -87,6 +87,55 @@ static partial class Native
     public static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    public static extern nint GetShellWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(nint window, out Rect rect);
+
+    [DllImport("user32.dll")]
+    public static extern nint GetWindowLongPtr(nint window, int index);
+
+    public static bool IsTopmost(nint window) => (GetWindowLongPtr(window, -20).ToInt64() & 0x8) != 0;
+
+    public static void SetTopmost(nint window, bool topmost)
+    {
+        if (IsTopmost(window) != topmost)
+        {
+            SetWindowPos(window, topmost ? -1 : -2, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
+        }
+    }
+
+    public static bool FullScreenOnMonitor(nint dock, nint monitor)
+    {
+        List<(PixelRect Bounds, bool Maximized, bool OnMonitor)> windows = [];
+        var area = Bounds(monitor);
+        var shell = GetShellWindow();
+
+        EnumWindows((window, _) =>
+        {
+            // Tool windows include the taskbar and tooltips; cloaked windows belong to another virtual desktop.
+            if (window == dock || window == shell || !IsWindowVisible(window) || IsIconic(window)
+                || (GetWindowLongPtr(window, -20).ToInt64() & 0x80) != 0
+                || (DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) == 0 && cloaked != 0)
+                || !GetWindowRect(window, out var bounds)
+                || bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top
+                || bounds.Right <= area.Left || bounds.Left >= area.Right || bounds.Bottom <= area.Top || bounds.Top >= area.Bottom)
+            {
+                return true;
+            }
+
+            var entry = (Bounds: Pixels(bounds), Maximized: IsZoomed(window), OnMonitor: MonitorFromWindow(window, MonitorDefaultToNearest) == monitor);
+            windows.Add(entry);
+            return !entry.OnMonitor && !DockPlacement.FullScreen(entry.Bounds, area, entry.Maximized);
+        }, 0);
+
+        return DockPlacement.FullScreen(area, windows);
+    }
+
+    [DllImport("dwmapi.dll")]
+    static extern int DwmGetWindowAttribute(nint window, uint attribute, out int value, int size);
+
+    [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(nint window);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

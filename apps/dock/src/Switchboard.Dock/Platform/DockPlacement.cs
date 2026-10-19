@@ -54,12 +54,35 @@ public static class DockPlacement
     /// <summary>The width the inner edge of <paramref name="strip"/> has when dragged to <paramref name="x"/>; the outer edge stays.</summary>
     public static int WidthAt(DockEdge edge, PixelRect strip, int x) => edge == DockEdge.Left ? x - strip.Left : strip.Right - x;
 
-    /// <summary>The pixels an auto-hidden dock leaves on screen at its outer edge, as many as the Windows taskbar leaves.</summary>
-    public const int SliverWidth = 2;
+    /// <summary>The device-independent pixels an auto-hidden dock leaves at its outer edge.</summary>
+    public const double SliverWidth = 3;
 
     /// <summary>The part of a <paramref name="width"/> by <paramref name="height"/> window an auto-hidden dock shows, in window coordinates: its outer edge.</summary>
-    public static PixelRect Sliver(DockEdge edge, int width, int height) =>
-        edge == DockEdge.Left ? new(0, 0, SliverWidth, height) : new(width - SliverWidth, 0, width, height);
+    public static PixelRect Sliver(DockEdge edge, int width, int height, double scale) =>
+        edge == DockEdge.Left ? new(0, 0, Pixels(SliverWidth, scale), height) : new(width - Pixels(SliverWidth, scale), 0, width, height);
+
+    /// <summary>A full-screen foreground window covers the monitor; maximized windows leave room for taskbars and app bars.</summary>
+    public static bool FullScreen(PixelRect window, PixelRect monitor, bool maximized) =>
+        window == monitor || (!maximized && window.Left <= monitor.Left && window.Top <= monitor.Top && window.Right >= monitor.Right && window.Bottom >= monitor.Bottom);
+
+    /// <summary>Checks windows in front-to-back order, ignoring ordinary windows on other monitors.</summary>
+    public static bool FullScreen(PixelRect monitor, IEnumerable<(PixelRect Bounds, bool Maximized, bool OnMonitor)> windows)
+    {
+        foreach (var window in windows)
+        {
+            if (FullScreen(window.Bounds, monitor, window.Maximized))
+            {
+                return true;
+            }
+
+            if (window.OnMonitor)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>Device-independent pixels at a monitor's scale, rounded to whole pixels.</summary>
     public static int Pixels(double dips, double scale) => (int)Math.Round(dips * scale);

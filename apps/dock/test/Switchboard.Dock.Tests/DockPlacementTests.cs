@@ -90,11 +90,42 @@ public sealed class DockPlacementTests
     [InlineData(259, 1.75, 453)]
     public void Pixels_Scale_RoundsToWholePixels(double dips, double scale, int pixels) => Assert.Equal(pixels, DockPlacement.Pixels(dips, scale));
 
-    [Fact]
-    public void Sliver_EachEdge_KeepsTheOuterTwoPixels()
+    [Theory]
+    [InlineData(1, 3)]
+    [InlineData(1.5, 4)]
+    [InlineData(1.75, 5)]
+    [InlineData(2, 6)]
+    public void Sliver_EachEdge_KeepsThreeScaledPixels(double scale, int pixels)
     {
-        Assert.Equal(new PixelRect(0, 0, 2, 1440), DockPlacement.Sliver(DockEdge.Left, 320, 1440));
-        Assert.Equal(new PixelRect(318, 0, 320, 1440), DockPlacement.Sliver(DockEdge.Right, 320, 1440));
+        Assert.Equal(new PixelRect(0, 0, pixels, 1440), DockPlacement.Sliver(DockEdge.Left, 320, 1440, scale));
+        Assert.Equal(new PixelRect(320 - pixels, 0, 320, 1440), DockPlacement.Sliver(DockEdge.Right, 320, 1440, scale));
+    }
+
+    [Fact]
+    public void FullScreen_ForegroundBounds_YieldsOnlyWhenTheDockMonitorIsCovered()
+    {
+        var monitor = new PixelRect(1920, 0, 3840, 1080);
+        Assert.True(DockPlacement.FullScreen(monitor, monitor, false));
+        Assert.True(DockPlacement.FullScreen(monitor, monitor, true));
+        Assert.True(DockPlacement.FullScreen(new PixelRect(1900, 0, 3900, 1080), monitor, false));
+        Assert.False(DockPlacement.FullScreen(new PixelRect(1912, -8, 3848, 1048), monitor, true));
+        Assert.False(DockPlacement.FullScreen(new PixelRect(1912, -8, 3848, 1088), monitor, true));
+        Assert.False(DockPlacement.FullScreen(new PixelRect(0, 0, 1920, 1080), monitor, false));
+        Assert.False(DockPlacement.FullScreen(new PixelRect(2000, 100, 3000, 900), monitor, false));
+    }
+
+    [Fact]
+    public void FullScreen_WindowOrder_KeepsYieldingWhenAnotherMonitorGainsFocus()
+    {
+        var monitor = new PixelRect(1920, 0, 3840, 1080);
+        var other = (new PixelRect(100, 100, 1000, 900), false, false);
+        var full = (monitor, false, true);
+        var ordinary = (new PixelRect(2000, 100, 3000, 900), false, true);
+
+        Assert.True(DockPlacement.FullScreen(monitor, [other, full]));
+        Assert.False(DockPlacement.FullScreen(monitor, [other, ordinary, full]));
+        Assert.False(DockPlacement.FullScreen(monitor, [other]));
+        Assert.False(DockPlacement.FullScreen(monitor, []));
     }
 
     static readonly TimeSpan Start = TimeSpan.FromSeconds(10);

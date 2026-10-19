@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
     readonly HideDelay hideDelay = new();
     readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
     DispatcherTimer? hideTimer;
+    DispatcherTimer? topmostTimer;
     /// <summary>Where the pointer last moved or pressed, in window coordinates; a row's menu and a tooltip open there.</summary>
     Point pointer;
     // The width the pointer has dragged to, in device-independent pixels, before rounding to physical pixels.
@@ -197,8 +198,11 @@ public sealed partial class MainWindow : Window
             appBar = new AppBar(handle.Handle);
             // Dispatched, because the bar raises it from inside its window procedure.
             appBar.Moved += () => Dispatcher.UIThread.Post(Dock);
-            appBar.FullScreen += (full) => Topmost = !full;
+            appBar.FullScreen += (_) => Dispatcher.UIThread.Post(UpdateTopmost);
             Dock();
+            topmostTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            topmostTimer.Tick += (_, _) => UpdateTopmost();
+            topmostTimer.Start();
             // Shown after it has drawn a frame at the strip's size.
             RequestAnimationFrame((_) => RequestAnimationFrame((_) => Native.Cloak(handle.Handle, false)));
             // Shown regardless after a second, in case no frame is drawn, so the dock never stays hidden.
@@ -209,6 +213,7 @@ public sealed partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         hideTimer?.Stop();
+        topmostTimer?.Stop();
 
         if (OperatingSystem.IsWindows())
         {
@@ -322,6 +327,11 @@ public sealed partial class MainWindow : Window
     /// <summary>Checks every 100 ms whether the shown dock is still kept open, and hides it once it has not been for <see cref="HideDelay.Delay"/>.</summary>
     void WatchHide()
     {
+        if (hideTimer?.IsEnabled == true)
+        {
+            return;
+        }
+
         hideDelay.Reset();
 
         if (hideTimer is null)
@@ -337,6 +347,20 @@ public sealed partial class MainWindow : Window
         }
 
         hideTimer.Start();
+    }
+
+    void UpdateTopmost()
+    {
+        if (!OperatingSystem.IsWindows() || appBar is null || TryGetPlatformHandle() is not { } handle)
+        {
+            return;
+        }
+
+        var fullScreen = Native.FullScreenOnMonitor(handle.Handle, appBar.Monitor);
+
+        Topmost = !fullScreen;
+        // Avalonia caches Topmost; the shell can change the native style without changing that property.
+        Native.SetTopmost(handle.Handle, !fullScreen);
     }
 
     /// <summary>The pointer is over the dock or a window it owns, such as a menu or dialog, one of them has the focus, or a drag is under way.</summary>
@@ -359,7 +383,7 @@ public sealed partial class MainWindow : Window
 
         if (OperatingSystem.IsWindows() && placed is { } bounds && TryGetPlatformHandle() is { } handle)
         {
-            var sliver = DockPlacement.Sliver(model.Settings.DockEdge, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top);
+            var sliver = DockPlacement.Sliver(model.Settings.DockEdge, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, RenderScaling);
 
             Sliver.HorizontalAlignment = model.Settings.DockEdge == DockEdge.Left ? Avalonia.Layout.HorizontalAlignment.Left : Avalonia.Layout.HorizontalAlignment.Right;
             Sliver.Bars = SliverBars();
