@@ -19,6 +19,38 @@ function recordOf(s: HubServer) {
 }
 
 describe('listenHub', () => {
+  it('sends the latest theme to the dock, rejects invalid reports and ignores late reports', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, dock: () => ({}) });
+    const chunks: string[] = [];
+    const outbound = request({ host: '127.0.0.1', port: server.port, path: '/dock/events', headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => chunks.push(chunk));
+    });
+    outbound.on('error', () => {});
+    outbound.end();
+    const report = (body: unknown, token: string | null = server.token) => call(server.port, 'POST', '/window/theme', token, 2000, body);
+    const latest = () => chunks.join('').split('\n').filter(line => line.startsWith('data: ')).at(-1);
+    try {
+      await until(() => latest()?.includes('windows') ? true : null);
+      expect(latest()).not.toContain('theme');
+      expect((await report({ theme: 'dark', at: 20 }, null))?.status).toBe(401);
+      for (const body of [null, {}, { theme: 'blue', at: 20 }, { theme: 'light', at: '20' }, { theme: 'light', at: null }]) {
+        expect((await report(body))?.status).toBe(400);
+      }
+      expect((await report({ theme: 'dark', at: 20 }))?.status).toBe(200);
+      await until(() => latest()?.includes('"theme":"dark"') ? true : null);
+      expect((await report({ theme: 'light', at: 19 }))?.status).toBe(200);
+      const before = chunks.join('').split('event: dock').length;
+      server.update();
+      await until(() => chunks.join('').split('event: dock').length > before ? true : null);
+      expect(latest()).toContain('"theme":"dark"');
+      expect((await report({ theme: 'light', at: 21 }))?.status).toBe(200);
+      await until(() => latest()?.includes('"theme":"light"') ? true : null);
+    } finally {
+      outbound.destroy();
+    }
+  });
+
   it('answers /hub without a token', async () => {
     server = await listenHub({ identity, onShutdown: () => {} });
 

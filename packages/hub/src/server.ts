@@ -104,6 +104,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   let front: string | null = null;
   // When the focus change that set `front` happened, and each window's latest reported change, so a report that arrives late changes nothing.
   let frontAt = -Infinity;
+  let theme: 'light' | 'dark' | undefined;
+  let themeAt = -Infinity;
   const reportedAt = new Map<string | null, number>();
 
   let emptySince: number | null = now();
@@ -118,7 +120,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const dock = options.dock;
   const views: Record<View, { event: string; data: (() => unknown) | undefined }> = {
     window: { event: 'state', data: options.snapshot },
-    dock: { event: 'dock', data: dock === undefined ? undefined : () => ({ ...dock(), windows: openWindows() }) },
+    dock: { event: 'dock', data: dock === undefined ? undefined : () => ({ ...dock(), windows: openWindows(), ...(theme === undefined ? {} : { theme }) }) },
   };
   // Set by stopViews and close: the app that builds the views may already be closed.
   let closing = false;
@@ -217,6 +219,26 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       openStream(request, response, 'window', url.searchParams);
     } else if (request.method === 'GET' && path === '/dock/events') {
       openStream(request, response, 'dock');
+    } else if (request.method === 'POST' && path === '/window/theme') {
+      readJson(request).then(
+        (body) => {
+          const report = body as { theme?: unknown; at?: unknown } | null;
+
+          if ((report?.theme !== 'light' && report?.theme !== 'dark') || typeof report.at !== 'number' || !Number.isFinite(report.at)) {
+            json(response, 400, { error: 'Expected {theme: light|dark, at: epoch milliseconds}.' });
+            return;
+          }
+
+          if (report.at >= themeAt) {
+            theme = report.theme;
+            themeAt = report.at;
+            windowsChanged();
+          }
+
+          json(response, 200, {});
+        },
+        (error: Error) => json(response, 400, { error: error.message }),
+      );
     } else if (request.method === 'POST' && path === '/window/focus') {
       readJson(request).then(
         (body) => {

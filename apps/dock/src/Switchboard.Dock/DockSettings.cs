@@ -25,6 +25,8 @@ public sealed class DockSettings
     /// <summary>Hides the dock to a sliver at its edge instead of reserving a strip, and shows it while the pointer is over it (PRD R71).</summary>
     public bool AutoHide { get; set; }
 
+    public string Theme { get; set; } = "system";
+
     [System.Text.Json.Serialization.JsonIgnore]
     public Platform.DockEdge DockEdge => Edge == "right" ? Platform.DockEdge.Right : Platform.DockEdge.Left;
 
@@ -51,6 +53,7 @@ public sealed class DockSettings
         // Done's date bands (done:<band>) start at their defaults each run (PRD R27).
         settings.Groups = (settings.Groups ?? []).Where((entry) => !entry.Key.Contains(':', StringComparison.Ordinal)).ToDictionary();
         settings.Edge = settings.Edge == "right" ? "right" : "left";
+        settings.Theme = settings.Theme is "light" or "dark" or "vscode" ? settings.Theme : "system";
 
         return settings;
     }

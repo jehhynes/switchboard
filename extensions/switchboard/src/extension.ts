@@ -179,9 +179,19 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     // The dock follows the window in front through the hub where it cannot see other apps' windows (architecture.md § Dock).
     if (record !== null) {
       void postToHub(record, '/window/focus', { workspace: workspaceFile(), focused, at: Date.now() }, 5_000);
+      if (focused) {
+        reportTheme(record);
+      }
     }
 
     return focused ? Promise.resolve(vscode.commands.executeCommand('switchboard.claim')).catch(() => {}) : closing;
+  };
+
+  const reportTheme = (record: HubRecord): void => {
+    const kind = vscode.window.activeColorTheme.kind;
+    const theme = kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark';
+
+    void postToHub(record, '/window/theme', { theme, at: Date.now() }, 5_000);
   };
 
   status.name = 'Switchboard';
@@ -204,6 +214,12 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       return record === null ? null : claimOpen(record, runCommand);
     }),
     vscode.window.onDidChangeWindowState((window) => void windowStateChanged(window.focused)),
+    vscode.window.onDidChangeActiveColorTheme(() => {
+      const record = keeper.current();
+      if (record !== null && vscode.window.state.focused) {
+        reportTheme(record);
+      }
+    }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration('switchboard.configDir')) {
         return;
@@ -246,6 +262,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
             void claimOpen(record, runCommand).catch(() => {});
           }
         } else if (event === 'hello') {
+          if (vscode.window.state.focused) {
+            reportTheme(record);
+          }
           toasts.connected();
           void claimOpen(record, runCommand).catch(() => {});
           history.connected(record);

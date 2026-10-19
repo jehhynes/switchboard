@@ -89,6 +89,14 @@ public sealed partial class MainWindow : Window
         this.docked = docked;
         DataContext = model;
         InitializeComponent();
+        ApplyTheme();
+        model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(DockViewModel.VsCodeTheme) or nameof(DockViewModel.Theme))
+            {
+                ApplyTheme();
+            }
+        };
         // After the XAML, whose width is the default.
         Width = model.Settings.Width;
         AddHandler(PointerMovedEvent, (_, e) =>
@@ -1254,6 +1262,17 @@ public sealed partial class MainWindow : Window
         Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
     ];
 
+    void ApplyTheme()
+    {
+        var theme = model.Settings.Theme == "vscode" ? model.VsCodeTheme : model.Settings.Theme;
+        Application.Current!.RequestedThemeVariant = theme switch
+        {
+            "light" => ThemeVariant.Light,
+            "dark" => ThemeVariant.Dark,
+            _ => ThemeVariant.Default,
+        };
+    }
+
     /// <summary>Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked.</summary>
     async Task NewAdhoc()
     {
@@ -1294,7 +1313,7 @@ public sealed partial class MainWindow : Window
         }
 
         var editor = new SettingsEditor(config);
-        var window = new SettingsWindow(editor, actions);
+        var window = new SettingsWindow(editor, actions, model);
         // The hub says when the files change on disk, so the window reads them again.
         Action reload = () => Dispatcher.UIThread.Post(() => _ = editor.Load());
 

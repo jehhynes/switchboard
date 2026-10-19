@@ -14,10 +14,10 @@ public sealed class SettingsWindowTests
     readonly FakeConfigHub hub = new();
     readonly FakeActions actions = new();
 
-    (SettingsWindow Window, SettingsEditor Editor) Open(Func<CancellationToken, Task>? delay = null)
+    (SettingsWindow Window, SettingsEditor Editor) Open(Func<CancellationToken, Task>? delay = null, DockViewModel? dock = null)
     {
         var editor = new SettingsEditor(hub, delay ?? ((_) => Task.CompletedTask));
-        var window = new SettingsWindow(editor, actions);
+        var window = new SettingsWindow(editor, actions, dock ?? new DockViewModel(new DockSettings(), _ => { }));
 
         window.Show();
         editor.Load().GetAwaiter().GetResult();
@@ -26,12 +26,119 @@ public sealed class SettingsWindowTests
         return (window, editor);
     }
 
+    static ComboBox ThemeBox(Window window) => window.GetVisualDescendants().OfType<ComboBox>().Single(box => box.Name == "DockTheme");
+
     static void Settle()
     {
         for (var pass = 0; pass < 5; pass++)
         {
             Dispatcher.UIThread.RunJobs();
         }
+    }
+
+    [AvaloniaFact]
+    public void Theme_EditAndSave_DraftsThenPersistsWithoutWritingHubSettings()
+    {
+        var saved = new List<string>();
+        var dock = new DockViewModel(new DockSettings { Theme = "vscode" }, settings => saved.Add(settings.Theme));
+        var (window, _) = Open(dock: dock);
+        var theme = ThemeBox(window);
+
+        Assert.Equal(1, theme.SelectedIndex);
+        Assert.Equal(["Follow the system theme", "Follow the VS Code theme", "Always light", "Always dark"], theme.Items.Cast<string>());
+        theme.SelectedIndex = 2;
+        Settle();
+        Assert.Equal("vscode", dock.Theme);
+        Assert.Contains("Unsaved changes", Texts(window));
+        Assert.Contains(NavButton(window, "general").GetVisualDescendants().OfType<TextBlock>(), text => text.Classes.Contains("dirty"));
+        Click(PageButton(window, "save"));
+
+        Assert.Equal(["light"], saved);
+        Assert.Equal("light", dock.Theme);
+        Assert.Empty(hub.Saves);
+        Assert.False(PageButton(window, "save").IsEnabled);
+        Assert.Contains("Saved", Texts(window));
+    }
+
+    [AvaloniaFact]
+    public void Theme_Discard_RestoresSavedChoice()
+    {
+        var dock = new DockViewModel(new DockSettings { Theme = "dark" }, _ => throw new InvalidOperationException("Unexpected save"));
+        var (window, _) = Open(dock: dock);
+        ThemeBox(window).SelectedIndex = 2;
+        Click(PageButton(window, "discard"));
+        Assert.Equal(3, ThemeBox(window).SelectedIndex);
+        Assert.Equal("dark", dock.Theme);
+        Assert.False(PageButton(window, "save").IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Theme_SaveFails_KeepsDraftAndPreviousTheme()
+    {
+        var dock = new DockViewModel(new DockSettings(), _ => throw new IOException("disk full"));
+        var (window, _) = Open(dock: dock);
+        ThemeBox(window).SelectedIndex = 2;
+        Click(PageButton(window, "save"));
+        Assert.Equal("system", dock.Theme);
+        Assert.Equal(2, ThemeBox(window).SelectedIndex);
+        Assert.Contains("The dock could not save its settings: disk full", Texts(window));
+        Assert.True(PageButton(window, "save").IsEnabled);
+    }
+
+    [AvaloniaTheory]
+    [InlineData("CloseSave", "light")]
+    [InlineData("CloseDiscard", "system")]
+    public void Theme_CloseWithChanges_AsksAndHonoursChoice(string choice, string expected)
+    {
+        var dock = new DockViewModel(new DockSettings(), _ => { });
+        var (window, _) = Open(dock: dock);
+        var closed = false;
+        window.Closed += (_, _) => closed = true;
+        ThemeBox(window).SelectedIndex = 2;
+        window.Close();
+        Settle();
+        Assert.False(closed);
+        Click(DialogButton(window, choice));
+        Assert.True(closed);
+        Assert.Equal(expected, dock.Theme);
+    }
+
+    [AvaloniaFact]
+    public void Theme_ConfigSaveRefused_DoesNotSaveTheme()
+    {
+        var dock = new DockViewModel(new DockSettings(), _ => throw new InvalidOperationException("Unexpected save"));
+        var (window, _) = Open(dock: dock);
+        ThemeBox(window).SelectedIndex = 2;
+        Field<TextBox>(window, "sessions.concurrency").Text = "3";
+        Settle();
+        hub.SaveReplies.Enqueue(["Settings changed on disk."]);
+        Click(PageButton(window, "save"));
+        Assert.Equal("system", dock.Theme);
+        Assert.Contains("Settings changed on disk.", Texts(window));
+    }
+
+    [AvaloniaFact]
+    public void Theme_EditedDuringSave_KeepsLaterChoiceUnsaved()
+    {
+        var saved = new List<string>();
+        var dock = new DockViewModel(new DockSettings(), settings => saved.Add(settings.Theme));
+        var (window, _) = Open(dock: dock);
+        ThemeBox(window).SelectedIndex = 2;
+        Field<TextBox>(window, "sessions.concurrency").Text = "3";
+        Settle();
+        var release = new TaskCompletionSource();
+        hub.HoldSave = () => release.Task;
+        Click(PageButton(window, "save"));
+        ThemeBox(window).SelectedIndex = 3;
+        release.SetResult();
+        Settle();
+        Assert.Equal(["light"], saved);
+        Assert.Equal("light", dock.Theme);
+        Assert.Equal(3, ThemeBox(window).SelectedIndex);
+        Assert.True(PageButton(window, "save").IsEnabled);
+        Assert.Contains("Unsaved changes", Texts(window));
+        Click(PageButton(window, "save"));
+        Assert.Equal(["light", "dark"], saved);
     }
 
     static void Click(Button button)
@@ -81,7 +188,7 @@ public sealed class SettingsWindowTests
         var (window, _) = Open();
         var texts = Texts(window);
 
-        Assert.Contains("Sessions and triage", texts);
+        Assert.Contains("General", texts);
         Assert.Contains("Concurrency", texts);
         Assert.Equal("2", Field<TextBox>(window, "sessions.concurrency").Text);
         Assert.Contains("+ Add Forum", texts);
@@ -350,7 +457,7 @@ public sealed class SettingsWindowTests
     {
         var (window, closed) = Changed();
 
-        Assert.Contains("Save changes to settings.json?", Texts(Assert.Single(window.OwnedWindows)));
+        Assert.Contains("Save changes to settings?", Texts(Assert.Single(window.OwnedWindows)));
         Click(DialogButton(window, "CloseKeep"));
 
         Assert.False(closed());

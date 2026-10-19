@@ -58,7 +58,7 @@ public static class SettingsPages
     {
         var sources = state.SettingsValue?["sources"] is JsonObject configured ? configured.ToList() : [];
         var missing = state.Config.SourceKinds.Where((kind) => !sources.Any((entry) => entry.Key == kind));
-        List<NavEntry> nav = [new("heading", "Settings"), Item(state, "general", "Sessions and triage"), new("heading", "Sources")];
+        List<NavEntry> nav = [new("heading", "Settings"), Item(state, "general", "General"), new("heading", "Sources")];
 
         foreach (var (name, _) in sources)
         {
@@ -147,7 +147,7 @@ public static class SettingsPages
 
         if (page == "general")
         {
-            return SettingsPage(state, "Sessions and triage", SettingsFields.GeneralFields(state), [], []);
+            return SettingsPage(state, "General", SettingsFields.GeneralFields(state), [], []);
         }
 
         if (page.StartsWith("source:", StringComparison.Ordinal))

@@ -38,6 +38,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     readonly Dictionary<string, bool> bandsOpen = [];
 
     string? status;
+    string? vsCodeTheme;
     string? connection = "Connecting to Switchboard…";
     string? selected;
     string filter = "";
@@ -48,6 +49,24 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     DockView? pendingView;
 
     public DockSettings Settings => settings;
+
+    public string? VsCodeTheme => vsCodeTheme;
+
+    public string Theme => settings.Theme;
+
+    public bool SaveTheme(string theme)
+    {
+        var previous = settings.Theme;
+        settings.Theme = theme;
+        if (!SaveSettings())
+        {
+            settings.Theme = previous;
+            return false;
+        }
+
+        Changed(nameof(Theme));
+        return true;
+    }
 
     /// <summary>The resize grip is on the inner edge.</summary>
     public bool GripOnLeft => settings.DockEdge == DockEdge.Right;
@@ -178,6 +197,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         if (state != Hub.Connection.Connected)
         {
             pendingView = null;
+            Set(ref vsCodeTheme, null, nameof(VsCodeTheme));
         }
 
         Connection = state switch
@@ -206,6 +226,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
     public void Show(DockView view)
     {
+        Set(ref vsCodeTheme, view.Theme, nameof(VsCodeTheme));
         if (viewHeld)
         {
             pendingView = view;
@@ -284,15 +305,17 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     void BandToggled(BandViewModel band) => bandsOpen[band.Key] = band.IsOpen;
 
     /// <summary>Keeps the settings; a failure shows on the status line and changes nothing else.</summary>
-    public void SaveSettings()
+    public bool SaveSettings()
     {
         try
         {
             save(settings);
+            return true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             Status = $"The dock could not save its settings: {error.Message}";
+            return false;
         }
     }
 

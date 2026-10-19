@@ -19,6 +19,9 @@ public sealed class SettingsWindow : Window
 {
     readonly SettingsEditor editor;
     readonly IDockActions actions;
+    readonly DockViewModel dock;
+    string theme;
+    bool ThemeDirty => theme != dock.Theme;
     readonly StackPanel nav = new() { Margin = new Thickness(8), Spacing = 2 };
     readonly StackPanel page = new() { Margin = new Thickness(16, 12), Spacing = 10 };
     readonly TextBlock status = new() { Name = "SettingsStatus", Margin = new Thickness(16, 6), TextWrapping = TextWrapping.Wrap, IsVisible = false };
@@ -48,10 +51,12 @@ public sealed class SettingsWindow : Window
     readonly Dictionary<string, Action<TableCell>> cells = [];
     readonly Dictionary<string, (TextBlock Dot, StackPanel Errors)> tableRows = [];
 
-    public SettingsWindow(SettingsEditor editor, IDockActions actions)
+    public SettingsWindow(SettingsEditor editor, IDockActions actions, DockViewModel dock)
     {
         this.editor = editor;
         this.actions = actions;
+        this.dock = dock;
+        theme = dock.Theme;
         Title = "Switchboard Settings";
         Icon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://Switchboard.Dock/Assets/dock.ico")));
         Width = 980;
@@ -111,10 +116,15 @@ public sealed class SettingsWindow : Window
         var border = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(16, 8), Child = grid };
 
         save.Classes.Add("accent");
-        ToolTip.SetTip(save, "Save settings.json (Ctrl+S)");
-        ToolTip.SetTip(discard, "Drop every unsaved change and read settings.json again");
-        save.Click += async (_, _) => await editor.Save();
-        discard.Click += async (_, _) => await editor.Discard();
+        ToolTip.SetTip(save, "Save settings (Ctrl+S)");
+        ToolTip.SetTip(discard, "Drop every unsaved change and reload settings");
+        save.Click += async (_, _) => await Save();
+        discard.Click += async (_, _) =>
+        {
+            theme = dock.Theme;
+            await editor.Discard();
+            Draw();
+        };
         Grid.SetColumn(buttons, 1);
         border.Bind(Border.BorderBrushProperty, this.GetResourceObservable("DockBorder"));
         Tinted(fileStatus, "DockMuted");
@@ -127,7 +137,7 @@ public sealed class SettingsWindow : Window
         if (e.Key == Avalonia.Input.Key.S && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
         {
             e.Handled = true;
-            await editor.Save();
+            await Save();
         }
     }
 
@@ -135,7 +145,7 @@ public sealed class SettingsWindow : Window
     async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
         // The dock closing ends the app, which cannot wait for an answer.
-        if (closing || e.CloseReason is WindowCloseReason.ApplicationShutdown or WindowCloseReason.OwnerWindowClosing || editor.State is not { Dirty: true })
+        if (closing || e.CloseReason is WindowCloseReason.ApplicationShutdown or WindowCloseReason.OwnerWindowClosing || (!ThemeDirty && editor.State is not { Dirty: true }))
         {
             return;
         }
@@ -151,9 +161,9 @@ public sealed class SettingsWindow : Window
 
         try
         {
-            var answer = await Choose("Save changes to settings.json?", "Your changes are lost if you don't save them.", [("CloseSave", "Save", true), ("CloseDiscard", "Discard", false), ("CloseKeep", "Keep editing", false)]);
+            var answer = await Choose("Save changes to settings?", "Your changes are lost if you don't save them.", [("CloseSave", "Save", true), ("CloseDiscard", "Discard", false), ("CloseKeep", "Keep editing", false)]);
 
-            if (answer is null or "CloseKeep" || (answer == "CloseSave" && !await editor.Save()))
+            if (answer is null or "CloseKeep" || (answer == "CloseSave" && !await Save()))
             {
                 return;
             }
@@ -165,6 +175,31 @@ public sealed class SettingsWindow : Window
 
         closing = true;
         Close();
+    }
+
+    async Task<bool> Save()
+    {
+        var submittedTheme = theme;
+        if (editor.State is not { } state || state.ChangedOnDisk)
+        {
+            return false;
+        }
+
+        if (state.Dirty && !await editor.Save())
+        {
+            return false;
+        }
+
+        if (submittedTheme != dock.Theme && !dock.SaveTheme(submittedTheme))
+        {
+            Status = dock.Status;
+            Update();
+            return false;
+        }
+
+        Status = null;
+        Update();
+        return true;
     }
 
     /// <summary>A line under the page, such as why Open file did not run; null hides it.</summary>
@@ -313,6 +348,24 @@ public sealed class SettingsWindow : Window
         page.Children.Add(header);
         page.Children.Add(notes);
         page.Children.Add(errors);
+
+        if (state.Page == "general")
+        {
+            var choices = new[] { (Label: "Follow the system theme", Value: "system"), (Label: "Follow the VS Code theme", Value: "vscode"), (Label: "Always light", Value: "light"), (Label: "Always dark", Value: "dark") };
+            var box = new ComboBox { Name = "DockTheme", ItemsSource = choices.Select(choice => choice.Label).ToArray(), SelectedIndex = Array.FindIndex(choices, choice => choice.Value == theme), HorizontalAlignment = HorizontalAlignment.Left, MinWidth = 240 };
+            box.SelectionChanged += (_, _) =>
+            {
+                if (box.SelectedIndex >= 0)
+                {
+                    theme = choices[box.SelectedIndex].Value;
+                    Update();
+                }
+            };
+            page.Children.Add(new TextBlock { Text = "Appearance", FontSize = 15, FontWeight = FontWeight.SemiBold });
+            page.Children.Add(new TextBlock { Text = "Dock theme" });
+            page.Children.Add(box);
+            page.Children.Add(Tinted(new TextBlock { Text = "VS Code follows the most recently focused window's light or dark appearance. Custom colours are not copied.", TextWrapping = TextWrapping.Wrap }, "DockMuted"));
+        }
 
         if (view.Message is not null)
         {
@@ -483,12 +536,12 @@ public sealed class SettingsWindow : Window
 
     void UpdateBar(BarView bar)
     {
-        fileStatus.Text = bar.Status;
+        fileStatus.Text = ThemeDirty ? bar.Status.Replace("Saved", "Unsaved changes", StringComparison.Ordinal) : bar.Status;
         warning.Text = bar.Warning;
         warning.IsVisible = bar.Warning is not null;
         ShowErrors(barErrors, bar.Errors);
-        save.IsEnabled = bar.CanSave;
-        discard.IsEnabled = bar.CanDiscard;
+        save.IsEnabled = bar.CanSave || (ThemeDirty && editor.State is { ChangedOnDisk: false, Saving: false });
+        discard.IsEnabled = bar.CanDiscard || (ThemeDirty && editor.State is { Saving: false });
     }
 
     void ShowErrors(StackPanel panel, IReadOnlyList<string> list)
@@ -556,7 +609,7 @@ public sealed class SettingsWindow : Window
             label.Children.Add(Tinted(new TextBlock { Text = entry.Note }, "DockMuted"));
         }
 
-        if (entry.Dirty)
+        if (entry.Dirty || (entry.Argument == "general" && ThemeDirty))
         {
             label.Children.Add(new TextBlock { Text = "●", Classes = { "dirty" } });
             ToolTip.SetTip(label, "Unsaved changes");

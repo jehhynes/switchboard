@@ -2,7 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="Switchboard.Dock.App"
              RequestedThemeVariant="Default">
-  <!-- Colours are VS Code's Light Modern and Dark Modern theme values, also set on the Fluent theme's control keys; the dock follows Windows' light or dark mode. -->
+  <!-- VS Code's Light Modern and Dark Modern colours, shared by the dock and Fluent controls. -->
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
