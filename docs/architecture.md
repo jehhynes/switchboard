@@ -127,6 +127,8 @@ The extension makes each VS Code window an item window's helper; it has no view 
 
 ## Dock
 
+The dock compares group content before rebuilding its list, including nested action data. A focus report carries the whole view on both platforms; when the groups are unchanged, their controls stay attached. While the pointer is pressed, the dock holds the latest view until after release, loss of capture or deactivation, so even a changed elapsed-time label cannot replace the pressed row before its click runs. Starting a row drag releases the held view, since a drag suppresses the click and needs current rows for its drop target. Linux's window tracking still receives each view.
+
 PRD R71. `apps/dock` (`Switchboard.Dock.exe` on Windows, `Switchboard.Dock` on Linux) is a C# .NET 10 app with Avalonia 12.1.3. Window management sits behind `IWindows` and `IVsCode` (`Switching/Platform.cs`). On Windows they are `Win32Windows`, `VsCodeInstall` and `AppBar` in `Platform/`, described below. `npm run publish --workspace @switchboard/dock` publishes it to `~/.switchboard/dock/`.
 
 - **Linux.** Under GNOME on Wayland an app cannot list, raise or watch another app's windows (mechanics M38). The dock runs under XWayland, so `App` docks it with `MainWindow.DockOnX11` when its window is an X11 window, else floats it (`Float`), and uses `ShellWindows` when the GNOME Shell extension's service is on the session bus at start, else `HubWindows`. Either way `HubWindows.Update` takes the view's `windows` ([Hub lifecycle](#hub-lifecycle)): a change of `front` to an item window selects its row (`MainWindow.ShowItemWindow`), and an item window that leaves `open` clears the selection, as on Windows.

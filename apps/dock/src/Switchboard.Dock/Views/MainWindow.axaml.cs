@@ -99,6 +99,7 @@ public sealed partial class MainWindow : Window
         Activated += (_, _) => Expand();
         AddHandler(PointerPressedEvent, (_, e) =>
         {
+            model.HoldView();
             pointer = e.GetPosition(this);
             pressOnRow = (e.Source as Visual)?.GetSelfAndVisualAncestors().OfType<Border>().Any((border) => border.Classes.Contains("row")) == true;
 
@@ -113,11 +114,20 @@ public sealed partial class MainWindow : Window
         // Posted, so the release's tap runs first.
         AddHandler(PointerReleasedEvent, (_, _) =>
         {
+            Dispatcher.UIThread.Post(model.ReleaseView);
             if (!pressOnRow)
             {
                 Dispatcher.UIThread.Post(TakeFocus);
             }
         }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerCaptureLostEvent, (_, e) =>
+        {
+            if (e.Pointer.Captured is null)
+            {
+                Dispatcher.UIThread.Post(model.ReleaseView);
+            }
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        Deactivated += (_, _) => Dispatcher.UIThread.Post(model.ReleaseView);
         Styles.Add(new Style((x) => x.Is<Control>())
         {
             Setters =
@@ -674,6 +684,7 @@ public sealed partial class MainWindow : Window
             dragging = pressed.Key;
             rowDragged = true;
             e.Pointer.Capture(GroupList);
+            model.ReleaseView();
         }
 
         dragAt = e.GetPosition(this);

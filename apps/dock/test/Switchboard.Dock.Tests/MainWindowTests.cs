@@ -149,6 +149,107 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void TapRow_FocusRefreshBetweenPressAndRelease_OpensOnFirstClick()
+    {
+        var (window, model) = Open();
+        var row = RowNamed(window, "Issue <8>");
+        var point = row.TranslatePoint(new Point(20, 8), window)!.Value;
+
+        window.MouseDown(point, MouseButton.Left);
+        model.Show(Fixtures.View with { Windows = new OpenWindows([], null, 1) });
+        Dispatcher.UIThread.RunJobs();
+        window.MouseUp(point, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Single(actions.Clicked);
+        Assert.Same(row, RowNamed(window, "Issue <8>"));
+    }
+
+    [AvaloniaFact]
+    public void TapRow_ChangedViewBetweenPressAndRelease_OpensThenShowsLatestView()
+    {
+        var (window, model) = Open();
+        var row = RowNamed(window, "Issue <8>");
+        var point = row.TranslatePoint(new Point(20, 8), window)!.Value;
+        window.MouseDown(point, MouseButton.Left);
+
+        foreach (var title in new[] { "Intermediate issue", "Updated issue" })
+        {
+            var view = Fixtures.View;
+            model.Show(view with
+            {
+                Groups = view.Groups.Select(group => group with
+                {
+                    Rows = group.Rows.Select(item => item.Key == "item:8" ? item with { Title = title } : item).ToList(),
+                }).ToList(),
+            });
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Contains("Issue <8>", VisibleTexts(window));
+        window.MouseUp(point, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Single(actions.Clicked);
+        Assert.Contains("Updated issue", VisibleTexts(window));
+        Assert.DoesNotContain("Intermediate issue", VisibleTexts(window));
+    }
+
+    [AvaloniaFact]
+    public void TapRow_HubDisconnectsWithAViewPending_KeepsTheDisconnectMessage()
+    {
+        var (window, model) = Open();
+        var point = RowNamed(window, "Issue <8>").TranslatePoint(new Point(20, 8), window)!.Value;
+        window.MouseDown(point, MouseButton.Left);
+        model.Show(Fixtures.View);
+        model.Show(Connection.NotRunning);
+        var message = model.Connection;
+        window.MouseUp(point, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(message);
+        Assert.Equal(message, model.Connection);
+    }
+
+    [AvaloniaFact]
+    public void Show_ChangedRowAfterFocusRefresh_UpdatesTheRow()
+    {
+        var (window, model) = Open();
+
+        model.Show(Fixtures.View with { Windows = new OpenWindows([], null, 1) });
+        var view = Fixtures.View;
+        model.Show(view with
+        {
+            Groups = view.Groups.Select(group => group with
+            {
+                Rows = group.Rows.Select(row => row.Key == "item:8" ? row with { Title = "Updated issue" } : row).ToList(),
+            }).ToList(),
+        });
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Contains("Updated issue", VisibleTexts(window));
+        Assert.DoesNotContain("Issue <8>", VisibleTexts(window));
+    }
+
+    [AvaloniaFact]
+    public void Show_ChangedNestedAction_UsesTheNewAction()
+    {
+        var (window, model) = Open();
+        var view = Fixtures.View;
+        model.Show(view);
+        var action = view.Groups.SelectMany(group => group.Rows).Single(row => row.Key == "item:9").Controls[0].Action;
+        action["guidance"] = "Updated guidance";
+        model.Show(view);
+        model.Selected = "item:9";
+        Dispatcher.UIThread.RunJobs();
+        hub.ActReplies.Enqueue(null);
+
+        Tap(window, window.GetVisualDescendants().OfType<Button>().Single(button => button.Classes.Contains("main") && button.IsEffectivelyVisible));
+
+        Assert.Contains(hub.Calls, call => call.Contains("Updated guidance", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
     public void TakeFocus_ClickOffTheRows_AsksForTheFocusAfterTheRelease()
     {
         var (window, _) = Open();

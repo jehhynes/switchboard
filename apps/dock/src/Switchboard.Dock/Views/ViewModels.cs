@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Switchboard.Dock.Hub;
 using Switchboard.Dock.Platform;
 
@@ -41,6 +43,9 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     string filter = "";
     bool searchOpen;
     string? adhocRepo;
+    JsonNode? groupContent;
+    bool viewHeld;
+    DockView? pendingView;
 
     public DockSettings Settings => settings;
 
@@ -168,7 +173,13 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
     }
 
-    public void Show(Connection state) =>
+    public void Show(Connection state)
+    {
+        if (state != Hub.Connection.Connected)
+        {
+            pendingView = null;
+        }
+
         Connection = state switch
         {
             Hub.Connection.Connected => null,
@@ -177,9 +188,30 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
             Hub.Connection.TooOld => "The running hub has no dock view. Reload a VS Code window to update it.",
             _ => throw new ArgumentOutOfRangeException(nameof(state)),
         };
+    }
+
+    internal void HoldView() => viewHeld = true;
+
+    internal void ReleaseView()
+    {
+        viewHeld = false;
+        var view = pendingView;
+        pendingView = null;
+
+        if (view is not null)
+        {
+            Show(view);
+        }
+    }
 
     public void Show(DockView view)
     {
+        if (viewHeld)
+        {
+            pendingView = view;
+            return;
+        }
+
         Show(Hub.Connection.Connected);
         Snooze = view.Snooze;
         Schedules = view.Schedules ?? [];
@@ -206,13 +238,25 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
             AdhocRepo = RepoRoots.Contains(AdhocRepo ?? "") ? AdhocRepo : RepoRoots.FirstOrDefault();
         }
 
-        Notes.Clear();
-
-        foreach (var note in view.Notes)
+        if (!Notes.SequenceEqual(view.Notes))
         {
-            Notes.Add(note);
+            Notes.Clear();
+
+            foreach (var note in view.Notes)
+            {
+                Notes.Add(note);
+            }
         }
 
+        // Focus reports carry the whole view; replacing unchanged rows between press and release loses the click.
+        var content = JsonSerializer.SerializeToNode(view.Groups);
+
+        if (JsonNode.DeepEquals(groupContent, content))
+        {
+            return;
+        }
+
+        groupContent = content;
         var kept = Groups.ToDictionary((group) => group.Key);
 
         Groups.Clear();
