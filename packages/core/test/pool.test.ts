@@ -62,16 +62,16 @@ describe('pool triage (PRD R47, R50)', () => {
     expect(h.store.poolTriages(1)).toMatchObject([{ error: 'Triage playbook triage:zoho: Unknown template variable: ticket.title.', endedAt: T0 }]);
   });
 
-  it('drops the pool triage of a ticket that leaves the pool, and triages it again if it returns', () => {
+  it('keeps the Support triage when a ticket leaves the pool and reuses it if it returns', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool')), 'triage');
     h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null });
 
     pollZoho(h);
     expect(h.store.ticket(1)).toMatchObject({ pool: false, assigned: false });
-    expect(h.store.poolTriages(1)).toEqual([]);
+    expect(h.store.poolTriages(1)).toMatchObject([{ playbook: 'support:case' }]);
 
-    expect(only(pollZoho(h, zoho('500', 'pool')), 'triage').ticket.sourceKey).toBe('500');
+    expect(pollZoho(h, zoho('500', 'pool'))).toEqual([]);
   });
 
   it('lists pool tickets oldest first', () => {

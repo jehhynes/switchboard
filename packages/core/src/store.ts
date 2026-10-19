@@ -283,6 +283,16 @@ export const MIGRATIONS = [
    ALTER TABLE sourceStates ADD COLUMN volumeInterval INTEGER;
    ALTER TABLE sourceStates ADD COLUMN volumeTimezone TEXT NOT NULL DEFAULT 'America/New_York';
    CREATE INDEX currentQueue ON tickets(source, inQueue, assigned, pool);`,
+  `CREATE TABLE ticketClassifications (
+    ticketId INTEGER PRIMARY KEY, playbook TEXT NOT NULL, immediacy TEXT, severity TEXT, at INTEGER NOT NULL
+  );
+  INSERT INTO ticketClassifications
+    SELECT t.ticketId, t.playbook, t.immediacy, t.severity, t.endedAt FROM triages t
+    JOIN tickets k ON k.id = t.ticketId
+    WHERE k.source IN ('zoho', 'forum') AND t.id = (
+      SELECT id FROM triages WHERE ticketId = t.ticketId AND playbook IS NOT NULL AND error IS NULL AND endedAt IS NOT NULL
+      ORDER BY endedAt DESC, id DESC LIMIT 1
+    );`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external']);
@@ -696,6 +706,7 @@ export class Store {
     this.#db.prepare('DELETE FROM changes WHERE ticketId = ?').run(id);
     this.#db.prepare('DELETE FROM events WHERE ticketId = ?').run(id);
     this.#db.prepare('DELETE FROM historyRevisions WHERE ticketId = ?').run(id);
+    this.#db.prepare('DELETE FROM ticketClassifications WHERE ticketId = ?').run(id);
     this.#db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   }
 
@@ -745,6 +756,9 @@ export class Store {
 
   /** Ticket-report identity consolidation preserves queue evidence on the surviving ticket. */
   transferVolume(from: number, to: number): void {
+    this.#db.prepare(`INSERT INTO ticketClassifications SELECT ?, playbook, immediacy, severity, at FROM ticketClassifications WHERE ticketId = ?
+      ON CONFLICT(ticketId) DO UPDATE SET playbook = excluded.playbook, immediacy = excluded.immediacy, severity = excluded.severity, at = excluded.at
+      WHERE excluded.at > ticketClassifications.at`).run(to, from);
     const ticket = this.ticket(from)!;
     this.#db.prepare("UPDATE changes SET ticketId = ?, entityId = CASE WHEN entity = 'ticket' THEN ? ELSE entityId END WHERE ticketId = ?").run(to, String(to), from);
     this.#db.prepare('UPDATE events SET ticketId = ? WHERE ticketId = ?').run(to, from);
@@ -754,6 +768,7 @@ export class Store {
 
   volumeData(): import('./volume.js').VolumeData {
     return {
+      classifications: this.#all('SELECT * FROM ticketClassifications'),
       sources: this.#db.prepare('SELECT name AS source, volumeStartedAt AS startedAt, volumeLastAt AS lastAt, volumeInterval AS interval, volumeTimezone AS timezone FROM sourceStates WHERE volumeStartedAt IS NOT NULL').all() as unknown as import('./volume.js').VolumeSource[],
       tickets: this.#all<Ticket>("SELECT * FROM tickets WHERE source IN ('zoho', 'forum')"),
       changes: this.#db.prepare(`SELECT c.ticketId, e.at, c.fields FROM changes c JOIN events e ON e.id = c.eventId JOIN tickets t ON t.id = c.ticketId
@@ -844,6 +859,23 @@ export class Store {
 
   updateTriage(id: number, patch: Partial<NewTriage>): void {
     this.#update('triages', id, patch);
+    const triage = this.triage(id)!;
+    if (triage.playbook !== null && triage.endedAt !== null && triage.error === null) {
+      this.#db.prepare(`INSERT INTO ticketClassifications
+        SELECT id, ?, ?, ?, ? FROM tickets WHERE id = ? AND source IN ('zoho', 'forum')
+        ON CONFLICT(ticketId) DO UPDATE SET playbook = excluded.playbook, immediacy = excluded.immediacy, severity = excluded.severity, at = excluded.at
+        WHERE excluded.at >= ticketClassifications.at`).run(triage.playbook, triage.immediacy, triage.severity, triage.endedAt, triage.ticketId);
+    }
+  }
+
+  /** Retained Support tickets without a classification or an outstanding/failed ticket-only attempt. */
+  unclassifiedTickets(): Ticket[] {
+    return this.#all(`SELECT t.* FROM tickets t WHERE source IN ('zoho', 'forum') AND lastPolledAt IS NOT NULL
+      AND assigned = 0 AND pool = 0
+      AND (inQueue = 1 OR EXISTS (SELECT 1 FROM changes WHERE ticketId = t.id AND entity = 'ticket' AND json_extract(fields, '$.inQueue[1]') = 1))
+      AND NOT EXISTS (SELECT 1 FROM ticketClassifications WHERE ticketId = t.id)
+      AND NOT EXISTS (SELECT 1 FROM triages WHERE ticketId = t.id AND workItemId IS NULL)
+      ORDER BY t.id`);
   }
 
   triage(id: number): Triage | null {

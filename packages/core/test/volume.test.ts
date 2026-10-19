@@ -29,9 +29,9 @@ describe('observed Support volume', () => {
   it('retains other engineers without work, baselines the first poll, and records only changes', () => {
     const h = new Harness();
     h.now = monday;
-    expect(poll(h, [{ key: '1' }])).toEqual([]);
+    expect(poll(h, [{ key: '1' }])).toMatchObject([{ type: 'triage', workItemId: null }]);
     expect(h.store.workItemsForTicket(1)).toEqual([]);
-    expect(h.store.poolTriages(1)).toEqual([]);
+    expect(h.store.poolTriages(1)).toHaveLength(1);
     expect(h.store.ticket(1)).toMatchObject({ inQueue: true, assigned: false, pool: false, assigneeId: 'other' });
     const revision = h.store.historyRevision(1);
     h.now += 300000;
@@ -101,11 +101,14 @@ describe('observed Support volume', () => {
   it('transfers ticket evidence during identity consolidation', () => {
     const h = new Harness();
     h.now = monday;
-    poll(h, [{ key: '1' }, { key: '2' }]);
+    const actions = poll(h, [{ key: '1' }, { key: '2' }]);
+    h.triaged(actions[0], 'support:defect');
+    for (const triage of h.store.poolTriages(1)) h.store.deleteTriage(triage.id);
     h.store.volumeWorked(1, 'old', h.now);
     h.store.transferVolume(1, 2);
     h.store.deleteBareTicket(1);
     expect(h.store.volumeData().worked).toEqual([{ ticketId: 2, at: monday }]);
+    expect(h.store.volumeData().classifications).toMatchObject([{ ticketId: 2, playbook: 'support:defect' }]);
     expect(counts(h).counts).toMatchObject({ seen: 1, worked: 1 });
     h.store.close();
   });

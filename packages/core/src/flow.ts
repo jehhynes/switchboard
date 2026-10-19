@@ -653,8 +653,10 @@ class Flow {
     });
   }
 
-  /** A ticket that left the pool without a pick loses its pool triage, so it is triaged again if it returns (PRD R47). */
+  /** Support keeps ticket-only triages across queue and assignment changes for reporting. */
   private leftPool(ticketId: number): void {
+    const source = this.store.ticket(ticketId)!.source;
+    if (source === 'zoho' || source === 'forum') return;
     for (const triage of this.store.poolTriages(ticketId)) {
       this.store.deleteTriage(triage.id);
     }
@@ -1939,10 +1941,11 @@ class Flow {
     this.scheduleStarts();
   }
 
-  /** Triages work items, then pool tickets that have no triage yet, up to `triage.concurrency` at once (PRD R47). */
+  /** Triages work items, pool tickets, then retained Support tickets, within the shared concurrency limit. */
   private scheduleTriage(): void {
     const running = this.store.runningTriages();
     const busy = new Set(running.map((triage) => triage.workItemId));
+    const busyTickets = new Set(running.filter((triage) => triage.workItemId === null).map((triage) => triage.ticketId));
     let free = this.context.settings.triage.concurrency - running.length;
     const start = (ticket: Ticket, item: WorkItem | null) => {
       const before = this.actions.length;
@@ -1957,7 +1960,7 @@ class Flow {
 
       const ticket = this.store.ticket(item.ticketId)!;
 
-      if (!busy.has(item.id) && !ticket.snoozed) {
+      if (!busy.has(item.id) && !busyTickets.has(ticket.id) && !ticket.snoozed) {
         start(ticket, item);
       }
     }
@@ -1970,6 +1973,12 @@ class Flow {
       if (!ticket.snoozed && this.store.poolTriages(ticket.id).length === 0 && !this.hasOpenWorkItem(ticket.id)) {
         start(ticket, null);
       }
+    }
+
+    const enabled = this.store.enabledSources();
+    for (const ticket of this.store.unclassifiedTickets()) {
+      if (free <= 0) return;
+      if (enabled.has(ticket.source) && this.context.settings.sources[ticket.source] && !ticket.snoozed && !this.hasOpenWorkItem(ticket.id)) start(ticket, null);
     }
   }
 

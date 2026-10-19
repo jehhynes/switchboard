@@ -16,6 +16,23 @@ describe('Store', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('seeds the latest successful Support classification when upgrading version 29', () => {
+    const path = join(dir, 'v29.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 29).join(';'));
+    raw.exec(`PRAGMA user_version = 29;
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'zoho', '1', 'One', '', 0, ''), (2, 'github', '2', 'Two', '', 0, '');
+      INSERT INTO triages (ticketId, startedAt, endedAt, playbook, immediacy, severity, error) VALUES
+        (1, 1, 2, 'support:old', 'URGENT', 'HIGH', NULL),
+        (1, 3, 4, 'support:new', 'BLOCKING', 'LOW', NULL),
+        (1, 5, 6, NULL, NULL, NULL, 'Failed'),
+        (2, 1, 2, 'dev:question', NULL, NULL, NULL);`);
+    raw.close();
+    const store = Store.open(path);
+    expect(store.volumeData().classifications).toEqual([{ ticketId: 1, playbook: 'support:new', immediacy: 'BLOCKING', severity: 'LOW', at: 4 }]);
+    store.close();
+  });
+
   it('migrates a new file to the current version, in WAL mode, and reopens it without migrating again', () => {
     const path = join(dir, 'switchboard.db');
     const store = Store.open(path);

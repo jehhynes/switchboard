@@ -1,4 +1,12 @@
-import type { Ticket } from './model.js';
+import type { Ticket, Immediacy, Severity } from './model.js';
+
+export interface TicketClassification {
+  ticketId: number;
+  playbook: string;
+  immediacy: Immediacy | null;
+  severity: Severity | null;
+  at: number;
+}
 
 export interface VolumeSource {
   source: string;
@@ -9,6 +17,7 @@ export interface VolumeSource {
 }
 
 export interface VolumeData {
+  classifications?: TicketClassification[];
   sources: VolumeSource[];
   tickets: Ticket[];
   changes: { ticketId: number; at: number; fields: Record<string, [unknown, unknown]> }[];
@@ -18,7 +27,7 @@ export interface VolumeData {
 
 export const VOLUME_METRICS = ['seen', 'entered', 'left', 'open', 'assigned', 'worked', 'mine'] as const;
 export type VolumeMetric = typeof VOLUME_METRICS[number];
-export interface VolumeDetail { id: number; source: string; ref: string; title: string; url: string; at: number }
+export interface VolumeDetail { id: number; source: string; ref: string; title: string; url: string; at: number; classification: TicketClassification | null }
 export interface VolumeWeek {
   week: string;
   from: number;
@@ -52,6 +61,7 @@ export function weeklyVolume(data: VolumeData, now: number, source: 'all' | 'zoh
   const day = calendar(now, timezone);
   const monday = day - ((new Date(day).getUTCDay() + 6) % 7) * 86400000;
   const tickets = data.tickets.filter((t) => sources.some((s) => s.source === t.source));
+  const classifications = new Map(data.classifications?.map((c) => [c.ticketId, c]));
   const changes = new Map<number, VolumeData['changes']>();
   const worked = new Map<number, number[]>();
   for (const work of data.worked) {
@@ -78,7 +88,7 @@ export function weeklyVolume(data: VolumeData, now: number, source: 'all' | 'zoh
       const tracking = sources.find((s) => s.source === ticket.source)!;
       if (tracking.startedAt >= end) continue;
       const add = (metric: VolumeMetric, at: number) => {
-        if (!details[metric].some((d) => d.id === ticket.id)) details[metric].push({ id: ticket.id, source: ticket.source, ref: ticket.ref, title: ticket.title, url: ticket.url, at });
+        if (!details[metric].some((d) => d.id === ticket.id)) details[metric].push({ id: ticket.id, source: ticket.source, ref: ticket.ref, title: ticket.title, url: ticket.url, at, classification: classifications.get(ticket.id) ?? null });
       };
       const history = changes.get(ticket.id) ?? [];
       let queue = false;
