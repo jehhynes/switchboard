@@ -127,32 +127,18 @@ async function showInClaude(sessionId: string): Promise<void> {
   }
 }
 
-/** How long the Codex panel's tab may take to appear after `vscode.open`, which resolves before the extension shows it. */
-export const CODEX_TAB_WAIT_MS = 2_500;
-
-/** The Codex extension's conversation editor for a thread (mechanics M31). */
-export function codexThreadUri(threadId: string): vscode.Uri {
-  return vscode.Uri.parse(`openai-codex://route/local/${threadId}`);
-}
-
-function codexTabOpen(threadId: string): boolean {
-  const wanted = codexThreadUri(threadId).toString();
-
-  return vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType.includes('chatgpt.conversationEditor') && tab.input.uri.toString() === wanted));
-}
-
-/**
- * Opens a Codex thread in the Codex extension's panel, or shows its open tab. `vscode.open` makes a tab for the URI even without the extension,
- * so only a tab of the extension's view type counts (GC M43, mechanics M31).
- */
+/** Opens the sidebar in this window; Codex does not acknowledge when its history loads (mechanics M43). */
 async function showInCodex(threadId: string): Promise<void> {
-  await vscode.commands.executeCommand('vscode.open', codexThreadUri(threadId));
+  const extension = vscode.extensions.getExtension('openai.chatgpt');
 
-  for (const deadline = Date.now() + CODEX_TAB_WAIT_MS; !codexTabOpen(threadId); await new Promise((done) => setTimeout(done, 100))) {
-    if (Date.now() >= deadline) {
-      throw new Error('The Codex extension did not open the session. Is it installed?');
-    }
+  if (extension === undefined) {
+    throw new Error('Install or enable the Codex extension to open this session.');
   }
+
+  await extension.activate();
+  const uri = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://openai.chatgpt/local/${threadId}`));
+
+  await vscode.commands.executeCommand('vscode.open', uri);
 }
 
 /** Opens the session in the view of its provider. */

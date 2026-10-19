@@ -180,49 +180,80 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
     }
   });
 
-  it('opens a claimed Codex session in a Codex extension tab, and says so when no such tab opens (PRD R29)', async () => {
-    const opened = [];
+  it("opens a claimed Codex session in this window's sidebar (PRD R29)", async () => {
+    const calls = [];
     const execute = vscode.commands.executeCommand;
-    const realGroups = Object.getOwnPropertyDescriptor(vscode.window, 'tabGroups');
-    let codexTab = false;
-    const uri = 'openai-codex://route/local/thread-1';
-
-    vscode.commands.executeCommand = (command, ...args) => {
-      if (command === 'vscode.open' && String(args[0]?.scheme) === 'openai-codex') {
-        opened.push(args[0].toString());
-        return Promise.resolve();
-      }
-
-      return execute(command, ...args);
-    };
-    // A stand-in for the Codex extension's conversation editor, which this test host does not have.
-    Object.defineProperty(vscode.window, 'tabGroups', {
-      configurable: true,
-      get: () => ({ all: codexTab ? [{ tabs: [{ input: Object.assign(Object.create(vscode.TabInputCustom.prototype), { viewType: 'mainThreadWebview-chatgpt.conversationEditor', uri: vscode.Uri.parse(uri) }) }] }] : [] }),
-    });
-
+    const getExtension = vscode.extensions.getExtension;
+    const asExternalUri = vscode.env.asExternalUri;
     const hub = await claimingHub([], 'thread-1', 'codex');
+    const targeted = vscode.Uri.parse(`${vscode.env.uriScheme}://openai.chatgpt/local/thread-1?windowId=17`);
+
+    vscode.extensions.getExtension = (id) => {
+      assert.strictEqual(id, 'openai.chatgpt');
+      return { activate: async () => { calls.push('activate'); } };
+    };
+    vscode.env.asExternalUri = async (uri) => {
+      calls.push(uri.toString());
+      return targeted;
+    };
+    vscode.commands.executeCommand = async (command, ...args) => {
+      assert.strictEqual(command, 'vscode.open');
+      assert.strictEqual(args[0], targeted);
+      calls.push('open');
+    };
 
     try {
-      codexTab = true;
       assert.strictEqual(await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' }), 'thread-1');
-      assert.deepStrictEqual(opened, [uri]);
+      assert.deepStrictEqual(calls, ['activate', `${vscode.env.uriScheme}://openai.chatgpt/local/thread-1`, 'open']);
       assert.deepStrictEqual(errors, []);
-
-      codexTab = false;
-      await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' });
-      assert.deepStrictEqual(opened, [uri, uri]);
-      assert.deepStrictEqual(errors, ['Switchboard: Error: The Codex extension did not open the session. Is it installed?']);
     } finally {
       vscode.commands.executeCommand = execute;
-
-      if (realGroups !== undefined) {
-        Object.defineProperty(vscode.window, 'tabGroups', realGroups);
-      } else {
-        delete vscode.window.tabGroups;
-      }
-
+      vscode.extensions.getExtension = getExtension;
+      vscode.env.asExternalUri = asExternalUri;
       hub.server.close();
     }
   });
+
+  for (const failure of ['missing', 'activate', 'resolve', 'open']) {
+    it(`reports Codex ${failure} failure and still runs claimed commands`, async () => {
+      const execute = vscode.commands.executeCommand;
+      const getExtension = vscode.extensions.getExtension;
+      const asExternalUri = vscode.env.asExternalUri;
+      const calls = [];
+      const hub = await claimingHub([{ type: 'history' }], 'thread-1', 'codex');
+      const step = (name) => {
+        calls.push(name);
+        if (failure === name) throw new Error(`${name} failed`);
+      };
+
+      vscode.extensions.getExtension = (id) => {
+        assert.strictEqual(id, 'openai.chatgpt');
+        return failure === 'missing' ? undefined : { activate: async () => step('activate') };
+      };
+      vscode.env.asExternalUri = async (uri) => { step('resolve'); return uri; };
+      vscode.commands.executeCommand = async (command) => {
+        assert.strictEqual(command, 'vscode.open');
+        step('open');
+      };
+
+      try {
+        await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' }, async (command) => calls.push(command.type));
+        assert.deepStrictEqual(errors, [failure === 'missing'
+          ? 'Switchboard: Error: Install or enable the Codex extension to open this session.'
+          : `Switchboard: Error: ${failure} failed`]);
+        const expected = {
+          missing: ['history'],
+          activate: ['activate', 'history'],
+          resolve: ['activate', 'resolve', 'history'],
+          open: ['activate', 'resolve', 'open', 'history'],
+        };
+        assert.deepStrictEqual(calls, expected[failure]);
+      } finally {
+        vscode.commands.executeCommand = execute;
+        vscode.extensions.getExtension = getExtension;
+        vscode.env.asExternalUri = asExternalUri;
+        hub.server.close();
+      }
+    });
+  }
 });
