@@ -1310,6 +1310,11 @@ class Flow {
 
     const item = this.latest(current);
 
+    if (item !== null && current.kind === 'setup') {
+      this.setupState(item, current, state, resumed);
+      return;
+    }
+
     if (item === null || current.kind !== 'task') {
       return;
     }
@@ -1374,19 +1379,10 @@ class Flow {
         return;
       }
 
-      if (item.unassignedAt !== null) {
-        this.done(item, 'unassigned', null);
-      } else if (this.store.worktreeFor(item.ticketId) === null) {
+      if (item.unassignedAt === null && this.store.worktreeFor(item.ticketId) === null) {
         this.fail(item, MESSAGES.setupWithoutWorktree);
       } else {
-        this.store.updateSession(session.id, { outcome: 'done' });
-
-        // A snoozed ticket's task waits in the queue until the ticket wakes or is restored (PRD R49).
-        if (this.store.ticket(item.ticketId)!.snoozed) {
-          this.queue(item);
-        } else {
-          this.startSession(item);
-        }
+        this.finishSetup(item, session);
       }
 
       return;
@@ -1403,6 +1399,34 @@ class Flow {
       } else {
         this.endRun(item, session, false);
       }
+    }
+  }
+
+  /**
+   * A setup session the operator resumed, such as one opened in Claude to answer its question (PRD R70), keeps its process while the tab is open,
+   * so its turn end decides setup. A resume after setup failed because the process was gone, as at a logout, retries it.
+   */
+  private setupState(item: WorkItem, session: Session, state: LiveState, resumed: boolean): void {
+    if (resumed && item.status === 'failed' && item.error === MESSAGES.setupWithoutWorktree) {
+      this.setStatus(item.id, { status: 'setup', error: null });
+    } else if (TURN_ENDED.includes(state) && session.released && !session.releasing && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
+      this.finishSetup(item, session);
+    }
+  }
+
+  private finishSetup(item: WorkItem, session: Session): void {
+    if (item.unassignedAt !== null) {
+      this.done(item, 'unassigned', null);
+      return;
+    }
+
+    this.store.updateSession(session.id, { outcome: 'done' });
+
+    // A snoozed ticket's task waits in the queue until the ticket wakes or is restored (PRD R49).
+    if (this.store.ticket(item.ticketId)!.snoozed) {
+      this.queue(item);
+    } else {
+      this.startSession(item);
     }
   }
 

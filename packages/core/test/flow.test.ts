@@ -843,6 +843,61 @@ describe('setup', () => {
     expect(setup).toBe('s1');
   });
 
+  it('starts the task when a setup session the operator answers in a tab ends its turn with a worktree, though its process stays', () => {
+    const h = new Harness();
+    const setup = toSetup(h);
+    const tab = (state: 'running' | 'idle') => h.act({ type: 'roster', sessions: [{ sessionId: setup, state, detail: null, interactive: true }] });
+
+    h.act({ type: 'marker', sessionId: setup, state: 'waiting', detail: null });
+    tab('running');
+    expect(tab('idle')).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'setup' });
+
+    tab('running');
+    h.report(setup, { kind: 'worktree', path: 'D:/wt/1', branch: '15619-fix' });
+    h.report(setup, { kind: 'done' });
+    expect(h.status(1)).toBe('setup');
+
+    const task = only(tab('idle'), 'start-session');
+    expect(task).toMatchObject({ kind: 'task', cwd: 'D:/wt/1', prompt: '/sb-plan 15619' });
+    expect(h.store.session(setup)).toMatchObject({ state: 'idle', outcome: 'done' });
+
+    expect(h.act({ type: 'roster', sessions: [] })).toEqual([]);
+    expect(h.status(1)).toBe('running');
+  });
+
+  it('retries setup when its session resumes after failing because its process was gone, and only then', () => {
+    const h = new Harness();
+    const setup = toSetup(h);
+    const tab = (state: 'running' | 'idle') => h.act({ type: 'roster', sessions: [{ sessionId: setup, state, detail: null, interactive: true }] });
+
+    h.act({ type: 'marker', sessionId: setup, state: 'waiting', detail: null });
+    h.act({ type: 'roster', sessions: [] });
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: MESSAGES.setupWithoutWorktree });
+
+    // Listed idle, the reopened tab has run no turn.
+    expect(tab('idle')).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: MESSAGES.setupWithoutWorktree });
+
+    tab('running');
+    expect(h.item(1)).toMatchObject({ status: 'setup', error: null });
+
+    h.report(setup, { kind: 'worktree', path: 'D:/wt/1', branch: '15619-fix' });
+    expect(only(tab('idle'), 'start-session')).toMatchObject({ kind: 'task', cwd: 'D:/wt/1' });
+    expect(h.status(1)).toBe('running');
+  });
+
+  it('leaves a work item that failed for another cause failed when its setup session resumes', () => {
+    const h = new Harness();
+    const setup = toSetup(h);
+    h.act({ type: 'roster', sessions: [] });
+    h.store.updateWorkItem(1, { error: 'The start failed.' });
+
+    h.act({ type: 'roster', sessions: [{ sessionId: setup, state: 'running', detail: null, interactive: true }] });
+    expect(h.store.session(setup)?.state).toBe('running');
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: 'The start failed.' });
+  });
+
   it('blocks when the operator stops setup, and starts the task when setup had already reported done', () => {
     const h = new Harness();
     const setup = toSetup(h);
