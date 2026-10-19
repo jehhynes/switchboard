@@ -7,7 +7,7 @@ import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
 import { listenHub } from '../src/server.js';
-import { gitBashRoot, isPastePath, registerTitle, reportBody, ticketBody } from '../src/report.js';
+import { gitBashRoot, handledBody, isPastePath, registerTitle, reportBody, ticketBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
 
 let temp: ReturnType<typeof tempHome>;
@@ -40,6 +40,11 @@ function writeSettings(settings: unknown): void {
 }
 
 describe('parseReport and reportBody', () => {
+  it('parses handled registration and conditional release, refusing missing values', () => {
+    expect(handledBody(['handled', 's1', 'https://github.com/o/r/issues/1'])).toEqual({ sessionId: 's1', url: 'https://github.com/o/r/issues/1', releaseKey: null });
+    expect(handledBody(['handled', 's1', 'https://github.com/o/r/issues/1', '--release=I:A'])).toMatchObject({ releaseKey: 'I:A' });
+    for (const args of [[], ['handled'], ['handled', '--session', 'https://x'], ['handled', 's1', 'file:///x'], ['handled', 's1', 'https://x', '--release'], ['handled', 's1', 'https://x', '--release=']]) expect(handledBody(args)).toBeNull();
+  });
   it('reads the report commands', () => {
     expect(reportBody(['stage', 's1', 'Writing', 'tests'])).toEqual({ sessionId: 's1', kind: 'stage', stage: 'Writing tests' });
     expect(reportBody(['worktree', 's1', 'D:/wt/1'])).toEqual({ sessionId: 's1', kind: 'worktree', path: resolve('D:/wt/1') });
@@ -295,6 +300,23 @@ describe('createHubApp', () => {
     const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
 
     expect(await app.post['/ticket']!({ sessionId, url: 'https://github.com/o/r/issues/1', nativeSessionId: native })).toEqual({ status: 409, body: { error: 'No enabled source has a ticket at https://github.com/o/r/issues/1.' } });
+  });
+
+  it('registers and releases a handled assignment through the HTTP route, refusing bad requests', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { github: { repoRoot: '' } } });
+    const url = 'https://github.com/o/r/issues/7';
+    const source = { name: 'github', poll: async () => ({ tickets: [] }), keyOfBranch: () => null, context: async () => ({ context: '' }), assignmentAt: async () => ({ ticket: { sourceKey: '7', ref: '#7', title: 'Fix', url, open: true }, assignmentKey: 'I:A', assigned: false }) };
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, makeSource: () => ({ source }) } });
+    closers.push(() => app.close());
+    await app.post['/sources']!({ name: 'github', enabled: true });
+    app.runtime.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
+    const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
+    for (const body of [{}, { sessionId, url: 'file:///x' }, { sessionId, url, releaseKey: '' }, { sessionId, url, releaseKey: 1 }]) {
+      expect((await app.post['/handled']!(body)).status).toBe(400);
+    }
+    expect(await app.post['/handled']!({ sessionId, url })).toEqual({ status: 200, body: { assignmentKey: 'I:A' } });
+    expect((await app.post['/handled']!({ sessionId, url, releaseKey: 'wrong' })).status).toBe(409);
+    expect(await app.post['/handled']!({ sessionId, url, releaseKey: 'I:A' })).toEqual({ status: 200, body: { assignmentKey: null } });
   });
 
   it('reloads settings and playbooks when settings.json changes', async () => {

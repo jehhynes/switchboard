@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { buildOf, createHubApp, findHub, gitBashRoot, postToHub, registerTitle, reportBody, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { buildOf, createHubApp, findHub, gitBashRoot, handledBody, postToHub, registerTitle, reportBody, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -18,6 +18,7 @@ const REPORT_USAGE = `Usage:
   report done <sessionId>
   report approval <sessionId> --prompt <prompt> [--summary <text>] [--report <path>]
   report link <sessionId> --label <text> --target <http(s) url>
+  report handled <sessionId> <ticket url> [--release <assignment key>]
   report paste <sessionId> --label <text> --file <absolute path>
   report question <sessionId> --text <question>
 `;
@@ -66,6 +67,20 @@ async function ticket(home: string, argv: readonly string[]): Promise<number> {
 
 /** Exit codes: 0 recorded, 1 usage, 2 no hub, 3 refused (architecture.md § Session reports). */
 async function report(home: string, argv: readonly string[]): Promise<number> {
+  if (argv[0] === 'handled') {
+    const body = handledBody(argv);
+    if (body === null) {
+      process.stderr.write('Usage: report handled <sessionId> <ticket url> [--release <assignment key>]\n');
+      return 1;
+    }
+    const nativeSessionId = process.env['CLAUDE_CODE_SESSION_ID'];
+    const hub = await findHub(home);
+    const reply = hub === null ? null : await postToHub(hub, '/handled', { ...body, nativeSessionId }, REPORT_TIMEOUT_MS);
+    if (reply === null) { process.stderr.write('The Switchboard hub is not running.\n'); return 2; }
+    if (reply.status !== 200) { process.stderr.write(`Refused: ${reply.error ?? reply.status}\n`); return reply.status === 400 ? 1 : 3; }
+    process.stdout.write(`${JSON.stringify(reply.body)}\n`);
+    return 0;
+  }
   if (argv[0] === 'ticket') {
     return ticket(home, argv);
   }

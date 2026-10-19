@@ -31,6 +31,8 @@ export function importanceRank(immediacy: Immediacy | null, severity: Severity |
 
 export interface Ticket {
   id: number;
+  /** The operator assignment another session already handles; null until explicitly reported. */
+  handledAssignmentKey?: string | null;
   source: string;
   /** The key people use, such as an issue number. */
   sourceKey: string;

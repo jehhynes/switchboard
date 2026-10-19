@@ -111,7 +111,8 @@ export function sessionContract(sessionId: string, report: string, reports: read
     : "When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.";
 
   return `Report to Switchboard with these commands:
-${lines.join('\n')}${finish}
+${lines.join('\n')}
+- {{report}} handled {{session.id}} <ticket url> [--release <assignment key>], only when a skill directs it: register another ticket's current assignment as already handled before publishing it to the work queue; save the returned assignment key for an explicit release.${finish}
 
 ${ask}`
     .replaceAll('{{report}}', report)

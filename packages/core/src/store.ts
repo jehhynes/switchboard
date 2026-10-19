@@ -293,6 +293,7 @@ export const MIGRATIONS = [
       SELECT id FROM triages WHERE ticketId = t.ticketId AND playbook IS NOT NULL AND error IS NULL AND endedAt IS NOT NULL
       ORDER BY endedAt DESC, id DESC LIMIT 1
     );`,
+  `ALTER TABLE tickets ADD COLUMN handledAssignmentKey TEXT;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external']);
@@ -685,7 +686,7 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    const row = { adhocKey: null, inQueue: false, assigneeId: null, ...ticket };
+    const row = { adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, ...ticket };
 
     return { id: this.#insert('tickets', row as unknown as Row), ...row };
   }
@@ -695,6 +696,7 @@ export class Store {
    * moved an ad-hoc ticket to the same key (PRD R83).
    */
   deleteBareTicket(id: number): void {
+    if (this.ticket(id)?.handledAssignmentKey != null) throw new Error(`Ticket ${id} has a handled assignment.`);
     const held = this.#db
       .prepare('SELECT (SELECT COUNT(*) FROM workItems WHERE ticketId = :id) + (SELECT COUNT(*) FROM triages WHERE ticketId = :id) + (SELECT COUNT(*) FROM worktrees WHERE ticketId = :id) + (SELECT COUNT(*) FROM links WHERE ticketId = :id) AS n')
       .get({ id }) as { n: number };
@@ -819,6 +821,23 @@ export class Store {
 
   workItemsForTicket(ticketId: number): WorkItem[] {
     return this.#all('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id', ticketId);
+  }
+
+  handledTickets(source: string): Ticket[] {
+    return this.#all('SELECT * FROM tickets WHERE source = ? AND handledAssignmentKey IS NOT NULL', source);
+  }
+
+  assignmentEnded(ticketId: number, key: string): boolean {
+    return this.#one(`SELECT id FROM changes WHERE entity = 'ticket' AND ticketId = ?
+      AND json_extract(fields, '$.handledAssignmentKey[0]') = ?
+      AND json_type(fields, '$.handledAssignmentKey[1]') = 'null' LIMIT 1`, ticketId, key) !== null;
+  }
+
+  registeredAssignment(ticketId: number, sessionId: string): string | null {
+    return this.#one<{ key: string }>(`SELECT json_extract(e.detail, '$.key') AS key FROM events e
+      JOIN changes c ON c.eventId = e.id WHERE c.ticketId = ? AND e.type = 'handled'
+      AND json_extract(e.detail, '$.reportedBySessionId') = ? AND json_extract(e.detail, '$.release') = 0
+      AND e.refused IS NULL ORDER BY e.id DESC LIMIT 1`, ticketId, sessionId)?.key ?? null;
   }
 
   /** Work items created by task reports from the sessions of `parentId` (PRD R68). */

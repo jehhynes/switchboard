@@ -293,6 +293,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
       },
+      '/handled': async (body) => {
+        const { sessionId, url, releaseKey, nativeSessionId } = isRecord(body) ? body : {};
+        if (typeof sessionId !== 'string' || typeof url !== 'string' || !/^https?:\/\//i.test(url) || !optionalString(releaseKey) || releaseKey === '' || !optionalString(nativeSessionId)) {
+          return { status: 400, body: { error: 'Expected {sessionId, url, releaseKey?}.' } };
+        }
+        const result = await runtime.handled(sessionId, url, releaseKey ?? null, nativeSessionId || null);
+        return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
+      },
       '/open': async (body) => {
         if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace'])) {
           return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?}.' } };

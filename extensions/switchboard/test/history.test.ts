@@ -68,6 +68,18 @@ function texts(entries: Entry[]): string[] {
 }
 
 describe('History model', () => {
+  it('explains handled registration and release without exposing assignment keys', () => {
+    const run = new Run();
+    run.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
+    const event = { type: 'handled' as const, sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', title: 'Fix', url: ISSUE.url, key: 'I:opaque-event-id', release: false, assigned: false };
+    run.send(event);
+    run.send({ ...event, release: true });
+    const view = historyView(run.store.ticketHistory(2)!, run.now);
+    const entries = view.sections.flatMap((section) => section.entries);
+    expect(texts(entries)).toContain('Registered the assignment as already handled');
+    expect(texts(entries)).toContain('Released the handled assignment');
+    expect(JSON.stringify(entries)).not.toContain('opaque-event-id');
+  });
   it('says when a schedule came due and when its open run kept it from making another (PRD R82)', () => {
     const store = Store.open(':memory:');
     const settings: Settings = { ...SETTINGS, schedules: { cleanup: { playbook: 'dev:question', repoRoot: 'D:/git/widgets', every: 'day', day: null, at: 10 * 60 } } };

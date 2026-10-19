@@ -83,6 +83,14 @@ export function ticketBody(argv: readonly string[]): { sessionId: string; url: s
 }
 
 /** A report body from `report <kind> <sessionId> …`, or null for bad usage. `root` is the Git Bash root the CLI ran under. */
+export function handledBody(argv: readonly string[]): { sessionId: string; url: string; releaseKey: string | null } | null {
+  const [kind, sessionId, url] = argv;
+  const releaseKey = valueOf(argv, 'release');
+  if (kind !== 'handled' || !sessionId || sessionId.startsWith('--') || !url || !/^https?:\/\//i.test(url) || (hasFlag(argv, 'release') && !releaseKey)) return null;
+  return { sessionId, url, releaseKey };
+}
+
+/** Parses ordinary report commands. */
 export function reportBody(argv: readonly string[], root: string | null = null): Record<string, unknown> | null {
   const [kind, sessionId, text] = argv;
 

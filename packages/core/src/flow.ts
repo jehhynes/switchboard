@@ -113,7 +113,8 @@ export interface ObservedFork {
 }
 
 export type FlowEvent =
-  | { type: 'poll'; source: string; tickets: PolledTicket[] }
+  | { type: 'poll'; source: string; tickets: PolledTicket[]; assignments?: { ticketId: number; expectedKey: string; key: string | null }[] }
+  | { type: 'handled'; sessionId: string; source: string; sourceKey: string; ref: string; title: string; url: string; key: string; release: boolean; assigned: boolean }
   | { type: 'poll-failed'; source: string; error: string }
   | {
       type: 'triage-succeeded';
@@ -289,6 +290,8 @@ function actorOf(type: FlowEvent['type']): Actor {
     case 'report':
     case 'ticket':
       return 'session';
+    case 'handled':
+      return 'session';
     case 'poll':
     case 'poll-failed':
       return 'source';
@@ -341,6 +344,8 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { cwd: event.cwd };
     case 'ticket':
       return { source: event.source, sourceKey: event.sourceKey, playbook: event.playbook };
+    case 'handled':
+      return { source: event.source, sourceKey: event.sourceKey, key: event.key, release: event.release, reportedBySessionId: event.sessionId };
     case 'run-schedule':
       return { name: event.name };
     case 'start':
@@ -360,6 +365,7 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
 /** The ticket, work item and session an event names, when it names one that exists. */
 function subjectOf(store: Store, event: FlowEvent): Pick<EventRecord, 'ticketId' | 'workItemId' | 'sessionId'> {
   const none = { ticketId: null, workItemId: null, sessionId: null };
+  if (event.type === 'handled') return { ...none, ticketId: store.findTicket(event.source, event.sourceKey)?.id ?? null };
   const ofItem = (workItemId: number | null, sessionId: string | null = null) => {
     const item = workItemId === null ? null : store.workItem(workItemId);
     return item === null ? none : { ticketId: item.ticketId, workItemId: item.id, sessionId };
@@ -467,7 +473,9 @@ class Flow {
   apply(event: FlowEvent): void {
     switch (event.type) {
       case 'poll':
-        return this.poll(event.source, event.tickets);
+        return this.poll(event.source, event.tickets, event.assignments);
+      case 'handled':
+        return this.registerHandled(event);
       case 'poll-failed':
       case 'tick':
         return;
@@ -541,7 +549,17 @@ class Flow {
 
   // Sources
 
-  private poll(source: string, polled: PolledTicket[]): void {
+  private poll(source: string, polled: PolledTicket[], assignments: Extract<FlowEvent, { type: 'poll' }>['assignments'] = []): void {
+    const returned = new Set<number>();
+    const assignmentChanges: { ticketId: number; reason: string }[] = [];
+    for (const assignment of assignments) {
+      const ticket = this.store.ticket(assignment.ticketId);
+      if (ticket?.source !== source || ticket.handledAssignmentKey !== assignment.expectedKey || assignment.key === assignment.expectedKey) continue;
+      this.store.updateTicket(ticket.id, { handledAssignmentKey: null });
+      assignmentChanges.push({ ticketId: ticket.id, reason: assignment.key === null ? 'unassigned' : 'reassigned' });
+      returned.add(ticket.id);
+    }
+    if (assignmentChanges.length > 0) this.store.noteEvent({ assignmentChanges });
     const seen = new Set<string>();
     if (source === 'zoho' || source === 'forum') {
       this.store.volumePoll(source, this.now, (this.context.settings.sources[source]?.pollIntervalSeconds ?? 300) * 1000);
@@ -582,7 +600,7 @@ class Flow {
         this.leftPool(known.id);
       }
 
-      if (entry.assigned && !known.assigned) {
+      if (entry.assigned && (!known.assigned || returned.has(known.id))) {
         this.createWorkItem(known.id);
       } else if (!entry.assigned && known.assigned) {
         this.left(known.id);
@@ -614,6 +632,7 @@ class Flow {
 
   /** A ticket that entered the assigned state gets a work item, unless it already has an open one, such as a picked pool ticket's (PRD R48). */
   private createWorkItem(ticketId: number): void {
+    if (this.store.ticket(ticketId)?.handledAssignmentKey != null) return;
     const open = this.store.workItemsForTicket(ticketId).filter((item) => item.status !== 'done');
 
     if (open.length > 0) {
@@ -801,7 +820,7 @@ class Flow {
     const existing = this.store.findTicket(event.source, event.sourceKey);
 
     if (existing !== null) {
-      const bare = this.store.workItemsForTicket(existing.id).length === 0 && this.store.worktreeFor(existing.id) === null && this.store.linksFor(existing.id).length === 0 && this.store.poolTriages(existing.id).length === 0;
+      const bare = existing.handledAssignmentKey == null && this.store.workItemsForTicket(existing.id).length === 0 && this.store.worktreeFor(existing.id) === null && this.store.linksFor(existing.id).length === 0 && this.store.poolTriages(existing.id).length === 0;
 
       if (!bare) {
         throw new Refusal(`Switchboard already has ${event.source} ${event.sourceKey}.`);
@@ -1177,6 +1196,33 @@ class Flow {
     }
 
     return session;
+  }
+
+  private registerHandled(event: Extract<FlowEvent, { type: 'handled' }>): void {
+    const session = this.session(event.sessionId);
+    const origin = this.store.workItem(session.workItemId)!;
+    if (origin.status === 'done' || this.store.sessionsFor(origin.id).at(-1)?.id !== session.id) throw new Refusal('Only the current session of an open work item can report a handled assignment.');
+    let ticket = this.store.findTicket(event.source, event.sourceKey);
+    if (ticket?.id === origin.ticketId) throw new Refusal('The session already works on this ticket.');
+    if (event.release) {
+      if (ticket === null) throw new Refusal('No handled assignment was registered for this ticket.');
+      if (ticket.handledAssignmentKey == null && this.store.assignmentEnded(ticket.id, event.key)) return;
+      if (ticket.handledAssignmentKey !== event.key) throw new Refusal('The handled assignment changed; the release was not applied.');
+      this.store.updateTicket(ticket.id, { handledAssignmentKey: null, assigned: event.assigned });
+      this.store.noteEvent({ assignmentReason: 'released' });
+      if (event.assigned) this.createWorkItem(ticket.id);
+      return;
+    }
+    if (ticket?.handledAssignmentKey === event.key) return;
+    const registered = ticket === null ? null : this.store.registeredAssignment(ticket.id, session.id);
+    if (registered !== null && registered !== event.key) throw new Refusal('This session registered an earlier assignment; it cannot register the returned work.');
+    if (ticket !== null && (ticket.handledAssignmentKey != null || this.store.assignmentEnded(ticket.id, event.key))) throw new Refusal('This assignment was already released or another assignment is registered.');
+    const items = ticket === null ? [] : this.store.workItemsForTicket(ticket.id).filter((item) => item.status !== 'done');
+    if (items.some((item) => this.store.sessionsFor(item.id).length > 0)) throw new Refusal('This ticket already has started work; resolve it before registering the assignment.');
+    ticket ??= this.store.insertTicket({ source: event.source, sourceKey: event.sourceKey, ref: event.ref, title: event.title, url: event.url, sourceId: null, assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    for (const item of items) this.store.deleteWorkItem(item.id);
+    this.store.updateTicket(ticket.id, { handledAssignmentKey: event.key });
+    this.store.noteEvent({ reportedByWorkItemId: origin.id });
   }
 
   private sessionStarted(sessionId: string, nativeSessionId: string | null, shortId: string, startPrompt: boolean): void {
@@ -1960,7 +2006,7 @@ class Flow {
 
       const ticket = this.store.ticket(item.ticketId)!;
 
-      if (!busy.has(item.id) && !busyTickets.has(ticket.id) && !ticket.snoozed) {
+      if (!busy.has(item.id) && !busyTickets.has(ticket.id) && !ticket.snoozed && ticket.handledAssignmentKey == null) {
         start(ticket, item);
       }
     }
@@ -1970,7 +2016,7 @@ class Flow {
         return;
       }
 
-      if (!ticket.snoozed && this.store.poolTriages(ticket.id).length === 0 && !this.hasOpenWorkItem(ticket.id)) {
+      if (!ticket.snoozed && ticket.handledAssignmentKey == null && this.store.poolTriages(ticket.id).length === 0 && !this.hasOpenWorkItem(ticket.id)) {
         start(ticket, null);
       }
     }
@@ -1978,7 +2024,7 @@ class Flow {
     const enabled = this.store.enabledSources();
     for (const ticket of this.store.unclassifiedTickets()) {
       if (free <= 0) return;
-      if (enabled.has(ticket.source) && this.context.settings.sources[ticket.source] && !ticket.snoozed && !this.hasOpenWorkItem(ticket.id)) start(ticket, null);
+      if (enabled.has(ticket.source) && this.context.settings.sources[ticket.source] && !ticket.snoozed && ticket.handledAssignmentKey == null && !this.hasOpenWorkItem(ticket.id)) start(ticket, null);
     }
   }
 
@@ -2000,7 +2046,7 @@ class Flow {
         return;
       }
 
-      if (queueWaits(this.store, item, limit, used).length === 0) {
+      if (this.store.ticket(item.ticketId)?.handledAssignmentKey == null && queueWaits(this.store, item, limit, used).length === 0) {
         this.startSession(item);
         used = heldSlots(this.store);
       }

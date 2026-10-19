@@ -1,0 +1,57 @@
+{
+  "data": {
+    "repository": {
+      "issue": {
+        "id": "I1",
+        "number": 7,
+        "title": "Issue 7",
+        "url": "https://github.com/acme/widgets/issues/7",
+        "state": "OPEN",
+        "updatedAt": "2026-10-19T12:00:00Z",
+        "assignees": {
+          "nodes": [
+            {
+              "login": "work-login"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "projectItems": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": [
+            {
+              "project": {
+                "number": 3,
+                "owner": {
+                  "login": "acme"
+                }
+              },
+              "fieldValueByName": {
+                "name": "Dev"
+              }
+            }
+          ]
+        },
+        "timelineItems": {
+          "pageInfo": {
+            "hasPreviousPage": false,
+            "startCursor": "cursor"
+          },
+          "nodes": [
+            {
+              "__typename": "AssignedEvent",
+              "id": "event-1",
+              "assignee": {
+                "login": "work-login"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -27,6 +27,7 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
   return [
     `Report to Switchboard with these commands:`,
     ...Object.keys(lines).filter((kind) => reports.includes(kind)).flatMap((kind) => lines[kind]!),
+    `- ${REPORT} handled ${id} <ticket url> [--release <assignment key>], only when a skill directs it: register another ticket's current assignment as already handled before publishing it to the work queue; save the returned assignment key for an explicit release.`,
     ...finish,
     ``,
     `When you need the operator's answer or choice, or cannot continue without them, ask with AskUserQuestion and wait for the answer. Do not report or write a file for a question.`,
@@ -54,7 +55,7 @@ describe('assigned-state transitions', () => {
       type: 'triage',
       triageId: 1,
       workItemId: 1,
-      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null },
+      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null },
       systemPrompt: 'Classify the GitHub issue.\n\nChoose one playbook:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change', focus: null },

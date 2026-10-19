@@ -128,6 +128,37 @@ describe('hub entry point', () => {
     expect((await first.exited).code).toBe(0);
   });
 
+  it('sends handled registration and release through the CLI and prints the returned key', async () => {
+    expect((await start('report', 'handled', 's1').exited).code).toBe(1);
+    expect((await start('report', 'handled', 's1', 'https://github.com/o/r/issues/7').exited).code).toBe(2);
+    const bodies: unknown[] = [];
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk: Buffer) => (body += chunk.toString('utf8')));
+      req.on('end', () => {
+        if (req.method === 'GET') { res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid })); return; }
+        expect(req.url).toBe('/handled');
+        const parsed = JSON.parse(body) as { releaseKey: string | null };
+        bodies.push(parsed);
+        res.end(JSON.stringify({ assignmentKey: parsed.releaseKey === null ? 'I:A' : null }));
+      });
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+    try {
+      const registered = await startWith({ CLAUDE_CODE_SESSION_ID: 'native' }, 'report', 'handled', 's1', 'https://github.com/o/r/issues/7').exited;
+      expect(registered).toMatchObject({ code: 0, stdout: '{"assignmentKey":"I:A"}\n' });
+      const released = await start('report', 'handled', 's1', 'https://github.com/o/r/issues/7', '--release', 'I:A').exited;
+      expect(released).toMatchObject({ code: 0, stdout: '{"assignmentKey":null}\n' });
+      expect(bodies[0]).toEqual({ sessionId: 's1', url: 'https://github.com/o/r/issues/7', releaseKey: null, nativeSessionId: 'native' });
+      expect(bodies[1]).toMatchObject({ releaseKey: 'I:A' });
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+
   it('reports when there is no hub to stop', async () => {
     const stop = await start('--stop').exited;
 

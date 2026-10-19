@@ -244,6 +244,9 @@ class Builder {
       const [before, after] = fields[field]!;
 
       switch (`${change.entity}.${field}`) {
+        case 'ticket.handledAssignmentKey':
+          lines.push(after === null ? 'Assignment no longer handled by another session' : 'Assignment already handled by another session');
+          break;
         case 'workItem.status':
           lines.push(
             after === 'done'
@@ -473,6 +476,15 @@ class Builder {
     const session = this.sessionName(event.sessionId);
 
     switch (event.type) {
+      case 'poll': {
+        const updates = detail['assignmentChanges'];
+        const update = Array.isArray(updates) ? updates.find((value: { ticketId?: number }) => value.ticketId === this.history.ticket.id) as { reason?: string } | undefined : undefined;
+        if (update === undefined) return {};
+        skip.add('handledAssignmentKey');
+        return { category: 'ticket', icon: 'issues', text: update.reason === 'unassigned' ? 'Handled assignment ended: unassigned' : 'Handled assignment ended: assigned again' };
+      }
+      case 'handled':
+        return { category: 'report', icon: 'issues', text: detail['release'] === true ? 'Released the handled assignment' : 'Registered the assignment as already handled' };
       case 'volume-worked':
         return { category: 'ticket', icon: 'play', text: 'Worked in Switchboard' };
       case 'reconstructed':

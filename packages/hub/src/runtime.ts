@@ -464,7 +464,11 @@ export class Runtime {
 
   /** Reads the source once any read in flight has finished. */
   private readAfter(name: string, source: Source): Promise<PolledTicket[] | null> {
-    const read = (this.reads.get(name) ?? Promise.resolve()).then(() => this.read(name, source));
+    return this.sourceOperation(name, () => this.read(name, source));
+  }
+
+  private sourceOperation<T>(name: string, operation: () => Promise<T>): Promise<T> {
+    const read = (this.reads.get(name) ?? Promise.resolve()).then(operation);
     const settled: Promise<void> = read.then(
       () => undefined,
       () => undefined,
@@ -488,9 +492,27 @@ export class Runtime {
     }
 
     const result = await source.poll();
+    const assignments: NonNullable<Extract<FlowEvent, { type: 'poll' }>['assignments']> = [];
+    if (!('error' in result)) {
+      for (const ticket of this.deps.store.handledTickets(name)) {
+        const assignment = await this.assignmentRead(source, ticket.url);
+        if (assignment === null || 'error' in assignment) {
+          const error = assignment === null ? `The ${name} source cannot read the assignment of ${ticket.ref}.` : assignment.error;
+          if (this.sources.get(name) === source) {
+            this.sourceErrors[name] = error;
+            this.send({ type: 'poll-failed', source: name, error });
+          }
+          return null;
+        }
+        assignments.push({ ticketId: ticket.id, expectedKey: ticket.handledAssignmentKey!, key: assignment.assignmentKey });
+        const polled = result.tickets.find((entry) => entry.sourceKey === ticket.sourceKey);
+        if (polled !== undefined) polled.assigned = assignment.assigned;
+        else result.tickets.push({ sourceKey: ticket.sourceKey, ref: assignment.ticket.ref, title: assignment.ticket.title, url: assignment.ticket.url, sourceId: ticket.sourceId, assigned: assignment.assigned, pool: false, sortAt: ticket.sortAt, enteredAt: null });
+      }
+    }
 
     // The operator turned the source off while it was read; its result would show an error or tickets of a source that is off.
-    if (!this.sources.has(name)) {
+    if (this.sources.get(name) !== source) {
       return null;
     }
 
@@ -501,7 +523,7 @@ export class Runtime {
     }
 
     delete this.sourceErrors[name];
-    this.send({ type: 'poll', source: name, tickets: result.tickets });
+    this.send({ type: 'poll', source: name, tickets: result.tickets, assignments });
     await this.findWorktrees(name, source);
 
     return result.tickets;
@@ -909,6 +931,37 @@ export class Runtime {
     const session = this.deps.store.session(sessionId)!;
 
     return { key: `${found.source} ${ticket.sourceKey}`, contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider) };
+  }
+
+  private async assignmentRead(source: Source, url: string) {
+    if (source.assignmentAt === undefined) return null;
+    return Promise.race([
+      source.assignmentAt(url).catch((error: unknown) => ({ error: String(error) })),
+      this.deps.sleep(REPORT_CHECK_MS).then(() => ({ error: 'The assignment read timed out. Retry the report or poll.' })),
+    ]);
+  }
+
+  async handled(sessionId: string, url: string, releaseKey: string | null, nativeSessionId: string | null = null): Promise<{ assignmentKey: string | null } | { refused: string }> {
+    const refuse = (refused: string) => {
+      this.refuseReport(sessionId, { kind: 'handled', url, releaseKey }, refused);
+      return { refused };
+    };
+    for (const [name, source] of [...this.sources]) {
+      const result = await this.sourceOperation(name, async () => {
+        const lookup = await this.assignmentRead(source, url);
+        if (lookup === null) return null;
+        if ('error' in lookup) return refuse(lookup.error);
+        if (this.stopped || this.sources.get(name) !== source) return refuse(`The ${name} source changed during the lookup. Retry the report.`);
+        const retired = nativeSessionId === null ? null : this.retiredCopy(sessionId, nativeSessionId);
+        if (retired !== null) return refuse(retired);
+        if (releaseKey === null && (!lookup.ticket.open || lookup.assignmentKey === null)) return refuse('Registration requires an open ticket assigned to the operator.');
+        const key = releaseKey ?? lookup.assignmentKey!;
+        const { refused } = this.send({ type: 'handled', sessionId, source: name, ...lookup.ticket, url: lookup.ticket.url, key, release: releaseKey !== null, assigned: lookup.assigned });
+        return refused === null ? { assignmentKey: releaseKey === null ? key : null } : { refused };
+      });
+      if (result !== null) return result;
+    }
+    return refuse('No enabled source supports assignments for this ticket URL.');
   }
 
   /**

@@ -31,6 +31,8 @@ export type LinkCheck = { refused: string | null } | { error: string };
 /** The ticket at a URL a ticket report names (PRD R83), as the source reads it, or why the read failed. */
 export type TicketLookup = { ticket: { sourceKey: string; ref: string; title: string; url: string; open: boolean } } | { error: string };
 
+export type AssignmentLookup = { ticket: Extract<TicketLookup, { ticket: unknown }>['ticket']; assignmentKey: string | null; assigned: boolean } | { error: string };
+
 /** A source plugin (PRD R1). It reads and never writes. */
 export interface Source {
   /** The settings key, such as `github`. */
@@ -44,4 +46,6 @@ export interface Source {
   checkLink?(ticket: Ticket, target: string): Promise<LinkCheck>;
   /** Reads the ticket at `url`, or answers null when the URL is not one of this source's tickets (PRD R83). */
   ticketAt?(url: string): Promise<TicketLookup | null>;
+  /** Actual operator assignment, independent of status/project eligibility; null for another source's URL. */
+  assignmentAt?(url: string): Promise<AssignmentLookup | null>;
 }

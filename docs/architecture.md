@@ -332,6 +332,19 @@ Actions are `triage`, `start-session` and `stop-session`. `open-question` gives 
 
 ## Session reports
 
+### Handled assignments (R85)
+
+`report handled <sessionId> <ticket URL> [--release <assignment key>]` posts to `/handled`. It is available in every session contract when a skill directs it. The response contains `assignmentKey`; the skill retains it for an optional conditional release. Registration requires an open target assigned to the operator and the current session of an open work item. It cannot target the reporting work item's own ticket.
+
+`tickets.handledAssignmentKey` is nullable text, the only added storage. Existing events and changes retain target-ticket registration and clearing evidence, with reporting session/work-item IDs in event detail. Deleting the reporting work item preserves this evidence. Core refuses ticket identity adoption of an active handled target; consolidation of an inactive target transfers its audit. Ended-key audit prevents a delayed registration retry from restoring handling.
+
+`Source.assignmentAt(url)` returns the ticket, its opaque operator assignment key and fresh queue eligibility, or a read error. GitHub reads assignees and paginated assignment events directly by issue number; the key combines the issue node ID and the event that began the current continuous assignment across configured operator logins. Event IDs distinguish changes within one second. It also reads the configured project's current status to correct stale search eligibility. It never infers assignment changes from status history. Incomplete history, changed pagination snapshots and failed reads are errors.
+
+The runtime serializes registration and polling per source. Every poll directly reads registered targets, including those absent from project search, and applies assignment reconciliation with the poll atomically. Core guards work creation, triage and session dispatch. Registration refuses a target whose open work already has a session, including an emitted start; otherwise it removes unstarted duplicates before acknowledgement. A new assignment clears the key and permits normal work even when consecutive polls both show actionable assignment. Explicit release compares the supplied key and uses freshly read eligibility before scheduling work.
+
+
+### Report transport
+
 Sessions report through the hub bundle, which posts to the hub's loopback HTTP server. The prompt carries the Switchboard session ID and the bundle's absolute path, because a background session has no Switchboard environment and `switchboard` is not on PATH. `node` below is `sessions.nodePath`; a session started before a change keeps the command its prompt holds. Bash, PowerShell and cmd run the command, and they agree only on a first word with no spaces, quotes or shell characters, so `parseSettings` refuses a `sessions.nodePath` with any of them or whose name is not `node` or `node.exe`, and turns its backslashes into forward slashes.
 
 ```

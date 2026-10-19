@@ -4,6 +4,7 @@ import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
 import { CONTEXT_QUERY, FIELD_QUERY, ISSUE_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from './queries.js';
 import type { Roles, RolesResult } from './roles.js';
+import { readAssignment } from './assignment.js';
 
 /** Each issue body, comment and review-thread comment is clipped to this many characters (GC). */
 export const TEXT_LIMIT = 2_000;
@@ -148,6 +149,11 @@ export class GithubSource implements Source {
 
   keyOfBranch(branch: string): string | null {
     return this.config.branchPattern.exec(branch)?.[1] ?? null;
+  }
+
+  async assignmentAt(target: string) {
+    const issue = githubUrlOf(target, ISSUE_PATH);
+    return issue?.repo.toLowerCase() === this.config.repo.toLowerCase() ? readAssignment(this.config, this.gh, issue.number) : null;
   }
 
   /**

@@ -147,6 +147,7 @@ class FakeSource implements Source {
   context: (ticket: { sourceKey: string }) => Promise<ContextResult> = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text` });
   checkLink?: NonNullable<Source['checkLink']>;
   ticketAt?: NonNullable<Source['ticketAt']>;
+  assignmentAt?: NonNullable<Source['assignmentAt']>;
 
   async poll(): Promise<PollResult> {
     this.polls++;
@@ -276,6 +277,100 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
 
   return { store, cli, source, runtime, logs, late, recheck, codex };
 }
+
+describe('handled assignment reports', () => {
+  const url = 'https://github.com/acme/widgets/issues/7';
+  const lookup = (key: string | null = 'I:A', assigned = true) => ({ ticket: { sourceKey: '7', ref: '#7', title: 'Fix', url, open: true }, assignmentKey: key, assigned });
+  async function ready() {
+    const h = setup();
+    h.runtime.send({ type: 'adhoc', prompt: 'Prepare a fix', repoRoot: 'D:/repo', start: true });
+    await h.runtime.settled();
+    h.source.assignmentAt = vi.fn(async () => lookup());
+    return h;
+  }
+
+  it('registers, reads targets absent from search, and admits a reassignment between polls', async () => {
+    const { runtime, store, source } = await ready();
+    expect(await runtime.handled('s1', url, null)).toEqual({ assignmentKey: 'I:A' });
+    const ticket = store.findTicket('github', '7')!;
+    await runtime.pollSource('github');
+    expect(store.ticket(ticket.id)).toMatchObject({ assigned: true, handledAssignmentKey: 'I:A' });
+    expect(store.workItemsForTicket(ticket.id)).toHaveLength(0);
+    source.assignmentAt = async () => lookup('I:B');
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(store.ticket(ticket.id)?.handledAssignmentKey).toBeNull();
+    expect(store.workItemsForTicket(ticket.id)).toHaveLength(1);
+    runtime.stop(); store.close();
+  });
+
+  it('uses fresh eligibility on release instead of stale stored assignment', async () => {
+    const { runtime, store, source } = await ready();
+    await runtime.handled('s1', url, null);
+    await runtime.pollSource('github');
+    source.assignmentAt = async () => lookup(null, false);
+    expect(await runtime.handled('s1', url, 'I:A')).toEqual({ assignmentKey: null });
+    const ticket = store.findTicket('github', '7')!;
+    expect(store.ticket(ticket.id)).toMatchObject({ assigned: false, handledAssignmentKey: null });
+    expect(store.workItemsForTicket(ticket.id)).toHaveLength(0);
+    runtime.stop(); store.close();
+  });
+
+  it('keeps every ticket unchanged when a handled assignment read fails', async () => {
+    const { runtime, store, source } = await ready();
+    await runtime.handled('s1', url, null);
+    await runtime.pollSource('github');
+    const ticket = store.findTicket('github', '7')!;
+    source.result = { tickets: [issue('9')] };
+    source.assignmentAt = async () => ({ error: 'offline' });
+    await runtime.pollSource('github');
+    expect(store.ticket(ticket.id)).toMatchObject({ assigned: true, handledAssignmentKey: 'I:A' });
+    expect(store.findTicket('github', '9')).toBeNull();
+    expect(await runtime.handled('s1', url, null)).toEqual({ refused: 'offline' });
+    runtime.stop(); store.close();
+  });
+
+  it('does not apply a timed-out registration when the lookup eventually returns', async () => {
+    const { runtime, store, source, late } = await ready();
+    const gate = deferred();
+    source.assignmentAt = async () => { await gate.promise; return lookup(); };
+    const report = runtime.handled('s1', url, null);
+    late.resolve();
+    expect(await report).toHaveProperty('refused');
+    gate.resolve();
+    await runtime.settled();
+    expect(store.findTicket('github', '7')).toBeNull();
+    runtime.stop(); store.close();
+  });
+
+  it('serializes a registration lookup with polling', async () => {
+    const { runtime, store, source } = await ready();
+    const entered = deferred();
+    const gate = deferred();
+    source.assignmentAt = async () => { entered.resolve(); await gate.promise; return lookup(); };
+    const report = runtime.handled('s1', url, null);
+    await entered.promise;
+    await runtime.pollSource('github');
+    expect(source.polls).toBe(0);
+    gate.resolve();
+    expect(await report).toEqual({ assignmentKey: 'I:A' });
+    await runtime.pollSource('github');
+    expect(store.workItemsForTicket(store.findTicket('github', '7')!.id)).toHaveLength(0);
+    runtime.stop(); store.close();
+  });
+
+  it('refuses unsupported, unassigned and closed targets', async () => {
+    const { runtime, store, source } = await ready();
+    source.assignmentAt = async () => null;
+    expect(await runtime.handled('s1', url, null)).toHaveProperty('refused');
+    source.assignmentAt = async () => lookup(null);
+    expect(await runtime.handled('s1', url, null)).toHaveProperty('refused');
+    source.assignmentAt = async () => ({ ...lookup(), ticket: { ...lookup().ticket, open: false } });
+    expect(await runtime.handled('s1', url, null)).toHaveProperty('refused');
+    expect(store.findTicket('github', '7')).toBeNull();
+    runtime.stop(); store.close();
+  });
+});
 
 describe('Runtime', () => {
   it('triages with the default provider, falls back from a mismatched model, and follows a provider reload', async () => {
