@@ -1938,8 +1938,8 @@ class Flow {
   }
 
   /**
-   * PRD R86: a done work item opens again where its work stands. A task session in a turn keeps it running; one whose turn ended leaves it
-   * `finished` for review; without a task session it waits for Start, or for triage when it has no playbook or prompt.
+   * PRD R86: a done work item opens where its work stands: running while its task session is in a turn, `awaiting-approval` for an approval
+   * that waited when it became done, else `finished`; without a task session it waits for Start, or for triage. A turn holds that approval.
    */
   private reopen(item: WorkItem): void {
     const refusal = reopenRefusal(item, this.store.workItemsForTicket(item.ticketId), this.store.ticket(item.ticketId)!);
@@ -1955,11 +1955,13 @@ class Flow {
       this.store.updateSession(latest.id, { outcome: null, outcomeDetail: null });
     }
 
+    const turnEnded = latest !== undefined && (TURN_ENDED.includes(latest.state) || latest.state === 'ended');
+    const approval = latest?.kind === 'task' && item.approvalHeld;
     const status: WorkItemStatus = latest?.kind !== 'task'
       ? item.playbook !== null || item.taskPrompt !== null ? 'unstarted' : 'triaging'
-      : TURN_ENDED.includes(latest.state) || latest.state === 'ended' ? 'finished' : 'running';
+      : turnEnded ? (approval ? 'awaiting-approval' : 'finished') : 'running';
 
-    this.setStatus(item.id, { status, doneAt: null, doneReason: null, scopeAt: null, warning: null, error: null, unassignedAt: null, queuedAt: null });
+    this.setStatus(item.id, { status, approvalHeld: approval && !turnEnded, doneAt: null, doneReason: null, scopeAt: null, warning: null, error: null, unassignedAt: null, queuedAt: null });
   }
 
   private requireNoSession(item: WorkItem): void {
@@ -1990,8 +1992,14 @@ class Flow {
 
   private done(item: WorkItem, reason: 'session' | 'operator' | 'unassigned', warning: string | null): void {
     const scopeAt = this.store.ticket(item.ticketId)!.scopeAt ?? item.createdAt;
+    const current = this.store.workItem(item.id)!;
+    const latest = this.store.sessionsFor(item.id).at(-1);
+    // A done report, settled now or awaiting its recheck, covers the publication; any other ending keeps a waiting or approved-but-unstarted
+    // approval for Reopen (PRD R86).
+    const reported = reason === 'session' || (latest !== undefined && awaitsRecheck(current, latest));
+    const approvalHeld = !reported && (current.status === 'awaiting-approval' || current.approvalHeld || (current.status === 'queued' && current.approvalPrompt !== null));
 
-    this.setStatus(item.id, { status: 'done', doneAt: this.now, doneReason: reason, warning, queuedAt: null, scopeAt });
+    this.setStatus(item.id, { status: 'done', doneAt: this.now, doneReason: reason, warning, queuedAt: null, scopeAt, approvalHeld });
   }
 
   private fail(item: WorkItem, cause: string): void {

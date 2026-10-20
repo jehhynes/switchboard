@@ -38,6 +38,8 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
 const QUESTION_REPORTS = ['stage', 'approval', 'link', 'task'];
 /** A playbook whose session may report done. */
 const FINISH = { 'dev:finish': { description: 'Finish it', reports: ['done'], template: 'Finish {{ticket.sourceKey}}.' } };
+/** A playbook whose session may report approval and done. */
+const BOTH = { 'dev:both': { description: 'Both', reports: ['done', 'approval'], template: 'Do {{ticket.sourceKey}}.' } };
 const FINISHING_REPORTS = ['stage', 'worktree', 'done', 'link', 'task'];
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
@@ -430,7 +432,7 @@ describe('sessions', () => {
   });
 
   it('keeps an approval reported after an unconfirmed done report open when the ticket leaves or the recheck arrives', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:both': { description: 'Both', reports: ['done', 'approval'], template: 'Do {{ticket.sourceKey}}.' } }) });
+    const h = new Harness({ playbooks: playbooks(undefined, BOTH) });
     const { item, session } = running(h, '1', 'dev:both');
 
     h.report(session, { kind: 'done', assigned: true });
@@ -816,6 +818,97 @@ describe('sessions', () => {
 
     expect(h.send({ type: 'reopen', workItemId: 1 }).refused).toBe("Another session handles the ticket's assignment.");
     expect(h.status(1)).toBe('done');
+  });
+
+  it('reopens a work item whose approval was never approved as awaiting it, holding it through a turn', () => {
+    const h = new Harness();
+    const { item, session } = running(h);
+    h.report(session, { kind: 'approval', prompt: '/support-release #1', summary: 'release', report: null });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+
+    // As zoho 444953 did: the operator asks the session more, and a poll that omits the ticket ends the work item when the turn ends.
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    h.poll();
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned', approvalPrompt: '/support-release #1' });
+
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false });
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item).status).toBe('awaiting-approval');
+
+    // Reopened mid-turn, the work item runs holding the approval, which its turn end restores.
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    h.act({ type: 'mark-done', workItemId: item });
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item).status).toBe('awaiting-approval');
+  });
+
+  it('reopens an approved run that reported done as finished, so Approve is not offered again', () => {
+    const h = new Harness();
+    const { item, session } = running(h);
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: null, report: null });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+    const approved = h.started(only(h.act({ type: 'approve', workItemId: item }), 'start-session'));
+    h.report(approved, { kind: 'done' });
+    h.act({ type: 'marker', sessionId: approved, state: 'idle', detail: null });
+
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item)).toMatchObject({ status: 'finished', approvalHeld: false, approvalPrompt: '/publish' });
+  });
+
+  it('reopens a session that reported approval and then done as finished, because its done report covers the publication', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:both': { description: 'Both', reports: ['done', 'approval'], template: 'Do {{ticket.sourceKey}}.' } }) });
+    const { item, session } = running(h, '1', 'dev:both');
+    expect(h.report(session, { kind: 'approval', prompt: '/publish', summary: null, report: null }).refused).toBeNull();
+    expect(h.item(item).status).toBe('awaiting-approval');
+    expect(h.report(session, { kind: 'done' }).refused).toBeNull();
+    expect(h.item(item)).toMatchObject({ status: 'done', approvalHeld: false });
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item).status).toBe('finished');
+  });
+
+  it('reopens as finished when a done report after an approval is settled by the ticket leaving', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, BOTH) });
+    const { item, session } = running(h, '1', 'dev:both');
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: null, report: null });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', approvalHeld: true });
+
+    // The resumed session reports done while the read still lists the ticket, and the next poll settles it.
+    h.report(session, { kind: 'done', assigned: true });
+    h.poll();
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned', approvalHeld: false });
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item).status).toBe('finished');
+  });
+
+  it('reopens an approved run marked done before it started as awaiting approval', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 } }) });
+    const { item, session } = running(h);
+    h.report(session, { kind: 'approval', prompt: '/publish', summary: null, report: null });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+    // Another work item holds the only slot, so the approved run waits.
+    running(h, '2');
+    expect(h.act({ type: 'approve', workItemId: item })).toEqual([]);
+    expect(h.item(item).status).toBe('queued');
+
+    h.act({ type: 'mark-done', workItemId: item });
+    expect(h.item(item)).toMatchObject({ status: 'done', approvalHeld: true });
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false });
   });
 
   it('refuses to reopen an open work item or one its ticket has moved past', () => {
