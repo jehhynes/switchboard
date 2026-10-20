@@ -345,7 +345,41 @@ public sealed class SwitcherTests
         var status = await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken);
 
         Assert.Equal("VS Code did not open the window for gh-107-58c609 within 20 seconds.", status);
+        Assert.Equal(["withdraw 41", "withdraw 42"], hub.Calls[^2..]);
+    }
+
+    [Fact]
+    public async Task Run_NoWindowYet_LeavesTheTabsBeforeTheCommandForTheWindowItOpens()
+    {
+        windows.Open["gh-107-58c609"] = (43, 1);
+
+        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "terminal", ["sessionId"] = "s" }, TestContext.Current.CancellationToken));
+        Assert.Equal(["window gh-107-58c609.code-workspace {\"type\":\"openTabs\"}", "window gh-107-58c609.code-workspace {\"type\":\"terminal\",\"sessionId\":\"s\"}"], hub.Calls);
+        Assert.Equal(["open gh-107-58c609.code-workspace"], vsCode.Calls);
+    }
+
+    [Fact]
+    public async Task Run_NoWindowYetAndReplacedWhileLeavingTheTabs_WithdrawsThemAndLeavesNoCommand()
+    {
+        windows.Open["gh-107-58c609"] = (43, 1);
+
+        using var cancel = new CancellationTokenSource();
+
+        hub.OnWindow = (_) => cancel.Cancel();
+
+        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "terminal", ["sessionId"] = "s" }, cancel.Token));
+        Assert.Equal(["window gh-107-58c609.code-workspace {\"type\":\"openTabs\"}", "withdraw 41"], hub.Calls);
+        Assert.Empty(vsCode.Calls);
+    }
+
+    [Fact]
+    public async Task Run_NoWindowYetAndHubRefusesTheCommand_WithdrawsTheTabsAndDoesNotOpenTheWindow()
+    {
+        hub.RefuseCommand = "terminal";
+
+        Assert.Equal("Refused.", await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "terminal", ["sessionId"] = "s" }, TestContext.Current.CancellationToken));
         Assert.Equal("withdraw 41", hub.Calls[^1]);
+        Assert.Empty(vsCode.Calls);
     }
 
     [Fact]

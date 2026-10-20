@@ -122,14 +122,35 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
                 return Older;
             }
 
+            var handle = windows.Find(window.Name);
+            // A window the command opens shows its tabs, as one a click opens does (PRD R72).
+            var tabs = handle == 0 ? await hub.Window(new JsonObject { ["type"] = "openTabs" }, file) : null;
+
+            if (tabs is not null && cancel.IsCancellationRequested)
+            {
+                return await Withdrawn(tabs, null, cancel);
+            }
+
             var left = await hub.Window(command, file);
 
             if (left.Error is { } refused)
             {
+                if (tabs is not null)
+                {
+                    await Withdrawn(tabs, refused, cancel);
+                }
+
                 return cancel.IsCancellationRequested ? null : refused;
             }
 
-            return await Withdrawn(left, cancel.IsCancellationRequested ? null : await Switch(window, file, windows.Find(window.Name), cancel), cancel);
+            var failure = cancel.IsCancellationRequested ? null : await Switch(window, file, handle, cancel);
+
+            if (tabs is not null)
+            {
+                await Withdrawn(tabs, failure, cancel);
+            }
+
+            return await Withdrawn(left, failure, cancel);
         }
 
         var any = windows.FindVsCode();

@@ -34,9 +34,21 @@ sealed class FakeHub : IHub
 
     public string? WindowReply { get; set; }
 
+    /// <summary>A command type the hub refuses with "Refused.", while it leaves the others.</summary>
+    public string? RefuseCommand { get; set; }
+
+    /// <summary>Runs when the hub receives a window command, such as to cancel the click that sent it.</summary>
+    public Action<JsonObject>? OnWindow { get; set; }
+
     public Task<WindowReply> Window(JsonObject command, string? workspace)
     {
         Calls.Add($"window {(workspace is null ? "any" : Paths.FileName(workspace))} {command.ToJsonString()}");
+        OnWindow?.Invoke(command);
+
+        if (RefuseCommand is not null && command["type"]?.GetValue<string>() == RefuseCommand)
+        {
+            return Task.FromResult(new WindowReply("Refused.", null));
+        }
 
         return Task.FromResult(WindowReply is null ? new WindowReply(null, 40 + Calls.Count) : new WindowReply(WindowReply, null));
     }
