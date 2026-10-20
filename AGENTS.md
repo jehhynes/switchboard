@@ -92,8 +92,9 @@ For changes to the GNOME Shell extension, run `npm run publish --workspace @swit
 
 ## Commit messages
 
-Use `type(scope): summary`, adding `(fixes #123)` on the same line when closing an issue.
+Use `type(scope): summary`.
 
+- End the subject of every commit for a GitHub issue with `#<issue>`, as in `fix(dock): keep the auto-hidden status strip visible #123`.
 - Use a conventional type such as `feat`, `fix`, `docs`, `refactor`, `test`, or `chore`, and an area such as `core`, `hub`, `dock`, `vscode`, `github`, `claude` or `docs` as scope.
 - Write an imperative, lowercase summary under about 70 characters, without a final period.
 - Name the changed identifier and behavior. Use exact settings, flags, message types, and measurements.
