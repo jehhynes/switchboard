@@ -1071,6 +1071,7 @@ public sealed partial class MainWindow : Window
     const string SettingsGlyph = "\uEB51";
     const string OutputGlyph = "\uEB9D";
     const string RefreshGlyph = "\uEB37";
+    const string GraphGlyph = "\uEB03";
 
     static MenuItem Item(string header, Func<Task> run, string? glyph = null)
     {
@@ -1250,15 +1251,15 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// New Ad-hoc Session, Refresh Sources, which polls each source that is on now, Open Settings and Show Hub Log, which shows the hub log in the
-    /// VS Code window used last.
+    /// New Ad-hoc Session, Refresh Sources, which polls each source that is on now, Open Settings, Ticket Volume Report when a Zoho or Forum source is configured,
+    /// and Show Hub Log, which shows the hub log in the VS Code window used last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
         Item("New Ad-hoc Session…", NewAdhoc, AddGlyph),
         Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
         Item("Open Settings", OpenSettings, SettingsGlyph),
-        Item("Support Volume", OpenVolume),
+        .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket Volume Report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
         Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
     ];
 
@@ -1349,7 +1350,7 @@ public sealed partial class MainWindow : Window
         }
         if (hub is not IVolumeHub volume)
         {
-            model.Status = "Support volume needs the hub.";
+            model.Status = "Ticket volume needs the hub.";
             return;
         }
         var window = new VolumeWindow(volume, actions);

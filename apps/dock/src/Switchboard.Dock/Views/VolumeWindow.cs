@@ -10,7 +10,7 @@ namespace Switchboard.Dock.Views;
 
 public sealed class VolumeWindow : Window
 {
-    static readonly (string Key, string Label)[] Metrics = [("seen", "Seen in Support"), ("entered", "Entered / returned"), ("left", "Left active queue"), ("open", "Open at end"), ("assigned", "Assigned to you"), ("worked", "Worked by you"), ("mine", "Yours at end")];
+    static readonly (string Key, string Label)[] Metrics = [("seen", "Seen in queue"), ("entered", "Entered / returned"), ("left", "Left active queue"), ("open", "Open at end"), ("assigned", "Assigned to you"), ("worked", "Worked by you"), ("mine", "Yours at end")];
     readonly IVolumeHub hub;
     readonly IDockActions actions;
     readonly ComboBox source = new() { Name = "VolumeSource", ItemsSource = new[] { "all", "zoho", "forum" }, SelectedIndex = 0, Width = 130 };
@@ -25,7 +25,7 @@ public sealed class VolumeWindow : Window
     {
         this.hub = hub;
         this.actions = actions;
-        Title = "Support Volume";
+        Title = "Ticket Volume Report";
         Width = 1200;
         Height = 750;
         MinWidth = 800;
@@ -37,7 +37,7 @@ public sealed class VolumeWindow : Window
         source.SelectionChanged += async (_, _) => await Load();
         var page = new StackPanel { Margin = new Thickness(16), Spacing = 12, Width = 1100, HorizontalAlignment = HorizontalAlignment.Left };
         page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { source, refresh } });
-        page.Children.Add(new TextBlock { Text = "Observed active Support queue · Monday–Sunday · select a count for tickets", FontSize = 18 });
+        page.Children.Add(new TextBlock { Text = "Observed active queue · Monday–Sunday · select a count for tickets", FontSize = 18 });
         page.Children.Add(status);
         page.Children.Add(new TextBlock { Text = "Left does not mean resolved: Deferred and other deferrals can leave and return. Worked means a task started in Switchboard. Week-end counts use the last observed state; activity between polls or while Switchboard is off can be missed.", TextWrapping = TextWrapping.Wrap });
         page.Children.Add(weeks);

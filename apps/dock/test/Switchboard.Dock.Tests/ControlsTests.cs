@@ -410,7 +410,19 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Support Volume", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Ticket Volume Report", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.All(more.ContextMenu.Items.OfType<MenuItem>(), (item) => Assert.NotNull(item.Icon));
+    }
+
+    [AvaloniaFact]
+    public void MoreActions_NoZohoOrForumSource_OmitsTicketVolumeReport()
+    {
+        var (window, _) = Open(Fixtures.View with { Sources = [new SourceState("github", true)] });
+        var more = window.FindControl<Button>("MoreButton")!;
+
+        Click(more);
+
+        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Show Hub Log"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
     }
 
     [AvaloniaFact]
