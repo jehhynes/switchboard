@@ -160,7 +160,7 @@ export class ZohoSource implements Source {
     const rows: SearchTicket[] = [];
 
     for (let page = 0; page < this.config.maxPages; page++) {
-      const body = json(await this.get(`/tickets/search?status=Open&customField1=${filter}&sortBy=createdTime&limit=${PAGE}&from=${page * PAGE + 1}`)) as { data?: SearchTicket[] } | null;
+      const body = json(await this.get(`/tickets/search?status=Open&customField1=${filter}&sortBy=createdTime&limit=${PAGE}&from=${page * PAGE}`)) as { data?: SearchTicket[] } | null;
       const data = body?.data ?? [];
 
       if (!Array.isArray(data)) {

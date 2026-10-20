@@ -11,8 +11,8 @@ import { stripHtml } from '../src/text.js';
 const fixture = (name: string): unknown => JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', `${name}.json`), 'utf8'));
 
 const SELF = '8000000000000000001';
-const SEARCH = '/tickets/search?status=Open&customField1=cf_queue%3ASupport&sortBy=createdTime&limit=100&from=1';
-const SEARCH_2 = SEARCH.replace(/from=1$/, 'from=101');
+const SEARCH = '/tickets/search?status=Open&customField1=cf_queue%3ASupport&sortBy=createdTime&limit=100&from=0';
+const SEARCH_2 = SEARCH.replace(/from=0$/, 'from=100');
 const CONFIG = (parseZohoConfig({ orgId: '700000001', agentId: SELF }) as { config: ZohoConfig }).config;
 
 /** Answers Desk paths from fixtures; fails on an unexpected path. */

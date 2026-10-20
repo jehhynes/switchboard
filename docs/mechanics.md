@@ -566,6 +566,7 @@ These mechanisms are planned but not yet verified for Switchboard:
   - `status=Open` with the field filter returned 17 tickets in one request in 0.8 seconds. The unfiltered walk took 9 requests and about 5 seconds, and its client-side Support filter found the same 17 tickets; the filter matches the value exactly.
   - The field filter without `status=Open` returned 2,358 tickets. Every row of the unfiltered `status=Open` walk had status and status type `Open`.
   - Filtered rows carry the same fields as unfiltered ones, including `cf`, `assigneeId`, `status`, `modifiedTime`, `createdTime` and `customerResponseTime`. `sortBy=createdTime` with `from` pages the filtered list.
-  - One filtered read reported `count` 17 with 16 rows, minutes after a ticket closed, so `count` is not used.
+  - Search `from` counts from 0, unlike history's (M14): with 8 matches, `from=0&limit=4` and `from=4&limit=4` returned all 8 oldest first, and `from=1&limit=100` returned 7, without the oldest, zoho 420923.
+  - One filtered read reported `count` 17 with 16 rows, minutes after a ticket closed; it may have used `from=1`, which drops a row. The poll pages by row count, not `count`.
   - `/tickets/{id}` for a missing ticket answers HTTP 404.
 - **Current use:** the Zoho poll filters by the escalation field and sorts by creation, and reads by ID each current ticket the search omits (architecture.md § Sources).
