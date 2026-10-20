@@ -158,9 +158,10 @@ export interface DockRow {
   search: string;
   /**
    * The ticket's links (PRD R52), a link to the ticket itself left out: `label` names it in the right-click menu (`PR #19002`, `gh 18941` or its
-   * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon.
+   * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon. A `mentioned` link,
+   * found in the ticket's text (PRD R61), follows the others and is drawn muted.
    */
-  links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null }[];
+  links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null; mentioned: boolean }[];
   /** How many earlier work items with the same playbook, or one it is a return of, were done, for "Returned ×N" on line 2 (PRD R51); 0 when it is not marked. */
   returned: number;
   /** A Done row's date band, such as `Today` or `Last week` (PRD R27); null in the other groups. */
@@ -300,11 +301,14 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
   };
 }
 
-/** The ticket's links in the order reported, each once, named by its pull request or issue number when it has one (PRD R52). */
+/** The ticket's links in the order reported, mentioned ones last, each once, named by its pull request or issue number when it has one (PRD R52, R61). */
 function linksOf(entry: WorkItemView | PoolView): DockRow['links'] {
   const seen = new Set<string>();
+  const ordered = [...entry.links.filter((link) => !link.mentioned), ...entry.links.filter((link) => link.mentioned)];
 
-  return entry.links.flatMap((link): DockRow['links'] => {
+  return ordered.flatMap((link): DockRow['links'] => {
+    const { mentioned } = link;
+
     if (link.target === entry.ticket.url || seen.has(link.target)) {
       return [];
     }
@@ -314,12 +318,12 @@ function linksOf(entry: WorkItemView | PoolView): DockRow['links'] {
     const kind = linkKind(link.target);
     const number = linkNumber(link.target);
     if (kind === 'url' || number === null) {
-      return [{ label: link.label, url: link.target, kind: 'url', badge: link.label, glyph: LINK_GLYPH }];
+      return [{ label: link.label, url: link.target, kind: 'url', badge: link.label, glyph: LINK_GLYPH, mentioned }];
     }
 
     return kind === 'pr'
-      ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH }]
-      : [{ label: `gh ${number}`, url: link.target, kind, badge: `gh ${number}`, glyph: null }];
+      ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH, mentioned }]
+      : [{ label: `gh ${number}`, url: link.target, kind, badge: `gh ${number}`, glyph: null, mentioned }];
   });
 }
 

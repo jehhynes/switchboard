@@ -122,7 +122,7 @@ describe('cardsOf', () => {
   it("gives a card the link URLs of its work item or pool entry (PRD R69)", () => {
     const linked = ticket(1, 'github', issue(1));
     const pooled = ticket(2, 'zoho', 'https://desk.example.test/2');
-    const link = (target: string) => ({ id: 1, ticketId: 0, label: 'PR', target, reportedAt: 0 });
+    const link = (target: string) => ({ id: 1, ticketId: 0, label: 'PR', target, reportedAt: 0, mentioned: false });
     const withLinks = (entry: WorkItemView, targets: string[]): WorkItemView => ({ ...entry, links: targets.map(link) });
     const cards = cardsOf(
       snapshot(

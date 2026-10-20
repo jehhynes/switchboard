@@ -471,7 +471,7 @@ public sealed class MainWindowTests
         var snooze = (MenuItem)menu[2];
 
         Assert.Equal(
-            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002"],
+            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002", "Open gh 20087"],
             menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
         Assert.IsType<Separator>(menu[9]);
         Assert.IsType<Separator>(menu[11]);
@@ -530,8 +530,7 @@ public sealed class MainWindowTests
         var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
 
         Assert.IsType<Separator>(menu[11]);
-        Assert.Equal("Open PR #19002", ((MenuItem)menu[12]).Header);
-        Assert.Equal(13, menu.Count);
+        Assert.Equal(["Open PR #19002", "Open gh 20087"], menu.Skip(12).Select((item) => ((MenuItem)item).Header));
     }
 
     [AvaloniaFact]
@@ -1006,14 +1005,35 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var pills = RowNamed(window, "Issue <7>").GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("pill") && border.IsEffectivelyVisible).ToList();
 
-        Assert.Equal(["gh 107", "19002", "Returned ×2"], pills.Select((pill) => pill.GetVisualDescendants().OfType<TextBlock>().Last().Text));
+        Assert.Equal(["gh 107", "19002", "gh 20087", "Returned ×2"], pills.Select((pill) => pill.GetVisualDescendants().OfType<TextBlock>().Last().Text));
         Assert.Contains("pr", pills[1].Classes);
 
         Tap(window, pills[0]);
         Tap(window, pills[1]);
-        Tap(window, pills[2]);
+        Tap(window, pills[3]);
 
         Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
+        Assert.Empty(actions.Clicked);
+    }
+
+    [AvaloniaFact]
+    public void LinkPill_Mentioned_IsGreyWithItsTooltipWhileTheWorkLinkKeepsItsColour()
+    {
+        var (window, _) = Open(new DockSettings { Edge = "right", Width = 480 });
+        var pills = RowNamed(window, "Issue <7>").GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("pill") && border.IsEffectivelyVisible).ToList();
+        var muted = window.FindResource(window.ActualThemeVariant, "DockMuted");
+        var mentioned = pills[2];
+
+        Assert.Equal(muted, mentioned.BorderBrush);
+        Assert.Equal(window.FindResource(window.ActualThemeVariant, "DockPillFill"), mentioned.Background);
+        Assert.Equal(muted, mentioned.GetVisualDescendants().OfType<TextBlock>().Last().Foreground);
+        Assert.Equal("Named in the ticket: https://github.com/o/r/issues/20087", ToolTip.GetTip(mentioned));
+        Assert.Equal(window.FindResource(window.ActualThemeVariant, "DockPullRequest"), pills[1].BorderBrush);
+        Assert.Equal("https://github.com/o/r/pull/19002", ToolTip.GetTip(pills[1]));
+
+        Tap(window, mentioned);
+
+        Assert.Equal(["https://github.com/o/r/issues/20087"], actions.Urls);
         Assert.Empty(actions.Clicked);
     }
 

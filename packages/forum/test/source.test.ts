@@ -91,8 +91,8 @@ describe('ForumSource.context', () => {
 
     // The issue appears three times: as an href, as link text, and with a comment anchor. The help page and the topic's own URL are not links.
     expect(result.links).toEqual([
-      { label: 'Issue #19515', target: 'https://github.com/acme/widgets/issues/19515' },
-      { label: 'Pull request #19600', target: 'https://github.com/acme/widgets/pull/19600' },
+      { label: 'Issue #19515', target: 'https://github.com/acme/widgets/issues/19515', mentioned: true },
+      { label: 'Pull request #19600', target: 'https://github.com/acme/widgets/pull/19600', mentioned: true },
     ]);
     expect(result.context).not.toContain('19600');
   });

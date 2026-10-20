@@ -102,8 +102,11 @@ public sealed class DockViewTests
         Assert.Equal("Approve", approval.Main);
         Assert.Equal([new DockPaste("Customer reply", "D:/drafts/reply.md")], approval.Pastes);
         Assert.Equal(["Open in terminal", "History", "Open report"], approval.Commands.Select((command) => command.Label));
-        Assert.Equal("Issue <7> · gh 107 · PR #19002 · dev:develop · Ready for review · 107-fix", Fixtures.Row("item:7").Search);
-        Assert.Equal([new DockLink("PR #19002", "https://github.com/o/r/pull/19002", "pr", "19002", "\uEA64")], Fixtures.Row("item:7").Links);
+        Assert.Equal("Issue <7> · gh 107 · PR #19002 · gh 20087 · dev:develop · Ready for review · 107-fix", Fixtures.Row("item:7").Search);
+        Assert.Equal(
+            [new DockLink("PR #19002", "https://github.com/o/r/pull/19002", "pr", "19002", "\uEA64", false), new DockLink("gh 20087", "https://github.com/o/r/issues/20087", "issue", "gh 20087", null, true)],
+            Fixtures.Row("item:7").Links);
+        Assert.Equal(["https://github.com/o/r/pull/19002", "Named in the ticket: https://github.com/o/r/issues/20087"], Fixtures.Row("item:7").Links.Select((link) => link.Tooltip));
         Assert.Equal(2, Fixtures.Row("item:7").Returned);
         Assert.Equal(@"C:\Users\op\.switchboard\windows\gh-107-58c609.code-workspace", Fixtures.Row("item:7").Window!.File);
     }

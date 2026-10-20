@@ -9,6 +9,8 @@ export type PollResult = { tickets: PolledTicket[] } | { error: string };
 export interface SourceLink {
   label: string;
   target: string;
+  /** Found in the ticket's text rather than tied to the work, as a GitHub issue a Zoho note names is (PRD R61). */
+  mentioned?: boolean;
 }
 
 /** A page or comment the triage context tags with `id`, such as `[c3]`, which triage can return as the focus (PRD R79). */

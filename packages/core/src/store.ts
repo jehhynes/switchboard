@@ -294,9 +294,17 @@ export const MIGRATIONS = [
       ORDER BY endedAt DESC, id DESC LIMIT 1
     );`,
   `ALTER TABLE tickets ADD COLUMN handledAssignmentKey TEXT;`,
+  // Links triage found in a Zoho or Forum ticket's text and no session reported (PRD R61).
+  `ALTER TABLE links ADD COLUMN mentioned INTEGER NOT NULL DEFAULT 0;
+  UPDATE links SET mentioned = 1
+    WHERE ticketId IN (SELECT id FROM tickets WHERE source IN ('zoho', 'forum'))
+    AND EXISTS (SELECT 1 FROM changes c JOIN events e ON e.id = c.eventId
+      WHERE c.entity = 'link' AND c.op = 'insert' AND c.entityId = CAST(links.id AS TEXT) AND e.type = 'triage-succeeded')
+    AND NOT EXISTS (SELECT 1 FROM events e
+      WHERE e.ticketId = links.ticketId AND e.type = 'report' AND e.refused IS NULL AND json_extract(e.detail, '$.kind') = 'link' AND json_extract(e.detail, '$.target') = links.target);`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external']);
+const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -944,12 +952,12 @@ export class Store {
     );
   }
 
-  /** Adds a link to the ticket; a link to the same target replaces its label. */
+  /** Adds a link to the ticket; a link to the same target replaces its label, and stays unmentioned once a session reported it. */
   addLink(link: Omit<Link, 'id'>): void {
     this.#upsert(
       'links',
-      'INSERT INTO links (ticketId, label, target, reportedAt) VALUES (:ticketId, :label, :target, :reportedAt) ' +
-        'ON CONFLICT (ticketId, target) DO UPDATE SET label = excluded.label, reportedAt = excluded.reportedAt',
+      'INSERT INTO links (ticketId, label, target, reportedAt, mentioned) VALUES (:ticketId, :label, :target, :reportedAt, :mentioned) ' +
+        'ON CONFLICT (ticketId, target) DO UPDATE SET label = excluded.label, reportedAt = excluded.reportedAt, mentioned = MIN(mentioned, excluded.mentioned)',
       link as unknown as Row,
       ['ticketId', 'target'],
     );

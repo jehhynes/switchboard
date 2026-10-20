@@ -9,9 +9,9 @@ describe('githubLinks', () => {
         '<a href="https://github.com/acme/widgets/issues/12">https://github.com/acme/widgets/pull/7</a> https://github.com/other/repo.js/issues/12',
       ]),
     ).toEqual([
-      { label: 'Pull request #7', target: 'https://github.com/acme/widgets/pull/7' },
-      { label: 'Issue #12', target: 'https://github.com/acme/widgets/issues/12' },
-      { label: 'Issue #12', target: 'https://github.com/other/repo.js/issues/12' },
+      { label: 'Pull request #7', target: 'https://github.com/acme/widgets/pull/7', mentioned: true },
+      { label: 'Issue #12', target: 'https://github.com/acme/widgets/issues/12', mentioned: true },
+      { label: 'Issue #12', target: 'https://github.com/other/repo.js/issues/12', mentioned: true },
     ]);
   });
 

@@ -56,7 +56,7 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
   };
 }
 
-const pr = { links: [{ id: 1, ticketId: 7, label: 'PR', target: PR, reportedAt: NOW }] };
+const pr = { links: [{ id: 1, ticketId: 7, label: 'PR', target: PR, reportedAt: NOW, mentioned: false }] };
 const report = { status: 'awaiting-approval' as const, approvalReport: REPORT };
 
 function snapshot(items: WorkItemView[]): Snapshot {

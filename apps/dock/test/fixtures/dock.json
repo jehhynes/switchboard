@@ -279,14 +279,23 @@
               }
             }
           ],
-          "search": "Issue <7> · gh 107 · PR #19002 · dev:develop · Ready for review · 107-fix",
+          "search": "Issue <7> · gh 107 · PR #19002 · gh 20087 · dev:develop · Ready for review · 107-fix",
           "links": [
             {
               "label": "PR #19002",
               "url": "https://github.com/o/r/pull/19002",
               "kind": "pr",
               "badge": "19002",
-              "glyph": ""
+              "glyph": "",
+              "mentioned": false
+            },
+            {
+              "label": "gh 20087",
+              "url": "https://github.com/o/r/issues/20087",
+              "kind": "issue",
+              "badge": "gh 20087",
+              "glyph": null,
+              "mentioned": true
             }
           ],
           "returned": 2,

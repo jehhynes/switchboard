@@ -312,9 +312,9 @@ describe('ZohoSource.context', () => {
 
     // The issue appears three times: as an href, as link text, and with a comment anchor. The help page, a file and a project are not links.
     expect(result.links).toEqual([
-      { label: 'Issue #19515', target: 'https://github.com/acme/widgets/issues/19515' },
-      { label: 'Pull request #19600', target: 'https://github.com/acme/widgets/pull/19600' },
-      { label: 'Pull request #19601', target: 'https://github.com/acme/widgets/pull/19601' },
+      { label: 'Issue #19515', target: 'https://github.com/acme/widgets/issues/19515', mentioned: true },
+      { label: 'Pull request #19600', target: 'https://github.com/acme/widgets/pull/19600', mentioned: true },
+      { label: 'Pull request #19601', target: 'https://github.com/acme/widgets/pull/19601', mentioned: true },
     ]);
     expect(result.context).not.toContain('19601');
   });

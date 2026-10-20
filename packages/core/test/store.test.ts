@@ -33,6 +33,35 @@ describe('Store', () => {
     store.close();
   });
 
+  it('marks a version 31 link mentioned only when triage added it to a Zoho or Forum ticket and no accepted session report named it (PRD R61)', () => {
+    const path = join(dir, 'v31.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, 31).join(';'));
+    raw.exec(`PRAGMA user_version = 31;
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'zoho', '1', 'One', '', 1, ''), (2, 'github', '2', 'Two', '', 1, '');
+      INSERT INTO links (id, ticketId, label, target, reportedAt) VALUES
+        (1, 1, 'Issue #5', 'https://github.com/o/r/issues/5', 1),
+        (2, 1, 'Issue #6', 'https://github.com/o/r/issues/6', 1),
+        (3, 1, 'PR #7', 'https://github.com/o/r/pull/7', 1),
+        (4, 2, 'Pull request #8', 'https://github.com/o/r/pull/8', 1),
+        (5, 1, 'Issue #9', 'https://github.com/o/r/issues/9', 1);
+      INSERT INTO events (id, at, type, actor, ticketId, detail) VALUES
+        (101, 1, 'triage-succeeded', 'triage', 1, '{}'),
+        (102, 2, 'report', 'session', 1, '{"kind":"link","label":"Issue #6","target":"https://github.com/o/r/issues/6"}'),
+        (103, 2, 'report', 'session', 1, '{"kind":"link","label":"PR #7","target":"https://github.com/o/r/pull/7"}'),
+        (104, 1, 'triage-succeeded', 'triage', 2, '{}');
+      INSERT INTO events (id, at, type, actor, ticketId, detail, refused) VALUES
+        (105, 2, 'report', 'session', 1, '{"kind":"link","label":"Issue #9","target":"https://github.com/o/r/issues/9"}', 'Refused.');
+      INSERT INTO changes (eventId, ticketId, entity, entityId, op, fields) VALUES
+        (101, 1, 'link', '1', 'insert', '{}'), (101, 1, 'link', '2', 'insert', '{}'), (103, 1, 'link', '3', 'insert', '{}'), (104, 2, 'link', '4', 'insert', '{}'), (101, 1, 'link', '5', 'insert', '{}');`);
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([...store.linksFor(1), ...store.linksFor(2)].map((link) => [link.id, link.mentioned])).toEqual([[1, true], [2, false], [3, false], [5, true], [4, false]]);
+    store.close();
+  });
+
   it('migrates a new file to the current version, in WAL mode, and reopens it without migrating again', () => {
     const path = join(dir, 'switchboard.db');
     const store = Store.open(path);
@@ -58,7 +87,7 @@ describe('Store', () => {
 
     store.insertTicket({ ...ticket, source: 'adhoc', sourceKey: '2' });
     store.insertTicket({ ...ticket, source: 'github', sourceKey: '117', adhocKey: '5' });
-    store.addLink({ ticketId: held.id, label: 'Issue', target: 'https://github.com/o/r/issues/1', reportedAt: 1 });
+    store.addLink({ ticketId: held.id, label: 'Issue', target: 'https://github.com/o/r/issues/1', reportedAt: 1, mentioned: false });
 
     expect(store.adhocKeys().sort()).toEqual(['2', '5']);
     expect(() => store.deleteBareTicket(held.id)).toThrow('Ticket 2 has work items, triages, a worktree or links.');

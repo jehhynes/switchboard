@@ -65,8 +65,8 @@ public sealed record DockRow(
     public int? WorkItemId => Key.StartsWith("item:", StringComparison.Ordinal) && int.TryParse(Key.AsSpan(5), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : null;
 }
 
-/// <summary>A ticket's link, named as <c>PR #19002</c>, <c>gh 18941</c> or by its label (PRD R52).</summary>
-public sealed record DockLink(string Label, string Url, string Kind = "url", string? Badge = null, string? Glyph = null)
+/// <summary>A ticket's link, named as <c>PR #19002</c>, <c>gh 18941</c> or by its label (PRD R52); <c>Mentioned</c> when the ticket's text names it (PRD R61).</summary>
+public sealed record DockLink(string Label, string Url, string Kind = "url", string? Badge = null, string? Glyph = null, bool Mentioned = false)
 {
     [JsonIgnore]
     public bool IsPullRequest => Kind == "pr";
@@ -80,6 +80,9 @@ public sealed record DockLink(string Label, string Url, string Kind = "url", str
     /// <summary>The pill's text: the badge, or the menu name from a hub older than badges.</summary>
     [JsonIgnore]
     public string Text => Badge ?? Label;
+
+    [JsonIgnore]
+    public string Tooltip => Mentioned ? $"Named in the ticket: {Url}" : Url;
 }
 
 /// <summary>A drafted text Copy puts on the clipboard (PRD R60).</summary>

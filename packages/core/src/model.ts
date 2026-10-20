@@ -143,6 +143,8 @@ export interface Link {
   /** An http(s) URL or an absolute file path. */
   target: string;
   reportedAt: number;
+  /** Found in the ticket's own text, such as an issue a support note names, rather than reported by a session (PRD R61). */
+  mentioned: boolean;
 }
 
 /** A drafted text the operator pastes into the source by hand, such as a customer reply; Copy puts the file's text on the clipboard (PRD R60). */

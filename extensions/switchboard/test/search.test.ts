@@ -35,7 +35,7 @@ describe('rowFor (PRD R49, R65)', () => {
 describe('Open in Switchboard (PRD R69)', () => {
   const desk = (id: number) => `https://desk.example.test/tickets/${id}`;
   const zoho = (id: number, patch: Partial<WorkItemView['ticket']> = {}): WorkItemView['ticket'] => ({ ...item(id).ticket, source: 'zoho', sourceKey: `Z${id}`, url: desk(id), ...patch });
-  const link = (target: string) => ({ id: 1, ticketId: 1, label: 'link', target, reportedAt: NOW });
+  const link = (target: string) => ({ id: 1, ticketId: 1, label: 'link', target, reportedAt: NOW, mentioned: false });
   const data = snapshot(
     [
       // Work item 1 links issue 102, which is also work item 2's ticket.

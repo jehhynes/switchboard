@@ -215,7 +215,7 @@ describe('dockView', () => {
       item(7, {
         worktree,
         sessions: [session({ state: 'waiting' })],
-        links: [{ id: 1, ticketId: 7, label: 'PR', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW }],
+        links: [{ id: 1, ticketId: 7, label: 'PR', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW, mentioned: false }],
       }),
     );
 
@@ -267,11 +267,12 @@ describe('dockView', () => {
     expect(failed!.controls.map((control) => control.action)).toEqual([{ type: 'retriage-pool', ticketId: 5 }, { type: 'snooze', ticketId: 5 }]);
   });
 
-  it('names each link once by its pull request or issue number, else its label, leaving out the ticket itself, and carries Returned', () => {
-    const link = (id: number, label: string, target: string) => ({ id, ticketId: 7, label, target, reportedAt: NOW });
+  it('names each link once by its pull request or issue number, else its label, leaving out the ticket itself, mentioned links last, and carries Returned', () => {
+    const link = (id: number, label: string, target: string, mentioned = false) => ({ id, ticketId: 7, label, target, reportedAt: NOW, mentioned });
     const shown = row(
       item(7, {
         links: [
+          link(0, 'Issue #20087', 'https://github.com/o/r/issues/20087', true),
           link(1, 'Pull request', 'https://github.com/o/r/pull/19002'),
           link(2, 'Issue', 'https://github.com/o/r/issues/18941'),
           link(3, 'Design doc', 'https://example.test/doc'),
@@ -283,9 +284,10 @@ describe('dockView', () => {
     );
 
     expect(shown.links).toEqual([
-      { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}' },
-      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941', kind: 'issue', badge: 'gh 18941', glyph: null },
-      { label: 'Design doc', url: 'https://example.test/doc', kind: 'url', badge: 'Design doc', glyph: '\u{eb15}' },
+      { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}', mentioned: false },
+      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941', kind: 'issue', badge: 'gh 18941', glyph: null, mentioned: false },
+      { label: 'Design doc', url: 'https://example.test/doc', kind: 'url', badge: 'Design doc', glyph: '\u{eb15}', mentioned: false },
+      { label: 'gh 20087', url: 'https://github.com/o/r/issues/20087', kind: 'issue', badge: 'gh 20087', glyph: null, mentioned: true },
     ]);
     expect(shown.returned).toBe(3);
   });
@@ -300,7 +302,10 @@ describe('dockView', () => {
             readyAt: NOW - 3 * 3_600_000,
             worktree,
             sessions: [session({ state: 'ended', cwd: worktree.path })],
-            links: [{ id: 1, ticketId: 7, label: 'Pull request', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW }],
+            links: [
+              { id: 1, ticketId: 7, label: 'Pull request', target: 'https://github.com/o/r/pull/19002', reportedAt: NOW, mentioned: false },
+              { id: 2, ticketId: 7, label: 'Issue #20087', target: 'https://github.com/o/r/issues/20087', reportedAt: NOW, mentioned: true },
+            ],
             returned: 2,
           }),
           item(8, { sessions: [session({ state: 'waiting', cwd: 'D:/git/widgets' })] }),
@@ -421,7 +426,7 @@ describe('windowOf', () => {
 
 describe('windowTabs', () => {
   const file = `${W}\\gh-107-58c609.code-workspace`;
-  const link = (id: number, target: string) => ({ id, ticketId: 7, label: 'Link', target, reportedAt: NOW });
+  const link = (id: number, target: string) => ({ id, ticketId: 7, label: 'Link', target, reportedAt: NOW, mentioned: false });
 
   it("lists each window work item's focus, not its links, then an awaiting-approval report, each once (PRD R72, R79)", () => {
     const links = [link(1, 'https://github.com/o/r/issues/900'), link(2, 'https://github.com/o/r/pull/19002')];

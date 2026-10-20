@@ -1083,7 +1083,7 @@ class Flow {
     });
 
     for (const link of event.links ?? []) {
-      this.store.addLink({ ticketId: triage.ticketId, label: link.label, target: link.target, reportedAt: this.now });
+      this.store.addLink({ ticketId: triage.ticketId, label: link.label, target: link.target, reportedAt: this.now, mentioned: link.mentioned === true });
     }
 
     const item = triage.workItemId === null ? null : this.store.workItem(triage.workItemId)!;
@@ -1571,7 +1571,7 @@ class Flow {
         return;
       case 'link':
         // Links belong to the ticket, so a returned ticket keeps them (PRD R52).
-        this.store.addLink({ ticketId: this.store.workItem(session.workItemId)!.ticketId, label: report.label, target: report.target, reportedAt: this.now });
+        this.store.addLink({ ticketId: this.store.workItem(session.workItemId)!.ticketId, label: report.label, target: report.target, reportedAt: this.now, mentioned: false });
         return;
       case 'playbook':
         if (item !== null && session.kind === 'task') {

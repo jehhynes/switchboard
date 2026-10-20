@@ -40,7 +40,37 @@ describe('link reports (PRD R52)', () => {
     h.act({ ...succeeded, links: [pr] });
     h.act({ ...succeeded, links: [{ label: 'Late', target: 'https://github.com/o/r/pull/3' }] });
 
-    expect(h.store.linksFor(1)).toMatchObject([{ ticketId: 1, ...pr }]);
+    expect(h.store.linksFor(1)).toMatchObject([{ ticketId: 1, ...pr, mentioned: false }]);
+  });
+
+  it('keeps a mentioned link mentioned until a session reports it, and a later triage does not mention it again (PRD R61)', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:finish': { description: 'Finish it', reports: ['done'], template: 'Finish it.' } }) });
+    const [triage] = h.poll(issue('1'));
+    const named = { label: 'Issue #5', target: 'https://github.com/o/r/issues/5', mentioned: true };
+    const other = { label: 'Issue #6', target: 'https://github.com/o/r/issues/6', mentioned: true };
+
+    if (triage?.type !== 'triage') {
+      throw new Error('Expected a triage action.');
+    }
+
+    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'c', playbook: 'dev:finish', immediacy: null, severity: null, model: null, links: [named, other] });
+    expect(h.store.linksFor(1).map((link) => link.mentioned)).toEqual([true, true]);
+
+    const session = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+    h.report(session, { kind: 'link', label: 'Issue #5', target: named.target });
+    h.report(session, { kind: 'done' });
+    h.poll();
+    const [again] = h.poll(issue('1'));
+
+    if (again?.type !== 'triage') {
+      throw new Error('Expected a triage action.');
+    }
+
+    h.act({ type: 'triage-succeeded', triageId: again.triageId, context: 'c', playbook: 'dev:finish', immediacy: null, severity: null, model: null, links: [named, other] });
+    expect(h.store.linksFor(1).map((link) => [link.target, link.mentioned])).toEqual([
+      [named.target, false],
+      [other.target, true],
+    ]);
   });
 
   it('refuses a link from an unknown session', () => {

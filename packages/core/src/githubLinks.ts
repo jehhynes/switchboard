@@ -14,7 +14,7 @@ export function githubLinks(texts: readonly string[]): SourceLink[] {
       const target = `https://github.com/${owner!.toLowerCase()}/${repo!.toLowerCase()}/${kind}/${number}`;
 
       if (!links.has(target)) {
-        links.set(target, { label: `${kind === 'pull' ? 'Pull request' : 'Issue'} #${number}`, target });
+        links.set(target, { label: `${kind === 'pull' ? 'Pull request' : 'Issue'} #${number}`, target, mentioned: true });
       }
     }
   }
