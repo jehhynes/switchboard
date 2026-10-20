@@ -13,13 +13,13 @@ export function reuseFilter(url: string): string {
 
 /**
  * Opens each of an item window's work items' focus and approval report in editor tabs (PRD R72, R79): all of them when the dock opened the window,
- * and afterwards a focus a later triage changes and a report a snapshot adds. A tab the operator closes stays closed until the dock opens the window again.
+ * and afterwards a focus a later triage changes and a report the window has not seen. A tab the operator closes stays closed until the dock opens the window again.
  */
 export class ItemTabs {
   /** Each work item's focus when last seen, so only a changed focus opens, and a work item that leaves the snapshot and returns opens nothing. */
   private readonly focuses = new Map<number, string>();
-  /** The reports in the last snapshot, so a report opens again each time its work item starts awaiting approval. */
-  private reports = new Set<string>();
+  /** Every report this window has seen, so each opens at most once, however often its work item returns to awaiting approval. */
+  private readonly reports = new Set<string>();
   /** False until the first snapshot, which opens nothing. */
   private started = false;
 
@@ -42,7 +42,7 @@ export class ItemTabs {
     const started = this.started;
 
     focuses.forEach((focus) => this.focuses.set(focus.workItemId, focus.url));
-    this.reports = new Set(reports);
+    reports.forEach((report) => this.reports.add(report));
     this.started = true;
 
     if (started) {

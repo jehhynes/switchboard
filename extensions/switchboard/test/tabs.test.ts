@@ -110,13 +110,43 @@ describe('ItemTabs', () => {
     expect(opened).toEqual([REVIEW, COMMENT]);
   });
 
-  it('opens a report again when its work item awaits approval again', async () => {
+  it('opens a report once, not again when its work item awaits approval again, and a new report when it names one', async () => {
+    const { tracker, opened } = tabs();
+    const OTHER = 'D:/drafts/reply-2.md';
+
+    await tracker.update(snapshot([item()]));
+    await tracker.update(snapshot([item(report)]));
+    await tracker.update(snapshot([item({ status: 'running', approvalReport: REPORT })]));
+    await tracker.update(snapshot([item(report)]));
+    expect(opened).toEqual([REPORT]);
+
+    await tracker.update(snapshot([item({ ...report, approvalReport: OTHER })]));
+    await tracker.update(snapshot([item(report)]));
+    expect(opened).toEqual([REPORT, OTHER]);
+  });
+
+  it('does not open a report openAll opened when its work item awaits approval again, nor one another work item already reported', async () => {
+    const { tracker, opened } = tabs();
+    const OTHER = 'D:/drafts/reply-2.md';
+    const earlier = (patch: Partial<WorkItemView>) => item({ id: 6, focus: null, ...patch });
+
+    await tracker.openAll(snapshot([item(report)]));
+    await tracker.update(snapshot([item({ status: 'running', approvalReport: REPORT })]));
+    await tracker.update(snapshot([item(report)]));
+    expect(opened).toEqual([ISSUE, REPORT]);
+
+    await tracker.update(snapshot([earlier(report), item({ status: 'running', approvalReport: REPORT })]));
+    await tracker.update(snapshot([earlier({ ...report, approvalReport: OTHER }), item(report)]));
+    expect(opened).toEqual([ISSUE, REPORT, OTHER]);
+  });
+
+  it('does not open a report the first snapshot showed when its work item awaits approval again', async () => {
     const { tracker, opened } = tabs();
 
     await tracker.update(snapshot([item(report)]));
     await tracker.update(snapshot([item({ status: 'running', approvalReport: REPORT })]));
     await tracker.update(snapshot([item(report)]));
-    expect(opened).toEqual([REPORT]);
+    expect(opened).toEqual([]);
   });
 
   it('opens a work item that joins the window once, and nothing when it leaves the snapshot and returns', async () => {
