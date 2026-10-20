@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
 import { MESSAGES, nothingNew, UNCONFIRMED_DONE } from '../src/flow.js';
 import { HOUR, Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
+import { heldSlots } from '../src/queue.js';
 
 /** The report contract offering `reports`, written out so a change to the contract shows here. */
 const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 'approval', 'link', 'task']) => {
@@ -738,6 +739,105 @@ describe('sessions', () => {
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'operator', error: null });
     expect(h.store.session(session)?.state).toBe('ended');
+  });
+
+  it('reopens a work item whose session reported done mid-turn as running, so the turn end without a done report blocks it', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
+    h.report(session, { kind: 'done' });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
+
+    h.now += 1000;
+    expect(h.send({ type: 'reopen', workItemId: item })).toEqual({ actions: [], refused: null });
+    expect(h.item(item)).toMatchObject({ status: 'running', doneAt: null, doneReason: null, scopeAt: null, statusAt: h.now });
+    expect(h.store.session(session)).toMatchObject({ outcome: null, outcomeDetail: null });
+
+    h.report(session, { kind: 'stage', stage: 'fixing the rest' });
+    expect(h.item(item).stage).toBe('fixing the rest');
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.turnEnded });
+  });
+
+  it('reopens a work item whose session turn ended as finished, and a resume runs it again', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { item, session } = running(h, '1', 'dev:finish');
+    h.report(session, { kind: 'done' });
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+
+    h.now += 1000;
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item)).toMatchObject({ status: 'finished', readyAt: h.now, error: null });
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.item(item).status).toBe('running');
+    h.report(session, { kind: 'done' });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
+
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'release' });
+    expect(h.store.session(session)).toMatchObject({ state: 'ended', outcome: 'done' });
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item).status).toBe('finished');
+  });
+
+  it('reopens a work item marked done before it started as unstarted', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('1'));
+    h.triaged(triage, 'dev:question');
+    h.act({ type: 'mark-done', workItemId: 1 });
+
+    h.act({ type: 'reopen', workItemId: 1 });
+    expect(h.item(1)).toMatchObject({ status: 'unstarted', playbook: 'dev:question', doneAt: null });
+  });
+
+  it('clears a stopped outcome on reopen, so the resumed turn settles the work item and frees its slot', () => {
+    const h = new Harness();
+    const { item, session } = running(h);
+    h.act({ type: 'stop', workItemId: item });
+    h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
+    h.act({ type: 'mark-done', workItemId: item });
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'running', detail: null, interactive: true }] });
+
+    h.act({ type: 'reopen', workItemId: item });
+    expect(h.item(item).status).toBe('running');
+    expect(h.store.session(session)?.outcome).toBeNull();
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.item(item).status).toBe('blocked');
+    expect(heldSlots(h.store)).toBe(0);
+  });
+
+  it('refuses to reopen a work item whose ticket another session handles', () => {
+    const h = new Harness();
+    h.triaged(h.poll(issue('7'))[0], 'dev:question');
+    h.act({ type: 'mark-done', workItemId: 1 });
+    const sessionId = h.started(h.act({ type: 'adhoc', prompt: 'Publish the prepared fix', repoRoot: 'D:/repo', start: true })[0]);
+    h.act({ type: 'handled', sessionId, source: 'github', sourceKey: '7', ref: '#7', title: 'Fix', url: 'https://github.com/acme/widgets/issues/7', key: 'issue:assignment-1', release: false, assigned: true });
+
+    expect(h.send({ type: 'reopen', workItemId: 1 }).refused).toBe("Another session handles the ticket's assignment.");
+    expect(h.status(1)).toBe('done');
+  });
+
+  it('refuses to reopen an open work item or one its ticket has moved past', () => {
+    const h = new Harness();
+    const { item } = running(h);
+
+    expect(h.send({ type: 'reopen', workItemId: item }).refused).toBe('The work item is not done.');
+    expect(h.send({ type: 'reopen', workItemId: 99 }).refused).toBe('Unknown work item 99.');
+
+    h.act({ type: 'mark-done', workItemId: item });
+    h.poll();
+    const [triage] = h.poll(issue('1'));
+    const next = (triage as Extract<FlowAction, { type: 'triage' }>).workItemId!;
+    expect(next).not.toBe(item);
+
+    const refused = 'Only the latest work item of a ticket with no open work item can be reopened.';
+    expect(h.send({ type: 'reopen', workItemId: item }).refused).toBe(refused);
+    expect(h.item(item).status).toBe('done');
+
+    h.act({ type: 'mark-done', workItemId: next });
+    expect(h.send({ type: 'reopen', workItemId: item }).refused).toBe(refused);
+    expect(h.send({ type: 'reopen', workItemId: next }).refused).toBeNull();
   });
 });
 

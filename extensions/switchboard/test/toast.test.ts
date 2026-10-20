@@ -59,6 +59,7 @@ function item(id: number, status: WorkItemView['status'], patch: Partial<WorkIte
     parent: null,
     moved: false,
     approvalSends: false,
+    reopenable: false,
     waits: [],
     ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, sourceId: null, title: `Issue ${id}`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, snoozed, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '', adhocKey: null },
     triage: null,

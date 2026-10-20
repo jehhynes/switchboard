@@ -5,7 +5,7 @@ import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
@@ -69,6 +69,8 @@ export interface WorkItemView extends WorkItem {
   approvalSends: boolean;
   /** What keeps a queued work item from starting; empty for every other status (PRD R34). */
   waits: QueueWait[];
+  /** The operator can reopen it (PRD R86). */
+  reopenable: boolean;
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
@@ -1079,6 +1081,7 @@ export class Runtime {
           moved: ticket.adhocKey !== null && store.workItemsForTicket(item.ticketId)[0]?.id === item.id,
           approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
           waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
+          reopenable: reopenRefusal(item, store.workItemsForTicket(item.ticketId), ticket) === null,
         };
       }),
       pool: store

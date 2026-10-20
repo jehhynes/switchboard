@@ -48,7 +48,9 @@ describe('controlsOf', () => {
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Reopen', 'Open in terminal', 'Delete', 'History']);
+    expect(controlsOf(item(7, { status: 'done' })).find((control) => control.label === 'Reopen')?.message).toEqual({ type: 'action', action: { type: 'reopen', workItemId: 7 } });
+    expect(labels(item(1, { status: 'done', reopenable: false }))).toEqual(['Delete', 'History']);
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'schedule' } }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);

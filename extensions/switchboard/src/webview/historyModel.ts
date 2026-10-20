@@ -92,6 +92,7 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   approve: { text: 'You approved it', icon: 'check' },
   retry: { text: 'You retried it', icon: 'refresh' },
   'mark-done': { text: 'You marked it done', icon: 'pass' },
+  reopen: { text: 'You reopened it', icon: 'issue-reopened' },
   retriage: { text: 'You asked to triage it again', icon: 'filter' },
   stop: { text: 'You asked to stop the session', icon: 'debug-stop' },
   delete: { text: 'You deleted a work item', icon: 'trash' },

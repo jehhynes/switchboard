@@ -40,6 +40,7 @@ export const CONTROL_GLYPHS = {
   'diff-multiple': '\u{ec23}',
   'symbol-file': '\u{ea7b}',
   history: '\u{ea82}',
+  'issue-reopened': '\u{eb0b}',
   pass: '\u{eba4}',
   play: '\u{eb2c}',
   search: '\u{ea6d}',
@@ -135,6 +136,8 @@ export function controlsOf(item: WorkItemView): Control[] {
 
   if (item.status !== 'done') {
     controls.push({ label: 'Mark done', icon: 'pass', message: action('mark-done') });
+  } else if (item.reopenable) {
+    controls.push({ label: 'Reopen', icon: 'issue-reopened', message: action('reopen') });
   }
 
   if (item.status !== 'done' || item.ticket.snoozed) {

@@ -25,7 +25,7 @@ import { volumeReply } from './volume.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the dock may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 

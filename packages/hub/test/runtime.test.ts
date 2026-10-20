@@ -2278,12 +2278,14 @@ describe('ticket reports (PRD R83)', () => {
 
     // Once the work is done, the issue's return to scope makes a work item of its own, which was not moved.
     runtime.send({ type: 'mark-done', workItemId: 1 });
+    expect(runtime.snapshot().workItems.map((item) => [item.id, item.reopenable])).toEqual([[1, true]]);
     source.result = { tickets: [{ ...issue('115'), url: URL }] };
     await runtime.pollSource('github');
     await runtime.settled();
-    expect(runtime.snapshot().workItems.map((item) => [item.id, item.moved])).toEqual([
-      [2, false],
-      [1, true],
+    // Only the ticket's latest work item, once done, can be reopened (PRD R86).
+    expect(runtime.snapshot().workItems.map((item) => [item.id, item.moved, item.reopenable])).toEqual([
+      [2, false, false],
+      [1, true, false],
     ]);
   });
 

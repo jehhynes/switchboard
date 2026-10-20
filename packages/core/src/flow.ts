@@ -40,6 +40,22 @@ export const MESSAGES = {
 /** Starts a task session's `outcomeDetail` while its done report waits for the hub's second read of the ticket (PRD R10). */
 export const UNCONFIRMED_DONE = 'Waiting to read the ticket again';
 
+/**
+ * Why a work item cannot be reopened, or null (PRD R86): it must be done, its ticket's latest work item with no open one, and its ticket not
+ * registered as handled by another session, whose work the scheduler would not start.
+ */
+export function reopenRefusal(item: Pick<WorkItem, 'id' | 'status'>, ticketItems: readonly Pick<WorkItem, 'id' | 'status'>[], ticket: Pick<Ticket, 'handledAssignmentKey'>): string | null {
+  if (item.status !== 'done') {
+    return 'The work item is not done.';
+  }
+
+  if (ticketItems.some((other) => other.id > item.id || other.status !== 'done')) {
+    return 'Only the latest work item of a ticket with no open work item can be reopened.';
+  }
+
+  return ticket.handledAssignmentKey == null ? null : "Another session handles the ticket's assignment.";
+}
+
 /** A task session's done report whose first read still listed the ticket, on a work item the second read can still settle. */
 export function awaitsRecheck(item: Pick<WorkItem, 'status'>, session: Pick<Session, 'kind' | 'outcome' | 'outcomeDetail'>): boolean {
   return session.kind === 'task' && session.outcome === 'done' && !!session.outcomeDetail?.startsWith(UNCONFIRMED_DONE) && (item.status === 'running' || item.status === 'awaiting-approval');
@@ -158,7 +174,7 @@ export type FlowEvent =
   | { type: 'ticket'; sessionId: string; source: string; sourceKey: string; ref: string; title: string; url: string; playbook: string | null }
   /** Run now: a queued work item for the named schedule (PRD R82). */
   | { type: 'run-schedule'; name: string }
-  | { type: 'approve' | 'mark-done' | 'retriage' | 'stop' | 'delete'; workItemId: number }
+  | { type: 'approve' | 'mark-done' | 'reopen' | 'retriage' | 'stop' | 'delete'; workItemId: number }
   /** `guidance` is added to the task session's prompt (PRD R77). */
   | { type: 'start'; workItemId: number; guidance?: string | null }
   | { type: 'pick'; ticketId: number; guidance?: string | null }
@@ -273,7 +289,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -517,6 +533,8 @@ class Flow {
         return this.approve(this.openItem(event.workItemId));
       case 'mark-done':
         return this.done(this.openItem(event.workItemId), 'operator', null);
+      case 'reopen':
+        return this.reopen(this.knownItem(event.workItemId));
       case 'retriage':
         return this.retriage(this.openItem(event.workItemId));
       case 'stop':
@@ -1917,6 +1935,31 @@ class Flow {
     }
 
     this.setStatus(item.id, { status: 'triaging', error: null, queuedAt: null, guidance: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, readyAt: null, orderAt: null });
+  }
+
+  /**
+   * PRD R86: a done work item opens again where its work stands. A task session in a turn keeps it running; one whose turn ended leaves it
+   * `finished` for review; without a task session it waits for Start, or for triage when it has no playbook or prompt.
+   */
+  private reopen(item: WorkItem): void {
+    const refusal = reopenRefusal(item, this.store.workItemsForTicket(item.ticketId), this.store.ticket(item.ticketId)!);
+
+    if (refusal !== null) {
+      throw new Refusal(refusal);
+    }
+
+    const latest = this.store.sessionsFor(item.id).at(-1);
+
+    // An outcome such as `stopped` from before the work item was done would keep its next turn end from settling it.
+    if (latest !== undefined && latest.outcome !== null && latest.outcome !== 'opened') {
+      this.store.updateSession(latest.id, { outcome: null, outcomeDetail: null });
+    }
+
+    const status: WorkItemStatus = latest?.kind !== 'task'
+      ? item.playbook !== null || item.taskPrompt !== null ? 'unstarted' : 'triaging'
+      : TURN_ENDED.includes(latest.state) || latest.state === 'ended' ? 'finished' : 'running';
+
+    this.setStatus(item.id, { status, doneAt: null, doneReason: null, scopeAt: null, warning: null, error: null, unassignedAt: null, queuedAt: null });
   }
 
   private requireNoSession(item: WorkItem): void {

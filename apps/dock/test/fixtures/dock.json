@@ -894,6 +894,14 @@
           },
           "controls": [
             {
+              "label": "Reopen",
+              "glyph": "",
+              "action": {
+                "type": "reopen",
+                "workItemId": 11
+              }
+            },
+            {
               "label": "Delete",
               "glyph": "",
               "action": {
@@ -961,6 +969,14 @@
             "url": "https://github.com/o/r/issues/112"
           },
           "controls": [
+            {
+              "label": "Reopen",
+              "glyph": "",
+              "action": {
+                "type": "reopen",
+                "workItemId": 12
+              }
+            },
             {
               "label": "Delete",
               "glyph": "",

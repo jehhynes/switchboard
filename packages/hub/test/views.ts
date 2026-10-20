@@ -67,6 +67,7 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     parent: null,
     moved: false,
     approvalSends: false,
+    reopenable: true,
     waits: [],
     ...patch,
   };
