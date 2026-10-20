@@ -2,6 +2,16 @@ import type { Snapshot } from '@switchboard/hub';
 import { windowTabs } from '@switchboard/hub';
 
 /**
+ * The `reuseUrlFilter` that finds a browser tab already showing `url`; VS Code matches its host and path as globs (mechanics M27). Zoho Desk
+ * redirects a ticket's `/support/<portal>/ShowHomePage.do#Cases/dv/<id>` link to `/agent/<portal>/<department>/tickets/details/<id>`.
+ */
+export function reuseFilter(url: string): string {
+  const zoho = /^(https?:\/\/[^/]+)\/support\/[^/]+\/ShowHomePage\.do#Cases\/dv\/(\d+)$/.exec(url);
+
+  return zoho === null ? url : `${zoho[1]}/agent/*/*/tickets/details/${zoho[2]}`;
+}
+
+/**
  * Opens each of an item window's work items' focus and approval report in editor tabs (PRD R72, R79): all of them when the dock opened the window,
  * and afterwards a focus a later triage changes and a report a snapshot adds. A tab the operator closes stays closed until the dock opens the window again.
  */

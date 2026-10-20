@@ -32,6 +32,13 @@ describe("Item window tabs (PRD R72)", () => {
     server = createServer((request, response) => {
       requests.push(request.url);
       response.writeHead(200, { 'Content-Type': 'text/html' });
+
+      // As Zoho Desk does, a ticket link's page replaces itself with the ticket's agent page, named by the bookmark's ID.
+      if (request.url === '/support/acme/ShowHomePage.do') {
+        response.end(`<!doctype html><script>location.replace('/agent/acme/acme-inc/tickets/details/' + location.hash.split('/').pop())</script>`);
+        return;
+      }
+
       // A page reports the bookmark it loaded with, which the browser does not send, as /hash?<bookmark>.
       response.end(`<!doctype html><title>page${request.url.replaceAll('/', '-')}</title><p>${request.url}</p><script>fetch('/hash?' + location.hash.slice(1))</script>`);
     });
@@ -101,6 +108,26 @@ describe("Item window tabs (PRD R72)", () => {
 
     assert.strictEqual(browserTabs.length, 1, `tabs: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
     assert.deepStrictEqual(requests.filter((url) => url === '/focus'), ['/focus']);
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  });
+
+  it("reuses the tab of a Zoho Desk ticket link that the page redirected to the ticket's agent page", async function () {
+    this.timeout(120_000);
+
+    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
+    const ticket = `${base}/support/acme/ShowHomePage.do#Cases/dv/1019`;
+
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    requests.length = 0;
+    await extension.openTab(ticket);
+    // The tab's title shows the redirected page, so its URL has changed before the second open.
+    await until(() => tabs().some((tab) => tab.input === undefined && tab.label.startsWith('page-agent')), `the tab never showed the redirected page: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
+    await extension.openTab(ticket);
+    await until(() => requests.filter((url) => url === '/agent/acme/acme-inc/tickets/details/1019').length === 2, `the tab never loaded the link again: ${JSON.stringify(requests)}`);
+
+    const browserTabs = tabs().filter((tab) => tab.input === undefined);
+
+    assert.strictEqual(browserTabs.length, 1, `tabs: ${JSON.stringify(tabs().map((tab) => tab.label))}`);
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
 

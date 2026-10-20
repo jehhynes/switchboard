@@ -4,6 +4,7 @@ import { executableDirOnPath } from '@switchboard/core';
 import type { DockRow, Snapshot } from '@switchboard/hub';
 import { dockView, postToHub, windowsDir, writeWorkspaceFile } from '@switchboard/hub';
 import { openUrlOf, rowFor, targetForUrl } from './search.js';
+import { reuseFilter } from './tabs.js';
 import type { RowTarget } from './search.js';
 import type { HubState } from './state.js';
 
@@ -62,7 +63,7 @@ export async function openTab(target: string): Promise<void> {
   }
 
   try {
-    await vscode.commands.executeCommand('workbench.action.browser.open', { url: target, reuseUrlFilter: target });
+    await vscode.commands.executeCommand('workbench.action.browser.open', { url: target, reuseUrlFilter: reuseFilter(target) });
   } catch (error) {
     throw new Error(`VS Code's integrated browser did not open ${target}: ${(error as Error).message}`);
   }

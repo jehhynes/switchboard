@@ -1,6 +1,6 @@
 import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { describe, expect, it } from 'vitest';
-import { ItemTabs } from '../src/tabs.js';
+import { ItemTabs, reuseFilter } from '../src/tabs.js';
 
 const NOW = Date.UTC(2026, 9, 9, 12);
 const WINDOWS = 'C:\\Users\\me\\.switchboard\\windows';
@@ -187,5 +187,16 @@ describe('ItemTabs', () => {
 
     await expect(tracker.openAll(snapshot([item({ ...pr, ...report })]))).rejects.toThrow(`cannot open ${ISSUE}`);
     expect(opened).toEqual([ISSUE, REPORT]);
+  });
+});
+
+describe('reuseFilter', () => {
+  it("matches a Zoho Desk ticket link's tab at the agent page Zoho redirects it to", () => {
+    expect(reuseFilter('https://desk.zoho.com/support/acme/ShowHomePage.do#Cases/dv/90000000062480627')).toBe('https://desk.zoho.com/agent/*/*/tickets/details/90000000062480627');
+  });
+
+  it('keeps any other URL, including a Zoho Desk page that is not a ticket', () => {
+    expect(reuseFilter(COMMENT)).toBe(COMMENT);
+    expect(reuseFilter('https://desk.zoho.com/support/acme/ShowHomePage.do#Cases')).toBe('https://desk.zoho.com/support/acme/ShowHomePage.do#Cases');
   });
 });
