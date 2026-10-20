@@ -8,7 +8,7 @@ const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 
   const lines: Record<string, string[]> = {
     stage: [`- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`, `  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`],
     worktree: [`- ${REPORT} worktree ${id} <path>, when you create a worktree.`],
-    done: [`- ${REPORT} done ${id}, when the work is finished.`],
+    done: [`- ${REPORT} done ${id}, when the entire work item is done: every part of the task is complete, and this session has nothing left to do and can be retired.`],
     approval: [
       `- ${REPORT} approval ${id} --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
       `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,

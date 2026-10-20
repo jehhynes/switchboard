@@ -249,7 +249,7 @@ describe('hub entry point', () => {
 
     const bodies: unknown[] = [];
     const replies = [
-      { status: 200, body: { key: 'adhoc 4', already: false, contract: 'Report to Switchboard with these commands:\n- node hub.js report done s9, when the work is finished.' } },
+      { status: 200, body: { key: 'adhoc 4', already: false, contract: 'Report to Switchboard with these commands:\n- node hub.js report done s9, when the entire work item is done: every part of the task is complete, and this session has nothing left to do and can be retired.' } },
       { status: 200, body: { key: 'adhoc 4', already: true, contract: 'Report to Switchboard with these commands:' } },
       { status: 409, body: { error: 'This session is a copy of adhoc 4, which Switchboard continues in its latest copy.' } },
     ];
@@ -276,7 +276,7 @@ describe('hub entry point', () => {
     try {
       expect(await startWith(native, 'register', '--title', 'Fix the badge').exited).toMatchObject({
         code: 0,
-        stdout: 'Registered as adhoc 4.\n\nReport to Switchboard with these commands:\n- node hub.js report done s9, when the work is finished.\n',
+        stdout: 'Registered as adhoc 4.\n\nReport to Switchboard with these commands:\n- node hub.js report done s9, when the entire work item is done: every part of the task is complete, and this session has nothing left to do and can be retired.\n',
       });
       expect(await startWith(native, 'register', '--title=Again').exited).toMatchObject({ code: 0, stdout: 'Already registered as adhoc 4.\n\nReport to Switchboard with these commands:\n' });
       expect(await startWith(native, 'register', '--title', 'Copy').exited).toMatchObject({ code: 3, stderr: 'Refused: This session is a copy of adhoc 4, which Switchboard continues in its latest copy.\n' });

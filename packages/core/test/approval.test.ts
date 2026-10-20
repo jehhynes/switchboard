@@ -35,7 +35,7 @@ describe('approval reports (PRD R23, R31)', () => {
     expect(h.item(item)).toMatchObject({ status: 'running', approvalPrompt: '/review-pr pr:123 publish' });
 
     // The playbook offers no done report, but the approved prompt's session finishes the work item with one.
-    expect(start.contract).toContain(' done s2, when the work is finished.');
+    expect(start.contract).toContain(' done s2, when the entire work item is done: every part of the task is complete, and this session has nothing left to do and can be retired.');
     expect(start.contract).not.toContain(' approval ');
     h.started(start);
     expect(h.report('s2', { kind: 'approval', prompt: '/again', summary: null, report: null }).refused).toBe("This session's report contract does not offer the approval report.");

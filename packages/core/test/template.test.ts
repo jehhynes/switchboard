@@ -24,7 +24,7 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
         `- node "C:/h/hub.js" report stage s-1 <stage>, when you start a new phase of the work.`,
         `  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
         `- node "C:/h/hub.js" report worktree s-1 <path>, when you create a worktree.`,
-        `- node "C:/h/hub.js" report done s-1, when the work is finished.`,
+        `- node "C:/h/hub.js" report done s-1, when the entire work item is done: every part of the task is complete, and this session has nothing left to do and can be retired.`,
         `- node "C:/h/hub.js" report approval s-1 --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
         `  - The prompt runs in a new session with no memory of this one, so it names what it acts on, such as /review-pr pr:123 publish.`,
         `  - The summary is one phrase of at most 8 words saying what Approve publishes, without counts.`,
