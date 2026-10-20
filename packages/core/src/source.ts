@@ -37,7 +37,8 @@ export type AssignmentLookup = { ticket: Extract<TicketLookup, { ticket: unknown
 export interface Source {
   /** The settings key, such as `github`. */
   readonly name: string;
-  poll(): Promise<PollResult>;
+  /** `current` holds the source's tickets that are assigned, in the pool or in the queue now, as the store keeps them. */
+  poll(current: readonly Ticket[]): Promise<PollResult>;
   /** The triage context: the ticket's text, clipped and formatted for the classifier. */
   context(ticket: Ticket): Promise<ContextResult>;
   /** The ticket key a worktree's branch names by convention, or null (PRD R25). */

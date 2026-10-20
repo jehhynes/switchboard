@@ -50,8 +50,8 @@ describe('deskClient', () => {
     const { config } = await fakeDesk({ status: 429 }, { status: 500 }, { status: 200, body: 'not json' }, { status: 401 }, { status: 401 });
     const get = deskClient(config, async () => ({ token: 't' }));
 
-    expect(await get('/teams')).toEqual({ error: 'Zoho Desk rate-limited the read.' });
-    expect(await get('/tickets/5?include=assignee')).toEqual({ error: 'Zoho Desk answered HTTP 500 for /tickets/5.' });
+    expect(await get('/teams')).toEqual({ error: 'Zoho Desk rate-limited the read.', status: 429 });
+    expect(await get('/tickets/5?include=assignee')).toEqual({ error: 'Zoho Desk answered HTTP 500 for /tickets/5.', status: 500 });
     expect(await get('/teams')).toEqual({ error: 'Zoho Desk returned output that is not JSON.' });
     expect(await get('/teams')).toEqual({ error: 'Zoho Desk refused the access token.' });
     expect(await deskClient(config, async () => ({ error: 'no token' }))('/teams')).toEqual({ error: 'no token' });

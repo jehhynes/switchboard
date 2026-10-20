@@ -555,3 +555,17 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Live acceptance:** the built report CLI called an isolated hub with a synthetic originating session and real read-only GitHub assignment lookup. Registration, idempotent retry, targeted polling outside search results, zero duplicate work items, retained target audit and stale-key release refusal passed. Evidence: `.wip/handled-acceptance-result.txt`. No GitHub writes or real agent sessions ran.
 - **Automated checks:** `npm run verify` passed, including coverage and 436 dock tests; the isolated real-host integration suite passed all 62 tests. Logs: `.wip/handled-verify-final.log` and `.wip/handled-integration-focused.log`. Two earlier integration runs failed the existing dock-theme focus assertion; the final run passed without a code change.
 - **Limits and current use:** R85. This verifies the generic report and source reconciliation path. The Support publication instructions were reviewed and compiled, but no customer case was published for this check. Status or project membership changes alone do not end an assignment.
+
+## M46. Zoho search filtered by escalation
+
+- **Date:** 2026-10-20.
+- **Versions:** Zoho Desk REST API v1, the operator's `desk-token.sh` runner, Node 24.14.0.
+- **Trigger:** zoho 444953 went to Done at 12:51:03 UTC on 2026-10-20 although it stayed Open, Support and assigned to the operator: the 12:51:00 poll, which paged through all 835 Open tickets by `from`, did not return it, and the 12:56:00 poll did. The raw pages were not kept, so a list that shifted between pages and a search index that lagged an edit at 12:50:03 are both possible causes.
+- **Experiment:** read-only GETs of `/tickets/search` with `status=Open`, `customField1=cf_queue:Support` (the colon encoded or not), `sortBy=createdTime`, `limit` and `from`; `/tickets/search` with the field filter alone; and `/tickets/{id}` for a ticket that does not exist.
+- **Result:**
+  - `status=Open` with the field filter returned 17 tickets in one request in 0.8 seconds. The unfiltered walk took 9 requests and about 5 seconds, and its client-side Support filter found the same 17 tickets; the filter matches the value exactly.
+  - The field filter without `status=Open` returned 2,358 tickets. Every row of the unfiltered `status=Open` walk had status and status type `Open`.
+  - Filtered rows carry the same fields as unfiltered ones, including `cf`, `assigneeId`, `status`, `modifiedTime`, `createdTime` and `customerResponseTime`. `sortBy=createdTime` with `from` pages the filtered list.
+  - One filtered read reported `count` 17 with 16 rows, minutes after a ticket closed, so `count` is not used.
+  - `/tickets/{id}` for a missing ticket answers HTTP 404.
+- **Current use:** the Zoho poll filters by the escalation field and sorts by creation, and reads by ID each current ticket the search omits (architecture.md § Sources).

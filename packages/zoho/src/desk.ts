@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import type { ZohoConfig } from './config.js';
 
-export type DeskResult = { json: unknown } | { empty: true } | { error: string };
+/** `status` is the HTTP status of an answered request that failed. */
+export type DeskResult = { json: unknown } | { empty: true } | { error: string; status?: number };
 
 /** One authorized GET against the Desk API, path relative to the API base. */
 export type DeskGet = (path: string) => Promise<DeskResult>;
@@ -81,7 +82,7 @@ export function deskClient(config: ZohoConfig, tokens: TokenSource, now: () => n
       }
 
       if (!response.ok) {
-        return { error: response.status === 429 ? 'Zoho Desk rate-limited the read.' : `Zoho Desk answered HTTP ${response.status} for ${path.split('?')[0]}.` };
+        return { error: response.status === 429 ? 'Zoho Desk rate-limited the read.' : `Zoho Desk answered HTTP ${response.status} for ${path.split('?')[0]}.`, status: response.status };
       }
 
       try {

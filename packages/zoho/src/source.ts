@@ -109,61 +109,110 @@ export class ZohoSource implements Source {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** Reads every Open ticket and keeps the Support ones: yours are assigned, unclaimed ones are the pool (PRD R46, R47). A failed team read fails the poll. */
-  async poll(): Promise<PollResult> {
+  /**
+   * Reads the Open Support tickets, filtered by the search (mechanics M46): yours are assigned, unclaimed ones are the pool (PRD R46, R47).
+   * A current ticket this search omits is read on its own and kept while it is still Open and Support. A failed team read fails the poll.
+   */
+  async poll(current: readonly Ticket[] = []): Promise<PollResult> {
     try {
       const teamOf = await this.teamMap();
-      const tickets: PolledTicket[] = [];
+      const rows = await this.search();
 
-      for (let page = 0; page < this.config.maxPages; page++) {
-        const body = json(await this.get(`/tickets/search?status=Open&limit=${PAGE}&from=${page * PAGE + 1}`)) as { data?: SearchTicket[] } | null;
-        const rows = body?.data ?? [];
+      if (rows === null) {
+        return { error: `More than ${this.config.maxPages} pages of Open Support tickets; raise sources.zoho.maxPages.` };
+      }
 
-        if (!Array.isArray(rows)) {
-          throw new DeskError('Zoho Desk returned an unexpected response.');
-        }
+      const found = new Set(rows.map((row) => String(row.id)));
 
-        for (const ticket of rows) {
-          const holder = this.classify(ticket.assigneeId, teamOf);
+      for (const id of current.map((ticket) => ticket.sourceId).filter((id) => id !== null)) {
+        if (!found.has(id)) {
+          const ticket = await this.stillListed(id);
 
-          // Other engineers' tickets are retained for volume, without becoming actionable.
-          if (ticket.cf?.[this.config.escalationField] === this.config.escalationValue) {
-            // The customer has waited since their last message; a ticket without one falls back to its creation.
-            const waiting = Date.parse(ticket.customerResponseTime ?? ticket.createdTime ?? '');
-
-            tickets.push({
-              sourceKey: String(ticket.ticketNumber),
-              ref: `#${ticket.ticketNumber}`,
-              sourceId: String(ticket.id),
-              title: ticket.subject,
-              url: ticket.webUrl,
-              assigned: holder === 'mine',
-              pool: holder === 'none' || holder === 'support',
-              inQueue: true,
-              assigneeId: ticket.assigneeId,
-              sortAt: Number.isNaN(waiting) ? null : waiting,
-              enteredAt: holder === 'engineer' ? null : await this.enteredScope(ticket),
-            });
+          if (ticket !== null) {
+            rows.push(ticket);
           }
-        }
-
-        if (rows.length < PAGE) {
-          const kept = new Set(tickets.filter((ticket) => ticket.assigned || ticket.pool).map((ticket) => ticket.sourceId));
-
-          for (const id of this.entered.keys()) {
-            if (!kept.has(id)) {
-              this.entered.delete(id);
-            }
-          }
-
-          return { tickets };
         }
       }
 
-      return { error: `More than ${this.config.maxPages} pages of Open tickets; raise sources.zoho.maxPages.` };
+      const tickets: PolledTicket[] = [];
+
+      for (const ticket of rows.filter((row) => this.inScope(row))) {
+        tickets.push(await this.polled(ticket, teamOf));
+      }
+
+      const kept = new Set(tickets.filter((ticket) => ticket.assigned || ticket.pool).map((ticket) => ticket.sourceId));
+
+      for (const id of this.entered.keys()) {
+        if (!kept.has(id)) {
+          this.entered.delete(id);
+        }
+      }
+
+      return { tickets };
     } catch (error) {
       return { error: error instanceof DeskError ? error.message : 'Zoho Desk returned an unexpected response.' };
     }
+  }
+
+  /** Every Open ticket with the escalation value, oldest first; null past maxPages. */
+  private async search(): Promise<SearchTicket[] | null> {
+    const filter = encodeURIComponent(`${this.config.escalationField}:${this.config.escalationValue}`);
+    const rows: SearchTicket[] = [];
+
+    for (let page = 0; page < this.config.maxPages; page++) {
+      const body = json(await this.get(`/tickets/search?status=Open&customField1=${filter}&sortBy=createdTime&limit=${PAGE}&from=${page * PAGE + 1}`)) as { data?: SearchTicket[] } | null;
+      const data = body?.data ?? [];
+
+      if (!Array.isArray(data)) {
+        throw new DeskError('Zoho Desk returned an unexpected response.');
+      }
+
+      rows.push(...data);
+
+      if (data.length < PAGE) {
+        return rows;
+      }
+    }
+
+    return null;
+  }
+
+  /** The ticket when it is still Open and Support, read by its ID; null when it is not, or no longer exists. */
+  private async stillListed(id: string): Promise<SearchTicket | null> {
+    const result = await this.get(`/tickets/${encodeURIComponent(id)}`);
+
+    if ('error' in result && result.status === 404) {
+      return null;
+    }
+
+    const ticket = json(result) as SearchTicket | null;
+
+    return ticket !== null && ticket.status === 'Open' && this.inScope(ticket) ? ticket : null;
+  }
+
+  private inScope(ticket: SearchTicket): boolean {
+    return ticket.cf?.[this.config.escalationField] === this.config.escalationValue;
+  }
+
+  /** Other engineers' tickets are retained for volume, without becoming actionable. */
+  private async polled(ticket: SearchTicket, teamOf: Map<string, string[]>): Promise<PolledTicket> {
+    const holder = this.classify(ticket.assigneeId, teamOf);
+    // The customer has waited since their last message; a ticket without one falls back to its creation.
+    const waiting = Date.parse(ticket.customerResponseTime ?? ticket.createdTime ?? '');
+
+    return {
+      sourceKey: String(ticket.ticketNumber),
+      ref: `#${ticket.ticketNumber}`,
+      sourceId: String(ticket.id),
+      title: ticket.subject,
+      url: ticket.webUrl,
+      assigned: holder === 'mine',
+      pool: holder === 'none' || holder === 'support',
+      inQueue: true,
+      assigneeId: ticket.assigneeId,
+      sortAt: Number.isNaN(waiting) ? null : waiting,
+      enteredAt: holder === 'engineer' ? null : await this.enteredScope(ticket),
+    };
   }
 
   /**

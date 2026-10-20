@@ -11,6 +11,8 @@ import { stripHtml } from '../src/text.js';
 const fixture = (name: string): unknown => JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', `${name}.json`), 'utf8'));
 
 const SELF = '8000000000000000001';
+const SEARCH = '/tickets/search?status=Open&customField1=cf_queue%3ASupport&sortBy=createdTime&limit=100&from=1';
+const SEARCH_2 = SEARCH.replace(/from=1$/, 'from=101');
 const CONFIG = (parseZohoConfig({ orgId: '700000001', agentId: SELF }) as { config: ZohoConfig }).config;
 
 /** Answers Desk paths from fixtures; fails on an unexpected path. */
@@ -18,7 +20,7 @@ function desk(overrides: Record<string, DeskResult> = {}) {
   const threads = fixture('threads') as { id: string }[];
   const answers: Record<string, DeskResult> = {
     '/teams': { json: fixture('teams') },
-    '/tickets/search?status=Open&limit=100&from=1': { json: fixture('search') },
+    [SEARCH]: { json: fixture('search') },
     [`/tickets/${(fixture('ticket') as { id: string }).id}`]: { json: fixture('ticket') },
     ...overrides,
   };
@@ -68,7 +70,7 @@ describe('ZohoSource.poll', () => {
     const get = desk();
     const result = await new ZohoSource(CONFIG, get).poll();
 
-    expect(get.mock.calls.map(([path]) => path)).toEqual(['/teams', '/tickets/search?status=Open&limit=100&from=1', ...support.slice(0, 3).map((row) => `/tickets/${row.id}/history?from=1&limit=100`)]);
+    expect(get.mock.calls.map(([path]) => path)).toEqual(['/teams', SEARCH, ...support.slice(0, 3).map((row) => `/tickets/${row.id}/history?from=1&limit=100`)]);
     expect(search.data).toHaveLength(17);
     // Recorded live: three Support tickets held by support agents, so in the pool, and two by an engineer, retained without pool eligibility.
     expect(result).toEqual({
@@ -92,13 +94,13 @@ describe('ZohoSource.poll', () => {
 
   it('pages until a short page and fails past maxPages', async () => {
     const full = { json: { data: Array.from({ length: 100 }, (_, n) => ({ id: String(n), ticketNumber: String(n), subject: 's', webUrl: 'u', assigneeId: null, cf: {} })) } };
-    const get = desk({ '/tickets/search?status=Open&limit=100&from=1': full, '/tickets/search?status=Open&limit=100&from=101': { empty: true } });
+    const get = desk({ [SEARCH]: full, [SEARCH_2]: { empty: true } });
 
     expect(await new ZohoSource(CONFIG, get).poll()).toEqual({ tickets: [] });
     expect(get).toHaveBeenCalledTimes(3);
 
-    expect(await new ZohoSource({ ...CONFIG, maxPages: 1 }, desk({ '/tickets/search?status=Open&limit=100&from=1': full })).poll()).toEqual({
-      error: 'More than 1 pages of Open tickets; raise sources.zoho.maxPages.',
+    expect(await new ZohoSource({ ...CONFIG, maxPages: 1 }, desk({ [SEARCH]: full })).poll()).toEqual({
+      error: 'More than 1 pages of Open Support tickets; raise sources.zoho.maxPages.',
     });
   });
 
@@ -107,13 +109,13 @@ describe('ZohoSource.poll', () => {
       error: 'Zoho Desk returned no teams, so support assignees cannot be told from engineers.',
     });
     expect(await new ZohoSource(CONFIG, desk({ '/teams': { error: 'Zoho Desk rate-limited the read.' } })).poll()).toEqual({ error: 'Zoho Desk rate-limited the read.' });
-    expect(await new ZohoSource(CONFIG, desk({ '/tickets/search?status=Open&limit=100&from=1': { json: { data: 'x' } } })).poll()).toEqual({ error: 'Zoho Desk returned an unexpected response.' });
+    expect(await new ZohoSource(CONFIG, desk({ [SEARCH]: { json: { data: 'x' } } })).poll()).toEqual({ error: 'Zoho Desk returned an unexpected response.' });
   });
 
   it('marks your own ticket assigned and not in the pool', async () => {
     const mine = { json: { data: [{ id: '1', ticketNumber: '9', subject: 's', webUrl: 'u', assigneeId: SELF, cf: { cf_queue: 'Support' } }] } };
 
-    expect(await new ZohoSource(CONFIG, desk({ '/tickets/search?status=Open&limit=100&from=1': mine })).poll()).toEqual({
+    expect(await new ZohoSource(CONFIG, desk({ [SEARCH]: mine })).poll()).toEqual({
       tickets: [{ sourceKey: '9', ref: '#9', sourceId: '1', title: 's', url: 'u', assigned: true, pool: false, inQueue: true, assigneeId: SELF, sortAt: null, enteredAt: null }],
     });
   });
@@ -131,7 +133,7 @@ describe('ZohoSource.poll', () => {
       assigneeId: null,
       cf: { cf_queue: 'Support' },
     });
-    const page = (modifiedTime?: string) => ({ '/tickets/search?status=Open&limit=100&from=1': { json: { data: [row(modifiedTime)] } } });
+    const page = (modifiedTime?: string) => ({ [SEARCH]: { json: { data: [row(modifiedTime)] } } });
     const entered = async (source: ZohoSource) => ((await source.poll()) as { tickets: { enteredAt: number | null }[] }).tickets[0]?.enteredAt;
 
     // The fixture: escalated to Support at 18:52, then Open → Deferred → Open, which is out of scope and back.
@@ -169,7 +171,7 @@ describe('ZohoSource.poll', () => {
     const escalated = { eventTime: '2026-09-10T00:00:00Z', changes: [{ field: 'Escalation', oldValue: 'General', newValue: 'Support' }] };
     const pages = (second: unknown[]) =>
       desk({
-        '/tickets/search?status=Open&limit=100&from=1': { json: { data } },
+        [SEARCH]: { json: { data } },
         [`/tickets/${id}/history?from=1&limit=100`]: { json: noise(100) },
         [`/tickets/${id}/history?from=101&limit=100`]: { json: second },
       });
@@ -212,6 +214,45 @@ describe('ZohoSource.poll', () => {
     rows = [row('b')];
     await source.poll();
     expect(reads()).toBe(3);
+  });
+
+  it('reads a current ticket the search omits on its own, keeping it while it is still Open and Support, with no memory of earlier polls', async () => {
+    const row = (id: string, status = 'Open') => ({ id, ticketNumber: `9${id}`, subject: 's', webUrl: 'u', status, assigneeId: SELF, cf: { cf_queue: 'Support' } });
+    let rows: object[] = [row('1'), row('2'), row('3')];
+    const detail: Record<string, DeskResult> = {};
+    const get = vi.fn<DeskGet>(async (path) => {
+      if (path === '/teams') {
+        return { json: fixture('teams') };
+      }
+
+      if (path === SEARCH) {
+        return { json: { data: rows } };
+      }
+
+      return detail[path] ?? { json: [] };
+    });
+    // A new source for each poll, as after a hub restart or a settings reload, so only `current` names the tickets to read again.
+    const poll = (ids: (string | null)[]) => new ZohoSource(CONFIG, get).poll(ids.map((sourceId) => ({ sourceId }) as Ticket));
+    const keys = async (ids: (string | null)[]) => ((await poll(ids)) as { tickets: { sourceKey: string }[] }).tickets.map((ticket) => ticket.sourceKey);
+    const details = () => get.mock.calls.map(([path]) => path).filter((path) => /^\/tickets\/\d+$/.test(path));
+
+    expect(await keys(['1', '2'])).toEqual(['91', '92', '93']);
+    expect(details()).toEqual([]);
+
+    // 1 is still Open and Support, 2 was closed, 3 was deleted, and a ticket without an ID is not read.
+    rows = [];
+    detail['/tickets/1'] = { json: row('1') };
+    detail['/tickets/2'] = { json: row('2', 'Closed') };
+    detail['/tickets/3'] = { error: 'Zoho Desk answered HTTP 404 for /tickets/3.', status: 404 };
+    expect(await keys(['1', '2', '3', null])).toEqual(['91']);
+    expect(details()).toEqual(['/tickets/1', '/tickets/2', '/tickets/3']);
+
+    // A failed read fails the poll, so the ticket is not reported gone, and the next poll reads it again.
+    detail['/tickets/1'] = { error: 'Zoho Desk answered HTTP 500 for /tickets/1.', status: 500 };
+    expect(await poll(['1'])).toEqual({ error: 'Zoho Desk answered HTTP 500 for /tickets/1.' });
+    detail['/tickets/1'] = { json: row('1', 'Closed') };
+    expect(await keys(['1'])).toEqual([]);
+    expect(details()).toEqual(['/tickets/1', '/tickets/2', '/tickets/3', '/tickets/1', '/tickets/1']);
   });
 
   it('reads the teams once per six hours', async () => {

@@ -6,7 +6,7 @@ import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
 import { markOf } from '@switchboard/core/group';
-import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source } from '@switchboard/core';
+import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, Ticket } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import { REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
@@ -144,13 +144,16 @@ class FakeSource implements Source {
   /** When set, the next poll waits for this before returning the `result` it started with. */
   gate: Promise<void> | null = null;
   polls = 0;
+  /** The sourceKeys of the current tickets each poll was given. */
+  current: string[][] = [];
   context: (ticket: { sourceKey: string }) => Promise<ContextResult> = async (ticket) => ({ context: `Issue ${ticket.sourceKey} text` });
   checkLink?: NonNullable<Source['checkLink']>;
   ticketAt?: NonNullable<Source['ticketAt']>;
   assignmentAt?: NonNullable<Source['assignmentAt']>;
 
-  async poll(): Promise<PollResult> {
+  async poll(current: readonly Ticket[]): Promise<PollResult> {
     this.polls++;
+    this.current.push(current.map((ticket) => ticket.sourceKey));
     const result = this.result;
     const gate = this.gate;
     this.gate = null;
@@ -451,6 +454,12 @@ describe('Runtime', () => {
     expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', branch: '7-fix', linkedBy: 'convention' });
     expect(cli.calls.find((call) => call[0] === 'git')).toEqual(['git', 'worktree', 'list', '--porcelain']);
     expect(changes).toBeGreaterThan(3);
+
+    // The next poll gets the tickets the store lists as current, so a source can read again one its search omits (mechanics M46).
+    source.result = { tickets: [] };
+    await runtime.pollSource('github');
+    await runtime.pollSource('github');
+    expect(source.current).toEqual([[], ['7'], []]);
   });
 
   it('logs a context warning and still triages', async () => {

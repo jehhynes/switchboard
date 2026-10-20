@@ -493,7 +493,7 @@ export class Runtime {
       return null;
     }
 
-    const result = await source.poll();
+    const result = await source.poll(this.deps.store.currentTickets(name));
     const assignments: NonNullable<Extract<FlowEvent, { type: 'poll' }>['assignments']> = [];
     if (!('error' in result)) {
       for (const ticket of this.deps.store.handledTickets(name)) {
