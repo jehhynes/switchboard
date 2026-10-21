@@ -569,6 +569,51 @@ describe('createHubApp', () => {
     expect(JSON.parse(readFileSync(window.file, 'utf8')).settings['window.title']).toBe(`${window.title}\${separator}\${activeEditorShort}\${separator}sb:${window.name}`);
   });
 
+  it('names the agent CLI on each terminal the dock view carries with dock.openVSCode review (PRD R28, R71)', async () => {
+    writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude' }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openVSCode: 'review' } });
+    const done = { code: 0, stderr: '', missing: false, timedOut: false };
+    // `claude --bg` starts a session the roster lists as running in its background process (mechanics M5).
+    const bg: Exec = async (file, args) => {
+      if (file === 'node' && args.join(' ') === '--version') {
+        return { ...done, stdout: 'v24.0.0\n' };
+      }
+
+      if (args[0] === '--bg') {
+        return { ...done, stdout: 'backgrounded · 00000001 · name\n' };
+      }
+
+      return { ...done, stdout: args[0] === 'agents' ? JSON.stringify([{ id: '00000001', sessionId: '00000001-native', pid: 101, kind: 'background', cwd: 'D:/scratch', state: 'working' }]) : '' };
+    };
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: bg } });
+
+    closers.push(() => app.close());
+
+    expect(await app.post['/action']!({ type: 'adhoc', prompt: 'Look around', repoRoot: 'D:/scratch', start: true })).toMatchObject({ status: 200 });
+    await until(() => ((app.snapshot() as { workItems: { sessions: { shortId: string | null }[] }[] }).workItems[0]?.sessions[0]?.shortId ? true : null));
+
+    const shown = (app.dock() as { groups: { rows: { open: { type: string; executable?: string; args?: string[] } | null; terminal: { executable?: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!;
+
+    expect(shown.open).toMatchObject({ type: 'terminal', executable: '/opt/claude/bin/claude' });
+    expect(shown.open?.args?.[0]).toBe('attach');
+    expect(shown.terminal).toMatchObject({ executable: '/opt/claude/bin/claude' });
+  });
+
+  it('forwards a click to the dock only while a dock that runs clicks is connected (PRD R65, R69)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const app = await start();
+    const clicks: unknown[] = [];
+
+    expect(await app.post['/dock/click']!({ rowKey: 'item:7' })).toEqual({ status: 409, body: { error: 'The dock is not running.' } });
+    app.attachDockClick!((data) => {
+      clicks.push(data);
+      return true;
+    });
+    expect(await app.post['/dock/click']!({ rowKey: 'item:7' })).toEqual({ status: 202, body: { sent: true } });
+    expect(clicks).toEqual([{ rowKey: 'item:7' }]);
+    expect(await app.post['/dock/click']!({ rowKey: 7 })).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
+    expect(clicks).toHaveLength(1);
+  });
+
   it('keeps the session and commands the dock left for a window when another hub replaces this one', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const logs: string[] = [];

@@ -335,6 +335,103 @@ describe('dockView', () => {
   });
 });
 
+describe('dockView with dock.openVSCode review (PRD R71)', () => {
+  const review = (entry: WorkItemView): DockRow => dockView(snapshot([entry], { openVSCode: 'review' }), NOW, W).groups.flatMap((group) => group.rows)[0]!;
+  const focus = 'https://github.com/o/r/issues/107';
+  // The item window of a work item whose session ran in D:/git/widgets, which names its terminals.
+  const base = windowOf(item(7, { sessions: [session()] }), W)!.name;
+  const attach = { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', args: ['attach', 'aaaa1111'], name: `${base}-aaaa1111`, title: `Issue <7> · sb:${base}-aaaa1111`, handoff: null, active: false };
+  const resume = { ...attach, args: ['--resume', 'aaaa1111-native'] };
+
+  it('opens a terminal on a Claude session its background process holds, whatever the status', () => {
+    expect(review(item(7, { sessions: [session()] })).open).toEqual(attach);
+    expect(review(item(7, { sessions: [session({ state: 'waiting' })] })).open).toEqual(attach);
+    expect(review(item(7, { status: 'awaiting-approval', sessions: [session({ state: 'waiting' })] })).open).toEqual(attach);
+    expect(review(item(7, { sessions: [session({ state: 'waiting', stateDetail: 'start-prompt' })] })).open).toEqual(attach);
+  });
+
+  it('answers a Codex question in a terminal after the Open in Codex stop, and only selects a running Codex session', () => {
+    const codex = session({ provider: 'codex', nativeSessionId: 'thread-1234567', shortId: 'run-1' });
+
+    expect(review(item(7, { sessions: [{ ...codex, state: 'waiting', question: { id: 'q1', text: 'Red or blue?' } }] })).open).toEqual({
+      ...attach,
+      provider: 'codex',
+      sessionId: 'thread-1234567',
+      args: ['resume', 'thread-1234567'],
+      name: `${base}-thread-1`,
+      title: `Issue <7> · sb:${base}-thread-1`,
+      handoff: { workItemId: 7, sessionId: 'thread-1234567' },
+    });
+    expect(review(item(7, { sessions: [codex] })).open).toEqual({ type: 'select' });
+    expect(review(item(7, { status: 'blocked', sessions: [{ ...codex, state: 'ended', shortId: null }] })).open).toMatchObject({ type: 'terminal', args: ['resume', 'thread-1234567'], handoff: null });
+  });
+
+  it('resumes an ended session in a terminal unless its work is on review, which opens the item window', () => {
+    expect(review(item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] })).open).toEqual(resume);
+    expect(review(item(7, { status: 'failed', sessions: [session({ state: 'ended' })] })).open).toEqual(resume);
+    expect(review(item(7, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(review(item(7, { status: 'finished', sessions: [session({ state: 'ended' })] })).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(review(item(7, { status: 'finished', sessions: [session({ state: 'ended' })] })).window).not.toBeNull();
+    // With no session to open, the click still opens the item window, as with always.
+    expect(review(item(7, { status: 'awaiting-approval', worktree })).open).toBeNull();
+    expect(review(item(7, { status: 'finished', worktree, sessions: [session({ state: 'ended', nativeSessionId: null, cwd: worktree.path })] })).open).toBeNull();
+    expect(review(item(7, { status: 'finished', worktree })).window).not.toBeNull();
+  });
+
+  it('keeps one terminal name for a session across attach and resume, and gives another session its own', () => {
+    const attached = review(item(7, { sessions: [session()] })).open as { name: string };
+    const resumed = review(item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] })).open as { name: string };
+    const next = review(item(7, { sessions: [session({ state: 'ended' }), session({ id: 's2', nativeSessionId: 'bbbb2222-native', shortId: 'bbbb2222' })] })).open as { name: string };
+
+    expect(resumed.name).toBe(attached.name);
+    expect(next.name).toBe(`${base}-bbbb2222`);
+  });
+
+  it('attaches to a session whose fork waits for its release, and only selects a Codex session waiting on a permission prompt', () => {
+    expect(review(item(7, { sessions: [session({ state: 'waiting', pendingFork: 'cccc3333' })] })).open).toEqual(attach);
+    expect(review(item(7, { sessions: [session({ provider: 'codex', nativeSessionId: 'thread-1', shortId: 'run-1', state: 'waiting' })] })).open).toEqual({ type: 'select' });
+  });
+
+  it('brings forward the terminal of a session resumed elsewhere, even on review, and resumes no copy', () => {
+    expect(review(item(7, { status: 'finished', sessions: [session({ state: 'idle', released: true })] })).open).toEqual({ ...resume, active: true });
+  });
+
+  it('only selects a row whose session is releasing, and opens the focus while it starts or with no session to open', () => {
+    expect(review(item(7, { sessions: [session({ state: 'idle', released: true, releasing: true })] })).open).toEqual({ type: 'select' });
+    expect(review(item(7, { sessions: [session({ state: 'starting', shortId: null })] })).open).toEqual({ type: 'url', url: focus });
+    expect(review(item(7, { sessions: [session({ state: 'starting', shortId: null })], focus: null })).open).toEqual({ type: 'select' });
+    expect(review(item(7, { status: 'unstarted', worktree })).open).toEqual({ type: 'url', url: focus });
+    expect(review(item(7, { status: 'unstarted', worktree })).window).not.toBeNull();
+    expect(review(item(7, { status: 'blocked', sessions: [session({ state: 'ended', nativeSessionId: null })] })).open).toEqual({ type: 'url', url: focus });
+  });
+
+  it('leaves a registered session in the operator window while it lives, and resumes it in a terminal once it ends (PRD R81)', () => {
+    expect(review(item(7, { sessions: [session({ external: true, shortId: null, released: true, state: 'running' })] })).open).toEqual({ type: 'url', url: focus });
+    expect(review(item(7, { status: 'blocked', sessions: [session({ external: true, state: 'ended', shortId: null })] })).open).toEqual(resume);
+  });
+
+  it('offers Answer in terminal in place of Open in Claude, Open in Codex and a prompt before start\'s Open in terminal', () => {
+    const waiting = review(item(7, { sessions: [session({ state: 'waiting' })] }));
+    const starting = review(item(7, { sessions: [session({ state: 'waiting', stateDetail: 'start-prompt' })] }));
+    const codex = review(item(7, { sessions: [session({ provider: 'codex', nativeSessionId: 'thread-1', state: 'waiting', question: { id: 'q1', text: 'Red?' } })] }));
+
+    expect([waiting.main, starting.main, codex.main]).toEqual(['Answer in terminal', 'Answer in terminal', 'Answer in terminal']);
+    expect(review(item(7, { status: 'awaiting-approval', sessions: [session({ state: 'ended' })] })).main).toBe('Approve');
+  });
+
+  it('runs the menu\'s Open in terminal in the dock, not the item window, and keeps today\'s row with always', () => {
+    const ended = item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] });
+
+    const { type: _, ...terminal } = resume;
+
+    expect(review(ended).terminal).toEqual(terminal);
+    expect(review(ended).commands.map((command) => command.label)).not.toContain('Open in terminal');
+    expect(row(ended).terminal).toBeNull();
+    expect(row(ended).commands.map((command) => command.label)).toContain('Open in terminal');
+    expect(row(ended).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+  });
+});
+
 describe('CONTROL_GLYPHS', () => {
   it('matches the codepoints of @vscode/codicons for every control icon', () => {
     const csv = readFileSync(new URL('../../../node_modules/@vscode/codicons/dist/codicon.csv', import.meta.url), 'utf8');

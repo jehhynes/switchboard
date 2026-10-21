@@ -229,10 +229,10 @@ export interface OpenContext {
 }
 
 /**
- * What a row's click did: its item window came forward (`window`, or `here` when it is this window), its ticket opened, or why not. A click
- * another click replaced is `replaced`, and a second click on the row being opened is `ignored`.
+ * What a row's click did: its item window came forward (`window`, or `here` when it is this window), its ticket opened, the dock took it
+ * (`dock`), or why not. A click another click replaced is `replaced`, and a second click on the row being opened is `ignored`.
  */
-export type OpenResult = 'window' | 'here' | 'url' | 'nothing' | 'refused' | 'timeout' | 'failed' | 'replaced' | 'ignored';
+export type OpenResult = 'window' | 'here' | 'url' | 'dock' | 'nothing' | 'refused' | 'timeout' | 'failed' | 'replaced' | 'ignored';
 
 function rowOf(snapshot: Snapshot, key: string, home: string): DockRow | null {
   return (
@@ -292,6 +292,23 @@ async function click(context: OpenContext, key: string, replaced: () => boolean)
 
   if (row === null) {
     return 'nothing';
+  }
+
+  // With `dock.openVSCode: review`, a row that opens a terminal or nothing is the dock's to run, since only the dock opens terminals (PRD R71).
+  if (row.open?.type === 'terminal' || row.open?.type === 'select') {
+    const sent = context.record === null ? null : await postToHub(context.record, '/dock/click', { rowKey: key }, ACTION_TIMEOUT_MS);
+
+    if (sent?.status === 202) {
+      return 'dock';
+    }
+
+    void vscode.window.showErrorMessage(`Switchboard: ${sent?.error ?? 'the hub did not answer.'}`);
+    return 'refused';
+  }
+
+  if (row.open?.type === 'url' && snapshot?.openVSCode === 'review') {
+    await openLink(row.open.url);
+    return 'url';
   }
 
   if (row.window === null) {

@@ -79,6 +79,7 @@ function snapshot(workItems: WorkItemView[]): Snapshot {
     sourceStates: [],
     namespaces: {},
     configDir: '',
+    openVSCode: 'always',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
   };
 }

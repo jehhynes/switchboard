@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import type { Provider } from '@switchboard/core';
+import type { OpenVSCode, Provider } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
@@ -12,6 +12,7 @@ import {
   CAPS,
   clip,
   controlsOf,
+  isBackground,
   CONTROL_GLYPHS,
   doneBand,
   GROUP_EMPTY,
@@ -35,6 +36,7 @@ import {
   staleSince,
   startPromptText,
   stripeOf,
+  terminalCommand,
   ticketKey,
   waitTexts,
 } from './rows.js';
@@ -103,13 +105,33 @@ export function writeWorkspaceFile(window: DockWindow, written: Map<string, stri
 }
 
 /**
+ * A session's terminal window (PRD R28, R71): `args` for the agent's CLI, which the hub names in `executable` when it sends the view; `name` is
+ * the window's `sb:` name, one per session; `handoff` is the Open in Codex stop that runs first (PRD R70); `active` marks a session resumed
+ * elsewhere, whose terminal is only brought forward, else its item window opens it.
+ */
+export interface DockTerminal {
+  provider: Provider;
+  sessionId: string;
+  cwd: string;
+  args: string[];
+  name: string;
+  title: string;
+  handoff: { workItemId: number; sessionId: string } | null;
+  active: boolean;
+  executable?: string;
+}
+
+/**
  * What a click does besides the switch: Open in Claude or Codex first, a session to open in the window's view of its provider, or the ticket in
- * the browser for a row with no window.
+ * the browser for a row with no window. With `dock.openVSCode: review`, `terminal` opens or brings forward the session's terminal instead of the
+ * item window, and `select` only selects the row.
  */
 export type DockOpen =
   | { type: 'question'; workItemId: number; sessionId: string; cwd: string; provider: Provider }
   | { type: 'session'; sessionId: string; cwd: string; provider: Provider }
-  | { type: 'url'; url: string };
+  | { type: 'url'; url: string }
+  | ({ type: 'terminal' } & DockTerminal)
+  | { type: 'select' };
 
 export interface DockRow {
   /** `item:<work item ID>` or `ticket:<pool ticket ID>`. */
@@ -138,6 +160,8 @@ export interface DockRow {
   movable: boolean;
   window: DockWindow | null;
   open: DockOpen | null;
+  /** With `dock.openVSCode: review`, the terminal the menu's Open in terminal opens in place of the item window's (PRD R28); null otherwise. */
+  terminal: DockTerminal | null;
   /**
    * The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time.
    * A control with `confirm` posts only after the operator confirms, such as Delete (PRD R76); one with `input` posts the text the operator
@@ -211,7 +235,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     // Done is sorted newest first, so each band's rows are consecutive.
     const band = group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null;
 
-    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null) : poolRow(entry, now, snapshot.namespaces);
+    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode) : poolRow(entry, now, snapshot.namespaces);
 
     return { ...shown, search, links: linksOf(entry), returned: entry.returned, band };
   };
@@ -226,12 +250,13 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
 }
 
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
   const kind = markOf(item);
-  const controls = order === null ? controlsOf(item) : [...controlsOf(item), ...moveControls(item, order)];
+  const controls = order === null ? controlsOf(item, mode) : [...controlsOf(item, mode), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
-  const main = mainControl(item);
+  const main = mainControl(item, mode);
+  const terminal = mode === 'review' ? menuTerminal(item, windows) : null;
 
   return {
     key: rowKeyOf(item),
@@ -255,13 +280,14 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     dim: order !== null && turn === 'agent',
     movable: order !== null,
     window: windowOf(item, windows),
-    open: openOf(item, windows),
+    open: mode === 'review' ? reviewOpenOf(item, windows) : openOf(item, windows),
+    terminal,
     controls: hubControls(controls),
     main: main?.label ?? null,
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main === null ? null : mainTitle(item, main),
     pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],
-    commands: [...windowCommands(controls), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
+    commands: [...windowCommands(terminal === null ? controls : controls.filter((control) => control.message['type'] !== 'terminal')), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
   };
 }
 
@@ -292,6 +318,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     movable: false,
     window: null,
     open: entry.focus === null ? null : { type: 'url', url: entry.focus },
+    terminal: null,
     controls: hubControls(controls),
     main: main?.label ?? null,
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
@@ -431,6 +458,91 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   }
 
   return null;
+}
+
+/**
+ * A row's click with `dock.openVSCode: review` (PRD R71): the first rule that holds for the latest session decides. A session its background
+ * process holds opens its terminal, whatever the status; work that is `awaiting-approval` or `finished` opens the item window as `openOf` does;
+ * an ended session resumes in a terminal. A registered session lives in the operator's window (PRD R81), and a starting or releasing one has
+ * nothing to open yet.
+ */
+export function reviewOpenOf(item: WorkItemView, windows: string): DockOpen | null {
+  const session = activeSession(item);
+  const latest = item.sessions.at(-1) ?? null;
+  const focus: DockOpen = item.focus === null ? { type: 'select' } : { type: 'url', url: item.focus };
+  const terminal = (command: DockTerminal | null): DockOpen => (command === null ? focus : { type: 'terminal', ...command });
+
+  if (session?.external === true) {
+    return openOf(item, windows);
+  }
+
+  if (session?.state === 'starting') {
+    return focus;
+  }
+
+  if (session?.releasing === true) {
+    return { type: 'select' };
+  }
+
+  if (isBackground(session)) {
+    const question = openQuestion(item);
+
+    if (session.provider === 'codex') {
+      return question === null ? { type: 'select' } : terminal(codexAnswer(item, windows, question));
+    }
+
+    return terminal(menuTerminal(item, windows));
+  }
+
+  if (session !== null) {
+    return terminal(menuTerminal(item, windows));
+  }
+
+  if (item.status === 'awaiting-approval' || item.status === 'finished') {
+    return openOf(item, windows);
+  }
+
+  return latest?.nativeSessionId == null ? focus : terminal(menuTerminal(item, windows));
+}
+
+/** Open in terminal's window for the latest session (PRD R28): `claude attach` in its background process, else a resume; null when none applies. */
+function menuTerminal(item: WorkItemView, windows: string): DockTerminal | null {
+  const command = terminalCommand(item);
+
+  if (command === null) {
+    return null;
+  }
+
+  const provider = command['provider'] as Provider;
+  const sessionId = String(command['sessionId']);
+  const shortId = command['shortId'] as string | null;
+  const args = shortId !== null ? ['attach', shortId] : provider === 'codex' ? ['resume', sessionId] : ['--resume', sessionId];
+
+  return { provider, sessionId, cwd: String(command['cwd']), args, ...terminalName(item, windows, sessionId), handoff: null, active: command['active'] === true };
+}
+
+/** Answer in terminal for a Codex question: the Open in Codex stop first, then `codex resume` once its turn's process has exited (PRD R70). */
+function codexAnswer(item: WorkItemView, windows: string, question: NonNullable<ReturnType<typeof openQuestion>>): DockTerminal {
+  return {
+    provider: 'codex',
+    sessionId: question.sessionId,
+    cwd: question.cwd,
+    args: ['resume', question.sessionId],
+    ...terminalName(item, windows, question.sessionId),
+    handoff: { workItemId: question.workItemId, sessionId: question.sessionId },
+    active: false,
+  };
+}
+
+/**
+ * A session's terminal name and title: the item window's name, else the ticket key, with the session's first eight characters, which are its
+ * short ID too, so an attach and a later resume of one session share a window name and another session never takes it.
+ */
+function terminalName(item: WorkItemView, windows: string, sessionId: string): { name: string; title: string } {
+  const base = windowOf(item, windows)?.name ?? ticketKey(item.ticket).replace(/[^A-Za-z0-9._-]+/g, '-');
+  const name = `${base}-${sessionId.slice(0, 8)}`.replace(/[^A-Za-z0-9._-]+/g, '-');
+
+  return { name, title: `${item.ticket.title} · sb:${name}` };
 }
 
 /** The controls the hub runs; Copy and the VS Code controls are in `pastes` and `commands` (PRD R71). */

@@ -83,6 +83,7 @@ function snapshot(items: WorkItemView[]): Snapshot {
     sourceStates: [{ name: 'github', enabled: true }],
     namespaces: { github: 'dev' },
     configDir: 'C:\\Users\\me\\.switchboard',
+    openVSCode: 'always',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
   };
 }

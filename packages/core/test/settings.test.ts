@@ -9,6 +9,7 @@ describe('parseSettings', () => {
         triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
         sources: {},
         schedules: {},
+        dock: { openVSCode: 'always' },
       },
     });
   });
@@ -21,6 +22,7 @@ describe('parseSettings', () => {
         sources: {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
+        dock: { openVSCode: 'review' },
       }),
     );
 
@@ -39,8 +41,14 @@ describe('parseSettings', () => {
           },
         },
         schedules: {},
+        dock: { openVSCode: 'review' },
       },
     });
+  });
+
+  it('refuses a dock.openVSCode other than always or review, and other dock keys', () => {
+    expect(parseSettings('{"dock":{"openVSCode":"never","width":3}}')).toEqual({ errors: ['dock.width is not a setting.', 'dock.openVSCode must be one of always, review.'] });
+    expect(parseSettings('{"dock":"review"}')).toMatchObject({ errors: [expect.stringContaining('dock')] });
   });
 
   it('fills defaults for a source that sets nothing', () => {

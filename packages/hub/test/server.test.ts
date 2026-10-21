@@ -246,6 +246,45 @@ describe('listenHub routes and state', () => {
     expect(chunks['/events']!.join('')).not.toContain('event: show');
   });
 
+  it('sends a forwarded click to the newest dock stream that asked for clicks, and to no other stream (PRD R65, R69)', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}) });
+
+    const open = (path: string) => {
+      const chunks: string[] = [];
+      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => chunks.push(chunk));
+      });
+
+      outbound.on('error', () => {});
+      outbound.end();
+
+      return { text: () => chunks.join(''), close: () => outbound.destroy() };
+    };
+
+    expect(server.clickDock({ rowKey: 'item:1' })).toBe(false);
+
+    const old = open('/dock/events');
+    const first = open('/dock/events?click=1');
+    const second = open('/dock/events?click=1');
+
+    await until(() => (server.clients() === 3 ? true : null));
+    expect(server.clickDock({ rowKey: 'item:2' })).toBe(true);
+    await until(() => (second.text().includes('event: click\ndata: {"rowKey":"item:2"}\n\n') ? true : null));
+
+    second.close();
+    await until(() => (server.clients() === 2 ? true : null));
+    expect(server.clickDock({ rowKey: 'item:3' })).toBe(true);
+    await until(() => (first.text().includes('"rowKey":"item:3"') ? true : null));
+    expect(first.text()).not.toContain('"rowKey":"item:2"');
+    expect(old.text()).not.toContain('event: click');
+
+    first.close();
+    await until(() => (server.clients() === 1 ? true : null));
+    expect(server.clickDock({ rowKey: 'item:4' })).toBe(false);
+    old.close();
+  });
+
   it('tells the dock which item windows are open and which has focus, as windows connect, report focus and close', async () => {
     server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({ d: 1 }) });
 

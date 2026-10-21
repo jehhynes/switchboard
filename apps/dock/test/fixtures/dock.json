@@ -44,6 +44,7 @@
             "file": "C:\\Users\\op\\.switchboard\\windows\\gh-113-widgets-655280.code-workspace"
           },
           "open": null,
+          "terminal": null,
           "controls": [
             {
               "label": "Stop",
@@ -175,6 +176,7 @@
             "cwd": "D:/git/widgets/.worktrees/107-fix",
             "provider": "claude"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Triage again",
@@ -343,6 +345,7 @@
             "cwd": "D:/git/support",
             "provider": "claude"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Approve",
@@ -495,6 +498,7 @@
             "type": "url",
             "url": "https://github.com/o/r/issues/114"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Triage again",
@@ -597,6 +601,7 @@
             "cwd": "D:/git/widgets",
             "provider": "claude"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Stop",
@@ -707,6 +712,7 @@
             "type": "url",
             "url": "https://github.com/o/r/issues/109"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Start",
@@ -808,6 +814,7 @@
             "type": "url",
             "url": "https://github.com/o/r/issues/104"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Start",
@@ -901,6 +908,7 @@
             "type": "url",
             "url": "https://github.com/o/r/issues/111"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Reopen",
@@ -977,6 +985,7 @@
             "type": "url",
             "url": "https://github.com/o/r/issues/112"
           },
+          "terminal": null,
           "controls": [
             {
               "label": "Reopen",

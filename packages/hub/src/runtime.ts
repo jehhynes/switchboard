@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -103,6 +103,8 @@ export interface Snapshot {
   namespaces: Record<string, string>;
   /** The folder holding settings.json. */
   configDir: string;
+  /** `dock.openVSCode`: whether rows open their item window always, or only for review (PRD R71). */
+  openVSCode: OpenVSCode;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
 }
 
@@ -1103,6 +1105,7 @@ export class Runtime {
         .filter(([name]) => name !== ADHOC_SOURCE)
         .map(([name]) => ({ name, enabled: enabled.has(name) })),
       namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
+      openVSCode: settings.dock.openVSCode,
       configDir: this.deps.configDir,
       errors: {
         settings: settingsError,

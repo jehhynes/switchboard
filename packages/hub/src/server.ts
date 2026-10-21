@@ -37,6 +37,11 @@ export interface HubServer {
   notifyDock(event: string, data: unknown): number;
   /** Sends an event to every `/events` stream, such as `claim`; returns how many streams it reached. */
   notifyWindows(event: string, data: unknown): number;
+  /**
+   * Sends a `click` event to the newest `/dock/events` stream opened with `?click=1`, so one dock runs a click VS Code forwards (PRD R65, R69);
+   * returns whether one was open.
+   */
+  clickDock(data: unknown): boolean;
   /** Builds no more views, so nothing reads the app after it closes; streams that open get only `hello`. */
   stopViews(): void;
   close(): Promise<void>;
@@ -99,6 +104,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const now = options.now ?? Date.now;
   // Each open stream and the view it sends.
   const streams = new Map<ServerResponse, View>();
+  // Dock streams that run forwarded clicks, oldest first; an older dock does not ask for them.
+  const clickStreams: ServerResponse[] = [];
   // Each window stream's workspace file, null for a window that is not an item window.
   const workspaces = new Map<ServerResponse, string | null>();
   let front: string | null = null;
@@ -172,6 +179,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     streams.set(response, view);
     emptySince = null;
 
+    if (view === 'dock' && query?.get('click') === '1') {
+      clickStreams.push(response);
+    }
+
     if (view === 'window') {
       const workspace = query?.get('workspace') || null;
 
@@ -184,6 +195,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     request.on('close', () => {
       streams.delete(response);
+
+      if (clickStreams.includes(response)) {
+        clickStreams.splice(clickStreams.indexOf(response), 1);
+      }
 
       if (workspaces.has(response)) {
         const workspace = workspaces.get(response)!;
@@ -218,7 +233,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     } else if (request.method === 'GET' && path === '/events') {
       openStream(request, response, 'window', url.searchParams);
     } else if (request.method === 'GET' && path === '/dock/events') {
-      openStream(request, response, 'dock');
+      openStream(request, response, 'dock', url.searchParams);
     } else if (request.method === 'POST' && path === '/window/theme') {
       readJson(request).then(
         (body) => {
@@ -328,6 +343,13 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         },
         notifyDock: (event, data) => notify('dock', event, data),
         notifyWindows: (event, data) => notify('window', event, data),
+        clickDock: (data) => {
+          const stream = clickStreams.at(-1);
+
+          stream?.write(`event: click\ndata: ${JSON.stringify(data)}\n\n`);
+
+          return stream !== undefined;
+        },
         stopViews: () => {
           closing = true;
         },

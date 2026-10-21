@@ -66,7 +66,7 @@ function item(id, cwd, state = 'waiting') {
 }
 
 /** A test-owned stand-in for a hub that accepts every request, recording each body. */
-async function acceptingHub() {
+async function acceptingHub(answer = () => [200, { done: true }]) {
   const requests = [];
   const server = createServer((request, response) => {
     let body = '';
@@ -75,8 +75,10 @@ async function acceptingHub() {
     request.on('data', (chunk) => (body += chunk));
     request.on('end', () => {
       requests.push({ path: request.url, auth: request.headers.authorization, body: JSON.parse(body) });
-      response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ done: true }));
+      const [status, reply] = answer(request.url);
+
+      response.writeHead(status, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(reply));
     });
   });
 
@@ -226,6 +228,43 @@ describe("A row's click from VS Code: a notification's Open (PRD R65, R70, R71)"
     assert.strictEqual(await extension.openRow('item:9'), 'url');
     assert.deepStrictEqual(browsed, ['https://github.com/o/r/issues/9#issuecomment-900']);
     assert.strictEqual(await extension.openRow('item:404'), 'nothing');
+    assert.deepStrictEqual(commands, []);
+  });
+
+  it('forwards the click of a row that opens a terminal to the dock with dock.openVSCode review, and opens no window (PRD R65, R71)', async () => {
+    const hub = await acceptingHub((path) => (path === '/dock/click' ? [202, { sent: true }] : [404, { error: 'unexpected' }]));
+
+    try {
+      extension.show(JSON.stringify({ ...hubState, openVSCode: 'review', workItems: [item(7, folder, 'running')] }));
+
+      assert.strictEqual(await extension.openRow('item:7', { hub: { ...extension.hub(), port: hub.port, token: 'stub-token' } }), 'dock');
+      assert.deepStrictEqual(hub.requests.map(({ path, body }) => [path, body]), [['/dock/click', { rowKey: 'item:7' }]]);
+      assert.deepStrictEqual(commands, []);
+      assert.deepStrictEqual(messages, []);
+    } finally {
+      hub.server.close();
+    }
+  });
+
+  it("shows the hub's answer when no dock runs a forwarded click, and opens nothing", async () => {
+    const hub = await acceptingHub(() => [409, { error: 'The dock is not running.' }]);
+
+    try {
+      extension.show(JSON.stringify({ ...hubState, openVSCode: 'review', workItems: [item(7, folder, 'running')] }));
+
+      assert.strictEqual(await extension.openRow('item:7', { hub: { ...extension.hub(), port: hub.port, token: 'stub-token' } }), 'refused');
+      assert.deepStrictEqual(messages, ['Switchboard: The dock is not running.']);
+      assert.deepStrictEqual(commands, []);
+    } finally {
+      hub.server.close();
+    }
+  });
+
+  it('opens the focus of a row with an item window but no session while dock.openVSCode is review (PRD R79)', async () => {
+    extension.show(JSON.stringify({ ...hubState, openVSCode: 'review', workItems: [{ ...item(9, folder, 'none'), worktree: { id: 1, ticketId: 9, path: folder, branch: '9-fix', linkedBy: 'report' } }] }));
+
+    assert.strictEqual(await extension.openRow('item:9'), 'url');
+    assert.deepStrictEqual(browsed, ['https://github.com/o/r/issues/9#issuecomment-900']);
     assert.deepStrictEqual(commands, []);
   });
 });

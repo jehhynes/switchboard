@@ -1,5 +1,5 @@
 import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
-import type { Provider } from '@switchboard/core';
+import type { OpenVSCode, Provider } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
@@ -69,24 +69,30 @@ function guidedStart(message: Record<string, unknown>): Control {
   return { label: 'Start with guidance…', icon: 'comment', message, input };
 }
 
-/** The one control a Blocked on you, Ready for review or Unstarted row shows as a button, when one applies; every control is in its right-click menu. */
-export function mainControl(item: WorkItemView): Control | null {
+/** Answer in terminal: the row's click, which opens the session's terminal, in place of Open in Claude or Codex (PRD R70, R71). */
+export const ANSWER_IN_TERMINAL: Control = { label: 'Answer in terminal', icon: 'terminal', message: { type: 'click' } };
+
+/**
+ * The one control a Blocked on you, Ready for review or Unstarted row shows as a button, when one applies; every control is in its right-click
+ * menu. With `dock.openVSCode: review`, Answer in terminal replaces Open in Claude or Codex and a prompt before start's Open in terminal.
+ */
+export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Control | null {
   const group = groupOf(item);
 
   if (group === 'progress' || group === 'done') {
     return null;
   }
 
-  const controls = controlsOf(item);
+  const controls = controlsOf(item, mode);
 
   // A prompt before the session starts is answered by attaching to it (PRD R41).
   if (isBackground(activeSession(item)) && waitsToStart(activeSession(item))) {
-    return controls.find((control) => control.label === 'Open in terminal') ?? null;
+    return mode === 'review' ? ANSWER_IN_TERMINAL : (controls.find((control) => control.label === 'Open in terminal') ?? null);
   }
 
   // A question the session waits on comes before an approval it reported earlier, as the row's mark does.
   if (waitsInBackground(activeSession(item))) {
-    return controls.find((control) => control.message['type'] === 'open-question') ?? null;
+    return controls.find((control) => control.message['type'] === 'open-question' || control === ANSWER_IN_TERMINAL) ?? null;
   }
 
   const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Triage again' : null;
@@ -99,8 +105,8 @@ export function mainTitle(item: WorkItemView, control: Control): string {
   return control.label === 'Approve' && item.approvalPrompt !== null ? `Approve: runs ${item.approvalPrompt}` : control.label;
 }
 
-/** The controls that apply to a work item (PRD R27). */
-export function controlsOf(item: WorkItemView): Control[] {
+/** The controls that apply to a work item (PRD R27); with `dock.openVSCode: review`, Answer in terminal replaces Open in Claude or Codex. */
+export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Control[] {
   const controls: Control[] = [];
   const session = activeSession(item);
   // Ad-hoc and scheduled work items name their prompt or playbook themselves, so there is nothing to triage (PRD R6, R82).
@@ -123,7 +129,7 @@ export function controlsOf(item: WorkItemView): Control[] {
   const question = openQuestion(item);
 
   if (question !== null) {
-    controls.push({ label: `Open in ${PROVIDER_NAMES[question.provider]}`, icon: 'comment-discussion', message: question });
+    controls.push(mode === 'review' ? ANSWER_IN_TERMINAL : { label: `Open in ${PROVIDER_NAMES[question.provider]}`, icon: 'comment-discussion', message: question });
   }
 
   if (isBackground(session)) {
@@ -179,7 +185,7 @@ function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control[
  * once it has ended; Codex has no attach (mechanics M31). `active` marks a session the operator resumed, in a terminal or a VS Code tab, which is
  * shown rather than resumed again. Null while it starts.
  */
-function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
+export function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
   const session = activeSession(item);
   const name = ticketKey(item.ticket);
@@ -254,7 +260,7 @@ type SessionView = WorkItemView['sessions'][number];
  * A session running in its background process, including one whose release stop has not finished or failed, so Stop stays offered; a released
  * session that is active again was resumed elsewhere, such as in a VS Code tab.
  */
-function isBackground(session: SessionView | null): session is SessionView & { shortId: string } {
+export function isBackground(session: SessionView | null): session is SessionView & { shortId: string } {
   return session !== null && session.state !== 'starting' && session.shortId !== null && (!session.released || session.releasing);
 }
 

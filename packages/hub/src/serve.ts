@@ -26,6 +26,8 @@ export interface HubApp {
   onChange(listener: () => void): void;
   /** Gives the app the way to send an event to the dock's streams, which answers how many it reached. */
   attachDock?(send: (event: string, data: unknown) => number): void;
+  /** Receives the sender of forwarded clicks to the dock (PRD R65, R69). */
+  attachDockClick?(click: (data: unknown) => boolean): void;
   /** Gives the app the way to send an event to the VS Code windows' streams. */
   attachWindows?(send: (event: string, data: unknown) => number): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
@@ -112,6 +114,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   app?.onChange(() => server.update());
   app?.attachDock?.((event, data) => server.notifyDock(event, data));
+  app?.attachDockClick?.((data) => server.clickDock(data));
   app?.attachWindows?.((event, data) => server.notifyWindows(event, data));
 
   const browserPort = options.browserPort === undefined ? BROWSER_PORT : options.browserPort;

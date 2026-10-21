@@ -83,11 +83,21 @@ export interface ScheduleSettings {
   at: number | null;
 }
 
+/** Where a dock row opens its work (PRD R71): `always` in its VS Code item window, `review` in a terminal until it is `awaiting-approval` or `finished`. */
+export const OPEN_VSCODE = ['always', 'review'] as const;
+
+export type OpenVSCode = (typeof OPEN_VSCODE)[number];
+
+export interface DockSettings {
+  openVSCode: OpenVSCode;
+}
+
 export interface Settings {
   sessions: SessionSettings;
   triage: TriageSettings;
   sources: Record<string, SourceSettings>;
   schedules: Record<string, ScheduleSettings>;
+  dock: DockSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -96,6 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
+  dock: { openVSCode: 'always' },
 };
 
 /** The repos an ad-hoc prompt or a task report can run in: each source's repo root, the first being the default. */
@@ -247,7 +258,7 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const read = new Reader();
-  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'playbooks'], 'settings');
+  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'dock', 'playbooks'], 'settings');
   // Each playbook is checked on its own by `parsePlaybooks`, so an invalid one is left out rather than rejecting the file.
   read.section(root, 'playbooks', 'playbooks');
 
@@ -317,7 +328,11 @@ export function parseSettings(text: string): SettingsResult {
     schedules[name] = parseSchedule(read, read.section(schedulesIn, name, path), path);
   }
 
-  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules } };
+  const dockIn = read.section(root, 'dock', 'dock');
+  read.unknown(dockIn, ['openVSCode'], 'dock');
+  const dock: DockSettings = { openVSCode: read.choice(dockIn, 'openVSCode', 'dock', OPEN_VSCODE, defaults.dock.openVSCode) };
+
+  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock } };
 }
 
 function parseSchedule(read: Reader, entry: Json, path: string): ScheduleSettings {

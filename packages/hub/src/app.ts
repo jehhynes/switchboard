@@ -13,6 +13,7 @@ import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
 import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
+import type { DockTerminal } from './dock.js';
 import { isPastePath } from './report.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
@@ -206,6 +207,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   });
 
   let sendDock: (event: string, data: unknown) => number = () => 0;
+  let clickDock: (data: unknown) => boolean = () => false;
   let sendWindows: (event: string, data: unknown) => number = () => 0;
   /**
    * Tells the window opened from `workspace` to claim what was left for it, because VS Code reports no focus change when the dock brings an open
@@ -407,6 +409,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },
+      // VS Code forwards the click of a row that opens a terminal or nothing, which only the dock runs (PRD R65, R69, R71).
+      '/dock/click': async (body) => {
+        if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {rowKey}.' } };
+        }
+
+        return clickDock({ rowKey: body['rowKey'] }) ? { status: 202, body: { sent: true } } : { status: 409, body: { error: 'The dock is not running.' } };
+      },
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
       // The dock's Settings window (PRD R54): settings.json with its version, and what the editor offers.
@@ -468,10 +478,22 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
       }
 
-      return view;
+      // A terminal runs the agent's CLI from `sessions.claudePath` or `sessions.codexPath` as they are when the dock gets the view (PRD R28).
+      const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, executable: terminal.provider === 'codex' ? config.settings.sessions.codexPath : config.settings.sessions.claudePath });
+
+      return {
+        ...view,
+        groups: view.groups.map((group) => ({
+          ...group,
+          rows: group.rows.map((row) => ({ ...row, open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open, terminal: row.terminal === null ? null : executable(row.terminal) })),
+        })),
+      };
     },
     attachDock: (send) => {
       sendDock = send;
+    },
+    attachDockClick: (click) => {
+      clickDock = click;
     },
     attachWindows: (send) => {
       sendWindows = send;
