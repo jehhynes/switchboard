@@ -43,6 +43,7 @@ export const CONTROL_GLYPHS = {
   'issue-reopened': '\u{eb0b}',
   pass: '\u{eba4}',
   play: '\u{eb2c}',
+  refresh: '\u{eb37}',
   search: '\u{ea6d}',
   terminal: '\u{ea85}',
   trash: '\u{ea81}',
@@ -95,7 +96,7 @@ export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Co
     return controls.find((control) => control.message['type'] === 'open-question' || control === ANSWER_IN_TERMINAL) ?? null;
   }
 
-  const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Triage again' : null;
+  const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Retry' : null;
 
   return controls.find((control) => control.label === wanted) ?? null;
 }
@@ -109,8 +110,6 @@ export function mainTitle(item: WorkItemView, control: Control): string {
 export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Control[] {
   const controls: Control[] = [];
   const session = activeSession(item);
-  // Ad-hoc and scheduled work items name their prompt or playbook themselves, so there is nothing to triage (PRD R6, R82).
-  const untriaged = item.ticket.source === 'adhoc' || item.ticket.source === 'schedule';
   const action = (type: string) => ({ type: 'action', action: { type, workItemId: item.id } });
 
   if (item.status === 'unstarted') {
@@ -136,8 +135,9 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
     controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop') });
   }
 
-  if (item.status !== 'done' && session === null && !untriaged && item.status !== 'triaging') {
-    controls.push({ label: 'Triage again', icon: 'search', message: action('retriage') });
+  // Retries from the step that failed (PRD R34).
+  if (item.status === 'failed' && session === null) {
+    controls.push({ label: 'Retry', icon: 'refresh', message: action('retry') });
   }
 
   if (item.status !== 'done') {

@@ -302,6 +302,17 @@ export const MIGRATIONS = [
       WHERE c.entity = 'link' AND c.op = 'insert' AND c.entityId = CAST(links.id AS TEXT) AND e.type = 'triage-succeeded')
     AND NOT EXISTS (SELECT 1 FROM events e
       WHERE e.ticketId = links.ticketId AND e.type = 'report' AND e.refused IS NULL AND json_extract(e.detail, '$.kind') = 'link' AND json_extract(e.detail, '$.target') = links.target);`,
+  // A triage that could not start left no triage row; one marks the failed work item as failed at triage, so Retry triages it again (PRD R34).
+  // Such a work item's logged status last went from triaging to failed, or, failing before the log or any triage result, it has no playbook or prompt.
+  `INSERT INTO triages (ticketId, workItemId, startedAt, endedAt, error)
+    SELECT w.ticketId, w.id, w.statusAt, w.statusAt, COALESCE(w.error, 'Triage failed.') FROM workItems w JOIN tickets k ON k.id = w.ticketId
+    WHERE w.status = 'failed' AND k.source NOT IN ('adhoc', 'schedule')
+      AND NOT EXISTS (SELECT 1 FROM triages t WHERE t.id = (SELECT MAX(id) FROM triages WHERE workItemId = w.id) AND t.error IS NOT NULL)
+      AND (
+        (SELECT json_extract(c.fields, '$.status[0]') FROM changes c
+          WHERE c.entity = 'workItem' AND c.workItemId = w.id AND json_type(c.fields, '$.status') IS NOT NULL ORDER BY c.id DESC LIMIT 1) = 'triaging'
+        OR (w.playbook IS NULL AND w.taskPrompt IS NULL)
+      );`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);

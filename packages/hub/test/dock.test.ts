@@ -173,7 +173,6 @@ describe('dockView', () => {
   it('gives a row only the controls the hub runs, with their actions', () => {
     expect(row(item(7, { status: 'awaiting-approval', worktree, pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] })).controls).toEqual([
       { label: 'Approve', glyph: '\u{eab2}', action: { type: 'approve', workItemId: 7 } },
-      { label: 'Triage again', glyph: '\u{ea6d}', action: { type: 'retriage', workItemId: 7 } },
       { label: 'Mark done', glyph: '\u{eba4}', action: { type: 'mark-done', workItemId: 7 } },
       { label: 'Snooze', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 7 } },
       {
@@ -184,6 +183,19 @@ describe('dockView', () => {
       },
     ]);
     expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop', 'Mark done', 'Snooze', 'Delete']);
+  });
+
+  it('keeps a work item that failed at triage in Unstarted with its Failed mark, its error and Retry, but no stripe or turn (PRD R27, R34)', () => {
+    const failed = item(7, { status: 'failed', error: 'Timed out.', playbook: null, triage: triage({ playbook: null, error: 'Timed out.' }) });
+
+    expect(dockView(snapshot([failed]), NOW, W).groups.filter((group) => group.rows.length > 0).map((group) => group.key)).toEqual(['unstarted']);
+    expect(row(failed)).toMatchObject({ mark: { kind: 'failed', glyph: '\u{ea87}' }, stripe: null, turn: null, main: 'Retry', mainGlyph: '\u{eb37}' });
+    expect(row(failed).details).toEqual([{ text: 'Timed out.', title: null, tone: 'warning' }]);
+    expect(row(failed).controls[0]).toEqual({ label: 'Retry', glyph: '\u{eb37}', action: { type: 'retry', workItemId: 7 } });
+
+    const started = item(7, { status: 'failed', error: 'Workspace not trusted', triage: triage() });
+    expect(dockView(snapshot([started]), NOW, W).groups.filter((group) => group.rows.length > 0).map((group) => group.key)).toEqual(['blocked']);
+    expect(row(started)).toMatchObject({ mark: { kind: 'failed' }, stripe: 'error', turn: 'operator', main: 'Retry' });
   });
 
   it('opens Open in Claude for a waiting background session, the latest session when it is not running, and nothing while it runs', () => {

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, adhocLabel, groupOf, holdsSlot, markOf, needsYou, reviewOrder, triageLabel, turnOf, urlKey } from '../src/group.js';
+import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, markOf, needsYou, reviewOrder, triageLabel, turnOf, urlKey } from '../src/group.js';
 import type { DoneReason, SessionOutcome, SessionState, WorkItemStatus } from '../src/model.js';
 
 const item = (status: WorkItemStatus, ...states: SessionState[]) => ({
   status,
   readyAt: null as number | null,
   sessions: states.map((state) => ({ state, outcome: null as SessionOutcome | null })),
+  triage: null as { error: string | null } | null,
 });
+/** A work item whose latest triage failed (PRD R34). */
+const triageFailed = (status: WorkItemStatus, readyAt: number | null = null) => ({ ...item(status), readyAt, triage: { error: 'Timed out.' } });
 /** A work item whose latest session Open in Claude stopped (PRD R70). */
 const opened = (status: WorkItemStatus) => ({ ...item(status), sessions: [{ state: 'ended' as SessionState, outcome: 'opened' as SessionOutcome | null }] });
 const ready = (status: WorkItemStatus, ...states: SessionState[]) => ({ ...item(status, ...states), readyAt: 1000 });
@@ -27,7 +30,7 @@ describe('groupOf', () => {
     expect(groupOf(opened('running'))).toBe('blocked');
     expect(groupOf({ ...opened('awaiting-approval'), readyAt: 1000 })).toBe('review');
     expect(groupOf(opened('done'))).toBe('done');
-    // Approve while the slots are full, or triage again, moves on from the opened question.
+    // Approve while the slots are full, or Retry, moves on from the opened question.
     expect(groupOf({ ...opened('queued'), readyAt: 1000 })).toBe('review');
     expect(groupOf(opened('queued'))).toBe('unstarted');
     expect(['awaiting-approval', 'finished', 'running', 'setup', 'queued'].map((status) => groupOf(ready(status as WorkItemStatus, 'running')))).toEqual([
@@ -38,6 +41,17 @@ describe('groupOf', () => {
       'review',
     ]);
     expect(['setup', 'running'].map((status) => groupOf(item(status as WorkItemStatus, 'ended', 'running')))).toEqual(['progress', 'progress']);
+  });
+
+  it('keeps a work item that failed at triage in Unstarted, ready or not, and a failure after triage in Blocked on you (PRD R27)', () => {
+    expect(failedAtTriage(triageFailed('failed'))).toBe(true);
+    expect(failedAtTriage(triageFailed('triaging'))).toBe(false);
+    expect(failedAtTriage({ ...item('failed'), triage: { error: null } })).toBe(false);
+    expect(failedAtTriage(item('failed'))).toBe(false);
+    expect(groupOf(triageFailed('failed'))).toBe('unstarted');
+    expect(groupOf(triageFailed('failed', 1000))).toBe('unstarted');
+    expect(groupOf({ ...item('failed'), triage: { error: null } })).toBe('blocked');
+    expect(groupOf({ ...ready('failed'), triage: { error: null } })).toBe('review');
   });
 });
 
@@ -53,6 +67,7 @@ describe('turnOf', () => {
     expect(turnOf(ready('queued'))).toBe('agent');
     expect(turnOf(item('running', 'running'))).toBe('agent');
     expect(turnOf(item('unstarted'))).toBeNull();
+    expect(turnOf(triageFailed('failed'))).toBeNull();
     expect(turnOf(ready('done'))).toBeNull();
   });
 
@@ -60,6 +75,8 @@ describe('turnOf', () => {
     expect(needsYou({ ...ready('awaiting-approval'), ticket: { snoozed: false } })).toBe(true);
     expect(needsYou({ ...ready('awaiting-approval'), ticket: { snoozed: true } })).toBe(false);
     expect(needsYou({ ...ready('running', 'running'), ticket: { snoozed: false } })).toBe(false);
+    expect(needsYou({ ...triageFailed('failed'), ticket: { snoozed: false } })).toBe(false);
+    expect(needsYou({ ...item('failed'), ticket: { snoozed: false } })).toBe(true);
   });
 });
 
@@ -115,11 +132,12 @@ describe('markOf', () => {
     expect(marked('queued', [], { readyAt: 1 })).toBe('queued');
   });
 
-  it('gives the phase in In progress, Triaging or none in Unstarted, and how Done ended', () => {
+  it('gives the phase in In progress, Triaging, Failed or none in Unstarted, and how Done ended', () => {
     expect(['setup', 'running'].map((status) => marked(status as WorkItemStatus, ['running']))).toEqual(['setup', 'running']);
     expect(marked('queued')).toBe('queued');
     expect(marked('queued', ['waiting'])).toBe('question');
     expect(marked('triaging')).toBe('triaging');
+    expect(markOf({ ...triageFailed('failed'), approvalSends: false, doneReason: null })).toBe('failed');
     expect(marked('unstarted')).toBeNull();
     expect(marked('done', ['waiting'])).toBe('done-session');
     expect(marked('done', [], { doneReason: 'session' })).toBe('done-session');

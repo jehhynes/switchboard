@@ -492,7 +492,7 @@ describe('Runtime', () => {
     expect(store.linksFor(1)).toEqual([]);
 
     source.context = async () => ({ error: 'Issue 7 was not found in acme/widgets.' });
-    runtime.send({ type: 'retriage', workItemId: 1 });
+    runtime.send({ type: 'retry', workItemId: 1 });
     await runtime.settled();
     expect(store.workItem(1)).toMatchObject({ status: 'failed', error: 'Issue 7 was not found in acme/widgets.' });
   });
@@ -1924,18 +1924,10 @@ describe('focus (PRD R79)', () => {
     playbooks: new Map([playbook('triage:github', { description: 'Triage', kind: 'triage', template: 'Classify.' }), playbook('dev:develop', { description: 'Build it', focus: 'ticket', template: 'Build {{ticket.sourceKey}}.' })]),
   });
 
-  it("offers the source's anchor ids, stores the chosen comment's URL, and keeps it through a running and a failed triage until a later one changes it", async () => {
+  it("offers the source's anchor ids, focuses the ticket after a failed triage, and stores the chosen comment's URL from Retry's triage", async () => {
     const { store, cli, source, runtime } = setup(waiting());
-    let triages = 0;
-    let release = (): void => undefined;
     source.result = { tickets: [{ ...issue('7'), url: ISSUE }] };
     source.context = async () => {
-      triages++;
-
-      if (triages === 2) {
-        await new Promise<void>((resolve) => (release = resolve));
-      }
-
       return {
         context: 'Issue 7 [ticket]\n### alice, 2026-10-01 [c1]\nPlease fix.\n### bob, 2026-10-02 [c2]\nStill broken.',
         anchors: [
@@ -1945,29 +1937,20 @@ describe('focus (PRD R79)', () => {
         ],
       };
     };
-    cli.classifyResult = focused('c1');
+    cli.classifyResult = fail('API Error: 529');
 
     await runtime.pollSource('github');
     await runtime.settled();
 
     const schema = JSON.parse(cli.calls.find((call) => call[1] === '-p')![5]!);
     expect(schema.properties.focus).toEqual({ type: 'string', enum: ['ticket', 'c1', 'c2'] });
-    expect(store.triage(1)?.focus).toBe(COMMENT);
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'failed', focus: ISSUE });
+
+    cli.classifyResult = focused('c1');
+    runtime.send({ type: 'retry', workItemId: 1 });
+    await runtime.settled();
+    expect(store.triage(2)?.focus).toBe(COMMENT);
     expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'unstarted', focus: COMMENT });
-
-    runtime.send({ type: 'retriage', workItemId: 1 });
-    await vi.waitFor(() => expect(triages).toBe(2));
-    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'triaging', focus: COMMENT });
-
-    cli.classifyResult = fail('API Error: 529');
-    release();
-    await runtime.settled();
-    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'failed', focus: COMMENT });
-
-    cli.classifyResult = focused('c2');
-    runtime.send({ type: 'retriage', workItemId: 1 });
-    await runtime.settled();
-    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'unstarted', focus: LATER });
   });
 
   it('focuses the ticket when the source tags no anchors', async () => {

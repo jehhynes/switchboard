@@ -468,13 +468,13 @@ public sealed class MainWindowTests
     {
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7"));
-        var snooze = (MenuItem)menu[2];
+        var snooze = (MenuItem)menu[1];
 
         Assert.Equal(
-            ["Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002", "Open gh 20087"],
+            ["Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002", "Open gh 20087"],
             menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
-        Assert.IsType<Separator>(menu[9]);
-        Assert.IsType<Separator>(menu[11]);
+        Assert.IsType<Separator>(menu[8]);
+        Assert.IsType<Separator>(menu[10]);
         Assert.Equal(7, snooze.ItemsSource!.Cast<MenuItem>().Count());
         Assert.Equal("Indefinitely", snooze.ItemsSource!.Cast<MenuItem>().Last().Header);
         Assert.StartsWith("Tomorrow · ", (string)snooze.ItemsSource!.Cast<MenuItem>().First().Header!);
@@ -485,15 +485,15 @@ public sealed class MainWindowTests
     {
         var (window, model) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7"));
-        var snooze = ((MenuItem)menu[2]).ItemsSource!.Cast<MenuItem>().ToList();
+        var snooze = ((MenuItem)menu[1]).ItemsSource!.Cast<MenuItem>().ToList();
 
         hub.ActReplies.Enqueue(null);
         hub.ActReplies.Enqueue("A wake time that has passed.");
-        ((MenuItem)menu[1]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[0]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         snooze[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         actions.UrlReply = "The browser did not open it.";
+        ((MenuItem)menu[11]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         ((MenuItem)menu[12]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        ((MenuItem)menu[13]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}", "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}"], hub.Calls);
@@ -501,9 +501,9 @@ public sealed class MainWindowTests
         Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
 
         actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
-        ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[6]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
-        ((MenuItem)menu[8]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(
@@ -529,8 +529,8 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
 
-        Assert.IsType<Separator>(menu[11]);
-        Assert.Equal(["Open PR #19002", "Open gh 20087"], menu.Skip(12).Select((item) => ((MenuItem)item).Header));
+        Assert.IsType<Separator>(menu[10]);
+        Assert.Equal(["Open PR #19002", "Open gh 20087"], menu.Skip(11).Select((item) => ((MenuItem)item).Header));
     }
 
     [AvaloniaFact]
@@ -547,7 +547,7 @@ public sealed class MainWindowTests
     public void Delete_Clicked_AsksInADialogAndPostsOnlyAfterDelete()
     {
         var (window, _) = Open();
-        var delete = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[10];
+        var delete = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[9];
         Button DialogButton(string name) => Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
 
         delete.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));

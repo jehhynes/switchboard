@@ -20,7 +20,7 @@ function waiting(h: Harness, key = '1'): { item: number; session: string } {
 
 /** The work item's group and mark, as the dock shows them. */
 function shown(h: Harness, item: number): { group: string; mark: string | null; holdsSlot: boolean } {
-  const view = { ...h.item(item), sessions: h.store.sessionsFor(item), approvalSends: false };
+  const view = { ...h.item(item), sessions: h.store.sessionsFor(item), triage: h.store.triagesFor(item).at(-1) ?? null, approvalSends: false };
 
   return { group: groupOf(view), mark: markOf(view), holdsSlot: holdsSlot(view) };
 }
@@ -51,8 +51,9 @@ describe('Open in Claude refusals (PRD R70)', () => {
 
     h.act({ type: 'stop', workItemId: item });
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
-    h.triaged(h.act({ type: 'retriage', workItemId: item })[0], 'dev:question');
-    const next = (h.act({ type: 'start', workItemId: item })[0] as Extract<FlowAction, { type: 'start-session' }>).sessionId;
+    // A failed start that Retry retries gives the work item a newer session.
+    h.store.updateWorkItem(item, { status: 'failed', error: 'The start failed.' });
+    const next = (h.act({ type: 'retry', workItemId: item })[0] as Extract<FlowAction, { type: 'start-session' }>).sessionId;
     h.act({ type: 'session-started', sessionId: next, nativeSessionId: 'native-new', shortId: 'def12345' });
     h.act({ type: 'marker', sessionId: next, state: 'waiting', detail: null });
 

@@ -26,7 +26,7 @@ function ready(h: Harness, key: string, id: number): string {
 }
 
 function groupOfItem(h: Harness, id: number) {
-  return groupOf({ ...h.item(id), sessions: h.store.sessionsFor(id) });
+  return groupOf({ ...h.item(id), sessions: h.store.sessionsFor(id), triage: h.store.triagesFor(id).at(-1) ?? null });
 }
 
 function order(h: Harness): number[] {

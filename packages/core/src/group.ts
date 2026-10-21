@@ -1,4 +1,4 @@
-import type { DoneReason, Session, WorkItem } from './model.js';
+import type { DoneReason, Session, Triage, WorkItem } from './model.js';
 
 // Imports only types, so the History webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
 
@@ -13,7 +13,13 @@ export function waitsToStart(session: Pick<Session, 'state' | 'stateDetail'> | n
   return session !== null && session.state === 'waiting' && session.stateDetail === START_PROMPT;
 }
 
-type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: Pick<Session, 'state' | 'outcome'>[] };
+/** `triage` is the work item's latest triage, or null when it has none. */
+type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: Pick<Session, 'state' | 'outcome'>[]; triage: Pick<Triage, 'error'> | null };
+
+/** The work item failed because its latest triage failed, so Retry triages it again and it waits in Unstarted (PRD R27, R34). */
+export function failedAtTriage(item: Pick<WorkItem, 'status'> & { triage: Pick<Triage, 'error'> | null }): boolean {
+  return item.status === 'failed' && item.triage?.error != null;
+}
 
 /** The latest session while it has not ended; an earlier session left open idle in VS Code is not the work item's (PRD R17). */
 export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions: S[] }): S | null {
@@ -39,15 +45,15 @@ export function blocksOnYou(item: Pick<WorkItem, 'status'> & { sessions: Pick<Se
 }
 
 /**
- * PRD R27 checks Done first, then Unstarted, which includes triage in progress, then Ready for review for a work item that has been ready,
- * then Blocked on you, then queued starts in Unstarted, then In progress.
+ * PRD R27 checks Done first, then Unstarted, which includes triage in progress or failed, then Ready for review for a work item that has been
+ * ready, then Blocked on you, then queued starts in Unstarted, then In progress.
  */
 export function groupOf(item: Grouped): Group {
   if (item.status === 'done') {
     return 'done';
   }
 
-  if (item.status === 'unstarted' || item.status === 'triaging') {
+  if (item.status === 'unstarted' || item.status === 'triaging' || failedAtTriage(item)) {
     return 'unstarted';
   }
 
@@ -137,7 +143,7 @@ export const MARK_GLYPHS: Record<Mark, string> = {
   'done-unassigned': '\u{ea6e}', // sign-out
 };
 
-/** The work item's mark, or null for an Unstarted item that is neither triaged nor queued, which shows its priority instead. A snoozed item has its group's mark. */
+/** The work item's mark, or null for an Unstarted item that is not triaging, failed or queued, which shows its priority instead. A snoozed item has its group's mark. */
 export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approvalSends: boolean }): Mark | null {
   switch (groupOf(item)) {
     case 'blocked':
@@ -158,7 +164,7 @@ export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approval
 
       return item.status === 'finished' ? 'finished' : item.status === 'queued' ? 'queued' : item.status === 'setup' ? 'setup' : 'running';
     case 'unstarted':
-      return item.status === 'triaging' ? 'triaging' : item.status === 'queued' ? 'queued' : null;
+      return item.status === 'triaging' || item.status === 'failed' || item.status === 'queued' ? item.status : null;
     case 'done':
       return `done-${item.doneReason ?? 'session'}`;
   }

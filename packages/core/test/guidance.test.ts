@@ -24,6 +24,21 @@ describe('Start with guidance (PRD R77)', () => {
     const start = only(h.act({ type: 'start', workItemId: 1, guidance: '  Check the 2024 thread first.\nKeep it short.\n' }), 'start-session');
 
     expect(start.prompt).toBe(GUIDED);
+    expect(h.item(1)).toMatchObject({ status: 'running', taskPrompt: GUIDED, guidance: 'Check the 2024 thread first.\nKeep it short.' });
+    h.started(start);
+    expect(h.item(1).guidance).toBeNull();
+  });
+
+  it('keeps the guidance through a failed task start, so Retry starts with it', () => {
+    const h = new Harness();
+    unstarted(h);
+    const first = only(h.act({ type: 'start', workItemId: 1, guidance: 'Check the 2024 thread first.\nKeep it short.' }), 'start-session');
+
+    h.act({ type: 'session-start-failed', sessionId: first.sessionId, message: 'Workspace not trusted' });
+    expect(h.item(1)).toMatchObject({ status: 'failed', guidance: 'Check the 2024 thread first.\nKeep it short.' });
+
+    const again = h.started(only(h.act({ type: 'retry', workItemId: 1 }), 'start-session'));
+    expect(h.store.session(again)).toMatchObject({ kind: 'task' });
     expect(h.item(1)).toMatchObject({ status: 'running', taskPrompt: GUIDED, guidance: null });
   });
 
@@ -44,7 +59,9 @@ describe('Start with guidance (PRD R77)', () => {
     expect(h.item(1)).toMatchObject({ status: 'queued', guidance: 'Be brief.' });
 
     h.settings = settings({ sessions: { concurrency: 1 } });
-    expect(only(h.act({ type: 'tick' }), 'start-session').prompt).toBe('Answer Issue 1.\nContext 1\n\nBe brief.');
+    const start = only(h.act({ type: 'tick' }), 'start-session');
+    expect(start.prompt).toBe('Answer Issue 1.\nContext 1\n\nBe brief.');
+    h.started(start);
     expect(h.item(1).guidance).toBeNull();
   });
 
@@ -69,21 +86,22 @@ describe('Start with guidance (PRD R77)', () => {
     const task = only(h.act({ type: 'roster', sessions: [] }), 'start-session');
 
     expect(task).toMatchObject({ kind: 'task', prompt: '/sb-plan 1\n\nSkip the UI.' });
+    h.started(task);
     expect(h.item(1).guidance).toBeNull();
   });
 
-  it('drops guidance a failed setup never used when the operator triages again', () => {
+  it('keeps guidance a failed setup never used for the task session that Retry starts', () => {
     const h = new Harness({ playbooks: playbooks(undefined, { 'dev:build': { description: 'Build', requiresWorktree: true, reports: ['done', 'worktree'], template: '/sb-plan {{ticket.sourceKey}}' } }) });
     h.triaged(h.poll(issue('1'))[0], 'dev:build');
     h.started(only(h.act({ type: 'start', workItemId: 1, guidance: 'Skip the UI.' }), 'start-session'));
     h.act({ type: 'roster', sessions: [] });
     expect(h.item(1)).toMatchObject({ status: 'failed', guidance: 'Skip the UI.' });
 
-    const triage = only(h.act({ type: 'retriage', workItemId: 1 }), 'triage');
-
-    expect(h.item(1).guidance).toBeNull();
     h.act({ type: 'worktree-found', source: 'github', sourceKey: '1', path: 'D:/wt/1', branch: '1-x' });
-    expect(only(h.triaged(triage, 'dev:develop'), 'start-session')).toMatchObject({ kind: 'task', prompt: '/sb-plan 1' });
+    const task = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
+    expect(task).toMatchObject({ kind: 'task', prompt: '/sb-plan 1\n\nSkip the UI.' });
+    h.started(task);
+    expect(h.item(1).guidance).toBeNull();
   });
 
   it('runs an approved prompt without the guidance', () => {
@@ -133,6 +151,7 @@ describe('pick with guidance (PRD R48, R77)', () => {
     const start = only(h.act({ type: 'pick', ticketId: 1, guidance: 'Reply in Spanish.' }), 'start-session');
 
     expect(start.prompt).toBe('/support-process R500\n\nReply in Spanish.');
+    h.started(start);
     expect(h.item(1).guidance).toBeNull();
     expect(h.store.ticketHistory(1)!.events.find((event) => event.type === 'pick')).toMatchObject({ detail: { guidance: 'Reply in Spanish.' } });
   });

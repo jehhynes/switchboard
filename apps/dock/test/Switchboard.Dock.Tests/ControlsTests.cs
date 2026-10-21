@@ -485,10 +485,10 @@ public sealed class ControlsTests
         var headers = (DockRow row) => window.MenuOf(row).Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList();
 
         Assert.Equal(["Open in Claude", "Stop", "Mark done", "Snooze", "Open in terminal", "History", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:8")));
-        Assert.Equal(["Approve", "Triage again", "Mark done", "Snooze", "Move to top", "Move up", "Copy Customer reply", "Open in terminal", "History", "Open report", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:10")));
+        Assert.Equal(["Approve", "Mark done", "Snooze", "Move to top", "Move up", "Copy Customer reply", "Open in terminal", "History", "Open report", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:10")));
 
         var two = Fixtures.Row("item:10") with { Pastes = [new DockPaste("Customer reply", "a.md"), new DockPaste("Private note", "b.md")] };
-        var copy = (MenuItem)window.MenuOf(two)[6];
+        var copy = (MenuItem)window.MenuOf(two)[5];
 
         Assert.Equal("Copy", copy.Header);
         Assert.Equal(["Customer reply", "Private note"], copy.ItemsSource!.Cast<MenuItem>().Select((item) => (string)item.Header!));

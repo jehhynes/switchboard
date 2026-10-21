@@ -31,6 +31,7 @@ describe('groupOf', () => {
     expect(groupOf(item(1, { status: 'done', sessions: [session({ state: 'waiting' })] }))).toBe('done');
     expect(['unstarted', 'triaging', 'queued'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['unstarted', 'unstarted', 'unstarted']);
     expect(['blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'] })))).toEqual(['blocked', 'blocked']);
+    expect(groupOf(item(1, { status: 'failed', triage: triage({ error: 'Timed out.' }) }))).toBe('unstarted');
     expect(groupOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('blocked');
     expect(['blocked', 'failed'].map((status) => groupOf(item(1, { status: status as WorkItemView['status'], readyAt: NOW })))).toEqual(['review', 'review']);
     expect(groupOf(item(1, { readyAt: NOW, sessions: [session({ state: 'waiting' })] }))).toBe('review');
@@ -42,17 +43,23 @@ describe('groupOf', () => {
 
 describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
-    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Start with guidance…', 'Triage again', 'Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Triage again', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
     expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Triage again', 'Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'finished', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed' }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', triage: triage({ error: 'Timed out.' }) }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
+    // A failed work item whose setup session the operator reopened resumes in that session.
+    expect(labels(item(1, { status: 'failed', sessions: [session({ state: 'idle' })] })).includes('Retry')).toBe(false);
+    expect(controlsOf(item(7, { status: 'failed' }))[0]).toMatchObject({ icon: 'refresh', message: { type: 'action', action: { type: 'retry', workItemId: 7 } } });
     expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Reopen', 'Open in terminal', 'Delete', 'History']);
     expect(controlsOf(item(7, { status: 'done' })).find((control) => control.label === 'Reopen')?.message).toEqual({ type: 'action', action: { type: 'reopen', workItemId: 7 } });
     expect(labels(item(1, { status: 'done', reopenable: false }))).toEqual(['Delete', 'History']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'schedule' } }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'schedule' } }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
     expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
@@ -157,11 +164,12 @@ describe('mainControl', () => {
   it('picks the one primary control of a Blocked on you, Ready for review or Unstarted row', () => {
 
     expect(mainControl(item(1, { status: 'awaiting-approval' }))?.label).toBe('Approve');
-    expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Triage again');
+    expect(mainControl(item(1, { status: 'failed' }))?.label).toBe('Retry');
+    expect(mainControl(item(1, { status: 'failed', triage: triage({ error: 'Timed out.' }) }))?.label).toBe('Retry');
     // A ready row keeps the control of what it waits on.
-    expect(mainControl(item(1, { status: 'failed', readyAt: NOW }))?.label).toBe('Triage again');
+    expect(mainControl(item(1, { status: 'failed', readyAt: NOW }))?.label).toBe('Retry');
     expect(mainControl(item(1, { status: 'awaiting-approval', readyAt: NOW, sessions: [session({ state: 'waiting' })] }))?.label).toBe('Open in Claude');
-    expect(mainControl(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toBeNull();
+    expect(mainControl(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))?.label).toBe('Retry');
     expect(mainControl(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toBeNull();
     expect(mainControl(item(1, { status: 'unstarted' }))?.label).toBe('Start');
     expect(mainControl(item(1, { status: 'triaging' }))).toBeNull();
@@ -272,6 +280,8 @@ describe('poolControls', () => {
 describe('stripeOf', () => {
   it("stripes failed rows red, blocked or waiting rows yellow and the operator's turn, but not the agent's turn, Snoozed or the other groups (PRD R27)", () => {
     expect(stripeOf(item(1, { status: 'failed' }))).toBe('error');
+    expect(stripeOf(item(1, { status: 'failed', triage: triage({ error: 'Timed out.' }) }))).toBeNull();
+    expect(stripeOf(item(1, { status: 'failed', triage: triage({ error: null }) }))).toBe('error');
     expect(stripeOf(item(1, { status: 'blocked' }))).toBe('warning');
     expect(stripeOf(item(1, { sessions: [session({ state: 'waiting' })] }))).toBe('warning');
     // A ready row keeps the stripe of what it waits on.

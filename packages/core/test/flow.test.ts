@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction, PolledTicket } from '../src/flow.js';
 import { MESSAGES, nothingNew, UNCONFIRMED_DONE } from '../src/flow.js';
+import { failedAtTriage } from '../src/group.js';
 import { HOUR, Harness, MINUTE, REPORT, T0, issue, playbooks, settings } from './flowHarness.js';
 import { heldSlots } from '../src/queue.js';
 
@@ -215,7 +216,7 @@ describe('triage', () => {
     expect(h.store.session('s1')).toMatchObject({ kind: 'task', state: 'starting', cwd: 'D:/git/widgets', provider: 'claude' });
   });
 
-  it('fails on a classifier error and triages again on Triage again', () => {
+  it('fails on a classifier error and triages again on Retry', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
 
@@ -223,7 +224,8 @@ describe('triage', () => {
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'Timed out after 180 seconds.' });
     expect(h.store.triage(1)).toMatchObject({ endedAt: T0, error: 'Timed out after 180 seconds.', context: 'ctx' });
 
-    const again = only(h.act({ type: 'retriage', workItemId: 1 }), 'triage');
+    expect(failedAtTriage({ ...h.item(1), triage: h.store.triagesFor(1).at(-1)! })).toBe(true);
+    const again = only(h.act({ type: 'retry', workItemId: 1 }), 'triage');
     expect(again).toMatchObject({ triageId: 2, workItemId: 1 });
     expect(h.item(1)).toMatchObject({ status: 'triaging', error: null });
   });
@@ -254,23 +256,34 @@ describe('triage', () => {
     expect(triage).toMatchObject({ type: 'triage', systemPrompt: 'Pick one:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect\nThen summarize.\n' });
   });
 
-  it('fails on configuration errors', () => {
+  it('fails on configuration errors with a failed triage, so the work item failed at triage', () => {
+    const failedTriage = (h: Harness, error: string) => {
+      expect(h.item(1)).toMatchObject({ status: 'failed', error });
+      expect(h.store.triagesFor(1)).toMatchObject([{ workItemId: 1, startedAt: T0, endedAt: T0, playbook: null, error }]);
+      expect(failedAtTriage({ ...h.item(1), triage: h.store.triagesFor(1).at(-1)! })).toBe(true);
+    };
+
     const variable = new Harness({ playbooks: playbooks(undefined, { 'triage:github': { description: 'Triage', kind: 'triage', template: '{{ticket.title}}\n' } }) });
     variable.poll(issue('1'));
-    expect(variable.item(1)).toMatchObject({ status: 'failed', error: 'Triage playbook triage:github: Unknown template variable: ticket.title.' });
+    failedTriage(variable, 'Triage playbook triage:github: Unknown template variable: ticket.title.');
 
     const missing = new Harness({ playbooks: playbooks(['dev:question']) });
     missing.poll(issue('1'));
-    expect(missing.item(1)).toMatchObject({ status: 'failed', error: 'Triage playbook triage:github is not loaded.' });
+    failedTriage(missing, 'Triage playbook triage:github is not loaded.');
 
     const none = new Harness({ playbooks: playbooks(['triage:github']) });
     none.poll(issue('1'));
-    expect(none.item(1)).toMatchObject({ status: 'failed', error: 'No task playbooks to choose from.' });
+    failedTriage(none, 'No task playbooks to choose from.');
 
     const unset = new Harness();
     unset.settings.sources['github']!.triagePlaybook = '';
     unset.poll(issue('1'));
-    expect(unset.item(1)).toMatchObject({ status: 'failed', error: 'sources.github.triagePlaybook is not set.' });
+    failedTriage(unset, 'sources.github.triagePlaybook is not set.');
+
+    // Retry after the fix triages it again.
+    unset.settings.sources['github']!.triagePlaybook = 'triage:github';
+    expect(only(unset.act({ type: 'retry', workItemId: 1 }), 'triage')).toMatchObject({ triageId: 2, workItemId: 1 });
+    expect(unset.item(1)).toMatchObject({ status: 'triaging', error: null });
   });
 
   it('leaves an auto-starting playbook unstarted when the triage found nothing newer than the earlier work item, and logs why (PRD R80)', () => {
@@ -489,18 +502,18 @@ describe('sessions', () => {
     expect(h.item(item).status).toBe('awaiting-approval');
   });
 
-  it('ignores a recheck after Triage again', () => {
+  it('ignores a recheck after Mark done', () => {
     const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
     const { item, session } = running(h, '1', 'dev:finish');
 
     h.report(session, { kind: 'done', assigned: true });
     const token = h.store.session(session)!.outcomeDetail!;
     h.act({ type: 'roster', sessions: [] });
-    h.act({ type: 'retriage', workItemId: item });
-    expect(h.item(item).status).toBe('triaging');
+    expect(h.send({ type: 'retry', workItemId: item }).refused).toBe('The work item has not failed.');
+    h.act({ type: 'mark-done', workItemId: item });
 
     h.act({ type: 'done-checked', sessionId: session, token, assigned: true });
-    expect(h.item(item)).toMatchObject({ status: 'triaging', error: null });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'operator', error: null });
   });
 
   it('settles a done report that follows an approval in the same turn, keeping the approval when it blocks', () => {
@@ -608,7 +621,7 @@ describe('sessions', () => {
     expect(h.store.session(start.sessionId)?.state).toBe('starting');
   });
 
-  it("fails a start with Claude's message, and a start after Triage again renders the prompt for the new session", () => {
+  it("fails a start with Claude's message, and Retry starts a new session with the prompt rendered for it", () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
     h.triaged(triage, 'dev:question');
@@ -619,8 +632,8 @@ describe('sessions', () => {
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'Workspace not trusted' });
     expect(h.store.session(first.sessionId)).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: 'Workspace not trusted' });
 
-    expect(h.triaged(only(h.act({ type: 'retriage', workItemId: 1 }), 'triage'), 'dev:question')).toEqual([]);
-    const second = only(h.act({ type: 'start', workItemId: 1 }), 'start-session');
+    expect(failedAtTriage({ ...h.item(1), triage: h.store.triagesFor(1).at(-1)! })).toBe(false);
+    const second = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
 
     expect(second.sessionId).toBe('s2');
     expect(second).toMatchObject({ prompt: 'Answer Issue 1.\nContext 1', contract: CONTRACT('s2', QUESTION_REPORTS) });
@@ -637,8 +650,9 @@ describe('sessions', () => {
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     h.act({ type: 'roster', sessions: [] });
-    h.triaged(only(h.act({ type: 'retriage', workItemId: item }), 'triage'), 'dev:finish');
-    const retry = h.started(only(h.act({ type: 'start', workItemId: item }), 'start-session'));
+    // A failed start that Retry retries gives the work item a new latest session.
+    h.store.updateWorkItem(item, { status: 'failed', error: 'The start failed.' });
+    const retry = h.started(only(h.act({ type: 'retry', workItemId: item }), 'start-session'));
 
     h.report(session, { kind: 'done' });
     expect(h.item(item).status).toBe('running');
@@ -1025,15 +1039,16 @@ describe('setup', () => {
     expect(task.cwd).toBe('D:/wt/new');
   });
 
-  it('fails when the setup session ends without a worktree, and Triage again starts a new setup', () => {
+  it('fails when the setup session ends without a worktree, and Retry starts a new setup', () => {
     const h = new Harness();
     const setup = toSetup(h);
 
     h.act({ type: 'roster', sessions: [] });
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'Setup ended without a worktree.' });
 
-    const again = only(h.triaged(only(h.act({ type: 'retriage', workItemId: 1 }), 'triage'), 'dev:develop'), 'start-session');
-    expect(again).toMatchObject({ kind: 'setup', sessionId: 's2' });
+    const again = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
+    expect(again).toMatchObject({ kind: 'setup', sessionId: 's2', prompt: '/init-worktree 15619' });
+    expect(h.item(1)).toMatchObject({ status: 'setup', playbook: 'dev:develop', error: null });
     expect(setup).toBe('s1');
   });
 
@@ -1099,10 +1114,12 @@ describe('setup', () => {
     h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'operator' });
     expect(h.item(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
 
-    const again = h.started(only(h.triaged(only(h.act({ type: 'retriage', workItemId: 1 }), 'triage'), 'dev:develop'), 'start-session'));
-    h.report(again, { kind: 'worktree', path: 'D:/wt/1', branch: null });
-    h.report(again, { kind: 'done' });
-    const task = only(h.act({ type: 'stop-succeeded', sessionId: again, reason: 'operator' }), 'start-session');
+    const g = new Harness();
+    const again = toSetup(g);
+    g.report(again, { kind: 'worktree', path: 'D:/wt/1', branch: null });
+    g.report(again, { kind: 'done' });
+    g.act({ type: 'stop', workItemId: 1 });
+    const task = only(g.act({ type: 'stop-succeeded', sessionId: again, reason: 'operator' }), 'start-session');
     expect(task).toMatchObject({ kind: 'task', cwd: 'D:/wt/1' });
   });
 
@@ -1115,8 +1132,12 @@ describe('setup', () => {
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'sources.github.setupPrompt is not set.' });
 
     h.settings.sources['github']!.setupPrompt = '/init {{worktree}}';
-    h.triaged(only(h.act({ type: 'retriage', workItemId: 1 }), 'triage'), 'dev:develop');
+    expect(h.act({ type: 'retry', workItemId: 1 })).toEqual([]);
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'sources.github.setupPrompt: Unknown template variable: worktree.' });
+
+    h.settings.sources['github']!.setupPrompt = '/init-worktree {{ticket.sourceKey}}';
+    expect(only(h.act({ type: 'retry', workItemId: 1 }), 'start-session')).toMatchObject({ kind: 'setup', prompt: '/init-worktree 1' });
+    expect(h.store.triagesFor(1)).toHaveLength(1);
   });
 
   it('skips setup when the ticket already has a worktree, and workdir repoRoot ignores the worktree', () => {
@@ -1317,26 +1338,45 @@ describe('limits and the one-session-in-a-turn rule', () => {
 });
 
 describe('operator actions', () => {
-  it('refuses Triage again with an active session', () => {
+  it('refuses Retry on a work item that has not failed', () => {
     const h = new Harness();
     const [triage] = h.poll(issue('1'));
+
+    expect(h.send({ type: 'retry', workItemId: 1 }).refused).toBe('The work item has not failed.');
     h.triaged(triage, 'dev:question');
+    expect(h.send({ type: 'retry', workItemId: 1 }).refused).toBe('The work item has not failed.');
 
     h.started(h.act({ type: 'start', workItemId: 1 })[0]);
-    expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('The work item has an active session.');
+    expect(h.send({ type: 'retry', workItemId: 1 }).refused).toBe('The work item has not failed.');
+    expect(h.item(1)).toMatchObject({ status: 'running' });
   });
 
-  it('triages again, refusing while triage runs', () => {
+  it('refuses Retry while a failed work item has an active session', () => {
     const h = new Harness();
-    const [triage] = h.poll(issue('1'));
+    const [triage] = h.poll(issue('15619'));
+    const setup = h.started(only(h.triaged(triage, 'dev:develop'), 'start-session'));
 
-    expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('Triage is already running.');
-    h.triaged(triage, 'dev:question');
+    h.act({ type: 'roster', sessions: [] });
+    // The operator reopened the setup session in a tab, which has run no turn.
+    h.act({ type: 'roster', sessions: [{ sessionId: setup, state: 'idle', detail: null, interactive: true }] });
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: MESSAGES.setupWithoutWorktree });
+    expect(h.send({ type: 'retry', workItemId: 1 }).refused).toBe('The work item has an active session.');
+    expect(h.status(1)).toBe('failed');
+  });
 
-    const again = only(h.act({ type: 'retriage', workItemId: 1 }), 'triage');
-    expect(h.store.triage(again.triageId)).toMatchObject({ workItemId: 1, endedAt: null });
-    h.triaged(again, 'support:defect');
-    expect(h.item(1).playbook).toBe('support:defect');
+  it('keeps the playbook, guidance and readiness when Retry queues a failed start', () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 } }) });
+    const [first, second] = h.poll(issue('1'), issue('2'));
+    h.triaged(first, 'dev:question');
+    h.triaged(second, 'dev:question');
+    h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+    h.store.updateWorkItem(2, { readyAt: T0 });
+    h.act({ type: 'start', workItemId: 2, guidance: 'Check the logs.' });
+    h.store.updateWorkItem(2, { status: 'failed', error: 'The start failed.' });
+
+    expect(h.act({ type: 'retry', workItemId: 2 })).toEqual([]);
+    expect(h.item(2)).toMatchObject({ status: 'queued', queuedAt: T0, error: null, playbook: 'dev:question', guidance: 'Check the logs.', readyAt: T0 });
+    expect(h.store.triagesFor(2)).toHaveLength(1);
   });
 
   it('refuses actions that do not apply', () => {
@@ -1388,8 +1428,8 @@ describe('ad-hoc', () => {
     expect(h.store.ticket(2)).toMatchObject({ sourceKey: '2', ref: '#2' });
     expect(h.status(2)).toBe('queued');
 
-    expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBe('The work item has an active session.');
-    expect(h.send({ type: 'retriage', workItemId: 2 }).refused).toBe('An ad-hoc work item is not triaged.');
+    expect(h.send({ type: 'retry', workItemId: 1 }).refused).toBe('The work item has not failed.');
+    expect(h.send({ type: 'retry', workItemId: 2 }).refused).toBe('The work item has not failed.');
   });
 
   it('leaves the work item unstarted until Start when not asked to start', () => {
@@ -1656,17 +1696,13 @@ describe('ticket reports (PRD R83)', () => {
     expect(move(k, null, first).refused).toBe("Only the work item's latest session can move it to a ticket.");
   });
 
-  it('never gives a moved ad-hoc key to a new ad-hoc ticket, and offers Triage again once the session ends', () => {
+  it('never gives a moved ad-hoc key to a new ad-hoc ticket', () => {
     const h = harness();
     register(h);
     move(h);
     h.act({ type: 'adhoc', prompt: 'Second', repoRoot: 'D:/git/widgets' });
 
     expect(h.store.ticket(2)).toMatchObject({ source: 'adhoc', sourceKey: '2' });
-
-    h.act({ type: 'roster', sessions: [] });
-    expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBeNull();
-    expect(h.item(1)).toMatchObject({ status: 'triaging' });
   });
 });
 
@@ -1749,12 +1785,9 @@ describe('in-queue times (PRD R27)', () => {
 
     h.now = T0 + 5_000;
     h.act({ type: 'roster', sessions: [] });
-    h.triaged(only(h.act({ type: 'retriage', workItemId: 1 }), 'triage'), 'dev:question');
-    expect(h.item(1)).toMatchObject({ status: 'unstarted', statusAt: T0 + 5_000, runStartedAt: T0 + 2_000 });
-
-    h.now = T0 + 6_000;
-    h.act({ type: 'start', workItemId: 1 });
-    expect(h.item(1)).toMatchObject({ status: 'running', statusAt: T0 + 6_000, runStartedAt: T0 + 6_000 });
+    h.store.updateWorkItem(1, { status: 'failed', error: 'The start failed.' });
+    h.act({ type: 'retry', workItemId: 1 });
+    expect(h.item(1)).toMatchObject({ status: 'running', statusAt: T0 + 5_000, runStartedAt: T0 + 5_000 });
   });
 
   it('starts the run clock when a queued work item starts, not when it was queued', () => {

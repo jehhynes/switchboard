@@ -16,6 +16,42 @@ describe('Store', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('gives a work item whose triage could not start a failed triage when upgrading, so it counts as failed at triage', () => {
+    const version = MIGRATIONS.length - 1;
+    const path = join(dir, 'failed.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version};
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'One', '', 1, ''), (2, 'adhoc', '2', 'Two', '', 1, '');
+      INSERT INTO workItems (id, ticketId, playbook, taskPrompt, status, error, createdAt, statusAt) VALUES
+        (1, 1, NULL, NULL, 'failed', 'sources.github.triagePlaybook is not set.', 1, 5),
+        (2, 1, 'dev:question', NULL, 'failed', 'Workspace not trusted', 1, 6),
+        (3, 1, NULL, NULL, 'failed', 'Timed out.', 1, 7),
+        (4, 2, NULL, NULL, 'failed', 'Workspace not trusted', 1, 8),
+        (5, 1, NULL, NULL, 'unstarted', NULL, 1, 9),
+        (6, 1, 'dev:question', '/answer', 'failed', 'Triage playbook triage:github is not loaded.', 1, 12),
+        (7, 1, 'dev:question', '/answer', 'failed', 'Workspace not trusted', 1, 13);
+      INSERT INTO triages (ticketId, workItemId, startedAt, endedAt, playbook, error) VALUES (1, 3, 6, 7, NULL, 'Timed out.'), (1, 6, 2, 3, 'dev:question', NULL), (1, 7, 2, 3, 'dev:question', NULL);
+      INSERT INTO events (id, at, type, actor, ticketId, workItemId) VALUES (100, 11, 'retriage', 'operator', 1, 6), (101, 12, 'tick', 'hub', 1, 6), (102, 11, 'start', 'operator', 1, 7), (103, 13, 'session-start-failed', 'session', 1, 7);
+      INSERT INTO changes (eventId, ticketId, workItemId, entity, entityId, op, fields) VALUES
+        (100, 1, 6, 'workItem', '6', 'update', '{"status":["finished","triaging"]}'),
+        (101, 1, 6, 'workItem', '6', 'update', '{"status":["triaging","failed"],"error":[null,"Triage playbook triage:github is not loaded."]}'),
+        (102, 1, 7, 'workItem', '7', 'update', '{"status":["unstarted","triaging"]}'),
+        (102, 1, 7, 'workItem', '7', 'update', '{"status":["queued","running"]}'),
+        (103, 1, 7, 'workItem', '7', 'update', '{"status":["running","failed"]}');`);
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect(store.triagesFor(1)).toMatchObject([{ ticketId: 1, startedAt: 5, endedAt: 5, playbook: null, error: 'sources.github.triagePlaybook is not set.' }]);
+    expect(store.triagesFor(3)).toMatchObject([{ error: 'Timed out.' }]);
+    // A failed re-triage of a work item that kept its earlier playbook, which the log shows.
+    expect(store.triagesFor(6)).toMatchObject([{ playbook: 'dev:question', error: null }, { startedAt: 12, endedAt: 12, playbook: null, error: 'Triage playbook triage:github is not loaded.' }]);
+    expect(store.triagesFor(7)).toHaveLength(1);
+    expect([2, 4, 5].map((id) => store.triagesFor(id))).toEqual([[], [], []]);
+    store.close();
+  });
+
   it('seeds the latest successful Support classification when upgrading version 29', () => {
     const path = join(dir, 'v29.db');
     const raw = new DatabaseSync(path);

@@ -63,14 +63,16 @@ describe('queueWaits', () => {
     expect(h.item(1)).toMatchObject({ status: 'done', doneReason: 'unassigned' });
   });
 
-  it('offers Triage again after the approved session fails to start, while the earlier one stays open idle', () => {
+  it('runs the approved prompt again on Retry after the approved session fails to start, while the earlier one stays open idle', () => {
     const { h } = approvalKeptOpen('idle');
     const start = only(h.act({ type: 'approve', workItemId: 1 }), 'start-session');
 
     h.act({ type: 'session-start-failed', sessionId: start.sessionId, message: 'x' });
     expect(h.status(1)).toBe('failed');
-    expect(h.send({ type: 'retriage', workItemId: 1 }).refused).toBeNull();
-    expect(h.status(1)).toBe('triaging');
+    const again = only(h.act({ type: 'retry', workItemId: 1 }), 'start-session');
+    expect(again).toMatchObject({ workItemId: 1, prompt: expect.stringContaining('/publish') });
+    expect(again.sessionId).not.toBe(start.sessionId);
+    expect(h.status(1)).toBe('running');
   });
 
   it('holds an approved work item while its own earlier session waits on a question, and starts it when the turn ends', () => {

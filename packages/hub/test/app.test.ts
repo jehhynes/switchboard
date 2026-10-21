@@ -257,7 +257,7 @@ describe('createHubApp', () => {
 
     expect(await app.post['/action']!({ type: 'approve', workItemId: 9 })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
     expect(await app.post['/action']!({ type: 'poll' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
-    expect(await app.post['/action']!({ type: 'retry', workItemId: 1 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
+    expect(await app.post['/action']!({ type: 'retriage', workItemId: 1 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/action']!({ type: 'answer', workItemId: 9, nativeSessionId: 'n', question: 'Which?', answer: 'Birch' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/action']!({ type: 'open-question', workItemId: 9, nativeSessionId: 'n' })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
     expect(await app.post['/action']!({ type: 'open-question', workItemId: 'x', nativeSessionId: 'n' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });

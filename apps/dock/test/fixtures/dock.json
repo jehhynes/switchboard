@@ -179,14 +179,6 @@
           "terminal": null,
           "controls": [
             {
-              "label": "Triage again",
-              "glyph": "",
-              "action": {
-                "type": "retriage",
-                "workItemId": 7
-              }
-            },
-            {
               "label": "Mark done",
               "glyph": "",
               "action": {
@@ -356,14 +348,6 @@
               }
             },
             {
-              "label": "Triage again",
-              "glyph": "",
-              "action": {
-                "type": "retriage",
-                "workItemId": 10
-              }
-            },
-            {
               "label": "Mark done",
               "glyph": "",
               "action": {
@@ -501,10 +485,10 @@
           "terminal": null,
           "controls": [
             {
-              "label": "Triage again",
-              "glyph": "",
+              "label": "Retry",
+              "glyph": "",
               "action": {
-                "type": "retriage",
+                "type": "retry",
                 "workItemId": 14
               }
             },
@@ -538,9 +522,9 @@
               }
             }
           ],
-          "main": "Triage again",
-          "mainGlyph": "",
-          "mainTitle": "Triage again",
+          "main": "Retry",
+          "mainGlyph": "",
+          "mainTitle": "Retry",
           "pastes": [],
           "commands": [
             {
@@ -734,14 +718,6 @@
                 "detail": "Switchboard adds it to the end of the session's prompt.",
                 "field": "guidance",
                 "action": "Start"
-              }
-            },
-            {
-              "label": "Triage again",
-              "glyph": "",
-              "action": {
-                "type": "retriage",
-                "workItemId": 9
               }
             },
             {

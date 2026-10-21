@@ -158,16 +158,28 @@ describe('schedules (PRD R82)', () => {
     expect(items(h, 'gone')).toMatchObject([{ status: 'failed', error: 'Playbook ops:gone is not loaded.' }]);
     expect(items(h, 'triage')).toMatchObject([{ status: 'failed', error: 'triage:github is not a task playbook.' }]);
     expect(ticket(h, 'gone').title).toBe('gone');
+
+    // Retry does not start a triage playbook as a task.
+    expect(h.act({ type: 'retry', workItemId: items(h, 'triage')[0]!.id })).toEqual([]);
+    expect(items(h, 'triage')).toMatchObject([{ status: 'failed', error: 'triage:github is not a task playbook.' }]);
   });
 
-  it('refuses Triage again on a run', () => {
+  it('fails a run again on Retry until its playbook loads, then starts it', () => {
     const h = harness({ review: { playbook: 'ops:review', repoRoot: 'D:/git/research', every: null, day: null, at: null } });
     h.act({ type: 'run-schedule', name: 'review' });
     h.act({ type: 'mark-done', workItemId: 1 });
+    h.act({ type: 'session-start-failed', sessionId: 's1', message: 'Stopped.' });
     h.settings = settings({ schedules: { review: { playbook: 'ops:missing', repoRoot: 'D:/r', every: null, day: null, at: null } } });
     h.act({ type: 'run-schedule', name: 'review' });
 
-    expect(h.send({ type: 'retriage', workItemId: 2 }).refused).toBe('A scheduled work item is not triaged.');
+    expect(h.item(2)).toMatchObject({ status: 'failed', error: 'Playbook ops:missing is not loaded.' });
+
+    expect(h.act({ type: 'retry', workItemId: 2 })).toEqual([]);
+    expect(h.item(2)).toMatchObject({ status: 'failed', error: 'Playbook ops:missing is not loaded.' });
+
+    h.playbooks.set('ops:missing', { ...h.playbooks.get('ops:review')!, name: 'ops:missing' });
+    expect(h.act({ type: 'retry', workItemId: 2 })).toMatchObject([{ type: 'start-session', workItemId: 2, kind: 'task' }]);
+    expect(h.item(2)).toMatchObject({ status: 'running', playbook: 'ops:missing', error: null });
   });
 
   it('follows a change of playbook description and repo root on the next tick', () => {

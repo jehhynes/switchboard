@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { activeSession, groupOf, reviewKey, START_PROMPT, waitsToStart } from './group.js';
+import { activeSession, failedAtTriage, groupOf, reviewKey, START_PROMPT, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { repoRoots } from './settings.js';
@@ -174,7 +174,8 @@ export type FlowEvent =
   | { type: 'ticket'; sessionId: string; source: string; sourceKey: string; ref: string; title: string; url: string; playbook: string | null }
   /** Run now: a queued work item for the named schedule (PRD R82). */
   | { type: 'run-schedule'; name: string }
-  | { type: 'approve' | 'mark-done' | 'reopen' | 'retriage' | 'stop' | 'delete'; workItemId: number }
+  /** `retry` retries a failed work item from the step that failed (PRD R34). */
+  | { type: 'approve' | 'mark-done' | 'reopen' | 'retry' | 'stop' | 'delete'; workItemId: number }
   /** `guidance` is added to the task session's prompt (PRD R77). */
   | { type: 'start'; workItemId: number; guidance?: string | null }
   | { type: 'pick'; ticketId: number; guidance?: string | null }
@@ -289,7 +290,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retriage', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -535,8 +536,8 @@ class Flow {
         return this.done(this.openItem(event.workItemId), 'operator', null);
       case 'reopen':
         return this.reopen(this.knownItem(event.workItemId));
-      case 'retriage':
-        return this.retriage(this.openItem(event.workItemId));
+      case 'retry':
+        return this.retry(this.openItem(event.workItemId));
       case 'stop':
         return this.stop(this.knownItem(event.workItemId));
       case 'delete':
@@ -1097,7 +1098,7 @@ class Flow {
     if (playbook.autoStart && !event.stale) {
       this.queue(item);
     } else {
-      // The row says why the work item waits; Start and Triage again clear it (PRD R80).
+      // The row says why the work item waits; Start clears it (PRD R80).
       this.setStatus(item.id, { status: 'unstarted', error: event.stale ? MESSAGES.nothingNew : null });
     }
   }
@@ -1140,10 +1141,11 @@ class Flow {
     const name = source?.triagePlaybook ?? '';
     const playbook = this.context.playbooks.get(name);
     const prefix = source?.namespace ? `${source.namespace}:` : '';
+    // The failed triage row marks a work item failed at triage (PRD R34).
     const fail = (error: string) => {
-      if (item === null) {
-        this.store.insertTriage({ ...EMPTY_TRIAGE, ticketId: ticket.id, workItemId: null, startedAt: this.now, endedAt: this.now, error });
-      } else {
+      this.store.insertTriage({ ...EMPTY_TRIAGE, ticketId: ticket.id, workItemId: item?.id ?? null, startedAt: this.now, endedAt: this.now, error });
+
+      if (item !== null) {
         this.fail(item, error);
       }
     };
@@ -1251,6 +1253,12 @@ class Flow {
 
       this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now });
       const item = this.store.workItem(session.workItemId)!;
+
+      // The started task session's prompt holds the guidance (PRD R77).
+      if (session.kind === 'task' && item.guidance !== null) {
+        this.store.updateWorkItem(item.id, { guidance: null });
+      }
+
       const ticket = this.store.ticket(item.ticketId)!;
       if (session.kind === 'task' && (ticket.source === 'zoho' || ticket.source === 'forum')) {
         this.store.volumeWorked(ticket.id, session.id, this.now);
@@ -1431,7 +1439,7 @@ class Flow {
     const session = this.store.session(sessionId);
     const item = session === null ? null : this.latest(session);
 
-    // A resume, an approval report or a later done report replaced the token; Triage again changed the status.
+    // A resume, an approval report or a later done report replaced the token, or the status changed.
     if (item === null || session!.outcomeDetail !== token || !awaitsRecheck(item, session!)) {
       return;
     }
@@ -1773,7 +1781,7 @@ class Flow {
   private reviewItem(workItemId: number): WorkItem {
     const item = this.openItem(workItemId);
 
-    if (this.store.ticket(item.ticketId)!.snoozed || groupOf({ ...item, sessions: this.store.sessionsFor(item.id) }) !== 'review') {
+    if (this.store.ticket(item.ticketId)!.snoozed || groupOf({ ...item, sessions: this.store.sessionsFor(item.id), triage: this.store.triagesFor(item.id).at(-1) ?? null }) !== 'review') {
       throw new Refusal('The work item is not in Ready for review.');
     }
 
@@ -1921,20 +1929,22 @@ class Flow {
     this.queue(item);
   }
 
-  private retriage(item: WorkItem): void {
+  /**
+   * PRD R34: a work item that failed at triage triages again; any other failure queues it, so its next start runs setup, the approved prompt
+   * or the task session, as before it failed. Its playbook, approval, guidance and readiness stay.
+   */
+  private retry(item: WorkItem): void {
+    if (item.status !== 'failed') {
+      throw new Refusal('The work item has not failed.');
+    }
+
     this.requireNoSession(item);
 
-    const source = this.store.ticket(item.ticketId)!.source;
-
-    if (source === ADHOC_SOURCE || source === SCHEDULE_SOURCE) {
-      throw new Refusal(`${source === ADHOC_SOURCE ? 'An ad-hoc' : 'A scheduled'} work item is not triaged.`);
+    if (failedAtTriage({ ...item, triage: this.store.triagesFor(item.id).at(-1) ?? null })) {
+      this.setStatus(item.id, { status: 'triaging', error: null });
+    } else {
+      this.queue(item);
     }
-
-    if (this.store.runningTriages().some((triage) => triage.workItemId === item.id)) {
-      throw new Refusal('Triage is already running.');
-    }
-
-    this.setStatus(item.id, { status: 'triaging', error: null, queuedAt: null, guidance: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, readyAt: null, orderAt: null });
   }
 
   /**
@@ -2116,6 +2126,11 @@ class Flow {
       return;
     }
 
+    if (playbook !== null && playbook.kind !== 'task') {
+      this.fail(item, `${playbook.name} is not a task playbook.`);
+      return;
+    }
+
     const worktree = this.store.worktreeFor(ticket.id);
     const repoRoot = ticket.repoRoot || source?.repoRoot || '';
     const approved = item.approvalPrompt !== null;
@@ -2165,7 +2180,7 @@ class Flow {
     // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do.
     const provider = playbook?.provider ?? sessions.provider;
     const reports = sessionReports(kind, approved, playbook, provider);
-    // The guidance waits through a setup session for the task session, and an approved prompt does not take it (PRD R77).
+    // The guidance waits through a setup session and a failed start for the task session, and an approved prompt does not take it (PRD R77).
     const guided = kind === 'task' && !approved;
     const full = sessionPrompt(prompt, id, guided ? item.guidance : null);
 
@@ -2173,9 +2188,6 @@ class Flow {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
     }
 
-    if (guided && item.guidance !== null) {
-      this.store.updateWorkItem(item.id, { guidance: null });
-    }
     const label = kind === 'task' ? (item.playbook ?? 'ad-hoc') : kind;
     const own = kind === 'task' ? playbook : null;
 

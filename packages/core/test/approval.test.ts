@@ -42,16 +42,6 @@ describe('approval reports (PRD R23, R31)', () => {
     expect(h.report('s2', { kind: 'done' }).refused).toBeNull();
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
   });
-
-  it('drops the pending approval when the work item is triaged again', () => {
-    const h = new Harness();
-    const { item, session } = running(h);
-
-    h.report(session, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: 'D:\\wt\\review.md' });
-    h.act({ type: 'roster', sessions: [] });
-    h.act({ type: 'retriage', workItemId: item });
-    expect(h.item(item)).toMatchObject({ status: 'triaging', approvalPrompt: null, approvalSummary: null, approvalReport: null });
-  });
 });
 
 describe('a resumed session after an approval report (PRD R34)', () => {
@@ -189,7 +179,7 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'session' });
   });
 
-  it('keeps a held approval that a done report leaves blocked, never starts it without Approve, and clears it on Triage again', () => {
+  it('keeps a held approval that a done report leaves blocked, and never starts it without Approve or Retry', () => {
     const h = harness();
     const { item, session } = awaitingApproval(h);
 
@@ -201,9 +191,8 @@ describe('a resumed session after an approval report (PRD R34)', () => {
     expect(h.send({ type: 'approve', workItemId: item }).refused).toBe('The work item is not awaiting approval.');
 
     h.act({ type: 'roster', sessions: [] });
-    h.triaged(only(h.act({ type: 'retriage', workItemId: item }), 'triage'), 'dev:question');
-    expect(h.item(item)).toMatchObject({ status: 'unstarted', approvalPrompt: null, approvalSummary: null, approvalReport: null });
-    expect(only(h.act({ type: 'start', workItemId: item }), 'start-session').prompt).toMatch(/^Answer Issue 1\./);
+    expect(h.send({ type: 'retry', workItemId: item }).refused).toBe('The work item has not failed.');
+    expect(h.item(item)).toMatchObject({ status: 'blocked', ...APPROVAL });
   });
 
   it('clears an earlier done outcome, so a held run that ends returns to approval', () => {
