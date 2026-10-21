@@ -14,11 +14,15 @@ public sealed class HubStarter(string switchboardHome, Func<DateTime>? now = nul
     /// <summary>The shortest time between two starts, so a hub that cannot start is not started on every retry.</summary>
     public static readonly TimeSpan Every = TimeSpan.FromSeconds(30);
 
+    /// <summary>How long no hub answers before the dock starts one, so a VS Code window replacing the hub, such as for a new config folder, wins.</summary>
+    public static readonly TimeSpan Grace = TimeSpan.FromSeconds(5);
+
     public const string Never = "Switchboard is not running. Open VS Code once to start it; after that the dock starts it.";
 
     readonly Func<DateTime> clock = now ?? (() => DateTime.UtcNow);
     readonly Func<ProcessStartInfo, Process?> run = start ?? Process.Start;
     DateTime? started;
+    DateTime? missingSince;
     string? problem;
     // The hub process last started, so a hub that exits at once is reported rather than shown as starting.
     Process? launched;
@@ -34,6 +38,8 @@ public sealed class HubStarter(string switchboardHome, Func<DateTime>? now = nul
     /// <summary>Keeps the runtime and config folder of a hub the dock connected to; a record from an older hub, without them, changes nothing.</summary>
     public void Remember(HubRecord record)
     {
+        missingSince = null;
+
         if (string.IsNullOrEmpty(record.ExecPath) || string.IsNullOrEmpty(record.ConfigDir))
         {
             return;
@@ -57,11 +63,18 @@ public sealed class HubStarter(string switchboardHome, Func<DateTime>? now = nul
     }
 
     /// <summary>
-    /// Starts a hub unless one was started less than <see cref="Every"/> ago; returns what the dock says while no hub runs: why it could not
-    /// start one, or null while one is starting.
+    /// Starts a hub once none has answered for <see cref="Grace"/>, unless one was started less than <see cref="Every"/> ago; returns what the
+    /// dock says while no hub runs: why it could not start one, or null while one is starting or about to be.
     /// </summary>
     public string? Start()
     {
+        missingSince ??= clock();
+
+        if (clock() - missingSince < Grace)
+        {
+            return problem;
+        }
+
         if (launched is { HasExited: true } ended)
         {
             problem = $"Switchboard's hub stopped as it started (exit code {ended.ExitCode}); see {Path.Combine(switchboardHome, "hub.log")}.";

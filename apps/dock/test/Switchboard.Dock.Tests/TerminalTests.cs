@@ -249,6 +249,19 @@ public sealed class TerminalTests
         Assert.Equal("/usr/bin", Terminals.CliEnvironment(environment, "claude")["Path"]);
     }
 
+    [Theory]
+    [InlineData("CLAUDE_CODE_USE_BEDROCK", "1")]
+    [InlineData("CLAUDE_CODE_USE_VERTEX", "1")]
+    [InlineData("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "8192")]
+    [InlineData("CLAUDE_CODE_GIT_BASH_PATH", @"C:\Program Files\Git\bin\bash.exe")]
+    public void CliEnvironment_OperatorConfiguration_KeepsItAndDropsOnlySessionMarkers(string key, string value)
+    {
+        var result = Terminals.CliEnvironment(new Hashtable { [key] = value, ["CLAUDE_CODE_CHILD_SESSION"] = "1", ["CLAUDE_CODE_SESSION_ID"] = "s", ["CLAUDE_CODE_ENTRYPOINT"] = "cli", ["CLAUDE_PID"] = "7" }, "claude");
+
+        Assert.Equal([key], result.Keys);
+        Assert.Equal(value, result[key]);
+    }
+
     [Fact]
     public void ShellWindows_FindsTerminalsByNameAndKeepsThemOutOfTheVsCodeLookup()
     {

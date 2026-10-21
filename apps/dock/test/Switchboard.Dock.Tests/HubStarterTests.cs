@@ -21,6 +21,15 @@ public sealed class HubStarterTests
         return null;
     });
 
+    /// <summary>Starts after the grace a missing hub gets, as the dock's retries reach it.</summary>
+    string? StartAfterGrace(HubStarter starter)
+    {
+        starter.Start();
+        now += HubStarter.Grace;
+
+        return starter.Start();
+    }
+
     /// <summary>A runtime and bundle that exist, as a hub a VS Code window started would leave them.</summary>
     HubRecord Installed()
     {
@@ -37,7 +46,7 @@ public sealed class HubStarterTests
     [Fact]
     public void Start_NoHubSeenYet_SaysToOpenVsCodeOnceAndStartsNothing()
     {
-        Assert.Equal(HubStarter.Never, Starter().Start());
+        Assert.Equal(HubStarter.Never, StartAfterGrace(Starter()));
         Assert.Empty(started);
     }
 
@@ -50,7 +59,7 @@ public sealed class HubStarterTests
         starter.Remember(new HubRecord(51234, "t0k", 42));
         starter.Remember(new HubRecord(51234, "t0k", 42, "C:/cfg"));
 
-        Assert.Equal(HubStarter.Never, starter.Start());
+        Assert.Equal(HubStarter.Never, StartAfterGrace(starter));
         Assert.Empty(started);
     }
 
@@ -62,7 +71,7 @@ public sealed class HubStarterTests
 
         starter.Remember(record);
 
-        Assert.Null(starter.Start());
+        Assert.Null(StartAfterGrace(starter));
 
         var info = Assert.Single(started);
         var hub = OperatingSystem.IsWindows() ? [info.FileName, .. info.ArgumentList] : info.ArgumentList.TakeLast(4).ToList();
@@ -77,7 +86,7 @@ public sealed class HubStarterTests
         var starter = Starter();
 
         starter.Remember(Installed());
-        starter.Start();
+        StartAfterGrace(starter);
         now += TimeSpan.FromSeconds(29);
 
         Assert.Null(starter.Start());
@@ -89,6 +98,29 @@ public sealed class HubStarterTests
     }
 
     [Fact]
+    public void Start_HubMissingForLessThanTheGrace_StartsNothingAndAHubAnsweringRestartsTheGrace()
+    {
+        var starter = Starter();
+        var record = Installed();
+
+        starter.Remember(record);
+        Assert.Null(starter.Start());
+        now += HubStarter.Grace - TimeSpan.FromSeconds(1);
+        Assert.Null(starter.Start());
+        Assert.Empty(started);
+
+        // A window's new hub answered, then went away again: the grace counts from the next missed attempt.
+        starter.Remember(record);
+        now += TimeSpan.FromSeconds(2);
+        Assert.Null(starter.Start());
+        Assert.Empty(started);
+
+        now += HubStarter.Grace;
+        starter.Start();
+        Assert.Single(started);
+    }
+
+    [Fact]
     public void Start_RuntimeOrBundleGone_SaysWhichAndStartsNothing()
     {
         var starter = Starter();
@@ -97,7 +129,7 @@ public sealed class HubStarterTests
         starter.Remember(record);
         File.Delete(record.ExecPath!);
 
-        Assert.Equal($"Switchboard could not start the hub: {record.ExecPath} is missing. Open VS Code once to start it.", starter.Start());
+        Assert.Equal($"Switchboard could not start the hub: {record.ExecPath} is missing. Open VS Code once to start it.", StartAfterGrace(starter));
 
         File.WriteAllText(record.ExecPath!, "");
         File.Delete(Path.Combine(Switchboard, "hub.js"));
@@ -115,7 +147,7 @@ public sealed class HubStarterTests
 
         starter.Remember(Installed());
 
-        Assert.Equal("Switchboard could not start the hub: Permission denied", starter.Start());
+        Assert.Equal("Switchboard could not start the hub: Permission denied", StartAfterGrace(starter));
     }
 
     [Fact]
@@ -152,7 +184,7 @@ public sealed class HubStarterTests
         var starter = new HubStarter(Switchboard, () => now);
 
         starter.Remember(record);
-        Assert.Null(starter.Start());
+        Assert.Null(StartAfterGrace(starter));
         await starter.Launched!.WaitForExitAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal($"Switchboard's hub stopped as it started (exit code 1); see {Path.Combine(Switchboard, "hub.log")}.", starter.Start());
@@ -182,10 +214,10 @@ public sealed class HubStarterTests
             environment[name] = Path.Combine(home, "profile", name);
         }
 
-        var starter = new HubStarter(Switchboard, extraArgs: ["--browser-port=0", "--idle-ms=60000"], environment: environment);
+        var starter = new HubStarter(Switchboard, () => now, extraArgs: ["--browser-port=0", "--idle-ms=60000"], environment: environment);
 
         starter.Remember(new HubRecord(1, "x", 1, config, node));
-        Assert.Null(starter.Start());
+        Assert.Null(StartAfterGrace(starter));
 
         // The shell execs the runtime, so the process started is the hub; it is ended whatever the test finds.
         using var hub = starter.Launched!;

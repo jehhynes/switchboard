@@ -290,7 +290,9 @@ public sealed class HubClientTests
     public async Task Start_NoHubAndAStarterThatNeverSawOne_SaysToOpenVsCodeOnce()
     {
         var home = Fixtures.TempFolder();
-        using var client = new HubClient(home, new HubStarter(home));
+        var at = DateTime.UtcNow;
+        // Each attempt reads a clock 10 seconds on, past the grace a missing hub gets.
+        using var client = new HubClient(home, new HubStarter(home, () => at = at.AddSeconds(10)));
         var changes = 0;
 
         client.Changed += () => Interlocked.Increment(ref changes);

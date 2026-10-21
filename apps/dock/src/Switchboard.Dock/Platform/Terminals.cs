@@ -46,8 +46,10 @@ public static class Terminals
     }
 
     /// <summary>
-    /// The dock's environment for the CLI: without VS Code's and a Claude Code session's variables, which would make Claude turn off transcripts or
-    /// target a VS Code window (mechanics M46), and with an absolute executable's folder first on PATH, so an npm launcher finds its Node.js.
+    /// The dock's environment for the CLI: without VS Code's variables and the markers of a Claude Code session the dock may have been started from,
+    /// which would make Claude turn off transcripts or target a VS Code window (mechanics M46), keeping the operator's own Claude Code settings such
+    /// as <c>CLAUDE_CODE_USE_BEDROCK</c>, as the hub's sessions do; and with an absolute executable's folder first on PATH, so an npm launcher finds
+    /// its Node.js.
     /// </summary>
     public static Dictionary<string, string> CliEnvironment(IDictionary environment, string executable)
     {
@@ -72,8 +74,12 @@ public static class Terminals
     }
 
     static bool Dropped(string key) =>
-        key.Equals("CLAUDECODE", StringComparison.OrdinalIgnoreCase)
-        || new[] { "CLAUDE_CODE_", "ELECTRON_", "VSCODE_" }.Any((prefix) => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        SessionMarkers.Contains(key) || new[] { "ELECTRON_", "VSCODE_", "CLAUDE_CODE_MESSAGING_" }.Any((prefix) => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>What Claude Code sets in the processes a session runs, read from a session's environment (Claude Code 2.1.305).</summary>
+    static readonly HashSet<string> SessionMarkers = new(
+        ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_SESSION_ATTENDED"],
+        StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>Opens a session's terminal in a new Ptyxis window.</summary>
