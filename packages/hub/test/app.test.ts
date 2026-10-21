@@ -645,7 +645,7 @@ describe('createHubApp', () => {
     app.attachWindows?.((event, data) => claims.push({ event, data }));
     const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
     closers.push(() => server.close());
-    const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', port: server.port, token: server.token, pid: 1, startedAt: '' };
+    const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
     expect(await postToHub(record, '/action', { type: 'mark-done', workItemId: 1 }, 5000)).toMatchObject({ status: 409, error: 'Unknown work item 1.' });
     expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' });

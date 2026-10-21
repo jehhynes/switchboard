@@ -71,6 +71,8 @@ describe('serveHub', () => {
     expect(record.version).toBe('0.1.0');
     expect(record.build).toBe('b1');
     expect(record.configDir).toBe('C:/cfg');
+    // The dock starts a hub with the runtime this one runs under (PRD R71).
+    expect(record.execPath).toBe(process.execPath);
     expect(await findHub(home)).toEqual(record);
   });
 

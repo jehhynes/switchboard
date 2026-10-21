@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeEnsure } from '../src/ensure.js';
 import type { EnsureDeps } from '../src/ensure.js';
 
-const current: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', port: 5000, token: 't1', pid: 7, startedAt: 'now' };
+const current: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: 5000, token: 't1', pid: 7, startedAt: 'now' };
 const old: HubRecord = { ...current, build: 'b0', port: 5001, token: 't0', pid: 6 };
 
 /** `find` returns the answers in order and then repeats the last one. */

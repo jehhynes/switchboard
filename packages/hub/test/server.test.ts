@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 function recordOf(s: HubServer) {
-  return { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', port: s.port, token: s.token, pid: 99, startedAt: '' };
+  return { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: s.port, token: s.token, pid: 99, startedAt: '' };
 }
 
 describe('listenHub', () => {

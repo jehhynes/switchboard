@@ -2,8 +2,11 @@ using System.Text.Json;
 
 namespace Switchboard.Dock.Hub;
 
-/// <summary>The running hub's <c>hub.json</c>: where it listens and the token its requests need (architecture.md § Hub lifecycle).</summary>
-public sealed record HubRecord(int Port, string Token, int Pid)
+/// <summary>
+/// The running hub's <c>hub.json</c>: where it listens, the token its requests need, and its config folder and runtime, which the dock starts the
+/// next hub with; an older hub writes neither (architecture.md § Hub lifecycle).
+/// </summary>
+public sealed record HubRecord(int Port, string Token, int Pid, string? ConfigDir = null, string? ExecPath = null)
 {
     /// <summary>The record in a Switchboard home, or null when it is missing or unreadable.</summary>
     public static HubRecord? Read(string switchboardHome)

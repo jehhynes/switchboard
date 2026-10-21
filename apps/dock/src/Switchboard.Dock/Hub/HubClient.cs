@@ -18,9 +18,9 @@ public enum Connection
 
 /// <summary>
 /// Holds the running hub's dock stream (<c>GET /dock/events</c>), connecting again whenever it ends, and sends the click's requests.
-/// The dock never starts the hub; a VS Code window with Switchboard does (PRD R71).
+/// While no hub answers, <paramref name="starter"/> starts one, as a VS Code window with Switchboard does (PRD R71).
 /// </summary>
-public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IVolumeHub, IDisposable
+public sealed class HubClient(string switchboardHome, HubStarter? starter = null) : IHub, IConfigHub, IVolumeHub, IDisposable
 {
     static readonly TimeSpan Retry = TimeSpan.FromSeconds(2);
     static readonly TimeSpan HeadersTimeout = TimeSpan.FromSeconds(5);
@@ -34,6 +34,11 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IVolum
     public DockView? View { get; private set; }
 
     public Connection Connection { get; private set; } = Connection.Connecting;
+
+    /// <summary>What the dock says while no hub runs: why it could not start one, that one is starting, or to open VS Code without a starter.</summary>
+    public string NotRunningText { get; private set; } = NotRunningDefault;
+
+    const string NotRunningDefault = "Switchboard is not running. Open VS Code to start it.";
 
     /// <summary>Raised on the stream's thread after the view or the connection changes.</summary>
     public event Action? Changed;
@@ -67,6 +72,20 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IVolum
                 }
                 catch (Exception error) when (error is HttpRequestException or IOException or TaskCanceledException or JsonException && !token.IsCancellationRequested)
                 {
+                }
+            }
+
+            if (ended == Connection.NotRunning && starter is not null)
+            {
+                var text = starter.Start() ?? "Starting Switchboard…";
+                var changed = text != NotRunningText;
+
+                NotRunningText = text;
+
+                // A connection that stays not running raises no change of its own.
+                if (changed && Connection == Connection.NotRunning)
+                {
+                    Changed?.Invoke();
                 }
             }
 
@@ -104,6 +123,8 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IVolum
         }
 
         response.EnsureSuccessStatusCode();
+        // The stream answered the record's token, so the record is this hub's: keep how to start the next one.
+        starter?.Remember(record);
 
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(token), Encoding.UTF8);
         var stream = new EventStream();

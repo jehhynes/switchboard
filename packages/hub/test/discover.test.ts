@@ -35,7 +35,7 @@ describe('findHub', () => {
     const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: '0.1.0', pid: 4321 }, onShutdown: () => {} });
 
     try {
-      const record = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', port: server.port, token: server.token, pid: 4321, startedAt: 'now' };
+      const record = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 4321, startedAt: 'now' };
 
       write(record);
       expect(await findHub(home)).toEqual(record);
@@ -54,7 +54,7 @@ describe('findHub', () => {
     const server = await listenHub({ identity: { hub: 'something-else', protocol: 1, version: '0.1.0', pid: 4321 }, onShutdown: () => {} });
 
     try {
-      write({ protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', port: server.port, token: server.token, pid: 4321, startedAt: 'now' });
+      write({ protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 4321, startedAt: 'now' });
       expect(await findHub(home)).toBeNull();
     } finally {
       await server.close();

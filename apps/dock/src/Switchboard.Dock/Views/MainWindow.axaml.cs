@@ -211,7 +211,7 @@ public sealed partial class MainWindow : Window
         }
         else if (stream is not null)
         {
-            model.Show(stream.Connection);
+            model.Show(stream.Connection, stream.NotRunningText);
         }
     }
 

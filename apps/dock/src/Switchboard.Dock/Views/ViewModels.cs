@@ -192,7 +192,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
     }
 
-    public void Show(Connection state)
+    public void Show(Connection state, string? notRunning = null)
     {
         if (state != Hub.Connection.Connected)
         {
@@ -204,7 +204,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         {
             Hub.Connection.Connected => null,
             Hub.Connection.Connecting => "Connecting to Switchboard…",
-            Hub.Connection.NotRunning => "Switchboard is not running. Open VS Code to start it.",
+            Hub.Connection.NotRunning => notRunning ?? "Switchboard is not running. Open VS Code to start it.",
             Hub.Connection.TooOld => "The running hub has no dock view. Reload a VS Code window to update it.",
             _ => throw new ArgumentOutOfRangeException(nameof(state)),
         };

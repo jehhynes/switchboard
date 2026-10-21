@@ -11,6 +11,8 @@ export interface HubRecord {
   build: string;
   /** The folder holding settings.json. */
   configDir: string;
+  /** The hub's runtime, `process.execPath`: VS Code's Electron when a window started it; the dock starts a hub with it (PRD R71). '' from an older hub. */
+  execPath: string;
   port: number;
   token: string;
   pid: number;
@@ -59,8 +61,9 @@ export function parseHubRecord(text: string): HubRecord | null {
 
   // A record from a hub older than configDir reads as '', so a window replaces that hub.
   const configDir = typeof raw.configDir === 'string' ? raw.configDir : '';
+  const execPath = typeof raw.execPath === 'string' ? raw.execPath : '';
 
-  return { protocol: raw.protocol, version: raw.version, build: raw.build, configDir, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt };
+  return { protocol: raw.protocol, version: raw.version, build: raw.build, configDir, execPath, port: raw.port, token: raw.token, pid: raw.pid, startedAt: raw.startedAt };
 }
 
 export function parseHubIdentity(text: string): HubIdentity | null {

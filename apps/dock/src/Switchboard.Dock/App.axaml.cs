@@ -21,7 +21,7 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var hub = new HubClient(SwitchboardHome);
+            var hub = new HubClient(SwitchboardHome, new HubStarter(SwitchboardHome));
             var model = new DockViewModel(DockSettings.Load(SwitchboardHome), (settings) => settings.Save(SwitchboardHome));
             MainWindow window;
 

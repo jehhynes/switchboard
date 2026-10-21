@@ -287,6 +287,45 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task Start_NoHubAndAStarterThatNeverSawOne_SaysToOpenVsCodeOnce()
+    {
+        var home = Fixtures.TempFolder();
+        using var client = new HubClient(home, new HubStarter(home));
+        var changes = 0;
+
+        client.Changed += () => Interlocked.Increment(ref changes);
+        client.Start();
+
+        await Until(() => client.Connection == Connection.NotRunning ? client.NotRunningText : null);
+        Assert.Equal(HubStarter.Never, client.NotRunningText);
+        Assert.True(changes >= 1);
+    }
+
+    [Fact]
+    public async Task Start_HubAnswersTheStream_RemembersItsRuntimeAndConfigFolderForTheStarter()
+    {
+        using var server = new LoopbackHub(async (_, _, stream) =>
+        {
+            await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"));
+            await stream.WriteAsync(Encoding.UTF8.GetBytes($"event: dock\ndata: {Fixtures.DockJson.ReplaceLineEndings(" ")}\n\n"));
+            await Task.Delay(5000);
+        });
+        var home = HomeFor(server);
+        var record = JsonNode.Parse(File.ReadAllText(Path.Combine(home, "hub.json")))!;
+
+        record["configDir"] = "/home/me/.claude/switchboard";
+        record["execPath"] = "/usr/share/code/code";
+        File.WriteAllText(Path.Combine(home, "hub.json"), record.ToJsonString());
+
+        using var client = new HubClient(home, new HubStarter(home));
+
+        client.Start();
+        await Until(() => client.View);
+
+        Assert.Equal("{\"execPath\":\"/usr/share/code/code\",\"configDir\":\"/home/me/.claude/switchboard\"}", File.ReadAllText(Path.Combine(home, "dock-hub.json")));
+    }
+
+    [Fact]
     public async Task Start_AsksForClicksAndRaisesEachForwardedClickWithItsRowKey()
     {
         var started = "";

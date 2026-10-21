@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { parseHubIdentity, parseHubRecord } from '../src/hubRecord.js';
 
-const record = { protocol: 1, version: '0.1.0', build: 'abc123', configDir: 'C:/Users/me/.switchboard', port: 51234, token: 'abc', pid: 4321, startedAt: '2026-10-02T12:00:00.000Z' };
+const record = { protocol: 1, version: '0.1.0', build: 'abc123', configDir: 'C:/Users/me/.switchboard', execPath: '/usr/share/code/code', port: 51234, token: 'abc', pid: 4321, startedAt: '2026-10-02T12:00:00.000Z' };
 
 describe('parseHubRecord', () => {
   it('reads a complete record', () => {
     expect(parseHubRecord(JSON.stringify(record))).toEqual(record);
+  });
+
+  it('reads a record without execPath, from a hub older than the dock starting hubs, as an empty execPath', () => {
+    expect(parseHubRecord(JSON.stringify({ ...record, execPath: undefined }))).toEqual({ ...record, execPath: '' });
+    expect(parseHubRecord(JSON.stringify({ ...record, execPath: 7 }))).toEqual({ ...record, execPath: '' });
   });
 
   it('reads a record without configDir, from a hub older than the setting, as an empty configDir', () => {

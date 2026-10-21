@@ -134,6 +134,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     version,
     build,
     configDir,
+    execPath: process.execPath,
     port: server.port,
     token: server.token,
     pid: process.pid,

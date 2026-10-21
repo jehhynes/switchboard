@@ -6,7 +6,7 @@ import { keepHub } from '../src/keeper.js';
 import type { KeeperDeps } from '../src/keeper.js';
 import { until } from './helpers.js';
 
-const record: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', port: 5000, token: 't', pid: 7, startedAt: 'now' };
+const record: HubRecord = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: 5000, token: 't', pid: 7, startedAt: 'now' };
 
 function harness(ensured: () => Ensured, opens: () => boolean = () => true) {
   let time = 0;
