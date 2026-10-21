@@ -21,7 +21,8 @@ export function codexRouting(configPath: string): { args: string[] } | { error: 
   let config: Record<string, unknown>;
 
   try {
-    config = parse(text);
+    // Every integer as a bigint, so a large one parses and is written back as an integer, unlike a float.
+    config = parse(text, { integersAsBigInt: true });
   } catch {
     // The parser's message quotes the file, which may hold credentials.
     return { error: `Codex's config at ${configPath} is not valid TOML.` };
@@ -52,12 +53,21 @@ export function codexRouting(configPath: string): { args: string[] } | { error: 
 /** A parsed TOML value written back inline, as `-c` reads it. */
 function tomlValue(value: unknown): string {
   if (typeof value === 'string') {
-    // A JSON string is a valid TOML basic string.
-    return JSON.stringify(value);
+    return tomlString(value);
   }
 
   if (typeof value === 'number') {
-    return Number.isNaN(value) ? 'nan' : value === Infinity ? 'inf' : value === -Infinity ? '-inf' : String(value);
+    if (Number.isNaN(value)) {
+      return 'nan';
+    }
+
+    if (!Number.isFinite(value)) {
+      return value > 0 ? 'inf' : '-inf';
+    }
+
+    // Integers parse as bigints, so a number is a float and keeps a float's syntax.
+    const text = String(value);
+    return /[.eE]/.test(text) ? text : `${text}.0`;
   }
 
   if (typeof value === 'boolean' || typeof value === 'bigint') {
@@ -73,10 +83,16 @@ function tomlValue(value: unknown): string {
   }
 
   if (isTable(value)) {
-    return `{ ${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)} = ${tomlValue(item)}`).join(', ')} }`;
+    return `{ ${Object.entries(value).map(([key, item]) => `${tomlString(key)} = ${tomlValue(item)}`).join(', ')} }`;
   }
 
   throw new Error(`Unsupported TOML value: ${String(value)}`);
+}
+
+/** A TOML basic string, which must escape every control character, DEL included. */
+function tomlString(value: string): string {
+  return `"${value.replace(/[\\"\u0000-\u001f\u007f]/g, (char) =>
+    char === '\\' || char === '"' ? `\\${char}` : `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)}"`;
 }
 
 function isTable(value: unknown): value is Record<string, unknown> {

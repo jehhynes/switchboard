@@ -15,7 +15,7 @@ const configWith = (text: string): string => {
 const asConfig = (args: string[]): Record<string, unknown> =>
   Object.fromEntries(args.filter((_arg, i) => i % 2 === 1).map((pair) => {
     const at = pair.indexOf('=');
-    return [pair.slice(0, at), parse(`v = ${pair.slice(at + 1)}`)['v']];
+    return [pair.slice(0, at), parse(`v = ${pair.slice(at + 1)}`, { integersAsBigInt: true })['v']];
   }));
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'codex-routing-'));
@@ -46,7 +46,7 @@ describe('codexRouting', () => {
     expect(args.filter((_arg, i) => i % 2 === 0).every((flag) => flag === '-c')).toBe(true);
     expect(asConfig(args)).toEqual({
       model_provider: 'my proxy',
-      model_providers: { 'my proxy': { name: 'CLIProxyAPI', base_url: 'http://liberty-linux:8317/v1', request_max_retries: 2, http_headers: { Authorization: 'Bearer k#1' } } },
+      model_providers: { 'my proxy': { name: 'CLIProxyAPI', base_url: 'http://liberty-linux:8317/v1', request_max_retries: 2n, http_headers: { Authorization: 'Bearer k#1' } } },
     });
   });
 
@@ -60,6 +60,26 @@ describe('codexRouting', () => {
     const path = configWith('model_provider = "p"\nmodel_providers.p.base_url = "http://p/v1"\nmodel_providers.p.name = "p"\n');
 
     expect(asConfig((codexRouting(path) as { args: string[] }).args)).toEqual({ model_provider: 'p', model_providers: { p: { base_url: 'http://p/v1', name: 'p' } } });
+  });
+
+  it('writes back control characters, floats and large integers as the values they were', () => {
+    const path = configWith([
+      'model_provider = "p"',
+      '[unrelated]',
+      'big = 9007199254740993',
+      '[model_providers.p]',
+      'name = "a\\u007fb\\tc\\\\d\\"e"',
+      'stream_idle_timeout_ms = 9007199254740993',
+      'weight = 1e20',
+      'ratio = 0.5',
+    ].join('\n'));
+
+    const result = codexRouting(path) as { args: string[] };
+    expect(asConfig(result.args)).toEqual({
+      model_provider: 'p',
+      model_providers: { p: { name: 'a\u007fb\tc\\d"e', stream_idle_timeout_ms: 9007199254740993n, weight: 1e20, ratio: 0.5 } },
+    });
+    expect(result.args.join(' ')).not.toMatch(/[\u0000-\u001f\u007f]/);
   });
 
   it('carries nothing when the file is missing or names no endpoint', () => {
