@@ -7,7 +7,7 @@ export function isVsCode(wmClass) {
   return name === 'com.microsoft.vscode' || name === 'code';
 }
 
-/** Ptyxis's window class, the terminal the dock opens sessions in (mechanics M46). @param {string | null} wmClass */
+/** Ptyxis's window class, the terminal the dock opens sessions in (mechanics M47). @param {string | null} wmClass */
 export function isTerminal(wmClass) {
   return wmClass?.toLowerCase() === 'org.gnome.ptyxis';
 }

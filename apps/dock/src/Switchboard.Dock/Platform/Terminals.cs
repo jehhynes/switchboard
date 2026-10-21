@@ -15,7 +15,7 @@ public static class Terminals
     public static ITerminal ForPlatform() => OperatingSystem.IsWindows() ? new WindowsTerminal() : new PtyxisTerminal();
 
     /// <summary>
-    /// What Ptyxis runs: a new window with the title, which the CLI's own title does not replace (mechanics M46), the session's directory and its
+    /// What Ptyxis runs: a new window with the title, which the CLI's own title does not replace (mechanics M47), the session's directory and its
     /// CLI.
     /// </summary>
     public static ProcessStartInfo Ptyxis(DockTerminal terminal, IDictionary environment) =>
@@ -47,7 +47,7 @@ public static class Terminals
 
     /// <summary>
     /// The dock's environment for the CLI: without VS Code's variables and the markers of a Claude Code session the dock may have been started from,
-    /// which would make Claude turn off transcripts or target a VS Code window (mechanics M46), keeping the operator's own Claude Code settings such
+    /// which would make Claude turn off transcripts or target a VS Code window (mechanics M47), keeping the operator's own Claude Code settings such
     /// as <c>CLAUDE_CODE_USE_BEDROCK</c>, as the hub's sessions do; and with an absolute executable's folder first on PATH, so an npm launcher finds
     /// its Node.js.
     /// </summary>
@@ -88,7 +88,7 @@ public sealed class PtyxisTerminal : ITerminal
     public void Open(DockTerminal terminal) => Process.Start(Terminals.Ptyxis(terminal, Environment.GetEnvironmentVariables()))?.Dispose();
 }
 
-/// <summary>Opens a session's terminal in a new Windows Terminal window; not verified on Windows yet (mechanics M46).</summary>
+/// <summary>Opens a session's terminal in a new Windows Terminal window; not verified on Windows yet (mechanics M47).</summary>
 public sealed class WindowsTerminal : ITerminal
 {
     public void Open(DockTerminal terminal) => Process.Start(Terminals.WindowsTerminal(terminal, Environment.GetEnvironmentVariables()))?.Dispose();
