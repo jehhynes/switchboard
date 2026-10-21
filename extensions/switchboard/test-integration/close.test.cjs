@@ -111,6 +111,27 @@ describe('Closing done item windows (PRD R76)', () => {
     assert.deepStrictEqual(errors, []);
   });
 
+  it('closes a window whose work left review with dock.openVSCode review, and keeps it with always (PRD R71, R76)', async () => {
+    const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const state = (workItem, openVSCode) => JSON.stringify({ ...hubState, openVSCode, workItems: [workItem] });
+    const review = { ...item(folder, false), status: 'awaiting-approval', sessions: [{ ...item(folder, false).sessions[0], state: 'ended' }] };
+    // The approved run, in its background process: it opens in a terminal, so it needs no item window.
+    const approved = { ...item(folder, false), sessions: [{ ...item(folder, false).sessions[0], released: false, shortId: 'abcd0007' }] };
+
+    extension.itemWindow(file);
+    await extension.receive(state(review, 'always'));
+    await extension.receive(state(approved, 'always'));
+    await extension.windowStateChanged(false);
+    assert.deepStrictEqual(closed, []);
+
+    extension.itemWindow(file);
+    await extension.windowStateChanged(false);
+    await extension.receive(state(review, 'review'));
+    assert.deepStrictEqual(closed, []);
+    await extension.receive(state(approved, 'review'));
+    assert.deepStrictEqual(closed, ['workbench.action.closeWindow']);
+  });
+
   it('stays open for work that was already done, or for another window', async () => {
     extension.itemWindow(file);
     await extension.receive(done);

@@ -75,7 +75,7 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
 
 const done = (state: SessionState = 'idle', patch: Partial<WorkItemView> = {}): WorkItemView => item({ status: 'done', doneAt: NOW, doneReason: 'session', sessions: [session(1, state)], ...patch });
 
-function snapshot(items: WorkItemView[]): Snapshot {
+function snapshot(items: WorkItemView[], openVSCode: Snapshot['openVSCode'] = 'always'): Snapshot {
   return {
     workItems: items,
     pool: [],
@@ -86,7 +86,7 @@ function snapshot(items: WorkItemView[]): Snapshot {
     sourceStates: [{ name: 'github', enabled: true }],
     namespaces: { github: 'dev' },
     configDir: 'C:\\Users\\me\\.switchboard',
-    openVSCode: 'always',
+    openVSCode,
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
   };
 }
@@ -220,5 +220,100 @@ describe('DoneWindow', () => {
     window.update(snapshot([item()]), NOW);
     window.update(snapshot([done()]), NOW);
     expect(closesLater(window)).toBe(false);
+  });
+});
+
+describe('DoneWindow with dock.openVSCode review (PRD R71, R76)', () => {
+  /** A window, unfocused since `NOW`, after a review-mode snapshot at `NOW` for each of `states`. */
+  function reviewWindowAfter(...states: WorkItemView[][]): DoneWindow {
+    const window = new DoneWindow(FILE, WINDOWS, false, NOW);
+
+    states.forEach((items) => window.update(snapshot(items, 'review'), NOW));
+
+    return window;
+  }
+
+  const background = (state: SessionState): Session => ({ ...session(2, state), released: false, shortId: 'abcd0002' });
+  const review = item({ status: 'awaiting-approval', sessions: [session(1, 'ended')] });
+
+  it('closes after the delay once its work leaves review, though a session runs in its background process', () => {
+    const window = reviewWindowAfter([review], [item({ status: 'running', sessions: [session(1, 'ended'), background('running')] })]);
+
+    expect(window.closeAt(DELAY)).toBe(NOW + DELAY);
+    expect(closesLater(window)).toBe(true);
+  });
+
+  it('closes when its work goes from finished to blocked, and keeps today\'s rule with always', () => {
+    const left = [item({ status: 'blocked', sessions: [session(1, 'ended')] })];
+
+    expect(closesLater(reviewWindowAfter([item({ status: 'finished', sessions: [session(1, 'ended')] })], left))).toBe(true);
+    expect(closesLater(windowAfter([review], left))).toBe(false);
+  });
+
+  it('stays open while a session is starting or resumed in a tab or terminal, and counts the delay from when it ends', () => {
+    const window = new DoneWindow(FILE, WINDOWS, false, NOW);
+
+    window.update(snapshot([review], 'review'), NOW);
+    window.update(snapshot([item({ status: 'running', sessions: [session(1, 'running')] })], 'review'), NOW);
+    expect(window.closeAt(DELAY)).toBeNull();
+    window.update(snapshot([item({ status: 'running', sessions: [session(1, 'ended'), background('starting')] })], 'review'), NOW);
+    expect(window.closeAt(DELAY)).toBeNull();
+    window.update(snapshot([item({ status: 'blocked', sessions: [session(1, 'ended')] })], 'review'), NOW + 5 * MINUTE);
+    expect(window.closeAt(DELAY)).toBe(NOW + 5 * MINUTE + DELAY);
+  });
+
+  it('restarts the delay when its work returns to review', () => {
+    const window = reviewWindowAfter([review], [item({ status: 'running', sessions: [background('running')] })]);
+
+    window.update(snapshot([review], 'review'), NOW + MINUTE);
+    expect(window.closeAt(DELAY)).toBeNull();
+    window.update(snapshot([item({ status: 'blocked', sessions: [session(1, 'ended')] })], 'review'), NOW + 2 * MINUTE);
+    expect(window.closeAt(DELAY)).toBe(NOW + 2 * MINUTE + DELAY);
+  });
+
+  it('closes when its work is a mix of done and off-review items', () => {
+    const running = item({ status: 'running', sessions: [session(1, 'ended'), background('running')] });
+
+    expect(closesLater(reviewWindowAfter([review, done('ended', { id: 9 })], [running, done('ended', { id: 9 })]))).toBe(true);
+  });
+
+  it('never closes for leaving review a window opened on work that was not on review, such as for History on a running row', () => {
+    expect(closesLater(reviewWindowAfter([item({ status: 'running', sessions: [background('running')] })], [item({ status: 'blocked', sessions: [session(1, 'ended')] })]))).toBe(false);
+  });
+
+  it('stays open for a resumed session that is idle or failed, and closes while a release is still stopping a background one', () => {
+    const left = (state: SessionState, patch: Partial<Session> = {}) => [item({ status: 'blocked', sessions: [{ ...session(1, state), ...patch }] })];
+
+    expect(closesLater(reviewWindowAfter([review], left('idle')))).toBe(false);
+    expect(closesLater(reviewWindowAfter([review], left('failed')))).toBe(false);
+    expect(closesLater(reviewWindowAfter([review], left('running', { releasing: true })))).toBe(true);
+  });
+
+  it('stays open while another of its work items is on review, or once the reviewed item moved to another window', () => {
+    const other = item({ id: 8, status: 'finished', sessions: [session(3, 'ended')] });
+    const moved = item({ status: 'running', sessions: [{ ...background('running'), cwd: 'D:/git/elsewhere' }], worktree: null });
+
+    expect(closesLater(reviewWindowAfter([review, other], [item({ status: 'blocked', sessions: [session(1, 'ended')] }), other]))).toBe(false);
+    expect(closesLater(reviewWindowAfter([review], [moved]))).toBe(false);
+  });
+
+  it('keeps today\'s rule for a snapshot with no openVSCode, from an older hub', () => {
+    const window = new DoneWindow(FILE, WINDOWS, false, NOW);
+    const older = (items: WorkItemView[]) => {
+      const { openVSCode: _, ...rest } = snapshot(items, 'review');
+
+      return rest as Snapshot;
+    };
+
+    window.update(older([review]), NOW);
+    window.update(older([item({ status: 'blocked', sessions: [session(1, 'ended')] })]), NOW);
+    expect(closesLater(window)).toBe(false);
+  });
+
+  it('waits while holding unsaved changes', () => {
+    const window = reviewWindowAfter([review], [item({ status: 'blocked', sessions: [session(1, 'ended')] })]);
+
+    expect(window.close(true, NOW + DELAY, DELAY)).toBe(false);
+    expect(window.close(false, NOW + DELAY, DELAY)).toBe(true);
   });
 });
