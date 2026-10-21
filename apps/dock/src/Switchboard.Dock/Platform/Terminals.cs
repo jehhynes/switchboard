@@ -88,7 +88,7 @@ public sealed class PtyxisTerminal : ITerminal
     public void Open(DockTerminal terminal) => Process.Start(Terminals.Ptyxis(terminal, Environment.GetEnvironmentVariables()))?.Dispose();
 }
 
-/// <summary>Opens a session's terminal in a new Windows Terminal window; not verified on Windows yet (mechanics M47).</summary>
+/// <summary>Opens a session's terminal in a new Windows Terminal window (mechanics M47).</summary>
 public sealed class WindowsTerminal : ITerminal
 {
     public void Open(DockTerminal terminal) => Process.Start(Terminals.WindowsTerminal(terminal, Environment.GetEnvironmentVariables()))?.Dispose();
