@@ -21,6 +21,14 @@ public interface IShell
 
     /// <summary>Calls <paramref name="changed"/>, on another thread, with the monitors a full-screen window covers each time they change.</summary>
     void WatchFullScreen(Action<IReadOnlyList<string>> changed);
+
+    /// <summary>Ptyxis's top-level windows, front first; an extension older than terminals throws (PRD R71).</summary>
+    IReadOnlyList<ShellWindow> Terminals() => throw new ShellException("The GNOME Shell extension lists no terminals.");
+
+    /// <summary>Calls <paramref name="focused"/>, on another thread, with the title of each terminal window that gains the focus.</summary>
+    void WatchTerminalFocused(Action<string> focused)
+    {
+    }
 }
 
 /// <summary>A window as the shell names it: Mutter's window ID and its title.</summary>
@@ -70,6 +78,35 @@ public sealed class ShellWindows(IShell shell, IWindows fallback) : IWindows
     public void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
 
     public nint FindVsCode() => Answer((windows) => windows.FirstOrDefault().Id, fallback.FindVsCode);
+
+    /// <summary>Whether the extension lists terminals; an older one, or none, does not, so a click opens no terminal it could not find again.</summary>
+    public bool FindsTerminals
+    {
+        get
+        {
+            try
+            {
+                shell.Terminals();
+                return true;
+            }
+            catch (ShellException)
+            {
+                return false;
+            }
+        }
+    }
+
+    public nint FindTerminal(string name)
+    {
+        try
+        {
+            return (nint)shell.Terminals().FirstOrDefault((window) => DockWindow.NameOf(window.Title) == name).Id;
+        }
+        catch (ShellException)
+        {
+            return 0;
+        }
+    }
 
     nint Answer(Func<IReadOnlyList<ShellWindow>, ulong> pick, Func<nint> fallBack)
     {

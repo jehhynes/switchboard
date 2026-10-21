@@ -80,6 +80,29 @@ public sealed class Win32Windows : IWindows, IDisposable
 
     public nint Find(string name) => ItemWindows().FirstOrDefault((entry) => entry.Name == name).Window;
 
+    public bool FindsTerminals => true;
+
+    /// <summary>The visible top-level Windows Terminal window whose title names <paramref name="name"/>, which <c>--suppressApplicationTitle</c> keeps.</summary>
+    public nint FindTerminal(string name)
+    {
+        nint found = 0;
+
+        Native.EnumWindows(
+            (window, _) =>
+            {
+                if (Native.IsWindowVisible(window) && Native.GetWindow(window, Native.GwOwner) == 0 && DockWindow.NameOf(Native.Title(window)) == name && IsProcess(window, "WindowsTerminal"))
+                {
+                    found = window;
+                    return false;
+                }
+
+                return true;
+            },
+            0);
+
+        return found;
+    }
+
     /// <summary>The visible top-level VS Code windows whose titles name an item window, from the front.</summary>
     static List<(nint Window, string Name)> ItemWindows()
     {
@@ -183,7 +206,9 @@ public sealed class Win32Windows : IWindows, IDisposable
         return found;
     }
 
-    static bool IsVsCode(nint window)
+    static bool IsVsCode(nint window) => IsProcess(window, "Code");
+
+    static bool IsProcess(nint window, string name)
     {
         Native.GetWindowThreadProcessId(window, out var process);
 
@@ -191,7 +216,7 @@ public sealed class Win32Windows : IWindows, IDisposable
         {
             using var owner = Process.GetProcessById((int)process);
 
-            return owner.ProcessName.Equals("Code", StringComparison.OrdinalIgnoreCase);
+            return owner.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase);
         }
         catch (ArgumentException)
         {

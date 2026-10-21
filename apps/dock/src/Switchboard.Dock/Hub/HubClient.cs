@@ -44,6 +44,9 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IVolum
     /// <summary>Raised on the stream's thread when a VS Code window's status bar item asks the dock to show its list (PRD R71).</summary>
     public event Action? ShowRequested;
 
+    /// <summary>Raised on the stream's thread with a row's key when VS Code forwards that row's click, which only the dock runs (PRD R65, R69, R71).</summary>
+    public event Action<string>? ClickRequested;
+
     /// <summary>Raised on the stream's thread with the first view of each connection, such as to a hub started on another config folder.</summary>
     public event Action? Connected;
 
@@ -84,7 +87,7 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IVolum
     /// <summary>Reads the stream until it ends; returns <see cref="Connection.TooOld"/> for a hub without one, else <see cref="Connection.NotRunning"/>.</summary>
     async Task<Connection> Read(HubRecord record, CancellationToken token)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{record.Port}/dock/events");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{record.Port}/dock/events?click=1");
 
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", record.Token);
 
@@ -121,6 +124,10 @@ public sealed class HubClient(string switchboardHome) : IHub, IConfigHub, IVolum
             else if (read is { Name: "show" })
             {
                 ShowRequested?.Invoke();
+            }
+            else if (read is { Name: "click" } && JsonNode.Parse(read.Data)?["rowKey"]?.GetValue<string>() is { } rowKey)
+            {
+                ClickRequested?.Invoke(rowKey);
             }
         }
 

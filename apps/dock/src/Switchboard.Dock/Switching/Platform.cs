@@ -1,3 +1,5 @@
+using Switchboard.Dock.Hub;
+
 namespace Switchboard.Dock.Switching;
 
 /// <summary>Finding and showing windows: Win32 on Windows, the hub's view of VS Code's windows on Linux (PRD R71).</summary>
@@ -16,6 +18,19 @@ public interface IWindows
 
     /// <summary>The VS Code window nearest the front, item windows included, or 0 when none is open.</summary>
     nint FindVsCode();
+
+    /// <summary>Whether <see cref="FindTerminal"/> can find terminal windows; false without the GNOME Shell extension (PRD R71).</summary>
+    bool FindsTerminals => false;
+
+    /// <summary>The terminal window whose title names <paramref name="name"/> as <c>sb:&lt;name&gt;</c>, or 0.</summary>
+    nint FindTerminal(string name) => 0;
+}
+
+/// <summary>The terminal app sessions open in with <c>dock.openVSCode: review</c> (PRD R71): Ptyxis on Linux, Windows Terminal on Windows.</summary>
+public interface ITerminal
+{
+    /// <summary>Opens a new window running the session's CLI; throws when the terminal cannot be started.</summary>
+    void Open(DockTerminal terminal);
 }
 
 /// <summary>The VS Code installation that item windows open in.</summary>

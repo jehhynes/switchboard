@@ -136,6 +136,20 @@ sealed class FakeWindows : IWindows
 
     public nint FindVsCode() => Front0;
 
+    public bool FindsTerminals { get; set; } = true;
+
+    /// <summary>The terminal window found for each terminal name, appearing after that many finds.</summary>
+    public Dictionary<string, (nint Window, int After)> Terminals { get; } = [];
+
+    readonly Dictionary<string, int> terminalFinds = [];
+
+    public nint FindTerminal(string name)
+    {
+        terminalFinds[name] = terminalFinds.GetValueOrDefault(name) + 1;
+
+        return Terminals.TryGetValue(name, out var found) && terminalFinds[name] > found.After ? found.Window : 0;
+    }
+
     public bool Show(nint window)
     {
         Calls.Add($"show {window}");
@@ -169,13 +183,37 @@ sealed class FakeShell : Switchboard.Dock.Platform.IShell
     {
         Calls.Add(monitor == "" ? $"activate {id}" : $"activate {id} on {monitor}");
 
-        return Fails ? throw new Switchboard.Dock.Platform.ShellException("The name switchboard.Shell was not provided.") : Open.Any((window) => window.Id == id);
+        return Fails ? throw new Switchboard.Dock.Platform.ShellException("The name switchboard.Shell was not provided.") : Open.Concat(Terms ?? []).Any((window) => window.Id == id);
     }
 
     public IReadOnlyList<string> FullScreen() => [];
 
     public void WatchFullScreen(Action<IReadOnlyList<string>> changed)
     {
+    }
+
+    /// <summary>Ptyxis's windows; null for an extension older than terminals, which has no such method.</summary>
+    public List<Switchboard.Dock.Platform.ShellWindow>? Terms { get; set; } = [];
+
+    public IReadOnlyList<Switchboard.Dock.Platform.ShellWindow> Terminals() =>
+        Fails || Terms is null ? throw new Switchboard.Dock.Platform.ShellException("No such method “Terminals”.") : Terms;
+}
+
+/// <summary>Records each terminal the dock opens; throws <see cref="Fails"/> as a missing terminal app does.</summary>
+sealed class FakeTerminal : ITerminal
+{
+    public List<DockTerminal> Opened { get; } = [];
+
+    public Exception? Fails { get; set; }
+
+    public void Open(DockTerminal terminal)
+    {
+        Opened.Add(terminal);
+
+        if (Fails is not null)
+        {
+            throw Fails;
+        }
     }
 }
 
@@ -239,6 +277,15 @@ sealed class FakeActions : IDockActions
         Urls.Add(url);
 
         return UrlReply;
+    }
+
+    public List<DockTerminal> Terminals { get; } = [];
+
+    public Task<string?> Terminal(DockRow row, DockTerminal terminal, CancellationToken cancel)
+    {
+        Terminals.Add(terminal);
+
+        return Task.FromResult<string?>(null);
     }
 }
 

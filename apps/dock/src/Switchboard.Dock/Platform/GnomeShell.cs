@@ -48,11 +48,15 @@ public sealed class GnomeShell : IShell, IDisposable
         }
     }
 
-    public IReadOnlyList<ShellWindow> Windows() => Wait(Task.Run(() =>
+    public IReadOnlyList<ShellWindow> Windows() => List("Windows");
+
+    public IReadOnlyList<ShellWindow> Terminals() => List("Terminals");
+
+    IReadOnlyList<ShellWindow> List(string method) => Wait(Task.Run(() =>
     {
         using var writer = connection.GetMessageWriter();
 
-        writer.WriteMethodCallHeader(Service, ObjectPath, Service, "Windows");
+        writer.WriteMethodCallHeader(Service, ObjectPath, Service, method);
 
         return connection.CallMethodAsync(writer.CreateMessage(), static (message, _) =>
         {
@@ -147,6 +151,20 @@ public sealed class GnomeShell : IShell, IDisposable
 
         watches.Add(Wait(Task.Run(async () => await connection.WatchSignalAsync(Service, ObjectPath, Service, "FullScreenChanged", read, handle, ObserverFlags.None, false, null))));
         watches.Add(Wait(Task.Run(async () => await connection.WatchSignalAsync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameOwnerChanged", readOwner, handleOwner, ObserverFlags.None, false, null))));
+    }
+
+    public void WatchTerminalFocused(Action<string> focused)
+    {
+        MessageValueReader<string> read = static (message, _) => message.GetBodyReader().ReadString();
+        Action<Notification<string>> handle = (notification) =>
+        {
+            if (notification.HasValue)
+            {
+                focused(notification.Value);
+            }
+        };
+
+        watches.Add(Wait(Task.Run(async () => await connection.WatchSignalAsync(Service, ObjectPath, Service, "TerminalFocused", read, handle, ObserverFlags.None, false, null))));
     }
 
     static T Wait<T>(Task<T> call)

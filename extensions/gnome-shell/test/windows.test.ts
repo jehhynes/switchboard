@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isListed, isVsCode } from '../src/windows.js';
+import { isListed, isListedTerminal, isTerminal, isVsCode } from '../src/windows.js';
 
 describe('isVsCode', () => {
   it('takes VS Code as a Wayland client and under XWayland, in any case', () => {
@@ -29,5 +29,33 @@ describe('isListed', () => {
     expect(isListed({ ...shown, height: 0 })).toBe(false);
     expect(isListed({ ...shown, normal: false })).toBe(false);
     expect(isListed({ ...shown, wmClass: 'Switchboard.Dock' })).toBe(false);
+  });
+});
+
+describe('isTerminal', () => {
+  it('takes Ptyxis, as Mutter 50.1 reported it, in any case', () => {
+    expect(isTerminal('org.gnome.Ptyxis')).toBe(true);
+    expect(isTerminal('org.gnome.ptyxis')).toBe(true);
+  });
+
+  it('refuses VS Code, other terminals and a window with no class', () => {
+    expect(isTerminal('com.microsoft.VSCode')).toBe(false);
+    expect(isTerminal('org.gnome.Terminal')).toBe(false);
+    expect(isTerminal(null)).toBe(false);
+  });
+});
+
+describe('isListedTerminal', () => {
+  const shown = { normal: true, wmClass: 'org.gnome.Ptyxis', width: 1410, height: 920 };
+
+  it('lists a Ptyxis window with a size, and keeps it out of the VS Code list', () => {
+    expect(isListedTerminal(shown)).toBe(true);
+    expect(isListed(shown)).toBe(false);
+  });
+
+  it('leaves out a Ptyxis dialog, a window with no size and VS Code', () => {
+    expect(isListedTerminal({ ...shown, normal: false })).toBe(false);
+    expect(isListedTerminal({ ...shown, width: 0 })).toBe(false);
+    expect(isListedTerminal({ ...shown, wmClass: 'com.microsoft.VSCode' })).toBe(false);
   });
 });

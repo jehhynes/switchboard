@@ -141,7 +141,7 @@ public sealed class HubClientTests
         Assert.Equal(5, view.Groups.Count);
         Assert.True(changes >= 1);
         Assert.Contains("Authorization: Bearer t0k", server.Requests);
-        Assert.Contains(server.Requests, (request) => request.StartsWith("GET /dock/events HTTP/1.1"));
+        Assert.Contains(server.Requests, (request) => request.StartsWith("GET /dock/events?click=1 HTTP/1.1"));
     }
 
     [Fact]
@@ -284,6 +284,30 @@ public sealed class HubClientTests
 
         Assert.Empty(reply.Errors);
         Assert.Equal("abc", reply.Version);
+    }
+
+    [Fact]
+    public async Task Start_AsksForClicksAndRaisesEachForwardedClickWithItsRowKey()
+    {
+        var started = "";
+        using var server = new LoopbackHub(async (start, _, stream) =>
+        {
+            started = start;
+            var json = Fixtures.DockJson.ReplaceLineEndings(" ");
+
+            await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"));
+            await stream.WriteAsync(Encoding.UTF8.GetBytes($"event: click\ndata: {{\"rowKey\":\"item:8\"}}\n\nevent: click\ndata: {{}}\n\nevent: dock\ndata: {json}\n\n"));
+            await Task.Delay(5000);
+        });
+        using var client = new HubClient(HomeFor(server));
+        var clicked = new System.Collections.Concurrent.ConcurrentQueue<string>();
+
+        client.ClickRequested += clicked.Enqueue;
+        client.Start();
+
+        await Until(() => client.View);
+        Assert.StartsWith("GET /dock/events?click=1 ", started);
+        Assert.Equal(["item:8"], clicked);
     }
 
     [Fact]

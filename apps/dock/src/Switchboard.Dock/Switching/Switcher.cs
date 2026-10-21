@@ -3,8 +3,11 @@ using Switchboard.Dock.Hub;
 
 namespace Switchboard.Dock.Switching;
 
-/// <summary>What a click on a row does (PRD R71): the session first, then the item window to the front, opened when it is not open.</summary>
-public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<TimeSpan, Task>? delay = null) : IDockActions
+/// <summary>
+/// What a click on a row does (PRD R71): the session first, then the item window to the front, opened when it is not open; with
+/// <c>dock.openVSCode: review</c>, a session's terminal instead until its work is on review.
+/// </summary>
+public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<TimeSpan, Task>? delay = null, ITerminal? terminal = null) : IDockActions
 {
     /// <summary>How long Open in Claude or Codex waits for the stopped session to end; a stop itself times out at 15 seconds.</summary>
     public static readonly TimeSpan StopWait = TimeSpan.FromSeconds(20);
@@ -17,7 +20,10 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
     readonly Func<TimeSpan, Task> wait = delay ?? Task.Delay;
 
     // Stops under way by session ID, so a later click on the same question waits for the stop already sent instead of sending another.
-    readonly Dictionary<string, Task<string?>> stopping = [];
+    readonly Dictionary<string, Task<Stopped>> stopping = [];
+
+    /// <summary>A stop's failure, or the row once its open offers the ended session.</summary>
+    readonly record struct Stopped(string? Failure, DockRow? Row);
 
     /// <summary>
     /// Runs the click; returns what to tell the operator when it did not finish, or null. A cancelled click, one a later click replaced, stops
@@ -25,12 +31,24 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
     /// </summary>
     public async Task<string?> Click(DockRow row, CancellationToken cancel = default)
     {
+        switch (row.Open)
+        {
+            case { Type: "select" }:
+                return null;
+            case { Type: "terminal" } asked:
+                return asked.Terminal is { } shown ? await Terminal(row, shown, cancel) : Older;
+            // With dock.openVSCode: review, a row with a window but nothing to open in it yet opens its focus (PRD R71, R79).
+            case { Type: "url", Url: { } url } when row.Window is not null:
+                return OpenUrl(windows, url);
+        }
+
         if (row.Window is not { } window)
         {
             return row.Open is { Type: "url", Url: { } url } ? OpenUrl(windows, url) : null;
         }
 
-        if (FileOf(window) is not { } file)
+        // Checked before a question's stop, so a session is not stopped for a window the dock cannot open.
+        if (FileOf(window) is null)
         {
             return Older;
         }
@@ -39,38 +57,30 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
         if (open is { Type: "question", WorkItemId: { } workItemId, SessionId: { } question })
         {
-            if (!stopping.TryGetValue(question, out var stop))
-            {
-                stop = Stop(row.Key, workItemId, question, open.Provider == "codex" ? "Codex" : "Claude");
-                stopping[question] = stop;
-            }
-
-            string? failed;
-
-            try
-            {
-                failed = await stop;
-            }
-            finally
-            {
-                // A stop that already ended, even one that failed at once, leaves the next click free to send its own.
-                if (stopping.TryGetValue(question, out var kept) && kept == stop)
-                {
-                    stopping.Remove(question);
-                }
-            }
+            var stopped = await Stop(row.Key, workItemId, question, open.Provider == "codex" ? "Codex" : "Claude");
 
             if (cancel.IsCancellationRequested)
             {
                 return null;
             }
 
-            if (failed is not null)
+            if (stopped.Failure is { } failed)
             {
                 return failed;
             }
 
             open = open with { Type = "session" };
+        }
+
+        return await ItemWindow(window, open, cancel);
+    }
+
+    /// <summary>Leaves the session to open for the item window, then brings the window forward or opens it; returns why not, or null.</summary>
+    async Task<string?> ItemWindow(DockWindow window, DockOpen? open, CancellationToken cancel)
+    {
+        if (FileOf(window) is not { } file)
+        {
+            return Older;
         }
 
         if (open is { Type: "session", SessionId: { } sessionId, Cwd: { } cwd } && await hub.Open(sessionId, cwd, file) is { } refused)
@@ -96,18 +106,154 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         return await Withdrawn(tabs, cancel.IsCancellationRequested ? null : await Switch(window, file, handle, cancel), cancel);
     }
 
-    /// <summary>Open in Claude's or Codex's stop (PRD R70): asks the hub to stop the session, then waits for the row to offer the ended session; returns why not, or null.</summary>
-    async Task<string?> Stop(string rowKey, int workItemId, string sessionId, string agent)
+    /// <summary>
+    /// Brings the session's terminal forward, or opens it (PRD R28, R71): after Open in Codex's stop for a Codex question, with the terminal the
+    /// row then offers; a session resumed elsewhere whose terminal is not found shows in its item window instead, so it is never resumed twice.
+    /// Returns why not, or null.
+    /// </summary>
+    public async Task<string?> Terminal(DockRow row, DockTerminal shown, CancellationToken cancel = default)
+    {
+        if (!windows.FindsTerminals || terminal is null)
+        {
+            return NoTerminals;
+        }
+
+        if (shown.Handoff is { } handoff)
+        {
+            var stopped = await Stop(row.Key, handoff.WorkItemId, handoff.SessionId, "Codex");
+
+            if (cancel.IsCancellationRequested)
+            {
+                return null;
+            }
+
+            if (stopped.Failure is { } failed)
+            {
+                return failed;
+            }
+
+            // Work that awaits approval opens its item window once the session stopped, and keeps the terminal in its menu.
+            if ((stopped.Row?.Open?.Terminal ?? stopped.Row?.Terminal) is not { Handoff: null } next || next.SessionId != shown.SessionId)
+            {
+                return $"The session stopped, but its row offers no terminal for {shown.Name}.";
+            }
+
+            shown = next;
+        }
+
+        var handle = windows.FindTerminal(shown.Name);
+
+        if (handle != 0)
+        {
+            return windows.Show(handle) ? null : "Windows kept another window in front. Click the row again.";
+        }
+
+        if (shown.Active)
+        {
+            return row.Window is { } window
+                ? await ItemWindow(window, new DockOpen("session", null, shown.SessionId, shown.Cwd, null, shown.Provider), cancel)
+                : "The session runs in a window the dock cannot find.";
+        }
+
+        // A terminal still opening, such as for a click another click replaced, is waited for rather than opened twice.
+        if (launching.TryGetValue(shown.Name, out var launch) && launch.IsCompleted)
+        {
+            launching.Remove(shown.Name);
+            launch = null;
+        }
+
+        if (launch is null)
+        {
+            try
+            {
+                terminal.Open(shown);
+            }
+            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+            {
+                return $"The terminal did not start: {error.Message}";
+            }
+
+            launch = Appeared(shown.Name);
+            launching[shown.Name] = launch;
+        }
+
+        await Task.WhenAny(launch, Task.Delay(Timeout.Infinite, cancel));
+
+        if (cancel.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        launching.Remove(shown.Name);
+        handle = await launch;
+
+        if (handle == 0)
+        {
+            return $"The terminal for {shown.Name} did not open within {OpenWait.TotalSeconds:0} seconds.";
+        }
+
+        return windows.Show(handle) ? null : "Windows kept another window in front. Click the row again.";
+    }
+
+    // Terminals opened and not yet found, by name.
+    readonly Dictionary<string, Task<nint>> launching = [];
+
+    /// <summary>The terminal window once it appears, looking every 100 ms for 20 seconds whatever happens to the click; 0 when it does not.</summary>
+    async Task<nint> Appeared(string name)
+    {
+        nint handle = 0;
+
+        for (var waited = TimeSpan.Zero; handle == 0 && waited < OpenWait; waited += Poll)
+        {
+            await wait(Poll);
+            handle = windows.FindTerminal(name);
+        }
+
+        return handle;
+    }
+
+    const string NoTerminals = "Opening terminals needs Switchboard's GNOME Shell extension.";
+
+    /// <summary>
+    /// Open in Claude's or Codex's stop (PRD R70), shared by the clicks on one question: asks the hub to stop the session, then waits for the row to
+    /// offer the ended session, in its item window or, with <c>dock.openVSCode: review</c>, in a terminal.
+    /// </summary>
+    async Task<Stopped> Stop(string rowKey, int workItemId, string sessionId, string agent)
+    {
+        if (!stopping.TryGetValue(sessionId, out var stop))
+        {
+            stop = Stopping(rowKey, workItemId, sessionId, agent);
+            stopping[sessionId] = stop;
+        }
+
+        try
+        {
+            return await stop;
+        }
+        finally
+        {
+            // A stop that already ended, even one that failed at once, leaves the next click free to send its own.
+            if (stopping.TryGetValue(sessionId, out var kept) && kept == stop)
+            {
+                stopping.Remove(sessionId);
+            }
+        }
+    }
+
+    async Task<Stopped> Stopping(string rowKey, int workItemId, string sessionId, string agent)
     {
         if (await hub.Act(new JsonObject { ["type"] = "open-question", ["workItemId"] = workItemId, ["nativeSessionId"] = sessionId }) is { } refused)
         {
-            return refused;
+            return new Stopped(refused, null);
         }
 
-        var ended = await hub.Until((view) => RowOf(view, rowKey)?.Open is { Type: "session" } next && next.SessionId == sessionId, StopWait);
+        var ended = await hub.Until((view) => Offers(RowOf(view, rowKey)?.Open, sessionId), StopWait);
 
-        return ended is null ? $"The session did not stop within {StopWait.TotalSeconds:0} seconds, so it was not opened in {agent}." : null;
+        return ended is null ? new Stopped($"The session did not stop within {StopWait.TotalSeconds:0} seconds, so it was not opened in {agent}.", null) : new Stopped(null, RowOf(ended, rowKey));
     }
+
+    /// <summary>Whether a row's open offers the ended session: in its item window, or in a terminal with no stop left to run.</summary>
+    static bool Offers(DockOpen? open, string sessionId) => open?.SessionId == sessionId && (open.Type == "session" || open is { Type: "terminal", Handoff: null });
 
     /// <summary>
     /// Runs a control in VS Code (PRD R71): the hub keeps the command for the row's item window, which is brought forward or opened and runs it

@@ -58,7 +58,8 @@ public sealed record DockRow(
     string? MainGlyph = null,
     string? Turn = null,
     bool Dim = false,
-    bool Movable = false)
+    bool Movable = false,
+    DockTerminal? Terminal = null)
 {
     /// <summary>The work item ID of an <c>item:&lt;id&gt;</c> row, or null for a pool row.</summary>
     [JsonIgnore]
@@ -142,8 +143,41 @@ public sealed partial record DockWindow(string Name, string Title, IReadOnlyList
     private static partial Regex NamePattern();
 }
 
-/// <summary>What a row's click opens; <paramref name="Provider"/> names the agent of a session, and an older hub sends none.</summary>
-public sealed record DockOpen(string Type, int? WorkItemId, string? SessionId, string? Cwd, string? Url, string? Provider = null);
+/// <summary>
+/// What a row's click opens; <paramref name="Provider"/> names the agent of a session, and an older hub sends none. A <c>terminal</c> open carries a
+/// <see cref="DockTerminal"/>'s fields, and a <c>select</c> open only selects the row (PRD R71).
+/// </summary>
+public sealed record DockOpen(
+    string Type,
+    int? WorkItemId,
+    string? SessionId,
+    string? Cwd,
+    string? Url,
+    string? Provider = null,
+    IReadOnlyList<string>? Args = null,
+    string? Name = null,
+    string? Title = null,
+    DockHandoff? Handoff = null,
+    bool Active = false,
+    string? Executable = null)
+{
+    /// <summary>The terminal a <c>terminal</c> open names, or null.</summary>
+    [JsonIgnore]
+    public DockTerminal? Terminal =>
+        Type == "terminal" && Provider is { } provider && SessionId is { } sessionId && Cwd is { } cwd && Args is { } args && Name is { } name && Title is { } title
+            ? new DockTerminal(provider, sessionId, cwd, args, name, title, Handoff, Active, Executable)
+            : null;
+}
+
+/// <summary>
+/// A session's terminal window (PRD R28, R71): the agent's CLI <paramref name="Executable"/> with <paramref name="Args"/> in <paramref name="Cwd"/>,
+/// in a window titled <paramref name="Title"/>, which ends with <c>sb:&lt;name&gt;</c>. <paramref name="Handoff"/> is Open in Codex's stop, which
+/// runs first (PRD R70); <paramref name="Active"/> marks a session resumed elsewhere, which only its open terminal or its item window shows.
+/// </summary>
+public sealed record DockTerminal(string Provider, string SessionId, string Cwd, IReadOnlyList<string> Args, string Name, string Title, DockHandoff? Handoff = null, bool Active = false, string? Executable = null);
+
+/// <summary>The work item and session of Open in Codex's stop before a Codex question opens in a terminal (PRD R70).</summary>
+public sealed record DockHandoff(int WorkItemId, string SessionId);
 
 /// <summary>
 /// A hub control in the row's menu, with the action posted to <c>/action</c> as the hub sent it, after <paramref name="Confirm"/> when set, or with

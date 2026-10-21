@@ -29,7 +29,7 @@ public sealed class App : Application
             {
                 var windows = new Win32Windows();
 
-                window = new MainWindow(model, hub, hub, new Switcher(hub, windows, new VsCodeInstall()), docked: true, config: hub);
+                window = new MainWindow(model, hub, hub, new Switcher(hub, windows, new VsCodeInstall(), terminal: Terminals.ForPlatform()), docked: true, config: hub);
                 window.DockedOn += (monitor) => windows.DockMonitor = monitor;
                 windows.WatchForeground(window.ShowForeground);
                 windows.WatchClosed(model.WindowClosed);
@@ -44,7 +44,7 @@ public sealed class App : Application
                 var shellWindows = shell is null ? null : new ShellWindows(shell, followed);
                 IWindows windows = shellWindows ?? (IWindows)followed;
 
-                window = new MainWindow(model, hub, hub, new Switcher(hub, windows, new VsCodeInstall()), docked: false, config: hub) { Title = "Switchboard" };
+                window = new MainWindow(model, hub, hub, new Switcher(hub, windows, new VsCodeInstall(), terminal: Terminals.ForPlatform()), docked: false, config: hub) { Title = "Switchboard" };
 
                 if (window.TryGetPlatformHandle() is { HandleDescriptor: "XID" })
                 {
@@ -69,6 +69,8 @@ public sealed class App : Application
                         {
                             shell.WatchFullScreen((monitors) => Dispatcher.UIThread.Post(() => window.ShowFullScreen(monitors)));
                             window.ShowFullScreen(shell.FullScreen());
+                            // VS Code windows report their focus through the hub; a terminal's comes from the shell (PRD R71).
+                            shell.WatchTerminalFocused((title) => Dispatcher.UIThread.Post(() => window.ShowForeground(title)));
                         }
                         catch (ShellException)
                         {

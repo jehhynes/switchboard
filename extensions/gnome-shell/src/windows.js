@@ -7,6 +7,19 @@ export function isVsCode(wmClass) {
   return name === 'com.microsoft.vscode' || name === 'code';
 }
 
+/** Ptyxis's window class, the terminal the dock opens sessions in (mechanics M46). @param {string | null} wmClass */
+export function isTerminal(wmClass) {
+  return wmClass?.toLowerCase() === 'org.gnome.ptyxis';
+}
+
+/**
+ * Whether the dock may find and bring forward a window as a terminal: a normal Ptyxis window with a size.
+ * @param {{ normal: boolean, wmClass: string | null, width: number, height: number }} window
+ */
+export function isListedTerminal(window) {
+  return window.normal && isTerminal(window.wmClass) && window.width > 0 && window.height > 0;
+}
+
 /**
  * Whether the dock may find and bring forward a window: a normal VS Code window with a size. The window VS Code never shows is 0 × 0 wherever it
  * is, while a minimized window or one on another workspace keeps its size, though Mutter hides those too (mechanics M39).

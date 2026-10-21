@@ -1,11 +1,11 @@
-// Lists and brings forward VS Code's windows for the Switchboard dock, and tells it which monitors a full-screen window covers, because
+// Lists and brings forward VS Code's windows and the terminals it opens for the Switchboard dock, reports which terminal gains focus, and tells it which monitors a full-screen window covers, because
 // under GNOME on Wayland only GNOME Shell can see other apps' windows (architecture.md § Dock). Exports `switchboard.Shell` on the session bus.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import { isListed } from './windows.js';
+import { isListed, isListedTerminal } from './windows.js';
 
 const NAME = 'switchboard.Shell';
 const PATH = '/switchboard/Shell';
@@ -13,6 +13,9 @@ const INTERFACE = `
 <node>
   <interface name="switchboard.Shell">
     <method name="Windows">
+      <arg name="windows" type="a(ts)" direction="out"/>
+    </method>
+    <method name="Terminals">
       <arg name="windows" type="a(ts)" direction="out"/>
     </method>
     <method name="Activate">
@@ -26,31 +29,52 @@ const INTERFACE = `
     <signal name="FullScreenChanged">
       <arg name="monitors" type="as"/>
     </signal>
+    <signal name="TerminalFocused">
+      <arg name="title" type="s"/>
+    </signal>
   </interface>
 </node>`;
 
+/** What `isListed` and `isListedTerminal` read of a window. */
+function described(window) {
+  const frame = window.get_frame_rect();
+
+  return { normal: window.get_window_type() === Meta.WindowType.NORMAL, wmClass: window.get_wm_class(), width: frame.width, height: frame.height };
+}
+
 /** VS Code's top-level windows, minimized ones and those on other workspaces included. */
 function vsCodeWindows() {
-  return global.display.list_all_windows().filter((window) => {
-    const frame = window.get_frame_rect();
+  return global.display.list_all_windows().filter((window) => isListed(described(window)));
+}
 
-    return isListed({ normal: window.get_window_type() === Meta.WindowType.NORMAL, wmClass: window.get_wm_class(), width: frame.width, height: frame.height });
-  });
+/** Ptyxis's top-level windows, where the dock opens sessions' terminals (PRD R71). */
+function terminalWindows() {
+  return global.display.list_all_windows().filter((window) => isListedTerminal(described(window)));
+}
+
+/** Front first, by Mutter window ID and title. */
+function listed(windows) {
+  return global.display.sort_windows_by_stacking(windows).reverse().map((window) => [window.get_id(), window.get_title() ?? '']);
 }
 
 const service = {
   /** VS Code's top-level windows, front first, by Mutter window ID and title. */
   Windows() {
-    return global.display.sort_windows_by_stacking(vsCodeWindows()).reverse().map((window) => [window.get_id(), window.get_title() ?? '']);
+    return listed(vsCodeWindows());
+  },
+
+  /** Ptyxis's top-level windows, front first, by Mutter window ID and title. */
+  Terminals() {
+    return listed(terminalWindows());
   },
 
   /**
-   * Brings the VS Code window forward on its workspace, unminimized and maximized on the monitor named by its connector, as the dock does on
-   * Windows; an empty or unknown connector leaves it on its monitor. False when no VS Code window has the ID, so a caller cannot bring forward
-   * other apps' windows.
+   * Brings the VS Code or Ptyxis window forward on its workspace, unminimized and maximized on the monitor named by its connector, as the dock
+   * does on Windows; an empty or unknown connector leaves it on its monitor. False when no such window has the ID, so a caller cannot bring
+   * forward other apps' windows.
    */
   Activate(id, monitor) {
-    const window = vsCodeWindows().find((each) => each.get_id() === id);
+    const window = [...vsCodeWindows(), ...terminalWindows()].find((each) => each.get_id() === id);
 
     if (window === undefined) {
       return false;
@@ -97,9 +121,18 @@ export default class SwitchboardExtension extends Extension {
         this.exported.emit_signal('FullScreenChanged', new GLib.Variant('(as)', [monitors]));
       }
     });
+    // VS Code windows report their focus to the hub; a terminal cannot, so the shell tells the dock, which selects its row (PRD R71).
+    this.focusWatch = global.display.connect('notify::focus-window', () => {
+      const window = global.display.focus_window;
+
+      if (window !== null && isListedTerminal(described(window))) {
+        this.exported.emit_signal('TerminalFocused', new GLib.Variant('(s)', [window.get_title() ?? '']));
+      }
+    });
   }
 
   disable() {
+    global.display.disconnect(this.focusWatch);
     global.display.disconnect(this.fullScreenWatch);
     Gio.bus_unown_name(this.owner);
     this.exported.unexport();

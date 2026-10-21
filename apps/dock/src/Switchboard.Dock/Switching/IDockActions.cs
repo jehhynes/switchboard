@@ -10,5 +10,8 @@ public interface IDockActions
 
     Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel);
 
+    /// <summary>Brings the session's terminal forward or opens it (PRD R28, R71); returns why not, or null.</summary>
+    Task<string?> Terminal(DockRow row, DockTerminal terminal, CancellationToken cancel);
+
     string? OpenUrl(string url);
 }

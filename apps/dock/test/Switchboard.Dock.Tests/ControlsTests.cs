@@ -494,6 +494,78 @@ public sealed class ControlsTests
         Assert.Equal(["Customer reply", "Private note"], copy.ItemsSource!.Cast<MenuItem>().Select((item) => (string)item.Header!));
     }
 
+    /// <summary>The recorded question row as the hub sends it with review: Answer in terminal attaches, and the menu's Open in terminal runs in the dock.</summary>
+    static DockRow ReviewQuestion()
+    {
+        var row = Fixtures.Row("item:8");
+        var menu = new DockTerminal("claude", "aaaa1111-native", "D:/git/widgets", ["attach", "aaaa1111"], "gh-108-widgets-655280-aaaa1111", "Issue <8> · sb:gh-108-widgets-655280-aaaa1111");
+
+        return row with
+        {
+            Open = new DockOpen("terminal", null, menu.SessionId, menu.Cwd, null, "claude", menu.Args, menu.Name, menu.Title),
+            Main = "Answer in terminal",
+            Terminal = menu,
+            Commands = row.Commands.Where((command) => command.Label != "Open in terminal").ToList(),
+        };
+    }
+
+    [AvaloniaFact]
+    public async Task TerminalRow_MainButtonAndMenuRunTheClickAndOpenInTerminalRunsInTheDock()
+    {
+        var review = ReviewQuestion();
+        var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [review])] });
+        var items = window.MenuOf(review);
+
+        Assert.Equal(["Answer in terminal", "Stop", "Mark done", "Snooze", "Open in terminal", "History", "", "Delete", "", "Open ticket"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
+
+        Click(ButtonIn(RowOf(window, "item:8"), "main"));
+        ((MenuItem)items[0]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)items[4]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal([review.Open, review.Open], actions.Clicked.Select((clicked) => clicked.Open));
+        Assert.Equal([review.Terminal!], actions.Terminals);
+        Assert.Empty(actions.Runs);
+        Assert.Empty(hub.Calls);
+    }
+
+    [AvaloniaFact]
+    public async Task ClickForwarded_KnownRowRunsItsClickAndAnUnknownRowSaysSo()
+    {
+        var (window, model) = Open();
+
+        window.ClickForwarded("item:8");
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["item:8"], actions.Clicked.Select((clicked) => clicked.Key));
+        Assert.Equal("item:8", model.Selected);
+
+        window.ClickForwarded("item:404");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Switchboard has no row for item:404.", model.Status);
+        Assert.Single(actions.Clicked);
+    }
+
+    [AvaloniaFact]
+    public async Task ClickForwarded_UnknownRow_ReplacesTheClickStillRunning()
+    {
+        var (window, model) = Open();
+
+        actions.Pending = new TaskCompletionSource<string?>();
+        window.ClickForwarded("item:8");
+        Dispatcher.UIThread.RunJobs();
+        window.ClickForwarded("item:404");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(actions.Cancels[0].IsCancellationRequested);
+
+        actions.Pending.SetResult("Windows kept another window in front. Click the row again.");
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Switchboard has no row for item:404.", model.Status);
+    }
+
     [AvaloniaFact]
     public void MainButton_ApproveRow_NamesThePromptInItsTooltip()
     {

@@ -284,6 +284,10 @@ public static partial class SettingsFields
                 new Field("sessions.codex.model", "Model", FieldKind.Text, "A playbook can set its own.", "Codex's default"),
                 new Field("sessions.codexPath", "Codex path", FieldKind.Text, "The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.", "codex"),
             ]),
+            new Section("Dock",
+            [
+                new Field("dock.openVSCode", "Open VS Code", FieldKind.Select, "Where a row opens its work. Only for review opens the session in a terminal, Ptyxis on Linux or Windows Terminal on Windows, until its work awaits approval or is finished, so fewer VS Code windows stay open.", "always", [new FieldOption("always", "Always"), new FieldOption("review", "Only for review")]),
+            ]),
             new Section("Triage",
             [
                 new Field("triage.model", "Model", FieldKind.Text, "Triage uses the default provider. A model from the other provider falls back to its default.", "Provider's default"),

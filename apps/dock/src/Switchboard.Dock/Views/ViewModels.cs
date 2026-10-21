@@ -320,14 +320,14 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     }
 
     /// <summary>
-    /// Selects the row whose item window came to the front, the first in list order when several work items of a ticket share it, and opens its
-    /// group; returns its key, or null when no row has that window.
+    /// Selects the row whose item window or session terminal came to the front, the first in list order when several work items of a ticket share
+    /// it, and opens its group; returns its key, or null when no row has that window (PRD R71).
     /// </summary>
     public string? SelectWindow(string name)
     {
         foreach (var group in Groups)
         {
-            if (group.AllRows.FirstOrDefault((row) => row.Row.Window?.Name == name) is { } row)
+            if (group.AllRows.FirstOrDefault((row) => row.Row.Window?.Name == name || row.Row.Open?.Terminal?.Name == name || row.Row.Terminal?.Name == name) is { } row)
             {
                 Reveal(group, row);
 

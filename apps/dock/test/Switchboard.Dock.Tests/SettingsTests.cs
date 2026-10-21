@@ -6,14 +6,15 @@ namespace Switchboard.Dock.Tests;
 public sealed class SettingsFieldsTests
 {
     [Fact]
-    public void GeneralFields_AnyState_ListsSessionsThenTriageFields()
+    public void GeneralFields_AnyState_ListsSessionsDockThenTriageFields()
     {
         var sections = SettingsFields.GeneralFields(SettingsConfigs.State());
 
-        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Triage"], sections.Select((section) => section.Heading));
+        Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Dock", "Triage"], sections.Select((section) => section.Heading));
         Assert.Equal(
             [
                 "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.nodePath", "sessions.permissionMode", "sessions.model", "sessions.claudePath", "sessions.codex.permissionMode", "sessions.codex.model", "sessions.codexPath",
+                "dock.openVSCode",
                 "triage.model", "triage.concurrency", "triage.timeoutSeconds",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
@@ -24,6 +25,8 @@ public sealed class SettingsFieldsTests
         Assert.Equal(["acceptEdits", "auto", "plan"], sections[1].Fields[0].Options!.Select((option) => option.Value));
         Assert.Equal(["auto", "bypassPermissions"], sections[2].Fields[0].Options!.Select((option) => option.Value));
         Assert.Equal("bypassPermissions", sections[2].Fields[0].Placeholder);
+        Assert.Equal([("always", "Always"), ("review", "Only for review")], sections[3].Fields[0].Options!.Select((option) => (option.Value, option.Label)));
+        Assert.Equal("always", sections[3].Fields[0].Placeholder);
     }
 
     [Fact]

@@ -175,6 +175,8 @@ public sealed partial class MainWindow : Window
                 Activate();
                 TakeFocus();
             });
+            // A notification's Open or Open in Switchboard on a row that opens a terminal (PRD R65, R69, R71).
+            stream.ClickRequested += (key) => Dispatcher.UIThread.Post(() => ClickForwarded(key));
         }
 
         // Hidden until it is in its strip, so it does not show at Avalonia's first size and position and then jump (the window exists before it is shown).
@@ -182,6 +184,22 @@ public sealed partial class MainWindow : Window
         {
             Native.NoTransitions(handle.Handle);
             Native.Cloak(handle.Handle, true);
+        }
+    }
+
+    /// <summary>Runs the click VS Code forwarded, as the operator's click on the row would.</summary>
+    internal async void ClickForwarded(string key)
+    {
+        if (model.Row(key) is { } row)
+        {
+            await Open(row);
+        }
+        else
+        {
+            // As a click on another row would, it replaces a click still running.
+            running?.Cancel.Cancel();
+            running = null;
+            model.Status = $"Switchboard has no row for {key}.";
         }
     }
 
@@ -999,8 +1017,8 @@ public sealed partial class MainWindow : Window
     {
         List<Control> items = [];
 
-        // Open in Claude or Codex is the click itself on a row whose session waits on a question (PRD R70).
-        if (row.Open is { Type: "question" } && model.Row(row.Key) is { } shown)
+        // Open in Claude or Codex, or Answer in terminal, is the click itself on a row whose session waits on a question (PRD R70, R71).
+        if (MainIsClick(row) && model.Row(row.Key) is { } shown)
         {
             items.Add(Item(row.Main ?? "Open", () => Open(shown), row.MainGlyph));
         }
@@ -1024,6 +1042,11 @@ public sealed partial class MainWindow : Window
         else if (row.Pastes.Count > 1)
         {
             items.Add(new MenuItem { Header = "Copy", Icon = Glyph(CopyGlyph), ItemsSource = row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() });
+        }
+
+        if (row.Terminal is { } terminal)
+        {
+            items.Add(Item("Open in terminal", () => OpenTerminal(row, terminal), TerminalGlyph));
         }
 
         foreach (var command in row.Commands)
@@ -1133,7 +1156,13 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>A control that runs in VS Code; like a click, it replaces a click or control still switching windows.</summary>
-    async Task Run(DockRow? row, JsonObject command)
+    Task Run(DockRow? row, JsonObject command) => Running((cancel) => actions.Run(row, command, cancel), "The command failed");
+
+    /// <summary>The menu's Open in terminal with <c>dock.openVSCode: review</c>, which runs in the dock (PRD R28, R71).</summary>
+    Task OpenTerminal(DockRow row, DockTerminal terminal) => Running((cancel) => actions.Terminal(row, terminal, cancel), "The terminal did not open");
+
+    /// <summary>Runs a menu action that a click on another row replaces, and shows what it could not do.</summary>
+    async Task Running(Func<CancellationToken, Task<string?>> act, string failure)
     {
         running?.Cancel.Cancel();
 
@@ -1147,11 +1176,11 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            status = await actions.Run(row, command, cancel.Token);
+            status = await act(cancel.Token);
         }
         catch (Exception error)
         {
-            status = $"The command failed: {error.Message}";
+            status = $"{failure}: {error.Message}";
         }
 
         if (!cancel.IsCancellationRequested)
@@ -1196,8 +1225,9 @@ public sealed partial class MainWindow : Window
 
         model.Selected = row.Key;
 
-        // The main control of a row whose session waits on a question is Open in Claude or Codex, which is the row's click (PRD R70).
-        if (row.Row.Open is { Type: "question" })
+        // The main control of a row whose session waits on a question is Open in Claude or Codex, or Answer in terminal, which is the row's
+        // click (PRD R70, R71).
+        if (MainIsClick(row.Row))
         {
             await Open(row);
         }
@@ -1455,8 +1485,16 @@ public sealed partial class MainWindow : Window
         Dock();
     }
 
+    /// <summary>Whether the row's main control is its click: Open in Claude or Codex, or Answer in terminal, which are not hub actions (PRD R70, R71).</summary>
+    static bool MainIsClick(DockRow row) => row.Open is { Type: "question" } || (row.Open is { Type: "terminal" } && row.Main is { } main && row.Controls.All((control) => control.Label != main));
+
+    /// <summary>The codicon of Open in terminal.</summary>
+    const string TerminalGlyph = "\uea85";
+
     sealed class NoActions : IDockActions
     {
+        public Task<string?> Terminal(DockRow row, DockTerminal terminal, CancellationToken cancel) => Task.FromResult<string?>(null);
+
         public Task<string?> Click(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
 
         public Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel) => Task.FromResult<string?>(null);
