@@ -4,13 +4,22 @@ import { classifierPrompt, classifierSchema, validateClassification } from '@swi
 import type { ClassifyInput, ClassifyResult, Exec } from '@switchboard/core';
 import { modeArgs } from './args.js';
 import { lastErrorLine, parseRunLog } from './log.js';
+import { codexRouting } from './routing.js';
 
 export interface CodexClassifyInput extends ClassifyInput {
   codexPath: string;
   env: Record<string, string>;
+  /** Codex's config.toml, whose model endpoint the run keeps. */
+  configPath: string;
 }
 
 export async function classifyCodex(input: CodexClassifyInput, exec: Exec): Promise<ClassifyResult> {
+  const routing = codexRouting(input.configPath);
+
+  if ('error' in routing) {
+    return routing;
+  }
+
   mkdirSync(input.cwd, { recursive: true });
   const dir = mkdtempSync(join(input.cwd, 'triage-'));
 
@@ -23,6 +32,8 @@ export async function classifyCodex(input: CodexClassifyInput, exec: Exec): Prom
     writeFileSync(schemaPath, JSON.stringify(schema));
     const result = await exec(input.codexPath, [
       'exec', '--json', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+      // Before the classifier's own overrides, so those win.
+      ...routing.args,
       ...modeArgs('plan'),
       '-c', 'project_doc_max_bytes=0', '-c', 'web_search="disabled"',
       '--disable', 'shell_tool', '--disable', 'apps', '--disable', 'hooks',

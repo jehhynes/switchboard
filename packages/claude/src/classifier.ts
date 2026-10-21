@@ -3,9 +3,12 @@ import type { ClassifyInput as SharedClassifyInput, ClassifyResult } from '@swit
 import type { TriageChoice } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { claudeEnvironment, failureOf } from './exec.js';
+import { claudeRouting } from './routing.js';
 
 export interface ClassifyInput extends SharedClassifyInput {
   claudePath: string;
+  /** Claude's user settings, whose routing variables the run gets. */
+  settingsPath: string;
 }
 
 export { classifierPrompt } from '@switchboard/core';
@@ -54,7 +57,14 @@ export function parseClassifierOutput(stdout: string, choices: TriageChoice[], r
 
 export async function classify(input: ClassifyInput, exec: Exec): Promise<ClassifyResult> {
   const timeoutMs = input.timeoutSeconds * 1000;
-  const result = await exec(input.claudePath, classifierArgs(input), { cwd: input.cwd, stdin: input.context, timeoutMs, env: claudeEnvironment(input.claudePath) });
+  const routing = claudeRouting(input.settingsPath);
+
+  if ('error' in routing) {
+    return routing;
+  }
+
+  const env = { ...routing.env, ...claudeEnvironment(input.claudePath) };
+  const result = await exec(input.claudePath, classifierArgs(input), { cwd: input.cwd, stdin: input.context, timeoutMs, env });
 
   if (result.code !== 0) {
     return { error: failureOf(input.claudePath, result, timeoutMs, { cwd: input.cwd }) };

@@ -1226,8 +1226,13 @@ export class Runtime {
           cwd: this.home,
         };
         const result = provider === 'codex'
-          ? await classifyCodex({ ...input, codexPath: this.config.settings.sessions.codexPath, env: this.deps.codex?.env ?? {} }, this.deps.exec)
-          : await classify({ ...input, claudePath: this.config.settings.sessions.claudePath }, this.deps.exec);
+          ? await classifyCodex({
+              ...input,
+              codexPath: this.config.settings.sessions.codexPath,
+              env: this.deps.codex?.env ?? {},
+              configPath: join(this.deps.codex?.home ?? join(this.deps.home, '.codex'), 'config.toml'),
+            }, this.deps.exec)
+          : await classify({ ...input, claudePath: this.config.settings.sessions.claudePath, settingsPath: this.deps.claudeSettings }, this.deps.exec);
 
 
         this.send(

@@ -19,7 +19,8 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@switchboard/core": "*"
+    "@switchboard/core": "*",
+    "smol-toml": "1.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

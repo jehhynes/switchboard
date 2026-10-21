@@ -7,13 +7,18 @@ import { classifyCodex } from '../src/classifier.js';
 import type { CodexClassifyInput } from '../src/classifier.js';
 
 let home: string;
+let configDir: string;
 let input: CodexClassifyInput;
 const ok: ExecResult = { code: 0, stdout: readFileSync(join(import.meta.dirname, 'fixtures/classifier-output.jsonl'), 'utf8'), stderr: '', missing: false, timedOut: false };
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'triage-codex-'));
-  input = { codexPath: 'custom-codex', env: { CODEX_HOME: join(home, 'auth') }, cwd: home, systemPrompt: 'Classify.', choices: [{ name: 'dev:build', description: 'Build', focus: null }], rates: true, focusIds: ['ticket'], context: '[ticket] Fix a typo.', model: null, timeoutSeconds: 12 };
+  configDir = mkdtempSync(join(tmpdir(), 'triage-codex-config-'));
+  input = { codexPath: 'custom-codex', env: { CODEX_HOME: join(home, 'auth') }, configPath: join(configDir, 'config.toml'), cwd: home, systemPrompt: 'Classify.', choices: [{ name: 'dev:build', description: 'Build', focus: null }], rates: true, focusIds: ['ticket'], context: '[ticket] Fix a typo.', model: null, timeoutSeconds: 12 };
 });
-afterEach(() => rmSync(home, { recursive: true, force: true }));
+afterEach(() => {
+  rmSync(home, { recursive: true, force: true });
+  rmSync(configDir, { recursive: true, force: true });
+});
 
 describe('classifyCodex', () => {
   it('runs isolated ephemeral triage with stdin, a strict schema, the configured environment and timeout', async () => {
@@ -32,6 +37,22 @@ describe('classifyCodex', () => {
     });
     expect(result).toEqual({ playbook: 'dev:build', immediacy: 'NON-BLOCKING', severity: 'LOW', focus: 'ticket' });
     expect(readdirSync(home)).toEqual([]);
+  });
+  it("keeps the model endpoint from config.toml ahead of the classifier's own overrides", async () => {
+    writeFileSync(input.configPath, 'model_provider = "openai"\nopenai_base_url = "http://127.0.0.1:8319/v1"\n');
+    await classifyCodex(input, async (_file, args) => {
+      expect(args.slice(6, 14)).toEqual(['-c', 'model_provider="openai"', '-c', 'openai_base_url="http://127.0.0.1:8319/v1"', '-c', 'approval_policy="never"', '-c', 'sandbox_mode="read-only"']);
+      writeFileSync(args[args.indexOf('--output-last-message') + 1]!, '{"playbook":"dev:build","immediacy":"NON-BLOCKING","severity":"LOW","focus":"ticket"}');
+      return ok;
+    });
+  });
+  it('fails without running Codex when config.toml cannot be read', async () => {
+    let ran = false;
+    expect(await classifyCodex({ ...input, configPath: configDir }, async () => {
+      ran = true;
+      return ok;
+    })).toEqual({ error: expect.stringMatching(/^Codex's config at .+ could not be read/) });
+    expect(ran).toBe(false);
   });
   it('passes an explicit model and accepts an unrated result', async () => {
     expect(await classifyCodex({ ...input, model: 'custom-model', rates: false, focusIds: [] }, async (_file, args) => {

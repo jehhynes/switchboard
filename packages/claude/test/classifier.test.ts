@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ const CHOICES = [
   { name: 'dev:develop', description: 'Build a change', focus: null },
   { name: 'dev:question', description: 'Answer a question', focus: null },
 ];
-const INPUT: ClassifyInput = { claudePath: 'claude', systemPrompt: 'Classify the issue.\n\nChoose one playbook:\n- dev:develop: Build a change\n- dev:question: Answer a question\n', choices: CHOICES, rates: false, focusIds: [], context: 'Issue #1 text', model: 'claude-sonnet-5', timeoutSeconds: 180, cwd: 'C:/home/.switchboard' };
+const INPUT: ClassifyInput = { claudePath: 'claude', settingsPath: join(tmpdir(), 'switchboard-no-such-dir', 'settings.json'), systemPrompt: 'Classify the issue.\n\nChoose one playbook:\n- dev:develop: Build a change\n- dev:question: Answer a question\n', choices: CHOICES, rates: false, focusIds: [], context: 'Issue #1 text', model: 'claude-sonnet-5', timeoutSeconds: 180, cwd: 'C:/home/.switchboard' };
 const SCHEMA =
   '{"type":"object","properties":{"playbook":{"type":"string","enum":["dev:develop","dev:question"]}},' +
   '"required":["playbook"],"additionalProperties":false}';
@@ -118,6 +118,36 @@ describe('classify', () => {
 
     const env = exec.mock.calls[0]![2].env!;
     expect(env[Object.keys(env).find((name) => name.toUpperCase() === 'PATH')!]!.split(delimiter)[0]).toBe(join(tmpdir(), 'nvm', 'bin'));
+  });
+
+  it("passes the routing variables from Claude's user settings, which --setting-sources skips", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'classify-settings-'));
+    const settingsPath = join(dir, 'settings.json');
+    writeFileSync(settingsPath, JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318', ENABLE_LSP_TOOL: '1' } }));
+    const exec = vi.fn<Exec>(async () => ran({ stdout: OUTPUT }));
+
+    try {
+      expect(await classify({ ...INPUT, settingsPath }, exec)).toMatchObject({ playbook: 'dev:develop' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    expect(exec.mock.calls[0]![2].env).toEqual({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:8318' });
+  });
+
+  it('fails without running Claude when its settings are not valid JSON', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'classify-settings-'));
+    const settingsPath = join(dir, 'settings.json');
+    writeFileSync(settingsPath, '{ "env": ');
+    const exec = vi.fn<Exec>(async () => ran({ stdout: OUTPUT }));
+
+    try {
+      expect(await classify({ ...INPUT, settingsPath }, exec)).toEqual({ error: expect.stringMatching(/^Claude's settings at .+ are not valid JSON\.$/) });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it('fails with the CLI error, a timeout, or a missing CLI', async () => {
