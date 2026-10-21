@@ -159,7 +159,7 @@ public sealed class HubStarterTests
         var info = HubStarter.StartInfo(launch, "/home/me/.switchboard/hub.js", "/home/me/.switchboard", environment, windows: false, ["--idle-ms=5"]);
 
         Assert.Equal("/bin/sh", info.FileName);
-        Assert.Equal(["-c", "log=$1; shift; exec \"$@\" >>\"$log\" 2>&1", "sh", Path.Combine("/home/me/.switchboard", "hub.log"), "/usr/share/code/code", "/home/me/.switchboard/hub.js", "--home=/home/me", "--config=/home/me/.claude/switchboard", "--idle-ms=5"], info.ArgumentList);
+        Assert.Equal(["-c", "log=$1; shift; exec \"$@\" >>\"$log\" 2>&1", "sh", Path.Combine("/home/me/.switchboard", "hub.log"), "/usr/share/code/code", "/home/me/.switchboard/hub.js", $"--home={Path.GetDirectoryName("/home/me/.switchboard")}", "--config=/home/me/.claude/switchboard", "--idle-ms=5"], info.ArgumentList);
         Assert.Equal(["ELECTRON_RUN_AS_NODE", "HOME"], info.Environment.Keys.Order(StringComparer.Ordinal));
     }
 
@@ -246,7 +246,12 @@ public sealed class HubStarterTests
             Assert.True(response.IsSuccessStatusCode);
             Assert.Equal(record.Pid, identity.GetProperty("pid").GetInt32());
             Assert.Equal(config, record.ConfigDir);
-            Assert.Contains("listening", File.ReadAllText(Path.Combine(Switchboard, "hub.log")), StringComparison.OrdinalIgnoreCase);
+
+            // On Windows the dock starts the hub unlogged (HubStarter.StartInfo).
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Contains("listening", File.ReadAllText(Path.Combine(Switchboard, "hub.log")), StringComparison.OrdinalIgnoreCase);
+            }
         }
         finally
         {
