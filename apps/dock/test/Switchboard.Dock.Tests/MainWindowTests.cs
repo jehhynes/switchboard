@@ -668,6 +668,10 @@ public sealed class MainWindowTests
         Assert.False(Named<Button>("SnoozeAction").IsEnabled);
 
         Named<RadioButton>("SnoozeChoice0").IsChecked = true;
+        Named<CalendarDatePicker>("SnoozeDate").GetVisualDescendants().OfType<TextBox>().Single().Focus();
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(Named<RadioButton>("SnoozeOnDate").IsChecked);
+        Named<RadioButton>("SnoozeChoice0").IsChecked = true;
         Named<CalendarDatePicker>("SnoozeDate").SelectedDate = first.AddDays(10);
         Assert.True(Named<RadioButton>("SnoozeOnDate").IsChecked);
         Assert.True(Named<Button>("SnoozeAction").IsEnabled);

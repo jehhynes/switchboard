@@ -21,7 +21,7 @@ static class SnoozeDialog
         var radios = choices.Select((choice, index) => new RadioButton { Name = $"SnoozeChoice{index}", GroupName = "snooze", Content = choice.Description == "" ? choice.Label : $"{choice.Label} · {choice.Description}", IsChecked = index == 0 }).ToList();
         var first = FirstDay(choices);
         var onDate = new RadioButton { Name = "SnoozeOnDate", GroupName = "snooze", Content = "On", VerticalAlignment = VerticalAlignment.Center, IsEnabled = first is not null };
-        var date = new CalendarDatePicker { Name = "SnoozeDate", DisplayDateStart = first, IsEnabled = first is not null, PlaceholderText = "Pick a date" };
+        var date = new CalendarDatePicker { Name = "SnoozeDate", Width = 200, DisplayDateStart = first, IsEnabled = first is not null, PlaceholderText = "Pick a date" };
         var comment = new TextBox { Name = "SnoozeComment", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, MaxHeight = 200, PlaceholderText = "Comment (optional)" };
         var go = new Button { Name = "SnoozeAction", Content = "Snooze" };
         var cancel = new Button { Name = "SnoozeCancel", Content = "Cancel", IsCancel = true };
@@ -33,6 +33,9 @@ static class SnoozeDialog
             radio.IsCheckedChanged += (_, _) => Update();
         }
 
+        // Focusing the box or opening its calendar chooses On, as picking a date does.
+        date.GotFocus += (_, _) => onDate.IsChecked = true;
+        date.CalendarOpened += (_, _) => onDate.IsChecked = true;
         date.PropertyChanged += (_, e) =>
         {
             if (e.Property != CalendarDatePicker.SelectedDateProperty)
