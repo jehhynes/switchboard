@@ -188,6 +188,8 @@ export interface DockRow {
   links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null; mentioned: boolean }[];
   /** How many earlier work items with the same playbook, or one it is a return of, were done, for "Returned ×N" on line 2 (PRD R51); 0 when it is not marked. */
   returned: number;
+  /** The comment icon on line 2, with the work item's comments, oldest first, as its tooltip (PRD R87); null without comments. */
+  comment: { glyph: string; title: string } | null;
   /** A Done row's date band, such as `Today` or `Last week` (PRD R27); null in the other groups. */
   band: string | null;
 }
@@ -237,7 +239,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
 
     const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode) : poolRow(entry, now, snapshot.namespaces);
 
-    return { ...shown, search, links: linksOf(entry), returned: entry.returned, band };
+    return { ...shown, search, links: linksOf(entry), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
   };
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
@@ -250,7 +252,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
 }
 
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode): Omit<DockRow, 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const kind = markOf(item);
   const controls = order === null ? controlsOf(item, mode) : [...controlsOf(item, mode), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
@@ -296,7 +298,7 @@ function orMarkTitle(kind: Mark | null, details: DockText[]): DockText[] {
   return kind !== null && details.length === 0 ? [{ text: MARK_TITLES[kind], title: null, tone: null }] : details;
 }
 
-function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search' | 'links' | 'returned' | 'band'> {
+function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const { ticket, triage } = entry;
   const { main, controls } = poolControls(entry);
   const triaging = triage !== null && triage.endedAt === null;
@@ -360,8 +362,33 @@ function clipped(text: string, max: number, tone: DockText['tone'] = null): Dock
   return { text: shown, title: full, tone };
 }
 
-function wake(ticket: { snoozed: boolean; snoozedUntil: number | null }): DockText[] {
-  return ticket.snoozed && ticket.snoozedUntil !== null ? [{ text: `Wakes ${wakeText(ticket.snoozedUntil)}`, title: null, tone: null }] : [];
+/**
+ * A snoozed row's wake time, unless the snooze is indefinite, then the snooze's comment (PRD R49). With a comment the wake time is only its
+ * date, with the whole time as its tooltip, so the comment keeps most of line 3.
+ */
+function wake(ticket: { snoozed: boolean; snoozedUntil: number | null; snoozeComment?: string | null }): DockText[] {
+  if (!ticket.snoozed) {
+    return [];
+  }
+
+  const comment = ticket.snoozeComment ?? null;
+  const until = ticket.snoozedUntil;
+  const day = (time: number) => new Date(time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  return [
+    ...(until === null ? [] : [comment === null ? { text: `Wakes ${wakeText(until)}`, title: null, tone: null } : { text: `Wakes ${day(until)}`, title: `Wakes ${wakeText(until)}`, tone: null }]),
+    ...(comment === null ? [] : [{ ...clipped(oneLine(comment), CAPS.note), title: comment }]),
+  ];
+}
+
+/** Line 2's comment icon: each comment under its time, oldest first (PRD R87). */
+function commentOf(item: WorkItemView): DockRow['comment'] {
+  return item.comments.length === 0 ? null : { glyph: CONTROL_GLYPHS.comment, title: item.comments.map((comment) => `${wakeText(comment.at)}\n${comment.text}`).join('\n\n') };
+}
+
+/** A multi-line text on one line, for a row. */
+function oneLine(text: string): string {
+  return text.replace(/\s*\r?\n\s*/g, ' ');
 }
 
 /** The approval summary, else the stage, each with its age, for line 3 (PRD R27, R58). */

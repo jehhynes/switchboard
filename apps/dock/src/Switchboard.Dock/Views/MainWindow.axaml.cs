@@ -1012,7 +1012,7 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    /// <summary>The row's hub controls, Snooze with its choices, then Open ticket (PRD R71).</summary>
+    /// <summary>The row's hub controls, Snooze… opening its dialog, then Open ticket (PRD R71).</summary>
     internal List<Control> MenuOf(DockRow row)
     {
         List<Control> items = [];
@@ -1025,14 +1025,7 @@ public sealed partial class MainWindow : Window
 
         foreach (var control in row.Controls.Where((control) => control.Confirm is null))
         {
-            if (control.Label == "Snooze")
-            {
-                items.Add(new MenuItem { Header = "Snooze", Icon = Glyph(control.Glyph), ItemsSource = model.Snooze.Select((choice) => Item(choice.Description == "" ? choice.Label : $"{choice.Label} · {choice.Description}", () => Act(Snoozed(control.Action, choice.Until)))).ToList() });
-            }
-            else
-            {
-                items.Add(Item(control.Label, () => Act(control), control.Glyph));
-            }
+            items.Add(Item(control.Label, control.Action["type"]?.GetValue<string>() == "snooze" ? () => Snooze(row, control) : () => Act(control), control.Glyph));
         }
 
         if (row.Pastes.Count == 1)
@@ -1109,13 +1102,24 @@ public sealed partial class MainWindow : Window
     static TextBlock? Glyph(string? glyph) =>
         string.IsNullOrEmpty(glyph) ? null : new TextBlock { Text = glyph, FontFamily = (FontFamily)Application.Current!.FindResource("Codicons")!, FontSize = 14, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
 
-    static JsonObject Snoozed(JsonObject action, long? until)
+    /// <summary>Posts Snooze… with the wake time and comment its dialog returns, or nothing on Cancel (PRD R49).</summary>
+    async Task Snooze(DockRow row, DockControl control)
     {
-        var copy = action.DeepClone().AsObject();
+        if (await SnoozeDialog.Ask(this, row.Title, model.Snooze) is not { } answer)
+        {
+            return;
+        }
 
-        copy["until"] = until;
+        var action = control.Action.DeepClone().AsObject();
 
-        return copy;
+        action["until"] = answer.Until;
+
+        if (answer.Comment is { } comment)
+        {
+            action["comment"] = comment;
+        }
+
+        await Act(action);
     }
 
     /// <summary>Posts the control's action, after the operator confirms it when the hub sent a question, or with the text the hub asked for.</summary>

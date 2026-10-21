@@ -26,7 +26,7 @@ import { volumeReply } from './volume.js';
 const RELOAD_DEBOUNCE_MS = 300;
 
 /** Operator events the dock may send (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'move', 'reset-position']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 
@@ -122,8 +122,14 @@ export function parseAction(body: unknown): FlowEvent | null {
     return null;
   }
 
-  if (body['type'] === 'snooze' && body['until'] !== null && !Number.isFinite(body['until'])) {
+  if (body['type'] === 'snooze' && ((body['until'] !== null && !Number.isFinite(body['until'])) || (body['comment'] != null && typeof body['comment'] !== 'string'))) {
     return null;
+  }
+
+  if (body['type'] === 'comment') {
+    const { workItemId, text } = body;
+
+    return Number.isInteger(workItemId) && typeof text === 'string' ? { type: 'comment', workItemId: workItemId as number, text } : null;
   }
 
   // Only the fields the core reads, because a `sessionId` field would make the activity log name another subject.

@@ -1,5 +1,5 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import type { Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
+import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -313,6 +313,15 @@ export const MIGRATIONS = [
           WHERE c.entity = 'workItem' AND c.workItemId = w.id AND json_type(c.fields, '$.status') IS NOT NULL ORDER BY c.id DESC LIMIT 1) = 'triaging'
         OR (w.playbook IS NULL AND w.taskPrompt IS NULL)
       );`,
+  // The snooze's comment (PRD R49) and the operator's comments on work items (PRD R87); the comment and snooze events' details log the text.
+  `ALTER TABLE tickets ADD COLUMN snoozeComment TEXT;
+  CREATE TABLE comments (
+    id INTEGER PRIMARY KEY,
+    workItemId INTEGER NOT NULL REFERENCES workItems(id),
+    at INTEGER NOT NULL,
+    text TEXT NOT NULL
+  );
+  CREATE INDEX commentsByWorkItem ON comments (workItemId);`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
@@ -454,7 +463,8 @@ export interface TicketHistory {
 
 /** Fields that change on every poll or status change; their change alone is not activity, and the event's time already says when. */
 const UNLOGGED: Record<string, ReadonlySet<string>> = {
-  tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt']),
+  // The snooze event's detail holds its comment (PRD R49).
+  tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt', 'snoozeComment']),
   // The start or pick event's detail holds the guidance (PRD R77).
   workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance']),
   // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
@@ -705,7 +715,7 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    const row = { adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, ...ticket };
+    const row = { adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, ...ticket };
 
     return { id: this.#insert('tickets', row as unknown as Row), ...row };
   }
@@ -811,7 +821,7 @@ export class Store {
     return this.#one('SELECT * FROM workItems WHERE id = ?', id);
   }
 
-  /** Deletes a work item with its triages, sessions, pastes and activity, so History does not show it (PRD R10, R76); its children keep no parent. */
+  /** Deletes a work item with its triages, sessions, pastes, comments and activity, so History does not show it (PRD R10, R76); its children keep no parent. */
   deleteWorkItem(id: number): void {
     this.#bump(this.workItem(id)?.ticketId ?? null);
 
@@ -834,6 +844,7 @@ export class Store {
     this.#db.prepare('DELETE FROM triages WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM sessions WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
     this.#db.prepare('UPDATE workItems SET parentId = NULL WHERE parentId = ?').run(id);
     this.#db.prepare('DELETE FROM workItems WHERE id = ?').run(id);
   }
@@ -991,6 +1002,16 @@ export class Store {
 
   pastesFor(workItemId: number): Paste[] {
     return this.#all('SELECT * FROM pastes WHERE workItemId = ? ORDER BY id', workItemId);
+  }
+
+  /** Adds the operator's comment; the comment event logs its text, so the row itself is not logged (PRD R87). */
+  addComment(comment: Omit<Comment, 'id'>): void {
+    this.#insertRaw('comments', comment as unknown as Record<string, SQLInputValue>);
+  }
+
+  /** Oldest first. */
+  commentsFor(workItemId: number): Comment[] {
+    return this.#all('SELECT * FROM comments WHERE workItemId = ? ORDER BY id', workItemId);
   }
 
   insertSession(session: Session): void {

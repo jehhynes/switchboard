@@ -464,20 +464,17 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void MenuOf_Row_ListsHubControlsSnoozeChoicesDeleteOpenTicketAndLinks()
+    public void MenuOf_Row_ListsHubControlsDeleteOpenTicketAndLinks()
     {
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7"));
-        var snooze = (MenuItem)menu[1];
 
         Assert.Equal(
-            ["Mark done", "Snooze", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002", "Open gh 20087"],
+            ["Mark done", "Snooze…", "Add comment…", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002", "Open gh 20087"],
             menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
-        Assert.IsType<Separator>(menu[8]);
-        Assert.IsType<Separator>(menu[10]);
-        Assert.Equal(7, snooze.ItemsSource!.Cast<MenuItem>().Count());
-        Assert.Equal("Indefinitely", snooze.ItemsSource!.Cast<MenuItem>().Last().Header);
-        Assert.StartsWith("Tomorrow · ", (string)snooze.ItemsSource!.Cast<MenuItem>().First().Header!);
+        Assert.IsType<Separator>(menu[9]);
+        Assert.IsType<Separator>(menu[11]);
+        Assert.Null(((MenuItem)menu[1]).ItemsSource);
     }
 
     [AvaloniaFact]
@@ -485,25 +482,22 @@ public sealed class MainWindowTests
     {
         var (window, model) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7"));
-        var snooze = ((MenuItem)menu[1]).ItemsSource!.Cast<MenuItem>().ToList();
 
         hub.ActReplies.Enqueue(null);
-        hub.ActReplies.Enqueue("A wake time that has passed.");
         ((MenuItem)menu[0]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        snooze[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         actions.UrlReply = "The browser did not open it.";
-        ((MenuItem)menu[11]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         ((MenuItem)menu[12]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)menu[13]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}", "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}"], hub.Calls);
+        Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}"], hub.Calls);
         Assert.Equal("The browser did not open it.", model.Status);
         Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
 
         actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
-        ((MenuItem)menu[6]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        Dispatcher.UIThread.RunJobs();
         ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        ((MenuItem)menu[8]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(
@@ -529,8 +523,8 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
 
-        Assert.IsType<Separator>(menu[10]);
-        Assert.Equal(["Open PR #19002", "Open gh 20087"], menu.Skip(11).Select((item) => ((MenuItem)item).Header));
+        Assert.IsType<Separator>(menu[11]);
+        Assert.Equal(["Open PR #19002", "Open gh 20087"], menu.Skip(12).Select((item) => ((MenuItem)item).Header));
     }
 
     [AvaloniaFact]
@@ -547,7 +541,7 @@ public sealed class MainWindowTests
     public void Delete_Clicked_AsksInADialogAndPostsOnlyAfterDelete()
     {
         var (window, _) = Open();
-        var delete = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[9];
+        var delete = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[10];
         Button DialogButton(string name) => Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
 
         delete.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
@@ -610,6 +604,145 @@ public sealed class MainWindowTests
 
         Assert.Equal(["act {\"type\":\"start\",\"workItemId\":9,\"guidance\":\"Check the 2024 thread.\\nKeep it short.\"}"], hub.Calls);
         Assert.Equal("{\"type\":\"start\",\"workItemId\":9}", row.Controls[1].Action.ToJsonString());
+    }
+
+    [AvaloniaFact]
+    public void Snooze_Clicked_AsksInADialogAndPostsTheChoiceAndTrimmedComment()
+    {
+        var (window, _) = Open();
+        var snooze = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[1];
+        Window Dialog() => Assert.Single(window.OwnedWindows);
+        T Named<T>(string name) where T : Control => Dialog().GetVisualDescendants().OfType<T>().Single((control) => control.Name == name);
+        void Press(string name) => Named<Button>(name).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+
+        snooze.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("Snooze Issue <7>", VisibleTexts(Dialog())[0]);
+        Assert.Equal(Fixtures.View.Snooze.Select((choice) => choice.Description == "" ? choice.Label : $"{choice.Label} · {choice.Description}"), Dialog().GetVisualDescendants().OfType<RadioButton>().Where((radio) => radio.Name!.StartsWith("SnoozeChoice", StringComparison.Ordinal)).Select((radio) => radio.Content));
+        Assert.True(Named<RadioButton>("SnoozeChoice0").IsChecked);
+        Assert.True(Named<Button>("SnoozeAction").IsEnabled);
+        Press("SnoozeCancel");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Empty(window.OwnedWindows);
+        Assert.Empty(hub.Calls);
+
+        hub.ActReplies.Enqueue(null);
+        hub.ActReplies.Enqueue(null);
+        snooze.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Named<RadioButton>("SnoozeChoice6").IsChecked = true;
+        Named<TextBox>("SnoozeComment").Text = "  Waiting for the release.\nThen retry.  ";
+        Press("SnoozeAction");
+        Dispatcher.UIThread.RunJobs();
+        snooze.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Named<TextBox>("SnoozeComment").Text = "   ";
+        Press("SnoozeAction");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(
+            [
+                "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":null,\"comment\":\"Waiting for the release.\\nThen retry.\"}",
+                "act {\"type\":\"snooze\",\"ticketId\":7,\"until\":1791093600000}",
+            ],
+            hub.Calls);
+    }
+
+    [AvaloniaFact]
+    public void Snooze_DateChosen_WakesThatDayAtTheChoicesTimeAndNeedsADateFromTomorrow()
+    {
+        var (window, _) = Open();
+        var snooze = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[1];
+        Window Dialog() => Assert.Single(window.OwnedWindows);
+        T Named<T>(string name) where T : Control => Dialog().GetVisualDescendants().OfType<T>().Single((control) => control.Name == name);
+        var first = SnoozeDialog.FirstDay(Fixtures.View.Snooze)!.Value;
+
+        snooze.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(first, Named<CalendarDatePicker>("SnoozeDate").DisplayDateStart);
+        Named<RadioButton>("SnoozeOnDate").IsChecked = true;
+        Assert.False(Named<Button>("SnoozeAction").IsEnabled);
+        Named<CalendarDatePicker>("SnoozeDate").SelectedDate = first.AddDays(-1);
+        Assert.False(Named<Button>("SnoozeAction").IsEnabled);
+
+        Named<RadioButton>("SnoozeChoice0").IsChecked = true;
+        Named<CalendarDatePicker>("SnoozeDate").SelectedDate = first.AddDays(10);
+        Assert.True(Named<RadioButton>("SnoozeOnDate").IsChecked);
+        Assert.True(Named<Button>("SnoozeAction").IsEnabled);
+
+        hub.ActReplies.Enqueue(null);
+        Named<Button>("SnoozeAction").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        var until = SnoozeDialog.OnDate(first.AddDays(10), Fixtures.View.Snooze);
+        var wake = DateTimeOffset.FromUnixTimeMilliseconds(until).LocalDateTime;
+
+        Assert.Equal([$"act {{\"type\":\"snooze\",\"ticketId\":7,\"until\":{until}}}"], hub.Calls);
+        Assert.Equal(first.AddDays(10), wake.Date);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Fixtures.View.Snooze[0].Until!.Value).LocalDateTime.TimeOfDay, wake.TimeOfDay);
+    }
+
+    [AvaloniaFact]
+    public void Snooze_NoTimedChoice_OffersNoDate()
+    {
+        Assert.Null(SnoozeDialog.FirstDay([new SnoozeChoice("Indefinitely", "", null)]));
+    }
+
+    [AvaloniaFact]
+    public void AddComment_Clicked_AsksForTextAndPostsItAsTheCommentText()
+    {
+        var (window, _) = Open();
+        var add = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[2];
+        Window Dialog() => Assert.Single(window.OwnedWindows);
+
+        hub.ActReplies.Enqueue(null);
+        add.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Add comment", VisibleTexts(Dialog())[0]);
+        Dialog().GetVisualDescendants().OfType<TextBox>().Single((box) => box.Name == "InputText").Text = " Waiting on Dana. ";
+        Dialog().GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "InputAction").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["act {\"type\":\"comment\",\"workItemId\":7,\"text\":\"Waiting on Dana.\"}"], hub.Calls);
+    }
+
+    [AvaloniaFact]
+    public void Show_RowWithComments_ShowsTheCommentIconOnLineTwoWithTheCommentsAsItsTooltip()
+    {
+        var commented = Fixtures.Row("item:7") with { Comment = new RowComment("\uea6b", "Oct 3, 9:00 AM\nWaiting on Dana.") };
+        var (window, model) = Open();
+
+        model.Show(Fixtures.View with { Groups = [new DockGroup("review", "Ready for review", null, [commented, Fixtures.Row("item:10")])] });
+        Dispatcher.UIThread.RunJobs();
+        TextBlock IconOf(string key) => window.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Name == "CommentIcon" && text.DataContext is RowViewModel row && row.Key == key);
+
+        Assert.True(IconOf("item:7").IsVisible);
+        Assert.Equal("\uea6b", IconOf("item:7").Text);
+        Assert.Equal("Oct 3, 9:00 AM\nWaiting on Dana.", ToolTip.GetTip(IconOf("item:7")));
+        Assert.False(IconOf("item:10").IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void Show_NarrowDockWithALongPlaybook_KeepsTheCommentIconInView()
+    {
+        var (window, model) = Open(new DockSettings { Width = 200 });
+        var row = Fixtures.Row("item:7") with
+        {
+            Playbook = "dev:review-pr-followup",
+            Comment = new RowComment("\uea6b", "Waiting on Dana."),
+        };
+
+        model.Show(Fixtures.View with { Groups = [new DockGroup("review", "Ready for review", null, [row])] });
+        Dispatcher.UIThread.RunJobs();
+
+        var border = window.GetVisualDescendants().OfType<Border>().Single((candidate) => candidate.Classes.Contains("row"));
+        var icon = border.GetVisualDescendants().OfType<TextBlock>().Single((text) => text.Name == "CommentIcon");
+        Rect InRow(Control control) => new(control.TranslatePoint(new Point(0, 0), border)!.Value, control.Bounds.Size);
+
+        Assert.True(icon.Bounds.Width > 0);
+        Assert.True(InRow(icon).Right <= border.Bounds.Width);
     }
 
     [AvaloniaFact]

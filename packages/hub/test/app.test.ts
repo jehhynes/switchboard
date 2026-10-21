@@ -189,6 +189,12 @@ describe('parseReport and reportBody', () => {
     expect(parseAction({ type: 'snooze', ticketId: 1, until: 1_800_000_000_000 })).toEqual({ type: 'snooze', ticketId: 1, until: 1_800_000_000_000 });
     expect(parseAction({ type: 'snooze', ticketId: 1 })).toBeNull();
     expect(parseAction({ type: 'snooze', ticketId: 1, until: 'tomorrow' })).toBeNull();
+    expect(parseAction({ type: 'snooze', ticketId: 1, until: null, comment: 'Waiting on the release.' })).toEqual({ type: 'snooze', ticketId: 1, until: null, comment: 'Waiting on the release.' });
+    expect(parseAction({ type: 'snooze', ticketId: 1, until: null, comment: null })).toEqual({ type: 'snooze', ticketId: 1, until: null, comment: null });
+    expect(parseAction({ type: 'snooze', ticketId: 1, until: null, comment: 7 })).toBeNull();
+    expect(parseAction({ type: 'comment', workItemId: 3, text: 'Waiting on Dana.', sessionId: 'x' })).toEqual({ type: 'comment', workItemId: 3, text: 'Waiting on Dana.' });
+    expect(parseAction({ type: 'comment', workItemId: 3 })).toBeNull();
+    expect(parseAction({ type: 'comment', workItemId: '3', text: 'Hi' })).toBeNull();
     expect(parseAction({ type: 'icebox', ticketId: 1 })).toBeNull();
     expect(parseAction({ type: 'restore', ticketId: 1 })).toEqual({ type: 'restore', ticketId: 1 });
     expect(parseAction({ type: 'run-schedule', name: 'cleanup', workItemId: 3 })).toEqual({ type: 'run-schedule', name: 'cleanup' });

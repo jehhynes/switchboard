@@ -821,6 +821,18 @@ describe('Runtime', () => {
     expect(runtime.snapshot().workItems[0]?.pastes).toMatchObject([{ workItemId: 1, label: 'Customer reply', file: 'D:/case/draft-reply.md' }]);
   });
 
+  it("puts a work item's comments in the snapshot, oldest first (PRD R87)", async () => {
+    const { source, runtime } = setup();
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(runtime.snapshot().workItems[0]?.comments).toEqual([]);
+    expect(runtime.send({ type: 'comment', workItemId: 1, text: 'First' }).refused).toBeNull();
+    expect(runtime.send({ type: 'comment', workItemId: 1, text: 'Second' }).refused).toBeNull();
+    expect(runtime.snapshot().workItems[0]?.comments.map((comment) => comment.text)).toEqual(['First', 'Second']);
+  });
+
   it('turns a task report into an unstarted ad-hoc row from its parent, which Start runs in the repo (PRD R68)', async () => {
     const { store, cli, source, runtime } = setup();
     source.result = { tickets: [issue('18941')] };

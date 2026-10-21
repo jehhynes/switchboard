@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -59,6 +59,8 @@ export interface WorkItemView extends WorkItem {
   links: Link[];
   /** Drafted texts the operator copies into the source (PRD R60). */
   pastes: Paste[];
+  /** The operator's comments, oldest first (PRD R87). */
+  comments: Comment[];
   /** Earlier started work items for the same ticket with the same playbook or one it is a return of; above 0 the dock marks the work item Returned (PRD R51). */
   returned: number;
   /** The ticket of the work item whose session reported this one as a task (PRD R68). */
@@ -1078,6 +1080,7 @@ export class Runtime {
           worktree: store.worktreeFor(item.ticketId),
           links: store.linksFor(item.ticketId),
           pastes: store.pastesFor(item.id),
+          comments: store.commentsFor(item.id),
           returned: returned(store.workItemsForTicket(item.ticketId).filter((other) => other.id < item.id), item.playbook, ticket),
           parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
           moved: ticket.adhocKey !== null && store.workItemsForTicket(item.ticketId)[0]?.id === item.id,

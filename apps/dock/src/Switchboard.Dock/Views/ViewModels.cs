@@ -646,6 +646,13 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public bool HasReturned => row.Returned > 0;
 
+    /// <summary>The operator's comments (PRD R87), as an icon on line 2 with the comments as its tooltip.</summary>
+    public bool HasComment => row.Comment is not null;
+
+    public string CommentGlyph => row.Comment?.Glyph ?? "";
+
+    public string? CommentTitle => row.Comment?.Title;
+
     /// <summary>The ticket's URL, which its key pill opens; empty for an ad-hoc ticket.</summary>
     public string Url => row.Url;
 

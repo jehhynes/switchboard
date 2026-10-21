@@ -40,6 +40,7 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     doneReason: null,
     parentId: null,
     pastes: [],
+    comments: [],
     parent: null,
     moved: false,
     approvalSends: false,

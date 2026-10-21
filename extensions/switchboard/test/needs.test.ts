@@ -53,6 +53,7 @@ function item(id: number, status: WorkItemView['status'], patch: { snoozed?: boo
     doneReason: null,
     parentId: null,
     pastes: [],
+    comments: [],
     parent: null,
     moved: false,
     approvalSends: false,

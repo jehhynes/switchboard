@@ -417,6 +417,8 @@
                                 </Grid>
                                 <StackPanel Grid.Row="1" Margin="0,3,0,0" Spacing="3">
                                 <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">
+                                  <!-- First, because line 2 clips its end on a narrow dock or after a long playbook name (PRD R87). -->
+                                  <TextBlock Name="CommentIcon" Classes="icon muted" Text="{Binding CommentGlyph}" IsVisible="{Binding HasComment}" ToolTip.Tip="{Binding CommentTitle}" VerticalAlignment="Center" />
                                   <TextBlock VerticalAlignment="Center">
                                     <Run Text="{Binding Namespace}" Foreground="{DynamicResource DockMuted}" /><Run Text="{Binding Name}" />
                                   </TextBlock>

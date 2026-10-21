@@ -56,6 +56,7 @@ function item(id: number, status: WorkItemView['status'], patch: Partial<WorkIte
     doneReason: null,
     parentId: null,
     pastes: [],
+    comments: [],
     parent: null,
     moved: false,
     approvalSends: false,

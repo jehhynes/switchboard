@@ -102,6 +102,7 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   'retriage-pool': { text: 'You asked to triage the pool ticket again', icon: 'filter' },
   restore: { text: 'You restored it', icon: 'bell' },
   snooze: { text: 'You snoozed it', icon: 'bell-slash' },
+  comment: { text: 'You commented', icon: 'comment' },
   move: { text: 'You moved it in Ready for review', icon: 'list-ordered' },
   'reset-position': { text: 'You reset its place in Ready for review', icon: 'list-ordered' },
 };
@@ -469,6 +470,13 @@ class Builder {
       // Start with guidance… (PRD R77) shows the guidance under the entry.
       if ((event.type === 'start' || event.type === 'pick') && typeof detail['guidance'] === 'string') {
         return { category: 'you', icon: operator.icon, text: `${text} with guidance`, detail: detail['guidance'], tone: 'accent' };
+      }
+
+      // A snooze's comment (PRD R49) and a comment (PRD R87) show their text under the entry.
+      const comment = event.type === 'snooze' ? detail['comment'] : event.type === 'comment' ? detail['text'] : undefined;
+
+      if (typeof comment === 'string') {
+        return { category: 'you', icon: operator.icon, text, detail: comment, tone: 'accent' };
       }
 
       return { category: 'you', icon: operator.icon, text, tone: 'accent' };

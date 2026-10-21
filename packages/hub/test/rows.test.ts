@@ -43,28 +43,29 @@ describe('groupOf', () => {
 
 describe('controlsOf', () => {
   it('shows only the controls that apply, with no session controls and no Change playbook', () => {
-    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
-    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'finished', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'failed' }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'failed', triage: triage({ error: 'Timed out.' }) }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'unstarted' }))).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'awaiting-approval' }))).toEqual(['Approve', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
+    expect(labels(item(1, { sessions: [session()] }))).toEqual(['Stop', 'Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { sessions: [session({ state: 'starting', shortId: null })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'finished', sessions: [session({ state: 'ended' })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed' }))).toEqual(['Retry', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', triage: triage({ error: 'Timed out.' }) }))).toEqual(['Retry', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
     // A failed work item whose setup session the operator reopened resumes in that session.
     expect(labels(item(1, { status: 'failed', sessions: [session({ state: 'idle' })] })).includes('Retry')).toBe(false);
     expect(controlsOf(item(7, { status: 'failed' }))[0]).toMatchObject({ icon: 'refresh', message: { type: 'action', action: { type: 'retry', workItemId: 7 } } });
-    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Reopen', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'triaging' }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'done', sessions: [session({ state: 'ended' })] }))).toEqual(['Reopen', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
     expect(controlsOf(item(7, { status: 'done' })).find((control) => control.label === 'Reopen')?.message).toEqual({ type: 'action', action: { type: 'reopen', workItemId: 7 } });
-    expect(labels(item(1, { status: 'done', reopenable: false }))).toEqual(['Delete', 'History']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'schedule' } }))).toEqual(['Retry', 'Mark done', 'Snooze', 'Delete', 'History']);
-    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze', 'Open in terminal', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'done', reopenable: false }))).toEqual(['Add comment…', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'adhoc' } }))).toEqual(['Retry', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'failed', ticket: { ...item(1).ticket, source: 'schedule' } }))).toEqual(['Retry', 'Mark done', 'Snooze…', 'Add comment…', 'Delete', 'History']);
+    expect(labels(item(1, { status: 'blocked', sessions: [session({ released: true })] }))).toEqual(['Mark done', 'Snooze…', 'Add comment…', 'Open in terminal', 'Delete', 'History']);
     expect(controlsOf(item(7, { sessions: [session()] })).map((control) => control.message)).toEqual([
       { type: 'action', action: { type: 'stop', workItemId: 7 } },
       { type: 'action', action: { type: 'mark-done', workItemId: 7 } },
       { type: 'action', action: { type: 'snooze', ticketId: 7 } },
+      { type: 'action', action: { type: 'comment', workItemId: 7 } },
       { type: 'terminal', provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false },
       { type: 'action', action: { type: 'delete', workItemId: 7 } },
       { type: 'history', ticketId: 7, key: 'gh 107' },
@@ -82,7 +83,16 @@ describe('controlsOf', () => {
       input: { question: 'Start with guidance', detail: "Switchboard adds it to the end of the session's prompt.", field: 'guidance', action: 'Start' },
     });
     expect(mainControl(unstarted)?.label).toBe('Start');
-    expect(controlsOf(unstarted).filter((control) => control.input !== undefined)).toHaveLength(1);
+    expect(controlsOf(unstarted).filter((control) => control.input !== undefined).map((control) => control.label)).toEqual(['Start with guidance…', 'Add comment…']);
+  });
+
+  it('asks for the text before Add comment… and posts it as the comment action (PRD R87)', () => {
+    expect(controlsOf(item(7, { status: 'done' })).find((control) => control.label === 'Add comment…')).toEqual({
+      label: 'Add comment…',
+      icon: 'comment',
+      message: { type: 'action', action: { type: 'comment', workItemId: 7 } },
+      input: { question: 'Add comment', detail: 'Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.', field: 'text', action: 'Add' },
+    });
   });
 
   it('asks before Delete, naming the session it stops, and offers no Delete while a session starts (PRD R76)', () => {
@@ -268,10 +278,10 @@ describe('poolControls', () => {
       return [main?.label ?? null, controls.map((control) => control.label)];
     };
 
-    expect(labels(pool(3))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze', 'History']]);
-    expect(labels(pool(3, { triage: triage({ playbook: null, error: 'timed out' }) }))).toEqual(['Triage again', ['Triage again', 'Snooze', 'History']]);
-    expect(labels(pool(3, { triage: triage({ playbook: null, endedAt: null }) }))).toEqual([null, ['Snooze', 'History']]);
-    expect(labels(pool(3, { ticket: { ...pool(3).ticket, snoozed: true } }))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze', 'Restore', 'History']]);
+    expect(labels(pool(3))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze…', 'History']]);
+    expect(labels(pool(3, { triage: triage({ playbook: null, error: 'timed out' }) }))).toEqual(['Triage again', ['Triage again', 'Snooze…', 'History']]);
+    expect(labels(pool(3, { triage: triage({ playbook: null, endedAt: null }) }))).toEqual([null, ['Snooze…', 'History']]);
+    expect(labels(pool(3, { ticket: { ...pool(3).ticket, snoozed: true } }))).toEqual(['Start', ['Start', 'Start with guidance…', 'Snooze…', 'Restore', 'History']]);
     expect(poolControls(pool(3)).main?.message).toEqual({ type: 'action', action: { type: 'pick', ticketId: 3 } });
     expect(poolControls(pool(3)).controls[1]).toMatchObject({ message: { type: 'action', action: { type: 'pick', ticketId: 3 } }, input: { field: 'guidance', action: 'Start' } });
   });

@@ -329,6 +329,8 @@ describe('History model', () => {
       ],
       [event('snooze', 'operator', { until: T0 + 24 * 60 * MINUTE }, [], null), { text: `You snoozed it until ${timeText(T0 + 24 * 60 * MINUTE)}`, category: 'you' }],
       [event('snooze', 'operator', { until: null }, [], null), { text: 'You snoozed it indefinitely' }],
+      [event('snooze', 'operator', { until: null, comment: 'Waiting for the release.' }, [], null), { text: 'You snoozed it indefinitely', detail: 'Waiting for the release.', category: 'you', tone: 'accent' }],
+      [event('comment', 'operator', { text: 'Waiting on Dana.\nAsk Monday.' }, [], null), { text: 'You commented', detail: 'Waiting on Dana.\nAsk Monday.', category: 'you', tone: 'accent' }],
       [event('restore', 'operator', null, [], null), { text: 'You restored it', lines: [] }],
       [event('stop', 'operator', null, [], null), { text: 'You asked to stop the session' }],
       [event('reconstructed', 'hub', { fact: 'created', playbook: 'dev:question' }), { text: 'Work item created: dev:question', reconstructed: true }],

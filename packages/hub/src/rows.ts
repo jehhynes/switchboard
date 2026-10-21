@@ -70,6 +70,13 @@ function guidedStart(message: Record<string, unknown>): Control {
   return { label: 'Start with guidance…', icon: 'comment', message, input };
 }
 
+/** Add comment…: a note on the work item, which its row shows in a tooltip on line 2 (PRD R87). */
+function commentControl(item: WorkItemView): Control {
+  const input = { question: 'Add comment', detail: 'Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.', field: 'text', action: 'Add' };
+
+  return { label: 'Add comment…', icon: 'comment', message: { type: 'action', action: { type: 'comment', workItemId: item.id } }, input };
+}
+
 /** Answer in terminal: the row's click, which opens the session's terminal, in place of Open in Claude or Codex (PRD R70, R71). */
 export const ANSWER_IN_TERMINAL: Control = { label: 'Answer in terminal', icon: 'terminal', message: { type: 'click' } };
 
@@ -149,6 +156,8 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
   if (item.status !== 'done' || item.ticket.snoozed) {
     controls.push(...snoozeControls(item.ticket));
   }
+
+  controls.push(commentControl(item));
 
   // Runs in the item window, not the hub (PRD R57).
   if (item.worktree !== null) {
@@ -288,11 +297,11 @@ export const PROVIDER_NAMES: Record<Provider, string> = { claude: 'Claude', code
 
 
 /**
- * Snooze for a ticket, and Restore when it is snoozed, so a snoozed ticket can take a new wake time without waking first (PRD R49).
- * Snooze carries no wake time: the extension asks for one before it reaches the hub.
+ * Snooze… for a ticket, and Restore when it is snoozed, so a snoozed ticket can take a new wake time without waking first (PRD R49).
+ * Snooze… carries no wake time or comment: the dock asks for them in its snooze dialog before it posts the action.
  */
 function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
-  const controls: Control[] = [{ label: 'Snooze', icon: 'clockface', message: { type: 'action', action: { type: 'snooze', ticketId: ticket.id } } }];
+  const controls: Control[] = [{ label: 'Snooze…', icon: 'clockface', message: { type: 'action', action: { type: 'snooze', ticketId: ticket.id } } }];
 
   if (ticket.snoozed) {
     controls.push({ label: 'Restore', icon: 'debug-restart', message: { type: 'action', action: { type: 'restore', ticketId: ticket.id } } });

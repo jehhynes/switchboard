@@ -63,6 +63,7 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     worktree: null,
     links: [],
     pastes: [],
+    comments: [],
     returned: 0,
     parent: null,
     moved: false,

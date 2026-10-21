@@ -44,6 +44,7 @@ function item(cwd, done) {
     worktree: null,
     links: [],
     pastes: [],
+    comments: [],
     waits: [],
     parent: null,
     returned: 0,

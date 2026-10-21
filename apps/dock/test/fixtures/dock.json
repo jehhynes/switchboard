@@ -63,11 +63,25 @@
               }
             },
             {
-              "label": "Snooze",
+              "label": "Snooze…",
               "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 13
+              }
+            },
+            {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 13
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
               }
             },
             {
@@ -132,6 +146,7 @@
           "search": "Issue <13> · gh 113 · dev:develop · Ready for review",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": null
         },
         {
@@ -187,11 +202,25 @@
               }
             },
             {
-              "label": "Snooze",
+              "label": "Snooze…",
               "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 7
+              }
+            },
+            {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 7
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
               }
             },
             {
@@ -293,6 +322,7 @@
             }
           ],
           "returned": 2,
+          "comment": null,
           "band": null
         },
         {
@@ -356,11 +386,25 @@
               }
             },
             {
-              "label": "Snooze",
+              "label": "Snooze…",
               "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 10
+              }
+            },
+            {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 10
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
               }
             },
             {
@@ -439,6 +483,7 @@
           "search": "Issue <10> · gh 110 · dev:develop · Ready for review",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": null
         }
       ]
@@ -501,11 +546,25 @@
               }
             },
             {
-              "label": "Snooze",
+              "label": "Snooze…",
               "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 14
+              }
+            },
+            {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 14
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
               }
             },
             {
@@ -540,6 +599,7 @@
           "search": "Issue <14> · gh 114 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": null
         },
         {
@@ -604,11 +664,25 @@
               }
             },
             {
-              "label": "Snooze",
+              "label": "Snooze…",
               "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 8
+              }
+            },
+            {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 8
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
               }
             },
             {
@@ -656,6 +730,7 @@
           "search": "Issue <8> · gh 108 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": null
         }
       ]
@@ -729,11 +804,25 @@
               }
             },
             {
-              "label": "Snooze",
+              "label": "Snooze…",
               "glyph": "",
               "action": {
                 "type": "snooze",
                 "ticketId": 9
+              }
+            },
+            {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 9
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
               }
             },
             {
@@ -768,6 +857,7 @@
           "search": "Issue <9> · gh 109 · dev:develop · Unstarted",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": null
         },
         {
@@ -815,7 +905,7 @@
               }
             },
             {
-              "label": "Snooze",
+              "label": "Snooze…",
               "glyph": "",
               "action": {
                 "type": "snooze",
@@ -841,6 +931,7 @@
           "search": "Issue <4> · gh 104 · dev:develop · Unstarted",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": null
         }
       ]
@@ -895,6 +986,20 @@
               }
             },
             {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 11
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
+              }
+            },
+            {
               "label": "Delete",
               "glyph": "",
               "action": {
@@ -926,6 +1031,7 @@
           "search": "Issue <11> · gh 111 · dev:develop · Done",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": "Today"
         },
         {
@@ -972,6 +1078,20 @@
               }
             },
             {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 12
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
+              }
+            },
+            {
               "label": "Delete",
               "glyph": "",
               "action": {
@@ -1003,6 +1123,7 @@
           "search": "Issue <12> · gh 112 · dev:develop · Done",
           "links": [],
           "returned": 0,
+          "comment": null,
           "band": "Two weeks ago"
         }
       ]

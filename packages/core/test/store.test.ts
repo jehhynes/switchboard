@@ -17,7 +17,7 @@ describe('Store', () => {
   });
 
   it('gives a work item whose triage could not start a failed triage when upgrading, so it counts as failed at triage', () => {
-    const version = MIGRATIONS.length - 1;
+    const version = 32;
     const path = join(dir, 'failed.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
@@ -111,7 +111,7 @@ describe('Store', () => {
     raw.close();
 
     const reopened = Store.open(path);
-    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null });
+    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null });
     reopened.close();
   });
 

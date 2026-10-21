@@ -484,11 +484,11 @@ public sealed class ControlsTests
         var (window, _) = Open();
         var headers = (DockRow row) => window.MenuOf(row).Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList();
 
-        Assert.Equal(["Open in Claude", "Stop", "Mark done", "Snooze", "Open in terminal", "History", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:8")));
-        Assert.Equal(["Approve", "Mark done", "Snooze", "Move to top", "Move up", "Copy Customer reply", "Open in terminal", "History", "Open report", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:10")));
+        Assert.Equal(["Open in Claude", "Stop", "Mark done", "Snooze…", "Add comment…", "Open in terminal", "History", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:8")));
+        Assert.Equal(["Approve", "Mark done", "Snooze…", "Add comment…", "Move to top", "Move up", "Copy Customer reply", "Open in terminal", "History", "Open report", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:10")));
 
         var two = Fixtures.Row("item:10") with { Pastes = [new DockPaste("Customer reply", "a.md"), new DockPaste("Private note", "b.md")] };
-        var copy = (MenuItem)window.MenuOf(two)[5];
+        var copy = (MenuItem)window.MenuOf(two)[6];
 
         Assert.Equal("Copy", copy.Header);
         Assert.Equal(["Customer reply", "Private note"], copy.ItemsSource!.Cast<MenuItem>().Select((item) => (string)item.Header!));
@@ -516,11 +516,11 @@ public sealed class ControlsTests
         var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [review])] });
         var items = window.MenuOf(review);
 
-        Assert.Equal(["Answer in terminal", "Stop", "Mark done", "Snooze", "Open in terminal", "History", "", "Delete", "", "Open ticket"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
+        Assert.Equal(["Answer in terminal", "Stop", "Mark done", "Snooze…", "Add comment…", "Open in terminal", "History", "", "Delete", "", "Open ticket"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
 
         Click(ButtonIn(RowOf(window, "item:8"), "main"));
         ((MenuItem)items[0]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        ((MenuItem)items[4]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        ((MenuItem)items[5]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         await Task.Yield();
         Dispatcher.UIThread.RunJobs();
 

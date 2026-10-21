@@ -58,6 +58,7 @@ function item(id, cwd, state = 'waiting') {
     worktree: null,
     links: [],
     pastes: [],
+    comments: [],
     waits: [],
     parent: null,
     returned: 0,

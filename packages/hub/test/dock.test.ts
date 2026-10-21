@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MESSAGES } from '@switchboard/core';
+import { wakeText } from '@switchboard/core/snooze';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dockView, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
@@ -174,7 +175,13 @@ describe('dockView', () => {
     expect(row(item(7, { status: 'awaiting-approval', worktree, pastes: [{ id: 1, workItemId: 7, label: 'Reply', file: 'D:/r.md', reportedAt: NOW }] })).controls).toEqual([
       { label: 'Approve', glyph: '\u{eab2}', action: { type: 'approve', workItemId: 7 } },
       { label: 'Mark done', glyph: '\u{eba4}', action: { type: 'mark-done', workItemId: 7 } },
-      { label: 'Snooze', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 7 } },
+      { label: 'Snooze…', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 7 } },
+      {
+        label: 'Add comment…',
+        glyph: '\u{ea6b}',
+        action: { type: 'comment', workItemId: 7 },
+        input: { question: 'Add comment', detail: expect.stringContaining('It is not sent to the source.') as string, field: 'text', action: 'Add' },
+      },
       {
         label: 'Delete',
         glyph: '\u{ea81}',
@@ -182,7 +189,37 @@ describe('dockView', () => {
         confirm: { question: 'Delete gh 107?', detail: expect.stringContaining('Switchboard deletes the work item') as string, action: 'Delete' },
       },
     ]);
-    expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop', 'Mark done', 'Snooze', 'Delete']);
+    expect(row(item(7, { sessions: [session()] })).controls.map((control) => control.label)).toEqual(['Stop', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
+  });
+
+  it("shows a snoozed row's wake time and then its comment on line 3, on one line and cut with the whole text as the tooltip (PRD R49)", () => {
+    const long = `Waiting for the 4.2 release.\n${'Then ask the customer to retry the import once more. '.repeat(2)}`;
+    const snoozed = (until: number | null, snoozeComment: string | null) => row(item(7, { status: 'unstarted', ticket: { ...item(7).ticket, snoozed: true, snoozedUntil: until, snoozeComment } }));
+    const until = NOW + 86_400_000;
+
+    expect(snoozed(until, null).details).toEqual([{ text: `Wakes ${wakeText(until)}`, title: null, tone: null }]);
+    expect(snoozed(until, 'Waiting for the release.\nThen retry.').details).toEqual([
+      { text: `Wakes ${new Date(until).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, title: `Wakes ${wakeText(until)}`, tone: null },
+      { text: 'Waiting for the release. Then retry.', title: 'Waiting for the release.\nThen retry.', tone: null },
+    ]);
+    expect(snoozed(null, 'Later').details).toEqual([{ text: 'Later', title: 'Later', tone: null }]);
+    expect(snoozed(null, null).details).toEqual([]);
+    expect(snoozed(null, long).details[0]).toMatchObject({ title: long });
+    expect(snoozed(null, long).details[0]!.text).toMatch(/^Waiting for the 4\.2 release\. Then .*…$/);
+    expect(snoozed(null, long).details[0]!.text.length).toBeLessThanOrEqual(81);
+
+    const view = dockView(snapshot([], { pool: [pool(4, { ticket: { ...pool(4).ticket, snoozed: true, snoozedUntil: null, snoozeComment: 'Customer is away' } })] }), NOW, W);
+    expect(view.groups.find((group) => group.key === 'snoozed')!.rows[0]).toMatchObject({ details: [{ text: 'Customer is away', title: 'Customer is away', tone: null }], comment: null });
+  });
+
+  it("gives a work item row with comments line 2's comment icon, each comment under its time in the tooltip, oldest first (PRD R87)", () => {
+    const comments = [
+      { id: 1, workItemId: 7, at: NOW - 3_600_000, text: 'Waiting on Dana.' },
+      { id: 2, workItemId: 7, at: NOW, text: 'Dana replied.\nRetry Monday.' },
+    ];
+
+    expect(row(item(7, { comments })).comment).toEqual({ glyph: '\u{ea6b}', title: `${wakeText(NOW - 3_600_000)}\nWaiting on Dana.\n\n${wakeText(NOW)}\nDana replied.\nRetry Monday.` });
+    expect(row(item(7)).comment).toBeNull();
   });
 
   it('keeps a work item that failed at triage in Unstarted with its Failed mark, its error and Retry, but no stripe or turn (PRD R27, R34)', () => {
@@ -270,7 +307,7 @@ describe('dockView', () => {
     const [triaging, failed] = view.groups.find((group) => group.key === 'unstarted')!.rows;
 
     expect(triaging).toMatchObject({ key: 'ticket:4', playbook: 'dev:triage', mark: { kind: 'triaging', glyph: '\u{eb19}', title: 'Triaging' }, window: null, open: { type: 'url', url: 'https://github.com/o/r/issues/104' }, time: null });
-    expect(triaging!.controls).toEqual([{ label: 'Snooze', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 4 } }]);
+    expect(triaging!.controls).toEqual([{ label: 'Snooze…', glyph: '\u{ec75}', action: { type: 'snooze', ticketId: 4 } }]);
     expect(triaging!.details).toEqual([{ text: 'Triaging', title: null, tone: null }]);
     expect(triaging!.main).toBeNull();
     expect(triaging!.commands).toEqual([{ label: 'History', glyph: '\u{ea82}', command: { type: 'history', ticketId: 4, key: 'gh 104' } }]);

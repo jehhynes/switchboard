@@ -53,6 +53,8 @@ export interface Ticket {
   snoozed: boolean;
   /** When the snooze ends and the ticket returns to its group; null for an indefinite snooze (PRD R49). */
   snoozedUntil: number | null;
+  /** The operator's comment with the snooze, shown with the wake time and cleared when the snooze ends (PRD R49). */
+  snoozeComment?: string | null;
   /** The source's sort time, which orders the pool so the longest-waiting customer comes first (PRD R27). */
   sortAt: number | null;
   /** When the ticket last entered the source's scope (assigned or pool); the in-queue time counts from it (PRD R27). */
@@ -156,6 +158,14 @@ export interface Paste {
   /** An absolute path, read when the operator copies it. */
   file: string;
   reportedAt: number;
+}
+
+/** A note the operator added to a work item (PRD R87). Local only. */
+export interface Comment {
+  id: number;
+  workItemId: number;
+  at: number;
+  text: string;
 }
 
 export interface Session {

@@ -21,7 +21,7 @@ const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['setup', 'running']);
 const READY_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['awaiting-approval', 'finished']);
 
 /** A ticket that leaves the source's scope stops being snoozed, so it leaves the Snoozed group (PRD R49). */
-const UNSNOOZED = { snoozed: false, snoozedUntil: null } as const;
+const UNSNOOZED = { snoozed: false, snoozedUntil: null, snoozeComment: null } as const;
 
 const EMPTY_TRIAGE = { context: null, playbook: null, immediacy: null, severity: null, focus: null, model: null } as const;
 
@@ -182,8 +182,10 @@ export type FlowEvent =
   /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
   | { type: 'retriage-pool' | 'restore'; ticketId: number }
-  /** Snoozes the ticket until `until`, or indefinitely when null (PRD R49). */
-  | { type: 'snooze'; ticketId: number; until: number | null }
+  /** Snoozes the ticket until `until`, or indefinitely when null, with the operator's comment (PRD R49). */
+  | { type: 'snooze'; ticketId: number; until: number | null; comment?: string | null }
+  /** Adds the operator's comment to a work item (PRD R87). */
+  | { type: 'comment'; workItemId: number; text: string }
   /** Places a Ready for review work item after `after`, or first when null (PRD R73). */
   | { type: 'move'; workItemId: number; after: number | null }
   /** Returns a moved work item to its place by readyAt (PRD R73). */
@@ -278,8 +280,8 @@ function firstLine(prompt: string): string {
   return prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
 }
 
-/** The operator's guidance from Start, trimmed, or null when there is none (PRD R77). */
-function guidanceOf(text: string | null | undefined): string | null {
+/** The operator's text, such as Start's guidance (PRD R77) or a comment (PRD R49, R87), trimmed, or null when blank. */
+function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
 }
 
@@ -290,7 +292,7 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -367,9 +369,11 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
       return { name: event.name };
     case 'start':
     case 'pick':
-      return guidanceOf(event.guidance) === null ? null : { guidance: guidanceOf(event.guidance) };
+      return textOf(event.guidance) === null ? null : { guidance: textOf(event.guidance) };
     case 'snooze':
-      return { until: event.until };
+      return textOf(event.comment) === null ? { until: event.until } : { until: event.until, comment: textOf(event.comment) };
+    case 'comment':
+      return { text: textOf(event.text) };
     case 'move':
       return { after: event.after };
     case 'delete':
@@ -529,7 +533,7 @@ class Flow {
       case 'run-schedule':
         return this.runSchedule(event.name);
       case 'start':
-        return this.start(this.openItem(event.workItemId), guidanceOf(event.guidance));
+        return this.start(this.openItem(event.workItemId), textOf(event.guidance));
       case 'approve':
         return this.approve(this.openItem(event.workItemId));
       case 'mark-done':
@@ -545,11 +549,13 @@ class Flow {
       case 'open-question':
         return this.openQuestion(this.openItem(event.workItemId), event.nativeSessionId);
       case 'pick':
-        return this.pick(this.poolTicket(event.ticketId), guidanceOf(event.guidance));
+        return this.pick(this.poolTicket(event.ticketId), textOf(event.guidance));
       case 'retriage-pool':
         return this.retriagePool(this.poolTicket(event.ticketId));
       case 'snooze':
-        return this.snooze(event.ticketId, event.until);
+        return this.snooze(event.ticketId, event.until, textOf(event.comment));
+      case 'comment':
+        return this.comment(this.knownItem(event.workItemId), textOf(event.text));
       case 'restore':
         return this.restore(event.ticketId);
       case 'move':
@@ -562,7 +568,7 @@ class Flow {
   /** Ends every snooze whose wake time has passed, so the ticket returns to its group on the next event (PRD R49). */
   wake(): void {
     for (const ticket of this.store.dueSnoozes(this.now)) {
-      this.store.updateTicket(ticket.id, { snoozed: false, snoozedUntil: null });
+      this.store.updateTicket(ticket.id, UNSNOOZED);
     }
   }
 
@@ -1823,16 +1829,25 @@ class Flow {
   }
 
   /** PRD R49: local only; a snoozed ticket gets no automatic triage or start until `until` passes, or until restored when `until` is null. */
-  private snooze(ticketId: number, until: number | null): void {
+  private snooze(ticketId: number, until: number | null, comment: string | null): void {
     if (until !== null && until <= this.now) {
       throw new Refusal('The snooze time has passed.');
     }
 
-    this.store.updateTicket(this.knownTicket(ticketId).id, { snoozed: true, snoozedUntil: until });
+    this.store.updateTicket(this.knownTicket(ticketId).id, { snoozed: true, snoozedUntil: until, snoozeComment: comment });
   }
 
   private restore(ticketId: number): void {
-    this.store.updateTicket(this.knownTicket(ticketId).id, { snoozed: false, snoozedUntil: null });
+    this.store.updateTicket(this.knownTicket(ticketId).id, UNSNOOZED);
+  }
+
+  /** PRD R87: local only; any work item, open or done, takes a comment. */
+  private comment(item: WorkItem, text: string | null): void {
+    if (text === null) {
+      throw new Refusal('The comment is empty.');
+    }
+
+    this.store.addComment({ workItemId: item.id, at: this.now, text });
   }
 
   private knownTicket(ticketId: number): Ticket {

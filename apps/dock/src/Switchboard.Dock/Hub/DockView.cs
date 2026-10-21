@@ -59,7 +59,8 @@ public sealed record DockRow(
     string? Turn = null,
     bool Dim = false,
     bool Movable = false,
-    DockTerminal? Terminal = null)
+    DockTerminal? Terminal = null,
+    RowComment? Comment = null)
 {
     /// <summary>The work item ID of an <c>item:&lt;id&gt;</c> row, or null for a pool row.</summary>
     [JsonIgnore]
@@ -95,6 +96,9 @@ public sealed record DockCommand(string Label, JsonObject Command, string Glyph 
 public sealed record TimeText(string Text, string Title);
 
 public sealed record RowMark(string Kind, string Glyph, string Title);
+
+/// <summary>Line 2's comment icon, with the work item's comments as its tooltip (PRD R87).</summary>
+public sealed record RowComment(string Glyph, string Title);
 
 public sealed record DockText(string Text, string? Title, Tone? Tone);
 
