@@ -1183,8 +1183,10 @@ export class Runtime {
 
     for (const worktree of worktrees ?? []) {
       const key = worktree.branch === null ? null : source.keyOfBranch(worktree.branch);
+      const ticket = key === null ? null : this.deps.store.findTicket(name, key);
 
-      if (key !== null && this.deps.store.findTicket(name, key) !== null) {
+      // The flow links only a ticket without a worktree, and each event rebuilds the views, so a linked ticket gets none.
+      if (key !== null && ticket !== null && this.deps.store.worktreeFor(ticket.id) === null) {
         this.send({ type: 'worktree-found', source: name, sourceKey: key, path: worktree.path, branch: worktree.branch! });
       }
     }

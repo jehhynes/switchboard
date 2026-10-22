@@ -183,6 +183,25 @@ describe('serveHub', () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
+  it('builds the views once for a burst of changes', async () => {
+    let change = () => {};
+    let built = 0;
+    const app: HubApp = { post: {}, snapshot: () => ++built, dock: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: (listener) => (change = listener), busy: () => false, close: () => {} };
+    const hub = served(await serve({ app: async () => app, browserPort: null }));
+    const states: string[] = [];
+    const stream = await openEvents(hub.record, () => {}, undefined, (event, data) => event === 'state' && states.push(data));
+
+    await until(() => (states.length === 1 ? true : null));
+    change();
+    change();
+    change();
+    await until(() => (states.length === 2 ? true : null));
+    await new Promise((done) => setTimeout(done, 50));
+
+    expect(states).toEqual(['1', '2']);
+    stream!.close();
+  });
+
   describe('browser endpoint', () => {
     const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'blocked', snoozed: false }];
     const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null, unsnoozeUrl: HubApp['unsnoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, unsnoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });

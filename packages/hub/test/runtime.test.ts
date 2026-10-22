@@ -434,6 +434,21 @@ describe('Runtime', () => {
   });
 
 
+  it('sends no worktree-found event for a ticket whose worktree is linked, so a poll rebuilds the views once', async () => {
+    const { store, source, runtime } = setup();
+    source.result = { tickets: [issue('7')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', linkedBy: 'convention' });
+
+    let changes = 0;
+    runtime.onChange(() => changes++);
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(changes).toBe(1);
+  });
+
   it('polls, triages through the source and classifier, and starts the chosen playbook', async () => {
     const { store, cli, source, runtime } = setup();
     let changes = 0;

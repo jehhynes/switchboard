@@ -1,7 +1,10 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { hubRecordPath, switchboardHome } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findHub, readHubRecord } from '../src/discover.js';
+import { findHub, readHubRecord, recordedHubPid } from '../src/discover.js';
 import { listenHub } from '../src/server.js';
 import { tempHome } from './helpers.js';
 
@@ -59,5 +62,38 @@ describe('findHub', () => {
     } finally {
       await server.close();
     }
+  });
+
+  it('waits for a slow hub as long as the caller allows', async () => {
+    const server = createServer((_request, response) => void setTimeout(() => response.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.1.0', pid: 4321 })), 1500));
+
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+
+    try {
+      const record = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: (server.address() as AddressInfo).port, token: 't', pid: 4321, startedAt: 'now' };
+
+      write(record);
+      expect(await findHub(home)).toBeNull();
+      expect(await findHub(home, 5000)).toEqual(record);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+});
+
+describe('recordedHubPid', () => {
+  it('is the recorded pid while that process runs, else null', () => {
+    const record = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: 1, token: 't', pid: process.pid, startedAt: 'now' };
+
+    expect(recordedHubPid(home)).toBeNull();
+
+    write(record);
+    expect(recordedHubPid(home)).toBe(process.pid);
+
+    const exited = spawnSync(process.execPath, ['-e', '']).pid!;
+
+    write({ ...record, pid: exited });
+    expect(recordedHubPid(home)).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { buildOf, createHubApp, findHub, gitBashRoot, handledBody, postToHub, registerTitle, reportBody, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { buildOf, createHubApp, findHub, gitBashRoot, handledBody, postToHub, recordedHubPid, registerTitle, reportBody, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -22,6 +22,13 @@ const REPORT_USAGE = `Usage:
   report paste <sessionId> --label <text> --file <absolute path>
   report question <sessionId> --text <question>
 `;
+
+/** Why the hub took no command: the process `hub.json` names runs but the hub did not answer, or none runs. */
+function noHub(home: string): string {
+  const pid = recordedHubPid(home);
+
+  return pid === null ? 'The Switchboard hub is not running' : `The Switchboard hub (pid ${pid}) did not answer`;
+}
 
 function flag(argv: readonly string[], name: string): string | null {
   const match = argv.find((argument) => argument === `--${name}` || argument.startsWith(`--${name}=`));
@@ -46,11 +53,11 @@ async function ticket(home: string, argv: readonly string[]): Promise<number> {
   }
 
   const native = process.env['CLAUDE_CODE_SESSION_ID'];
-  const hub = await findHub(home);
+  const hub = await findHub(home, REPORT_TIMEOUT_MS);
   const reply = hub === null ? null : await postToHub(hub, '/ticket', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
 
   if (reply === null) {
-    process.stderr.write('The Switchboard hub is not running or did not answer; run the command again, which answers the contract of a work item it moved.\n');
+    process.stderr.write(`${noHub(home)}; run the command again, which answers the contract of a work item it moved.\n`);
     return 2;
   }
 
@@ -74,9 +81,9 @@ async function report(home: string, argv: readonly string[]): Promise<number> {
       return 1;
     }
     const nativeSessionId = process.env['CLAUDE_CODE_SESSION_ID'];
-    const hub = await findHub(home);
+    const hub = await findHub(home, REPORT_TIMEOUT_MS);
     const reply = hub === null ? null : await postToHub(hub, '/handled', { ...body, nativeSessionId }, REPORT_TIMEOUT_MS);
-    if (reply === null) { process.stderr.write('The Switchboard hub is not running.\n'); return 2; }
+    if (reply === null) { process.stderr.write(`${noHub(home)}.\n`); return 2; }
     if (reply.status !== 200) { process.stderr.write(`Refused: ${reply.error ?? reply.status}\n`); return reply.status === 400 ? 1 : 3; }
     process.stdout.write(`${JSON.stringify(reply.body)}\n`);
     return 0;
@@ -94,11 +101,11 @@ async function report(home: string, argv: readonly string[]): Promise<number> {
 
   // Claude names the reporting copy, so the hub can refuse a copy a fork retired (PRD R78).
   const native = process.env['CLAUDE_CODE_SESSION_ID'];
-  const hub = await findHub(home);
+  const hub = await findHub(home, REPORT_TIMEOUT_MS);
   const reply = hub === null ? null : await postToHub(hub, '/report', native ? { ...body, nativeSessionId: native } : body, REPORT_TIMEOUT_MS);
 
   if (reply === null) {
-    process.stderr.write('The Switchboard hub is not running, so the report was not recorded.\n');
+    process.stderr.write(`${noHub(home)}, so the report was not recorded.\n`);
     return 2;
   }
 
@@ -129,11 +136,11 @@ async function register(home: string, argv: readonly string[]): Promise<number> 
     return 1;
   }
 
-  const hub = await findHub(home);
+  const hub = await findHub(home, REGISTER_TIMEOUT_MS);
   const reply = hub === null ? null : await postToHub(hub, '/register', { nativeSessionId: native, title }, REGISTER_TIMEOUT_MS);
 
   if (reply === null) {
-    process.stderr.write('The Switchboard hub is not running or did not answer; run the command again, which answers the contract of a session it registered.\n');
+    process.stderr.write(`${noHub(home)}; run the command again, which answers the contract of a session it registered.\n`);
     return 2;
   }
 

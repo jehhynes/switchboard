@@ -205,6 +205,41 @@ describe('hub entry point', () => {
     expect((await hub.exited).code).toBe(0);
   });
 
+  it('waits longer than a second for a slow hub to answer its status check', async () => {
+    const server = createServer((req, res) => {
+      if (req.method === 'GET') {
+        setTimeout(() => res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid })), 1500);
+        return;
+      }
+
+      req.resume();
+      req.on('end', () => res.end('{}'));
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+
+    try {
+      expect(await start('report', 'stage', 's1', 'Planning').exited).toMatchObject({ code: 0, stdout: 'recorded\n' });
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('says a hub whose recorded process runs did not answer, rather than that none runs', async () => {
+    const closed = createServer();
+    await new Promise<void>((done) => closed.listen(0, '127.0.0.1', done));
+    const { port } = closed.address() as AddressInfo;
+    await new Promise<void>((done) => closed.close(() => done()));
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+
+    expect(await start('report', 'stage', 's1', 'Planning').exited).toMatchObject({ code: 2, stderr: `The Switchboard hub (pid ${process.pid}) did not answer, so the report was not recorded.\n` });
+    expect(await start('report', 'handled', 's1', 'https://github.com/o/r/issues/7').exited).toMatchObject({ code: 2, stderr: `The Switchboard hub (pid ${process.pid}) did not answer.\n` });
+  });
+
   it("sends the reporting Claude copy from CLAUDE_CODE_SESSION_ID, and prints the hub's refusal (PRD R78)", async () => {
     const bodies: unknown[] = [];
     const server = createServer((req, res) => {
@@ -245,7 +280,7 @@ describe('hub entry point', () => {
 
     expect(await startWith(native, 'register').exited).toMatchObject({ code: 1, stderr: 'Usage: register --title <text>\n' });
     expect(await startWith({ CLAUDE_CODE_SESSION_ID: undefined }, 'register', '--title', 'Fix it').exited).toMatchObject({ code: 1, stderr: 'Only a Claude Code session can register: CLAUDE_CODE_SESSION_ID is not set.\n' });
-    expect(await startWith(native, 'register', '--title', 'Fix it').exited).toMatchObject({ code: 2, stderr: 'The Switchboard hub is not running or did not answer; run the command again, which answers the contract of a session it registered.\n' });
+    expect(await startWith(native, 'register', '--title', 'Fix it').exited).toMatchObject({ code: 2, stderr: 'The Switchboard hub is not running; run the command again, which answers the contract of a session it registered.\n' });
 
     const bodies: unknown[] = [];
     const replies = [

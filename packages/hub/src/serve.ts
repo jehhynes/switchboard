@@ -112,7 +112,15 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     ...(app === undefined ? {} : { post: app.post, snapshot: () => app.snapshot(), dock: () => app.dock() }),
   });
 
-  app?.onChange(() => server.update());
+  // A burst of changes, such as a poll's worktree links, rebuilds the views once.
+  let update: NodeJS.Immediate | undefined;
+
+  app?.onChange(() => {
+    update ??= setImmediate(() => {
+      update = undefined;
+      server.update();
+    });
+  });
   app?.attachDock?.((event, data) => server.notifyDock(event, data));
   app?.attachDockClick?.((data) => server.clickDock(data));
   app?.attachWindows?.((event, data) => server.notifyWindows(event, data));
@@ -170,6 +178,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     stopping ??= (async () => {
       log(`stopping: ${reason}`);
       clearInterval(idle);
+      clearImmediate(update);
       process.off('exit', unclaim);
       server.stopViews();
       app?.close();
