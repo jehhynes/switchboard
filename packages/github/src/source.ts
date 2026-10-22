@@ -4,7 +4,7 @@ import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
 import { CONTEXT_QUERY, FIELD_QUERY, ISSUE_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from './queries.js';
 import type { Roles, RolesResult } from './roles.js';
-import { readAssignment } from './assignment.js';
+import { NO_ISSUE, readAssigned, readAssignment } from './assignment.js';
 
 /** Each issue body, comment and review-thread comment is clipped to this many characters (GC). */
 export const TEXT_LIMIT = 2_000;
@@ -19,8 +19,6 @@ const ISSUE_PATH = /^\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)(?:\/|$)/;
 
 /** gh's stderr for a pull request number the repository does not have. */
 const NO_PULL_REQUEST = /Could not resolve to a PullRequest/;
-/** gh's stderr for an issue number the repository does not have, or that is a pull request. */
-const NO_ISSUE = /Could not resolve to an Issue/;
 
 /** The `owner/name` and number of a GitHub URL whose path matches `path`, or null for any other URL. */
 function githubUrlOf(target: string, path: RegExp): { repo: string; number: number } | null {
@@ -129,11 +127,11 @@ export class GithubSource implements Source {
   /**
    * Reads every open issue assigned to a configured login on the project, and lists an issue whose status is not configured as not
    * assigned. With `requireAssignee` off, reads every open issue on the project and lists only those on a configured status. A malformed
-   * response is a failed read.
+   * response is a failed read. An issue of `current` stored as assigned that the search drops or lists outside scope is read on its own.
    */
-  async poll(): Promise<PollResult> {
+  async poll(current: readonly Ticket[] = []): Promise<PollResult> {
     try {
-      return await this.readIssues();
+      return await this.readIssues(current);
     } catch {
       return { error: UNEXPECTED };
     }
@@ -267,7 +265,34 @@ export class GithubSource implements Source {
     return null;
   }
 
-  private async readIssues(): Promise<PollResult> {
+  /**
+   * Corrects the search by reading each issue the store holds as assigned that the search drops or lists outside scope, because issue
+   * search can answer with a successful but incomplete result during a GitHub outage, which would end every work item (mechanics M48).
+   */
+  private async confirmLeft(tickets: PolledTicket[], current: readonly Ticket[]): Promise<PollResult> {
+    for (const ticket of current) {
+      const index = tickets.findIndex((entry) => entry.sourceKey === ticket.sourceKey);
+
+      if (!ticket.assigned || tickets[index]?.assigned === true) {
+        continue;
+      }
+
+      const read = await readAssigned(this.config, this.gh, Number(ticket.sourceKey));
+
+      if ('error' in read) {
+        return { error: `Could not confirm that ${ticket.ref} left the assigned state: ${read.error}` };
+      }
+
+      if (read.assigned) {
+        const entry: PolledTicket = { sourceKey: ticket.sourceKey, ref: ticket.ref, sourceId: null, title: ticket.title, url: ticket.url, assigned: true, pool: false, sortAt: ticket.sortAt, enteredAt: null };
+        tickets.splice(index === -1 ? tickets.length : index, index === -1 ? 0 : 1, entry);
+      }
+    }
+
+    return { tickets };
+  }
+
+  private async readIssues(current: readonly Ticket[]): Promise<PollResult> {
     const { repo, logins, requireAssignee, project, assignedStatuses, maxPages } = this.config;
     const assignees = requireAssignee ? logins.map((login) => `assignee:${login}`) : [];
     const q = [`repo:${repo}`, 'is:issue', 'is:open', ...assignees, `project:${project.owner}/${project.number}`].join(' ');
@@ -319,7 +344,7 @@ export class GithubSource implements Source {
       }
 
       if (!search.pageInfo.hasNextPage) {
-        return { tickets };
+        return this.confirmLeft(tickets, current);
       }
 
       after = search.pageInfo.endCursor;

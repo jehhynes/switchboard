@@ -6,6 +6,7 @@ import { parseGithubConfig } from '../src/config.js';
 import type { GithubConfig } from '../src/config.js';
 import type { Gh, GhResult } from '../src/gh.js';
 import { CONTEXT_QUERY, FIELD_QUERY, ISSUE_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from '../src/queries.js';
+import { ASSIGNMENT_QUERY } from '../src/assignment.js';
 import { GithubSource } from '../src/source.js';
 
 function fixture(name: string): unknown {
@@ -193,6 +194,74 @@ describe('GithubSource.poll', () => {
     expect(gh).toHaveBeenNthCalledWith(1, FIELD_QUERY, { owner: 'acme', number: 3, status: 'Status' });
     // Asking each issue's projects for the field would fail on any other project without it.
     expect(ISSUES_QUERY).not.toContain('field(name:');
+  });
+
+  describe('an assigned ticket the search leaves out or lists outside scope (PRD R88)', () => {
+    const search = (...nodes: unknown[]): GhResult => ({ json: { data: { search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } } } });
+    const node = (number: number, status: string | null) => ({
+      number,
+      title: `Issue ${number}`,
+      url: `https://github.com/acme/widgets/issues/${number}`,
+      projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: status === null ? null : { name: status } }] },
+      timelineItems: { nodes: [] },
+    });
+    const issue = (number: number, status: string, logins = ['work-login'], state = 'OPEN'): GhResult => ({
+      json: {
+        data: {
+          repository: {
+            issue: {
+              id: `I${number}`, number, title: `Issue ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, state, updatedAt: '2026-10-22T15:39:00Z',
+              assignees: { nodes: logins.map((login) => ({ login })), pageInfo: { hasNextPage: false } },
+              projectItems: { pageInfo: { hasNextPage: false }, nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: status } }] },
+              timelineItems: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [] },
+            },
+          },
+        },
+      },
+    });
+    const stored = (number: number, patch: Partial<Ticket> = {}): Ticket => ({ ...ticket(String(number)), title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, sortAt: 1000 + number, ...patch });
+    const kept = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, assigned: true, pool: false, sortAt: 1000 + number, enteredAt: null });
+
+    it('reads each one on its own and keeps those still assigned, so an empty search ends no work item', async () => {
+      const gh = fakeGh(
+        SINGLE_SELECT,
+        search(),
+        issue(1, '🔍 Review'),
+        issue(2, '🆕 New'),
+        issue(3, '🔍 Review', ['someone']),
+        issue(4, '🔍 Review', ['work-login'], 'CLOSED'),
+        { error: 'gh: Could not resolve to an Issue with the number of 5.' },
+        { json: { data: { repository: { issue: null } } } },
+      );
+      const current = [1, 2, 3, 4, 5, 6].map((number) => stored(number));
+
+      expect(await new GithubSource(config(), gh).poll(current)).toEqual({ tickets: [kept(1)] });
+      expect(gh).toHaveBeenNthCalledWith(3, ASSIGNMENT_QUERY, { owner: 'acme', name: 'widgets', number: 1, status: 'Status' });
+      expect(gh).toHaveBeenCalledTimes(8);
+    });
+
+    it('replaces a search entry without a status with the stored ticket when the issue is still assigned, and reads no issue the search lists as assigned or the store holds as unassigned', async () => {
+      const gh = fakeGh(SINGLE_SELECT, search(node(1, null), node(2, '⚒️ Dev'), node(3, '🆕 New'), node(4, null)), issue(1, '⚒️ Dev'), issue(4, '🆕 New'));
+      const current = [stored(1), stored(2), stored(3, { assigned: false }), stored(4)];
+      const result = await new GithubSource(config(), gh).poll(current);
+
+      expect(result).toEqual({ tickets: [kept(1), expect.objectContaining({ sourceKey: '2', assigned: true }), expect.objectContaining({ sourceKey: '3', assigned: false }), expect.objectContaining({ sourceKey: '4', assigned: false, title: 'Issue 4' })] });
+      expect(gh).toHaveBeenCalledTimes(4);
+    });
+
+    it('fails the poll when a read fails, so nothing changes', async () => {
+      expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, search(), { error: 'GitHub is not reachable.' })).poll([stored(1)])).toEqual({ error: 'Could not confirm that #1 left the assigned state: GitHub is not reachable.' });
+      expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, search(), { json: { data: {} } })).poll([stored(1)])).toEqual({ error: 'Could not confirm that #1 left the assigned state: GitHub returned unexpected assignment data.' });
+      const mixed = 'gh: Could not resolve to an Issue with the number of 1.\nSomething went wrong while executing your query.';
+      expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, search(), { error: mixed })).poll([stored(1)])).toEqual({ error: `Could not confirm that #1 left the assigned state: ${mixed}` });
+      // A later failure fails the poll even after an earlier ticket was kept.
+      expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, search(), issue(1, '⚒️ Dev'), { error: 'GitHub is not reachable.' })).poll([stored(1), stored(2)])).toEqual({ error: 'Could not confirm that #2 left the assigned state: GitHub is not reachable.' });
+    });
+
+    it('without requireAssignee, keeps an issue in a configured status whoever is assigned', async () => {
+      const gh = fakeGh(SINGLE_SELECT, search(), issue(1, '⚒️ Dev', ['someone']));
+      expect(await new GithubSource(config({ requireAssignee: false }), gh).poll([stored(1)])).toEqual({ tickets: [kept(1)] });
+    });
   });
 
   it('fails on a gh error or a malformed response', async () => {

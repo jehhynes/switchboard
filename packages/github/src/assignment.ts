@@ -28,9 +28,46 @@ interface AssignmentIssue {
   };
 }
 
+/** gh's stderr for an issue number the repository does not have, or that is a pull request. */
+export const NO_ISSUE = /Could not resolve to an Issue/;
+
+type IssueRead = { issue: AssignmentIssue | null; names: string[]; assigned: boolean } | { error: string };
+
+/** One read of the issue: its assignees and whether it is in the assigned state; `issue` is null when GitHub has no such issue. */
+async function readIssue(config: GithubConfig, gh: Gh, number: number, before: string | null): Promise<IssueRead> {
+  const [owner = '', name = ''] = config.repo.split('/');
+  const own = new Set(config.logins.map((login) => login.toLowerCase()));
+  const result = await gh(ASSIGNMENT_QUERY, { owner, name, number, status: config.project.statusField, ...(before === null ? {} : { before }) });
+  if ('error' in result) return result;
+  const issue = (result.json as { data: { repository: { issue: AssignmentIssue | null } } }).data.repository.issue;
+  if (issue === null) return { issue, names: [], assigned: false };
+  if (typeof issue.id !== 'string' || issue.number !== number || typeof issue.title !== 'string' || typeof issue.url !== 'string' || !['OPEN', 'CLOSED'].includes(issue.state) || typeof issue.updatedAt !== 'string' || issue.assignees.pageInfo.hasNextPage !== false) {
+    return { error: 'GitHub returned incomplete assignment data.' };
+  }
+  const names = issue.assignees.nodes.map(({ login }) => login.toLowerCase()).sort();
+  if (issue.projectItems.pageInfo.hasNextPage !== false) return { error: 'GitHub returned incomplete project membership.' };
+  const status = issue.projectItems.nodes.find(({ project }) => project.number === config.project.number && project.owner.login.toLowerCase() === config.project.owner.toLowerCase())?.fieldValueByName?.name;
+  const assigned = issue.state === 'OPEN' && status !== undefined && config.assignedStatuses.includes(status) && (!config.requireAssignee || names.some((login) => own.has(login)));
+  return { issue, names, assigned };
+}
+
+/** Whether the issue is in the assigned state, read from the issue itself rather than issue search; a missing issue is not. */
+export async function readAssigned(config: GithubConfig, gh: Gh, number: number): Promise<{ assigned: boolean } | { error: string }> {
+  try {
+    const read = await readIssue(config, gh, number, null);
+    if ('error' in read) {
+      // gh reports every GraphQL error; another one beside the missing issue leaves the read failed.
+      const lines = read.error.split('\n').filter((line) => line.trim() !== '');
+      return lines.length > 0 && lines.every((line) => NO_ISSUE.test(line)) ? { assigned: false } : read;
+    }
+    return { assigned: read.assigned };
+  } catch {
+    return { error: 'GitHub returned unexpected assignment data.' };
+  }
+}
+
 /** Walks assignment events backwards to the beginning of the current continuous operator assignment. */
 export async function readAssignment(config: GithubConfig, gh: Gh, number: number): Promise<AssignmentLookup> {
-  const [owner = '', name = ''] = config.repo.split('/');
   const own = new Set(config.logins.map((login) => login.toLowerCase()));
   let held: Set<string> | null = null;
   let snapshot: string | null = null;
@@ -38,17 +75,10 @@ export async function readAssignment(config: GithubConfig, gh: Gh, number: numbe
 
   try {
     for (let page = 0; page < config.maxPages; page++) {
-      const result = await gh(ASSIGNMENT_QUERY, { owner, name, number, status: config.project.statusField, ...(before === null ? {} : { before }) });
-      if ('error' in result) return result;
-      const issue = (result.json as { data: { repository: { issue: AssignmentIssue | null } } }).data.repository.issue;
+      const read = await readIssue(config, gh, number, before);
+      if ('error' in read) return read;
+      const { issue, names, assigned } = read;
       if (issue === null) return { error: `Issue #${number} was not found.` };
-      if (typeof issue.id !== 'string' || issue.number !== number || typeof issue.title !== 'string' || typeof issue.url !== 'string' || !['OPEN', 'CLOSED'].includes(issue.state) || typeof issue.updatedAt !== 'string' || issue.assignees.pageInfo.hasNextPage !== false) {
-        return { error: 'GitHub returned incomplete assignment data.' };
-      }
-      const names = issue.assignees.nodes.map(({ login }) => login.toLowerCase()).sort();
-      if (issue.projectItems.pageInfo.hasNextPage !== false) return { error: 'GitHub returned incomplete project membership.' };
-      const status = issue.projectItems.nodes.find(({ project }) => project.number === config.project.number && project.owner.login.toLowerCase() === config.project.owner.toLowerCase())?.fieldValueByName?.name;
-      const assigned = issue.state === 'OPEN' && status !== undefined && config.assignedStatuses.includes(status) && (!config.requireAssignee || names.some((login) => own.has(login)));
       const current = JSON.stringify([issue.updatedAt, names]);
       if (snapshot !== null && snapshot !== current) return { error: `Assignment changed while reading #${number}; retry.` };
       snapshot = current;
