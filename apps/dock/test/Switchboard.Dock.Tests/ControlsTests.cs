@@ -223,6 +223,25 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void ClearSearchButton_Clicked_ClearsSearchAndKeepsTheBoxFocused()
+    {
+        var (window, model) = Open();
+        var box = window.FindControl<TextBox>("SearchBox")!;
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        box.Text = "107-fix";
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["Issue <7>"], VisibleTitles(window));
+
+        Click(window.FindControl<Button>("ClearSearchButton")!);
+        Assert.True(box.IsVisible);
+        Assert.Equal("", model.Filter);
+        Assert.Equal(7, VisibleTitles(window).Count);
+        Assert.Equal("", box.Text);
+        Assert.True(box.IsFocused);
+    }
+
+    [AvaloniaFact]
     public void Search_ClosedGroup_OpensWhileFilteringOnly()
     {
         var (window, model) = Open();

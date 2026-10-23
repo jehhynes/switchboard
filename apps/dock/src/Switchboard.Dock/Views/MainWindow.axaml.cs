@@ -1463,6 +1463,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    void OnClearSearchClicked(object? sender, RoutedEventArgs e)
+    {
+        model.Filter = "";
+        SearchBox.Focus();
+    }
+
     void OnSearchClicked(object? sender, RoutedEventArgs e)
     {
         model.SearchOpen = !model.SearchOpen;

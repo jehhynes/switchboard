@@ -356,7 +356,13 @@
             <TextBlock Classes="icon" Text="&#xEA76;" />
           </Button>
         </Grid>
-        <TextBox Name="SearchBox" Text="{Binding Filter}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,8" FontSize="13" />
+        <TextBox Name="SearchBox" Text="{Binding Filter}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,8" FontSize="13">
+          <TextBox.InnerRightContent>
+            <Button Name="ClearSearchButton" Classes="header" Click="OnClearSearchClicked" ToolTip.Tip="Clear search" AutomationProperties.Name="Clear search">
+              <TextBlock Classes="icon" Text="&#xEA76;" />
+            </Button>
+          </TextBox.InnerRightContent>
+        </TextBox>
       </StackPanel>
       <TextBlock Name="StatusLine" DockPanel.Dock="Bottom" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}"
                  TextWrapping="Wrap" Margin="8" Classes="warning" />
