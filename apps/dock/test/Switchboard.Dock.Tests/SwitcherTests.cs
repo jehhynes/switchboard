@@ -65,14 +65,14 @@ public sealed class SwitcherTests
     }
 
     [Fact]
-    public async Task Click_WindowNeverAppears_SaysSoAfterTheWaitAndWithdrawsTheTabs()
+    public async Task Click_WindowNeverAppears_SaysSoAfterTheWaitAndKeepsTheTabsForTheWindowVsCodeStillOpens()
     {
         var status = await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken);
 
         Assert.Equal("VS Code did not open the window for gh-107-58c609 within 20 seconds.", status);
         Assert.Equal(200, waits.Count);
         Assert.Empty(windows.Calls);
-        Assert.Equal("withdraw 42", hub.Calls[^1]);
+        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));
     }
 
     [Fact]
@@ -81,6 +81,19 @@ public sealed class SwitcherTests
         vsCode.Fails = new FileNotFoundException("Code.exe was not found beside code on PATH.");
 
         Assert.Equal("VS Code did not start: Code.exe was not found beside code on PATH.", await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
+        Assert.Equal("withdraw 42", hub.Calls[^1]);
+    }
+
+    [Fact]
+    public async Task Click_ReplacedWhileLeavingTheTabs_WithdrawsThemAndDoesNotOpenTheWindow()
+    {
+        using var cancel = new CancellationTokenSource();
+
+        hub.OnWindow = (_) => cancel.Cancel();
+
+        Assert.Null(await Switcher().Click(Fixtures.Row("item:7"), cancel.Token));
+        Assert.Equal("withdraw 42", hub.Calls[^1]);
+        Assert.Empty(vsCode.Calls);
     }
 
     [Fact]
@@ -266,7 +279,9 @@ public sealed class SwitcherTests
 
         Assert.Null(await switcher.Click(Fixtures.Row("item:7"), cancel.Token));
         Assert.Equal(1, windows.Finds("gh-107-58c609"));
-        Assert.Equal("withdraw 42", hub.Calls[^1]);
+        // VS Code still opens the window, which claims the session and needs its tabs.
+        Assert.Equal(["open gh-107-58c609.code-workspace"], vsCode.Calls);
+        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));
     }
 
     [Fact]
@@ -345,6 +360,49 @@ public sealed class SwitcherTests
         var status = await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken);
 
         Assert.Equal("VS Code did not open the window for gh-107-58c609 within 20 seconds.", status);
+        Assert.Equal(["window gh-107-58c609.code-workspace {\"type\":\"openTabs\"}", "window gh-107-58c609.code-workspace {\"type\":\"openUrl\",\"url\":\"D:/drafts/reply.md\"}", "withdraw 42"], hub.Calls);
+    }
+
+    [Fact]
+    public async Task Run_ReplacedWhileTheWindowOpens_KeepsTheTabsAndWithdrawsTheCommand()
+    {
+        using var cancel = new CancellationTokenSource();
+        var switcher = new Switcher(hub, windows, vsCode, (_) =>
+        {
+            cancel.Cancel();
+            return Task.CompletedTask;
+        });
+
+        Assert.Null(await switcher.Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, cancel.Token));
+        Assert.Equal(["open gh-107-58c609.code-workspace"], vsCode.Calls);
+        Assert.Equal("withdraw 42", hub.Calls[^1]);
+        Assert.Single(hub.Calls, (call) => call.StartsWith("withdraw"));
+    }
+
+    [Fact]
+    public async Task Run_ReplacedWhileLeavingTheCommand_WithdrawsTheTabsAndTheCommandAndDoesNotOpenTheWindow()
+    {
+        using var cancel = new CancellationTokenSource();
+
+        hub.OnWindow = (command) =>
+        {
+            if (command["type"]?.GetValue<string>() == "openUrl")
+            {
+                cancel.Cancel();
+            }
+        };
+
+        Assert.Null(await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, cancel.Token));
+        Assert.Equal(["withdraw 41", "withdraw 42"], hub.Calls[^2..]);
+        Assert.Empty(vsCode.Calls);
+    }
+
+    [Fact]
+    public async Task Run_NoWindowYetAndVsCodeFailsToStart_WithdrawsTheTabsAndTheCommand()
+    {
+        vsCode.Fails = new FileNotFoundException("Code.exe was not found beside code on PATH.");
+
+        Assert.Equal("VS Code did not start: Code.exe was not found beside code on PATH.", await Switcher().Run(Fixtures.Row("item:7"), new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
         Assert.Equal(["withdraw 41", "withdraw 42"], hub.Calls[^2..]);
     }
 

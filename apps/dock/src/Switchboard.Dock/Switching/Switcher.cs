@@ -97,13 +97,20 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
         if (handle != 0)
         {
-            return await Switch(window, file, handle, cancel);
+            return await BringForward(window, handle, cancel);
         }
 
         // A window the click opens shows the ticket, its links and its report in tabs (PRD R72); a hub that refuses only leaves them out.
         var tabs = await hub.Window(new JsonObject { ["type"] = "openTabs" }, file);
+        var failure = cancel.IsCancellationRequested ? null : Launch(file);
 
-        return await Withdrawn(tabs, cancel.IsCancellationRequested ? null : await Switch(window, file, handle, cancel), cancel);
+        if (cancel.IsCancellationRequested || failure is not null)
+        {
+            return await Withdrawn(tabs, failure, cancel);
+        }
+
+        // VS Code has started, so the window it opens claims the tabs, even when a later click replaces this one or it appears after the wait.
+        return await BringForward(window, handle, cancel);
     }
 
     /// <summary>
@@ -289,14 +296,20 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
                 return cancel.IsCancellationRequested ? null : refused;
             }
 
-            var failure = cancel.IsCancellationRequested ? null : await Switch(window, file, handle, cancel);
+            var failure = cancel.IsCancellationRequested || handle != 0 ? null : Launch(file);
 
-            if (tabs is not null)
+            if (cancel.IsCancellationRequested || failure is not null)
             {
-                await Withdrawn(tabs, failure, cancel);
+                if (tabs is not null)
+                {
+                    await Withdrawn(tabs, failure, cancel);
+                }
+
+                return await Withdrawn(left, failure, cancel);
             }
 
-            return await Withdrawn(left, failure, cancel);
+            // Once VS Code has started, the window it opens claims the tabs, as in a click; only the command is the control's to withdraw.
+            return await Withdrawn(left, await BringForward(window, handle, cancel), cancel);
         }
 
         var any = windows.FindVsCode();
@@ -373,20 +386,25 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         }
     }
 
-    /// <summary>Brings the window forward, opening it from <paramref name="file"/> when <paramref name="handle"/> is 0 because it was not found.</summary>
-    async Task<string?> Switch(DockWindow window, string file, nint handle, CancellationToken cancel)
+    /// <summary>Starts VS Code on the workspace file; returns why it did not start, or null.</summary>
+    string? Launch(string file)
+    {
+        try
+        {
+            vsCode.Open(file);
+            return null;
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or FileNotFoundException)
+        {
+            return $"VS Code did not start: {error.Message}";
+        }
+    }
+
+    /// <summary>Brings the window forward, waiting for it to appear when <paramref name="handle"/> is 0 because VS Code is opening it.</summary>
+    async Task<string?> BringForward(DockWindow window, nint handle, CancellationToken cancel)
     {
         if (handle == 0)
         {
-            try
-            {
-                vsCode.Open(file);
-            }
-            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or FileNotFoundException)
-            {
-                return $"VS Code did not start: {error.Message}";
-            }
-
             for (var waited = TimeSpan.Zero; handle == 0 && waited < OpenWait; waited += Poll)
             {
                 await wait(Poll);
