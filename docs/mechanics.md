@@ -196,9 +196,9 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The resumed session kept the conversation, ran in the worktree (`pwd`, roster `cwd`) and wrote there in auto mode with no prompt. The worktree inherited the main checkout's trust, as GC found.
   - After `claude stop` alone, the resume printed ``note: session 68838687 is already running in the background, so this started a copy as 4df6b678`` and ran under a new session ID, with its transcript in the worktree's project directory.
   - After `claude stop` and `claude rm`, the resume kept the session ID and short ID. The roster listed it with the worktree as `cwd` and `kind: background`. The transcript stayed in the original directory's project directory, with each entry's `cwd` set to the directory it ran in.
-  - A `--bg` session in `.wip/mech` under `auto` wrote and then edited a file in a sibling folder outside its working directory, with no prompt. Support relies on this: its sessions stay in `D:\git\support` and `/support-fix` works in its widgets worktree by absolute path.
+  - A `--bg` session in `.wip/mech` under `auto` wrote and then edited a file in a sibling folder outside its working directory, with no prompt.
 - **Ground Control:** GC never entered a worktree inside a session. A worktree run went first, and the action then started as a new session in the worktree it reported (GC R46).
-- **Current use:** Switchboard sessions do not call EnterWorktree or resume in another directory. `dev:develop`, `dev:qa-failure` and `dev:qa-question` require a worktree, so a setup session creates it and the skill starts inside it, as in GC. `/sb-route` creates a worktree when its own work changes code and edits it by absolute path, as `/support-fix` does. Because resuming a live session starts a copy, Open in terminal never resumes a session that is still live (architecture.md § Claude Code runner); a session live in a VS Code tab was not tested.
+- **Current use:** Switchboard does not move a session into another directory. A playbook that requires a worktree gets it from a setup session, and its task session starts inside it, as in GC. Because resuming a live session starts a copy, Open in terminal never resumes a session that is still live (architecture.md § Claude Code runner); a session live in a VS Code tab was not tested.
 
 ## M19. Forking a session for a friction debrief
 
@@ -220,7 +220,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Versions:** Claude Code CLI 2.1.292, Git for Windows 2.53 at `C:\Program Files\Git`, Windows 11.
 - **Observation:** the approval prompts of two widgets work items were stored as `C:/Program Files/Git/legacy-ship 16416` and `C:/Program Files/Git/address-feedback 19703 publish`. The sessions ran the report command with Claude Code's Bash tool, which is Git Bash.
 - **Experiment:** in Git Bash, `node -e … -- --prompt "/legacy-ship 16416" ~/x.ps1` printed `["--prompt","C:/Program Files/Git/legacy-ship 16416","C:/Users/operator/x.ps1"]`; with `MSYS_NO_PATHCONV=1` it printed `["--prompt","/legacy-ship 16416","/c/Users/operator/x.ps1"]`. The `--prompt=/…` form is rewritten too. In Git Bash `MSYSTEM` is `MINGW64` and `cygpath -m /` prints `C:/Program Files/Git/`.
-- **Not covered:** a prompt that starts with `/` and also holds a URL is rewritten further (`https://` becomes `https;\\`), and a `--summary`, stage or link label starting with `/` is rewritten too; the CLI restores neither. A prompt holding `pr:123` is not rewritten at all. The skills' prompts (`/sb-ship <issue>`, `/<skill> <issue> publish`, `/review-pr pr:<pr> publish`) are restored or left intact. The `sb-session-reports` skill already tells sessions to report through `pwsh`; the two sessions above did not.
+- **Not covered:** a prompt that starts with `/` and also holds a URL is rewritten further (`https://` becomes `https;\\`), and a `--summary`, stage or link label starting with `/` is rewritten too; the CLI restores neither. A prompt holding `pr:123` is not rewritten at all. Prompts such as `/sb-ship <issue>`, `/<skill> <issue> publish` and `/review-pr pr:<pr> publish` are restored or left intact.
 - **Limitation:** `MSYS_NO_PATHCONV=1` for a whole session would also stop the rewrite of paths such as `~/…` that sessions pass to native programs like `pwsh -File`, so it is not set.
 - **Current use:** under Git Bash (`MSYSTEM` set), the report CLI asks `cygpath -m /` for the root and turns an approval prompt that starts with `<root>/` back into `/…` (architecture.md § Session reports).
 
@@ -504,7 +504,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 These mechanisms are planned but not yet verified for Switchboard:
 
-- A real pick whose `/support-process` task session claims the pool ticket through `support-bind`. By the operator's rule no test claims a case; the operator makes the first real pick.
+- A real pick whose task session claims the pool ticket. By the operator's rule no test claims a case; the operator makes the first real pick.
 
 ## M41. Observed Support volume retention
 
@@ -552,7 +552,7 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Date:** 2026-10-19.
 - **Versions:** Node 24.14.0, GitHub CLI 2.100.0, VS Code 1.142.0.
 - **Assignment identity:** read-only GitHub GraphQL queries returned the issue ID, current assignees and assignment events for issues #20618 and #20765. The adapter identified an unassigned issue and the operator's current assignment. The scrubbed response is `packages/github/test/fixtures/assignment.json`. Pagination, multiple operator logins, incomplete reads and between-poll reassignment are covered by fixtures and unit tests.
-- **Publication ordering:** read-only inspection of project 3's enabled Item added workflow showed that it sets Status to New. The repository's add-issues workflow adds the issue to that project. Support can register after creation and before its explicit Dev transition. Evidence: `.wip/handled-project-workflow.txt`. Recheck this ordering if the project automation changes.
+- **Publication ordering:** read-only inspection of project 3's enabled Item added workflow showed that it sets Status to New. The repository's add-issues workflow adds the issue to that project. An issue therefore stays outside scope until it moves to Dev, so a `handled` report sent after its creation and before that move reaches Switchboard first. Evidence: `.wip/handled-project-workflow.txt`. Recheck this ordering if the project automation changes.
 - **Live acceptance:** the built report CLI called an isolated hub with a synthetic originating session and real read-only GitHub assignment lookup. Registration, idempotent retry, targeted polling outside search results, zero duplicate work items, retained target audit and stale-key release refusal passed. Evidence: `.wip/handled-acceptance-result.txt`. No GitHub writes or real agent sessions ran.
 - **Automated checks:** `npm run verify` passed, including coverage and 436 dock tests; the isolated real-host integration suite passed all 62 tests. Logs: `.wip/handled-verify-final.log` and `.wip/handled-integration-focused.log`. Two earlier integration runs failed the existing dock-theme focus assertion; the final run passed without a code change.
 - **Limits and current use:** R85. This verifies the generic report and source reconciliation path. The Support publication instructions were reviewed and compiled, but no customer case was published for this check. Status or project membership changes alone do not end an assignment.

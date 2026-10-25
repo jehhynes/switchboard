@@ -45,6 +45,8 @@ Read and update the document responsible for the decision:
 | [mechanics.md](docs/mechanics.md) | Dated experiments and source inspections, versions, limitations, and current use (M IDs) |
 | [testing.md](docs/testing.md) | Required checks, test layers, fixture rules, and isolation |
 
+State only Switchboard's own behavior and constraints. Skills that sessions run are outside Switchboard and may change independently: name one only as an example, such as a prompt in a sample setting, and never describe how it works.
+
 Replace superseded text in place. Record the decision and its constraint; omit discussion history, discarded proposals, and changelog prose. Distinguish current implementation, future requirements, and experimental evidence. An experiment does not imply product support. Re-verify version-fragile mechanisms after upgrading Claude Code, its VS Code extension, or VS Code.
 
 ## Verification
