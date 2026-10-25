@@ -10,9 +10,15 @@ namespace Switchboard.Dock.Platform;
 /// windows fill the rest. Struts are measured from the X screen's edges (<see cref="DockPlacement.Strut"/>).
 /// </summary>
 [SupportedOSPlatform("linux")]
-internal sealed partial class X11Dock : IDisposable
+internal sealed partial class X11Dock : IX11Edge
 {
     const string Library = "libX11.so.6";
+    const string ShapeLibrary = "libXext.so.6";
+    const int ShapeBounding = 0;
+    const int ShapeInput = 2;
+    const nint PointerRoot = 1;
+    const int ShapeSet = 0;
+    const int Unsorted = 0;
     const int PropModeReplace = 0;
     const int RevertToParent = 2;
     const nint CurrentTime = 0;
@@ -31,6 +37,21 @@ internal sealed partial class X11Dock : IDisposable
         [FieldOffset(56)] public nint Action;
         [FieldOffset(64)] public nint First;
         [FieldOffset(80)] public nint Source;
+    }
+
+    /// <summary>The start of an <c>XWindowAttributes</c> on 64-bit Linux, through <c>override_redirect</c>, padded to its full size.</summary>
+    [StructLayout(LayoutKind.Explicit, Size = 136)]
+    struct WindowAttributes
+    {
+        [FieldOffset(120)] public int OverrideRedirect;
+    }
+
+    struct XRectangle
+    {
+        public short X;
+        public short Y;
+        public ushort Width;
+        public ushort Height;
     }
 
     readonly nint display;
@@ -53,6 +74,14 @@ internal sealed partial class X11Dock : IDisposable
         }
 
         var dock = new X11Dock(display, window);
+
+        try
+        {
+            dock.CanShape = XShapeQueryExtension(display, out _, out _);
+        }
+        catch (DllNotFoundException)
+        {
+        }
 
         dock.Set("_NET_WM_WINDOW_TYPE", "ATOM", [dock.Atom("_NET_WM_WINDOW_TYPE_DOCK")]);
         XFlush(display);
@@ -94,6 +123,84 @@ internal sealed partial class X11Dock : IDisposable
         return [.. values.Chunk(4).Where((each) => each.Length == 4).Select((each) => new PixelRect((int)each[0], (int)each[1], (int)(each[0] + each[2]), (int)(each[1] + each[3])))];
     }
 
+    /// <summary>Whether the X server has the Shape extension, which auto-hide needs.</summary>
+    public bool CanShape { get; private set; }
+
+    /// <summary>
+    /// Limits the window's drawing and input to the <paramref name="width"/> pixels at its <paramref name="edge"/>, through the X Shape extension.
+    /// The sliver runs past the window's bottom, which the X server clips, so it holds when the window grows taller.
+    /// </summary>
+    public void ClipToSliver(DockEdge edge, int width)
+    {
+        XGetGeometry(display, window, out _, out _, out _, out var windowWidth, out _, out _, out _);
+        Shape(new XRectangle { X = (short)(edge == DockEdge.Left ? 0 : (int)windowWidth - width), Width = (ushort)width, Height = (ushort)short.MaxValue });
+    }
+
+    /// <summary>
+    /// Gives the window its whole rectangle again. Mutter kept drawing only the sliver when the shape was removed, so the shape becomes a rectangle
+    /// larger than any window instead (mechanics M49).
+    /// </summary>
+    public void Unclip() => Shape(new XRectangle { Width = (ushort)short.MaxValue, Height = (ushort)short.MaxValue });
+
+    void Shape(XRectangle rectangle)
+    {
+        XShapeCombineRectangles(display, window, ShapeBounding, 0, 0, ref rectangle, 1, ShapeSet, Unsorted);
+        XShapeCombineRectangles(display, window, ShapeInput, 0, 0, ref rectangle, 1, ShapeSet, Unsorted);
+        XFlush(display);
+    }
+
+    /// <summary>
+    /// Whether the pointer is over the dock or a window it owns, or one of them has the keyboard focus. Its owned dialogs are
+    /// <c>WM_TRANSIENT_FOR</c> it, and its menus and tooltips are override-redirect windows of its process, which Avalonia does not mark with an owner
+    /// (mechanics M49). The pointer's windows are each window under it from the root down, and the focus's are the focus window and its ancestors,
+    /// as a window manager can put a window in a frame.
+    /// </summary>
+    public bool KeptOpen()
+    {
+        if (XGetInputFocus(display, out var focus, out _) != 0 && focus > PointerRoot)
+        {
+            for (var at = focus; at != 0; at = Parent(at))
+            {
+                if (Ours(at))
+                {
+                    return true;
+                }
+            }
+        }
+
+        var root = XDefaultRootWindow(display);
+
+        for (var at = root; XQueryPointer(display, at, out _, out var child, out _, out _, out _, out _, out _) && child != 0; at = child)
+        {
+            if (Ours(child))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool Ours(nint at) =>
+        HideDelay.OwnedBy(at, window, (each) => XGetTransientForHint(display, each, out var owner) != 0 ? owner : 0)
+        || (XGetWindowAttributes(display, at, out var attributes) != 0 && attributes.OverrideRedirect != 0 && Get(at, "_NET_WM_PID", "CARDINAL") is [var pid, ..] && pid == Environment.ProcessId);
+
+    /// <summary>The window's parent; 0 for the root window or a window that is gone.</summary>
+    nint Parent(nint at)
+    {
+        if (XQueryTree(display, at, out var root, out var parent, out var children, out _) == 0)
+        {
+            return 0;
+        }
+
+        if (children != 0)
+        {
+            XFree(children);
+        }
+
+        return parent == root ? 0 : parent;
+    }
+
     /// <summary>The pointer on the X screen; null when it is on another X screen.</summary>
     public Avalonia.PixelPoint? Pointer() =>
         XQueryPointer(display, XDefaultRootWindow(display), out _, out _, out var x, out var y, out _, out _, out _) ? new Avalonia.PixelPoint(x, y) : null;
@@ -130,9 +237,12 @@ internal sealed partial class X11Dock : IDisposable
     nint Atom(string name) => XInternAtom(display, name, false);
 
     /// <summary>A 32-bit property of the root window, at most 64 values; empty when it is missing or of another type.</summary>
-    nint[] Get(string property, string type)
+    nint[] Get(string property, string type) => Get(XDefaultRootWindow(display), property, type);
+
+    /// <summary>A 32-bit property of <paramref name="of"/>, at most 64 values; empty when it is missing or of another type.</summary>
+    nint[] Get(nint of, string property, string type)
     {
-        if (XGetWindowProperty(display, XDefaultRootWindow(display), Atom(property), 0, 64, false, Atom(type), out _, out var format, out var count, out _, out var data) != 0 || data == 0)
+        if (XGetWindowProperty(display, of, Atom(property), 0, 64, false, Atom(type), out _, out var format, out var count, out _, out var data) != 0 || data == 0)
         {
             return [];
         }
@@ -188,6 +298,25 @@ internal sealed partial class X11Dock : IDisposable
     [LibraryImport(Library)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool XQueryPointer(nint display, nint window, out nint root, out nint child, out int rootX, out int rootY, out int windowX, out int windowY, out uint mask);
+
+    [LibraryImport(Library)]
+    private static partial int XGetInputFocus(nint display, out nint focus, out int revertTo);
+
+    [LibraryImport(Library)]
+    private static partial int XGetTransientForHint(nint display, nint window, out nint owner);
+
+    [LibraryImport(Library)]
+    private static partial int XGetWindowAttributes(nint display, nint window, out WindowAttributes attributes);
+
+    [LibraryImport(Library)]
+    private static partial int XQueryTree(nint display, nint window, out nint root, out nint parent, out nint children, out uint count);
+
+    [LibraryImport(ShapeLibrary)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool XShapeQueryExtension(nint display, out int eventBase, out int errorBase);
+
+    [LibraryImport(ShapeLibrary)]
+    private static partial void XShapeCombineRectangles(nint display, nint window, int kind, int x, int y, ref XRectangle rectangles, int count, int operation, int ordering);
 
     [LibraryImport(Library)]
     private static partial int XGetGeometry(nint display, nint drawable, out nint root, out int x, out int y, out uint width, out uint height, out uint border, out uint depth);

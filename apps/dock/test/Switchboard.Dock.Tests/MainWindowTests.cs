@@ -86,6 +86,220 @@ public sealed class MainWindowTests
         Assert.False(window.FindControl<Button>("AutoHideButton")!.IsVisible);
     }
 
+    /// <summary>A dock docked as an X11 dock window through <paramref name="edge"/>, a fake of its X11 calls.</summary>
+    (MainWindow Window, DockViewModel Model) OpenOnEdge(DockSettings settings, FakeX11Edge edge)
+    {
+        var model = new DockViewModel(settings, (_) => saved.Add("saved"));
+        var window = new MainWindow(model, null, hub, actions, docked: false);
+
+        window.DockOnX11(edge);
+        model.Show(Fixtures.View);
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        return (window, model);
+    }
+
+    // The monotonic time the hide timer's checks run at; the headless platform runs no timers.
+    TimeSpan now = TimeSpan.FromSeconds(10);
+
+    /// <summary>Runs the hide timer's check now and once the hide delay has passed.</summary>
+    void Wait(MainWindow window)
+    {
+        Dispatcher.UIThread.RunJobs();
+        Check(window, TimeSpan.Zero);
+        Check(window, HideDelay.Delay);
+        now += TimeSpan.FromSeconds(1);
+    }
+
+    /// <summary>Runs the hide timer's check <paramref name="after"/> the current time.</summary>
+    void Check(MainWindow window, TimeSpan after)
+    {
+        window.CheckHide(now + after);
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_WithShape_ShowsThePin()
+    {
+        var (window, _) = OpenOnEdge(new DockSettings(), new FakeX11Edge());
+
+        Assert.True(window.FindControl<Button>("AutoHideButton")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_AutoHideKeptWithoutShape_HidesThePinAndReservesTheStrip()
+    {
+        var edge = new FakeX11Edge { CanShape = false };
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        Wait(window);
+
+        Assert.False(window.FindControl<Button>("AutoHideButton")!.IsVisible);
+        Assert.Equal(["reserve Left"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_AutoHideOff_ReservesTheStripAndNeverClips()
+    {
+        var edge = new FakeX11Edge();
+
+        var (window, _) = OpenOnEdge(new DockSettings(), edge);
+        Wait(window);
+
+        Assert.Equal(["reserve Left"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_AutoHideOnAndNothingKeepsIt_ReleasesTheStripAndClipsToTheSliverAfterTheDelay()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        Assert.Equal(["release"], edge.Calls);
+        Assert.False(window.FindControl<Control>("Sliver")!.IsVisible);
+
+        Check(window, TimeSpan.Zero);
+        Check(window, HideDelay.Delay - TimeSpan.FromMilliseconds(1));
+
+        Assert.Equal(["release"], edge.Calls);
+
+        Check(window, HideDelay.Delay);
+
+        Assert.Equal(["release", "clip Left 3"], edge.Calls);
+        var sliver = window.FindControl<Control>("Sliver")!;
+        Assert.True(sliver.IsVisible);
+        Assert.Equal(Avalonia.Layout.HorizontalAlignment.Left, sliver.HorizontalAlignment);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_KeptOpenDuringTheDelay_StartsTheDelayAgain()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        Check(window, TimeSpan.Zero);
+        edge.Kept = true;
+        Check(window, TimeSpan.FromMilliseconds(300));
+        edge.Kept = false;
+        Check(window, TimeSpan.FromMilliseconds(400));
+        Check(window, TimeSpan.FromMilliseconds(799));
+
+        Assert.Equal(["release"], edge.Calls);
+
+        Check(window, TimeSpan.FromMilliseconds(800));
+
+        Assert.Equal(["release", "clip Left 3"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_HiddenAndResized_ClipsAgain()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true, Edge = "right" }, edge);
+
+        Wait(window);
+        window.Width = 400;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["release", "clip Right 3", "clip Right 3"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_HiddenAndDialogOpens_Unclips()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        Wait(window);
+
+        Assert.Same(window, window.ShownForDialog());
+        Assert.Equal(["release", "clip Left 3", "unclip"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_AutoHideOnRightEdge_ClipsToTheRightSliver()
+    {
+        var edge = new FakeX11Edge();
+
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true, Edge = "right" }, edge);
+        Wait(window);
+
+        Assert.Equal(["release", "clip Right 3"], edge.Calls);
+        Assert.Equal(Avalonia.Layout.HorizontalAlignment.Right, window.FindControl<Control>("Sliver")!.HorizontalAlignment);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_AutoHideOnAndKeptOpen_DoesNotClip()
+    {
+        var edge = new FakeX11Edge { Kept = true };
+
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+        Wait(window);
+
+        Assert.Equal(["release"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_HiddenAndPointerMoves_UnclipsAndHidesAgainOnceNothingKeepsIt()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        Wait(window);
+        window.MouseMove(new Point(1, 300));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["release", "clip Left 3", "unclip"], edge.Calls);
+        Assert.False(window.FindControl<Control>("Sliver")!.IsVisible);
+
+        Wait(window);
+
+        Assert.Equal(["release", "clip Left 3", "unclip", "clip Left 3"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_HiddenAndPinTurnedOff_UnclipsAndReservesTheStrip()
+    {
+        var edge = new FakeX11Edge();
+        var (window, model) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        Wait(window);
+        // The headless tap moves no pointer, so the dock is still hidden when the click turns auto-hide off.
+        Tap(window, window.FindControl<Button>("AutoHideButton")!);
+        Wait(window);
+
+        Assert.False(model.Settings.AutoHide);
+        Assert.Equal(["release", "clip Left 3", "reserve Left", "unclip"], edge.Calls);
+        Assert.False(window.FindControl<Control>("Sliver")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_PinTurnedOn_ReleasesTheStripAndHides()
+    {
+        var edge = new FakeX11Edge();
+        var (window, model) = OpenOnEdge(new DockSettings(), edge);
+
+        Tap(window, window.FindControl<Button>("AutoHideButton")!);
+        Wait(window);
+
+        Assert.True(model.Settings.AutoHide);
+        Assert.Equal(["reserve Left", "release", "clip Left 3"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_HiddenAndActivated_Unclips()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        Wait(window);
+        window.Activate();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["release", "clip Left 3", "unclip"], edge.Calls);
+    }
+
     [AvaloniaFact]
     public void DockOnX11_KeptMonitorMissing_DocksOnThePrimaryMonitor()
     {

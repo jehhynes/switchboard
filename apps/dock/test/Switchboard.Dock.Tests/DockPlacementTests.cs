@@ -173,4 +173,18 @@ public sealed class DockPlacementTests
     [InlineData(7, false)]
     [InlineData(0, false)]
     public void OwnedBy_OwnerChain_ReachesTheDockOnlyThroughItsOwners(int window, bool owned) => Assert.Equal(owned, HideDelay.OwnedBy(window, 1, OwnerOf));
+
+    [Fact]
+    public void OwnedBy_OwnersInALoop_StopsWithoutReachingTheDock()
+    {
+        var asked = 0;
+
+        // 8 and 9 own each other, as X11 owner hints can.
+        Assert.False(HideDelay.OwnedBy(8, 1, (window) =>
+        {
+            // Fails fast instead of hanging if the walk does not stop.
+            Assert.True(++asked <= 100);
+            return window == 8 ? 9 : 8;
+        }));
+    }
 }

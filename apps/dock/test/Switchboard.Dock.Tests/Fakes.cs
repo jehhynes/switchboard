@@ -448,3 +448,39 @@ static class SettingsConfigs
 
     public static Switchboard.Dock.Settings.EditorState State(JsonObject? config = null) => new(Switchboard.Dock.Settings.EditorConfig.Parse(config ?? Basic()));
 }
+
+/// <summary>Records the dock's X11 calls; <see cref="Kept"/> answers whether the pointer or focus keeps the dock open.</summary>
+sealed class FakeX11Edge : Switchboard.Dock.Platform.IX11Edge
+{
+    public List<string> Calls { get; } = [];
+
+    public bool CanShape { get; init; } = true;
+
+    public bool Kept { get; set; }
+
+    public void Reserve(Switchboard.Dock.Platform.DockEdge edge, Switchboard.Dock.Platform.PixelRect strip) => Calls.Add($"reserve {edge}");
+
+    public void Release() => Calls.Add("release");
+
+    public void ClipToSliver(Switchboard.Dock.Platform.DockEdge edge, int width) => Calls.Add($"clip {edge} {width}");
+
+    public void Unclip() => Calls.Add("unclip");
+
+    public bool KeptOpen() => Kept;
+
+    public IReadOnlyList<Switchboard.Dock.Platform.PixelRect> WorkAreas() => [];
+
+    public Avalonia.PixelPoint? Pointer() => null;
+
+    public void Focus()
+    {
+    }
+
+    public void Below(bool below)
+    {
+    }
+
+    public void Dispose()
+    {
+    }
+}

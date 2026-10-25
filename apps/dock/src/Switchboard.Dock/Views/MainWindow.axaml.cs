@@ -47,9 +47,11 @@ public sealed partial class MainWindow : Window
     bool moving;
     // An ordinary window, where the dock cannot reserve a screen edge (Float).
     bool floating;
-    // Docked at a monitor's edge as an X11 dock window (DockOnX11), and the X11 properties that reserve its strip, when an X display opened.
+    // Docked at a monitor's edge as an X11 dock window (DockOnX11), and its X11 calls, when an X display opened.
     bool edgeDocked;
-    IDisposable? x11;
+    IX11Edge? x11;
+    // As an X11 dock window, the scale of the monitor it docked on, at which an auto-hidden dock cuts its sliver.
+    double edgeScale = 1;
     // As an X11 dock window, the RandR name of the monitor the dock is on, and the monitors a full-screen window covers.
     string? edgeMonitor;
     IReadOnlyList<string> fullScreen = [];
@@ -163,6 +165,14 @@ public sealed partial class MainWindow : Window
             }
         };
         RowScroller.ScrollChanged += (_, _) => RedrawDrop();
+        // As an X11 dock window, the sliver at the right edge is cut from the window's width, which the X server sets after the dock asks for it.
+        Resized += (_, _) =>
+        {
+            if (hidden && x11 is not null)
+            {
+                Collapse();
+            }
+        };
 
         if (stream is not null)
         {
@@ -259,21 +269,7 @@ public sealed partial class MainWindow : Window
             var monitor = Native.MonitorNamed(model.Settings.Monitor);
             Place(appBar.Dock(model.Settings.DockEdge, monitor, DockPlacement.Pixels(model.Settings.Width, Native.Scale(monitor)), model.Settings.AutoHide));
             DockedOn?.Invoke(appBar.Monitor);
-
-            if (!model.Settings.AutoHide)
-            {
-                Expand();
-                hideTimer?.Stop();
-            }
-            else if (hidden)
-            {
-                // The strip may have changed size or edge, so the sliver is cut again.
-                Collapse();
-            }
-            else
-            {
-                WatchHide();
-            }
+            ApplyAutoHide();
         }
         else
         {
@@ -282,13 +278,36 @@ public sealed partial class MainWindow : Window
             if (edgeDocked)
             {
                 PlaceOnEdge();
+
+                if (x11 is { CanShape: true })
+                {
+                    ApplyAutoHide();
+                }
             }
+        }
+    }
+
+    void ApplyAutoHide()
+    {
+        if (!model.Settings.AutoHide)
+        {
+            Expand();
+            hideTimer?.Stop();
+        }
+        else if (hidden)
+        {
+            // The strip may have changed size or edge, so the sliver is cut again.
+            Collapse();
+        }
+        else
+        {
+            WatchHide();
         }
     }
 
     /// <summary>
     /// Places the window in the strip at the kept edge of the kept monitor, or the primary monitor when that is missing, as tall as its work area,
-    /// and reserves the strip unless the monitor has a neighbour beyond that edge (<see cref="DockPlacement.CanReserve"/>). Only the work area's
+    /// and reserves the strip unless auto-hide is on or the monitor has a neighbour beyond that edge (<see cref="DockPlacement.CanReserve"/>). Only the work area's
     /// top and bottom are used, because its left and right leave out the dock's own strip. It is Mutter's work area for that monitor: Avalonia's
     /// comes from <c>_NET_WORKAREA</c>, one work area for all monitors, which can leave out a panel on one monitor or a top bar's rows on another.
     /// </summary>
@@ -300,18 +319,19 @@ public sealed partial class MainWindow : Window
         }
 
         var bounds = PixelRectOf(screen.Bounds);
-        var work = (OperatingSystem.IsLinux() && x11 is X11Dock monitors ? DockPlacement.WorkAreaOn(bounds, monitors.WorkAreas()) : null) ?? PixelRectOf(screen.WorkingArea);
+        var work = (x11 is { } monitors ? DockPlacement.WorkAreaOn(bounds, monitors.WorkAreas()) : null) ?? PixelRectOf(screen.WorkingArea);
         var area = bounds with { Top = work.Top, Bottom = work.Bottom };
         var strip = DockPlacement.Strip(model.Settings.DockEdge, area, DockPlacement.Pixels(model.Settings.Width, screen.Scaling));
 
         Position = new PixelPoint(strip.Left, strip.Top);
         Height = strip.Height / screen.Scaling;
+        edgeScale = screen.Scaling;
         edgeMonitor = screen.DisplayName;
         DockedOnX11?.Invoke(edgeMonitor ?? "");
 
-        if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
+        if (x11 is { } dock)
         {
-            if (DockPlacement.CanReserve(model.Settings.DockEdge, strip, bounds, Screens.All.Select((each) => PixelRectOf(each.Bounds))))
+            if (!(model.Settings.AutoHide && dock.CanShape) && DockPlacement.CanReserve(model.Settings.DockEdge, strip, bounds, Screens.All.Select((each) => PixelRectOf(each.Bounds))))
             {
                 dock.Reserve(model.Settings.DockEdge, strip);
             }
@@ -363,16 +383,19 @@ public sealed partial class MainWindow : Window
         if (hideTimer is null)
         {
             hideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
-            hideTimer.Tick += (_, _) =>
-            {
-                if (hideDelay.Hides(KeptOpen(), clock.Elapsed))
-                {
-                    Collapse();
-                }
-            };
+            hideTimer.Tick += (_, _) => CheckHide(clock.Elapsed);
         }
 
         hideTimer.Start();
+    }
+
+    /// <summary>The hide timer's check at <paramref name="now"/>, a monotonic time; tests call it, as the headless platform runs no timers.</summary>
+    internal void CheckHide(TimeSpan now)
+    {
+        if (hideTimer?.IsEnabled == true && hideDelay.Hides(KeptOpen(), now))
+        {
+            Collapse();
+        }
     }
 
     void UpdateTopmost()
@@ -392,7 +415,17 @@ public sealed partial class MainWindow : Window
     /// <summary>The pointer is over the dock or a window it owns, such as a menu or dialog, one of them has the focus, or a drag is under way.</summary>
     bool KeptOpen()
     {
-        if (resizing || moving || dragging is not null || !OperatingSystem.IsWindows() || TryGetPlatformHandle() is not { } handle)
+        if (resizing || moving || dragging is not null)
+        {
+            return true;
+        }
+
+        if (x11 is { } dock)
+        {
+            return dock.KeptOpen();
+        }
+
+        if (!OperatingSystem.IsWindows() || TryGetPlatformHandle() is not { } handle)
         {
             return true;
         }
@@ -407,16 +440,26 @@ public sealed partial class MainWindow : Window
     {
         hideTimer?.Stop();
 
-        if (OperatingSystem.IsWindows() && placed is { } bounds && TryGetPlatformHandle() is { } handle)
+        if (x11 is { } dock)
+        {
+            ShowSliver();
+            dock.ClipToSliver(model.Settings.DockEdge, DockPlacement.Pixels(DockPlacement.SliverWidth, edgeScale));
+        }
+        else if (OperatingSystem.IsWindows() && placed is { } bounds && TryGetPlatformHandle() is { } handle)
         {
             var sliver = DockPlacement.Sliver(model.Settings.DockEdge, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, RenderScaling);
 
-            Sliver.HorizontalAlignment = model.Settings.DockEdge == DockEdge.Left ? Avalonia.Layout.HorizontalAlignment.Left : Avalonia.Layout.HorizontalAlignment.Right;
-            Sliver.Bars = SliverBars();
-            Sliver.IsVisible = true;
+            ShowSliver();
             Native.SetWindowRgn(handle.Handle, Native.CreateRectRgn(sliver.Left, sliver.Top, sliver.Right, sliver.Bottom), true);
-            hidden = true;
         }
+    }
+
+    void ShowSliver()
+    {
+        Sliver.HorizontalAlignment = model.Settings.DockEdge == DockEdge.Left ? Avalonia.Layout.HorizontalAlignment.Left : Avalonia.Layout.HorizontalAlignment.Right;
+        Sliver.Bars = SliverBars();
+        Sliver.IsVisible = true;
+        hidden = true;
     }
 
     /// <summary>The coloured stripe of each row in the list's view, cut to the view, at its height in the window.</summary>
@@ -441,13 +484,25 @@ public sealed partial class MainWindow : Window
 
     void Expand()
     {
-        if (!hidden || !OperatingSystem.IsWindows() || TryGetPlatformHandle() is not { } handle)
+        if (!hidden)
+        {
+            return;
+        }
+
+        if (x11 is { } dock)
+        {
+            dock.Unclip();
+        }
+        else if (OperatingSystem.IsWindows() && TryGetPlatformHandle() is { } handle)
+        {
+            Native.SetWindowRgn(handle.Handle, 0, true);
+        }
+        else
         {
             return;
         }
 
         Sliver.IsVisible = false;
-        Native.SetWindowRgn(handle.Handle, 0, true);
         // The composition surface keeps the clipped frame until Avalonia draws again.
         InvalidateVisual();
         hidden = false;
@@ -512,7 +567,7 @@ public sealed partial class MainWindow : Window
     {
         if (edgeDocked)
         {
-            if (OperatingSystem.IsLinux() && x11 is X11Dock dock && dock.Pointer() is { } pointer)
+            if (x11?.Pointer() is { } pointer)
             {
                 at = pointer;
             }
@@ -551,8 +606,8 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// Makes the dock an ordinary window, for a Linux desktop where its window is not an X11 window, so it cannot reserve a screen edge: it opens as
-    /// tall as the primary monitor's work area at the kept edge, its title moves it, and it has no auto-hide, which needs a reserved edge
-    /// (architecture.md § Dock).
+    /// tall as the primary monitor's work area at the kept edge, its title moves it, and it has no auto-hide, which clips an X11 window to
+    /// its sliver (architecture.md § Dock).
     /// </summary>
     public void Float()
     {
@@ -575,19 +630,18 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// Docks at the kept edge and monitor as an X11 dock window, where the dock runs under XWayland (architecture.md § Dock): it reserves the strip,
-    /// a drag of the title docks it at the nearer edge of the monitor under the pointer, and the grip sets its width. There is no auto-hide. Call before the window shows,
-    /// so the window manager maps it as a dock window.
+    /// a drag of the title docks it at the nearer edge of the monitor under the pointer, and the grip sets its width. With an X display whose server
+    /// has the Shape extension it can auto-hide (PRD R71). Call before the window shows, so the window manager maps it as a dock window.
     /// </summary>
-    public void DockOnX11()
+    public void DockOnX11() => DockOnX11(OperatingSystem.IsLinux() && TryGetPlatformHandle() is { HandleDescriptor: "XID" } handle ? X11Dock.Create(handle.Handle) : null);
+
+    /// <summary>Docks as an X11 dock window through <paramref name="edge"/>, its X11 calls; null when no X display opened.</summary>
+    internal void DockOnX11(IX11Edge? edge)
     {
         edgeDocked = true;
         ShowInTaskbar = false;
-        AutoHideButton.IsVisible = false;
-
-        if (OperatingSystem.IsLinux() && TryGetPlatformHandle() is { HandleDescriptor: "XID" } handle)
-        {
-            x11 = X11Dock.Create(handle.Handle);
-        }
+        x11 = edge;
+        AutoHideButton.IsVisible = x11 is { CanShape: true };
 
         Opened += (_, _) => Dock();
         // A monitor added, removed or rearranged moves the kept monitor's edge, or the kept monitor is gone.
@@ -618,10 +672,7 @@ public sealed partial class MainWindow : Window
 
         Below = below;
 
-        if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
-        {
-            dock.Below(below);
-        }
+        x11?.Below(below);
     }
 
     /// <summary>How many times the dock asked for the keyboard focus; for tests, where no X display is used.</summary>
@@ -635,10 +686,7 @@ public sealed partial class MainWindow : Window
     {
         FocusRequests++;
 
-        if (OperatingSystem.IsLinux() && x11 is X11Dock dock)
-        {
-            dock.Focus();
-        }
+        x11?.Focus();
     }
 
     /// <summary>Selects and scrolls to the row of an item window that came to the front by any means; other windows change nothing (PRD R71).</summary>
@@ -1102,10 +1150,20 @@ public sealed partial class MainWindow : Window
     static TextBlock? Glyph(string? glyph) =>
         string.IsNullOrEmpty(glyph) ? null : new TextBlock { Text = glyph, FontFamily = (FontFamily)Application.Current!.FindResource("Codicons")!, FontSize = 14, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
 
+    /// <summary>
+    /// The dock as the owner of a dialog it opens, shown first: a modal dialog blocks the dock's input, so a pointer at the sliver could not show a
+    /// hidden dock until the dialog closed, as when a row's menu stayed open after the dock hid (mechanics M49).
+    /// </summary>
+    internal MainWindow ShownForDialog()
+    {
+        Expand();
+        return this;
+    }
+
     /// <summary>Posts Snooze… with the wake time and comment its dialog returns, or nothing on Cancel (PRD R49).</summary>
     async Task Snooze(DockRow row, DockControl control)
     {
-        if (await SnoozeDialog.Ask(this, row.Title, model.Snooze) is not { } answer)
+        if (await SnoozeDialog.Ask(ShownForDialog(), row.Title, model.Snooze) is not { } answer)
         {
             return;
         }
@@ -1125,14 +1183,14 @@ public sealed partial class MainWindow : Window
     /// <summary>Posts the control's action, after the operator confirms it when the hub sent a question, or with the text the hub asked for.</summary>
     async Task Act(DockControl control)
     {
-        if (control.Confirm is { } confirm && !await ConfirmDialog.Ask(this, confirm.Question, confirm.Detail, confirm.Action))
+        if (control.Confirm is { } confirm && !await ConfirmDialog.Ask(ShownForDialog(), confirm.Question, confirm.Detail, confirm.Action))
         {
             return;
         }
 
         if (control.Input is { } input)
         {
-            if (await InputDialog.Ask(this, input.Question, input.Detail, input.Action) is not { } text)
+            if (await InputDialog.Ask(ShownForDialog(), input.Question, input.Detail, input.Action) is not { } text)
             {
                 return;
             }
@@ -1322,7 +1380,7 @@ public sealed partial class MainWindow : Window
 
         model.Status = null;
 
-        var created = await AdhocDialog.Ask(this, [.. model.RepoRoots], repo, (prompt, repoRoot, start) =>
+        var created = await AdhocDialog.Ask(ShownForDialog(), [.. model.RepoRoots], repo, (prompt, repoRoot, start) =>
             hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start }),
             model.Schedules, (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }));
 

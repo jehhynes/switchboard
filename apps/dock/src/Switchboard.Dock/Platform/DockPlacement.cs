@@ -116,11 +116,13 @@ public sealed class HideDelay
 
     /// <summary>
     /// Whether <paramref name="window"/>, a top-level window, is the dock or owned by it through any chain of owners: its menus are owned popups
-    /// and its dialogs owned windows, whose root owner is themselves.
+    /// and its dialogs owned windows, whose root owner is themselves. It follows at most 32 owners, as X11 owner hints can form a loop.
     /// </summary>
     public static bool OwnedBy(nint window, nint dock, Func<nint, nint> ownerOf)
     {
-        for (var at = window; at != 0; at = ownerOf(at))
+        var at = window;
+
+        for (var hops = 0; at != 0 && hops < 32; at = ownerOf(at), hops++)
         {
             if (at == dock)
             {
