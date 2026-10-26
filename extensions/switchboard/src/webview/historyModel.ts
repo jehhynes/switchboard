@@ -402,8 +402,12 @@ class Builder {
     const status = changes.find((change) => change.entity === 'workItem' && 'status' in change.fields)?.fields['status']?.[1];
     // Work another work item's or ticket's event caused, such as a session the queue started when one ended, is worded from its own changes.
     const other = event.workItemId !== null ? event.workItemId !== workItemId : event.ticketId !== null && event.ticketId !== this.history.ticket.id;
-    const foreign = other && detail['childTicketId'] !== this.history.ticket.id;
-    const entry = { ...base, ...(foreign ? { refused: null } : this.headline(event, detail, skip, sessionChange, state)) };
+    // The event that ended the reporting work item is about another ticket, so this ticket's entry names only the release (PRD R85).
+    const ended = workItemId === null && this.handledEnded(detail);
+    const foreign = other && detail['childTicketId'] !== this.history.ticket.id && !ended;
+    const entry = ended
+      ? { ...base, ...this.handledEndedHeadline(skip) }
+      : { ...base, ...(foreign ? { refused: null } : this.headline(event, detail, skip, sessionChange, state)) };
     const lines = changes.flatMap((change) => this.changeLines(change, skip));
 
     for (const change of changes) {
@@ -447,6 +451,15 @@ class Builder {
     }
 
     return entity === 'triage' ? 'triage' : entity === 'session' || entity === 'workItem' ? 'session' : 'ticket';
+  }
+
+  handledEnded(detail: Record<string, unknown>): boolean {
+    return Array.isArray(detail['handledEnded']) && detail['handledEnded'].includes(this.history.ticket.id);
+  }
+
+  handledEndedHeadline(skip: Set<string>): Partial<Entry> {
+    skip.add('handledAssignmentKey');
+    return { category: 'ticket', icon: 'issues', text: 'Handled assignment ended: the work that handled it ended' };
   }
 
   /** The entry's text, category, icon and links from its event; fields its text covers go in `skip`. An empty text takes the first change's line. */

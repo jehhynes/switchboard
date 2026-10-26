@@ -80,6 +80,26 @@ describe('History model', () => {
     expect(texts(entries)).toContain('Released the handled assignment');
     expect(JSON.stringify(entries)).not.toContain('opaque-event-id');
   });
+  it('says a handled assignment ended with the reporting work item, not what ended that work item (PRD R85)', () => {
+    const run = new Run();
+    run.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
+    run.send({ type: 'handled', sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', title: 'Fix', url: ISSUE.url, key: 'I:A', release: false, assigned: false });
+    run.send({ type: 'mark-done', workItemId: 1 });
+    const entries = historyView(run.store.ticketHistory(2)!, run.now).sections.flatMap((section) => section.entries);
+    expect(texts(entries)).toEqual(['Registered the assignment as already handled', 'Handled assignment ended: the work that handled it ended']);
+  });
+  it('words only the ticket entry as the release when the ended registration gives an assigned ticket a work item (PRD R85)', () => {
+    const run = new Run();
+    run.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
+    run.send({ type: 'handled', sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', title: 'Fix', url: ISSUE.url, key: 'I:A', release: false, assigned: true });
+    run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
+    run.send({ type: 'mark-done', workItemId: 1 });
+    const sections = historyView(run.store.ticketHistory(2)!, run.now).sections;
+    const ended = sections.flatMap((section) => section.entries).filter((entry) => entry.text === 'Handled assignment ended: the work that handled it ended');
+    expect(ended).toHaveLength(1);
+    expect(sections.find((section) => section.key === 'ticket')!.entries).toContain(ended[0]);
+    expect(sections.filter((section) => section.key !== 'ticket').flatMap((section) => texts(section.entries))).not.toContain('Handled assignment ended: the work that handled it ended');
+  });
   it('says when a schedule came due and when its open run kept it from making another (PRD R82)', () => {
     const store = Store.open(':memory:');
     const settings: Settings = { ...SETTINGS, schedules: { cleanup: { playbook: 'dev:question', repoRoot: 'D:/git/widgets', every: 'day', day: null, at: 10 * 60 } } };

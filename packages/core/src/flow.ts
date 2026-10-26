@@ -471,6 +471,7 @@ export function handle(store: Store, event: FlowEvent, context: FlowContext): Fl
       throw error;
     }
 
+    flow.endUnownedHandling();
     flow.schedule();
 
     return { actions: flow.actions, refused: null };
@@ -569,6 +570,34 @@ class Flow {
   wake(): void {
     for (const ticket of this.store.dueSnoozes(this.now)) {
       this.store.updateTicket(ticket.id, UNSNOOZED);
+    }
+  }
+
+  /**
+   * Ends each handled assignment whose reporting work item is done or deleted, and gives a still-assigned ticket a work item, so no ticket
+   * stays hidden after the work that handled it ends (PRD R85).
+   */
+  endUnownedHandling(): void {
+    const ended: number[] = [];
+
+    for (const ticket of this.store.handledTickets()) {
+      const registration = this.store.handledRegistrations(ticket.id).filter((entry) => entry.key === ticket.handledAssignmentKey).at(-1);
+      const reporter = registration?.workItemId == null ? null : this.store.workItem(registration.workItemId);
+
+      if (reporter !== null && reporter.status !== 'done') {
+        continue;
+      }
+
+      this.store.updateTicket(ticket.id, { handledAssignmentKey: null });
+      ended.push(ticket.id);
+
+      if (ticket.assigned) {
+        this.createWorkItem(ticket.id);
+      }
+    }
+
+    if (ended.length > 0) {
+      this.store.noteEvent({ handledEnded: ended });
     }
   }
 
@@ -1196,6 +1225,7 @@ class Flow {
   /**
    * The latest earlier work item of the ticket and when it took in the ticket's activity: the start of its first task session that the runner
    * started, or when the operator marked it done without one (PRD R80). A work item with neither, such as one unassigned during setup, did not act on it.
+   * A handled-assignment registration counts as the reporting work item taking in the ticket's activity when it registered (PRD R85).
    */
   private handled(item: WorkItem): HandledWork | null {
     let latest: HandledWork | null = null;
@@ -1206,6 +1236,14 @@ class Flow {
 
       if (other.id !== item.id && at !== null && (latest === null || at > latest.at)) {
         latest = { at, playbook: other.playbook };
+      }
+    }
+
+    for (const registration of this.store.handledRegistrations(item.ticketId)) {
+      if (latest === null || registration.at > latest.at) {
+        // Registrations logged before the event kept the playbook take it from the reporter while it exists.
+        const playbook = registration.playbook ?? (registration.workItemId === null ? null : (this.store.workItem(registration.workItemId)?.playbook ?? null));
+        latest = { at: registration.at, playbook };
       }
     }
 
@@ -1248,7 +1286,7 @@ class Flow {
     ticket ??= this.store.insertTicket({ source: event.source, sourceKey: event.sourceKey, ref: event.ref, title: event.title, url: event.url, sourceId: null, assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     for (const item of items) this.store.deleteWorkItem(item.id);
     this.store.updateTicket(ticket.id, { handledAssignmentKey: event.key });
-    this.store.noteEvent({ reportedByWorkItemId: origin.id });
+    this.store.noteEvent({ reportedByWorkItemId: origin.id, reportedByPlaybook: origin.playbook });
   }
 
   private sessionStarted(sessionId: string, nativeSessionId: string | null, shortId: string, startPrompt: boolean): void {

@@ -853,8 +853,17 @@ export class Store {
     return this.#all('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id', ticketId);
   }
 
-  handledTickets(source: string): Ticket[] {
-    return this.#all('SELECT * FROM tickets WHERE source = ? AND handledAssignmentKey IS NOT NULL', source);
+  /** Tickets with a handled assignment, of one source or of all. */
+  handledTickets(source: string | null = null): Ticket[] {
+    return this.#all('SELECT * FROM tickets WHERE (? IS NULL OR source = ?) AND handledAssignmentKey IS NOT NULL ORDER BY id', source, source);
+  }
+
+  /** The ticket's handled-assignment registrations in order: when, the key, and the reporting work item, which may since be deleted, and its playbook (PRD R85). */
+  handledRegistrations(ticketId: number): { at: number; key: string; workItemId: number | null; playbook: string | null }[] {
+    return this.#all(`SELECT e.at AS at, json_extract(e.detail, '$.key') AS key, json_extract(e.detail, '$.reportedByWorkItemId') AS workItemId,
+      json_extract(e.detail, '$.reportedByPlaybook') AS playbook
+      FROM events e JOIN changes c ON c.eventId = e.id WHERE c.ticketId = ? AND e.type = 'handled' AND e.refused IS NULL
+      AND json_extract(c.fields, '$.handledAssignmentKey[1]') IS NOT NULL ORDER BY e.id`, ticketId);
   }
 
   assignmentEnded(ticketId: number, key: string): boolean {
