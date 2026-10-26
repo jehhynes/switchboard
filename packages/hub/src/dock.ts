@@ -68,13 +68,15 @@ export function windowsDir(home: string): string {
 }
 
 /**
- * The workspace file's text: the folders, and a `window.title` of the ticket title, the active editor and `sb:<name>`. VS Code reads every `$` in
- * a title as the start of a variable and drops the text up to a later `}`, so the ticket title's `$` becomes a fullwidth `＄`.
+ * The workspace file's text: the folders, a `window.title` of the ticket title, the active editor and `sb:<name>`, and
+ * `extensions.ignoreRecommendations`, because VS Code keeps a dismissed recommendation prompt per workspace, so each new item window would
+ * ask again (M50). VS Code reads every `$` in a title as the start of a variable and drops the text up to a later `}`, so the ticket title's
+ * `$` becomes a fullwidth `＄`.
  */
 export function workspaceText(window: DockWindow): string {
   const title = `${window.title.replaceAll('$', '＄')}\${separator}\${activeEditorShort}\${separator}sb:${window.name}`;
 
-  return `${JSON.stringify({ folders: window.folders.map((path) => ({ path })), settings: { 'window.title': title, 'window.titleSeparator': ' · ' } }, null, 2)}\n`;
+  return `${JSON.stringify({ folders: window.folders.map((path) => ({ path })), settings: { 'window.title': title, 'window.titleSeparator': ' · ', 'extensions.ignoreRecommendations': true } }, null, 2)}\n`;
 }
 
 /** Writes a window's workspace file when its text differs, because VS Code applies any change to an open window; `written` caches what each file holds. */

@@ -604,7 +604,7 @@ describe('windowTabs', () => {
 describe('workspace files', () => {
   const window = { name: 'gh-107-widgets', title: 'Fix ${x} badge for $5', folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'], file: '' };
 
-  it('lists the folders and ends the title with the window name, replacing each $ in the ticket title', () => {
+  it('lists the folders, ends the title with the window name, replacing each $ in the ticket title, and turns off recommendation prompts', () => {
     expect(workspaceText(window)).toBe(
       [
         '{',
@@ -618,7 +618,8 @@ describe('workspace files', () => {
         '  ],',
         '  "settings": {',
         '    "window.title": "Fix ＄{x} badge for ＄5${separator}${activeEditorShort}${separator}sb:gh-107-widgets",',
-        '    "window.titleSeparator": " · "',
+        '    "window.titleSeparator": " · ",',
+        '    "extensions.ignoreRecommendations": true',
         '  }',
         '}',
         '',

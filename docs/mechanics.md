@@ -611,3 +611,11 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **X errors.** Avalonia 12.1.3 installs a process-wide Xlib error handler that records the error and returns, so a `BadWindow` from the dock's own connection, as when a menu closes during `KeptOpen`, does not end the process; not provoked live.
 - **Not verified:** a second monitor; a scale other than 1; a resize while hidden; the operator's desktop, where IBus changed focus behaviour in M39; a native Wayland window receiving a click through the hidden part.
 - **Current use:** Linux auto-hide (PRD R71, architecture.md § Dock).
+
+## M50. Extension recommendation prompts in item windows
+
+- **Date:** 2026-10-26.
+- **Versions:** VS Code 1.143.1 on Linux.
+- **Source inspection of `workbench.desktop.main.js`:** on opening a workspace, VS Code prompts to install the recommended extensions of its folders' `.vscode/extensions.json`. Its "Don't Show Again" stores `extensionsAssistant/workspaceRecommendationsIgnore` in workspace storage, which is per workspace file, so every new item window prompts again. Every recommendation prompt first returns when `extensions.ignoreRecommendations` or `extensions.showRecommendationsOnlyOnDemand` is set; `extensions.ignoreRecommendations` declares no scope, so it is a window setting that a `.code-workspace` file's `settings` applies. It turns off every recommendation notification, such as those for a file type, not only the repository's; the Extensions view's Recommended section depends on `showRecommendationsOnlyOnDemand`, not on it, so it stays.
+- **Not verified:** a live item window with the setting.
+- **Current use:** item windows' workspace files (PRD R71, architecture.md § Dock).
