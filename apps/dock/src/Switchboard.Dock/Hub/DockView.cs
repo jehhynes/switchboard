@@ -189,8 +189,14 @@ public sealed record DockHandoff(int WorkItemId, string SessionId);
 /// </summary>
 public sealed record DockControl(string Label, JsonObject Action, string Glyph = "", DockConfirm? Confirm = null, DockInput? Input = null);
 
-/// <summary>A text the dock asks for before it posts a control's action, set as the action's <paramref name="Field"/>, such as Start's guidance (PRD R77).</summary>
-public sealed record DockInput(string Question, string Detail, string Field, string Action);
+/// <summary>
+/// A text the dock asks for before it posts a control's action, set as the action's <paramref name="Field"/>, such as Start's guidance (PRD R77),
+/// with <paramref name="Choice"/> asked beside it.
+/// </summary>
+public sealed record DockInput(string Question, string Detail, string Field, string Action, DockChoice? Choice = null);
+
+/// <summary>A list of <paramref name="Values"/> with <paramref name="Value"/> selected; a changed choice is set as the action's <paramref name="Field"/>, such as Start's playbook (PRD R35).</summary>
+public sealed record DockChoice(string Field, string Label, string Value, IReadOnlyList<string> Values);
 
 /// <summary>A question the dock asks before it posts a control's action, such as Delete's (PRD R76); <paramref name="Action"/> labels the button that goes ahead.</summary>
 public sealed record DockConfirm(string Question, string Detail, string Action);

@@ -796,7 +796,7 @@ public sealed class MainWindowTests
         guided.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal(["Start with guidance", "Switchboard adds it to the end of the session's prompt."], VisibleTexts(Dialog()).Take(2));
+        Assert.Equal(["Start with guidance", "Playbook", "dev:develop", "Switchboard adds your guidance to the end of the session's prompt."], VisibleTexts(Dialog()).Take(4));
         Assert.False(DialogButton("InputAction").IsEnabled);
 
         Text().Text = "   ";
@@ -818,6 +818,32 @@ public sealed class MainWindowTests
 
         Assert.Equal(["act {\"type\":\"start\",\"workItemId\":9,\"guidance\":\"Check the 2024 thread.\\nKeep it short.\"}"], hub.Calls);
         Assert.Equal("{\"type\":\"start\",\"workItemId\":9}", row.Controls[1].Action.ToJsonString());
+    }
+
+    [AvaloniaFact]
+    public void StartWithGuidance_PlaybookChosen_EnablesStartWithoutTextAndPostsThePlaybook()
+    {
+        var (window, _) = Open();
+        var guided = (MenuItem)window.MenuOf(Fixtures.Row("item:9"))[1];
+        Window Dialog() => Assert.Single(window.OwnedWindows);
+        Button Go() => Dialog().GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "InputAction");
+        ComboBox Choice() => Dialog().GetVisualDescendants().OfType<ComboBox>().Single((box) => box.Name == "InputChoice");
+
+        hub.ActReplies.Enqueue(null);
+        guided.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["dev:develop", "dev:other"], Choice().Items.Cast<string>());
+        Assert.Equal("dev:develop", Choice().SelectedItem);
+        Choice().SelectedItem = "dev:other";
+        Assert.True(Go().IsEnabled);
+        Choice().SelectedItem = "dev:develop";
+        Assert.False(Go().IsEnabled);
+        Choice().SelectedItem = "dev:other";
+        Go().RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["act {\"type\":\"start\",\"workItemId\":9,\"guidance\":\"\",\"playbook\":\"dev:other\"}"], hub.Calls);
     }
 
     [AvaloniaFact]

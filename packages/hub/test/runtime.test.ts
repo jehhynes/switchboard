@@ -1980,6 +1980,22 @@ describe('focus (PRD R79)', () => {
     expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'unstarted', focus: COMMENT });
   });
 
+  it("lists the playbook choices of an unstarted work item, and keeps its focus when Start chooses another (PRD R35)", async () => {
+    const cfg = waiting();
+    cfg.playbooks.set('dev:other', { ...cfg.playbooks.get('dev:develop')!, name: 'dev:other' });
+    const { cli, source, runtime } = setup(cfg);
+    source.result = { tickets: [{ ...issue('7'), url: ISSUE }] };
+    source.context = async () => ({ context: 'Issue 7 [ticket]\n### alice, 2026-10-01 [c1]\nPlease fix.', anchors: [{ id: 'ticket', url: ISSUE, page: 'ticket' }, { id: 'c1', url: COMMENT, page: 'ticket' }] });
+    cli.classifyResult = focused('c1');
+
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ status: 'unstarted', playbook: 'dev:develop', playbookChoices: ['dev:develop', 'dev:other'] });
+
+    expect(runtime.send({ type: 'start', workItemId: 1, playbook: 'dev:other' }).refused).toBeNull();
+    expect(runtime.snapshot().workItems[0]).toMatchObject({ playbook: 'dev:other', playbookChoices: [], focus: COMMENT });
+  });
+
   it('focuses the ticket when the source tags no anchors', async () => {
     const { store, cli, source, runtime } = setup(waiting());
     source.result = { tickets: [{ ...issue('7'), url: ISSUE }] };

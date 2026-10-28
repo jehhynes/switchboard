@@ -58,6 +58,7 @@ function item(id, url, cwd) {
     waits: [],
     parent: null,
     returned: 0,
+    playbookChoices: [],
   };
 }
 

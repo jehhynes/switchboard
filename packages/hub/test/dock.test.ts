@@ -358,7 +358,7 @@ describe('dockView', () => {
             returned: 2,
           }),
           item(8, { sessions: [session({ state: 'waiting', cwd: 'D:/git/widgets' })] }),
-          item(9, { status: 'unstarted', triage: triage({ immediacy: 'BLOCKING', severity: 'MED' }) }),
+          item(9, { status: 'unstarted', triage: triage({ immediacy: 'BLOCKING', severity: 'MED' }), playbookChoices: ['dev:develop', 'dev:other'] }),
           item(10, {
             status: 'awaiting-approval',
             approvalPrompt: '/support-release #4521',

@@ -316,6 +316,8 @@ describe('History model', () => {
       [event('start', 'operator', { guidance: 'Check the 2024 thread.' }, [], null), { text: 'You started it with guidance', detail: 'Check the 2024 thread.', category: 'you', tone: 'accent' }],
       [event('pick', 'operator', { guidance: 'Reply in Spanish.' }, [], null), { text: 'You picked it from the pool with guidance', detail: 'Reply in Spanish.', category: 'you' }],
       [event('start', 'operator', null, [], null), { text: 'You started it', detail: null, category: 'you' }],
+      [event('start', 'operator', { playbook: 'dev:other' }, [change('workItem', 'update', { playbook: ['dev:question', 'dev:other'] })], null), { text: 'You started it as dev:other', lines: ['Playbook: dev:question → dev:other'], category: 'you' }],
+      [event('pick', 'operator', { guidance: 'Reply in Spanish.', playbook: 'support:defect' }, [], null), { text: 'You picked it from the pool as support:defect with guidance', detail: 'Reply in Spanish.' }],
       [event('register', 'operator', { cwd: 'D:/git/widgets' }, [], null), { text: 'You registered the session', category: 'you' }],
       [event('triage-failed', 'triage', { triageId: 1, error: 'Timed out' }, [change('triage', 'update', { error: [null, 'Timed out'] })], null), { text: 'Triage failed', detail: 'Timed out', category: 'triage', tone: 'error' }],
       [event('triage-cancelled', 'hub', { triageId: 1 }, [change('triage', 'update', { error: [null, 'Cancelled.'] })], null), { text: 'Triage cancelled because the hub stopped', lines: [] }],

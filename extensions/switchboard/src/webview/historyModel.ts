@@ -480,7 +480,11 @@ class Builder {
         text = `You answered: ${oneLine(str(detail['answer']))}`;
       }
 
-      // Start with guidance… (PRD R77) shows the guidance under the entry.
+      // Start with guidance… names the playbook it chose (PRD R35) and shows the guidance under the entry (PRD R77).
+      if ((event.type === 'start' || event.type === 'pick') && typeof detail['playbook'] === 'string') {
+        text = `${text} as ${detail['playbook']}`;
+      }
+
       if ((event.type === 'start' || event.type === 'pick') && typeof detail['guidance'] === 'string') {
         return { category: 'you', icon: operator.icon, text: `${text} with guidance`, detail: detail['guidance'], tone: 'accent' };
       }

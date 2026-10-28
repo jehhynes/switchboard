@@ -15,7 +15,7 @@ function item(id: number, owner: Ticket, status: WorkItemView['status'], playboo
   return {
     id, ticketId: owner.id, playbook, status, stage: null, stageAt: null, taskPrompt: null, guidance: null, warning: null, error: null, unassignedAt: null, queuedAt: null,
     approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: 0, statusAt: 0, runStartedAt: null, readyAt: status === 'awaiting-approval' || status === 'finished' ? 0 : null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null,
-    ticket: owner, triage: null, focus: owner.url, sessions, worktree: null, links: [], pastes: [], comments: [], returned: 0, parent: null, moved: false, approvalSends: false, waits: [], reopenable: false,
+    ticket: owner, triage: null, focus: owner.url, sessions, worktree: null, links: [], pastes: [], comments: [], returned: 0, parent: null, moved: false, approvalSends: false, waits: [], reopenable: false, playbookChoices: [],
   };
 }
 
@@ -101,11 +101,11 @@ describe('cardsOf', () => {
       snapshot(
         [item(1, picked, 'done', 'support:defect')],
         [
-          { ticket: picked, focus: null, triage: triage('support:case', 10), links: [], returned: 1 },
-          { ticket: ticket(2, 'zoho', 'https://desk.example.test/2'), focus: null, triage: triage(null, null), links: [], returned: 0 },
-          { ticket: ticket(3, 'zoho', 'https://desk.example.test/3'), focus: null, triage: triage(null, 10, 'Model refused'), links: [], returned: 0 },
-          { ticket: ticket(4, 'zoho', 'https://desk.example.test/4', true), focus: null, triage: null, links: [], returned: 0 },
-          { ticket: ticket(5, 'zoho', ''), focus: null, triage: triage('support:case', 10), links: [], returned: 0 },
+          { ticket: picked, focus: null, triage: triage('support:case', 10), links: [], returned: 1, playbookChoices: [] },
+          { ticket: ticket(2, 'zoho', 'https://desk.example.test/2'), focus: null, triage: triage(null, null), links: [], returned: 0, playbookChoices: [] },
+          { ticket: ticket(3, 'zoho', 'https://desk.example.test/3'), focus: null, triage: triage(null, 10, 'Model refused'), links: [], returned: 0, playbookChoices: [] },
+          { ticket: ticket(4, 'zoho', 'https://desk.example.test/4', true), focus: null, triage: null, links: [], returned: 0, playbookChoices: [] },
+          { ticket: ticket(5, 'zoho', ''), focus: null, triage: triage('support:case', 10), links: [], returned: 0, playbookChoices: [] },
         ],
         ['zoho'],
       ),
@@ -127,7 +127,7 @@ describe('cardsOf', () => {
     const cards = cardsOf(
       snapshot(
         [withLinks(item(1, linked, 'running', 'dev:develop'), ['https://github.com/o/r/pull/7', 'https://example.test/doc']), withLinks(item(2, pooled, 'done', 'support:defect'), ['https://github.com/o/r/issues/8'])],
-        [{ ticket: pooled, focus: null, triage: triage('support:case', 10), returned: 1, links: [link('https://github.com/o/r/issues/9')] }],
+        [{ ticket: pooled, focus: null, triage: triage('support:case', 10), returned: 1, playbookChoices: [], links: [link('https://github.com/o/r/issues/9')] }],
         ['github', 'zoho'],
       ),
     );

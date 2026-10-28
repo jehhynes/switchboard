@@ -80,10 +80,19 @@ describe('controlsOf', () => {
       label: 'Start with guidance…',
       icon: 'comment',
       message: { type: 'action', action: { type: 'start', workItemId: 7 } },
-      input: { question: 'Start with guidance', detail: "Switchboard adds it to the end of the session's prompt.", field: 'guidance', action: 'Start' },
+      input: { question: 'Start with guidance', detail: "Switchboard adds your guidance to the end of the session's prompt.", field: 'guidance', action: 'Start' },
     });
     expect(mainControl(unstarted)?.label).toBe('Start');
     expect(controlsOf(unstarted).filter((control) => control.input !== undefined).map((control) => control.label)).toEqual(['Start with guidance…', 'Add comment…']);
+  });
+
+  it("offers the playbook in Start with guidance… when there is another to choose, triage's selected (PRD R35)", () => {
+    const guided = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Start with guidance…')!.input;
+
+    expect(guided(item(7, { status: 'unstarted', playbookChoices: ['dev:develop', 'dev:other'] }))?.choice).toEqual({ field: 'playbook', label: 'Playbook', value: 'dev:develop', values: ['dev:develop', 'dev:other'] });
+    expect(guided(item(7, { status: 'unstarted', playbookChoices: ['dev:develop'] }))).not.toHaveProperty('choice');
+    expect(guided(item(7, { status: 'unstarted', playbook: null, taskPrompt: 'Write hello.txt' }))).not.toHaveProperty('choice');
+    expect(poolControls(pool(3, { playbookChoices: ['dev:develop', 'dev:other'] })).controls.find((control) => control.label === 'Start with guidance…')!.input?.choice).toMatchObject({ value: 'dev:develop', values: ['dev:develop', 'dev:other'] });
   });
 
   it('asks for the text before Add comment… and posts it as the comment action (PRD R87)', () => {

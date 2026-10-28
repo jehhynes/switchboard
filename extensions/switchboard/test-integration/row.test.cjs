@@ -63,6 +63,7 @@ function item(id, cwd, state = 'waiting') {
     parent: null,
     returned: 0,
     approvalSends: false,
+    playbookChoices: [],
   };
 }
 

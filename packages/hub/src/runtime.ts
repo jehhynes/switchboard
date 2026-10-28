@@ -5,7 +5,7 @@ import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
@@ -73,6 +73,8 @@ export interface WorkItemView extends WorkItem {
   waits: QueueWait[];
   /** The operator can reopen it (PRD R86). */
   reopenable: boolean;
+  /** The playbooks Start with guidance… offers an `unstarted` work item, its own among them; empty otherwise (PRD R35). */
+  playbookChoices: string[];
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
@@ -85,6 +87,8 @@ export interface PoolView {
   links: Link[];
   /** Started done work items for the ticket with the latest triage's playbook or one it is a return of; above 0 the dock marks it Returned (PRD R51). */
   returned: number;
+  /** The playbooks Start with guidance… offers, the triage's among them (PRD R35). */
+  playbookChoices: string[];
 }
 
 /** Everything a window and the dock show, sent whole on each change. */
@@ -1087,6 +1091,7 @@ export class Runtime {
           approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
           waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
           reopenable: reopenRefusal(item, store.workItemsForTicket(item.ticketId), ticket) === null,
+          playbookChoices: item.status === 'unstarted' ? playbookChoices(item.playbook, ticket.source, playbooks) : [],
         };
       }),
       pool: store
@@ -1098,7 +1103,7 @@ export class Runtime {
           const triages = store.poolTriages(ticket.id);
           const triage = triages.at(-1) ?? null;
 
-          return { ticket, triage, focus: effectiveFocus(triages, ticket.url), links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null, ticket) };
+          return { ticket, triage, focus: effectiveFocus(triages, ticket.url), links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null, ticket), playbookChoices: playbookChoices(triage?.playbook ?? null, ticket.source, playbooks) };
         }),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
       repoRoots: repoRoots(settings),

@@ -56,6 +56,24 @@ export function reopenRefusal(item: Pick<WorkItem, 'id' | 'status'>, ticketItems
   return ticket.handledAssignmentKey == null ? null : "Another session handles the ticket's assignment.";
 }
 
+/**
+ * The task playbooks Start with guidance… offers, triage's choice among them: those of the work item's playbook namespace, in settings order. None for
+ * a work item without a playbook, such as an ad-hoc one, or a scheduled run, which keeps its schedule's (PRD R35).
+ */
+export function playbookChoices(playbook: string | null, source: string, playbooks: ReadonlyMap<string, Playbook>): string[] {
+  if (playbook === null || source === SCHEDULE_SOURCE) {
+    return [];
+  }
+
+  const namespace = namespaceOf(playbook);
+
+  return [...playbooks.values()].filter((candidate) => candidate.kind === 'task' && namespaceOf(candidate.name) === namespace).map((candidate) => candidate.name);
+}
+
+function namespaceOf(playbook: string): string {
+  return playbook.split(':')[0]!;
+}
+
 /** A task session's done report whose first read still listed the ticket, on a work item the second read can still settle. */
 export function awaitsRecheck(item: Pick<WorkItem, 'status'>, session: Pick<Session, 'kind' | 'outcome' | 'outcomeDetail'>): boolean {
   return session.kind === 'task' && session.outcome === 'done' && !!session.outcomeDetail?.startsWith(UNCONFIRMED_DONE) && (item.status === 'running' || item.status === 'awaiting-approval');
@@ -176,9 +194,9 @@ export type FlowEvent =
   | { type: 'run-schedule'; name: string }
   /** `retry` retries a failed work item from the step that failed (PRD R34). */
   | { type: 'approve' | 'mark-done' | 'reopen' | 'retry' | 'stop' | 'delete'; workItemId: number }
-  /** `guidance` is added to the task session's prompt (PRD R77). */
-  | { type: 'start'; workItemId: number; guidance?: string | null }
-  | { type: 'pick'; ticketId: number; guidance?: string | null }
+  /** `guidance` is added to the task session's prompt (PRD R77); `playbook` replaces triage's choice (PRD R35). */
+  | { type: 'start'; workItemId: number; guidance?: string | null; playbook?: string | null }
+  | { type: 'pick'; ticketId: number; guidance?: string | null; playbook?: string | null }
   /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
   | { type: 'retriage-pool' | 'restore'; ticketId: number }
@@ -368,8 +386,10 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
     case 'run-schedule':
       return { name: event.name };
     case 'start':
-    case 'pick':
-      return textOf(event.guidance) === null ? null : { guidance: textOf(event.guidance) };
+    case 'pick': {
+      const detail = { ...(textOf(event.guidance) === null ? {} : { guidance: textOf(event.guidance) }), ...(event.playbook == null ? {} : { playbook: event.playbook }) };
+      return Object.keys(detail).length === 0 ? null : detail;
+    }
     case 'snooze':
       return textOf(event.comment) === null ? { until: event.until } : { until: event.until, comment: textOf(event.comment) };
     case 'comment':
@@ -534,7 +554,7 @@ class Flow {
       case 'run-schedule':
         return this.runSchedule(event.name);
       case 'start':
-        return this.start(this.openItem(event.workItemId), textOf(event.guidance));
+        return this.start(this.openItem(event.workItemId), textOf(event.guidance), event.playbook ?? null);
       case 'approve':
         return this.approve(this.openItem(event.workItemId));
       case 'mark-done':
@@ -550,7 +570,7 @@ class Flow {
       case 'open-question':
         return this.openQuestion(this.openItem(event.workItemId), event.nativeSessionId);
       case 'pick':
-        return this.pick(this.poolTicket(event.ticketId), textOf(event.guidance));
+        return this.pick(this.poolTicket(event.ticketId), textOf(event.guidance), event.playbook ?? null);
       case 'retriage-pool':
         return this.retriagePool(this.poolTicket(event.ticketId));
       case 'snooze':
@@ -1913,7 +1933,7 @@ class Flow {
   }
 
   /** PRD R48: a queued work item with the pool triage's playbook; its task session's skill claims the ticket. */
-  private pick(ticket: Ticket, guidance: string | null): void {
+  private pick(ticket: Ticket, guidance: string | null, playbook: string | null): void {
     const triages = this.store.poolTriages(ticket.id);
     const triaged = triages.filter((triage) => triage.playbook !== null).at(-1);
 
@@ -1923,7 +1943,7 @@ class Flow {
 
     const item = this.store.insertWorkItem({
       ticketId: ticket.id,
-      playbook: triaged.playbook,
+      playbook: this.chosenPlaybook(triaged.playbook, ticket, playbook),
       status: 'queued',
       stage: null,
       stageAt: null,
@@ -1973,13 +1993,27 @@ class Flow {
     this.queue(item);
   }
 
-  private start(item: WorkItem, guidance: string | null): void {
+  private start(item: WorkItem, guidance: string | null, playbook: string | null): void {
     if (item.status !== 'unstarted') {
       throw new Refusal('The work item is not unstarted.');
     }
 
-    this.store.updateWorkItem(item.id, { guidance });
+    // The focus stays as triage set it (PRD R79).
+    this.store.updateWorkItem(item.id, { guidance, playbook: this.chosenPlaybook(item.playbook, this.store.ticket(item.ticketId)!, playbook) });
     this.queue(item);
+  }
+
+  /** The playbook Start with guidance… chose, or triage's when it chose none (PRD R35). */
+  private chosenPlaybook(triaged: string | null, ticket: Ticket, chosen: string | null): string | null {
+    if (chosen === null || chosen === triaged) {
+      return triaged;
+    }
+
+    if (!playbookChoices(triaged, ticket.source, this.context.playbooks).includes(chosen)) {
+      throw new Refusal(triaged === null || ticket.source === SCHEDULE_SOURCE ? 'The playbook of this work item cannot change.' : `${chosen} is not a task playbook in the ${namespaceOf(triaged)} namespace.`);
+    }
+
+    return chosen;
   }
 
   /**

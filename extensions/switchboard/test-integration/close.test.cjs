@@ -49,6 +49,7 @@ function item(cwd, done) {
     parent: null,
     returned: 0,
     approvalSends: false,
+    playbookChoices: [],
   };
 }
 

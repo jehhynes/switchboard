@@ -1190,12 +1190,14 @@ public sealed partial class MainWindow : Window
 
         if (control.Input is { } input)
         {
-            if (await InputDialog.Ask(ShownForDialog(), input.Question, input.Detail, input.Action) is not { } text)
+            if (await InputDialog.Ask(ShownForDialog(), input.Question, input.Detail, input.Action, input.Choice) is not { } answer)
             {
                 return;
             }
 
-            await Act(WithField(control.Action, input.Field, text));
+            var action = WithField(control.Action, input.Field, answer.Text);
+
+            await Act(input.Choice is { } choice && answer.Choice is { } chosen ? WithField(action, choice.Field, chosen) : action);
             return;
         }
 

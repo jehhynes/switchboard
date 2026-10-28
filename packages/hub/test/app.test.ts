@@ -213,6 +213,8 @@ describe('parseReport and reportBody', () => {
     expect(parseAction({ type: 'pick', ticketId: 1, guidance: null })).toEqual({ type: 'pick', ticketId: 1, guidance: null });
     expect(parseAction({ type: 'start', workItemId: 1, guidance: 7 })).toBeNull();
     expect(parseAction({ type: 'pick', ticketId: 1, guidance: ['x'] })).toBeNull();
+    expect(parseAction({ type: 'start', workItemId: 1, guidance: '', playbook: 'dev:other' })).toEqual({ type: 'start', workItemId: 1, guidance: '', playbook: 'dev:other' });
+    expect(parseAction({ type: 'pick', ticketId: 1, playbook: 7 })).toBeNull();
     expect(parseAction({ type: 'poll', source: 'github', tickets: [] })).toBeNull();
   });
 

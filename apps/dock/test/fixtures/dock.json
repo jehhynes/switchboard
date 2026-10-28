@@ -790,9 +790,18 @@
               },
               "input": {
                 "question": "Start with guidance",
-                "detail": "Switchboard adds it to the end of the session's prompt.",
+                "detail": "Switchboard adds your guidance to the end of the session's prompt.",
                 "field": "guidance",
-                "action": "Start"
+                "action": "Start",
+                "choice": {
+                  "field": "playbook",
+                  "label": "Playbook",
+                  "value": "dev:develop",
+                  "values": [
+                    "dev:develop",
+                    "dev:other"
+                  ]
+                }
               }
             },
             {
@@ -899,7 +908,7 @@
               },
               "input": {
                 "question": "Start with guidance",
-                "detail": "Switchboard adds it to the end of the session's prompt.",
+                "detail": "Switchboard adds your guidance to the end of the session's prompt.",
                 "field": "guidance",
                 "action": "Start"
               }

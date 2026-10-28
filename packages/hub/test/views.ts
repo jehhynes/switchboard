@@ -69,6 +69,7 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     moved: false,
     approvalSends: false,
     reopenable: true,
+    playbookChoices: [],
     waits: [],
     ...patch,
   };
@@ -101,5 +102,5 @@ export function triage(patch: Partial<Triage> = {}): Triage {
 export function pool(id: number, patch: Partial<PoolView> = {}): PoolView {
   const ticket = { ...item(id).ticket, assigned: false, pool: true };
 
-  return { ticket, triage: triage({ ticketId: id, workItemId: null }), focus: ticket.url, links: [], returned: 0, ...patch };
+  return { ticket, triage: triage({ ticketId: id, workItemId: null }), focus: ticket.url, links: [], returned: 0, playbookChoices: [], ...patch };
 }

@@ -59,13 +59,27 @@ export interface Control {
   message: Record<string, unknown>;
   /** A question the dock asks before it posts the message, with its detail and the label of the button that goes ahead. */
   confirm?: { question: string; detail: string; action: string };
-  /** A text the dock asks for before it posts the message, set as the action's `field`, with the label of the button that goes ahead. */
-  input?: { question: string; detail: string; field: string; action: string };
+  /**
+   * A text the dock asks for before it posts the message, set as the action's `field`, with the label of the button that goes ahead; with `choice`,
+   * the dock also offers `values`, `value` selected, and sets a changed choice as the action's `choice.field`.
+   */
+  input?: { question: string; detail: string; field: string; action: string; choice?: InputChoice };
 }
 
-/** Start with guidance…: Start, after the dock asks for guidance that the task session's prompt ends with (PRD R77). */
-function guidedStart(message: Record<string, unknown>): Control {
-  const input = { question: 'Start with guidance', detail: "Switchboard adds it to the end of the session's prompt.", field: 'guidance', action: 'Start' };
+export interface InputChoice {
+  field: string;
+  label: string;
+  value: string;
+  values: string[];
+}
+
+/**
+ * Start with guidance…: Start, after the dock asks for guidance that the task session's prompt ends with (PRD R77), and for the playbook when
+ * there is another to choose (PRD R35).
+ */
+function guidedStart(message: Record<string, unknown>, playbook: string | null, playbooks: string[]): Control {
+  const choice = playbook !== null && playbooks.length > 1 ? { choice: { field: 'playbook', label: 'Playbook', value: playbook, values: playbooks } } : {};
+  const input = { question: 'Start with guidance', detail: "Switchboard adds your guidance to the end of the session's prompt.", field: 'guidance', action: 'Start', ...choice };
 
   return { label: 'Start with guidance…', icon: 'comment', message, input };
 }
@@ -120,7 +134,7 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
   const action = (type: string) => ({ type: 'action', action: { type, workItemId: item.id } });
 
   if (item.status === 'unstarted') {
-    controls.push({ label: 'Start', icon: 'play', message: action('start') }, guidedStart(action('start')));
+    controls.push({ label: 'Start', icon: 'play', message: action('start') }, guidedStart(action('start'), item.playbook, item.playbookChoices));
   }
 
   if (item.status === 'awaiting-approval') {
@@ -253,7 +267,7 @@ export function poolControls(entry: PoolView): { main: Control | null; controls:
   const pick: Control = { label: 'Start', icon: 'play', message: pickMessage };
   const again: Control = { label: 'Triage again', icon: 'search', message: { type: 'action', action: { type: 'retriage-pool', ticketId: ticket.id } } };
   const main = triage?.error != null ? again : triage?.playbook != null ? pick : null;
-  const guided = main === pick ? [guidedStart(pickMessage)] : [];
+  const guided = main === pick ? [guidedStart(pickMessage, triage?.playbook ?? null, entry.playbookChoices)] : [];
 
   return { main, controls: [...(main === null ? [] : [main]), ...guided, ...snoozeControls(ticket), historyControl(ticket)] };
 }

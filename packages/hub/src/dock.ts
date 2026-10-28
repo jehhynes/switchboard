@@ -167,9 +167,10 @@ export interface DockRow {
   /**
    * The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time.
    * A control with `confirm` posts only after the operator confirms, such as Delete (PRD R76); one with `input` posts the text the operator
-   * enters as the action's `field`, such as Start with guidance… (PRD R77).
+   * enters as the action's `field`, such as Start with guidance… (PRD R77), and with `choice`, a changed choice as the action's `choice.field`,
+   * such as Start with guidance…'s playbook (PRD R35).
    */
-  controls: { label: string; glyph: string; action: Record<string, unknown>; confirm?: { question: string; detail: string; action: string }; input?: { question: string; detail: string; field: string; action: string } }[];
+  controls: { label: string; glyph: string; action: Record<string, unknown>; confirm?: { question: string; detail: string; action: string }; input?: NonNullable<Control['input']> }[];
   /** The label of the control the row shows as a button, or null (PRD R27). */
   main: string | null;
   /** The main control's codicon glyph, shown before its label, or null. */
