@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { activeSession, failedAtTriage, groupOf, reviewKey, START_PROMPT, waitsToStart } from './group.js';
+import { activeSession, failedAtTriage, groupOf, ownPrompt, reviewKey, START_PROMPT, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { repoRoots } from './settings.js';
@@ -194,8 +194,8 @@ export type FlowEvent =
   | { type: 'run-schedule'; name: string }
   /** `retry` retries a failed work item from the step that failed (PRD R34). */
   | { type: 'approve' | 'mark-done' | 'reopen' | 'retry' | 'stop' | 'delete'; workItemId: number }
-  /** `guidance` is added to the task session's prompt (PRD R77); `playbook` replaces triage's choice (PRD R35). */
-  | { type: 'start'; workItemId: number; guidance?: string | null; playbook?: string | null }
+  /** `guidance` is added to the task session's prompt (PRD R77); `playbook` replaces triage's choice (PRD R35); `prompt` replaces an ad-hoc one (PRD R77). */
+  | { type: 'start'; workItemId: number; guidance?: string | null; playbook?: string | null; prompt?: string | null }
   | { type: 'pick'; ticketId: number; guidance?: string | null; playbook?: string | null }
   /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
@@ -298,6 +298,14 @@ function firstLine(prompt: string): string {
   return prompt.trim().split(/\r?\n/, 1)[0]?.trim() ?? '';
 }
 
+/** Start with prompt…'s trimmed prompt when it differs from the work item's stored one, else null (PRD R77). */
+function editedPrompt(store: Store, workItemId: number, prompt: string | null | undefined): string | null {
+  const text = textOf(prompt);
+  const item = store.workItem(workItemId);
+
+  return text === null || item === null || text === ownPrompt(item)?.trim() ? null : text;
+}
+
 /** The operator's text, such as Start's guidance (PRD R77) or a comment (PRD R49, R87), trimmed, or null when blank. */
 function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
@@ -345,8 +353,8 @@ function retiredStop(session: Session, shortId: string | null | undefined): bool
   return shortId !== undefined && shortId !== session.shortId;
 }
 
-/** The event's own fields for the log: no prompt, context or polled list. */
-function detailOf(event: FlowEvent): Record<string, unknown> | null {
+/** The event's own fields for the log: no prompt, context or polled list, except the prompt the operator edited in Start with prompt… (PRD R77). */
+function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | null {
   switch (event.type) {
     case 'poll':
     case 'poll-failed':
@@ -388,7 +396,10 @@ function detailOf(event: FlowEvent): Record<string, unknown> | null {
     case 'start':
     case 'pick': {
       const detail = { ...(textOf(event.guidance) === null ? {} : { guidance: textOf(event.guidance) }), ...(event.playbook == null ? {} : { playbook: event.playbook }) };
-      return Object.keys(detail).length === 0 ? null : detail;
+      const prompt = event.type === 'start' ? editedPrompt(store, event.workItemId, event.prompt) : null;
+      const all = prompt === null ? detail : { ...detail, prompt };
+
+      return Object.keys(all).length === 0 ? null : all;
     }
     case 'snooze':
       return textOf(event.comment) === null ? { until: event.until } : { until: event.until, comment: textOf(event.comment) };
@@ -448,7 +459,7 @@ function subjectOf(store: Store, event: FlowEvent): Pick<EventRecord, 'ticketId'
 
 /** The event as the activity log records it (PRD R59). */
 export function eventRecord(store: Store, event: FlowEvent, at: number): EventRecord {
-  return { at, type: event.type, actor: actorOf(event.type), ...subjectOf(store, event), detail: detailOf(event) };
+  return { at, type: event.type, actor: actorOf(event.type), ...subjectOf(store, event), detail: detailOf(store, event) };
 }
 
 /** Logs an event the hub refused before the flow saw it, such as a worktree report naming no git worktree. */
@@ -554,7 +565,7 @@ class Flow {
       case 'run-schedule':
         return this.runSchedule(event.name);
       case 'start':
-        return this.start(this.openItem(event.workItemId), textOf(event.guidance), event.playbook ?? null);
+        return this.start(this.openItem(event.workItemId), textOf(event.guidance), event.playbook ?? null, editedPrompt(this.store, event.workItemId, event.prompt));
       case 'approve':
         return this.approve(this.openItem(event.workItemId));
       case 'mark-done':
@@ -726,6 +737,7 @@ class Flow {
       stageAt: null,
       taskPrompt: null,
       guidance: null,
+      reportedPrompt: null,
       warning: null,
       error: null,
       unassignedAt: null,
@@ -949,7 +961,7 @@ class Flow {
       throw new Refusal(`${wanted === '' ? 'Name a repo with --repo.' : `${wanted} is not a configured repo root.`} Repo roots: ${roots.join(', ') || 'none'}.`);
     }
 
-    if (this.store.workItemsWithParent(parent.id).some((item) => item.status !== 'done' && item.taskPrompt === report.prompt)) {
+    if (this.store.workItemsWithParent(parent.id).some((item) => item.status !== 'done' && item.reportedPrompt === report.prompt)) {
       return;
     }
 
@@ -979,6 +991,7 @@ class Flow {
       stageAt: null,
       taskPrompt: prompt,
       guidance: null,
+      reportedPrompt: parentId === null ? null : prompt,
       warning: null,
       error: null,
       unassignedAt: null,
@@ -1092,6 +1105,7 @@ class Flow {
       stageAt: null,
       taskPrompt: null,
       guidance: null,
+      reportedPrompt: null,
       warning: null,
       error,
       unassignedAt: null,
@@ -1949,6 +1963,7 @@ class Flow {
       stageAt: null,
       taskPrompt: null,
       guidance,
+      reportedPrompt: null,
       warning: null,
       error: null,
       unassignedAt: null,
@@ -1993,13 +2008,18 @@ class Flow {
     this.queue(item);
   }
 
-  private start(item: WorkItem, guidance: string | null, playbook: string | null): void {
+  private start(item: WorkItem, guidance: string | null, playbook: string | null, prompt: string | null): void {
     if (item.status !== 'unstarted') {
       throw new Refusal('The work item is not unstarted.');
     }
 
+    // Start with prompt… edits the prompt of a work item without a playbook, which every later start runs (PRD R77).
+    if (prompt !== null && ownPrompt(item) === null) {
+      throw new Refusal("The work item runs its playbook's prompt.");
+    }
+
     // The focus stays as triage set it (PRD R79).
-    this.store.updateWorkItem(item.id, { guidance, playbook: this.chosenPlaybook(item.playbook, this.store.ticket(item.ticketId)!, playbook) });
+    this.store.updateWorkItem(item.id, { guidance, playbook: this.chosenPlaybook(item.playbook, this.store.ticket(item.ticketId)!, playbook), ...(prompt === null ? {} : { taskPrompt: prompt }) });
     this.queue(item);
   }
 

@@ -1,4 +1,4 @@
-import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, reviewOrder, triageLabel, turnOf, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
+import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, reviewOrder, triageLabel, turnOf, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
 import type { OpenVSCode, Provider } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -35,6 +35,7 @@ export const CONTROL_GLYPHS = {
   'comment-discussion': '\u{eac7}',
   copy: '\u{ebcc}',
   discard: '\u{eae2}',
+  edit: '\u{ea73}',
   'debug-restart': '\u{ead2}',
   'debug-stop': '\u{ead7}',
   'diff-multiple': '\u{ec23}',
@@ -60,10 +61,10 @@ export interface Control {
   /** A question the dock asks before it posts the message, with its detail and the label of the button that goes ahead. */
   confirm?: { question: string; detail: string; action: string };
   /**
-   * A text the dock asks for before it posts the message, set as the action's `field`, with the label of the button that goes ahead; with `choice`,
-   * the dock also offers `values`, `value` selected, and sets a changed choice as the action's `choice.field`.
+   * A text the dock asks for before it posts the message, set as the action's `field`, with the label of the button that goes ahead and `text` in
+   * the box at first; with `choice`, the dock also offers `values`, `value` selected, and sets a changed choice as the action's `choice.field`.
    */
-  input?: { question: string; detail: string; field: string; action: string; choice?: InputChoice };
+  input?: { question: string; detail: string; field: string; action: string; text?: string; choice?: InputChoice };
 }
 
 export interface InputChoice {
@@ -82,6 +83,13 @@ function guidedStart(message: Record<string, unknown>, playbook: string | null, 
   const input = { question: 'Start with guidance', detail: "Switchboard adds your guidance to the end of the session's prompt.", field: 'guidance', action: 'Start', ...choice };
 
   return { label: 'Start with guidance…', icon: 'comment', message, input };
+}
+
+/** Start with prompt…: Start, after the operator reads and edits the prompt of an ad-hoc or task work item, which later starts keep (PRD R77). */
+function promptedStart(message: Record<string, unknown>, prompt: string): Control {
+  const input = { question: 'Start with prompt', detail: 'The session runs this prompt. Switchboard keeps your changes for later starts.', field: 'prompt', action: 'Start', text: prompt };
+
+  return { label: 'Start with prompt…', icon: 'edit', message, input };
 }
 
 /** Add comment…: a note on the work item, which its row shows in a tooltip on line 2 (PRD R87). */
@@ -117,7 +125,8 @@ export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Co
     return controls.find((control) => control.message['type'] === 'open-question' || control === ANSWER_IN_TERMINAL) ?? null;
   }
 
-  const wanted = item.status === 'unstarted' ? 'Start' : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Retry' : null;
+  // An ad-hoc or task work item's Start opens its prompt first (PRD R77).
+  const wanted = item.status === 'unstarted' ? (ownPrompt(item) === null ? 'Start' : 'Start with prompt…') : item.status === 'awaiting-approval' ? 'Approve' : item.status === 'failed' ? 'Retry' : null;
 
   return controls.find((control) => control.label === wanted) ?? null;
 }
@@ -134,7 +143,9 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
   const action = (type: string) => ({ type: 'action', action: { type, workItemId: item.id } });
 
   if (item.status === 'unstarted') {
-    controls.push({ label: 'Start', icon: 'play', message: action('start') }, guidedStart(action('start'), item.playbook, item.playbookChoices));
+    const prompt = ownPrompt(item);
+
+    controls.push({ label: 'Start', icon: 'play', message: action('start') }, prompt === null ? guidedStart(action('start'), item.playbook, item.playbookChoices) : promptedStart(action('start'), prompt));
   }
 
   if (item.status === 'awaiting-approval') {

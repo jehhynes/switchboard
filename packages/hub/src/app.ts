@@ -139,7 +139,7 @@ export function parseAction(body: unknown): FlowEvent | null {
     return Number.isInteger(workItemId) && typeof nativeSessionId === 'string' ? { type: 'open-question', workItemId: workItemId as number, nativeSessionId } : null;
   }
 
-  if ((body['type'] === 'start' || body['type'] === 'pick') && ((body['guidance'] != null && typeof body['guidance'] !== 'string') || (body['playbook'] != null && typeof body['playbook'] !== 'string'))) {
+  if ((body['type'] === 'start' || body['type'] === 'pick') && ((body['guidance'] != null && typeof body['guidance'] !== 'string') || (body['playbook'] != null && typeof body['playbook'] !== 'string') || (body['prompt'] != null && typeof body['prompt'] !== 'string'))) {
     return null;
   }
 

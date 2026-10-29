@@ -185,6 +185,11 @@ export function adhocLabel(item: { parentId: number | null; prompted: boolean },
   return item.parentId !== null || ticket.sourceId === 'task' ? 'task' : item.prompted ? 'ad-hoc' : 'registered';
 }
 
+/** The prompt a work item without a playbook runs, an ad-hoc or task one's (PRD R6, R68), which Start with prompt… edits and History shows; else null. */
+export function ownPrompt(item: Pick<WorkItem, 'playbook' | 'taskPrompt'>): string | null {
+  return item.playbook === null ? item.taskPrompt : null;
+}
+
 /**
  * A URL as Open in Switchboard compares it (PRD R69): a GitHub issue or pull request page, any tab such as `/files` included, as
  * `github.com/<owner>/<repo>/<issues|pull>/<number>` in lower case; any other URL as parsed, without a trailing slash.

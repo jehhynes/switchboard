@@ -1190,7 +1190,7 @@ public sealed partial class MainWindow : Window
 
         if (control.Input is { } input)
         {
-            if (await InputDialog.Ask(ShownForDialog(), input.Question, input.Detail, input.Action, input.Choice) is not { } answer)
+            if (await InputDialog.Ask(ShownForDialog(), input.Question, input.Detail, input.Action, input.Choice, input.Text) is not { } answer)
             {
                 return;
             }

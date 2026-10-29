@@ -10,15 +10,17 @@ namespace Switchboard.Dock.Views;
 sealed record InputAnswer(string Text, string? Choice);
 
 /// <summary>
-/// A small modal window that asks for a text, and with a choice, for a value from <c>InputChoice</c>; <c>InputAction</c> returns them and
+/// A small modal window that asks for a text, which starts as <c>initial</c>, and with a choice, for a value from <c>InputChoice</c>; <c>InputAction</c> returns them and
 /// <c>InputCancel</c> returns null. The action needs a text, or with a choice, a text or a changed choice.
 /// </summary>
 static class InputDialog
 {
-    public static Task<InputAnswer?> Ask(Window owner, string question, string detail, string action, DockChoice? choice = null)
+    public static Task<InputAnswer?> Ask(Window owner, string question, string detail, string action, DockChoice? choice = null, string? initial = null)
     {
-        var dialog = new Window { Title = question, Width = 420, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        var text = new TextBox { Name = "InputText", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, MaxHeight = 300 };
+        var dialog = new Window { Title = question, Width = 630, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var text = new TextBox { Name = "InputText", Text = initial, CaretIndex = initial?.Length ?? 0, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
+        // A prompt to edit, such as Start with prompt…'s, gets a taller box than new text.
+        (text.MinHeight, text.MaxHeight) = initial is null ? (90, 300) : (150, 400);
         var values = new ComboBox { Name = "InputChoice", ItemsSource = choice?.Values, SelectedItem = choice?.Value, HorizontalAlignment = HorizontalAlignment.Stretch };
         var go = new Button { Name = "InputAction", Content = action, IsEnabled = false };
         var cancel = new Button { Name = "InputCancel", Content = "Cancel", IsCancel = true };
@@ -26,6 +28,7 @@ static class InputDialog
         void Update() => go.IsEnabled = !string.IsNullOrWhiteSpace(text.Text) || Chosen() is not null;
 
         go.Classes.Add("accent");
+        Update();
         text.PropertyChanged += (_, e) =>
         {
             if (e.Property == TextBox.TextProperty)

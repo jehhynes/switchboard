@@ -215,6 +215,8 @@ describe('parseReport and reportBody', () => {
     expect(parseAction({ type: 'pick', ticketId: 1, guidance: ['x'] })).toBeNull();
     expect(parseAction({ type: 'start', workItemId: 1, guidance: '', playbook: 'dev:other' })).toEqual({ type: 'start', workItemId: 1, guidance: '', playbook: 'dev:other' });
     expect(parseAction({ type: 'pick', ticketId: 1, playbook: 7 })).toBeNull();
+    expect(parseAction({ type: 'start', workItemId: 1, prompt: 'Write hello.txt' })).toEqual({ type: 'start', workItemId: 1, prompt: 'Write hello.txt' });
+    expect(parseAction({ type: 'start', workItemId: 1, prompt: 7 })).toBeNull();
     expect(parseAction({ type: 'poll', source: 'github', tickets: [] })).toBeNull();
   });
 

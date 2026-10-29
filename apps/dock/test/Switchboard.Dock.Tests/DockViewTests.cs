@@ -72,6 +72,16 @@ public sealed class DockViewTests
     }
 
     [Fact]
+    public void Parse_InputWithText_ReadsTheTextThatStartsInTheBox()
+    {
+        var json = Fixtures.DockJson.Replace("\"field\": \"guidance\",", "\"field\": \"prompt\", \"text\": \"Write hello.txt\",");
+        var row = DockView.Parse(json).Groups.SelectMany((group) => group.Rows).Single((row) => row.Key == "item:9");
+
+        Assert.Equal(("prompt", "Write hello.txt"), (row.Controls[1].Input!.Field, row.Controls[1].Input!.Text));
+        Assert.Null(Fixtures.Row("item:9").Controls[1].Input!.Text);
+    }
+
+    [Fact]
     public void Parse_OpenWindows_ReadsTheFilesTheFrontAndTheCount()
     {
         Assert.Null(Fixtures.View.Windows);

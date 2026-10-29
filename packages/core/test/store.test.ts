@@ -98,6 +98,24 @@ describe('Store', () => {
     store.close();
   });
 
+  it("keeps a task report's prompt as its reported prompt when upgrading, and none for another work item (PRD R68, R77)", () => {
+    const version = MIGRATIONS.length - 1;
+    const path = join(dir, 'reported.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version};
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'One', '', 1, ''), (2, 'adhoc', '2', 'Two', '', 1, '');
+      INSERT INTO workItems (id, ticketId, playbook, taskPrompt, status, createdAt, statusAt, parentId) VALUES
+        (1, 1, 'dev:question', '/answer', 'running', 1, 1, NULL),
+        (2, 2, NULL, 'Fix the flaky test', 'unstarted', 2, 2, 1);`);
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect([store.workItem(1)!.reportedPrompt, store.workItem(2)!.reportedPrompt]).toEqual([null, 'Fix the flaky test']);
+    store.close();
+  });
+
   it('migrates a new file to the current version, in WAL mode, and reopens it without migrating again', () => {
     const path = join(dir, 'switchboard.db');
     const store = Store.open(path);
@@ -599,7 +617,7 @@ describe('Store', () => {
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
     const store = Store.open(':memory:');
     const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
-    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, guidance: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
+    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, guidance: null, reportedPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
     const first = store.insertWorkItem(item(1));
     const second = store.insertWorkItem(item(2));
 

@@ -191,9 +191,9 @@ public sealed record DockControl(string Label, JsonObject Action, string Glyph =
 
 /// <summary>
 /// A text the dock asks for before it posts a control's action, set as the action's <paramref name="Field"/>, such as Start's guidance (PRD R77),
-/// with <paramref name="Choice"/> asked beside it.
+/// with <paramref name="Choice"/> asked beside it and <paramref name="Text"/> in the box at first, such as an ad-hoc prompt.
 /// </summary>
-public sealed record DockInput(string Question, string Detail, string Field, string Action, DockChoice? Choice = null);
+public sealed record DockInput(string Question, string Detail, string Field, string Action, DockChoice? Choice = null, string? Text = null);
 
 /// <summary>A list of <paramref name="Values"/> with <paramref name="Value"/> selected; a changed choice is set as the action's <paramref name="Field"/>, such as Start's playbook (PRD R35).</summary>
 public sealed record DockChoice(string Field, string Label, string Value, IReadOnlyList<string> Values);

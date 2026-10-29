@@ -116,6 +116,29 @@ describe('History model', () => {
     expect(texts(view.sections.at(-1)!.entries)).toEqual(['Switchboard first saw the ticket, assigned to you', `The schedule came due at ${timeText(T0 + 25 * 60 * MINUTE)}; it made no work item, because one is still open`]);
   });
 
+  it("shows an ad-hoc work item's prompt, the edited one after Start with prompt…, and no prompt for a playbook's or a registered session (PRD R59, R77)", () => {
+    const run = new Run();
+
+    run.send({ type: 'adhoc', prompt: 'Fix the <badge>', repoRoot: 'D:/git/widgets' });
+    expect(historyView(run.history(), run.now).sections[0]!.prompt).toBe('Fix the <badge>');
+
+    run.send({ type: 'start', workItemId: 1, prompt: 'Fix the <badge>\nin the inbox' });
+    const section = historyView(run.history(), run.now).sections[0]!;
+
+    expect(section.prompt).toBe('Fix the <badge>\nin the inbox');
+    expect(section.entries.at(-1)).toMatchObject({ text: 'You started it with an edited prompt', detail: 'Fix the <badge>\nin the inbox' });
+
+    const root = document.createElement('div');
+    root.innerHTML = renderHistory(historyView(run.history(), run.now), EMPTY_UI);
+    expect(root.querySelector('.section .prompt .text')!.textContent).toBe('Fix the <badge>\nin the inbox');
+
+    run.send({ type: 'register', nativeSessionId: 'native-9', shortId: 'feed1234', cwd: 'D:/git/widgets', title: 'My session' });
+    expect(historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections[0]!.prompt).toBeNull();
+    root.innerHTML = renderHistory(historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now), EMPTY_UI);
+    expect(root.querySelector('.prompt')).toBeNull();
+    expect(historyView(approvedRun().history(), T0).sections[0]!.prompt).toBeNull();
+  });
+
   it('titles an ad-hoc section by how the work item was made (PRD R6, R68, R81)', () => {
     const run = new Run();
 

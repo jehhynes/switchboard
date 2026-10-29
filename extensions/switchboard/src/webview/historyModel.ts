@@ -50,6 +50,8 @@ export interface Section {
   status: string;
   tone: Tone;
   facts: string[];
+  /** The prompt of an ad-hoc or task work item, which no other place shows (PRD R59); null otherwise. */
+  prompt: string | null;
   entries: Entry[];
 }
 
@@ -489,6 +491,11 @@ class Builder {
         return { category: 'you', icon: operator.icon, text: `${text} with guidance`, detail: detail['guidance'], tone: 'accent' };
       }
 
+      // Start with prompt… shows the edited prompt under the entry (PRD R77).
+      if (event.type === 'start' && typeof detail['prompt'] === 'string') {
+        return { category: 'you', icon: operator.icon, text: `${text} with an edited prompt`, detail: detail['prompt'], tone: 'accent' };
+      }
+
       // A snooze's comment (PRD R49) and a comment (PRD R87) show their text under the entry.
       const comment = event.type === 'snooze' ? detail['comment'] : event.type === 'comment' ? detail['text'] : undefined;
 
@@ -834,13 +841,14 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
       status: item.status === 'done' && item.doneReason !== null ? DONE_WORDS[item.doneReason] : STATUS_WORDS[item.status],
       tone: item.status === 'failed' ? 'error' : item.status === 'blocked' ? 'warning' : item.status === 'done' ? 'success' : NEEDS_YOU.has(item.status) ? 'accent' : null,
       facts,
+      prompt: item.prompt,
       entries: byItem.get(item.id) ?? [],
     };
   });
   const ticketEntries = byItem.get(null) ?? [];
 
   if (ticketEntries.length > 0 || sections.length === 0) {
-    sections.push({ key: 'ticket', workItemId: null, title: 'Ticket', status: '', tone: null, facts: ['Assignment, pool, snoozes and worktree'], entries: ticketEntries });
+    sections.push({ key: 'ticket', workItemId: null, title: 'Ticket', status: '', tone: null, facts: ['Assignment, pool, snoozes and worktree'], prompt: null, entries: ticketEntries });
   }
 
   const latest = history.workItems[0];

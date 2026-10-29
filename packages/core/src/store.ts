@@ -1,5 +1,6 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
+import { ownPrompt } from './group.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -322,6 +323,9 @@ export const MIGRATIONS = [
     text TEXT NOT NULL
   );
   CREATE INDEX commentsByWorkItem ON comments (workItemId);`,
+  // A task report's prompt, which identifies a repeated report after Start with prompt… edits taskPrompt (PRD R68, R77).
+  `ALTER TABLE workItems ADD COLUMN reportedPrompt TEXT;
+  UPDATE workItems SET reportedPrompt = taskPrompt WHERE parentId IS NOT NULL;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
@@ -447,8 +451,11 @@ export interface HistoryEvent extends EventRecord {
 export interface TicketHistory {
   ticket: Ticket;
   /** Newest first, each with its sessions, triages and pastes oldest first; no task or approval prompt. */
-  /** `prompted`: the work item has a task prompt, which a registered session's lacks (PRD R81). */
-  workItems: (Omit<WorkItem, 'taskPrompt' | 'approvalPrompt'> & { prompted: boolean; sessions: Session[]; triages: HistoryTriage[]; pastes: Paste[] })[];
+  /**
+   * `prompted`: the work item has a task prompt, which a registered session's lacks (PRD R81); `prompt`: the prompt of an ad-hoc or task work
+   * item, which has no ticket elsewhere to show it (PRD R59).
+   */
+  workItems: (Omit<WorkItem, 'taskPrompt' | 'approvalPrompt' | 'reportedPrompt'> & { prompted: boolean; prompt: string | null; sessions: Session[]; triages: HistoryTriage[]; pastes: Paste[] })[];
   /** Pool triages no pick attached to a work item, oldest first. */
   poolTriages: HistoryTriage[];
   worktree: Worktree | null;
@@ -466,7 +473,7 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The snooze event's detail holds its comment (PRD R49).
   tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt', 'snoozeComment']),
   // The start or pick event's detail holds the guidance (PRD R77).
-  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance']),
+  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance', 'reportedPrompt']),
   // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
   // The register event names an external session, and its end already shows when it was cleared.
   sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external']),
@@ -1095,9 +1102,10 @@ export class Store {
     }
 
     const triages = this.#all<Triage>('SELECT * FROM triages WHERE ticketId = ? ORDER BY startedAt, id', ticketId).map(({ context: _context, ...triage }) => triage);
-    const workItems = this.#all<WorkItem>('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id DESC', ticketId).map(({ taskPrompt, approvalPrompt: _approval, ...item }) => ({
+    const workItems = this.#all<WorkItem>('SELECT * FROM workItems WHERE ticketId = ? ORDER BY id DESC', ticketId).map(({ taskPrompt, approvalPrompt: _approval, reportedPrompt: _reported, ...item }) => ({
       ...item,
       prompted: taskPrompt !== null,
+      prompt: ownPrompt({ playbook: item.playbook, taskPrompt }),
       sessions: this.sessionsFor(item.id),
       triages: triages.filter((triage) => triage.workItemId === item.id),
       pastes: this.pastesFor(item.id),

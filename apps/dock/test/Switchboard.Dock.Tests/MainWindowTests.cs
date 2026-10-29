@@ -8,6 +8,7 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using System.Text.Json.Nodes;
 using Switchboard.Dock.Hub;
 using Switchboard.Dock.Platform;
 using Switchboard.Dock.Views;
@@ -798,6 +799,7 @@ public sealed class MainWindowTests
 
         Assert.Equal(["Start with guidance", "Playbook", "dev:develop", "Switchboard adds your guidance to the end of the session's prompt."], VisibleTexts(Dialog()).Take(4));
         Assert.False(DialogButton("InputAction").IsEnabled);
+        Assert.Equal((90, 300), (Text().MinHeight, Text().MaxHeight));
 
         Text().Text = "   ";
         Assert.False(DialogButton("InputAction").IsEnabled);
@@ -818,6 +820,35 @@ public sealed class MainWindowTests
 
         Assert.Equal(["act {\"type\":\"start\",\"workItemId\":9,\"guidance\":\"Check the 2024 thread.\\nKeep it short.\"}"], hub.Calls);
         Assert.Equal("{\"type\":\"start\",\"workItemId\":9}", row.Controls[1].Action.ToJsonString());
+    }
+
+    [AvaloniaFact]
+    public void StartWithPrompt_Clicked_ShowsThePromptAndPostsTheEditedText()
+    {
+        var (window, _) = Open();
+        var start = new JsonObject { ["type"] = "start", ["workItemId"] = 9 };
+        var input = new DockInput("Start with prompt", "The session runs this prompt.", "prompt", "Start", Text: "Write hello.txt");
+        var row = Fixtures.Row("item:9") with { Controls = [new DockControl("Start with prompt…", start, Input: input)] };
+        var prompted = (MenuItem)window.MenuOf(row)[0];
+        Window Dialog() => Assert.Single(window.OwnedWindows);
+        Button Go() => Dialog().GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "InputAction");
+        TextBox Text() => Dialog().GetVisualDescendants().OfType<TextBox>().Single((box) => box.Name == "InputText");
+
+        hub.ActReplies.Enqueue(null);
+        prompted.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(630, Dialog().Width);
+        Assert.Equal((150, 400), (Text().MinHeight, Text().MaxHeight));
+        Assert.Equal("Write hello.txt", Text().Text);
+        Assert.True(Go().IsEnabled);
+        Text().Text = " ";
+        Assert.False(Go().IsEnabled);
+        Text().Text = "Write hello.txt\nthen report done ";
+        Go().RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["act {\"type\":\"start\",\"workItemId\":9,\"prompt\":\"Write hello.txt\\nthen report done\"}"], hub.Calls);
     }
 
     [AvaloniaFact]

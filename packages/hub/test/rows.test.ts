@@ -91,8 +91,24 @@ describe('controlsOf', () => {
 
     expect(guided(item(7, { status: 'unstarted', playbookChoices: ['dev:develop', 'dev:other'] }))?.choice).toEqual({ field: 'playbook', label: 'Playbook', value: 'dev:develop', values: ['dev:develop', 'dev:other'] });
     expect(guided(item(7, { status: 'unstarted', playbookChoices: ['dev:develop'] }))).not.toHaveProperty('choice');
-    expect(guided(item(7, { status: 'unstarted', playbook: null, taskPrompt: 'Write hello.txt' }))).not.toHaveProperty('choice');
     expect(poolControls(pool(3, { playbookChoices: ['dev:develop', 'dev:other'] })).controls.find((control) => control.label === 'Start with guidance…')!.input?.choice).toMatchObject({ value: 'dev:develop', values: ['dev:develop', 'dev:other'] });
+  });
+
+  it('offers Start with prompt… in place of Start with guidance… on an ad-hoc work item, with its prompt in the box, as its main control (PRD R77)', () => {
+    const adhoc = item(7, { status: 'unstarted', playbook: null, taskPrompt: 'Write hello.txt' });
+
+    expect(controlsOf(adhoc).find((control) => control.label === 'Start with prompt…')).toEqual({
+      label: 'Start with prompt…',
+      icon: 'edit',
+      message: { type: 'action', action: { type: 'start', workItemId: 7 } },
+      input: { question: 'Start with prompt', detail: 'The session runs this prompt. Switchboard keeps your changes for later starts.', field: 'prompt', action: 'Start', text: 'Write hello.txt' },
+    });
+    expect(labels(adhoc)).not.toContain('Start with guidance…');
+    expect(labels(adhoc)).toContain('Start');
+    expect(mainControl(adhoc)?.label).toBe('Start with prompt…');
+    const triaged = item(7, { status: 'unstarted', playbook: 'dev:question', taskPrompt: 'Answer Issue 1.' });
+    expect(labels(triaged)).not.toContain('Start with prompt…');
+    expect(mainControl(triaged)?.label).toBe('Start');
   });
 
   it('asks for the text before Add comment… and posts it as the comment action (PRD R87)', () => {
