@@ -38,6 +38,12 @@ public sealed partial class MainWindow : Window
     readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
     DispatcherTimer? hideTimer;
     DispatcherTimer? topmostTimer;
+    // The dock's open menus, including the search box's flyout; while one is open the dock does not hide, and hiding closes them.
+    readonly HashSet<Popup> openPopups = [];
+    readonly IDisposable popupWatch;
+    // On X11, whether the dock or its menu has had the focus since a menu opened, and the check that closes the menus once it moves elsewhere.
+    bool popupFocused;
+    DispatcherTimer? popupTimer;
     /// <summary>Where the pointer last moved or pressed, in window coordinates; a row's menu and a tooltip open there.</summary>
     Point pointer;
     // The width the pointer has dragged to, in device-independent pixels, before rounding to physical pixels.
@@ -139,6 +145,22 @@ public sealed partial class MainWindow : Window
             }
         }, RoutingStrategies.Tunnel, handledEventsToo: true);
         Deactivated += (_, _) => Dispatcher.UIThread.Post(model.ReleaseView);
+        // A class handler, because Avalonia opens a control's own context menu or flyout without the dock's code. A submenu's popup is placed on
+        // its menu, not the dock, and its root menu stays open while it is. ContextMenu alone would name the window's property.
+        popupWatch = Popup.IsOpenProperty.Changed.AddClassHandler<Popup>((popup, e) =>
+        {
+            if (e.GetNewValue<bool>() && popup.Child is Avalonia.Controls.ContextMenu or MenuFlyoutPresenter && popup.PlacementTarget is { } target && TopLevel.GetTopLevel(target) == this)
+            {
+                if (openPopups.Add(popup) && openPopups.Count == 1)
+                {
+                    WatchPopups();
+                }
+            }
+            else
+            {
+                openPopups.Remove(popup);
+            }
+        });
         Styles.Add(new Style((x) => x.Is<Control>())
         {
             Setters =
@@ -250,6 +272,8 @@ public sealed partial class MainWindow : Window
     {
         hideTimer?.Stop();
         topmostTimer?.Stop();
+        popupTimer?.Stop();
+        popupWatch.Dispose();
 
         if (OperatingSystem.IsWindows())
         {
@@ -415,7 +439,7 @@ public sealed partial class MainWindow : Window
     /// <summary>The pointer is over the dock or a window it owns, such as a menu or dialog, one of them has the focus, or a drag is under way.</summary>
     bool KeptOpen()
     {
-        if (resizing || moving || dragging is not null)
+        if (resizing || moving || dragging is not null || openPopups.Count > 0)
         {
             return true;
         }
@@ -439,6 +463,7 @@ public sealed partial class MainWindow : Window
     void Collapse()
     {
         hideTimer?.Stop();
+        ClosePopups();
 
         if (x11 is { } dock)
         {
@@ -451,6 +476,55 @@ public sealed partial class MainWindow : Window
 
             ShowSliver();
             Native.SetWindowRgn(handle.Handle, Native.CreateRectRgn(sliver.Left, sliver.Top, sliver.Right, sliver.Bottom), true);
+        }
+    }
+
+    void ClosePopups()
+    {
+        foreach (var popup in openPopups.ToList())
+        {
+            popup.IsOpen = false;
+        }
+    }
+
+    /// <summary>
+    /// On X11, takes the focus as a menu opens and checks every 100 ms whether it is still the dock's or the menu's. Avalonia closes a menu when
+    /// the dock window loses the focus; while the focus was elsewhere, a click on another app left the menu open.
+    /// </summary>
+    void WatchPopups()
+    {
+        if (x11 is not { } dock)
+        {
+            return;
+        }
+
+        TakeFocus();
+        // The X server applies the request before it answers the query on the same connection, so a focus lost before the first check counts.
+        popupFocused = dock.HasFocus();
+
+        if (popupTimer is null)
+        {
+            popupTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            popupTimer.Tick += (_, _) => CheckPopups();
+        }
+
+        popupTimer.Start();
+    }
+
+    /// <summary>The menu timer's check; tests call it, as the headless platform runs no timers.</summary>
+    internal void CheckPopups()
+    {
+        if (x11 is not { } dock || openPopups.Count == 0)
+        {
+            popupTimer?.Stop();
+        }
+        else if (dock.HasFocus())
+        {
+            popupFocused = true;
+        }
+        else if (popupFocused)
+        {
+            ClosePopups();
         }
     }
 
@@ -677,6 +751,9 @@ public sealed partial class MainWindow : Window
 
     /// <summary>How many times the dock asked for the keyboard focus; for tests, where no X display is used.</summary>
     internal int FocusRequests { get; private set; }
+
+    /// <summary>The dock's open menus; for tests, as a row's menu is not reachable from the window.</summary>
+    internal IReadOnlyCollection<Popup> OpenMenus => openPopups;
 
     /// <summary>
     /// As an X11 dock window, takes the keyboard focus, which the window manager does not give a dock window on a click. It does not check

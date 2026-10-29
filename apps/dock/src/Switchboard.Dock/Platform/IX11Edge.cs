@@ -21,6 +21,9 @@ internal interface IX11Edge : IDisposable
     /// <summary>Whether the pointer is over the dock or a window it owns, or one of them has the keyboard focus.</summary>
     bool KeptOpen();
 
+    /// <summary>Whether the dock or a window it owns, such as a menu, has the keyboard focus.</summary>
+    bool HasFocus();
+
     /// <summary>Each monitor's work area on the current workspace; empty when the window manager does not give them.</summary>
     IReadOnlyList<PixelRect> WorkAreas();
 

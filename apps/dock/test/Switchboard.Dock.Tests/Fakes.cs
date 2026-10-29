@@ -468,13 +468,18 @@ sealed class FakeX11Edge : Switchboard.Dock.Platform.IX11Edge
 
     public bool KeptOpen() => Kept;
 
+    /// <summary>Whether the dock or its menu has the focus; <see cref="Focus"/> gives it unless <see cref="Refuses"/>.</summary>
+    public bool Focused { get; set; }
+
+    public bool Refuses { get; init; }
+
+    public bool HasFocus() => Focused;
+
     public IReadOnlyList<Switchboard.Dock.Platform.PixelRect> WorkAreas() => [];
 
     public Avalonia.PixelPoint? Pointer() => null;
 
-    public void Focus()
-    {
-    }
+    public void Focus() => Focused = !Refuses;
 
     public void Below(bool below)
     {

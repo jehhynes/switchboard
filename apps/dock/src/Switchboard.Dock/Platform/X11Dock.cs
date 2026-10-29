@@ -157,15 +157,9 @@ internal sealed partial class X11Dock : IX11Edge
     /// </summary>
     public bool KeptOpen()
     {
-        if (XGetInputFocus(display, out var focus, out _) != 0 && focus > PointerRoot)
+        if (HasFocus())
         {
-            for (var at = focus; at != 0; at = Parent(at))
-            {
-                if (Ours(at))
-                {
-                    return true;
-                }
-            }
+            return true;
         }
 
         var root = XDefaultRootWindow(display);
@@ -175,6 +169,23 @@ internal sealed partial class X11Dock : IX11Edge
             if (Ours(child))
             {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Whether the dock or a window it owns, such as a menu, has the keyboard focus; see <see cref="KeptOpen"/>.</summary>
+    public bool HasFocus()
+    {
+        if (XGetInputFocus(display, out var focus, out _) != 0 && focus > PointerRoot)
+        {
+            for (var at = focus; at != 0; at = Parent(at))
+            {
+                if (Ours(at))
+                {
+                    return true;
+                }
             }
         }
 

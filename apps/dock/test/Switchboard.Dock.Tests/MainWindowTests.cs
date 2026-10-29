@@ -194,6 +194,143 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void DockOnX11_MenuOpen_DoesNotHideUntilItCloses()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+        var more = window.FindControl<Button>("MoreButton")!;
+
+        Tap(window, more);
+        Wait(window);
+
+        Assert.True(more.ContextMenu!.IsOpen);
+        Assert.Equal(["release"], edge.Calls);
+
+        more.ContextMenu.Close();
+        Wait(window);
+
+        Assert.Equal(["release", "clip Left 3"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_MenuOpenedByRightClick_DoesNotHide()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+        var more = window.FindControl<Button>("MoreButton")!;
+
+        var row = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel);
+
+        Tap(window, more);
+        more.ContextMenu!.Close();
+        // A row's menu opens after More Actions and closes, so the dock hides.
+        row.RaiseEvent(new ContextRequestedEventArgs());
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        Wait(window);
+        window.MouseMove(new Point(1, 300));
+        // Avalonia opens a control's own context menu without the dock's code.
+        more.RaiseEvent(new ContextRequestedEventArgs());
+        Wait(window);
+
+        Assert.True(more.ContextMenu.IsOpen);
+        Assert.Equal(["release", "clip Left 3", "unclip"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_SearchBoxMenuOpen_DoesNotHideAndHidingClosesIt()
+    {
+        var edge = new FakeX11Edge();
+        var (window, model) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+
+        model.SearchOpen = true;
+        Dispatcher.UIThread.RunJobs();
+        var search = window.FindControl<TextBox>("SearchBox")!;
+        var flyout = search.ContextFlyout!;
+        flyout.ShowAt(search);
+        Wait(window);
+
+        Assert.True(flyout.IsOpen);
+        Assert.Equal(["release"], edge.Calls);
+
+        flyout.Hide();
+        Wait(window);
+        flyout.ShowAt(search);
+        window.Width = 400;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(flyout.IsOpen);
+        Assert.Equal(["release", "clip Left 3", "clip Left 3"], edge.Calls);
+    }
+
+    /// <summary>Opens the menu of the first row, as a right-click does, which takes no focus by itself.</summary>
+    static void OpenRowMenu(MainWindow window) =>
+        window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel).RaiseEvent(new ContextRequestedEventArgs());
+
+    [AvaloniaFact]
+    public void DockOnX11_MenuOpen_TakesTheFocusAndClosesOnceItMovesToAnotherApp()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings(), edge);
+
+        OpenRowMenu(window);
+        window.CheckPopups();
+
+        Assert.Equal(1, window.FocusRequests);
+        Assert.NotEmpty(window.OpenMenus);
+
+        // A click on another app, which Avalonia does not see while the dock window does not have the focus.
+        edge.Focused = false;
+        window.CheckPopups();
+
+        Assert.Empty(window.OpenMenus);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_FocusLostBeforeTheFirstCheck_ClosesTheMenu()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings(), edge);
+
+        OpenRowMenu(window);
+        edge.Focused = false;
+        window.CheckPopups();
+
+        Assert.Empty(window.OpenMenus);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_MenuOpenAndFocusRefused_KeepsTheMenu()
+    {
+        var edge = new FakeX11Edge { Refuses = true };
+        var (window, _) = OpenOnEdge(new DockSettings(), edge);
+
+        OpenRowMenu(window);
+        window.CheckPopups();
+        window.CheckPopups();
+
+        Assert.NotEmpty(window.OpenMenus);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_HiddenWithMenuOpen_ClosesTheMenu()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+        var more = window.FindControl<Button>("MoreButton")!;
+
+        Wait(window);
+        // The headless tap moves no pointer, so the dock is still hidden when the menu opens.
+        Tap(window, more);
+        Assert.True(more.ContextMenu!.IsOpen);
+
+        window.Width = 400;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(more.ContextMenu.IsOpen);
+        Assert.Equal(["release", "clip Left 3", "clip Left 3"], edge.Calls);
+    }
+
+    [AvaloniaFact]
     public void DockOnX11_HiddenAndResized_ClipsAgain()
     {
         var edge = new FakeX11Edge();
