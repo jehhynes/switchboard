@@ -37,6 +37,8 @@ public sealed partial class MainWindow : Window
     readonly HideDelay hideDelay = new();
     readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
     DispatcherTimer? hideTimer;
+    DispatcherTimer? showTimer;
+    TimeSpan? hoverSince;
     DispatcherTimer? topmostTimer;
     // The dock's open menus, including the search box's flyout; while one is open the dock does not hide, and hiding closes them.
     readonly HashSet<Popup> openPopups = [];
@@ -110,8 +112,9 @@ public sealed partial class MainWindow : Window
         AddHandler(PointerMovedEvent, (_, e) =>
         {
             pointer = e.GetPosition(this);
-            Expand();
+            WatchShow(clock.Elapsed);
         }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        PointerExited += (_, _) => CancelShow();
         // Alt+Tab or a VS Code status bar item (ShowRequested) shows a hidden dock.
         Activated += (_, _) => Expand();
         AddHandler(PointerPressedEvent, (_, e) =>
@@ -271,6 +274,7 @@ public sealed partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         hideTimer?.Stop();
+        CancelShow();
         topmostTimer?.Stop();
         popupTimer?.Stop();
         popupWatch.Dispose();
@@ -422,6 +426,49 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    internal void WatchShow(TimeSpan now)
+    {
+        if (!hidden || showTimer?.IsEnabled == true)
+        {
+            return;
+        }
+
+        if (showTimer is null)
+        {
+            showTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            showTimer.Tick += (_, _) => CheckShow(clock.Elapsed);
+        }
+
+        hoverSince = now;
+        showTimer.Start();
+    }
+
+    // Tests supply monotonic time because the headless platform runs no timers.
+    internal void CheckShow(TimeSpan now)
+    {
+        if (showTimer?.IsEnabled != true)
+        {
+            return;
+        }
+
+        if (!hidden || !IsPointerOver)
+        {
+            CancelShow();
+            return;
+        }
+
+        if (now - hoverSince >= TimeSpan.FromMilliseconds(500))
+        {
+            Expand();
+        }
+    }
+
+    void CancelShow()
+    {
+        showTimer?.Stop();
+        hoverSince = null;
+    }
+
     void UpdateTopmost()
     {
         if (!OperatingSystem.IsWindows() || appBar is null || TryGetPlatformHandle() is not { } handle)
@@ -462,6 +509,7 @@ public sealed partial class MainWindow : Window
     /// <summary>Shows only the sliver at the outer edge; the window keeps its strip and its layout, so it shows again at once.</summary>
     void Collapse()
     {
+        CancelShow();
         hideTimer?.Stop();
         ClosePopups();
 
@@ -558,6 +606,7 @@ public sealed partial class MainWindow : Window
 
     void Expand()
     {
+        CancelShow();
         if (!hidden)
         {
             return;

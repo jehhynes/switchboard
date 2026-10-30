@@ -227,7 +227,10 @@ public sealed class MainWindowTests
         row.RaiseEvent(new ContextRequestedEventArgs());
         window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         Wait(window);
+        window.WatchShow(TimeSpan.Zero);
         window.MouseMove(new Point(1, 300));
+        window.CheckShow(TimeSpan.FromMilliseconds(100));
+        window.CheckShow(TimeSpan.FromMilliseconds(500));
         // Avalonia opens a control's own context menu without the dock's code.
         more.RaiseEvent(new ContextRequestedEventArgs());
         Wait(window);
@@ -379,13 +382,20 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
-    public void DockOnX11_HiddenAndPointerMoves_UnclipsAndHidesAgainOnceNothingKeepsIt()
+    public void DockOnX11_HiddenAndPointerHovers_WaitsBeforeShowingAndHidesAgainOnceNothingKeepsIt()
     {
         var edge = new FakeX11Edge();
         var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
 
         Wait(window);
+        window.WatchShow(TimeSpan.Zero);
         window.MouseMove(new Point(1, 300));
+        window.CheckShow(TimeSpan.FromMilliseconds(100));
+        window.MouseMove(new Point(1, 301));
+        window.CheckShow(TimeSpan.FromMilliseconds(499));
+        Assert.Equal(["release", "clip Left 3"], edge.Calls);
+        Assert.True(window.FindControl<Control>("Sliver")!.IsVisible);
+        window.CheckShow(TimeSpan.FromMilliseconds(500));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["release", "clip Left 3", "unclip"], edge.Calls);
@@ -394,6 +404,29 @@ public sealed class MainWindowTests
         Wait(window);
 
         Assert.Equal(["release", "clip Left 3", "unclip", "clip Left 3"], edge.Calls);
+    }
+
+    [AvaloniaFact]
+    public void DockOnX11_PointerLeavesBeforeShowDelay_CancelsAndRestartsOnReturn()
+    {
+        var edge = new FakeX11Edge();
+        var (window, _) = OpenOnEdge(new DockSettings { AutoHide = true }, edge);
+        Wait(window);
+
+        window.WatchShow(TimeSpan.Zero);
+        window.MouseMove(new Point(1, 300));
+        window.CheckShow(TimeSpan.FromMilliseconds(100));
+        window.MouseMove(new Point(-10, 300));
+        window.CheckShow(TimeSpan.FromMilliseconds(600));
+        Assert.Equal(["release", "clip Left 3"], edge.Calls);
+
+        window.WatchShow(TimeSpan.FromMilliseconds(700));
+        window.MouseMove(new Point(1, 300));
+        window.CheckShow(TimeSpan.FromMilliseconds(800));
+        window.CheckShow(TimeSpan.FromMilliseconds(1199));
+        Assert.Equal(["release", "clip Left 3"], edge.Calls);
+        window.CheckShow(TimeSpan.FromMilliseconds(1200));
+        Assert.Equal(["release", "clip Left 3", "unclip"], edge.Calls);
     }
 
     [AvaloniaFact]
