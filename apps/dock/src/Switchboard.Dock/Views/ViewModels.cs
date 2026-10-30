@@ -642,7 +642,7 @@ public sealed class RowViewModel(DockRow row) : Observable
     public bool HasThirdLine => row.Mark is not null || row.Details.Count > 0;
 
     /// <summary>How many times the same work came back (PRD R51), on line 2.</summary>
-    public string ReturnedText => row.Returned > 0 ? $"Returned ×{row.Returned}" : "";
+    public string ReturnedText => row.Returned > 0 ? $"{row.Returned}" : "";
 
     public bool HasReturned => row.Returned > 0;
 

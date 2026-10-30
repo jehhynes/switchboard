@@ -702,8 +702,10 @@ public sealed class MainWindowTests
         var texts = VisibleTexts(window);
 
         string[] headers = ["Blocked on you", "Ready for review", "In progress", "Unstarted", "Done", "0", "2", "3"];
+        var headerTexts = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("group"))
+            .SelectMany((header) => header.GetVisualDescendants().OfType<TextBlock>()).Select((text) => text.Text);
 
-        Assert.Equal(["Ready for review", "3", "Blocked on you", "2", "In progress", "0", "Unstarted", "2", "Done", "2"], texts.Where(headers.Contains));
+        Assert.Equal(["Ready for review", "3", "Blocked on you", "2", "In progress", "0", "Unstarted", "2", "Done", "2"], headerTexts.Where(headers.Contains));
         Assert.Contains("Nothing is in progress.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
@@ -1550,8 +1552,10 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var pills = RowNamed(window, "Issue <7>").GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("pill") && border.IsEffectivelyVisible).ToList();
 
-        Assert.Equal(["gh 107", "19002", "gh 20087", "Returned ×2"], pills.Select((pill) => pill.GetVisualDescendants().OfType<TextBlock>().Last().Text));
+        Assert.Equal(["gh 107", "19002", "gh 20087", "2"], pills.Select((pill) => pill.GetVisualDescendants().OfType<TextBlock>().Last().Text));
         Assert.Contains("pr", pills[1].Classes);
+        Assert.Equal("\uEAE2", pills[3].GetVisualDescendants().OfType<TextBlock>().First().Text);
+        Assert.StartsWith("Returned:", Assert.IsType<string>(ToolTip.GetTip(pills[3])));
 
         Tap(window, pills[0]);
         Tap(window, pills[1]);

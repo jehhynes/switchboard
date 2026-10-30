@@ -189,7 +189,7 @@ export interface DockRow {
    * found in the ticket's text (PRD R61), follows the others and is drawn muted.
    */
   links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null; mentioned: boolean }[];
-  /** How many earlier work items with the same playbook, or one it is a return of, were done, for "Returned ×N" on line 2 (PRD R51); 0 when it is not marked. */
+  /** How many earlier work items with the same playbook, or one it is a return of, were done, for the return icon and count on line 2 (PRD R51); 0 when it is not marked. */
   returned: number;
   /** The comment icon on line 2, with the work item's comments, oldest first, as its tooltip (PRD R87); null without comments. */
   comment: { glyph: string; title: string } | null;

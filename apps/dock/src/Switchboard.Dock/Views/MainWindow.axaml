@@ -450,8 +450,11 @@
                                       </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                   </ItemsControl>
-                                  <Border Classes="pill returned" IsVisible="{Binding HasReturned}" ToolTip.Tip="Earlier work items with this playbook, or one it is a return of, were done for this ticket">
-                                    <TextBlock Text="{Binding ReturnedText}" />
+                                  <Border Classes="pill returned" IsVisible="{Binding HasReturned}" ToolTip.Tip="Returned: earlier work items with this playbook, or one it is a return of, were done for this ticket" AutomationProperties.Name="Returned">
+                                    <StackPanel Orientation="Horizontal" Spacing="3">
+                                      <TextBlock Classes="icon pill-icon" Text="&#xEAE2;" />
+                                      <TextBlock Text="{Binding ReturnedText}" />
+                                    </StackPanel>
                                   </Border>
                                 </StackPanel>
                                 <!-- The last detail takes the remaining width and ends in an ellipsis. -->
