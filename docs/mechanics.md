@@ -619,3 +619,13 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Source inspection of `workbench.desktop.main.js`:** on opening a workspace, VS Code prompts to install the recommended extensions of its folders' `.vscode/extensions.json`. Its "Don't Show Again" stores `extensionsAssistant/workspaceRecommendationsIgnore` in workspace storage, which is per workspace file, so every new item window prompts again. Every recommendation prompt first returns when `extensions.ignoreRecommendations` or `extensions.showRecommendationsOnlyOnDemand` is set; `extensions.ignoreRecommendations` declares no scope, so it is a window setting that a `.code-workspace` file's `settings` applies. It turns off every recommendation notification, such as those for a file type, not only the repository's; the Extensions view's Recommended section depends on `showRecommendationsOnlyOnDemand`, not on it, so it stays.
 - **Not verified:** a live item window with the setting.
 - **Current use:** item windows' workspace files (PRD R71, architecture.md § Dock).
+
+## M51. Resizing an X11 dock after auto-hide
+
+- **Date:** 2026-10-30.
+- **Versions:** GNOME Shell and Mutter 50.1, Xwayland 24.1.10, Avalonia 12.1.3; one isolated headless 1920 × 1080 monitor at scale 1, as in M39.
+- **Reproduction:** a native preview of the production MainWindow served the recorded dock view without a hub. After hiding and showing it, a virtual-pointer drag widened the left dock from 320 to 420 pixels. Avalonia's Width, Bounds and ClientSize and the X11 window reached 420, but a shell screenshot showed only the original 320 pixels of the content.
+- **Shapes:** reapplying the 32767-pixel shape restored the drawing, but the pin in the added area did not respond to clicks. Setting both bounding and input shapes to the current XGetGeometry width and height restored that click. MainWindow now refreshes the shape after each native resize once auto-hide has applied one: the sliver while hidden, the current window rectangle while shown, including after pinning.
+- **Verification:** virtual-pointer drags and screenshots checked widening with auto-hide on, pinning and widening again on the left, moving to the right, and widening and narrowing there. Clicking the pin in the added area turned auto-hide off. The window, layout and drawing agreed at 420, 520 and 620 pixels. Headless tests check refreshes after growing and shrinking on both edges with auto-hide on and after turning it off; the existing test checks recutting the hidden sliver.
+- **Limits:** this run did not cover multiple monitors or scale factors other than 1.
+- **Current use:** Linux dock resize and auto-hide (PRD R71, architecture.md § Dock).

@@ -137,10 +137,14 @@ internal sealed partial class X11Dock : IX11Edge
     }
 
     /// <summary>
-    /// Gives the window its whole rectangle again. Mutter kept drawing only the sliver when the shape was removed, so the shape becomes a rectangle
-    /// larger than any window instead (mechanics M49).
+    /// Gives the window its whole rectangle again. Removing the shape left Mutter drawing only the sliver (M49); an oversized input shape
+    /// stayed clipped to the old size after a resize, so both shapes use the current window size and are refreshed on resize (M51).
     /// </summary>
-    public void Unclip() => Shape(new XRectangle { Width = (ushort)short.MaxValue, Height = (ushort)short.MaxValue });
+    public void Unclip()
+    {
+        XGetGeometry(display, window, out _, out _, out _, out var width, out var height, out _, out _);
+        Shape(new XRectangle { Width = (ushort)width, Height = (ushort)height });
+    }
 
     void Shape(XRectangle rectangle)
     {

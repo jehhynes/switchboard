@@ -34,6 +34,8 @@ public sealed partial class MainWindow : Window
     bool resizing;
     // Auto-hide (PRD R71): whether the dock shows only its sliver, and the check that hides it while it shows.
     bool hidden;
+    // X11 keeps the explicit shape after auto-hide is turned off; Mutter needs it refreshed on resize.
+    bool shaped;
     readonly HideDelay hideDelay = new();
     readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
     DispatcherTimer? hideTimer;
@@ -193,9 +195,16 @@ public sealed partial class MainWindow : Window
         // As an X11 dock window, the sliver at the right edge is cut from the window's width, which the X server sets after the dock asks for it.
         Resized += (_, _) =>
         {
-            if (hidden && x11 is not null)
+            if (x11 is not null && shaped)
             {
-                Collapse();
+                if (hidden)
+                {
+                    Collapse();
+                }
+                else
+                {
+                    x11.Unclip();
+                }
             }
         };
 
@@ -516,6 +525,7 @@ public sealed partial class MainWindow : Window
         if (x11 is { } dock)
         {
             ShowSliver();
+            shaped = true;
             dock.ClipToSliver(model.Settings.DockEdge, DockPlacement.Pixels(DockPlacement.SliverWidth, edgeScale));
         }
         else if (OperatingSystem.IsWindows() && placed is { } bounds && TryGetPlatformHandle() is { } handle)

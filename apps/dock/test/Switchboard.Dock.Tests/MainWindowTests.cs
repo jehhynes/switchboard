@@ -333,6 +333,36 @@ public sealed class MainWindowTests
         Assert.Equal(["release", "clip Left 3", "clip Left 3"], edge.Calls);
     }
 
+    [AvaloniaTheory]
+    [InlineData("left", true)]
+    [InlineData("right", true)]
+    [InlineData("left", false)]
+    [InlineData("right", false)]
+    public void DockOnX11_ExpandedThenResized_RefreshesTheShape(string side, bool autoHide)
+    {
+        var edge = new FakeX11Edge();
+        var (window, model) = OpenOnEdge(new DockSettings { AutoHide = true, Edge = side }, edge);
+        Wait(window);
+        window.Activate();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains("unclip", edge.Calls);
+
+        if (!autoHide)
+        {
+            Tap(window, window.FindControl<Button>("AutoHideButton")!);
+            Assert.False(model.Settings.AutoHide);
+        }
+
+        edge.Calls.Clear();
+        window.Width = 420;
+        Dispatcher.UIThread.RunJobs();
+        window.Width = 250;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["unclip", "unclip"], edge.Calls);
+        Assert.False(window.FindControl<Control>("Sliver")!.IsVisible);
+    }
+
     [AvaloniaFact]
     public void DockOnX11_HiddenAndResized_ClipsAgain()
     {
