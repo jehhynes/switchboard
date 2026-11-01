@@ -51,7 +51,7 @@ Replace superseded text in place. Record the decision and its constraint; omit d
 
 ## Verification
 
-[testing.md](docs/testing.md) is the full contract. The npm scripts below are created by the first delivery step in [prd.md](docs/prd.md#delivery).
+[testing.md](docs/testing.md) is the full contract.
 
 - Run `npm run verify` for executable changes: build, typecheck, tests, and coverage thresholds.
 - Run `npm run test:integration` for VS Code host wiring or UI-visible behavior. It uses a real extension host with isolated settings and home. Verify behavior directly instead of asking the developer to click through it.
@@ -67,10 +67,6 @@ Run commands from the repository root:
 | `npm run verify` | Build, typecheck, tests, coverage, and the dock's `dotnet build` and `dotnet test` |
 | `npm run verify:full` | Verify plus VS Code integration tests |
 | `npm run test:integration` | Build and run VS Code integration tests |
-| `npm run build` | Build workspace packages, hub and extension bundles |
-| `npm run watch` | Incremental builds |
-| `npm test` | Workspace tests with configured coverage |
-| `npm run typecheck` | Source and test typechecking |
 
 ### Reinstalling after a change
 
