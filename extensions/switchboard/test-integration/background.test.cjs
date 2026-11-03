@@ -101,7 +101,7 @@ describe('Continue in Background (PRD R89)', () => {
 
     await extension.background(hub.record, [7]);
 
-    assert.deepStrictEqual(hub.requests, [{ path: '/background', body: { label: LABEL, workItemIds: [7] } }]);
+    assert.deepStrictEqual(hub.requests, [{ path: '/background', body: { label: LABEL, hostPid: process.pid, workItemIds: [7] } }]);
     assert.strictEqual(open(panels[0]), false);
     assert.deepStrictEqual(closes, [false]);
     assert.deepStrictEqual(messages, []);

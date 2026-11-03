@@ -291,13 +291,13 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
       // Continue in Background from an item window's Claude tab (PRD R89).
       '/background': async (body) => {
-        const { label, workItemIds } = isRecord(body) ? body : {};
+        const { label, hostPid, workItemIds } = isRecord(body) ? body : {};
 
-        if (typeof label !== 'string' || label === '' || !Array.isArray(workItemIds) || !workItemIds.every((id) => Number.isInteger(id))) {
-          return { status: 400, body: { error: 'Expected {label, workItemIds}.' } };
+        if (typeof label !== 'string' || label === '' || !Number.isInteger(hostPid) || !Array.isArray(workItemIds) || !workItemIds.every((id) => Number.isInteger(id))) {
+          return { status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } };
         }
 
-        const result = await runtime.background(label, workItemIds as number[]);
+        const result = await runtime.background(label, hostPid as number, workItemIds as number[]);
 
         return result === null ? { status: 200, body: { moving: true } } : { status: 409, body: { error: result.refused } };
       },

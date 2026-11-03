@@ -283,16 +283,16 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false } });
     const roster: Exec = async (file, args) =>
       file === 'claude' && args.join(' ') === 'agents --json --all'
-        ? { code: 0, stdout: JSON.stringify([{ sessionId: 'n', pid: 7, kind: 'interactive', status: 'busy', cwd: 'D:/git/widgets', name: 'My tab' }]), stderr: '', missing: false, timedOut: false }
+        ? { code: 0, stdout: JSON.stringify([{ sessionId: 'n', kind: 'background', state: 'done', cwd: 'D:/git/widgets', name: 'My tab' }]), stderr: '', missing: false, timedOut: false }
         : noCli(file, args, { timeoutMs: 0 });
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: roster } });
     closers.push(() => app.close());
 
-    expect(await app.post['/background']!({ label: 'My tab' })).toEqual({ status: 400, body: { error: 'Expected {label, workItemIds}.' } });
-    expect(await app.post['/background']!({ label: '', workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, workItemIds}.' } });
-    expect(await app.post['/background']!({ label: 'My tab', workItemIds: ['1'] })).toEqual({ status: 400, body: { error: 'Expected {label, workItemIds}.' } });
-    expect(await app.post['/background']!({ label: 'My tab', workItemIds: [1] })).toEqual({ status: 409, body: { error: 'This session never ran in the background, so it cannot continue there.' } });
-    expect(await app.post['/background']!({ label: 'Other tab', workItemIds: [1] })).toEqual({ status: 409, body: { error: "This tab's session is not one of Switchboard's work items." } });
+    expect(await app.post['/background']!({ label: 'My tab', workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
+    expect(await app.post['/background']!({ label: '', hostPid: 1, workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
+    expect(await app.post['/background']!({ label: 'My tab', hostPid: 1, workItemIds: ['1'] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
+    expect(await app.post['/background']!({ label: 'My tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This tab's session is not one of Switchboard's work items." } });
+    expect(await app.post['/background']!({ label: 'Other tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This tab's session is not one of Switchboard's work items." } });
   });
 
   it('registers a session the Claude roster lists, answering its key and contract, and refuses a bad body (PRD R81)', async () => {

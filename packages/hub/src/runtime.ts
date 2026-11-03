@@ -1,7 +1,7 @@
 import { mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { classify, ClaudeRunner, NOT_SWITCHBOARD } from '@switchboard/claude';
+import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
@@ -9,6 +9,9 @@ import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFoc
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
+
+const NOT_SWITCHBOARD = "This tab's session is not one of Switchboard's work items.";
+const NEVER_BACKGROUND = 'This session never ran in the background, so it cannot continue there.';
 
 export const ROSTER_MS = 30_000;
 export const MARKER_MS = 5_000;
@@ -900,28 +903,35 @@ export class Runtime {
   }
 
   /**
-   * Continue in Background (PRD R89): finds the session in the item window's Claude tab labelled `label`, which must be one of `workItemIds`, and
-   * starts its move. It answers once the flow has stored the move with the tab's process, so the window closes the tab only after that.
+   * Continue in Background (PRD R89): finds the session in the Claude tab labelled `label` of the window whose extension host is `hostPid`, which
+   * must belong to one of `workItemIds`, and starts its move. A long label is cut, so the tab's process, a child of that extension host, tells it
+   * apart from other sessions the label may name. It answers once the flow has stored the move with that process, so the window closes the tab
+   * only after that.
    */
-  async background(label: string, workItemIds: number[]): Promise<{ refused: string } | null> {
+  async background(label: string, hostPid: number, workItemIds: number[]): Promise<{ refused: string } | null> {
     const runner = this.runners.claude;
-    const tab = runner.tab === undefined ? { error: 'The Claude runner cannot move sessions.' } : await runner.tab(label);
+    const tab = runner.tab === undefined ? { error: 'The Claude runner cannot move sessions.' } : await runner.tab(label, hostPid);
 
     if ('error' in tab) {
       return { refused: tab.error };
     }
 
-    if ('refused' in tab) {
-      return tab;
+    if (tab.candidates.length > 1) {
+      return { refused: `Several Claude sessions in this window are named "${label}", so Switchboard cannot tell which one this tab holds.` };
     }
 
-    const session = this.deps.store.sessionByNativeId(tab.nativeSessionId);
+    const [found] = tab.candidates;
+    const session = found === undefined ? null : this.deps.store.sessionByNativeId(found.nativeSessionId);
 
-    if (session === null) {
+    if (found === undefined || session === null || !workItemIds.includes(session.workItemId)) {
       return { refused: NOT_SWITCHBOARD };
     }
 
-    const { refused } = this.send({ type: 'background', sessionId: session.id, nativeSessionId: tab.nativeSessionId, pid: tab.pid, workItemIds });
+    if (!found.background) {
+      return { refused: NEVER_BACKGROUND };
+    }
+
+    const { refused } = this.send({ type: 'background', sessionId: session.id, nativeSessionId: found.nativeSessionId, pid: found.pid, workItemIds });
 
     return refused === null ? null : { refused };
   }

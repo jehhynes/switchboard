@@ -4,8 +4,8 @@ import * as vscode from 'vscode';
 
 /** The Claude Code extension's editor tab is a webview of this view type (mechanics M55). */
 const CLAUDE_PANEL = 'claudeVSCodePanel';
-/** The hub reads Claude's roster, which may take its 15-second timeout, before it answers. */
-const BACKGROUND_TIMEOUT_MS = 20_000;
+/** The hub reads Claude's roster, then the process table, each with a 15-second timeout, before it answers. */
+const BACKGROUND_TIMEOUT_MS = 35_000;
 
 const isClaude = (tab: vscode.Tab | undefined): tab is vscode.Tab => tab?.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith(CLAUDE_PANEL);
 
@@ -65,7 +65,7 @@ export async function continueInBackground(deps: BackgroundDeps): Promise<void> 
     return;
   }
 
-  const reply = deps.record === null ? null : await postToHub(deps.record, '/background', { label, workItemIds: deps.workItemIds }, BACKGROUND_TIMEOUT_MS);
+  const reply = deps.record === null ? null : await postToHub(deps.record, '/background', { label, hostPid: process.pid, workItemIds: deps.workItemIds }, BACKGROUND_TIMEOUT_MS);
 
   if (reply === null) {
     void vscode.window.showErrorMessage('Switchboard: the hub did not answer, so the session stays in its tab.');

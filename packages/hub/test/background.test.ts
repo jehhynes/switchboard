@@ -13,6 +13,8 @@ const NATIVE = '0f1e2d3c-0000-4000-8000-000000000001';
 const SHORT = '0f1e2d3c';
 const PID = 4242;
 const LABEL = 'switchboard · ad-hoc · adhoc 1';
+/** The window's extension host, the parent of its Claude tab's process. */
+const HOST = 4100;
 
 let home: string;
 
@@ -39,7 +41,7 @@ type Listed = Awaited<ReturnType<NonNullable<SessionRunner['background']>>>;
 
 /** A Claude runner whose answers the test sets, recording the resumes and stops it was asked for. */
 class StandIn {
-  tabResult: Tab = { nativeSessionId: NATIVE, pid: PID };
+  tabResult: Tab = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true }] };
   launch: Launch = { copy: null };
   /** Each roster read for the background process takes the next answer, then repeats the last. */
   listed: Listed[] = [{ shortId: SHORT }];
@@ -142,7 +144,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
     const h = await inTab();
 
     expect(current(h.store, h.session)).toMatchObject({ released: true, state: 'running' });
-    expect(await h.runtime.background(LABEL, [h.item().id])).toBeNull();
+    expect(await h.runtime.background(LABEL, HOST, [h.item().id])).toBeNull();
     expect(current(h.store, h.session).move).toMatchObject({ pid: PID });
 
     await h.runtime.settled();
@@ -152,17 +154,24 @@ describe('Continue in Background in the hub (PRD R89)', () => {
     expect(h.claude.stops).toEqual([]);
   });
 
-  it('answers the runner’s refusal or error, and refuses a session Switchboard does not have', async () => {
+  it('answers the roster’s error, and refuses a session that never ran in the background, or none or several of the window’s', async () => {
     const h = await inTab();
+    const other = { nativeSessionId: 'someone-else', pid: 7, background: true };
 
-    h.claude.tabResult = { refused: 'This session never ran in the background, so it cannot continue there.' };
-    expect(await h.runtime.background(LABEL, [1])).toEqual({ refused: 'This session never ran in the background, so it cannot continue there.' });
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: false }] };
+    expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: 'This session never ran in the background, so it cannot continue there.' });
     h.claude.tabResult = { error: 'claude agents timed out' };
-    expect(await h.runtime.background(LABEL, [1])).toEqual({ refused: 'claude agents timed out' });
-    h.claude.tabResult = { nativeSessionId: 'someone-else', pid: PID };
-    expect(await h.runtime.background(LABEL, [1])).toEqual({ refused: "This tab's session is not one of Switchboard's work items." });
-    h.claude.tabResult = { nativeSessionId: NATIVE, pid: PID };
-    expect(await h.runtime.background(LABEL, [2])).toEqual({ refused: "This tab's session is not one of Switchboard's work items." });
+    expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: 'claude agents timed out' });
+    h.claude.tabResult = { candidates: [other] };
+    expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: "This tab's session is not one of Switchboard's work items." });
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true }] };
+    expect(await h.runtime.background(LABEL, HOST, [2])).toEqual({ refused: "This tab's session is not one of Switchboard's work items." });
+
+    // Two Claude sessions of this window share a cut label, so neither is chosen, even though only the first is this window's work.
+    h.runtime.send({ type: 'adhoc', prompt: 'Other work', repoRoot: 'D:/git/widgets' });
+    h.store.insertSession({ ...current(h.store, h.session), id: 'second', workItemId: 2, nativeSessionId: 'second-native', startedAt: 0 });
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true }, { nativeSessionId: 'second-native', pid: 8, background: true }] };
+    expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: `Several Claude sessions in this window are named "${LABEL}", so Switchboard cannot tell which one this tab holds.` });
 
     await h.runtime.settled();
     expect(h.claude.resumes).toEqual([]);
@@ -172,7 +181,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
   it('cancels the move when the tab process is still running after the wait, and launches nothing', async () => {
     const h = await inTab({ exits: false });
 
-    await h.runtime.background(LABEL, [h.item().id]);
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
     await h.runtime.settled();
 
     expect(h.now() - T0).toBeGreaterThanOrEqual(MOVE_EXIT_MS);
@@ -184,7 +193,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
   it('launches nothing when Stop ended the move while the tab process exited', async () => {
     const h = await inTab({ exits: false });
 
-    await h.runtime.background(LABEL, [h.item().id]);
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
     h.runtime.send({ type: 'stop', workItemId: h.item().id });
     h.live.delete(PID);
     await h.runtime.settled();
@@ -197,7 +206,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
     const h = await inTab();
 
     h.claude.launch = { copy: '4df6b678' };
-    await h.runtime.background(LABEL, [h.item().id]);
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
     await h.runtime.settled();
 
     expect(h.claude.stops).toEqual(['4df6b678']);
@@ -208,7 +217,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
     const h = await inTab();
 
     h.claude.listed = [{ error: 'claude agents timed out' }, null, { shortId: SHORT }];
-    await h.runtime.background(LABEL, [h.item().id]);
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
     await h.runtime.settled();
     expect(current(h.store, h.session)).toMatchObject({ move: null, released: false, shortId: SHORT });
 
@@ -216,7 +225,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
 
     late.claude.launch = { error: 'Claude exited with code 1: no conversation found' };
     late.claude.listed = [null];
-    await late.runtime.background(LABEL, [late.item().id]);
+    await late.runtime.background(LABEL, HOST, [late.item().id]);
     await late.runtime.settled();
     expect(late.now() - T0).toBeGreaterThanOrEqual(RESUME_CONFIRM_MS);
     expect(late.item()).toMatchObject({ status: 'blocked', error: 'Continue in Background failed: Claude exited with code 1: no conversation found' });
@@ -227,7 +236,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
     let release!: () => void;
 
     h.claude.held = new Promise<void>((resolve) => (release = resolve));
-    await h.runtime.background(LABEL, [h.item().id]);
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
     await until(() => (h.claude.resumes.length === 1 ? true : null));
     h.runtime.send({ type: 'delete', workItemId: h.item().id });
     release();
@@ -261,7 +270,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
   it('leaves the move stored for the next hub when this one stops during the wait', async () => {
     const h = await inTab({ exits: false });
 
-    await h.runtime.background(LABEL, [h.item().id]);
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
     h.runtime.stop();
     h.live.delete(PID);
     await h.runtime.settled();
@@ -277,7 +286,7 @@ describe('Continue in Background in the hub (PRD R89)', () => {
     h.claude.observeGate = new Promise<void>((resolve) => (finish = resolve));
     h.claude.first = [];
     h.claude.later = [{ sessionId: h.session, state: 'running', detail: null, interactive: false }];
-    await h.runtime.background(LABEL, [h.item().id]);
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
 
     const read = h.runtime.readRoster();
     await h.runtime.settled();

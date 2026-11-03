@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { START_PROMPT } from '@switchboard/core';
 import type { LiveState, ObservedFork, ObservedSession, StartAction, StartResult } from '@switchboard/core';
 import type { Exec } from './exec.js';
@@ -151,31 +152,74 @@ export function copyFrom(output: string): string | null {
   return /started a copy as ([0-9a-f]{8})/.exec(output)?.[1] ?? null;
 }
 
-export const NOT_SWITCHBOARD = "This tab's session is not one of Switchboard's work items.";
-export const NEVER_BACKGROUND = 'This session never ran in the background, so it cannot continue there.';
+/** A live session a Claude tab may hold; `background` says Claude holds options to resume it with in the background. */
+export interface TabCandidate {
+  nativeSessionId: string;
+  pid: number;
+  background: boolean;
+}
 
 /**
- * The session a Claude tab labelled `label` holds (PRD R89). The tab's label is the session's name, and `--all` lists the session's earlier
- * background job beside its live interactive entry, which shows Claude holds the options to resume it with (mechanics M55).
+ * The live sessions a Claude tab labelled `label` may hold (PRD R89). The tab's label is the session's name, cut to its start and `…` when long,
+ * so several sessions can match; `--all` lists a session's earlier background job beside its live interactive entry (mechanics M55).
  */
-export function tabSession(entries: RosterEntry[], label: string): { nativeSessionId: string; pid: number } | { refused: string } {
-  const live = entries.filter((entry) => entry.name === label && entry.pid !== undefined && entry.kind !== 'background');
+export function tabCandidates(entries: RosterEntry[], label: string): TabCandidate[] {
+  const cut = label.endsWith('…') ? label.slice(0, -1) : null;
+  const named = (name: string | undefined) => name !== undefined && (cut === null ? name === label : name.startsWith(cut));
 
-  if (live.length > 1) {
-    return { refused: `Several running Claude sessions are named "${label}", so Switchboard cannot tell which one this tab holds.` };
+  return entries
+    .filter((entry) => named(entry.name) && entry.pid !== undefined && entry.kind !== 'background')
+    .map((entry) => ({ nativeSessionId: entry.sessionId, pid: entry.pid!, background: entries.some((other) => other.sessionId === entry.sessionId && other.kind === 'background') }));
+}
+
+/** Where parent PIDs are read: Windows PowerShell's CIM, or a `/proc` folder elsewhere. Tests pass their own. */
+export interface ProcessTable {
+  platform?: NodeJS.Platform;
+  proc?: string;
+}
+
+/**
+ * The parent PID of each live process among `pids`. A Claude tab's process is a child of its window's extension host (mechanics M55), so the
+ * parent tells which window holds a session.
+ */
+export async function parentPids(exec: Exec, pids: number[], table: ProcessTable = {}): Promise<Map<number, number> | { error: string }> {
+  if (pids.length === 0) {
+    return new Map();
   }
 
-  const [entry] = live;
+  if ((table.platform ?? process.platform) !== 'win32') {
+    const proc = table.proc ?? '/proc';
 
-  if (entry === undefined) {
-    return { refused: NOT_SWITCHBOARD };
+    return new Map(
+      pids.flatMap((pid) => {
+        try {
+          const stat = readFileSync(`${proc}/${pid}/stat`, 'utf8');
+          // The name may hold spaces and parentheses, so the fields are counted from the last ')'.
+          const parent = Number.parseInt(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1] ?? '', 10);
+
+          return Number.isInteger(parent) ? [[pid, parent] as const] : [];
+        } catch {
+          return [];
+        }
+      }),
+    );
   }
 
-  if (!entries.some((other) => other.sessionId === entry.sessionId && other.kind === 'background')) {
-    return { refused: NEVER_BACKGROUND };
+  const filter = pids.map((pid) => `ProcessId=${pid}`).join(' OR ');
+  const script = `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter "${filter}" -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; parent = $_.ParentProcessId } })`;
+  const result = await exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs: ROSTER_TIMEOUT_MS });
+
+  if (result.code !== 0) {
+    return { error: result.stderr.trim() || `The process query exited with code ${String(result.code)}.` };
   }
 
-  return { nativeSessionId: entry.sessionId, pid: entry.pid! };
+  try {
+    const found: unknown = JSON.parse(result.stdout.trim() || '[]');
+
+    return Array.isArray(found) ? new Map((found as { pid: number; parent: number }[]).map((entry) => [entry.pid, entry.parent])) : { error: 'The process query returned an unexpected answer.' };
+  } catch {
+    return { error: 'The process query returned output that is not JSON.' };
+  }
 }
 
 /** `claude stop`, never `claude rm`, which can delete the session's worktree (GC M33). */

@@ -4,8 +4,9 @@ import type { Exec } from './exec.js';
 import { findForks, forkTargets, relationOf, Transcripts } from './fork.js';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
+import type { ProcessTable, TabCandidate } from './runner.js';
 import { installHooks, readMarkers } from './install.js';
-import { copyFrom, entryFor, LAUNCH_TIMEOUT_MS, observe, observeForks, readRoster, resumeArgs, startSession, stopSession, tabSession } from './runner.js';
+import { copyFrom, entryFor, LAUNCH_TIMEOUT_MS, observe, observeForks, parentPids, readRoster, resumeArgs, startSession, stopSession, tabCandidates } from './runner.js';
 import { claudeEnvironment, failureOf } from './exec.js';
 
 export interface ClaudeRunnerDeps {
@@ -22,6 +23,8 @@ export interface ClaudeRunnerDeps {
   hooks(): boolean;
   /** The Node.js the hooks run (`sessions.nodePath`). */
   nodePath(): string;
+  /** Where parent PIDs are read; the real process table by default. */
+  processTable?: ProcessTable;
 }
 
 /** Claude Code's background sessions (architecture.md § Claude Code runner). */
@@ -77,10 +80,18 @@ export class ClaudeRunner implements SessionRunner {
     return entry === undefined ? null : { shortId: entry.id ?? nativeSessionId.slice(0, 8), cwd: entry.cwd };
   }
 
-  async tab(label: string): Promise<{ nativeSessionId: string; pid: number } | { refused: string } | { error: string }> {
+  /** Only processes whose parent is the window's extension host `hostPid` are that window's tabs (mechanics M55). */
+  async tab(label: string, hostPid: number): Promise<{ candidates: TabCandidate[] } | { error: string }> {
     const roster = await readRoster(this.deps.claudePath(), this.deps.exec, true);
 
-    return 'error' in roster ? roster : tabSession(roster.entries, label);
+    if ('error' in roster) {
+      return roster;
+    }
+
+    const candidates = tabCandidates(roster.entries, label);
+    const parents = await parentPids(this.deps.exec, candidates.map((candidate) => candidate.pid), this.deps.processTable);
+
+    return 'error' in parents ? parents : { candidates: candidates.filter((candidate) => parents.get(candidate.pid) === hostPid) };
   }
 
   async resume(nativeSessionId: string, prompt: string, cwd: string): Promise<{ copy: string | null } | { error: string }> {
