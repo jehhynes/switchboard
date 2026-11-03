@@ -186,6 +186,24 @@ sealed class FakeShell : Switchboard.Dock.Platform.IShell
         return Fails ? throw new Switchboard.Dock.Platform.ShellException("The name switchboard.Shell was not provided.") : Open.Concat(Terms ?? []).Any((window) => window.Id == id);
     }
 
+    /// <summary>Whether the extension has <c>OpenUrl</c>; an older one throws.</summary>
+    public bool OpensUrls { get; set; } = true;
+
+    /// <summary>Whether <c>OpenUrl</c> gets no answer in time.</summary>
+    public bool TimesOut { get; set; }
+
+    public bool OpenUrl(string url)
+    {
+        Calls.Add($"url {url}");
+
+        if (TimesOut)
+        {
+            throw new Switchboard.Dock.Platform.ShellTimeoutException("GNOME Shell did not answer within 2 seconds.");
+        }
+
+        return Fails || !OpensUrls ? throw new Switchboard.Dock.Platform.ShellException("No such method “OpenUrl”.") : url.StartsWith("https://");
+    }
+
     public IReadOnlyList<string> FullScreen() => [];
 
     public void WatchFullScreen(Action<IReadOnlyList<string>> changed)

@@ -25,6 +25,12 @@ public interface IShell
     /// <summary>Ptyxis's top-level windows, front first; an extension older than terminals throws (PRD R71).</summary>
     IReadOnlyList<ShellWindow> Terminals() => throw new ShellException("The GNOME Shell extension lists no terminals.");
 
+    /// <summary>
+    /// Opens an http or https URL in the default browser, which the shell lets take the focus (mechanics M54); false for any other URL, and an
+    /// extension older than this method throws.
+    /// </summary>
+    bool OpenUrl(string url) => throw new ShellException("The GNOME Shell extension opens no URLs.");
+
     /// <summary>Calls <paramref name="focused"/>, on another thread, with the title of each terminal window that gains the focus.</summary>
     void WatchTerminalFocused(Action<string> focused)
     {
@@ -35,7 +41,10 @@ public interface IShell
 public readonly record struct ShellWindow(ulong Id, string Title);
 
 /// <summary>The shell's service is missing or failed, such as when the extension is disabled.</summary>
-public sealed class ShellException(string message, Exception? inner = null) : Exception(message, inner);
+public class ShellException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>The shell did not answer in time; it may still carry out the call.</summary>
+public sealed class ShellTimeoutException(string message) : ShellException(message);
 
 /// <summary>
 /// Item windows found and brought forward by GNOME Shell through the Switchboard extension, where the dock cannot see other apps' windows itself
@@ -75,7 +84,29 @@ public sealed class ShellWindows(IShell shell, IWindows fallback) : IWindows
         }
     }
 
-    public void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
+    /// <summary>
+    /// Opens the URL through the shell, so the browser comes forward; when the shell does not open it, the fallback opens it, and GNOME only says
+    /// the browser is ready. A shell that does not answer in time may still open it, so the fallback does not, and the call throws.
+    /// </summary>
+    public void OpenUrl(string url)
+    {
+        try
+        {
+            if (shell.OpenUrl(url))
+            {
+                return;
+            }
+        }
+        catch (ShellTimeoutException error)
+        {
+            throw new InvalidOperationException(error.Message, error);
+        }
+        catch (ShellException)
+        {
+        }
+
+        fallback.OpenUrl(url);
+    }
 
     public nint FindVsCode() => Answer((windows) => windows.FirstOrDefault().Id, fallback.FindVsCode);
 

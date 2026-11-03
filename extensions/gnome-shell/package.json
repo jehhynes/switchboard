@@ -2,7 +2,7 @@
   "name": "@switchboard/gnome-shell",
   "version": "0.0.0",
   "private": true,
-  "description": "GNOME Shell extension that lets the dock find VS Code's windows, bring them forward and go below a full-screen window. npm run publish installs it.",
+  "description": "GNOME Shell extension that lets the dock find VS Code's windows, bring them forward, open links with the browser in front and go below a full-screen window. npm run publish installs it.",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --coverage",

@@ -1,11 +1,11 @@
-// Lists and brings forward VS Code's windows and the terminals it opens for the Switchboard dock, reports which terminal gains focus, and tells it which monitors a full-screen window covers, because
-// under GNOME on Wayland only GNOME Shell can see other apps' windows (architecture.md § Dock). Exports `switchboard.Shell` on the session bus.
+// Lists and brings forward VS Code's windows and the terminals it opens for the Switchboard dock, reports which terminal gains focus, tells it which monitors a full-screen window covers, and opens
+// its links, because under GNOME on Wayland only GNOME Shell can see other apps' windows or let a launched app take the focus (architecture.md § Dock). Exports `switchboard.Shell` on the session bus.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import { isListed, isListedTerminal } from './windows.js';
+import { isListed, isListedTerminal, isWebUrl } from './windows.js';
 
 const NAME = 'switchboard.Shell';
 const PATH = '/switchboard/Shell';
@@ -22,6 +22,10 @@ const INTERFACE = `
       <arg name="id" type="t" direction="in"/>
       <arg name="monitor" type="s" direction="in"/>
       <arg name="found" type="b" direction="out"/>
+    </method>
+    <method name="OpenUrl">
+      <arg name="url" type="s" direction="in"/>
+      <arg name="opened" type="b" direction="out"/>
     </method>
     <method name="FullScreen">
       <arg name="monitors" type="as" direction="out"/>
@@ -93,6 +97,30 @@ const service = {
     }
 
     return true;
+  },
+
+  /**
+   * Opens an http or https URL in the default browser with a launch context from the shell, whose activation token lets the browser take the
+   * focus; launched from the dock, GNOME shows "is ready" instead (mechanics M54). False for any other URL, so a caller cannot start other apps; an
+   * error when the handler does not start.
+   */
+  OpenUrlAsync([url], invocation) {
+    if (!isWebUrl(url)) {
+      invocation.return_value(new GLib.Variant('(b)', [false]));
+      return;
+    }
+
+    const context = global.create_app_launch_context(global.display.get_current_time_roundtrip(), -1);
+
+    // Answers once the handler has started, so the dock opens the link itself only when it did not.
+    Gio.AppInfo.launch_default_for_uri_async(url, context, null, (_, result) => {
+      try {
+        Gio.AppInfo.launch_default_for_uri_finish(result);
+        invocation.return_value(new GLib.Variant('(b)', [true]));
+      } catch (error) {
+        invocation.return_gerror(error);
+      }
+    });
   },
 
   /**

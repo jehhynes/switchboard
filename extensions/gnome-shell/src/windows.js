@@ -28,3 +28,8 @@ export function isListedTerminal(window) {
 export function isListed(window) {
   return window.normal && isVsCode(window.wmClass) && window.width > 0 && window.height > 0;
 }
+
+/** Whether the extension opens a URL for the dock: http and https only. @param {string} url */
+export function isWebUrl(url) {
+  return /^https?:\/\/[^\s]+$/i.test(url);
+}

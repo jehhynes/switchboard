@@ -133,4 +133,42 @@ public sealed class ShellWindowsTests
         Assert.Equal(["window any {\"type\":\"log\"}"], hub.Calls);
         Assert.Equal(["activate 41"], shell.Calls);
     }
+
+    [Fact]
+    public void OpenUrl_ShellOpensIt_TheFallbackOpensNothing()
+    {
+        var fallback = new FakeWindows();
+
+        new ShellWindows(shell, fallback).OpenUrl("https://github.com/o/r/issues/1");
+
+        Assert.Equal(["url https://github.com/o/r/issues/1"], shell.Calls);
+        Assert.Empty(fallback.Calls);
+    }
+
+    [Fact]
+    public void OpenUrl_ShellRefusesFailsOrIsOlder_TheFallbackOpensIt()
+    {
+        var fallback = new FakeWindows();
+        var windows = new ShellWindows(shell, fallback);
+
+        windows.OpenUrl("mailto:a@example.com");
+        shell.OpensUrls = false;
+        windows.OpenUrl("https://example.com/older");
+        shell.OpensUrls = true;
+        shell.Fails = true;
+        windows.OpenUrl("https://example.com/failed");
+
+        Assert.Equal(["url mailto:a@example.com", "url https://example.com/older", "url https://example.com/failed"], fallback.Calls);
+    }
+
+    [Fact]
+    public void OpenUrl_ShellDoesNotAnswerInTime_TheFallbackOpensNothingAndTheDockSaysSo()
+    {
+        var fallback = new FakeWindows();
+
+        shell.TimesOut = true;
+
+        Assert.Equal("The browser did not open https://example.com/: GNOME Shell did not answer within 2 seconds.", Switcher.OpenUrl(new ShellWindows(shell, fallback), "https://example.com/"));
+        Assert.Empty(fallback.Calls);
+    }
 }

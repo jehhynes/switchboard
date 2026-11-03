@@ -643,3 +643,15 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Verification:** virtual-pointer drags and screenshots checked widening with auto-hide on, pinning and widening again on the left, moving to the right, and widening and narrowing there. Clicking the pin in the added area turned auto-hide off. The window, layout and drawing agreed at 420, 520 and 620 pixels. Headless tests check refreshes after growing and shrinking on both edges with auto-hide on and after turning it off; the existing test checks recutting the hidden sliver.
 - **Limits:** this run did not cover multiple monitors or scale factors other than 1.
 - **Current use:** Linux dock resize and auto-hide (PRD R71, architecture.md § Dock).
+
+## M54. Bringing the browser forward for a link the dock opens on Linux
+
+- **Date:** 2026-11-03.
+- **Versions:** GNOME Shell and Mutter 50.1 in the isolated headless shell of M39; Firefox 158.0.1 from the Snap, whose desktop file has `StartupNotify=true`.
+- **Problem:** on the operator's desktop a link the dock opened with `xdg-open` loaded in Firefox's existing window, but GNOME showed a "Firefox is ready" notification and left the window behind, because the launch carried no activation token.
+- **Setup:** a single-instance GTK 4 app (GJS, `Gtk.Application` with `HANDLES_OPEN`) stood in for a running browser: each later run forwards its URL to the first instance, which presents its one window. Its desktop file was the default `x-scheme-handler/https` handler, with `StartupNotify=true`. Before each launch another window was activated and given a key press through a Clutter virtual keyboard, so it held the focus with a recent user time.
+- **Without the shell:** `gio open <url>` from outside the shell gave the handler no `XDG_ACTIVATION_TOKEN`; the app's window took the URL but stayed behind, and the message tray gained the app's "is ready" source.
+- **Through the shell:** the extension's `OpenUrl`, which runs `Gio.AppInfo.launch_default_for_uri_async` with `global.create_app_launch_context(global.display.get_current_time_roundtrip(), -1)`, gave the handler `XDG_ACTIVATION_TOKEN` and `DESKTOP_STARTUP_ID` with the same value, and the app's window took the focus, three times of three, with no notification. Without `StartupNotify=true` in the handler's desktop file, GIO set neither variable and the window stayed behind without a notification.
+- **Operator's desktop, 2026-11-03.** After a new login loaded the extension, a link the dock opened came forward in the running Firefox.
+- **Not verified:** Chrome.
+- **Current use:** the dock's links on Linux with the GNOME Shell extension (PRD R74, architecture.md § Dock).

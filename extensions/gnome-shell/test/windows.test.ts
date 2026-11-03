@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isListed, isListedTerminal, isTerminal, isVsCode } from '../src/windows.js';
+import { isListed, isListedTerminal, isTerminal, isVsCode, isWebUrl } from '../src/windows.js';
 
 describe('isVsCode', () => {
   it('takes VS Code as a Wayland client and under XWayland, in any case', () => {
@@ -57,5 +57,20 @@ describe('isListedTerminal', () => {
     expect(isListedTerminal({ ...shown, normal: false })).toBe(false);
     expect(isListedTerminal({ ...shown, width: 0 })).toBe(false);
     expect(isListedTerminal({ ...shown, wmClass: 'com.microsoft.VSCode' })).toBe(false);
+  });
+});
+
+describe('isWebUrl', () => {
+  it('takes http and https links, as the dock marks them', () => {
+    expect(isWebUrl('https://github.com/o/r/issues/1?switchboard-tab=1#issuecomment-2')).toBe(true);
+    expect(isWebUrl('HTTP://localhost:8080/')).toBe(true);
+  });
+
+  it('refuses other schemes, an empty host part and text with spaces', () => {
+    expect(isWebUrl('file:///etc/passwd')).toBe(false);
+    expect(isWebUrl('vscode://file/x')).toBe(false);
+    expect(isWebUrl('https://')).toBe(false);
+    expect(isWebUrl('https://a b')).toBe(false);
+    expect(isWebUrl(' https://a')).toBe(false);
   });
 });

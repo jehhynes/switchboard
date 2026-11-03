@@ -85,6 +85,16 @@ public sealed class GnomeShell : IShell, IDisposable
         return connection.CallMethodAsync(writer.CreateMessage(), static (message, _) => message.GetBodyReader().ReadBool(), null);
     }));
 
+    public bool OpenUrl(string url) => Wait(Task.Run(() =>
+    {
+        using var writer = connection.GetMessageWriter();
+
+        writer.WriteMethodCallHeader(Service, ObjectPath, Service, "OpenUrl", "s");
+        writer.WriteString(url);
+
+        return connection.CallMethodAsync(writer.CreateMessage(), static (message, _) => message.GetBodyReader().ReadBool(), null);
+    }));
+
     public IReadOnlyList<string> FullScreen() => Wait(Task.Run(() =>
     {
         using var writer = connection.GetMessageWriter();
@@ -171,7 +181,7 @@ public sealed class GnomeShell : IShell, IDisposable
     {
         try
         {
-            return call.Wait(Timeout) ? call.Result : throw new ShellException($"GNOME Shell did not answer within {Timeout.TotalSeconds:0} seconds.");
+            return call.Wait(Timeout) ? call.Result : throw new ShellTimeoutException($"GNOME Shell did not answer within {Timeout.TotalSeconds:0} seconds.");
         }
         catch (AggregateException error) when (error.InnerException is { } inner)
         {
