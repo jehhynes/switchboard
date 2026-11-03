@@ -14,7 +14,7 @@ public sealed class SettingsFieldsTests
         Assert.Equal(
             [
                 "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.nodePath", "sessions.permissionMode", "sessions.model", "sessions.claudePath", "sessions.codex.permissionMode", "sessions.codex.model", "sessions.codexPath",
-                "dock.openVSCode",
+                "dock.openVSCode", "dock.openTerminal",
                 "triage.model", "triage.concurrency", "triage.timeoutSeconds",
             ],
             sections.SelectMany((section) => section.Fields).Select((field) => field.Path));
@@ -27,6 +27,8 @@ public sealed class SettingsFieldsTests
         Assert.Equal("bypassPermissions", sections[2].Fields[0].Placeholder);
         Assert.Equal([("always", "Always"), ("review", "Only for review")], sections[3].Fields[0].Options!.Select((option) => (option.Value, option.Label)));
         Assert.Equal("always", sections[3].Fields[0].Placeholder);
+        Assert.Equal([("vscode", "VS Code"), ("app", "Terminal app"), ("auto", "VS Code when open")], sections[3].Fields[1].Options!.Select((option) => (option.Value, option.Label)));
+        Assert.Equal("vscode", sections[3].Fields[1].Placeholder);
     }
 
     [Fact]

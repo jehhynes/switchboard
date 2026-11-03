@@ -91,6 +91,7 @@ export function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): 
     namespaces: { github: 'dev', zoho: 'support', adhoc: '' },
     configDir: 'C:\\Users\\me\\.claude\\switchboard',
     openVSCode: 'always',
+    openTerminal: 'vscode',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
     ...patch,
   };

@@ -83,6 +83,7 @@ function snapshot(workItems: WorkItemView[]): Snapshot {
     namespaces: {},
     configDir: '',
     openVSCode: 'always',
+    openTerminal: 'vscode',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
   };
 }

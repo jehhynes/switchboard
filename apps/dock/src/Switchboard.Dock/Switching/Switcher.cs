@@ -202,6 +202,35 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         return windows.Show(handle) ? null : "Windows kept another window in front. Click the row again.";
     }
 
+    /// <summary>
+    /// Open in terminal (PRD R28): the row's terminal app window, or the item window's terminal command. A row that offers both, with
+    /// <c>dock.openTerminal: auto</c>, brings forward the session's terminal app window when it is open, else uses the item window while it is
+    /// open, else the terminal app; a session resumed elsewhere whose terminal app window is not found, and any session without the terminal
+    /// app's window lookup, use the item window, whose Open in terminal finds a session live in VS Code.
+    /// </summary>
+    public async Task<string?> OpenInTerminal(DockRow row, CancellationToken cancel = default)
+    {
+        var command = row.Commands.FirstOrDefault(IsTerminal)?.Command;
+
+        if (row.Terminal is not { } shown)
+        {
+            return command is null ? "This row offers no terminal." : await Run(row, command, cancel);
+        }
+
+        if (command is null)
+        {
+            return await Terminal(row, shown, cancel);
+        }
+
+        var inWindow = !windows.FindsTerminals || terminal is null
+            || (windows.FindTerminal(shown.Name) == 0 && (shown.Active || (row.Window is { } window && windows.Find(window.Name) != 0)));
+
+        return inWindow ? await Run(row, command, cancel) : await Terminal(row, shown, cancel);
+    }
+
+    /// <summary>Whether a VS Code command is the item window's Open in terminal.</summary>
+    public static bool IsTerminal(DockCommand command) => command.Command["type"]?.GetValue<string>() == "terminal";
+
     // Terminals opened and not yet found, by name.
     readonly Dictionary<string, Task<nint>> launching = [];
 

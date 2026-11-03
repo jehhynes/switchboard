@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenTerminal, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -134,6 +134,8 @@ export interface Snapshot {
   configDir: string;
   /** `dock.openVSCode`: whether rows open their item window always, or only for review (PRD R71). */
   openVSCode: OpenVSCode;
+  /** `dock.openTerminal`: where the dock's Open in terminal runs with `always` (PRD R28). */
+  openTerminal: OpenTerminal;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
 }
 
@@ -1318,6 +1320,7 @@ export class Runtime {
         .map(([name]) => ({ name, enabled: enabled.has(name) })),
       namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
       openVSCode: settings.dock.openVSCode,
+      openTerminal: settings.dock.openTerminal,
       configDir: this.deps.configDir,
       errors: {
         settings: settingsError,

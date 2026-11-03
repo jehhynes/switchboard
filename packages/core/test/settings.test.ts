@@ -9,7 +9,7 @@ describe('parseSettings', () => {
         triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
         sources: {},
         schedules: {},
-        dock: { openVSCode: 'always' },
+        dock: { openVSCode: 'always', openTerminal: 'vscode' },
       },
     });
   });
@@ -22,7 +22,7 @@ describe('parseSettings', () => {
         sources: {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
-        dock: { openVSCode: 'review' },
+        dock: { openVSCode: 'review', openTerminal: 'auto' },
       }),
     );
 
@@ -41,13 +41,14 @@ describe('parseSettings', () => {
           },
         },
         schedules: {},
-        dock: { openVSCode: 'review' },
+        dock: { openVSCode: 'review', openTerminal: 'auto' },
       },
     });
   });
 
-  it('refuses a dock.openVSCode other than always or review, and other dock keys', () => {
+  it('refuses a dock.openVSCode or dock.openTerminal outside its choices, and other dock keys', () => {
     expect(parseSettings('{"dock":{"openVSCode":"never","width":3}}')).toEqual({ errors: ['dock.width is not a setting.', 'dock.openVSCode must be one of always, review.'] });
+    expect(parseSettings('{"dock":{"openTerminal":"native"}}')).toEqual({ errors: ['dock.openTerminal must be one of vscode, app, auto.'] });
     expect(parseSettings('{"dock":"review"}')).toMatchObject({ errors: [expect.stringContaining('dock')] });
   });
 

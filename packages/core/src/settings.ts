@@ -88,8 +88,17 @@ export const OPEN_VSCODE = ['always', 'review'] as const;
 
 export type OpenVSCode = (typeof OPEN_VSCODE)[number];
 
+/**
+ * Where the dock's Open in terminal runs with `dock.openVSCode: always` (PRD R28): `vscode` in the item window, `app` in the terminal app,
+ * `auto` in the item window while it is open and otherwise in the terminal app. With `review` it always runs in the terminal app.
+ */
+export const OPEN_TERMINAL = ['vscode', 'app', 'auto'] as const;
+
+export type OpenTerminal = (typeof OPEN_TERMINAL)[number];
+
 export interface DockSettings {
   openVSCode: OpenVSCode;
+  openTerminal: OpenTerminal;
 }
 
 export interface Settings {
@@ -106,7 +115,7 @@ export const DEFAULT_SETTINGS: Settings = {
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
-  dock: { openVSCode: 'always' },
+  dock: { openVSCode: 'always', openTerminal: 'vscode' },
 };
 
 /** The repos an ad-hoc prompt or a task report can run in: each source's repo root, the first being the default. */
@@ -329,8 +338,11 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const dockIn = read.section(root, 'dock', 'dock');
-  read.unknown(dockIn, ['openVSCode'], 'dock');
-  const dock: DockSettings = { openVSCode: read.choice(dockIn, 'openVSCode', 'dock', OPEN_VSCODE, defaults.dock.openVSCode) };
+  read.unknown(dockIn, ['openVSCode', 'openTerminal'], 'dock');
+  const dock: DockSettings = {
+    openVSCode: read.choice(dockIn, 'openVSCode', 'dock', OPEN_VSCODE, defaults.dock.openVSCode),
+    openTerminal: read.choice(dockIn, 'openTerminal', 'dock', OPEN_TERMINAL, defaults.dock.openTerminal),
+  };
 
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock } };
 }

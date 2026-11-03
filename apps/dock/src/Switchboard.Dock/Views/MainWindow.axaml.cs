@@ -1221,14 +1221,15 @@ public sealed partial class MainWindow : Window
             items.Add(new MenuItem { Header = "Copy", Icon = Glyph(CopyGlyph), ItemsSource = row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() });
         }
 
-        if (row.Terminal is { } terminal)
+        // One Open in terminal, which picks the item window or the terminal app when the row offers both (PRD R28).
+        if (row.Terminal is not null && !row.Commands.Any(Switcher.IsTerminal))
         {
-            items.Add(Item("Open in terminal", () => OpenTerminal(row, terminal), TerminalGlyph));
+            items.Add(Item("Open in terminal", () => OpenInTerminal(row), TerminalGlyph));
         }
 
         foreach (var command in row.Commands)
         {
-            items.Add(Item(command.Label, () => Run(row, command.Command), command.Glyph));
+            items.Add(Switcher.IsTerminal(command) ? Item(command.Label, () => OpenInTerminal(row), command.Glyph) : Item(command.Label, () => Run(row, command.Command), command.Glyph));
         }
 
         // Controls that ask first, such as Delete, come last, apart from the rest.
@@ -1358,8 +1359,8 @@ public sealed partial class MainWindow : Window
     /// <summary>A control that runs in VS Code; like a click, it replaces a click or control still switching windows.</summary>
     Task Run(DockRow? row, JsonObject command) => Running((cancel) => actions.Run(row, command, cancel), "The command failed");
 
-    /// <summary>The menu's Open in terminal with <c>dock.openVSCode: review</c>, which runs in the dock (PRD R28, R71).</summary>
-    Task OpenTerminal(DockRow row, DockTerminal terminal) => Running((cancel) => actions.Terminal(row, terminal, cancel), "The terminal did not open");
+    /// <summary>Open in terminal, in the item window or the terminal app (PRD R28, R71).</summary>
+    Task OpenInTerminal(DockRow row) => Running((cancel) => actions.OpenInTerminal(row, cancel), "The terminal did not open");
 
     /// <summary>Runs a menu action that a click on another row replaces, and shows what it could not do.</summary>
     async Task Running(Func<CancellationToken, Task<string?>> act, string failure)
@@ -1434,6 +1435,11 @@ public sealed partial class MainWindow : Window
         else if (row.Row.Controls.FirstOrDefault((control) => control.Label == row.Main) is { } control)
         {
             await Act(control);
+        }
+        // A prompt before start's Open in terminal (PRD R41).
+        else if (row.Main == "Open in terminal")
+        {
+            await OpenInTerminal(row.Row);
         }
     }
 
@@ -1699,7 +1705,7 @@ public sealed partial class MainWindow : Window
 
     sealed class NoActions : IDockActions
     {
-        public Task<string?> Terminal(DockRow row, DockTerminal terminal, CancellationToken cancel) => Task.FromResult<string?>(null);
+        public Task<string?> OpenInTerminal(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
 
         public Task<string?> Click(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
 

@@ -287,6 +287,7 @@ public static partial class SettingsFields
             new Section("Dock",
             [
                 new Field("dock.openVSCode", "Open VS Code", FieldKind.Select, "Where a row opens its work. Only for review opens the session in a terminal, Ptyxis on Linux or Windows Terminal on Windows, until its work awaits approval or is finished, so fewer VS Code windows stay open.", "always", [new FieldOption("always", "Always"), new FieldOption("review", "Only for review")]),
+                new Field("dock.openTerminal", "Open in terminal", FieldKind.Select, "Where Open in terminal runs when Open VS Code is Always. VS Code when open brings forward the session's terminal app window when there is one, else uses the item window's terminal while that window is open, else the terminal app: Ptyxis on Linux, Windows Terminal on Windows. On Linux without Switchboard's GNOME Shell extension it uses the item window. Only for review always uses the terminal app.", "vscode", [new FieldOption("vscode", "VS Code"), new FieldOption("app", "Terminal app"), new FieldOption("auto", "VS Code when open")]),
             ]),
             new Section("Triage",
             [

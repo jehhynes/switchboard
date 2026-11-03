@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dockView, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
 import { CONTROL_GLYPHS } from '../src/rows.js';
-import type { WorkItemView } from '../src/runtime.js';
+import type { Snapshot, WorkItemView } from '../src/runtime.js';
 import { item, NOW, pool, session, snapshot, triage } from './views.js';
 
 /** Where the tests' item windows keep their workspace files. */
@@ -503,6 +503,43 @@ describe('dockView with dock.openVSCode review (PRD R71)', () => {
     expect(row(ended).terminal).toBeNull();
     expect(row(ended).commands.map((command) => command.label)).toContain('Open in terminal');
     expect(row(ended).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+  });
+});
+
+describe('dockView with dock.openTerminal (PRD R28)', () => {
+  const shown = (entry: WorkItemView, patch: Partial<Snapshot>): DockRow => dockView(snapshot([entry], patch), NOW, W).groups.flatMap((group) => group.rows)[0]!;
+  const ended = item(7, { status: 'blocked', sessions: [session({ state: 'ended' })] });
+  const base = windowOf(item(7, { sessions: [session()] }), W)!.name;
+  const terminalLabels = (row: DockRow) => row.commands.filter((command) => command.command['type'] === 'terminal').map((command) => command.label);
+
+  it('opens the menu\'s Open in terminal in the terminal app with app, leaving the click and the item window\'s commands as with vscode', () => {
+    const app = shown(ended, { openTerminal: 'app' });
+
+    expect(app.terminal).toEqual({ provider: 'claude', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', args: ['--resume', 'aaaa1111-native'], name: `${base}-aaaa1111`, title: `Issue <7> · sb:${base}-aaaa1111`, handoff: null, active: false });
+    expect(terminalLabels(app)).toEqual([]);
+    expect(app.commands.map((command) => command.label)).toContain('History');
+    expect(app.open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+    expect(shown(ended, { openTerminal: 'vscode' }).terminal).toBeNull();
+  });
+
+  it('offers both terminals with auto, so the dock picks one, and only the terminal app with review', () => {
+    const auto = shown(ended, { openTerminal: 'auto' });
+
+    expect(auto.terminal).toMatchObject({ args: ['--resume', 'aaaa1111-native'] });
+    expect(terminalLabels(auto)).toEqual(['Open in terminal']);
+    expect(terminalLabels(shown(ended, { openVSCode: 'review', openTerminal: 'auto' }))).toEqual([]);
+    expect(terminalLabels(shown(ended, { openVSCode: 'review', openTerminal: 'vscode' }))).toEqual([]);
+  });
+
+  it('keeps a prompt before start\'s Open in terminal as the main control and attaches in the terminal app', () => {
+    const starting = shown(item(7, { sessions: [session({ state: 'waiting', stateDetail: 'start-prompt' })] }), { openTerminal: 'app' });
+
+    expect(starting.main).toBe('Open in terminal');
+    expect(starting.terminal).toMatchObject({ args: ['attach', 'aaaa1111'] });
+  });
+
+  it('offers no terminal while the session starts, whatever the setting', () => {
+    expect(shown(item(7, { sessions: [session({ state: 'starting', shortId: null })] }), { openTerminal: 'app' }).terminal).toBeNull();
   });
 });
 

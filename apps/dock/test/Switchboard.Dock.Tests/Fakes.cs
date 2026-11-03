@@ -297,11 +297,11 @@ sealed class FakeActions : IDockActions
         return UrlReply;
     }
 
-    public List<DockTerminal> Terminals { get; } = [];
+    public List<DockRow> InTerminal { get; } = [];
 
-    public Task<string?> Terminal(DockRow row, DockTerminal terminal, CancellationToken cancel)
+    public Task<string?> OpenInTerminal(DockRow row, CancellationToken cancel)
     {
-        Terminals.Add(terminal);
+        InTerminal.Add(row);
 
         return Task.FromResult<string?>(null);
     }

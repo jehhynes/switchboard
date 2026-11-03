@@ -917,12 +917,9 @@ public sealed class MainWindowTests
         ((MenuItem)menu[8]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal(
-            [
-                "item:7 {\"type\":\"terminal\",\"sessionId\":\"aaaa1111-native\",\"cwd\":\"D:/git/widgets/.worktrees/107-fix\",\"name\":\"gh 107\",\"shortId\":null,\"active\":false,\"provider\":\"claude\"}",
-                "item:7 {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}",
-            ],
-            actions.Runs);
+        // Open in terminal leaves the item window or terminal app to the switcher (PRD R28).
+        Assert.Equal(["item:7"], actions.InTerminal.Select((row) => row.Key));
+        Assert.Equal(["item:7 {\"type\":\"history\",\"ticketId\":7,\"key\":\"gh 107\"}"], actions.Runs);
         Assert.Equal(actions.RunReply, model.Status);
     }
 

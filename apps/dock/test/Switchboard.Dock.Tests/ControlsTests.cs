@@ -544,8 +544,41 @@ public sealed class ControlsTests
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal([review.Open, review.Open], actions.Clicked.Select((clicked) => clicked.Open));
-        Assert.Equal([review.Terminal!], actions.Terminals);
+        Assert.Equal([review], actions.InTerminal);
         Assert.Empty(actions.Runs);
+        Assert.Empty(hub.Calls);
+    }
+
+    [AvaloniaFact]
+    public async Task OpenInTerminal_RowOfferingBoth_ShowsOneItemThatLeavesTheChoiceToTheSwitcher()
+    {
+        var row = Fixtures.Row("item:8");
+        var auto = row with { Terminal = new DockTerminal("claude", "aaaa1111-native", "D:/git/widgets", ["attach", "aaaa1111"], "gh-108-widgets-655280-aaaa1111", "Issue <8>") };
+        var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [auto])] });
+        var items = window.MenuOf(auto);
+
+        Assert.Equal(["Open in Claude", "Stop", "Mark done", "Snooze…", "Add comment…", "Open in terminal", "History", "", "Delete", "", "Open ticket"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
+
+        ((MenuItem)items[5]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal([auto], actions.InTerminal);
+        Assert.Empty(actions.Runs);
+    }
+
+    [AvaloniaFact]
+    public async Task MainButton_PromptBeforeStartsOpenInTerminal_OpensTheTerminal()
+    {
+        var row = Fixtures.Row("item:8") with { Open = null, Main = "Open in terminal" };
+        var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [row])] });
+
+        Click(ButtonIn(RowOf(window, "item:8"), "main"));
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal([row], actions.InTerminal);
+        Assert.Empty(actions.Clicked);
         Assert.Empty(hub.Calls);
     }
 

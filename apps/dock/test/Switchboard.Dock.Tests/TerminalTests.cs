@@ -208,6 +208,98 @@ public sealed class TerminalTests
         Assert.Empty(vsCode.Calls);
     }
 
+    /// <summary>The recorded question row with dock.openTerminal: auto, which offers the terminal app and the item window's Open in terminal.</summary>
+    static DockRow Auto() => Fixtures.Row("item:8") with
+    {
+        Terminal = new DockTerminal("claude", "aaaa1111-native", "D:/git/widgets", ["attach", "aaaa1111"], Name, $"Issue <8> · sb:{Name}"),
+    };
+
+    static string WindowName => Fixtures.Row("item:8").Window!.Name;
+
+    [Fact]
+    public async Task OpenInTerminal_AutoWithTheItemWindowOpen_RunsInVsCodeAndOpensNoTerminal()
+    {
+        windows.Open[WindowName] = (60, 0);
+
+        Assert.Null(await Switcher().OpenInTerminal(Auto(), Cancel));
+        Assert.Empty(terminal.Opened);
+        Assert.Contains(hub.Calls, (call) => call.Contains("\"type\":\"terminal\""));
+        Assert.Equal(["show 60"], windows.Calls);
+    }
+
+    [Fact]
+    public async Task OpenInTerminal_AutoWithTheItemWindowClosed_OpensTheTerminalAppAndLaunchesNoVsCode()
+    {
+        windows.Terminals[Name] = (61, 2);
+
+        Assert.Null(await Switcher().OpenInTerminal(Auto(), Cancel));
+        Assert.Equal(["attach", "aaaa1111"], Assert.Single(terminal.Opened).Args);
+        Assert.Equal(["show 61"], windows.Calls);
+        Assert.Empty(vsCode.Calls);
+        Assert.Empty(hub.Calls);
+    }
+
+    [Fact]
+    public async Task OpenInTerminal_AutoWithTheTerminalAppWindowOpen_BringsItForwardEvenWithTheItemWindowOpen()
+    {
+        windows.Open[WindowName] = (60, 0);
+        windows.Terminals[Name] = (62, 0);
+
+        Assert.Null(await Switcher().OpenInTerminal(Auto(), Cancel));
+        Assert.Empty(terminal.Opened);
+        Assert.Equal(["show 62"], windows.Calls);
+        Assert.Empty(hub.Calls);
+    }
+
+    [Fact]
+    public async Task OpenInTerminal_AutoForASessionResumedElsewhere_RunsInVsCodeWhereItIsLive()
+    {
+        var row = Auto();
+
+        // The item window is closed, so only Active sends the session to VS Code, which opens the window where it is live.
+        var command = new System.Text.Json.Nodes.JsonObject { ["type"] = "terminal", ["sessionId"] = "aaaa1111-native", ["cwd"] = "D:/git/widgets", ["name"] = "gh 108", ["shortId"] = null, ["active"] = true, ["provider"] = "claude" };
+        var active = row with
+        {
+            Terminal = row.Terminal! with { Args = ["--resume", "aaaa1111-native"], Active = true },
+            Commands = row.Commands.Select((shown) => Switching.Switcher.IsTerminal(shown) ? shown with { Command = command } : shown).ToList(),
+        };
+
+        await Switcher().OpenInTerminal(active, Cancel);
+
+        Assert.Empty(terminal.Opened);
+        Assert.Contains(hub.Calls, (call) => call.EndsWith(command.ToJsonString()));
+        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("open "));
+    }
+
+    [Fact]
+    public async Task OpenInTerminal_AutoWithoutTerminalLookup_RunsInVsCode()
+    {
+        windows.FindsTerminals = false;
+        windows.Open[WindowName] = (60, 0);
+
+        Assert.Null(await Switcher().OpenInTerminal(Auto(), Cancel));
+        Assert.Empty(terminal.Opened);
+        Assert.Contains(hub.Calls, (call) => call.Contains("\"type\":\"terminal\""));
+    }
+
+    [Fact]
+    public async Task OpenInTerminal_AppOrVsCodeOnly_UsesTheOneTheRowOffers()
+    {
+        var app = Auto() with { Commands = Auto().Commands.Where((command) => !Switching.Switcher.IsTerminal(command)).ToList() };
+
+        windows.Open[WindowName] = (60, 0);
+        windows.Terminals[Name] = (63, 1);
+
+        Assert.Null(await Switcher().OpenInTerminal(app, Cancel));
+        Assert.Single(terminal.Opened);
+        Assert.Empty(hub.Calls);
+
+        Assert.Null(await Switcher().OpenInTerminal(Fixtures.Row("item:8"), Cancel));
+        Assert.Single(terminal.Opened);
+        Assert.Contains(hub.Calls, (call) => call.Contains("\"type\":\"terminal\""));
+        Assert.Equal("This row offers no terminal.", await Switcher().OpenInTerminal(app with { Terminal = null }, Cancel));
+    }
+
     [Fact]
     public void Ptyxis_RunsTheCliInANewTitledWindowInTheSessionFolder()
     {

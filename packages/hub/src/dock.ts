@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import type { OpenVSCode, Provider } from '@switchboard/core';
+import type { OpenTerminal, OpenVSCode, Provider } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
@@ -163,7 +163,10 @@ export interface DockRow {
   movable: boolean;
   window: DockWindow | null;
   open: DockOpen | null;
-  /** With `dock.openVSCode: review`, the terminal the menu's Open in terminal opens in place of the item window's (PRD R28); null otherwise. */
+  /**
+   * The terminal app window Open in terminal opens, with `dock.openVSCode: review` or `dock.openTerminal` `app` or `auto` (PRD R28); null
+   * otherwise. With `auto`, `commands` keeps the item window's Open in terminal too, and the dock picks one when it runs.
+   */
   terminal: DockTerminal | null;
   /**
    * The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time.
@@ -241,7 +244,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     // Done is sorted newest first, so each band's rows are consecutive.
     const band = group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null;
 
-    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode) : poolRow(entry, now, snapshot.namespaces);
+    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode, snapshot.openTerminal) : poolRow(entry, now, snapshot.namespaces);
 
     return { ...shown, search, links: linksOf(entry), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
   };
@@ -256,13 +259,15 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
 }
 
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode): Omit<DockRow, 'search' | 'links' | 'returned' | 'comment' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal): Omit<DockRow, 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const kind = markOf(item);
   const controls = order === null ? controlsOf(item, mode) : [...controlsOf(item, mode), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
   const main = mainControl(item, mode);
-  const terminal = mode === 'review' ? menuTerminal(item, windows) : null;
+  const terminal = mode === 'review' || terminalIn !== 'vscode' ? menuTerminal(item, windows) : null;
+  // With `auto`, the dock runs the item window's Open in terminal while that window is open.
+  const vscodeTerminal = terminal === null || (mode === 'always' && terminalIn === 'auto');
 
   return {
     key: rowKeyOf(item),
@@ -294,7 +299,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main === null ? null : mainTitle(item, main),
     pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],
-    commands: [...windowCommands(terminal === null ? controls : controls.filter((control) => control.message['type'] !== 'terminal')), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
+    commands: [...windowCommands(vscodeTerminal ? controls : controls.filter((control) => control.message['type'] !== 'terminal')), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
   };
 }
 
