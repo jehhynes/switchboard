@@ -655,3 +655,22 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Operator's desktop, 2026-11-03.** After a new login loaded the extension, a link the dock opened came forward in the running Firefox.
 - **Not verified:** Chrome.
 - **Current use:** the dock's links on Linux with the GNOME Shell extension (PRD R74, architecture.md § Dock).
+
+## M55. Closing a Claude tab or its VS Code window, and resuming the session in the background
+
+- **Date:** 2026-11-03.
+- **Versions:** Claude Code CLI 2.1.317, Claude Code extension 2.1.317, VS Code 1.144.0, on Linux.
+- **Setup:** an isolated VS Code (`--ozone-platform=headless`, its own `--user-data-dir` and `--extensions-dir` holding the Claude Code extension and a test-only extension that ran commands sent to a loopback port, `--remote-debugging-port` for clicks and screenshots) on the trusted `.wip/mech`, started without the calling session's `CLAUDE_*` variables. A Haiku session started with `claude --bg --permission-mode auto -n <name> --model haiku` and was stopped, then opened with `claude-vscode.editor.open(<session ID>, <prompt>)`. The window was closed with `workbench.action.closeWindow`.
+- **Roster while in the tab:** `claude agents --json` listed the session once, `kind: interactive` with a pid and no short ID; `--all` also listed the stopped background job under the same `sessionId`, `kind: background`, with its short ID, `state: done` and no pid. After the window close `--all` kept only the background entry.
+- **Window close:**
+  - The tab's `claude` process, its Bash shell and the command it ran were gone 2 to 4 seconds after the close, with the turn mid-tool and with a `run_in_background` Bash task after the turn ended. The killed foreground command was recorded as a `tool_result` with `Exit code 137` and no assistant reply after it; the background task's file was never written.
+  - The roster dropped the tab's `interactive` entry about 0.16 seconds after the close, while the process still ran for about 4 more seconds. A `claude --bg --resume` in that gap printed "session … is open in another Claude Code process, so this started a copy as <id>". After the pid had exited, the same command did not.
+  - The extension's `deactivate` ran within 15 milliseconds of the close command.
+- **Tab close:** `workbench.action.closeActiveEditor` on the Claude tab, mid-tool, asked nothing and ended the tab's process, its shell and the command within 4 seconds, as the window close did; the resume below then worked the same. The tab's label was the session's `-n` name, before and after turns, and `tabGroups` reports its input as a webview of view type `claudeVSCodePanel`.
+- **Background resume, after the tab's process exited:**
+  - `claude --bg --resume <session ID>` with no flags printed "woke session <short> with its saved options (--permission-mode, -n, --model)" and kept the session ID and short ID; the roster listed it `kind: background` with a pid. With no prompt it stayed idle ("send a prompt to start") and did not continue the killed turn.
+  - With a prompt and no flags it kept the IDs, ran the prompt with the conversation from the tab, in the mode the session started in (`auto`, not the tab's), and re-ran the killed command to completion. After a background task was killed, the resumed session was told "Background shell command didn't finish before the previous session ended".
+  - The same resume while the session was live in its background process started a copy with a new ID, as in M18.
+  - A session started with Switchboard's flags (`--permission-mode auto --settings {"worktree":{"bgIsolation":"none"}} -n --model --append-system-prompt <contract>`), stopped and resumed with a prompt and no flags, reported "saved options (--permission-mode, --settings, -n, --append-system-prompt, --model)", knew the contract's code word, and wrote a file in its working directory.
+- **Not verified:** Windows; VS Code quitting with several windows; a tab session waiting on a permission prompt or a question at the close; a session that was compacted in its tab.
+- **Current use:** none yet; planned for Continue in background.
