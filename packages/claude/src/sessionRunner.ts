@@ -80,18 +80,28 @@ export class ClaudeRunner implements SessionRunner {
     return entry === undefined ? null : { shortId: entry.id ?? nativeSessionId.slice(0, 8), cwd: entry.cwd };
   }
 
-  /** Only processes whose parent is the window's extension host `hostPid` are that window's tabs (mechanics M55). */
-  async tab(label: string, hostPid: number): Promise<{ candidates: TabCandidate[] } | { error: string }> {
+  /**
+   * Only processes whose parent is the window's extension host `hostPid` are that window's Claude sessions, in a tab or the sidebar (mechanics
+   * M55); `others` counts those the label does not name, which the window's close would end too.
+   */
+  async tab(label: string, hostPid: number): Promise<{ candidates: TabCandidate[]; others: number } | { error: string }> {
     const roster = await readRoster(this.deps.claudePath(), this.deps.exec, true);
 
     if ('error' in roster) {
       return roster;
     }
 
-    const candidates = tabCandidates(roster.entries, label);
-    const parents = await parentPids(this.deps.exec, candidates.map((candidate) => candidate.pid), this.deps.processTable);
+    const live = roster.entries.filter((entry) => entry.pid !== undefined && entry.kind !== 'background');
+    const parents = await parentPids(this.deps.exec, live.map((entry) => entry.pid!), this.deps.processTable);
 
-    return 'error' in parents ? parents : { candidates: candidates.filter((candidate) => parents.get(candidate.pid) === hostPid) };
+    if ('error' in parents) {
+      return parents;
+    }
+
+    const inWindow = live.filter((entry) => parents.get(entry.pid!) === hostPid);
+    const candidates = tabCandidates(roster.entries, label).filter((candidate) => parents.get(candidate.pid) === hostPid);
+
+    return { candidates, others: inWindow.length - candidates.length };
   }
 
   async resume(nativeSessionId: string, prompt: string, cwd: string): Promise<{ copy: string | null } | { error: string }> {

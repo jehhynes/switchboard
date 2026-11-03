@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 
 /** The Claude Code extension's editor tab is a webview of this view type (mechanics M55). */
 const CLAUDE_PANEL = 'claudeVSCodePanel';
+/** The name Open in terminal gives its terminals (`openTerminal` in open.ts). */
+const SWITCHBOARD_TERMINAL = 'Switchboard · ';
 /** The hub reads Claude's roster, then the process table, each with a 15-second timeout, before it answers. */
 const BACKGROUND_TIMEOUT_MS = 35_000;
 
@@ -30,7 +32,12 @@ export function closeRefusal(label: string): string | null {
 
   const dirty = vscode.window.tabGroups.all.some((group) => group.tabs.some((other) => other.isDirty)) || vscode.workspace.textDocuments.some((document) => document.isDirty);
 
-  return dirty ? 'Save or discard your changes first, so the window can close.' : null;
+  if (dirty) {
+    return 'Save or discard your changes first, so the window can close.';
+  }
+
+  // Open in terminal runs a session in such a terminal (PRD R28); the window's close would end it.
+  return vscode.window.terminals.some((terminal) => terminal.name.startsWith(SWITCHBOARD_TERMINAL)) ? "Close Switchboard's terminal first; closing the window would end its session." : null;
 }
 
 export interface BackgroundDeps {
@@ -65,7 +72,17 @@ export async function continueInBackground(deps: BackgroundDeps): Promise<void> 
     return;
   }
 
-  const reply = deps.record === null ? null : await postToHub(deps.record, '/background', { label, hostPid: process.pid, workItemIds: deps.workItemIds }, BACKGROUND_TIMEOUT_MS);
+  if (deps.record === null) {
+    void vscode.window.showErrorMessage('Switchboard: the hub did not answer, so the session stays in its tab.');
+    return;
+  }
+
+  // A Claude tab with the label that closes while the hub answers may be followed by another session's tab with the same label, which must stay.
+  let closedMeanwhile = false;
+  const watch = vscode.window.tabGroups.onDidChangeTabs((event) => {
+    closedMeanwhile ||= event.closed.some((tab) => isClaude(tab) && tab.label === label);
+  });
+  const reply = await postToHub(deps.record, '/background', { label, hostPid: process.pid, workItemIds: deps.workItemIds }, BACKGROUND_TIMEOUT_MS).finally(() => watch.dispose());
 
   if (reply === null) {
     void vscode.window.showErrorMessage('Switchboard: the hub did not answer, so the session stays in its tab.');
@@ -74,6 +91,11 @@ export async function continueInBackground(deps: BackgroundDeps): Promise<void> 
 
   if (reply.status !== 200) {
     refuse(reply.error ?? `the hub answered ${reply.status}.`);
+    return;
+  }
+
+  if (closedMeanwhile) {
+    refuse('The Claude tab closed while Switchboard answered, so nothing else closes; its session continues in the background.');
     return;
   }
 

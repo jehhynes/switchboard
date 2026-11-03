@@ -44,16 +44,16 @@ function runner(answer: (args: string[]) => ExecResult, calls: { args: string[];
 
 describe('Continue in Background in the Claude runner (PRD R89)', () => {
   it('finds the tab’s session by its name among live interactive entries, with its earlier background job', () => {
-    expect(tabCandidates(ENTRIES, TAB)).toEqual([{ nativeSessionId: NATIVE, pid: 2422900, background: true }]);
+    expect(tabCandidates(ENTRIES, TAB)).toEqual([{ nativeSessionId: NATIVE, pid: 2422900, background: true, busy: true }]);
   });
 
   it('matches a label the tab cut short with … by its start, so every live session it may name is a candidate', () => {
     // The Claude tab cuts a long name, as `switchboard · ad-hoc · a…` (live acceptance, 2026-11-03).
-    const other = { ...ENTRIES[1]!, pid: 5, sessionId: '0f1e2d3c-0000-4000-8000-000000000001', name: 'switchboard · ad-hoc · adhoc 2' };
+    const other = { ...ENTRIES[1]!, pid: 5, sessionId: '0f1e2d3c-0000-4000-8000-000000000001', name: 'switchboard · ad-hoc · adhoc 2', status: 'idle' };
 
     expect(tabCandidates([...ENTRIES, other], 'switchboard · ad-hoc · a…')).toEqual([
-      { nativeSessionId: NATIVE, pid: 2422900, background: true },
-      { nativeSessionId: other.sessionId, pid: 5, background: false },
+      { nativeSessionId: NATIVE, pid: 2422900, background: true, busy: true },
+      { nativeSessionId: other.sessionId, pid: 5, background: false, busy: false },
     ]);
     // Without the …, the label is the whole name.
     expect(tabCandidates(ENTRIES, 'switchboard · ad-hoc · a')).toEqual([]);
@@ -64,7 +64,7 @@ describe('Continue in Background in the Claude runner (PRD R89)', () => {
     // A background process with this name is not a tab.
     expect(tabCandidates(ENTRIES, 'switchboard · dev:develop · github 7')).toEqual([]);
     // A registered session (PRD R81) has no background job.
-    expect(tabCandidates(ENTRIES, 'Register skill live check')).toEqual([{ nativeSessionId: '9273f594-1111-4222-8333-444455556666', pid: 2434342, background: false }]);
+    expect(tabCandidates(ENTRIES, 'Register skill live check')).toEqual([{ nativeSessionId: '9273f594-1111-4222-8333-444455556666', pid: 2434342, background: false, busy: true }]);
     // A tab that has ended leaves only the background job.
     expect(tabCandidates(ENTRIES.filter((entry) => entry.kind === 'background'), TAB)).toEqual([]);
   });
@@ -81,8 +81,8 @@ describe('Continue in Background in the Claude runner (PRD R89)', () => {
     const claude = runner((args) => (args[0] === 'agents' ? ran({ stdout: ROSTER }) : ran({ stdout: 'note: woke session fece8d4c with its saved options (--permission-mode, -n, --model).\nbackgrounded · fece8d4c · x' })), calls, root);
 
     // Only a process whose parent is the window's extension host is its tab.
-    expect(await claude.tab(TAB, 2420928)).toEqual({ candidates: [{ nativeSessionId: NATIVE, pid: 2422900, background: true }] });
-    expect(await claude.tab(TAB, 1234)).toEqual({ candidates: [] });
+    expect(await claude.tab(TAB, 2420928)).toEqual({ candidates: [{ nativeSessionId: NATIVE, pid: 2422900, background: true, busy: true }], others: 0 });
+    expect(await claude.tab(TAB, 1234)).toEqual({ candidates: [], others: 0 });
     expect(calls[0]!.args).toEqual(['agents', '--json', '--all']);
     calls.length = 1;
     rmSync(root, { recursive: true, force: true });
@@ -94,6 +94,16 @@ describe('Continue in Background in the Claude runner (PRD R89)', () => {
     expect(await claude.background(NATIVE)).toBeNull();
     expect(await claude.background('1370ab66-2f5a-4c76-b5dd-5de16139ea60')).toEqual({ shortId: '1370ab66' });
     expect(calls[2]!.args).toEqual(['agents', '--json']);
+  });
+
+  it('counts the window’s other Claude sessions, such as one in its sidebar, whatever their names (review round 1, goal-2)', async () => {
+    const sidebar = { ...ENTRIES[1]!, sessionId: 'sidebar-native', name: 'Sidebar task', pid: 5555 };
+    // The registered session's process belongs to another window.
+    const root = proc({ 2422900: 2420928, 5555: 2420928, 2434342: 9999 });
+    const claude = runner(() => ran({ stdout: JSON.stringify([...ENTRIES, sidebar]) }), [], root);
+
+    expect(await claude.tab(TAB, 2420928)).toEqual({ candidates: [{ nativeSessionId: NATIVE, pid: 2422900, background: true, busy: true }], others: 1 });
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('answers the CLI’s failure and a failed roster read', async () => {

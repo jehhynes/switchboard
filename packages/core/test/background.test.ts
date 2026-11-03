@@ -25,11 +25,12 @@ function inTab(h: Harness): { item: number; session: string } {
   return { item: 1, session: start.sessionId };
 }
 
-const background = (session: string, patch: { nativeSessionId?: string; workItemIds?: number[] } = {}): Extract<FlowEvent, { type: 'background' }> => ({
+const background = (session: string, patch: { nativeSessionId?: string; workItemIds?: number[]; busy?: boolean } = {}): Extract<FlowEvent, { type: 'background' }> => ({
   type: 'background',
   sessionId: session,
   nativeSessionId: NATIVE,
   pid: PID,
+  busy: false,
   workItemIds: [1],
   ...patch,
 });
@@ -85,6 +86,11 @@ describe('Continue in Background (PRD R89)', () => {
     expect(h.send(background(session)).refused).toBe('Continue in Background works while the session is running.');
     h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
     expect(h.send(background(session)).refused).toBe('Continue in Background works while the session is running.');
+
+    // An idle state the roster read has not caught up with: the tab's process is busy (review round 1, goal-1).
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    expect(h.send(background(session, { busy: true })).refused).toBeNull();
+    h.store.updateSession(session, { move: null });
 
     h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
     h.store.updateSession(session, { pendingFork: 'aaaaaaaa' });

@@ -916,6 +916,10 @@ export class Runtime {
       return { refused: tab.error };
     }
 
+    if (tab.others > 0) {
+      return { refused: 'Another Claude session runs in this window; closing the window would end it.' };
+    }
+
     if (tab.candidates.length > 1) {
       return { refused: `Several Claude sessions in this window are named "${label}", so Switchboard cannot tell which one this tab holds.` };
     }
@@ -931,7 +935,8 @@ export class Runtime {
       return { refused: NEVER_BACKGROUND };
     }
 
-    const { refused } = this.send({ type: 'background', sessionId: session.id, nativeSessionId: found.nativeSessionId, pid: found.pid, workItemIds });
+
+    const { refused } = this.send({ type: 'background', sessionId: session.id, nativeSessionId: found.nativeSessionId, pid: found.pid, busy: found.busy, workItemIds });
 
     return refused === null ? null : { refused };
   }

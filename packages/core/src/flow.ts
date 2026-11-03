@@ -204,9 +204,9 @@ export type FlowEvent =
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
   /**
    * Continue in Background (PRD R89): the session the hub found in the item window's Claude tab, whose process is `pid`, and the work items of that
-   * window, which must hold it.
+   * window, which must hold it. `busy`: the roster listed the process running a turn, which the session's state may not show yet without hooks.
    */
-  | { type: 'background'; sessionId: string; nativeSessionId: string; pid: number; workItemIds: number[] }
+  | { type: 'background'; sessionId: string; nativeSessionId: string; pid: number; busy: boolean; workItemIds: number[] }
   /** The tab's process exited and `claude --bg --resume` runs, which a roster read must confirm before `deadline`. */
   | { type: 'move-launching'; sessionId: string; moveId: string; deadline: number }
   | { type: 'session-resumed'; sessionId: string; moveId: string; shortId: string }
@@ -1899,7 +1899,7 @@ class Flow {
       throw new Refusal(`Fork ${session.pendingFork} waits to continue this session; continue in the fork.`);
     }
 
-    if (session.state !== 'running') {
+    if (session.state !== 'running' && !event.busy) {
       throw new Refusal('Continue in Background works while the session is running.');
     }
 

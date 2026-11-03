@@ -43,7 +43,14 @@ async function inFront(title = LABEL) {
   }
 }
 
-const open = (panel) => tabs().some((tab) => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith('claudeVSCodePanel') && tab.label === panel.title);
+/** Whether the panel's tab is open; a disposed panel's tab is not, and it can no longer be asked its title. */
+const open = (panel) => {
+  try {
+    return tabs().some((tab) => tab.input instanceof vscode.TabInputWebview && tab.input.viewType.endsWith('claudeVSCodePanel') && tab.label === panel.title);
+  } catch {
+    return false;
+  }
+};
 
 describe('Continue in Background (PRD R89)', () => {
   const realExecute = vscode.commands.executeCommand;
@@ -214,5 +221,44 @@ describe('Continue in Background (PRD R89)', () => {
     const { menus } = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
 
     assert.deepStrictEqual(menus.commandPalette, [{ command: 'switchboard.continueInBackground', when: "activeWebviewPanelId == 'claudeVSCodePanel'" }]);
+  });
+
+  it('does not close a replacement Claude tab with the same label opened while the hub answered (review round 1, extension-1)', async () => {
+    panels.push(claudeTab());
+    await inFront();
+    hub.hold = async () => {
+      panels[0].dispose();
+
+      // A disposed panel cannot be asked its title, so the tabs are counted instead.
+      for (const deadline = Date.now() + 5000; tabs().some((tab) => tab.input instanceof vscode.TabInputWebview); await new Promise((done) => setTimeout(done, 50))) {
+        assert.ok(Date.now() < deadline, 'the original tab did not close');
+      }
+
+      // A cut label can name another session too.
+      panels.push(claudeTab());
+      await inFront();
+    };
+
+    await extension.background(hub.record, [7]);
+
+    assert.deepStrictEqual(messages, ['Switchboard: The Claude tab closed while Switchboard answered, so nothing else closes; its session continues in the background.']);
+    assert.strictEqual(open(panels[1]), true);
+    assert.deepStrictEqual(closes, []);
+  });
+
+  it('refuses while a Switchboard terminal is open, whose session the window would end (review round 1, goal-3)', async () => {
+    panels.push(claudeTab());
+    const terminal = vscode.window.createTerminal({ name: 'Switchboard · gh 7' });
+
+    try {
+      await inFront();
+      await extension.background(hub.record, [7]);
+    } finally {
+      terminal.dispose();
+    }
+
+    assert.deepStrictEqual(messages, ["Switchboard: Close Switchboard's terminal first; closing the window would end its session."]);
+    assert.deepStrictEqual(hub.requests, []);
+    assert.deepStrictEqual(closes, []);
   });
 });

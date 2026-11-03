@@ -152,11 +152,15 @@ export function copyFrom(output: string): string | null {
   return /started a copy as ([0-9a-f]{8})/.exec(output)?.[1] ?? null;
 }
 
-/** A live session a Claude tab may hold; `background` says Claude holds options to resume it with in the background. */
+/**
+ * A live session a Claude tab may hold; `background` says Claude holds options to resume it with in the background, and `busy` that the roster
+ * lists its process running a turn.
+ */
 export interface TabCandidate {
   nativeSessionId: string;
   pid: number;
   background: boolean;
+  busy: boolean;
 }
 
 /**
@@ -169,7 +173,12 @@ export function tabCandidates(entries: RosterEntry[], label: string): TabCandida
 
   return entries
     .filter((entry) => named(entry.name) && entry.pid !== undefined && entry.kind !== 'background')
-    .map((entry) => ({ nativeSessionId: entry.sessionId, pid: entry.pid!, background: entries.some((other) => other.sessionId === entry.sessionId && other.kind === 'background') }));
+    .map((entry) => ({
+      nativeSessionId: entry.sessionId,
+      pid: entry.pid!,
+      background: entries.some((other) => other.sessionId === entry.sessionId && other.kind === 'background'),
+      busy: entry.status === 'busy',
+    }));
 }
 
 /** Where parent PIDs are read: Windows PowerShell's CIM, or a `/proc` folder elsewhere. Tests pass their own. */

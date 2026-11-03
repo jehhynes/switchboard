@@ -41,7 +41,7 @@ type Listed = Awaited<ReturnType<NonNullable<SessionRunner['background']>>>;
 
 /** A Claude runner whose answers the test sets, recording the resumes and stops it was asked for. */
 class StandIn {
-  tabResult: Tab = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true }] };
+  tabResult: Tab = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true, busy: true }], others: 0 };
   launch: Launch = { copy: null };
   /** Each roster read for the background process takes the next answer, then repeats the last. */
   listed: Listed[] = [{ shortId: SHORT }];
@@ -156,26 +156,46 @@ describe('Continue in Background in the hub (PRD R89)', () => {
 
   it('answers the roster’s error, and refuses a session that never ran in the background, or none or several of the window’s', async () => {
     const h = await inTab();
-    const other = { nativeSessionId: 'someone-else', pid: 7, background: true };
+    const other = { nativeSessionId: 'someone-else', pid: 7, background: true, busy: true };
 
-    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: false }] };
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: false, busy: true }], others: 0 };
     expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: 'This session never ran in the background, so it cannot continue there.' });
     h.claude.tabResult = { error: 'claude agents timed out' };
     expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: 'claude agents timed out' });
-    h.claude.tabResult = { candidates: [other] };
+    h.claude.tabResult = { candidates: [other], others: 0 };
     expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: "This tab's session is not one of Switchboard's work items." });
-    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true }] };
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true, busy: true }], others: 0 };
     expect(await h.runtime.background(LABEL, HOST, [2])).toEqual({ refused: "This tab's session is not one of Switchboard's work items." });
 
     // Two Claude sessions of this window share a cut label, so neither is chosen, even though only the first is this window's work.
     h.runtime.send({ type: 'adhoc', prompt: 'Other work', repoRoot: 'D:/git/widgets' });
     h.store.insertSession({ ...current(h.store, h.session), id: 'second', workItemId: 2, nativeSessionId: 'second-native', startedAt: 0 });
-    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true }, { nativeSessionId: 'second-native', pid: 8, background: true }] };
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true, busy: true }, { nativeSessionId: 'second-native', pid: 8, background: true, busy: true }], others: 0 };
     expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: `Several Claude sessions in this window are named "${LABEL}", so Switchboard cannot tell which one this tab holds.` });
+
+    // Another session in the window, such as one in its Claude sidebar, would end with it (review round 1, goal-2).
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true, busy: true }], others: 1 };
+    expect(await h.runtime.background(LABEL, HOST, [1])).toEqual({ refused: 'Another Claude session runs in this window; closing the window would end it.' });
 
     await h.runtime.settled();
     expect(h.claude.resumes).toEqual([]);
     expect(current(h.store, h.session).move).toBeNull();
+  });
+
+  it('takes a tab the roster lists busy as running, so a turn it just started counts without hooks (review round 1, goal-1)', async () => {
+    const h = await inTab();
+
+    // The last read saw the turn end; the tab has started another since, which its roster entry shows as busy.
+    h.runtime.send({ type: 'roster', sessions: [{ sessionId: h.session, state: 'idle', detail: null, interactive: true }] });
+    expect(current(h.store, h.session).state).toBe('idle');
+
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true, busy: false }], others: 0 };
+    expect(await h.runtime.background(LABEL, HOST, [h.item().id])).toEqual({ refused: 'Continue in Background works while the session is running.' });
+
+    h.claude.tabResult = { candidates: [{ nativeSessionId: NATIVE, pid: PID, background: true, busy: true }], others: 0 };
+    expect(await h.runtime.background(LABEL, HOST, [h.item().id])).toBeNull();
+    await h.runtime.settled();
+    expect(h.claude.resumes).toHaveLength(1);
   });
 
   it('cancels the move when the tab process is still running after the wait, and launches nothing', async () => {
@@ -283,10 +303,11 @@ describe('Continue in Background in the hub (PRD R89)', () => {
     const h = await inTab();
     let finish!: () => void;
 
+    // The request's own roster read sees the tab; the read held here starts while the move waits.
+    await h.runtime.background(LABEL, HOST, [h.item().id]);
     h.claude.observeGate = new Promise<void>((resolve) => (finish = resolve));
     h.claude.first = [];
     h.claude.later = [{ sessionId: h.session, state: 'running', detail: null, interactive: false }];
-    await h.runtime.background(LABEL, HOST, [h.item().id]);
 
     const read = h.runtime.readRoster();
     await h.runtime.settled();
