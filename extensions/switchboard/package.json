@@ -77,6 +77,12 @@
         "title": "Continue in Background",
         "category": "Switchboard",
         "icon": "$(debug-step-out)"
+      },
+      {
+        "command": "switchboard.continueSidebarInBackground",
+        "title": "Continue in Background",
+        "category": "Switchboard",
+        "icon": "$(debug-step-out)"
       }
     ],
     "menus": {
@@ -96,11 +102,20 @@
         {
           "command": "switchboard.continueInBackground",
           "when": "activeWebviewPanelId == 'claudeVSCodePanel'"
+        },
+        {
+          "command": "switchboard.continueSidebarInBackground",
+          "when": "false"
         }
       ],
       "view/title": [
         {
           "command": "switchboard.newClaudeTab",
+          "when": "view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary",
+          "group": "navigation"
+        },
+        {
+          "command": "switchboard.continueSidebarInBackground",
           "when": "view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary",
           "group": "navigation"
         }

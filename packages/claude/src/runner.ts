@@ -164,12 +164,13 @@ export interface TabCandidate {
 }
 
 /**
- * The live sessions a Claude tab labelled `label` may hold (PRD R89). The tab's label is the session's name, cut to its start and `…` when long,
- * so several sessions can match; `--all` lists a session's earlier background job beside its live interactive entry (mechanics M55).
+ * The live sessions a Claude tab labelled `label` may hold (PRD R89), or every live session for the Claude sidebar, which has no label (null). The
+ * tab's label is the session's name, cut to its start and `…` when long, so several sessions can match; `--all` lists a session's earlier
+ * background job beside its live interactive entry (mechanics M55).
  */
-export function tabCandidates(entries: RosterEntry[], label: string): TabCandidate[] {
-  const cut = label.endsWith('…') ? label.slice(0, -1) : null;
-  const named = (name: string | undefined) => name !== undefined && (cut === null ? name === label : name.startsWith(cut));
+export function tabCandidates(entries: RosterEntry[], label: string | null): TabCandidate[] {
+  const cut = label?.endsWith('…') ? label.slice(0, -1) : null;
+  const named = (name: string | undefined) => label === null || (name !== undefined && (cut === null ? name === label : name.startsWith(cut)));
 
   return entries
     .filter((entry) => named(entry.name) && entry.pid !== undefined && entry.kind !== 'background')

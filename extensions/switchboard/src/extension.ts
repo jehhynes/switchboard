@@ -46,7 +46,7 @@ export interface SwitchboardApi {
   /** Opens a URL or file as an item window's tab; the suite's window is not an item window (PRD R72). */
   openTab(target: string): Promise<void>;
   /** Runs Continue in Background against `hub` with the given work items; the suite's window is not an item window (PRD R89). */
-  background(hub: HubRecord | null, workItemIds: number[] | null): Promise<void>;
+  background(hub: HubRecord | null, workItemIds: number[] | null, where?: 'tab' | 'sidebar'): Promise<void>;
   /** Closes this window as the item window opened from `file` would, or as its own again with null; the suite's window is not an item window (PRD R76). */
   itemWindow(file: string | null): void;
   /** Handles a state as if the hub sent it; resolves to whether the window asked VS Code to close (PRD R76). */
@@ -210,15 +210,15 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.showHubLog', showHubLog),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
-    vscode.commands.registerCommand('switchboard.continueInBackground', () => {
-      const snapshot = state.current();
-      const file = workspaceFile();
+    ...(['tab', 'sidebar'] as const).map((where) =>
+      vscode.commands.registerCommand(where === 'tab' ? 'switchboard.continueInBackground' : 'switchboard.continueSidebarInBackground', () => {
+        const snapshot = state.current();
+        const file = workspaceFile();
+        const workItemIds = snapshot === null || file === null ? null : windowItems(snapshot, file, windowsDir(home)).map((item) => item.id);
 
-      return continueInBackground({
-        record: keeper.current(),
-        workItemIds: snapshot === null || file === null ? null : windowItems(snapshot, file, windowsDir(home)).map((item) => item.id),
-      });
-    }),
+        return continueInBackground({ record: keeper.current(), workItemIds }, where);
+      }),
+    ),
     vscode.window.registerUriHandler({ handleUri: (uri) => void openUri(opening(), uri) }),
     vscode.commands.registerCommand('switchboard.claim', () => {
       const record = keeper.current();
@@ -304,7 +304,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     claim: (hub, run = runCommand) => claimOpen(hub, run),
     run: runCommand,
     openTab,
-    background: (hub, workItemIds) => continueInBackground({ record: hub, workItemIds }),
+    background: (hub, workItemIds, where) => continueInBackground({ record: hub, workItemIds }, where),
     itemWindow: (file) => {
       done = new DoneWindow(file ?? workspaceFile(), windowsDir(home), vscode.window.state.focused, Date.now());
     },

@@ -293,13 +293,26 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/background': async (body) => {
         const { label, hostPid, workItemIds } = isRecord(body) ? body : {};
 
-        if (typeof label !== 'string' || label === '' || !Number.isInteger(hostPid) || !Array.isArray(workItemIds) || !workItemIds.every((id) => Number.isInteger(id))) {
+        // A null label is the Claude sidebar, which has no tab.
+        if ((label !== null && (typeof label !== 'string' || label === '')) || !Number.isInteger(hostPid) || !Array.isArray(workItemIds) || !workItemIds.every((id) => Number.isInteger(id))) {
           return { status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } };
         }
 
-        const result = await runtime.background(label, hostPid as number, workItemIds as number[]);
+        const result = await runtime.background(label as string | null, hostPid as number, workItemIds as number[]);
 
-        return result === null ? { status: 200, body: { moving: true } } : { status: 409, body: { error: result.refused } };
+        return 'pid' in result ? { status: 200, body: { pid: result.pid } } : { status: 409, body: { error: result.refused } };
+      },
+      // Continue in Background's last check before the window closes (PRD R89).
+      '/background/check': async (body) => {
+        const { hostPid, pid } = isRecord(body) ? body : {};
+
+        if (!Number.isInteger(hostPid) || !Number.isInteger(pid)) {
+          return { status: 400, body: { error: 'Expected {hostPid, pid}.' } };
+        }
+
+        const alone = await runtime.windowAlone(hostPid as number, pid as number);
+
+        return typeof alone === 'boolean' ? { status: 200, body: { alone } } : { status: 409, body: { error: alone.error } };
       },
       // The ticket report (PRD R83), which no report contract or usage text lists.
       '/ticket': async (body) => {

@@ -84,7 +84,7 @@ export class ClaudeRunner implements SessionRunner {
    * Only processes whose parent is the window's extension host `hostPid` are that window's Claude sessions, in a tab or the sidebar (mechanics
    * M55); `others` counts those the label does not name, which the window's close would end too.
    */
-  async tab(label: string, hostPid: number): Promise<{ candidates: TabCandidate[]; others: number } | { error: string }> {
+  async tab(label: string | null, hostPid: number): Promise<{ candidates: TabCandidate[]; others: number } | { error: string }> {
     const roster = await readRoster(this.deps.claudePath(), this.deps.exec, true);
 
     if ('error' in roster) {

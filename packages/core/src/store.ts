@@ -1060,6 +1060,11 @@ export class Store {
     return this.#all("SELECT * FROM sessions WHERE state <> 'ended' ORDER BY startedAt, rowid");
   }
 
+  /** Sessions moving to their background process, whatever their state, since a move can begin before the roster revives an ended one (PRD R89). */
+  movingSessions(): Session[] {
+    return this.#all('SELECT * FROM sessions WHERE move IS NOT NULL ORDER BY startedAt, rowid');
+  }
+
   /** Sessions a start confirmed: a roster read can end them, or revive one the operator resumed. */
   startedSessions(): Session[] {
     return this.#all('SELECT * FROM sessions WHERE shortId IS NOT NULL ORDER BY startedAt, rowid');

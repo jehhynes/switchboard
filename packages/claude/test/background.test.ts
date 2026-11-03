@@ -59,6 +59,13 @@ describe('Continue in Background in the Claude runner (PRD R89)', () => {
     expect(tabCandidates(ENTRIES, 'switchboard · ad-hoc · a')).toEqual([]);
   });
 
+  it('lists every live session for the Claude sidebar, which has no label', () => {
+    expect(tabCandidates(ENTRIES, null)).toEqual([
+      { nativeSessionId: NATIVE, pid: 2422900, background: true, busy: true },
+      { nativeSessionId: '9273f594-1111-4222-8333-444455556666', pid: 2434342, background: false, busy: true },
+    ]);
+  });
+
   it('lists no tab for a name no live tab has, and marks a session that never ran in the background', () => {
     expect(tabCandidates(ENTRIES, 'Untitled')).toEqual([]);
     // A background process with this name is not a tab.

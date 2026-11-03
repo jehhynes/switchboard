@@ -16,17 +16,22 @@ function claudeTabs(): vscode.Tab[] {
 }
 
 /**
- * Why this window cannot close once its Claude tab labelled `label` does, or null (PRD R89). VS Code hands out new `Tab` objects as tabs change,
- * so the tab is found by its label. Tabs cover text, notebook and custom editors; a document can be dirty with no tab.
+ * Why this window cannot close, or null (PRD R89). `label` is the Claude tab whose session moves, found by its label because VS Code hands out new
+ * `Tab` objects as tabs change; null moves the session in the Claude sidebar, so no Claude tab may be open. Tabs cover text, notebook and custom
+ * editors; a document can be dirty with no tab.
  */
-export function closeRefusal(label: string): string | null {
+export function closeRefusal(label: string | null): string | null {
   const tabs = claudeTabs();
 
-  if (!tabs.some((tab) => tab.label === label)) {
+  if (label === null && tabs.length > 0) {
+    return 'Close the Claude tabs first; closing the window would end their sessions.';
+  }
+
+  if (label !== null && !tabs.some((tab) => tab.label === label)) {
     return 'Open the Claude tab to continue its session in the background.';
   }
 
-  if (tabs.length > 1) {
+  if (label !== null && tabs.length > 1) {
     return 'Close the other Claude tabs first; closing the window would end their sessions.';
   }
 
@@ -40,6 +45,37 @@ export function closeRefusal(label: string): string | null {
   return vscode.window.terminals.some((terminal) => terminal.name.startsWith(SWITCHBOARD_TERMINAL)) ? "Close Switchboard's terminal first; closing the window would end its session." : null;
 }
 
+/**
+ * The hub's move, then its last check that the moving process is still the window's only Claude session, since a session opened in the window
+ * meanwhile, such as in the sidebar, would end with it and only the hub sees the window's processes; or why the window stays open.
+ */
+async function answersOf(record: HubRecord, label: string | null, workItemIds: number[]): Promise<{ pid: number } | { refused: string }> {
+  const reply = await postToHub(record, '/background', { label, hostPid: process.pid, workItemIds }, BACKGROUND_TIMEOUT_MS);
+
+  if (reply === null) {
+    return { refused: 'the hub did not answer, so the session stays where it is.' };
+  }
+
+  const pid = (reply.body as { pid?: unknown } | null)?.pid;
+
+  if (reply.status !== 200 || typeof pid !== 'number') {
+    return { refused: reply.error ?? `the hub answered ${reply.status}.` };
+  }
+
+  const check = await postToHub(record, '/background/check', { hostPid: process.pid, pid }, BACKGROUND_TIMEOUT_MS);
+
+  if (check?.status === 200 && (check.body as { alone?: unknown } | null)?.alone === true) {
+    return { pid };
+  }
+
+  return {
+    refused:
+      check?.status === 200
+        ? 'Another Claude session started in this window while Switchboard answered, so the window stays open.'
+        : `the window's sessions could not be checked, so the window stays open: ${check?.error ?? 'the hub did not answer'}.`,
+  };
+}
+
 export interface BackgroundDeps {
   record: HubRecord | null;
   /** The IDs of this item window's work items; null in a window that is no work item's. */
@@ -47,19 +83,20 @@ export interface BackgroundDeps {
 }
 
 /**
- * Continue in Background (PRD R89): the hub moves the active Claude tab's session to its background process, then this window closes the tab,
- * which ends the tab's process (mechanics M55), and itself. A refusal, here or from the hub, closes nothing.
+ * Continue in Background (PRD R89): the hub moves a Claude session of this window to its background process, then the window closes, which ends
+ * the session's process (mechanics M55). `where` is the Claude tab in front, whose tab closes first, or the Claude sidebar, which has no tab, so
+ * the hub takes the window's one Claude session. A refusal, here or from the hub, closes nothing.
  */
-export async function continueInBackground(deps: BackgroundDeps): Promise<void> {
+export async function continueInBackground(deps: BackgroundDeps, where: 'tab' | 'sidebar' = 'tab'): Promise<void> {
   const active = vscode.window.tabGroups.activeTabGroup.activeTab;
   const refuse = (text: string) => void vscode.window.showWarningMessage(`Switchboard: ${text}`);
 
-  if (!isClaude(active)) {
+  if (where === 'tab' && !isClaude(active)) {
     refuse('Open the Claude tab to continue its session in the background.');
     return;
   }
 
-  const label = active.label;
+  const label = where === 'tab' ? active!.label : null;
   const refusal = closeRefusal(label);
 
   if (refusal !== null) {
@@ -68,29 +105,24 @@ export async function continueInBackground(deps: BackgroundDeps): Promise<void> 
   }
 
   if (deps.workItemIds === null || deps.workItemIds.length === 0) {
-    refuse("This tab's session is not one of Switchboard's work items.");
+    refuse("This session is not one of Switchboard's work items.");
     return;
   }
 
   if (deps.record === null) {
-    void vscode.window.showErrorMessage('Switchboard: the hub did not answer, so the session stays in its tab.');
+    void vscode.window.showErrorMessage('Switchboard: the hub did not answer, so the session stays where it is.');
     return;
   }
 
   // A Claude tab with the label that closes while the hub answers may be followed by another session's tab with the same label, which must stay.
   let closedMeanwhile = false;
   const watch = vscode.window.tabGroups.onDidChangeTabs((event) => {
-    closedMeanwhile ||= event.closed.some((tab) => isClaude(tab) && tab.label === label);
+    closedMeanwhile ||= label !== null && event.closed.some((tab) => isClaude(tab) && tab.label === label);
   });
-  const reply = await postToHub(deps.record, '/background', { label, hostPid: process.pid, workItemIds: deps.workItemIds }, BACKGROUND_TIMEOUT_MS).finally(() => watch.dispose());
+  const answers = await answersOf(deps.record, label, deps.workItemIds).finally(() => watch.dispose());
 
-  if (reply === null) {
-    void vscode.window.showErrorMessage('Switchboard: the hub did not answer, so the session stays in its tab.');
-    return;
-  }
-
-  if (reply.status !== 200) {
-    refuse(reply.error ?? `the hub answered ${reply.status}.`);
+  if ('refused' in answers) {
+    refuse(answers.refused);
     return;
   }
 
@@ -99,21 +131,24 @@ export async function continueInBackground(deps: BackgroundDeps): Promise<void> 
     return;
   }
 
-  // The window may have changed while the hub answered; the hub keeps the session where it is unless the tab's process ends.
+  // The window may have changed while the hub answered; the hub keeps the session where it is unless its process ends.
   const changed = closeRefusal(label);
 
   if (changed !== null) {
-    refuse(`${changed} The session stays in its tab.`);
+    refuse(`${changed} The session stays where it is.`);
     return;
   }
 
-  // The one Claude tab, which closeRefusal found by the label.
-  const closed = await Promise.resolve(vscode.window.tabGroups.close(claudeTabs()[0]!)).catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+  if (label !== null) {
+    // The one Claude tab, which closeRefusal found by the label.
+    const closed = await Promise.resolve(vscode.window.tabGroups.close(claudeTabs()[0]!)).catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
 
-  if (closed !== true) {
-    refuse(`the Claude tab did not close, so the session stays in it${typeof closed === 'string' ? `: ${closed}` : '.'}`);
-    return;
+    if (closed !== true) {
+      refuse(`the Claude tab did not close, so the session stays in it${typeof closed === 'string' ? `: ${closed}` : '.'}`);
+      return;
+    }
   }
 
+  // Hiding the sidebar leaves its session running; closing the window ends it (mechanics M55).
   await vscode.commands.executeCommand('workbench.action.closeWindow');
 }

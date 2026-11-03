@@ -10,7 +10,7 @@ import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
 
-const NOT_SWITCHBOARD = "This tab's session is not one of Switchboard's work items.";
+const NOT_SWITCHBOARD = "This session is not one of Switchboard's work items.";
 const NEVER_BACKGROUND = 'This session never ran in the background, so it cannot continue there.';
 
 export const ROSTER_MS = 30_000;
@@ -30,6 +30,8 @@ export const RECHECK_MS = 30_000;
 /** How long Continue in Background waits for the tab's process to exit (PRD R89); closing the tab ended it within 4 seconds (mechanics M55). */
 export const MOVE_EXIT_MS = 30_000;
 const MOVE_POLL_MS = 250;
+/** Time the window's close leaves the tab's process to exit before the wait gives up; it exited within 4.4 seconds (mechanics M55). */
+const MOVE_CLOSE_MARGIN_MS = 10_000;
 /** How long a resumed session may take to be listed in its background process with a pid, as for a start. */
 export const RESUME_CONFIRM_MS = 60_000;
 const RESUME_POLL_MS = 2_000;
@@ -908,7 +910,7 @@ export class Runtime {
    * apart from other sessions the label may name. It answers once the flow has stored the move with that process, so the window closes the tab
    * only after that.
    */
-  async background(label: string, hostPid: number, workItemIds: number[]): Promise<{ refused: string } | null> {
+  async background(label: string | null, hostPid: number, workItemIds: number[]): Promise<{ refused: string } | { pid: number }> {
     const runner = this.runners.claude;
     const tab = runner.tab === undefined ? { error: 'The Claude runner cannot move sessions.' } : await runner.tab(label, hostPid);
 
@@ -921,7 +923,12 @@ export class Runtime {
     }
 
     if (tab.candidates.length > 1) {
-      return { refused: `Several Claude sessions in this window are named "${label}", so Switchboard cannot tell which one this tab holds.` };
+      return {
+        refused:
+          label === null
+            ? 'Several Claude sessions run in this window, so Switchboard cannot tell which one the sidebar holds.'
+            : `Several Claude sessions in this window are named "${label}", so Switchboard cannot tell which one this tab holds.`,
+      };
     }
 
     const [found] = tab.candidates;
@@ -935,10 +942,30 @@ export class Runtime {
       return { refused: NEVER_BACKGROUND };
     }
 
-
     const { refused } = this.send({ type: 'background', sessionId: session.id, nativeSessionId: found.nativeSessionId, pid: found.pid, busy: found.busy, workItemIds });
 
-    return refused === null ? null : { refused };
+    return refused === null ? { pid: found.pid } : { refused };
+  }
+
+  /**
+   * Whether the window may close: the moving process `pid` is still the window's only live Claude session, so a session opened in the window while
+   * the hub answered does not end with it, and its move still waits with time left for the process to exit before the wait gives up (PRD R89).
+   */
+  async windowAlone(hostPid: number, pid: number): Promise<boolean | { error: string }> {
+    const pending = () => this.deps.store.movingSessions().some((session) => session.move?.pid === pid && session.move.phase === 'waiting' && this.deps.now() - session.move.at < MOVE_EXIT_MS - MOVE_CLOSE_MARGIN_MS);
+
+    if (!pending()) {
+      return { error: 'The move is no longer waiting for the window to close.' };
+    }
+
+    const runner = this.runners.claude;
+    const window = runner.tab === undefined ? { error: 'The Claude runner cannot move sessions.' } : await runner.tab(null, hostPid);
+
+    if ('error' in window) {
+      return window;
+    }
+
+    return pending() ? window.candidates.length === 1 && window.candidates[0]!.pid === pid : { error: 'The move is no longer waiting for the window to close.' };
   }
 
   /** Waits for the tab's process to exit, then resumes the session in its background process, unless Stop or Delete ended the move first. */
@@ -947,7 +974,7 @@ export class Runtime {
     const current = () => this.deps.store.session(action.sessionId)?.move?.id === action.moveId;
 
     // A stopped hub has closed the store; the move stays stored, and the next hub's startup continues it.
-    for (const until = this.deps.now() + MOVE_EXIT_MS; alive(action.pid); await this.deps.sleep(MOVE_POLL_MS)) {
+    for (const until = (this.deps.store.session(action.sessionId)?.move?.at ?? this.deps.now()) + MOVE_EXIT_MS; alive(action.pid); await this.deps.sleep(MOVE_POLL_MS)) {
       if (this.stopped || !current()) {
         return;
       }
@@ -1035,7 +1062,7 @@ export class Runtime {
 
   /** After a restart (PRD R89): a move still waiting runs again from the wait, and a launch is never repeated, only confirmed by its deadline. */
   private resumeMoves(): void {
-    for (const session of this.deps.store.activeSessions()) {
+    for (const session of this.deps.store.movingSessions()) {
       const move = session.move;
 
       if (move === null || session.nativeSessionId === null) {

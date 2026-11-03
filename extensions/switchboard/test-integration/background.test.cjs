@@ -4,19 +4,28 @@ const vscode = require('vscode');
 
 const LABEL = 'switchboard · dev:develop · github 7';
 
-/** A test-owned stand-in hub that records each Continue in Background request and answers `reply`, after `hold` when set. */
+/**
+ * A test-owned stand-in hub that records each Continue in Background request and answers `reply`, after `hold` when set, and records each last
+ * check before the window closes, answering `check`.
+ */
 async function stubHub() {
-  const hub = { requests: [], reply: { status: 200, body: { moving: true } }, hold: null };
+  const hub = { requests: [], reply: { status: 200, body: { pid: 4242 } }, hold: null, checks: [], check: { status: 200, body: { alone: true } } };
   const server = createServer((request, response) => {
     let body = '';
 
     request.setEncoding('utf8');
     request.on('data', (chunk) => (body += chunk));
     request.on('end', async () => {
-      hub.requests.push({ path: request.url, body: JSON.parse(body) });
-      await hub.hold?.();
-      response.writeHead(hub.reply.status, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify(hub.reply.body));
+      const checking = request.url === '/background/check';
+
+      (checking ? hub.checks : hub.requests).push({ path: request.url, body: JSON.parse(body) });
+
+      await (checking ? hub.checkHold : hub.hold)?.();
+
+      const answer = checking ? hub.check : hub.reply;
+
+      response.writeHead(answer.status, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(answer.body));
     });
   });
 
@@ -78,7 +87,10 @@ describe('Continue in Background (PRD R89)', () => {
     closes = [];
     panels = [];
     hub.requests = [];
-    hub.reply = { status: 200, body: { moving: true } };
+    hub.reply = { status: 200, body: { pid: 4242 } };
+    hub.checks = [];
+    hub.check = { status: 200, body: { alone: true } };
+    hub.checkHold = null;
     hub.hold = null;
     vscode.window.showWarningMessage = (text) => (messages.push(text), Promise.resolve(undefined));
     vscode.window.showErrorMessage = (text) => (messages.push(text), Promise.resolve(undefined));
@@ -159,8 +171,8 @@ describe('Continue in Background (PRD R89)', () => {
 
     assert.deepStrictEqual(messages, [
       'Switchboard: Continue in Background works while the session is running.',
-      'Switchboard: the hub did not answer, so the session stays in its tab.',
-      "Switchboard: This tab's session is not one of Switchboard's work items.",
+      'Switchboard: the hub did not answer, so the session stays where it is.',
+      "Switchboard: This session is not one of Switchboard's work items.",
     ]);
     assert.strictEqual(hub.requests.length, 1);
     assert.strictEqual(open(panels[0]), true);
@@ -179,7 +191,7 @@ describe('Continue in Background (PRD R89)', () => {
 
     await extension.background(hub.record, [7]);
 
-    assert.deepStrictEqual(messages, ['Switchboard: Close the other Claude tabs first; closing the window would end their sessions. The session stays in its tab.']);
+    assert.deepStrictEqual(messages, ['Switchboard: Close the other Claude tabs first; closing the window would end their sessions. The session stays where it is.']);
     assert.strictEqual(open(panels[0]), true);
     assert.deepStrictEqual(closes, []);
   });
@@ -212,7 +224,7 @@ describe('Continue in Background (PRD R89)', () => {
 
     await extension.background(hub.record, [7]);
 
-    assert.deepStrictEqual(messages, ['Switchboard: Save or discard your changes first, so the window can close. The session stays in its tab.']);
+    assert.deepStrictEqual(messages, ['Switchboard: Save or discard your changes first, so the window can close. The session stays where it is.']);
     assert.strictEqual(open(panels[0]), true);
     assert.deepStrictEqual(closes, []);
   });
@@ -220,7 +232,7 @@ describe('Continue in Background (PRD R89)', () => {
   it('is offered in the command palette only while a Claude tab is in front', () => {
     const { menus } = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
 
-    assert.deepStrictEqual(menus.commandPalette, [{ command: 'switchboard.continueInBackground', when: "activeWebviewPanelId == 'claudeVSCodePanel'" }]);
+    assert.ok(menus.commandPalette.some((item) => item.command === 'switchboard.continueInBackground' && item.when === "activeWebviewPanelId == 'claudeVSCodePanel'"));
   });
 
   it('does not close a replacement Claude tab with the same label opened while the hub answered (review round 1, extension-1)', async () => {
@@ -259,6 +271,75 @@ describe('Continue in Background (PRD R89)', () => {
 
     assert.deepStrictEqual(messages, ["Switchboard: Close Switchboard's terminal first; closing the window would end its session."]);
     assert.deepStrictEqual(hub.requests, []);
+    assert.deepStrictEqual(closes, []);
+  });
+
+  it('moves the Claude sidebar\'s session, which has no tab, and closes the window', async () => {
+    await extension.background(hub.record, [7], 'sidebar');
+
+    assert.deepStrictEqual(hub.requests, [{ path: '/background', body: { label: null, hostPid: process.pid, workItemIds: [7] } }]);
+    assert.deepStrictEqual(closes, [false]);
+    assert.deepStrictEqual(messages, []);
+  });
+
+  it('refuses the sidebar\'s move while a Claude tab is open, whose session the window would end', async () => {
+    panels.push(claudeTab());
+    await inFront();
+
+    await extension.background(hub.record, [7], 'sidebar');
+
+    assert.deepStrictEqual(messages, ['Switchboard: Close the Claude tabs first; closing the window would end their sessions.']);
+    assert.deepStrictEqual(hub.requests, []);
+    assert.deepStrictEqual(closes, []);
+  });
+
+  it('puts the sidebar\'s button in the Claude sidebar\'s title bar and keeps it out of the command palette', () => {
+    const { commands, menus } = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
+
+    assert.ok(commands.some((command) => command.command === 'switchboard.continueSidebarInBackground' && command.title === 'Continue in Background'));
+    assert.ok(menus['view/title'].some((item) => item.command === 'switchboard.continueSidebarInBackground' && item.when === 'view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary'));
+    assert.ok(menus.commandPalette.some((item) => item.command === 'switchboard.continueSidebarInBackground' && item.when === 'false'));
+  });
+
+  it('keeps the window open when another Claude session started in it while the hub answered, from the sidebar or a tab', async () => {
+    hub.check = { status: 200, body: { alone: false } };
+    await extension.background(hub.record, [7], 'sidebar');
+
+    panels.push(claudeTab());
+    await inFront();
+    await extension.background(hub.record, [7]);
+
+    assert.deepStrictEqual(hub.checks.map((check) => check.body), [{ hostPid: process.pid, pid: 4242 }, { hostPid: process.pid, pid: 4242 }]);
+    assert.deepStrictEqual(messages, [
+      'Switchboard: Another Claude session started in this window while Switchboard answered, so the window stays open.',
+      'Switchboard: Another Claude session started in this window while Switchboard answered, so the window stays open.',
+    ]);
+    assert.strictEqual(open(panels[0]), true);
+    assert.deepStrictEqual(closes, []);
+  });
+
+  it('keeps the window open when the last check fails', async () => {
+    hub.check = { status: 409, body: { error: 'claude agents timed out' } };
+    await extension.background(hub.record, [7], 'sidebar');
+
+    assert.deepStrictEqual(messages, ["Switchboard: the window's sessions could not be checked, so the window stays open: claude agents timed out."]);
+    assert.deepStrictEqual(closes, []);
+  });
+
+  it('checks the window again after the last check, so a Switchboard terminal opened during it keeps the window open', async () => {
+    let terminal;
+    hub.checkHold = async () => {
+      terminal = vscode.window.createTerminal({ name: 'Switchboard · gh 7' });
+    };
+
+    try {
+      await extension.background(hub.record, [7], 'sidebar');
+    } finally {
+      terminal?.dispose();
+    }
+
+    assert.deepStrictEqual(messages, ["Switchboard: Close Switchboard's terminal first; closing the window would end its session. The session stays where it is."]);
+    assert.strictEqual(hub.checks.length, 1);
     assert.deepStrictEqual(closes, []);
   });
 });

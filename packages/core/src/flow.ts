@@ -1880,7 +1880,7 @@ class Flow {
     const item = session === null ? null : this.latest(session);
 
     if (session === null || item === null || session.nativeSessionId !== event.nativeSessionId || !event.workItemIds.includes(item.id)) {
-      throw new Refusal("This tab's session is not one of Switchboard's work items.");
+      throw new Refusal("This session is not one of Switchboard's work items.");
     }
 
     if (session.provider !== 'claude' || session.external) {

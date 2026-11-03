@@ -78,9 +78,9 @@ describe('Continue in Background (PRD R89)', () => {
     const h = new Harness();
     const { session } = inTab(h);
 
-    expect(h.send(background(session, { workItemIds: [2] })).refused).toBe("This tab's session is not one of Switchboard's work items.");
-    expect(h.send(background(session, { nativeSessionId: 'other' })).refused).toBe("This tab's session is not one of Switchboard's work items.");
-    expect(h.send(background('unknown')).refused).toBe("This tab's session is not one of Switchboard's work items.");
+    expect(h.send(background(session, { workItemIds: [2] })).refused).toBe("This session is not one of Switchboard's work items.");
+    expect(h.send(background(session, { nativeSessionId: 'other' })).refused).toBe("This session is not one of Switchboard's work items.");
+    expect(h.send(background('unknown')).refused).toBe("This session is not one of Switchboard's work items.");
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.send(background(session)).refused).toBe('Continue in Background works while the session is running.');
@@ -247,7 +247,7 @@ describe('Continue in Background (PRD R89)', () => {
 
     h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
     h.store.insertSession({ ...h.store.session(session)!, id: 'later', startedAt: h.now + MINUTE, nativeSessionId: 'later-native' });
-    expect(h.send(background(session)).refused).toBe("This tab's session is not one of Switchboard's work items.");
+    expect(h.send(background(session)).refused).toBe("This session is not one of Switchboard's work items.");
   });
 
   it('logs the request and its result in History, without the move’s bookkeeping', () => {

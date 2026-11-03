@@ -291,8 +291,14 @@ describe('createHubApp', () => {
     expect(await app.post['/background']!({ label: 'My tab', workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
     expect(await app.post['/background']!({ label: '', hostPid: 1, workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
     expect(await app.post['/background']!({ label: 'My tab', hostPid: 1, workItemIds: ['1'] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
-    expect(await app.post['/background']!({ label: 'My tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This tab's session is not one of Switchboard's work items." } });
-    expect(await app.post['/background']!({ label: 'Other tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This tab's session is not one of Switchboard's work items." } });
+    expect(await app.post['/background']!({ label: 'My tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This session is not one of Switchboard's work items." } });
+    expect(await app.post['/background']!({ label: 'Other tab', hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This session is not one of Switchboard's work items." } });
+    // A null label is the Claude sidebar.
+    expect(await app.post['/background']!({ label: null, hostPid: 1, workItemIds: [1] })).toEqual({ status: 409, body: { error: "This session is not one of Switchboard's work items." } });
+    expect(await app.post['/background']!({ label: 7, hostPid: 1, workItemIds: [1] })).toEqual({ status: 400, body: { error: 'Expected {label, hostPid, workItemIds}.' } });
+    // No move waits for this process.
+    expect(await app.post['/background/check']!({ hostPid: 1, pid: 7 })).toEqual({ status: 409, body: { error: 'The move is no longer waiting for the window to close.' } });
+    expect(await app.post['/background/check']!({ hostPid: 1 })).toEqual({ status: 400, body: { error: 'Expected {hostPid, pid}.' } });
   });
 
   it('registers a session the Claude roster lists, answering its key and contract, and refuses a bad body (PRD R81)', async () => {

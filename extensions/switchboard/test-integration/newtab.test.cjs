@@ -56,6 +56,9 @@ describe('New Claude Session in Editor Tab (PRD R75)', () => {
       ['switchboard.newClaudeTab', '!config.claudeCode.useTerminal', 'navigation'],
       ['switchboard.continueInBackground', "activeWebviewPanelId == 'claudeVSCodePanel'", 'navigation'],
     ]);
-    assert.deepStrictEqual(shown(menus['view/title']), [['switchboard.newClaudeTab', 'view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary', 'navigation']]);
+    assert.deepStrictEqual(shown(menus['view/title']), [
+      ['switchboard.newClaudeTab', 'view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary', 'navigation'],
+      ['switchboard.continueSidebarInBackground', 'view == claudeVSCodeSidebar || view == claudeVSCodeSidebarSecondary', 'navigation'],
+    ]);
   });
 });
