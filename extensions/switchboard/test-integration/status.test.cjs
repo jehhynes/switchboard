@@ -86,7 +86,7 @@ describe('the status bar item (PRD R64, R71)', () => {
 
     const contributes = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
 
-    assert.deepStrictEqual(contributes.commands.map((entry) => entry.command), ['switchboard.showDock', 'switchboard.showHubLog', 'switchboard.newClaudeTab']);
+    assert.deepStrictEqual(contributes.commands.map((entry) => entry.command), ['switchboard.showDock', 'switchboard.showHubLog', 'switchboard.newClaudeTab', 'switchboard.continueInBackground']);
     assert.strictEqual(contributes.views, undefined, 'the panel view is gone');
   });
 });

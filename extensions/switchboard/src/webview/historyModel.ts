@@ -100,6 +100,7 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   delete: { text: 'You deleted a work item', icon: 'trash' },
   answer: { text: 'You answered the question', icon: 'comment' },
   'open-question': { text: 'You opened the question in its session', icon: 'comment-discussion' },
+  background: { text: 'You asked to continue the session in the background', icon: 'debug-step-out' },
   pick: { text: 'You picked it from the pool', icon: 'pin' },
   'retriage-pool': { text: 'You asked to triage the pool ticket again', icon: 'filter' },
   restore: { text: 'You restored it', icon: 'bell' },
@@ -583,6 +584,14 @@ class Builder {
       case 'stop-failed':
         skip.add('error');
         return { category: 'session', icon: 'error', text: detail['reason'] === 'release' ? 'Releasing the session failed' : 'Stopping the session failed', detail: str(detail['message']), tone: 'error' };
+      case 'session-resumed':
+        skip.add('state').add('shortId').add('released').add('releasing').add('endedAt');
+        return { category: 'session', icon: 'terminal', text: `${capital(session)} continues in the background` };
+      case 'resume-failed':
+        skip.add('state').add('outcome').add('outcomeDetail').add('released').add('error');
+        return { category: 'session', icon: 'error', text: 'Continuing in the background failed', detail: str(detail['message']), tone: 'error' };
+      case 'move-cancelled':
+        return { category: 'session', icon: 'circle-slash', text: `${capital(session)} stayed in its tab, whose process did not exit` };
       case 'reply-failed':
         skip.add('error');
         return { category: 'session', icon: 'error', text: 'Sending your answer failed', detail: str(detail['message']), tone: 'error' };

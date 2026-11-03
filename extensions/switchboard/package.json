@@ -71,6 +71,12 @@
         "title": "New Claude Session in Editor Tab",
         "category": "Switchboard",
         "icon": "$(add)"
+      },
+      {
+        "command": "switchboard.continueInBackground",
+        "title": "Continue in Background",
+        "category": "Switchboard",
+        "icon": "$(debug-step-out)"
       }
     ],
     "menus": {
@@ -79,6 +85,17 @@
           "command": "switchboard.newClaudeTab",
           "when": "!config.claudeCode.useTerminal",
           "group": "navigation"
+        },
+        {
+          "command": "switchboard.continueInBackground",
+          "when": "activeWebviewPanelId == 'claudeVSCodePanel'",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "switchboard.continueInBackground",
+          "when": "activeWebviewPanelId == 'claudeVSCodePanel'"
         }
       ],
       "view/title": [

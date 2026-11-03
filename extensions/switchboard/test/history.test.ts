@@ -336,6 +336,19 @@ describe('History model', () => {
       [event('reply-failed', 'hub', { message: 'no such session' }, [change('workItem', 'update', { error: [null, 'Answer failed: no such session'] })]), { text: 'Sending your answer failed', detail: 'no such session', lines: [], tone: 'error', category: 'session' }],
       [event('answer', 'operator', { answer: 'Birch\n bark' }, [], null), { text: 'You answered: Birch bark', category: 'you', tone: 'accent' }],
       [event('open-question', 'operator', null, [], null), { text: 'You opened the question in its session', category: 'you' }],
+      [event('background', 'operator', null, [], null), { text: 'You asked to continue the session in the background', category: 'you' }],
+      [
+        event('session-resumed', 'hub', { shortId: 'abc12345' }, [change('session', 'update', { released: [true, false], shortId: ['abc12345', 'abc12345'] }, { sessionId: 's1' })]),
+        { text: 'Session abc12345 continues in the background', lines: [], category: 'session' },
+      ],
+      [
+        event('resume-failed', 'hub', { message: 'Claude started a copy as 4df6b678.' }, [
+          change('session', 'update', { state: ['running', 'ended'], outcome: [null, 'failed'], released: [true, true] }, { sessionId: 's1' }),
+          change('workItem', 'update', { status: ['running', 'blocked'], error: [null, 'Continue in Background failed: Claude started a copy as 4df6b678.'] }),
+        ]),
+        { text: 'Continuing in the background failed', detail: 'Claude started a copy as 4df6b678.', lines: ['Status: Running → Blocked'], tone: 'error' },
+      ],
+      [event('move-cancelled', 'hub', null, []), { text: 'Session abc12345 stayed in its tab, whose process did not exit', lines: [], category: 'session' }],
       [event('start', 'operator', { guidance: 'Check the 2024 thread.' }, [], null), { text: 'You started it with guidance', detail: 'Check the 2024 thread.', category: 'you', tone: 'accent' }],
       [event('pick', 'operator', { guidance: 'Reply in Spanish.' }, [], null), { text: 'You picked it from the pool with guidance', detail: 'Reply in Spanish.', category: 'you' }],
       [event('start', 'operator', null, [], null), { text: 'You started it', detail: null, category: 'you' }],
