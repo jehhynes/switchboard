@@ -383,6 +383,18 @@ describe('Snoozed (PRD R49)', () => {
     expect(only(h.act({ type: 'restore', ticketId: 1 }), 'start-session').kind).toBe('task');
   });
 
+  it('queues the task after setup when a poll saw a blocker meanwhile, and starts it once the blocker closes (PRD R90)', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('15619'));
+    const setup = h.started(only(h.triaged(triage, 'dev:develop'), 'start-session'));
+
+    h.poll({ ...issue('15619'), blockers: [{ url: 'https://github.com/acme/widgets/issues/12', ref: '#12', title: 'Issue 12' }] });
+    h.report(setup, { kind: 'worktree', path: 'D:/wt/1', branch: null });
+    expect(h.act({ type: 'roster', sessions: [] })).toEqual([]);
+    expect(h.item(1).status).toBe('queued');
+    expect(only(h.poll({ ...issue('15619'), blockers: [] }), 'start-session').kind).toBe('task');
+  });
+
   it('keeps the work items of a snoozed ticket listed however long ago they were done', () => {
     const h = new Harness();
     h.poll(issue('1'), issue('2'));

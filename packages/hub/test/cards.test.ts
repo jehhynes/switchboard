@@ -4,7 +4,7 @@ import { cardsOf } from '../src/cards.js';
 import type { PoolView, Snapshot, WorkItemView } from '../src/runtime.js';
 
 function ticket(id: number, source: string, url: string, snoozed = false): Ticket {
-  return { id, source, sourceKey: String(id), ref: `#${id}`, sourceId: null, title: `t${id}`, url, assigned: true, pool: false, snoozed, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null };
+  return { id, source, sourceKey: String(id), ref: `#${id}`, sourceId: null, title: `t${id}`, url, assigned: true, pool: false, snoozed, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null, blockers: [] };
 }
 
 function session(state: Session['state']): Session {

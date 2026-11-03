@@ -129,7 +129,7 @@ describe('Store', () => {
     raw.close();
 
     const reopened = Store.open(path);
-    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null });
+    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [] });
     reopened.close();
   });
 

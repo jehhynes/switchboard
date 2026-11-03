@@ -229,7 +229,7 @@ class Builder {
     if (change.op === 'insert') {
       switch (change.entity) {
         case 'ticket':
-          return skip.has('*') ? [] : [`Switchboard first saw the ticket${value('assigned') === true ? ', assigned to you' : value('pool') === true ? ', in the pool' : ''}`];
+          return skip.has('*') ? [] : [`Switchboard first saw the ticket${value('assigned') === true ? ', assigned to you' : value('pool') === true ? ', in the pool' : ''}`, ...blockerLines([], value('blockers'))];
         case 'workItem':
           return skip.has('*') ? [] : [`Work item created: ${STATUS_WORDS[value('status') as WorkItemStatus] ?? str(value('status'))}${value('playbook') ? `, ${str(value('playbook'))}` : ''}`];
         case 'session':
@@ -333,6 +333,9 @@ class Builder {
           break;
         case 'ticket.title':
           lines.push(`Title: ${str(before)} → ${str(after)}`);
+          break;
+        case 'ticket.blockers':
+          lines.push(...blockerLines(before, after));
           break;
         case 'ticket.snoozed':
           lines.push(after === true ? `Snoozed ${value('snoozedUntil') == null ? 'indefinitely' : `until ${timeText(value('snoozedUntil') as number)}`}` : 'Snooze ended');
@@ -903,4 +906,16 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
     recordedSince: history.recordedSince,
     sections,
   };
+}
+
+/** A change to the open issues blocking the ticket (PRD R90), or nothing when it has none before or after. */
+function blockerLines(before: unknown, after: unknown): string[] {
+  const refs = (value: unknown) => (Array.isArray(value) ? value.map((blocker: { ref?: unknown }) => String(blocker.ref)) : []);
+  const now = refs(after);
+
+  if (now.length > 0) {
+    return [`${now.length === 1 ? 'Blocker' : 'Blockers'}: ${now.join(', ')}`];
+  }
+
+  return refs(before).length > 0 ? ['No open blockers'] : [];
 }

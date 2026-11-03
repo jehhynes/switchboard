@@ -280,7 +280,7 @@ describe('ZohoSource.classify', () => {
 });
 
 describe('ZohoSource.context', () => {
-  const ticket = (sourceId: string | null): Ticket => ({ id: 1, source: 'zoho', sourceKey: '900007', ref: '#900007', sourceId, title: 'Ticket 900007', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null });
+  const ticket = (sourceId: string | null): Ticket => ({ id: 1, source: 'zoho', sourceKey: '900007', ref: '#900007', sourceId, title: 'Ticket 900007', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null, blockers: [] });
 
   it('formats the subject, fields, tier and owner history, and the conversation oldest first, clipping each text', async () => {
     const detail = fixture('ticket') as { id: string; ticketNumber: string; status: string };

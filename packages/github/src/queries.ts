@@ -4,7 +4,7 @@ query($owner:String!, $number:Int!, $status:String!){
   repositoryOwner(login:$owner){ ... on ProjectV2Owner{ projectV2(number:$number){ field(name:$status){ __typename } } } }
 }`;
 
-/** Repeated `assignee:` qualifiers are ORed in issue search (GC issues.ts, verified live). */
+/** Repeated `assignee:` qualifiers are ORed in issue search (GC issues.ts, verified live). `blockedBy` lists closed blockers too (mechanics M56). */
 export const ISSUES_QUERY = `
 query($q:String!, $status:String!, $after:String){
   search(query:$q, type:ISSUE, first:100, after:$after){
@@ -16,6 +16,7 @@ query($q:String!, $status:String!, $after:String){
         fieldValueByName(name:$status){ ... on ProjectV2ItemFieldSingleSelectValue{ name updatedAt } }
       }}
       assignees(first:10){ nodes{ login } }
+      blockedBy(first:50){ nodes{ number title url state repository{ nameWithOwner } } }
       timelineItems(last:100, itemTypes:[ASSIGNED_EVENT, UNASSIGNED_EVENT]){ nodes{
         __typename
         ... on AssignedEvent{ createdAt assignee{ ... on User{ login } ... on Bot{ login } } }

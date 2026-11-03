@@ -15,7 +15,7 @@ export function heldSlots(store: Store): number {
   }).length;
 }
 
-/** Everything that keeps a queued work item from starting; the scheduler starts it only when the list is empty (PRD R17, R38, R49). */
+/** Everything that keeps a queued work item from starting; the scheduler starts it only when the list is empty (PRD R17, R38, R49, R90). */
 export function queueWaits(store: Store, item: WorkItem, limit: number, used = heldSlots(store)): QueueWait[] {
   const waits: QueueWait[] = [];
 
@@ -29,8 +29,14 @@ export function queueWaits(store: Store, item: WorkItem, limit: number, used = h
     waits.push({ kind: 'session', sessionId: session.id, shortId: session.shortId, ownItem, playbook: ownItem ? null : store.workItem(session.workItemId)!.playbook });
   }
 
-  if (store.ticket(item.ticketId)!.snoozed) {
+  const ticket = store.ticket(item.ticketId)!;
+
+  if (ticket.snoozed) {
     waits.push({ kind: 'snoozed' });
+  }
+
+  if (ticket.blockers?.length) {
+    waits.push({ kind: 'blockers', blockers: ticket.blockers });
   }
 
   return waits;

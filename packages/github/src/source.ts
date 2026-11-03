@@ -1,4 +1,4 @@
-import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket, TicketLookup } from '@switchboard/core';
+import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket, TicketBlocker, TicketLookup } from '@switchboard/core';
 import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import type { Gh } from './gh.js';
@@ -59,6 +59,7 @@ interface IssueNode {
   url: string;
   projectItems: ProjectItems;
   assignees?: { nodes: { login: string }[] };
+  blockedBy?: { nodes: ({ number: number; title: string; url: string; state: string; repository: { nameWithOwner: string } } | null)[] };
   timelineItems?: { nodes: { __typename?: string; createdAt?: string; assignee?: { login?: string } | null }[] };
 }
 
@@ -229,6 +230,23 @@ export class GithubSource implements Source {
     return times.length === 0 ? null : Math.max(...times);
   }
 
+  /** The open issues blocking an issue, none while `waitForBlockers` is off (PRD R90); `blockedBy` also lists closed ones (mechanics M56). */
+  private blockers(node: IssueNode): TicketBlocker[] {
+    if (!this.config.waitForBlockers) {
+      return [];
+    }
+
+    return (node.blockedBy?.nodes ?? []).flatMap((issue) => {
+      if (issue === null || issue.state !== 'OPEN') {
+        return [];
+      }
+
+      const repo = issue.repository.nameWithOwner;
+
+      return [{ url: issue.url, ref: repo.toLowerCase() === this.config.repo.toLowerCase() ? `#${issue.number}` : `${repo}#${issue.number}`, title: issue.title }];
+    });
+  }
+
   /**
    * When the operator's current assignment began (GC `assignedSince`): undo the events newest first until none of their logins is
    * assigned. Null when none is assigned or the events start mid-assignment. A status change does not count (PRD R27).
@@ -284,7 +302,9 @@ export class GithubSource implements Source {
       }
 
       if (read.assigned) {
-        const entry: PolledTicket = { sourceKey: ticket.sourceKey, ref: ticket.ref, sourceId: null, title: ticket.title, url: ticket.url, assigned: true, pool: false, sortAt: ticket.sortAt, enteredAt: null };
+        // The search's blockers are current; an issue missing from the search keeps the stored ones, or none while the check is off (PRD R90).
+        const blockers = this.config.waitForBlockers ? tickets[index]?.blockers : [];
+        const entry: PolledTicket = { sourceKey: ticket.sourceKey, ref: ticket.ref, sourceId: null, title: ticket.title, url: ticket.url, assigned: true, pool: false, sortAt: ticket.sortAt, enteredAt: null, ...(blockers === undefined ? {} : { blockers }) };
         tickets.splice(index === -1 ? tickets.length : index, index === -1 ? 0 : 1, entry);
       }
     }
@@ -340,6 +360,7 @@ export class GithubSource implements Source {
           sortAt: this.waitingSince(node.timelineItems, field?.updatedAt),
           // Scope then starts at a status change, which the timeline no longer logs, so core keeps the time it first saw the issue.
           enteredAt: requireAssignee ? this.assignedSince(node as IssueNode) : null,
+          blockers: this.blockers(node as IssueNode),
         });
       }
 

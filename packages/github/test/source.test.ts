@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Anchor, Ticket } from '@switchboard/core';
+import type { Anchor, Ticket, TicketBlocker } from '@switchboard/core';
 import { describe, expect, it, vi } from 'vitest';
 import { parseGithubConfig } from '../src/config.js';
 import type { GithubConfig } from '../src/config.js';
@@ -37,7 +37,7 @@ function fakeGh(...answers: GhResult[]) {
 
 const SINGLE_SELECT: GhResult = { json: { data: { repositoryOwner: { projectV2: { field: { __typename: 'ProjectV2SingleSelectField' } } } } } };
 
-const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null });
+const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null, blockers: [] });
 
 describe('GithubSource.poll', () => {
   it('lists every searched issue, assigned only when its project status is configured', async () => {
@@ -56,6 +56,7 @@ describe('GithubSource.poll', () => {
         pool: false,
         sortAt: null,
         enteredAt: null,
+        blockers: [],
       })),
     });
   });
@@ -141,10 +142,48 @@ describe('GithubSource.poll', () => {
     };
     const gh = fakeGh(SINGLE_SELECT, { json });
     const result = await new GithubSource(config({ requireAssignee: false }), gh).poll();
-    const listed = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Issue ${number}`, url: `u${number}`, assigned: true, pool: false, sortAt: Date.parse('2026-10-04T00:00:00Z'), enteredAt: null });
+    const listed = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Issue ${number}`, url: `u${number}`, assigned: true, pool: false, sortAt: Date.parse('2026-10-04T00:00:00Z'), enteredAt: null, blockers: [] });
 
     expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'repo:acme/widgets is:issue is:open project:acme/3', status: 'Status' });
     expect(result).toEqual({ tickets: [listed(1), listed(2), listed(3)] });
+  });
+
+  it('with waitForBlockers, lists the open issues blocking each issue, by number in the configured repository and by full name in another (PRD R90)', async () => {
+    const blocker = (number: number, state: string, repo: string) => ({ number, title: `Blocker ${number}`, url: `https://github.com/${repo}/issues/${number}`, state, repository: { nameWithOwner: repo } });
+    const node = (number: number, blockedBy: unknown) => ({
+      number,
+      title: 'T',
+      url: 'u',
+      projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev' } }] },
+      ...(blockedBy === undefined ? {} : { blockedBy }),
+    });
+    const json = {
+      data: {
+        search: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          nodes: [
+            // GitHub lists closed blockers too; an unreadable one is null.
+            node(1, { nodes: [blocker(12, 'OPEN', 'Acme/Widgets'), blocker(13, 'CLOSED', 'acme/widgets'), null, blocker(7, 'OPEN', 'acme/docs')] }),
+            node(2, { nodes: [blocker(14, 'CLOSED', 'acme/widgets')] }),
+            node(3, undefined),
+          ],
+        },
+      },
+    };
+    const result = await new GithubSource(config({ waitForBlockers: true }), fakeGh(SINGLE_SELECT, { json })).poll();
+    // Off, the default, no issue has blockers, so a stacked branch can start from its blocker's branch.
+    const off = await new GithubSource(config(), fakeGh(SINGLE_SELECT, { json })).poll();
+
+    expect('tickets' in off && off.tickets.map((t) => t.blockers)).toEqual([[], [], []]);
+    expect('tickets' in result && result.tickets.map((t) => t.blockers)).toEqual([
+      [
+        { url: 'https://github.com/Acme/Widgets/issues/12', ref: '#12', title: 'Blocker 12' },
+        { url: 'https://github.com/acme/docs/issues/7', ref: 'acme/docs#7', title: 'Blocker 7' },
+      ],
+      [],
+      [],
+    ]);
+    expect(ISSUES_QUERY).toContain('blockedBy(first:50){ nodes{ number title url state repository{ nameWithOwner } } }');
   });
 
   it('treats a status on another project as not assigned', async () => {
@@ -220,7 +259,7 @@ describe('GithubSource.poll', () => {
       },
     });
     const stored = (number: number, patch: Partial<Ticket> = {}): Ticket => ({ ...ticket(String(number)), title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, sortAt: 1000 + number, ...patch });
-    const kept = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, assigned: true, pool: false, sortAt: 1000 + number, enteredAt: null });
+    const kept = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, assigned: true, pool: false, sortAt: 1000 + number, enteredAt: null, blockers: [] as TicketBlocker[] });
 
     it('reads each one on its own and keeps those still assigned, so an empty search ends no work item', async () => {
       const gh = fakeGh(
@@ -241,11 +280,13 @@ describe('GithubSource.poll', () => {
     });
 
     it('replaces a search entry without a status with the stored ticket when the issue is still assigned, and reads no issue the search lists as assigned or the store holds as unassigned', async () => {
-      const gh = fakeGh(SINGLE_SELECT, search(node(1, null), node(2, '⚒️ Dev'), node(3, '🆕 New'), node(4, null)), issue(1, '⚒️ Dev'), issue(4, '🆕 New'));
+      // The search's blockers stay with the replacement (PRD R90).
+      const blocked = { ...node(1, null), blockedBy: { nodes: [{ number: 12, title: 'Blocker 12', url: 'https://github.com/acme/widgets/issues/12', state: 'OPEN', repository: { nameWithOwner: 'acme/widgets' } }] } };
+      const gh = fakeGh(SINGLE_SELECT, search(blocked, node(2, '⚒️ Dev'), node(3, '🆕 New'), node(4, null)), issue(1, '⚒️ Dev'), issue(4, '🆕 New'));
       const current = [stored(1), stored(2), stored(3, { assigned: false }), stored(4)];
-      const result = await new GithubSource(config(), gh).poll(current);
+      const result = await new GithubSource(config({ waitForBlockers: true }), gh).poll(current);
 
-      expect(result).toEqual({ tickets: [kept(1), expect.objectContaining({ sourceKey: '2', assigned: true }), expect.objectContaining({ sourceKey: '3', assigned: false }), expect.objectContaining({ sourceKey: '4', assigned: false, title: 'Issue 4' })] });
+      expect(result).toEqual({ tickets: [{ ...kept(1), blockers: [{ url: 'https://github.com/acme/widgets/issues/12', ref: '#12', title: 'Blocker 12' }] }, expect.objectContaining({ sourceKey: '2', assigned: true }), expect.objectContaining({ sourceKey: '3', assigned: false }), expect.objectContaining({ sourceKey: '4', assigned: false, title: 'Issue 4' })] });
       expect(gh).toHaveBeenCalledTimes(4);
     });
 
@@ -256,6 +297,16 @@ describe('GithubSource.poll', () => {
       expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, search(), { error: mixed })).poll([stored(1)])).toEqual({ error: `Could not confirm that #1 left the assigned state: ${mixed}` });
       // A later failure fails the poll even after an earlier ticket was kept.
       expect(await new GithubSource(config(), fakeGh(SINGLE_SELECT, search(), issue(1, '⚒️ Dev'), { error: 'GitHub is not reachable.' })).poll([stored(1), stored(2)])).toEqual({ error: 'Could not confirm that #2 left the assigned state: GitHub is not reachable.' });
+    });
+
+    it('keeps the stored blockers of an issue missing from the search while waitForBlockers is on, and clears them while it is off (PRD R90)', async () => {
+      const blocker = { url: 'https://github.com/acme/widgets/issues/12', ref: '#12', title: 'Blocker 12' };
+      const poll = (waitForBlockers: boolean) => new GithubSource(config({ waitForBlockers }), fakeGh(SINGLE_SELECT, search(), issue(1, '⚒️ Dev'))).poll([stored(1, { blockers: [blocker] })]);
+
+      const { blockers: _none, ...unread } = kept(1);
+
+      expect(await poll(true)).toEqual({ tickets: [unread] });
+      expect(await poll(false)).toEqual({ tickets: [kept(1)] });
     });
 
     it('without requireAssignee, keeps an issue in a configured status whoever is assigned', async () => {

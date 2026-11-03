@@ -5,7 +5,7 @@ import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { repoRoots } from './settings.js';
 import type { PermissionMode, Provider, ScheduleSettings, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
-import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, WorkItem, WorkItemStatus } from './model.js';
+import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, WorkItem, WorkItemStatus } from './model.js';
 import { focusUrl } from './focus.js';
 import type { Anchor, SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
@@ -110,6 +110,8 @@ export interface PolledTicket {
   sortAt: number | null;
   /** When the ticket last entered the source's scope, as the source records it, such as Zoho's escalation to Support; null when unknown (PRD R27). */
   enteredAt: number | null;
+  /** The open issues blocking the ticket (PRD R90); a source that does not read them omits it. */
+  blockers?: TicketBlocker[];
 }
 
 export type Report =
@@ -696,6 +698,8 @@ class Flow {
         sortAt: entry.sortAt,
         scopeAt: this.scopeAt(known, entry),
         lastPolledAt: this.now,
+        // A read that does not list blockers, such as GitHub's read of an issue missing from the search, keeps the last ones seen.
+        ...(entry.blockers === undefined ? {} : { blockers: entry.blockers }),
         ...(entry.assigned || entry.pool ? {} : UNSNOOZED),
       };
 
@@ -1621,8 +1625,10 @@ class Flow {
 
     this.store.updateSession(session.id, { outcome: 'done' });
 
-    // A snoozed ticket's task waits in the queue until the ticket wakes or is restored (PRD R49).
-    if (this.store.ticket(item.ticketId)!.snoozed) {
+    // A snoozed ticket's task waits in the queue until the ticket wakes or is restored (PRD R49), and a blocked one until its blockers close (PRD R90).
+    const ticket = this.store.ticket(item.ticketId)!;
+
+    if (ticket.snoozed || (ticket.blockers?.length ?? 0) > 0) {
       this.queue(item);
     } else {
       this.startSession(item);

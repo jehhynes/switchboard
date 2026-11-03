@@ -110,4 +110,68 @@ describe('queueWaits', () => {
 
     expect(waitsOf(h, 2)).toEqual([{ kind: 'slot', used: 1, limit: 1 }, { kind: 'snoozed' }]);
   });
+
+  it('holds an automatic start while the ticket has open blockers, and starts it on the poll that sees none (PRD R90)', () => {
+    const h = new Harness();
+    const blocker = { url: 'https://github.com/acme/widgets/issues/12', ref: '#12', title: 'Issue 12' };
+    const [triage] = h.poll({ ...issue('1'), blockers: [blocker] });
+
+    expect(h.triaged(triage, 'support:defect')).toEqual([]);
+    expect(h.status(1)).toBe('queued');
+    expect(waitsOf(h, 1)).toEqual([{ kind: 'blockers', blockers: [blocker] }]);
+
+    // A poll that lists it again, or does not read blockers, as GitHub's read of an issue missing from the search, starts nothing.
+    expect(h.poll({ ...issue('1'), blockers: [blocker] })).toEqual([]);
+    expect(h.poll(issue('1'))).toEqual([]);
+    expect(h.store.ticket(1)!.blockers).toEqual([blocker]);
+
+    only(h.poll({ ...issue('1'), blockers: [] }), 'start-session');
+    expect(h.store.ticket(1)!.blockers).toEqual([]);
+  });
+
+  it('holds Start with guidance, Approve and Retry of a ticket with an open blocker, with free slots, and runs each once it closes', () => {
+    const blocker = { url: 'https://github.com/acme/widgets/issues/12', ref: '#12', title: 'Issue 12' };
+    const blocked = { ...issue('1'), blockers: [blocker] };
+
+    // Start with guidance: the task session gets the guidance once the blocker closes.
+    const guided = new Harness();
+    guided.triaged(guided.poll(blocked)[0], 'dev:question');
+    expect(guided.act({ type: 'start', workItemId: 1, guidance: 'Read c2 first.' })).toEqual([]);
+    expect(waitsOf(guided, 1)).toEqual([{ kind: 'blockers', blockers: [blocker] }]);
+    expect(only(guided.poll({ ...issue('1'), blockers: [] }), 'start-session').prompt).toMatch(/Read c2 first\.$/);
+
+    // Approve: the approved prompt runs once the blocker closes.
+    const approved = new Harness();
+    approved.triaged(approved.poll(issue('1'))[0], 'dev:question');
+    const first = approved.started(approved.act({ type: 'start', workItemId: 1 })[0]);
+    approved.report(first, { kind: 'approval', prompt: '/publish', summary: 'Ready.', report: null });
+    approved.poll(blocked);
+    approved.act({ type: 'roster', sessions: [] });
+    expect(approved.act({ type: 'approve', workItemId: 1 })).toEqual([]);
+    expect(approved.status(1)).toBe('queued');
+    expect(only(approved.poll({ ...issue('1'), blockers: [] }), 'start-session').prompt).toContain('/publish');
+
+    // Retry of a failed start.
+    const retried = new Harness();
+    retried.triaged(retried.poll(issue('1'))[0], 'dev:question');
+    const start = only(retried.act({ type: 'start', workItemId: 1 }), 'start-session');
+    retried.act({ type: 'session-start-failed', sessionId: start.sessionId, message: 'spawn failed' });
+    expect(retried.status(1)).toBe('failed');
+    retried.poll(blocked);
+    expect(retried.act({ type: 'retry', workItemId: 1 })).toEqual([]);
+    expect(retried.status(1)).toBe('queued');
+    only(retried.poll({ ...issue('1'), blockers: [] }), 'start-session');
+  });
+
+  it("queues the operator's Start of a ticket with an open blocker, beside full slots", () => {
+    const h = new Harness({ settings: settings({ sessions: { concurrency: 1 }, triage: { concurrency: 4 } }) });
+    const blocker = { url: 'https://github.com/acme/docs/issues/7', ref: 'acme/docs#7', title: 'Docs 7' };
+    const triages = h.poll(issue('1'), { ...issue('2'), blockers: [blocker] });
+    h.started(only(h.triaged(triages[0], 'support:defect'), 'start-session'));
+    h.triaged(triages[1], 'dev:question');
+
+    expect(h.act({ type: 'start', workItemId: 2 })).toEqual([]);
+    expect(h.status(2)).toBe('queued');
+    expect(waitsOf(h, 2)).toEqual([{ kind: 'slot', used: 1, limit: 1 }, { kind: 'blockers', blockers: [blocker] }]);
+  });
 });

@@ -329,13 +329,15 @@ export const MIGRATIONS = [
   // Continue in Background (PRD R89): the move under way, as JSON, and when the last one ended.
   `ALTER TABLE sessions ADD COLUMN move TEXT;
   ALTER TABLE sessions ADD COLUMN movedAt INTEGER;`,
+  // The open issues blocking a ticket, as JSON (PRD R90).
+  `ALTER TABLE tickets ADD COLUMN blockers TEXT NOT NULL DEFAULT '[]';`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
-const OBJECTS = new Set(['question', 'move']);
+const OBJECTS = new Set(['question', 'move', 'blockers']);
 
 type Row = Record<string, unknown>;
 
@@ -400,7 +402,7 @@ function toParams(values: Row): Record<string, SQLInputValue> {
   const result: Record<string, SQLInputValue> = {};
 
   for (const [key, value] of Object.entries(values)) {
-    result[key] = typeof value === 'boolean' ? (value ? 1 : 0) : Array.isArray(value) ? value.join(',') : OBJECTS.has(key) && value !== null ? JSON.stringify(value) : (value as SQLInputValue);
+    result[key] = typeof value === 'boolean' ? (value ? 1 : 0) : OBJECTS.has(key) && value !== null ? JSON.stringify(value) : Array.isArray(value) ? value.join(',') : (value as SQLInputValue);
   }
 
   return result;
@@ -726,7 +728,7 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    const row = { adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, ...ticket };
+    const row = { adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [], ...ticket };
 
     return { id: this.#insert('tickets', row as unknown as Row), ...row };
   }

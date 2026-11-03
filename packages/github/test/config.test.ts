@@ -13,6 +13,7 @@ describe('parseGithubConfig', () => {
         repo: 'acme/widgets',
         logins: ['work-login'],
         requireAssignee: true,
+        waitForBlockers: false,
         project: { owner: 'acme', number: 3, statusField: 'Status' },
         assignedStatuses: ['⚒️ Dev'],
         branchPattern: /^(\d+)-/,
@@ -24,6 +25,10 @@ describe('parseGithubConfig', () => {
 
   it('keeps requireAssignee off', () => {
     expect(parseGithubConfig({ ...VALID, requireAssignee: false })).toMatchObject({ config: { requireAssignee: false } });
+  });
+
+  it('keeps waitForBlockers on', () => {
+    expect(parseGithubConfig({ ...VALID, waitForBlockers: true })).toMatchObject({ config: { waitForBlockers: true } });
   });
 
   it('keeps a roles file that is absolute or starts with ~', () => {
@@ -38,6 +43,7 @@ describe('parseGithubConfig', () => {
     [{ logins: [] }, 'sources.github.logins must list at least one login.'],
     [{ logins: [''] }, 'sources.github.logins must list at least one login.'],
     [{ requireAssignee: 'no' }, 'sources.github.requireAssignee must be true or false.'],
+    [{ waitForBlockers: 'yes' }, 'sources.github.waitForBlockers must be true or false.'],
     [{ project: { owner: 'acme' } }, 'sources.github.project must give owner and number.'],
     [{ assignedStatuses: 'Dev' }, 'sources.github.assignedStatuses must list at least one status.'],
     [{ ghPath: '' }, 'sources.github.ghPath must be a path.'],

@@ -146,6 +146,31 @@ describe('dockView', () => {
     expect(row(item(1, { status: 'unstarted', error: MESSAGES.nothingNew })).details).toEqual([{ text: 'Nothing is newer than the earlier work item', title: null, tone: 'warning' }]);
   });
 
+  it('names the open blockers on line 3 of an open work item or pool row, as a wait reason once queued, and not once done (PRD R90)', () => {
+    const one = [{ url: 'https://github.com/o/r/issues/12', ref: '#12', title: 'Migrate the schema' }];
+    const three = [...one, { url: 'https://github.com/o/r/issues/15', ref: '#15', title: 'Add the API' }, { url: 'https://github.com/o/docs/issues/7', ref: 'o/docs#7', title: 'Docs' }];
+    const blocked = (blockers: typeof one) => ({ ...item(1).ticket, blockers });
+
+    expect(row(item(1, { status: 'unstarted', ticket: blocked(one) })).details).toEqual([
+      { text: 'Blocker: #12', title: 'Open issues that block this one:\n#12 Migrate the schema\nA start waits until it closes.', tone: 'warning' },
+    ]);
+    expect(row(item(1, { ticket: blocked(three), sessions: [session()], stage: 'planning', stageAt: NOW - 60_000 })).details).toEqual([
+      { text: 'Blockers: #12, #15 and o/docs#7', title: 'Open issues that block this one:\n#12 Migrate the schema\n#15 Add the API\no/docs#7 Docs\nA start waits until they close.', tone: 'warning' },
+      { text: 'planning · 1m', title: null, tone: null },
+    ]);
+    expect(row(item(1, { status: 'queued', ticket: blocked(three.slice(0, 2)), waits: [{ kind: 'blockers', blockers: three.slice(0, 2) }] })).details).toEqual([
+      { text: 'Starts when #12 and #15 close', title: 'Open issues that block this one:\n#12 Migrate the schema\n#15 Add the API', tone: null },
+    ]);
+    expect(row(item(1, { status: 'done', doneAt: NOW, ticket: blocked(one) })).details).toEqual([{ text: 'Finished by the session', title: null, tone: null }]);
+
+    // An older hub's snapshot has no blockers.
+    const { blockers: _omitted, ...older } = item(1).ticket;
+    expect(row(item(1, { status: 'unstarted', ticket: older })).details).toEqual([]);
+
+    const pooled = dockView(snapshot([], { pool: [pool(4, { ticket: { ...pool(4).ticket, blockers: one } })] }), NOW, W).groups.flatMap((group) => group.rows);
+    expect(pooled.map((entry) => entry.details)).toEqual([[{ text: 'Blocker: #12', title: 'Open issues that block this one:\n#12 Migrate the schema\nA start waits until it closes.', tone: 'warning' }]]);
+  });
+
   it('shows the approval summary with its age, or the stage, coloured when stale', () => {
     expect(row(item(1, { status: 'awaiting-approval', statusAt: NOW - 2 * 3_600_000, approvalSummary: 'post the reply', stage: 'drafting' })).details).toEqual([
       { text: 'Post the reply · 2h', title: 'Post the reply\nLast stage: drafting', tone: null },

@@ -64,6 +64,15 @@ export interface Ticket {
   repoRoot: string;
   /** The ad-hoc key of a ticket a ticket report moved to a source (PRD R83), so the key is not used again and the item window keeps its name. */
   adhocKey: string | null;
+  /** The open issues the source lists as blocking this ticket, from the last complete poll that saw it (PRD R90); absent from an older hub's snapshot. */
+  blockers?: TicketBlocker[];
+}
+
+/** An open issue that blocks a ticket (PRD R90). `ref` is `#12` in the ticket's repository, else `owner/repo#12`. */
+export interface TicketBlocker {
+  url: string;
+  ref: string;
+  title: string;
 }
 
 export interface WorkItem {
@@ -225,9 +234,10 @@ export interface SessionQuestionReport {
   text: string;
 }
 
-/** Why a queued work item has not started (PRD R17, R38, R49). */
+/** Why a queued work item has not started (PRD R17, R38, R49, R90). */
 export type QueueWait =
   | { kind: 'slot'; used: number; limit: number }
   /** A live session of the ticket; `playbook` is its work item's, or null when it is this work item's own session. */
   | { kind: 'session'; sessionId: string; shortId: string | null; ownItem: boolean; playbook: string | null }
-  | { kind: 'snoozed' };
+  | { kind: 'snoozed' }
+  | { kind: 'blockers'; blockers: TicketBlocker[] };

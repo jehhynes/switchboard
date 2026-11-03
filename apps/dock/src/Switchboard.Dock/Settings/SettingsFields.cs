@@ -304,6 +304,7 @@ public static partial class SettingsFields
             ("repo", new Field("", "Repository", FieldKind.Text, "", "owner/name"), false),
             ("logins", new Field("", "Logins", FieldKind.List, "One per line. Your GitHub logins: comments and commits by them are yours, and with Require assignee on, an issue assigned to any of them is yours."), false),
             ("requireAssignee", new Field("", "Require assignee", FieldKind.Boolean, "Off, an issue in an assigned status is yours whoever is assigned.", Fallback: true), false),
+            ("waitForBlockers", new Field("", "Wait for blockers", FieldKind.Boolean, "On, an issue's work starts only once the issues blocking it close. Leave off to start stacked work from a blocker's branch.", Fallback: false), false),
             ("project.owner", new Field("", "Project owner", FieldKind.Text, ""), false),
             ("project.number", new Field("", "Project number", FieldKind.Integer, ""), false),
             ("project.statusField", new Field("", "Status field", FieldKind.Text, "", "Status"), false),

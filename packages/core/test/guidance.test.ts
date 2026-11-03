@@ -155,4 +155,15 @@ describe('pick with guidance (PRD R48, R77)', () => {
     expect(h.item(1).guidance).toBeNull();
     expect(h.store.ticketHistory(1)!.events.find((event) => event.type === 'pick')).toMatchObject({ detail: { guidance: 'Reply in Spanish.' } });
   });
+
+  it('holds a pick of a pool ticket with an open blocker until a poll sees none (PRD R90)', () => {
+    const h = new Harness({ playbooks: playbooks(undefined, { 'support:case': { description: 'A Support case', workdir: 'repoRoot', template: '/support-process {{ticket.ref}}' } }) });
+    const blockers = [{ url: 'https://github.com/acme/widgets/issues/12', ref: 'acme/widgets#12', title: 'Issue 12' }];
+    const triage = only(h.act({ type: 'poll', source: 'zoho', tickets: [{ ...zoho('500'), blockers }] }), 'triage');
+    h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', immediacy: null, severity: null, model: null });
+
+    expect(h.act({ type: 'pick', ticketId: 1, guidance: 'Reply in Spanish.' })).toEqual([]);
+    expect(h.item(1).status).toBe('queued');
+    expect(only(h.act({ type: 'poll', source: 'zoho', tickets: [{ ...zoho('500'), blockers: [] }] }), 'start-session').prompt).toBe('/support-process R500\n\nReply in Spanish.');
+  });
 });

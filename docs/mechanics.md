@@ -500,6 +500,15 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** a link from the dock through the desktop's URL handler to a running Firefox; a permanent install of the `.xpi` in Developer Edition or Nightly and whether it prompts for or withholds the host permissions; github.com and its live content security policy; a `vscode://` link from Firefox; Duplicate, Reopen closed tab, session restore and several windows; a mouse drag out of the group.
 - **Current use:** the Firefox build's manifest (architecture.md § Browser extension) and the hub's `moz-extension://` Origin check (architecture.md § Hub lifecycle).
 
+## M56. GitHub issue dependencies through `gh api graphql`
+
+- **Date:** 2026-11-03.
+- **Versions:** gh 2.103.3, signed in as `personal-login`.
+- **Experiment:** introspected `Issue` and `IssueDependenciesSummary`, then read `issueDependenciesSummary { blockedBy totalBlockedBy }` and `blockedBy(first:N) { nodes { number state url repository { nameWithOwner } } }` on public issues found with `is:issue is:blocked`, and on the open issues of `work-login/switchboard`.
+- **Result:** `Issue.blockedBy` is a connection of the issues blocking it, with the usual paging arguments; `Issue.blocking` is its reverse. `blockedBy` lists closed blockers too: `jimmie-potts/agent-device-hub#24` listed two `CLOSED` blockers, with summary `blockedBy: 0` (open only) and `totalBlockedBy: 2`. An issue with only open blockers had equal counts. The fields need no preview header, and a repository with no dependencies returns empty connections. Search's `is:blocked` returned some issues whose blockers had all been removed. The poll's `ISSUES_QUERY` with `blockedBy(first:50)` read a 75-issue search page of `arturmiller/specbound`, most with two or three blockers, in one request without a complexity error.
+- **Not verified:** a blocker in a repository the token cannot read; the schema allows a null node.
+- **Current use:** the GitHub source's poll keeps only the `OPEN` blockers (architecture.md § Settings, PRD R90).
+
 ## Pending verification
 
 These mechanisms are planned but not yet verified for Switchboard:

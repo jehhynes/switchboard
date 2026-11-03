@@ -1,5 +1,5 @@
 import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, reviewOrder, triageLabel, turnOf, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
-import type { OpenVSCode, Provider } from '@switchboard/core';
+import type { OpenVSCode, Provider, TicketBlocker } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
@@ -553,8 +553,29 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
       }
       case 'snoozed':
         return { text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.' };
+      case 'blockers':
+        return { text: `Starts when ${refList(wait.blockers)} ${wait.blockers.length === 1 ? 'closes' : 'close'}`, title: blockersTitle(wait.blockers) };
     }
   });
+}
+
+/** The open issues blocking a ticket whose work has not queued, for line 3 of an open work item's or pool ticket's row (PRD R90). */
+export function blockerTexts(ticket: { blockers?: TicketBlocker[] }, status: string | null): { text: string; title: string }[] {
+  const blockers = ticket.blockers ?? [];
+
+  // A queued row names them as a wait reason (waitTexts), and a done row needs no warning.
+  return blockers.length === 0 || status === 'queued' || status === 'done' ? [] : [{ text: `${blockers.length === 1 ? 'Blocker' : 'Blockers'}: ${refList(blockers)}`, title: `${blockersTitle(blockers)}\nA start waits until ${blockers.length === 1 ? 'it closes' : 'they close'}.` }];
+}
+
+/** `#12`, `#12 and #15`, or `#12, #15 and #20`. */
+function refList(blockers: TicketBlocker[]): string {
+  const refs = blockers.map((blocker) => blocker.ref);
+
+  return refs.length === 1 ? refs[0]! : `${refs.slice(0, -1).join(', ')} and ${refs.at(-1)!}`;
+}
+
+function blockersTitle(blockers: TicketBlocker[]): string {
+  return ['Open issues that block this one:', ...blockers.map((blocker) => `${blocker.ref} ${blocker.title}`)].join('\n');
 }
 
 /**

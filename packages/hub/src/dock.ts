@@ -39,6 +39,7 @@ import {
   terminalCommand,
   ticketKey,
   waitTexts,
+  blockerTexts,
 } from './rows.js';
 import type { Control, RowGroup } from './rows.js';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -275,6 +276,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     mark: kind === null ? null : { kind, glyph: MARK_GLYPHS[kind], title: MARK_TITLES[kind] },
     details: orMarkTitle(kind, [
       ...[...startPromptText(item), ...waitTexts(item)].map(({ text, title }) => ({ text, title, tone: null })),
+      ...blockerTexts(item.ticket, item.status).map(({ text, title }) => ({ text, title, tone: 'warning' as const })),
       ...wake(item.ticket),
       ...[item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped(note, CAPS.note, 'warning')),
       ...(item.parent === null ? [] : [{ text: `From ${ticketKey(item.parent)}`, title: item.parent.title, tone: null }]),
@@ -316,7 +318,11 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     source: ticket.source,
     url: ticket.url,
     mark: triaging ? { kind: 'triaging', glyph: MARK_GLYPHS.triaging, title: MARK_TITLES.triaging } : null,
-    details: orMarkTitle(triaging ? 'triaging' : null, [...wake(ticket), ...(triage?.error == null ? [] : [clipped(triage.error, CAPS.note, 'warning')])]),
+    details: orMarkTitle(triaging ? 'triaging' : null, [
+      ...blockerTexts(ticket, null).map(({ text, title }) => ({ text, title, tone: 'warning' as const })),
+      ...wake(ticket),
+      ...(triage?.error == null ? [] : [clipped(triage.error, CAPS.note, 'warning')]),
+    ]),
     stripe: null,
     turn: null,
     dim: false,

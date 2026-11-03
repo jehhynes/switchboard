@@ -433,6 +433,32 @@ describe('History model', () => {
     expect(ticket.entries[0]).toMatchObject({ text: 'Switchboard first saw the ticket, in the pool', lines: ['No longer assigned to you', 'Entered the pool', 'Title: A → B', 'Snoozed indefinitely', 'Snooze ended', 'Left the pool'] });
   });
 
+  it("words the ticket's open blockers: at first sight, as they change, and once none is open (PRD R90)", () => {
+    const base = approvedRun().history();
+    const fields = (value: HistoryChange['fields'], op: HistoryChange['op'] = 'update'): HistoryChange => ({ entity: 'ticket', entityId: '1', op, workItemId: null, sessionId: null, fields: value });
+    const twelve = { url: 'https://github.com/o/r/issues/12', ref: '#12', title: 'A' };
+    const docs = { url: 'https://github.com/o/docs/issues/7', ref: 'o/docs#7', title: 'B' };
+    const poll: HistoryEvent = {
+      id: 500,
+      at: T0,
+      type: 'poll',
+      actor: 'source',
+      ticketId: null,
+      workItemId: null,
+      sessionId: null,
+      detail: { source: 'github' },
+      refused: null,
+      changes: [fields({ assigned: [null, true], blockers: [null, [twelve]] }, 'insert'), fields({ blockers: [[twelve], [twelve, docs]] }), fields({ blockers: [[twelve, docs], []] })],
+    };
+    const unblocked: HistoryEvent = { ...poll, id: 501, changes: [fields({ assigned: [null, true], blockers: [null, []] }, 'insert')] };
+
+    expect(historyView({ ...base, workItems: [], events: [poll] }, T0).sections[0]!.entries[0]).toMatchObject({
+      text: 'Switchboard first saw the ticket, assigned to you',
+      lines: ['Blocker: #12', 'Blockers: #12, o/docs#7', 'No open blockers'],
+    });
+    expect(historyView({ ...base, workItems: [], events: [unblocked] }, T0).sections[0]!.entries[0]).toMatchObject({ text: 'Switchboard first saw the ticket, assigned to you', lines: [] });
+  });
+
   it('shows a new question asked while the session was already waiting, with no session link while it runs in its background process', () => {
     const run = approvedRun();
 

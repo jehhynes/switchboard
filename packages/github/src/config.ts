@@ -7,6 +7,8 @@ export interface GithubConfig {
   logins: string[];
   /** False puts an issue in the assigned state by its project status alone, whoever is assigned. */
   requireAssignee: boolean;
+  /** True reads each issue's open blockers, so its work waits until they close (PRD R90). */
+  waitForBlockers: boolean;
   project: { owner: string; number: number; statusField: string };
   assignedStatuses: string[];
   /** Its first group is the issue number a worktree branch names. */
@@ -18,7 +20,7 @@ export interface GithubConfig {
 
 export type ConfigResult = { config: GithubConfig } | { error: string };
 
-const KEYS = ['ghPath', 'repo', 'logins', 'requireAssignee', 'project', 'assignedStatuses', 'branchPattern', 'maxPages', 'rolesFile'];
+const KEYS = ['ghPath', 'repo', 'logins', 'requireAssignee', 'waitForBlockers', 'project', 'assignedStatuses', 'branchPattern', 'maxPages', 'rolesFile'];
 
 function strings(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry !== '') ? (value as string[]) : null;
@@ -32,7 +34,7 @@ export function parseGithubConfig(options: Record<string, unknown>): ConfigResul
     return { error: `sources.github.${unknown[0]} is not a setting.` };
   }
 
-  const { ghPath = 'gh', repo, logins, requireAssignee = true, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
+  const { ghPath = 'gh', repo, logins, requireAssignee = true, waitForBlockers = false, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
 
   if (typeof repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     return { error: 'sources.github.repo must be set to owner/name.' };
@@ -46,6 +48,10 @@ export function parseGithubConfig(options: Record<string, unknown>): ConfigResul
 
   if (typeof requireAssignee !== 'boolean') {
     return { error: 'sources.github.requireAssignee must be true or false.' };
+  }
+
+  if (typeof waitForBlockers !== 'boolean') {
+    return { error: 'sources.github.waitForBlockers must be true or false.' };
   }
 
   const p = project as { owner?: unknown; number?: unknown; statusField?: unknown } | undefined;
@@ -88,6 +94,7 @@ export function parseGithubConfig(options: Record<string, unknown>): ConfigResul
       repo,
       logins: loginList,
       requireAssignee,
+      waitForBlockers,
       project: { owner: p.owner, number: p.number, statusField: typeof p.statusField === 'string' && p.statusField !== '' ? p.statusField : 'Status' },
       assignedStatuses: statuses,
       branchPattern: pattern,
