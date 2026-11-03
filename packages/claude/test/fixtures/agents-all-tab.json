@@ -1,0 +1,40 @@
+[
+  {
+    "id": "fece8d4c",
+    "cwd": "/home/operator/git/mech",
+    "kind": "background",
+    "startedAt": 1793718539666,
+    "sessionId": "fece8d4c-6de5-4f07-b545-690af18d7bf9",
+    "name": "switchboard · ad-hoc · adhoc 1",
+    "state": "done"
+  },
+  {
+    "pid": 2422900,
+    "cwd": "/home/operator/git/mech",
+    "kind": "interactive",
+    "startedAt": 1793718558118,
+    "sessionId": "fece8d4c-6de5-4f07-b545-690af18d7bf9",
+    "name": "switchboard · ad-hoc · adhoc 1",
+    "status": "busy"
+  },
+  {
+    "pid": 2434342,
+    "cwd": "/home/operator/git/widgets",
+    "kind": "interactive",
+    "startedAt": 1793718724492,
+    "sessionId": "9273f594-1111-4222-8333-444455556666",
+    "name": "Register skill live check",
+    "status": "busy"
+  },
+  {
+    "pid": 2449399,
+    "id": "1370ab66",
+    "cwd": "/home/operator/git/mech",
+    "kind": "background",
+    "startedAt": 1793719035146,
+    "sessionId": "1370ab66-2f5a-4c76-b5dd-5de16139ea60",
+    "name": "switchboard · dev:develop · github 7",
+    "status": "idle",
+    "state": "done"
+  }
+]

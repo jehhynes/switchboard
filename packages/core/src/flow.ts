@@ -37,6 +37,9 @@ export const MESSAGES = {
   nothingNew: 'Nothing is newer than the earlier work item',
 } as const;
 
+/** The first message of a session resumed in its background process after its tab closed mid-turn (PRD R89, mechanics M55). */
+export const RESUME_PROMPT = 'The VS Code window closed while your turn was running, so your last tool call may have been cut off. Continue where you left off.';
+
 /** Starts a task session's `outcomeDetail` while its done report waits for the hub's second read of the ticket (PRD R10). */
 export const UNCONFIRMED_DONE = 'Waiting to read the ticket again';
 
@@ -199,6 +202,17 @@ export type FlowEvent =
   | { type: 'pick'; ticketId: number; guidance?: string | null; playbook?: string | null }
   /** Stops the waiting session the row showed, named by its native ID, to open it in a Claude tab (PRD R70). */
   | { type: 'open-question'; workItemId: number; nativeSessionId: string }
+  /**
+   * Continue in Background (PRD R89): the session the hub found in the item window's Claude tab, whose process is `pid`, and the work items of that
+   * window, which must hold it.
+   */
+  | { type: 'background'; sessionId: string; nativeSessionId: string; pid: number; workItemIds: number[] }
+  /** The tab's process exited and `claude --bg --resume` runs, which a roster read must confirm before `deadline`. */
+  | { type: 'move-launching'; sessionId: string; moveId: string; deadline: number }
+  | { type: 'session-resumed'; sessionId: string; moveId: string; shortId: string }
+  | { type: 'resume-failed'; sessionId: string; moveId: string; message: string }
+  /** The tab's process did not exit, so the session stays where it is. */
+  | { type: 'move-cancelled'; sessionId: string; moveId: string }
   | { type: 'retriage-pool' | 'restore'; ticketId: number }
   /** Snoozes the ticket until `until`, or indefinitely when null, with the operator's comment (PRD R49). */
   | { type: 'snooze'; ticketId: number; until: number | null; comment?: string | null }
@@ -245,7 +259,9 @@ export type FlowAction =
       model: string | null;
     }
   /** The provider travels with the action, because Delete removes the session's row before its stop runs. */
-  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason };
+  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason }
+  /** Waits for the tab's process `pid` to exit, then resumes the session in its background process with `prompt` (PRD R89). */
+  | { type: 'resume-session'; sessionId: string; moveId: string; provider: Provider; nativeSessionId: string; cwd: string; pid: number; prompt: string };
 
 export interface FlowContext {
   now: number;
@@ -318,13 +334,13 @@ function samePath(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
  * roster reads, are logged only when they change a row.
  */
-const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'ticket', 'session-start-failed', 'stop-failed']);
+const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'ticket', 'session-start-failed', 'stop-failed', 'move-cancelled']);
 
 function actorOf(type: FlowEvent['type']): Actor {
   if (OPERATOR_EVENTS.has(type)) {
@@ -387,6 +403,10 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { repoRoot: event.repoRoot, start: event.start === true };
     case 'register':
       return { cwd: event.cwd };
+    case 'session-resumed':
+      return { shortId: event.shortId };
+    case 'resume-failed':
+      return { message: event.message };
     case 'ticket':
       return { source: event.source, sourceKey: event.sourceKey, playbook: event.playbook };
     case 'handled':
@@ -580,6 +600,16 @@ class Flow {
         return this.delete(this.knownItem(event.workItemId));
       case 'open-question':
         return this.openQuestion(this.openItem(event.workItemId), event.nativeSessionId);
+      case 'background':
+        return this.background(event);
+      case 'move-launching':
+        return this.moveLaunching(event.sessionId, event.moveId, event.deadline);
+      case 'session-resumed':
+        return this.sessionResumed(event.sessionId, event.moveId, event.shortId);
+      case 'resume-failed':
+        return this.resumeFailed(event.sessionId, event.moveId, event.message);
+      case 'move-cancelled':
+        return this.moveCancelled(event.sessionId, event.moveId);
       case 'pick':
         return this.pick(this.poolTicket(event.ticketId), textOf(event.guidance), event.playbook ?? null);
       case 'retriage-pool':
@@ -871,6 +901,8 @@ class Flow {
       retiredIds: [],
       pendingFork: null,
       external: true,
+      move: null,
+      movedAt: null,
     });
   }
 
@@ -1388,7 +1420,8 @@ class Flow {
     for (const entry of listed.values()) {
       const session = this.store.session(entry.sessionId);
 
-      if (session !== null && session.state !== 'starting') {
+      // A moving session's tab process is going and its background one not confirmed, so no listing decides it (PRD R89).
+      if (session !== null && session.state !== 'starting' && session.move === null) {
         // An opened question waits until the operator's tab runs or asks again; a background listing was read before the stop, and an idle tab has
         // not answered, so neither changes the session or the clock (PRD R70).
         if (session.outcome === 'opened' && session.state === 'ended' && !(entry.interactive === true && (entry.state === 'running' || entry.state === 'waiting'))) {
@@ -1408,7 +1441,7 @@ class Flow {
     const looked = checked === undefined ? null : new Set(checked);
 
     for (const session of this.store.activeSessions()) {
-      if (session.state !== 'starting' && !listed.has(session.id) && (looked === null || looked.has(session.id))) {
+      if (session.state !== 'starting' && session.move === null && !listed.has(session.id) && (looked === null || looked.has(session.id))) {
         // Its background process is gone, so a later resume (such as in a VS Code tab) is never released (PRD R39).
         this.store.updateSession(session.id, { state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true, releasing: false, question: null, external: false });
         this.ended({ ...session, state: 'ended' });
@@ -1423,7 +1456,8 @@ class Flow {
   private adoptFork(fork: ObservedFork): boolean {
     const session = this.store.session(fork.sessionId);
 
-    if (session === null || session.state === 'starting' || session.nativeSessionId === null || session.nativeSessionId === fork.nativeSessionId || session.retiredIds.includes(fork.nativeSessionId)) {
+    // A moving session resumes its own ID, so a fork waits until the move ends (PRD R89).
+    if (session === null || session.state === 'starting' || session.move !== null || session.nativeSessionId === null || session.nativeSessionId === fork.nativeSessionId || session.retiredIds.includes(fork.nativeSessionId)) {
       return false;
     }
 
@@ -1451,7 +1485,7 @@ class Flow {
   private marker(sessionId: string, state: LiveState, detail: string | null): void {
     const session = this.session(sessionId);
 
-    if (session.state !== 'starting' && session.state !== 'ended' && !waitsToStart(session)) {
+    if (session.state !== 'starting' && session.state !== 'ended' && session.move === null && !waitsToStart(session)) {
       this.setState(session, state, detail);
     }
   }
@@ -1709,6 +1743,17 @@ class Flow {
       throw new Refusal('The session runs in your own window; stop it there.');
     }
 
+    if (session.move?.phase === 'launching') {
+      throw new Refusal('The session is starting in the background; stop it once it has started.');
+    }
+
+    // Its tab's process is exiting and no background one has started, so the move ends and nothing is left to stop (PRD R89).
+    if (session.move !== null) {
+      this.store.updateSession(session.id, { move: null, movedAt: this.now });
+      this.stopSucceeded(session.id, 'operator', undefined);
+      return;
+    }
+
     this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
   }
 
@@ -1824,6 +1869,119 @@ class Flow {
     }
 
     return session as Session & { shortId: string };
+  }
+
+  /**
+   * Continue in Background (PRD R89): once the tab's process exits, the session resumes in its background process. The window closes the tab after
+   * this succeeds, so the session must be running there, released to it, and Switchboard's own.
+   */
+  private background(event: Extract<FlowEvent, { type: 'background' }>): void {
+    const session = this.store.session(event.sessionId);
+    const item = session === null ? null : this.latest(session);
+
+    if (session === null || item === null || session.nativeSessionId !== event.nativeSessionId || !event.workItemIds.includes(item.id)) {
+      throw new Refusal("This tab's session is not one of Switchboard's work items.");
+    }
+
+    if (session.provider !== 'claude' || session.external) {
+      throw new Refusal('This session never ran in the background, so it cannot continue there.');
+    }
+
+    if (session.move !== null) {
+      throw new Refusal('The session is already moving to the background.');
+    }
+
+    if (!session.released || session.releasing) {
+      throw new Refusal('The session already runs in the background.');
+    }
+
+    if (session.pendingFork !== null) {
+      throw new Refusal(`Fork ${session.pendingFork} waits to continue this session; continue in the fork.`);
+    }
+
+    if (session.state !== 'running') {
+      throw new Refusal('Continue in Background works while the session is running.');
+    }
+
+    const moveId = this.context.newSessionId();
+
+    this.store.updateSession(session.id, { move: { id: moveId, pid: event.pid, phase: 'waiting', at: this.now, deadline: null } });
+    this.actions.push({ type: 'resume-session', sessionId: session.id, moveId, provider: session.provider, nativeSessionId: event.nativeSessionId, cwd: session.cwd, pid: event.pid, prompt: RESUME_PROMPT });
+  }
+
+  /** The session's move with this ID, or null for another attempt's result, such as one that Stop or Delete ended. */
+  private currentMove(sessionId: string, moveId: string): Session | null {
+    const session = this.store.session(sessionId);
+
+    return session?.move?.id === moveId ? session : null;
+  }
+
+  private moveLaunching(sessionId: string, moveId: string, deadline: number): void {
+    const session = this.currentMove(sessionId, moveId);
+
+    if (session !== null) {
+      this.store.updateSession(sessionId, { move: { ...session.move!, phase: 'launching', deadline } });
+    }
+  }
+
+  /** The background process holds the session again, so R39 releases it at its turn end. */
+  private sessionResumed(sessionId: string, moveId: string, shortId: string): void {
+    if (this.currentMove(sessionId, moveId) === null) {
+      return;
+    }
+
+    this.store.updateSession(sessionId, {
+      move: null,
+      movedAt: this.now,
+      shortId,
+      state: 'running',
+      stateAt: this.now,
+      stateDetail: null,
+      endedAt: null,
+      released: false,
+      releasing: false,
+    });
+  }
+
+  /** The session ended with the tab, and its resume failed; the work item shows why (Visible failure). */
+  private resumeFailed(sessionId: string, moveId: string, message: string): void {
+    const session = this.currentMove(sessionId, moveId);
+
+    if (session === null) {
+      return;
+    }
+
+    const cause = `Continue in Background failed: ${message}`;
+
+    this.store.updateSession(sessionId, { move: null, movedAt: this.now, state: 'ended', stateAt: this.now, stateDetail: null, endedAt: this.now, released: true, releasing: false, question: null, outcome: session.outcome ?? 'failed', outcomeDetail: session.outcome === null ? cause : session.outcomeDetail });
+
+    const item = this.latest(session);
+
+    if (item === null) {
+      return;
+    }
+
+    // Its process is gone, so its end decides setup, as when a setup session's process ends any other way; the session keeps the cause.
+    if (session.kind === 'setup') {
+      this.ended({ ...session, state: 'ended' });
+      return;
+    }
+
+    if (item.unassignedAt !== null) {
+      this.done(item, 'unassigned', null);
+    } else if (item.approvalHeld || item.status === 'awaiting-approval') {
+      // An approval reported before the failure still waits on the operator; the cause shows beside it (PRD R40).
+      this.restoreApproval(item, cause);
+    } else if (item.status === 'running') {
+      this.block(item, cause);
+    }
+  }
+
+  /** The tab's process is still running, so the session stays in its tab and the roster observes it again. */
+  private moveCancelled(sessionId: string, moveId: string): void {
+    if (this.currentMove(sessionId, moveId) !== null) {
+      this.store.updateSession(sessionId, { move: null, movedAt: this.now });
+    }
   }
 
   /** Stops the background session, so the window can open it in a Claude tab, which asks the question again (PRD R70). */
@@ -2320,6 +2478,8 @@ class Flow {
       retiredIds: [],
       pendingFork: null,
       external: false,
+      move: null,
+      movedAt: null,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     this.actions.push({

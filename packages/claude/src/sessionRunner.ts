@@ -5,7 +5,8 @@ import { findForks, forkTargets, relationOf, Transcripts } from './fork.js';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
 import { installHooks, readMarkers } from './install.js';
-import { entryFor, observe, observeForks, readRoster, startSession, stopSession } from './runner.js';
+import { copyFrom, entryFor, LAUNCH_TIMEOUT_MS, observe, observeForks, readRoster, resumeArgs, startSession, stopSession, tabSession } from './runner.js';
+import { claudeEnvironment, failureOf } from './exec.js';
 
 export interface ClaudeRunnerDeps {
   /** Read at each use, so a change to `sessions.claudePath` applies to the next command. */
@@ -74,6 +75,31 @@ export class ClaudeRunner implements SessionRunner {
     const entry = roster.entries.find((candidate) => candidate.sessionId === nativeSessionId && candidate.pid !== undefined);
 
     return entry === undefined ? null : { shortId: entry.id ?? nativeSessionId.slice(0, 8), cwd: entry.cwd };
+  }
+
+  async tab(label: string): Promise<{ nativeSessionId: string; pid: number } | { refused: string } | { error: string }> {
+    const roster = await readRoster(this.deps.claudePath(), this.deps.exec, true);
+
+    return 'error' in roster ? roster : tabSession(roster.entries, label);
+  }
+
+  async resume(nativeSessionId: string, prompt: string, cwd: string): Promise<{ copy: string | null } | { error: string }> {
+    const claudePath = this.deps.claudePath();
+    const result = await this.deps.exec(claudePath, resumeArgs(nativeSessionId, prompt), { cwd, timeoutMs: LAUNCH_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
+
+    return result.code === 0 ? { copy: copyFrom(`${result.stdout}\n${result.stderr}`) } : { error: failureOf(claudePath, result, LAUNCH_TIMEOUT_MS, { cwd }) };
+  }
+
+  async background(nativeSessionId: string): Promise<{ shortId: string } | null | { error: string }> {
+    const roster = await readRoster(this.deps.claudePath(), this.deps.exec);
+
+    if ('error' in roster) {
+      return roster;
+    }
+
+    const entry = roster.entries.find((candidate) => candidate.sessionId === nativeSessionId && candidate.kind === 'background' && candidate.pid !== undefined);
+
+    return entry === undefined ? null : { shortId: entry.id ?? nativeSessionId.slice(0, 8) };
   }
 
   /** Hook markers, or none when hooks are off, so the roster alone decides state. */

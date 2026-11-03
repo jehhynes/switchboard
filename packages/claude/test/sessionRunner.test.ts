@@ -35,7 +35,7 @@ function session(patch: Partial<Session> = {}): Session {
     outcomeDetail: null,
     startedAt: 0,
     endedAt: null,
-    released: false, releasing: false, question: null, retiredIds: [], pendingFork: null, external: false,
+    released: false, releasing: false, question: null, retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null,
     reports: ['stage'],
     ...patch,
   };

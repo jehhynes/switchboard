@@ -289,6 +289,18 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
       },
+      // Continue in Background from an item window's Claude tab (PRD R89).
+      '/background': async (body) => {
+        const { label, workItemIds } = isRecord(body) ? body : {};
+
+        if (typeof label !== 'string' || label === '' || !Array.isArray(workItemIds) || !workItemIds.every((id) => Number.isInteger(id))) {
+          return { status: 400, body: { error: 'Expected {label, workItemIds}.' } };
+        }
+
+        const result = await runtime.background(label, workItemIds as number[]);
+
+        return result === null ? { status: 200, body: { moving: true } } : { status: 409, body: { error: result.refused } };
+      },
       // The ticket report (PRD R83), which no report contract or usage text lists.
       '/ticket': async (body) => {
         const { sessionId, url, playbook, nativeSessionId } = isRecord(body) ? body : {};

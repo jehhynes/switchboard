@@ -99,7 +99,7 @@ describe('Store', () => {
   });
 
   it("keeps a task report's prompt as its reported prompt when upgrading, and none for another work item (PRD R68, R77)", () => {
-    const version = MIGRATIONS.length - 1;
+    const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN reportedPrompt'));
     const path = join(dir, 'reported.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));

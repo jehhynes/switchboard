@@ -63,7 +63,7 @@ function session(patch: Partial<Session> = {}): Session & { nativeSessionId: str
     question: null,
     reports: ['stage'],
     retiredIds: [],
-    pendingFork: null, external: false,
+    pendingFork: null, external: false, move: null, movedAt: null,
     ...patch,
   } as Session & { nativeSessionId: string };
 }

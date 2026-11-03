@@ -673,4 +673,4 @@ These mechanisms are planned but not yet verified for Switchboard:
   - The same resume while the session was live in its background process started a copy with a new ID, as in M18.
   - A session started with Switchboard's flags (`--permission-mode auto --settings {"worktree":{"bgIsolation":"none"}} -n --model --append-system-prompt <contract>`), stopped and resumed with a prompt and no flags, reported "saved options (--permission-mode, --settings, -n, --append-system-prompt, --model)", knew the contract's code word, and wrote a file in its working directory.
 - **Not verified:** Windows; VS Code quitting with several windows; a tab session waiting on a permission prompt or a question at the close; a session that was compacted in its tab.
-- **Current use:** none yet; planned for Continue in background.
+- **Current use:** Continue in Background (PRD R89, architecture.md § Claude Code runner): the session is found by its tab's label and its background job in `--all`, the hub waits for the tab's pid to exit, and resumes it with the prompt and no flags.

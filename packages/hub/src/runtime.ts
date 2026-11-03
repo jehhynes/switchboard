@@ -1,11 +1,11 @@
 import { mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { classify, ClaudeRunner } from '@switchboard/claude';
+import { classify, ClaudeRunner, NOT_SWITCHBOARD } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
@@ -24,6 +24,12 @@ const FIXED_TIMERS = 3;
 export const REPORT_CHECK_MS = 6_000;
 /** When the source is read again after a done report it lists as assigned; GitHub issue search lags an unassignment by seconds (mechanics M34). */
 export const RECHECK_MS = 30_000;
+/** How long Continue in Background waits for the tab's process to exit (PRD R89); closing the tab ended it within 4 seconds (mechanics M55). */
+export const MOVE_EXIT_MS = 30_000;
+const MOVE_POLL_MS = 250;
+/** How long a resumed session may take to be listed in its background process with a pid, as for a start. */
+export const RESUME_CONFIRM_MS = 60_000;
+const RESUME_POLL_MS = 2_000;
 /** How long `<sessions.nodePath> --version` may take. */
 const NODE_CHECK_TIMEOUT_MS = 10_000;
 
@@ -45,7 +51,19 @@ export interface RuntimeDeps {
   codex?: { home: string; env: Record<string, string> };
   /** Stand-in runners for tests; each runner is built from the fields above otherwise. */
   runners?: Partial<Record<Provider, SessionRunner>>;
+  /** Whether a process runs; a stand-in for tests. */
+  alive?(pid: number): boolean;
   log(line: string): void;
+}
+
+/** `kill(pid, 0)` sends nothing; EPERM means the process exists but belongs to someone else. */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 export interface WorkItemView extends WorkItem {
@@ -294,6 +312,8 @@ export class Runtime {
     }
 
     await this.reconcile(this.deps.store.activeSessions().filter((entry) => entry.state === 'starting'));
+
+    this.resumeMoves();
 
     await this.readRoster();
 
@@ -672,6 +692,10 @@ export class Runtime {
     const observed: ObservedSession[] = [];
     const forks: ObservedFork[] = [];
     const checked: string[] = [];
+    // A question reported, or a move to the background begun or ended, while the reads ran makes their result stale for that session, which the
+    // next read decides (PRD R70, R89). Checked once all providers' reads are done, since the event applies them together.
+    const marks = (session: Session | null) => `${session?.question?.id ?? ''}|${session?.move?.id ?? ''}|${session?.movedAt ?? ''}`;
+    const asked = new Map(sessions.map((session) => [session.id, marks(session)]));
 
     for (const provider of PROVIDERS) {
       const own = sessions.filter((session) => session.provider === provider);
@@ -680,8 +704,6 @@ export class Runtime {
         continue;
       }
 
-      // A question reported while the read ran makes its result stale for that session, which the next read decides (PRD R70).
-      const asked = new Map(own.map((session) => [session.id, session.question?.id ?? null]));
       const roster = await this.runners[provider].observe(own);
 
       // A failed read changes none of the provider's sessions.
@@ -690,19 +712,23 @@ export class Runtime {
         continue;
       }
 
-      const stale = new Set(own.filter((session) => (this.deps.store.session(session.id)?.question?.id ?? null) !== asked.get(session.id)).map((session) => session.id));
-
-      if (stale.size > 0) {
-        this.rosterAgain = true;
-      }
-
-      observed.push(...roster.sessions.filter((entry) => !stale.has(entry.sessionId)));
-      forks.push(...(roster.forks ?? []).filter((fork) => !stale.has(fork.sessionId)));
-      checked.push(...own.filter((session) => !stale.has(session.id)).map((session) => session.id));
+      observed.push(...roster.sessions);
+      forks.push(...(roster.forks ?? []));
+      checked.push(...own.map((session) => session.id));
     }
 
-    if (checked.length > 0) {
-      this.send({ type: 'roster', sessions: observed, checked, ...(forks.length > 0 ? { forks } : {}) });
+    const stale = new Set(sessions.filter((session) => marks(this.deps.store.session(session.id)) !== asked.get(session.id)).map((session) => session.id));
+
+    if (stale.size > 0) {
+      this.rosterAgain = true;
+    }
+
+    const fresh = checked.filter((id) => !stale.has(id));
+
+    if (fresh.length > 0) {
+      const filteredForks = forks.filter((fork) => !stale.has(fork.sessionId));
+
+      this.send({ type: 'roster', sessions: observed.filter((entry) => !stale.has(entry.sessionId)), checked: fresh, ...(filteredForks.length > 0 ? { forks: filteredForks } : {}) });
     }
   }
 
@@ -871,6 +897,142 @@ export class Runtime {
     const session = this.deps.store.sessionByNativeId(nativeSessionId)!;
 
     return { key: keyOf(session), contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider), already: false };
+  }
+
+  /**
+   * Continue in Background (PRD R89): finds the session in the item window's Claude tab labelled `label`, which must be one of `workItemIds`, and
+   * starts its move. It answers once the flow has stored the move with the tab's process, so the window closes the tab only after that.
+   */
+  async background(label: string, workItemIds: number[]): Promise<{ refused: string } | null> {
+    const runner = this.runners.claude;
+    const tab = runner.tab === undefined ? { error: 'The Claude runner cannot move sessions.' } : await runner.tab(label);
+
+    if ('error' in tab) {
+      return { refused: tab.error };
+    }
+
+    if ('refused' in tab) {
+      return tab;
+    }
+
+    const session = this.deps.store.sessionByNativeId(tab.nativeSessionId);
+
+    if (session === null) {
+      return { refused: NOT_SWITCHBOARD };
+    }
+
+    const { refused } = this.send({ type: 'background', sessionId: session.id, nativeSessionId: tab.nativeSessionId, pid: tab.pid, workItemIds });
+
+    return refused === null ? null : { refused };
+  }
+
+  /** Waits for the tab's process to exit, then resumes the session in its background process, unless Stop or Delete ended the move first. */
+  private async resumeSession(action: Extract<FlowAction, { type: 'resume-session' }>): Promise<void> {
+    const alive = this.deps.alive ?? processAlive;
+    const current = () => this.deps.store.session(action.sessionId)?.move?.id === action.moveId;
+
+    // A stopped hub has closed the store; the move stays stored, and the next hub's startup continues it.
+    for (const until = this.deps.now() + MOVE_EXIT_MS; alive(action.pid); await this.deps.sleep(MOVE_POLL_MS)) {
+      if (this.stopped || !current()) {
+        return;
+      }
+
+      if (this.deps.now() >= until) {
+        this.deps.log(`session ${action.sessionId} stays in its tab: process ${action.pid} did not exit within ${MOVE_EXIT_MS / 1000} seconds`);
+        this.send({ type: 'move-cancelled', sessionId: action.sessionId, moveId: action.moveId });
+        return;
+      }
+    }
+
+    const runner = this.runners[action.provider];
+
+    if (this.stopped || !current() || runner.resume === undefined) {
+      return;
+    }
+
+    const deadline = this.deps.now() + RESUME_CONFIRM_MS;
+
+    this.send({ type: 'move-launching', sessionId: action.sessionId, moveId: action.moveId, deadline });
+
+    const launched = await runner.resume(action.nativeSessionId, action.prompt, action.cwd);
+
+    if ('copy' in launched && launched.copy !== null) {
+      const failure = await runner.stop({ sessionId: action.sessionId, shortId: launched.copy }, 'operator');
+      const stopped = failure === null ? 'and Switchboard stopped it' : `and stopping it failed: ${failure.error}`;
+
+      if (this.stopped) {
+        this.deps.log(`session ${action.sessionId}: Claude started a copy as ${launched.copy} instead of resuming it, ${stopped}`);
+        return;
+      }
+
+      this.resumeResult(action.sessionId, action.moveId, { failed: `Claude started a copy as ${launched.copy} instead of resuming the session, ${stopped}.` });
+      return;
+    }
+
+    await this.confirmResume(action.sessionId, action.moveId, action.nativeSessionId, deadline, 'error' in launched ? launched.error : null);
+  }
+
+  /**
+   * Waits until the roster lists the session in its background process with a pid, or the deadline passes. A failed read, or an entry with no pid
+   * yet, decides nothing, because a launch takes seconds to list its pid (mechanics M5).
+   */
+  private async confirmResume(sessionId: string, moveId: string, nativeSessionId: string, deadline: number, launchError: string | null): Promise<void> {
+    const runner = this.runners.claude;
+
+    for (;;) {
+      const listed = runner.background === undefined ? null : await runner.background(nativeSessionId);
+
+      if (this.stopped) {
+        return;
+      }
+
+      // A process listed after the deadline still runs the session, so it is taken rather than left running unseen.
+      if (listed !== null && 'shortId' in listed) {
+        this.resumeResult(sessionId, moveId, { shortId: listed.shortId });
+        return;
+      }
+
+      if (this.deps.now() >= deadline) {
+        this.resumeResult(sessionId, moveId, { failed: launchError ?? `The session did not appear in claude agents within ${RESUME_CONFIRM_MS / 1000} seconds.` });
+        return;
+      }
+
+      await this.deps.sleep(RESUME_POLL_MS);
+    }
+  }
+
+  /** Sends the resume's result; a process started for a move that Delete ended belongs to no work item, so it is stopped. */
+  private resumeResult(sessionId: string, moveId: string, result: { shortId: string } | { failed: string }): void {
+    if ('shortId' in result && this.deps.store.session(sessionId)?.move?.id !== moveId) {
+      this.deps.log(`session ${sessionId} resumed in the background as ${result.shortId} after its move ended; stopping it`);
+      this.track(
+        this.runners.claude.stop({ sessionId, shortId: result.shortId }, 'operator').then((failure) => {
+          if (failure !== null) {
+            this.deps.log(`stop of ${result.shortId} failed; it may still be running: ${failure.error}`);
+          }
+        }),
+      );
+      return;
+    }
+
+    this.send('shortId' in result ? { type: 'session-resumed', sessionId, moveId, shortId: result.shortId } : { type: 'resume-failed', sessionId, moveId, message: result.failed });
+  }
+
+  /** After a restart (PRD R89): a move still waiting runs again from the wait, and a launch is never repeated, only confirmed by its deadline. */
+  private resumeMoves(): void {
+    for (const session of this.deps.store.activeSessions()) {
+      const move = session.move;
+
+      if (move === null || session.nativeSessionId === null) {
+        continue;
+      }
+
+      if (move.phase === 'waiting') {
+        this.track(this.resumeSession({ type: 'resume-session', sessionId: session.id, moveId: move.id, provider: session.provider, nativeSessionId: session.nativeSessionId, cwd: session.cwd, pid: move.pid, prompt: RESUME_PROMPT }));
+      } else {
+        this.track(this.confirmResume(session.id, move.id, session.nativeSessionId, move.deadline ?? this.deps.now(), null));
+      }
+    }
   }
 
   /**
@@ -1274,6 +1436,8 @@ export class Runtime {
         );
         return;
       }
+      case 'resume-session':
+        return this.resumeSession(action);
       case 'stop-session': {
         const runner = this.runners[action.provider];
 

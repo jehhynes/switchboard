@@ -49,6 +49,15 @@ export interface SessionRunner {
   forkOf?(nativeSessionId: string, sessions: Session[]): Session | null;
   /** The live session with this native ID, which the operator started outside Switchboard, or null; a provider that cannot register leaves it out (PRD R81). */
   live?(nativeSessionId: string): Promise<{ shortId: string; cwd: string } | null | { error: string }>;
+  /**
+   * Continue in Background (PRD R89): the live session that a Claude tab labelled `label` holds, by the roster's session name, and its process,
+   * or why it cannot move; a provider that cannot move sessions leaves it out.
+   */
+  tab?(label: string): Promise<{ nativeSessionId: string; pid: number } | { refused: string } | { error: string }>;
+  /** Resumes the session in its background process with `prompt`; `copy` is the short ID of a copy it started instead. */
+  resume?(nativeSessionId: string, prompt: string, cwd: string): Promise<{ copy: string | null } | { error: string }>;
+  /** The short ID of the session's background process when the roster lists it with a process, null when not. */
+  background?(nativeSessionId: string): Promise<{ shortId: string } | null | { error: string }>;
   /** Fast readings of the given started sessions by native session ID, read without starting a process. */
   markers(sessions: Session[]): Map<string, MarkerReading>;
   /** Whether the session runs in Switchboard's background process, so a release may stop it (PRD R39). */

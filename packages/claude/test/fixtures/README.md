@@ -12,3 +12,7 @@ node fork-fixtures.mjs ~/.vscode/extensions/anthropic.claude-code-2.1.296-win32-
 | `message` | Fork from the first assistant message |
 | `compacted` | Fork conversation after a compaction boundary: the chain from the boundary, so its first `requestId` is not the original's first |
 
+
+# Roster fixtures
+
+`agents-all-tab.json` is `claude agents --json --all` from Claude Code 2.1.317 while a released background session ran in a VS Code Claude tab (mechanics M55), with paths scrubbed and the session names replaced by Switchboard's form. It lists the session's stopped background job beside its live interactive entry, a registered session's interactive entry with no background job, and another background session with its process.

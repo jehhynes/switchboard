@@ -18,7 +18,7 @@ export interface RosterEntry {
 }
 
 export const START_TIMEOUT_MS = 60_000;
-const LAUNCH_TIMEOUT_MS = 60_000;
+export const LAUNCH_TIMEOUT_MS = 60_000;
 const ROSTER_TIMEOUT_MS = 15_000;
 export const STOP_TIMEOUT_MS = 15_000;
 const ROSTER_POLL_MS = 2_000;
@@ -51,8 +51,9 @@ export function shortIdFrom(stdout: string): string | null {
 
 export type RosterResult = { entries: RosterEntry[] } | { error: string };
 
-export async function readRoster(claudePath: string, exec: Exec): Promise<RosterResult> {
-  const result = await exec(claudePath, ['agents', '--json'], { timeoutMs: ROSTER_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
+/** `claude agents --json`; `all` also lists background jobs whose process ended, such as one released to a VS Code tab (mechanics M55). */
+export async function readRoster(claudePath: string, exec: Exec, all = false): Promise<RosterResult> {
+  const result = await exec(claudePath, ['agents', '--json', ...(all ? ['--all'] : [])], { timeoutMs: ROSTER_TIMEOUT_MS, env: claudeEnvironment(claudePath) });
 
   if (result.code !== 0) {
     return { error: failureOf(claudePath, result, ROSTER_TIMEOUT_MS) };
@@ -135,6 +136,46 @@ export async function startSession(claudePath: string, action: StartAction, deps
   }
 
   return { error: `Session ${shortId} did not appear in claude agents within ${START_TIMEOUT_MS / 1000} seconds.` };
+}
+
+/**
+ * Continue in Background's resume (PRD R89): no flag but the prompt, so Claude wakes the session with the options it started with and keeps its
+ * IDs; any flag, or a session still live, starts a copy instead (mechanics M18, M30, M55).
+ */
+export function resumeArgs(nativeSessionId: string, prompt: string): string[] {
+  return ['--bg', '--resume', nativeSessionId, prompt];
+}
+
+/** The short ID from `… so this started a copy as <id>`, which `claude --bg --resume` prints when it did not resume the session itself (M55). */
+export function copyFrom(output: string): string | null {
+  return /started a copy as ([0-9a-f]{8})/.exec(output)?.[1] ?? null;
+}
+
+export const NOT_SWITCHBOARD = "This tab's session is not one of Switchboard's work items.";
+export const NEVER_BACKGROUND = 'This session never ran in the background, so it cannot continue there.';
+
+/**
+ * The session a Claude tab labelled `label` holds (PRD R89). The tab's label is the session's name, and `--all` lists the session's earlier
+ * background job beside its live interactive entry, which shows Claude holds the options to resume it with (mechanics M55).
+ */
+export function tabSession(entries: RosterEntry[], label: string): { nativeSessionId: string; pid: number } | { refused: string } {
+  const live = entries.filter((entry) => entry.name === label && entry.pid !== undefined && entry.kind !== 'background');
+
+  if (live.length > 1) {
+    return { refused: `Several running Claude sessions are named "${label}", so Switchboard cannot tell which one this tab holds.` };
+  }
+
+  const [entry] = live;
+
+  if (entry === undefined) {
+    return { refused: NOT_SWITCHBOARD };
+  }
+
+  if (!entries.some((other) => other.sessionId === entry.sessionId && other.kind === 'background')) {
+    return { refused: NEVER_BACKGROUND };
+  }
+
+  return { nativeSessionId: entry.sessionId, pid: entry.pid! };
 }
 
 /** `claude stop`, never `claude rm`, which can delete the session's worktree (GC M33). */

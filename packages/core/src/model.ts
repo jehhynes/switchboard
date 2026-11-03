@@ -201,6 +201,22 @@ export interface Session {
   pendingFork: string | null;
   /** Registered from a window Switchboard did not open, until it ends, so no item window opens it as a copy (PRD R81). */
   external: boolean;
+  /** Continue in Background under way: the tab's process must exit before the session resumes in its background process (PRD R89). */
+  move: SessionMove | null;
+  /** When the last move ended, so a roster read that started before it does not change the session. */
+  movedAt: number | null;
+}
+
+/**
+ * A move to the background (PRD R89). `waiting`: for the tab's process `pid` to exit; `launching`: `claude --bg --resume` ran, and a roster read
+ * that lists the session in its background process before `deadline` confirms it. `id` names the attempt, so a result of another is not applied.
+ */
+export interface SessionMove {
+  id: string;
+  pid: number;
+  phase: 'waiting' | 'launching';
+  at: number;
+  deadline: number | null;
 }
 
 export interface SessionQuestionReport {

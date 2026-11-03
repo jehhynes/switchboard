@@ -326,13 +326,16 @@ export const MIGRATIONS = [
   // A task report's prompt, which identifies a repeated report after Start with prompt… edits taskPrompt (PRD R68, R77).
   `ALTER TABLE workItems ADD COLUMN reportedPrompt TEXT;
   UPDATE workItems SET reportedPrompt = taskPrompt WHERE parentId IS NOT NULL;`,
+  // Continue in Background (PRD R89): the move under way, as JSON, and when the last one ended.
+  `ALTER TABLE sessions ADD COLUMN move TEXT;
+  ALTER TABLE sessions ADD COLUMN movedAt INTEGER;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
-const OBJECTS = new Set(['question']);
+const OBJECTS = new Set(['question', 'move']);
 
 type Row = Record<string, unknown>;
 
@@ -476,7 +479,8 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance', 'reportedPrompt']),
   // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
   // The register event names an external session, and its end already shows when it was cleared.
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external']),
+  // The background event and its result name a move (PRD R89); its fields are bookkeeping.
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),
