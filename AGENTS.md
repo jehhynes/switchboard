@@ -84,7 +84,7 @@ Confirm the installed bundle under `%USERPROFILE%/.vscode/extensions/switchboard
 
 For changes to the dock, close the running dock (it holds its files open), then run `npm run publish --workspace @switchboard/dock`, which publishes it to `~/.switchboard/dock/` (`%USERPROFILE%` on Windows), and report that the operator can start `Switchboard.Dock.exe`, or `Switchboard.Dock` on Linux, there.
 
-For changes to the browser extension (`extensions/chrome` or `extensions/firefox`), run `npm run build`, then `npm run package --workspace @switchboard/firefox`, and report that the operator can reload `extensions/chrome/dist` in `chrome://extensions` and install `extensions/firefox/switchboard-firefox.xpi` again in Firefox Developer Edition or Nightly.
+For changes to the browser extension (`extensions/chrome` or `extensions/firefox`), run `npm run build` and `npm run lint --workspace @switchboard/firefox`, which must report no errors. Report that the operator can reload `extensions/chrome/dist` in `chrome://extensions` and load `extensions/firefox/dist/manifest.json` in `about:debugging`. `npm run sign --workspace @switchboard/firefox` signs and releases the Firefox build only from a pushed commit, so run it after the change is pushed when `~/.switchboard/amo.env` holds the operator's keys, without reading that file, and otherwise report that the operator can; they then install `extensions/firefox/switchboard-firefox-signed.xpi` from `about:addons`.
 
 For changes to the GNOME Shell extension, run `npm run publish --workspace @switchboard/gnome-shell`, which installs it to `~/.local/share/gnome-shell/extensions/switchboard@switchboard/` and enables it, and report that GNOME Shell loads the change at the operator's next login.
 

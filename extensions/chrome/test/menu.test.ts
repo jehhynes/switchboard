@@ -64,7 +64,16 @@ describe('watchCardMenus', () => {
     expect([open.getAttribute('role'), open.getAttribute('tabindex'), open.getAttribute('aria-label')]).toEqual(['menuitem', '-1', 'Open in Switchboard']);
     expect(open.querySelectorAll('[id]')).toHaveLength(0);
     expect(open.hasAttribute('aria-keyshortcuts')).toBe(false);
-    expect(open.querySelector('[data-component="ActionList.LeadingVisual"] svg')).not.toBeNull();
+
+    const svg = open.querySelector('[data-component="ActionList.LeadingVisual"] svg');
+
+    expect([svg?.namespaceURI, svg?.getAttribute('viewBox'), svg?.getAttribute('class'), svg?.childElementCount, svg?.querySelector('path')?.getAttribute('d')?.slice(0, 18)]).toEqual([
+      'http://www.w3.org/2000/svg',
+      '0 0 16 16',
+      'octicon',
+      1,
+      'M15.434 1.72887L12',
+    ]);
   });
 
   it('offers Unsnooze on a snoozed card, only Open in Switchboard on a Done card, and nothing on a card the hub does not list', async () => {

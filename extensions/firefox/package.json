@@ -2,12 +2,16 @@
   "name": "@switchboard/firefox",
   "version": "0.0.1",
   "private": true,
-  "description": "Firefox build of the Chrome extension in extensions/chrome, from the same source. Load dist/ from about:debugging, or install switchboard-firefox.xpi in Firefox Developer Edition or Nightly with xpinstall.signatures.required set to false.",
+  "description": "Firefox build of the Chrome extension in extensions/chrome, from the same source. npm run sign gets it signed as an unlisted add-on for release Firefox; npm run dev runs it in a dev profile and reloads it on each change.",
   "scripts": {
     "build": "node esbuild.mjs",
     "package": "node package.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "dev": "node dev.mjs",
+    "sign": "npm run build --workspace @switchboard/core && node esbuild.mjs && node sign.mjs",
+    "lint": "web-ext lint --source-dir dist",
+    "release": "node release.mjs"
   },
   "devDependencies": {
     "@switchboard/chrome": "*",
@@ -16,6 +20,7 @@
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.7",
+    "web-ext": "^10.8.0",
     "yazl": "^2.5.1"
   }
 }

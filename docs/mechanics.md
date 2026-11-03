@@ -483,7 +483,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** that answering the prompt in an interactive `claude` lets a later `--bg` start skip it; Claude Code saves each project's MCP choices, which `claude mcp reset-project-choices` clears. Other prompts before the start may block the same way.
 - **Current use:** a start whose entry is `blocked` with no pid on two reads in a row starts the session waiting on the operator, who answers through Open in terminal; only a session that started so is kept alive by such an entry, and one whose process died there waits until the operator stops it (architecture.md § Claude Code runner).
 
-## M42. The browser extension in Firefox
+## M52. The browser extension in Firefox
 
 - **Date:** 2026-10-18.
 - **Versions:** Firefox 158.0 (build ID 20261009003443, snap revision 9057), headless, Linux.
@@ -505,6 +505,20 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 These mechanisms are planned but not yet verified for Switchboard:
 
 - A real pick whose task session claims the pool ticket. By the operator's rule no test claims a case; the operator makes the first real pick.
+
+## M53. The Firefox dev loop and addons.mozilla.org's checks
+
+- **Date:** 2026-11-03.
+- **Versions:** web-ext 10.8.0, snap Firefox 158.0.1 (build ID 20261020045838, snap revision 9113), Ubuntu with AppArmor.
+- **Experiment:** `web-ext lint` ran on the built `extensions/firefox/dist`. `npm run dev --workspace @switchboard/firefox -- --arg=--headless --no-input` ran with a throwaway profile under `~/snap/firefox/common/`, from Claude Code's shell inside VS Code; the script then touched `content.css`, added a comment to a source file, and added a `console.debug` call to one, reverting it; a later run replaced `content.css` twice and an icon once by moving a copy over it, as editors save. The script was stopped with SIGINT to its process group, as Ctrl+C sends, in a second run by quitting Firefox through its debugger port, as closing its window does, and in later runs with SIGTERM to the script alone.
+- **Result:**
+  - `web-ext lint` refused a manifest `description` over 250 characters, and warned about `innerHTML` set from a variable, though the value was a constant SVG, and that `data_collection_permissions` needs Firefox for Android 142, which the desktop-only add-on does not target.
+  - `web-ext run` installed `dist/` as a temporary add-on in release Firefox. A rewritten manifest and a code change each reloaded it within seconds; a comment, which leaves the bundle unchanged, rebuilt without a reload. With the folders of the copied files watched, each replacing save reloaded it.
+  - The operator's `web-ext sign --channel unlisted` was accepted with the ID `switchboard@switchboard` and returned version 0.0.1.441353 signed, under the slug `2170cace57234e8a8e3f`.
+  - In a throwaway headless profile, offline, WebDriver BiDi's `webExtension.install` with `moz:permanent` installed the signed `.xpi`: active, `signedState` 2 with `xpinstall.signatures.required` on, both host permissions granted with no prompt, and all of it, with `storage.local`, kept across a restart. A temporary install of `dist/` with the same ID was accepted and ran alone, its version in the background script, with the signed copy installed but inactive; the UUID, host permissions and `storage.local` carried over, and `storage.session` was emptied. `addon.reload()`, as `about:debugging`'s Reload, loaded a changed build and kept the same. A restart dropped the temporary copy and brought back the signed one with its UUID, permissions and `storage.local`. `addon.uninstall()` of the temporary copy, as `about:debugging`'s Remove, brought back the signed one at once but with a new UUID, no host permissions and an empty `storage.local`, also after a restart and after installing the same `.xpi` again; uninstalling the signed copy and installing it again restored the permissions. Both runs of the Remove case did the same.
+  - SIGINT made `web-ext` exit with `kill EACCES`, leaving Firefox running: the shell had VS Code's AppArmor label `vscode`, and the snap's profile takes signals only from `unconfined` and `snap.*` peers. The same label refused the shell's own `kill` of the Firefox process. Quitting Firefox ended `web-ext` and the dev script. SIGTERM passed on to `web-ext` ended it without closing Firefox; passed on as SIGINT, `web-ext` tried to close Firefox, failing with the same `kill EACCES`.
+- **Not verified:** installing the signed `.xpi` from `about:addons` by hand, and any permission prompt it shows; granting the host permissions again by hand in `about:addons` after Remove; the add-on's own `browser.permissions.getAll()`; requests to a hub from the signed copy; Ctrl+C from a terminal outside VS Code, whose label snap Firefox accepts.
+- **Current use:** `npm run dev`, `npm run lint`, `npm run sign`, loading `dist/` over the signed copy, and the manifest's description (architecture.md § Browser extension).
 
 ## M41. Observed Support volume retention
 

@@ -4,15 +4,33 @@ export const GECKO_ID = 'switchboard@switchboard';
 /** The first Firefox with `tabGroups` and `data_collection_permissions`. */
 export const MIN_VERSION = '140.0';
 
+/** Builds are numbered by the minutes since this time, so a build in a later minute has a higher version. */
+const BUILD_EPOCH = Date.UTC(2026, 0, 1);
+
+/** A part of a Firefox version: at most nine digits, with no leading zero. */
+const VERSION_PART = /^(0|[1-9]\d{0,8})$/;
+
 const CHROME_FONT = "url('chrome-extension://__MSG_@@extension_id__/codicon.ttf')";
 
 /**
  * The Chrome manifest changed for Firefox, which runs a background script instead of a service worker, needs an add-on ID, and
- * matches nothing with a match pattern that has a port, so the hub's host permission covers every port of its host (mechanics M42).
+ * matches nothing with a match pattern that has a port, so the hub's host permission covers every port of its host (mechanics M52).
+ * The version adds the build number to Chrome's, because addons.mozilla.org signs each version once.
  * @param {Record<string, unknown>} chrome
+ * @param {number} build
  * @returns {Record<string, unknown>}
  */
-export function firefoxManifest(chrome) {
+export function firefoxManifest(chrome, build) {
+  const parts = typeof chrome.version === 'string' ? chrome.version.split('.') : [];
+
+  if (parts.length < 1 || parts.length > 3 || !parts.every((part) => VERSION_PART.test(part))) {
+    throw new Error('The Chrome manifest version is not 1 to 3 numbers, so it has no room for the build number.');
+  }
+
+  if (!VERSION_PART.test(String(build))) {
+    throw new Error(`The build number ${build} is not a whole number of at most nine digits; check the clock.`);
+  }
+
   const background = /** @type {{ service_worker?: unknown } | undefined} */ (chrome.background);
 
   if (typeof background?.service_worker !== 'string') {
@@ -27,12 +45,80 @@ export function firefoxManifest(chrome) {
 
   return {
     ...chrome,
+    version: `${chrome.version}.${build}`,
     background: { scripts: [background.service_worker] },
     host_permissions: hosts.map((host) => host.replace(/^([a-z]+:\/\/[^/:]+):\d+\//, '$1/')),
     browser_specific_settings: {
       gecko: { id: GECKO_ID, strict_min_version: MIN_VERSION, data_collection_permissions: { required: ['none'] } },
     },
   };
+}
+
+/**
+ * The build number at a time: whole minutes since 2026-01-01 UTC.
+ * @param {number} now
+ * @returns {number}
+ */
+export function buildNumber(now) {
+  return Math.floor((now - BUILD_EPOCH) / 60_000);
+}
+
+/** The GitHub release tag of a signed version. */
+const RELEASE_TAG = /^firefox-v(\d+(?:\.\d+)*)$/;
+
+/**
+ * The GitHub release tag of a signed version.
+ * @param {string} version
+ * @returns {string}
+ */
+export function releaseTag(version) {
+  return `firefox-v${version}`;
+}
+
+/**
+ * The signed versions among GitHub release tags; other tags are ignored.
+ * @param {string[]} tags
+ * @returns {string[]}
+ */
+export function releasedVersions(tags) {
+  return tags.flatMap((tag) => RELEASE_TAG.exec(tag)?.slice(1) ?? []);
+}
+
+/**
+ * Why addons.mozilla.org would refuse to sign `version`, given the versions already released, or null. It signs each version once,
+ * and a version lower than the last signed one would not update an installed copy.
+ * @param {string} version
+ * @param {string[]} signedVersions
+ * @returns {string | null}
+ */
+export function signingRefusal(version, signedVersions) {
+  if (signedVersions.includes(version)) {
+    return `Version ${version} is already signed. Builds in the same minute get the same version: wait a minute and sign again.`;
+  }
+
+  const newer = signedVersions.find((signed) => compareVersions(signed, version) > 0);
+
+  return newer === undefined ? null : `Version ${version} is lower than the signed version ${newer}. Check the clock.`;
+}
+
+/**
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function compareVersions(a, b) {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return 0;
 }
 
 /**

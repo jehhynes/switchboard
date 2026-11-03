@@ -8,3 +8,4 @@ coverage/
 bin/
 obj/
 *.xpi
+extensions/firefox/switchboard-firefox-signed.json
