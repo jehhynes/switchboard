@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MESSAGES } from '@switchboard/core';
+import { MESSAGES, PERMISSION_PROMPT } from '@switchboard/core';
 import { wakeText } from '@switchboard/core/snooze';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dockView, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
@@ -140,6 +140,18 @@ describe('dockView', () => {
     });
     // The question is answered in Claude, so line 3 names the mark in place of the stage.
     expect(row(item(7, { sessions: [session({ state: 'waiting' })], stage: 'checking refunds', stageAt: NOW - 60_000 })).details).toEqual([{ text: 'Answer a question', title: null, tone: null }]);
+  });
+
+  it('marks a permission prompt, says what answers it on line 3 without the stage, and opens a terminal from its main control (PRD R70)', () => {
+    const permission = row(item(7, { status: 'running', sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT })], stage: 'checking refunds', stageAt: NOW - 60_000 }));
+
+    expect(permission).toMatchObject({
+      mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' },
+      stripe: 'warning',
+      main: 'Open in terminal',
+      details: [{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.', tone: null }],
+    });
+    expect(permission.open).toBeNull();
   });
 
   it('says why an unstarted work item waits when nothing is newer than the earlier work item (PRD R80)', () => {

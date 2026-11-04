@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Exec, ExecResult } from '../src/exec.js';
 import type { Marker } from '../src/hooks.js';
 import { entryFor, observe, observeForks, readRoster, rosterState, shortIdFrom, startArgs, startSession, stopSession } from '../src/runner.js';
-import { START_PROMPT } from '@switchboard/core';
+import { PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import type { StartAction } from '@switchboard/core';
 import type { RosterEntry } from '../src/runner.js';
 
@@ -219,6 +219,29 @@ describe('roster', () => {
     expect(observe([{ ...entry, state: 'done' }], [waiting], new Map())).toEqual([]);
   });
 
+  // Entries as `claude agents --json` listed a background session at a tool call's permission prompt and at an AskUserQuestion (mechanics M57).
+  it("tells a permission prompt from a question by the roster's waitingFor, over a notification marker", () => {
+    const entry = { id: '1a2b3c4d', sessionId: '1a2b3c4d-0000', pid: 5, kind: 'background', cwd: '', status: 'waiting', state: 'blocked' };
+    const session = { id: 's1', shortId: '1a2b3c4d', state: 'running', stateDetail: null };
+    const notification: Marker = { sessionId: entry.sessionId, event: 'Notification', notificationType: 'permission_prompt', source: null, toolName: null, backgroundTasks: 0, error: null, errorMessage: null };
+    const request: Marker = { ...notification, event: 'PermissionRequest', notificationType: null, toolName: 'PowerShell' };
+    const markers = (marker: Marker) => new Map([[entry.sessionId, marker]]);
+
+    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], markers(notification))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
+    expect(observe([{ ...entry, waitingFor: 'input needed' }], [session], markers(notification))).toEqual([{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }]);
+    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], new Map())).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
+    // Before the roster lists the wait, the permission request's marker decides, and so does the notification that carries its tool, whatever
+    // the session was when the read began.
+    const working = { ...entry, status: 'busy', state: 'working' };
+    expect(observe([working], [session], markers(request))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
+    expect(observe([working], [session], markers({ ...notification, promptTool: 'PowerShell' }))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
+    expect(observe([working], [session], markers({ ...notification, promptTool: null }))).toEqual([{ sessionId: 's1', state: 'waiting', detail: null, interactive: false }]);
+    // A notification marker from before the writer recorded the tool leaves a listed wait to the roster.
+    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], markers(notification))).toEqual([{ sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }]);
+    // An answered prompt runs again whatever the roster still lists.
+    expect(observe([{ ...entry, waitingFor: 'permission prompt' }], [session], markers({ ...notification, event: 'PostToolBatch', notificationType: null }))).toEqual([{ sessionId: 's1', state: 'running', detail: null, interactive: false }]);
+  });
+
   it('observes a resumed tab as idle until its first turn, though the roster lists it as busy', () => {
     const tab = ENTRIES.find((entry) => entry.sessionId.startsWith('3e065e9f'))!;
     const marker = (event: string, source: string | null): Marker => ({ sessionId: tab.sessionId, event, notificationType: null, source, toolName: null, backgroundTasks: 0, error: null, errorMessage: null });
@@ -240,6 +263,8 @@ describe('roster', () => {
 
     expect(observeForks(forks, new Map())).toEqual([{ sessionId: 's1', nativeSessionId: fork.sessionId, shortId: '9e8d7c6b', state: 'idle', detail: null }]);
     expect(observeForks(forks, new Map([[fork.sessionId, marker]]))).toMatchObject([{ state: 'running' }]);
+    // A fork whose permission request's marker a notification replaced keeps the permission detail (mechanics M57).
+    expect(observeForks(forks, new Map([[fork.sessionId, { ...marker, event: 'Notification', notificationType: 'permission_prompt', promptTool: 'Bash' }]]))).toMatchObject([{ state: 'waiting', detail: PERMISSION_PROMPT }]);
   });
 });
 

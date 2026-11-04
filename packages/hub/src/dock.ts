@@ -285,7 +285,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
       ...wake(item.ticket),
       ...[item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped(note, CAPS.note, 'warning')),
       ...(item.parent === null ? [] : [{ text: `From ${ticketKey(item.parent)}`, title: item.parent.title, tone: null }]),
-      ...(kind === 'question' ? [] : progress(item, now)),
+      ...(kind === 'question' || kind === 'permission' ? [] : progress(item, now)),
     ]),
     stripe: stripeOf(item),
     turn,

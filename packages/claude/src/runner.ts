@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { START_PROMPT } from '@switchboard/core';
+import { PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import type { LiveState, ObservedFork, ObservedSession, StartAction, StartResult } from '@switchboard/core';
 import type { Exec } from './exec.js';
 import { claudeEnvironment, failureOf } from './exec.js';
@@ -14,6 +14,8 @@ export interface RosterEntry {
   kind: string;
   state?: string;
   status?: string;
+  /** What a `blocked` background session waits on: `permission prompt` for a tool call, `input needed` for a question (mechanics M57). */
+  waitingFor?: string;
   cwd: string;
   name?: string;
 }
@@ -271,6 +273,7 @@ export function observeForks(forks: ReadonlyMap<string, RosterEntry>, markers: R
   return [...forks].map(([sessionId, entry]) => ({ sessionId, nativeSessionId: entry.sessionId, shortId: entry.id ?? entry.sessionId.slice(0, 8), ...stateOf(entry, markers) }));
 }
 
+/** A background entry's `waitingFor` decides what a wait is on once the roster lists it (mechanics M57). */
 function stateOf(entry: RosterEntry, markers: ReadonlyMap<string, Marker>): { state: LiveState; detail: string | null } {
   const marker = markers.get(entry.sessionId);
 
@@ -279,5 +282,11 @@ function stateOf(entry: RosterEntry, markers: ReadonlyMap<string, Marker>): { st
     return { state: 'idle', detail: null };
   }
 
-  return (marker === undefined ? null : markerState(marker)) ?? { state: rosterState(entry), detail: null };
+  const seen = (marker === undefined ? null : markerState(marker)) ?? { state: rosterState(entry), detail: null };
+
+  if (seen.state === 'waiting' && entry.kind === 'background' && entry.state === 'blocked' && entry.waitingFor !== undefined) {
+    return { state: 'waiting', detail: entry.waitingFor === 'permission prompt' ? PERMISSION_PROMPT : null };
+  }
+
+  return seen;
 }

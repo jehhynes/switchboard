@@ -13,8 +13,16 @@ export function waitsToStart(session: Pick<Session, 'state' | 'stateDetail'> | n
   return session !== null && session.state === 'waiting' && session.stateDetail === START_PROMPT;
 }
 
-/** `triage` is the work item's latest triage, or null when it has none. */
-type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: Pick<Session, 'state' | 'outcome'>[]; triage: Pick<Triage, 'error'> | null };
+/** The state detail of a `waiting` Claude session that waits on a permission prompt for a tool call, not on a question (PRD R70). */
+export const PERMISSION_PROMPT = 'permission-prompt';
+
+/** A session waiting on a permission prompt, which stopping it would drop, so the operator answers it by attaching to it (PRD R70). */
+export function waitsOnPermission(session: { state: Session['state']; stateDetail?: string | null } | null): boolean {
+  return session !== null && session.state === 'waiting' && session.stateDetail === PERMISSION_PROMPT;
+}
+
+/** `triage` is the work item's latest triage, or null when it has none. A caller without `stateDetail` gets no permission mark. */
+type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: (Pick<Session, 'state' | 'outcome'> & { stateDetail?: string | null })[]; triage: Pick<Triage, 'error'> | null };
 
 /** The work item failed because its latest triage failed, so Retry triages it again and it waits in Unstarted (PRD R27, R34). */
 export function failedAtTriage(item: Pick<WorkItem, 'status'> & { triage: Pick<Triage, 'error'> | null }): boolean {
@@ -105,13 +113,14 @@ export function reviewOrder(a: Pick<WorkItem, 'id' | 'readyAt' | 'orderAt'>, b: 
 }
 
 /** What differs between rows of one group (PRD R27): what the operator must do, the working phase, or how the work ended. */
-export type Mark = 'question' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
+export type Mark = 'question' | 'permission' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
 
 export const DONE_WORDS: Record<DoneReason, string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
 /** Each mark in words, for its tooltip. */
 export const MARK_TITLES: Record<Mark, string> = {
   question: 'Answer a question',
+  permission: 'Approve a permission',
   send: 'Approve to send',
   review: 'Review, then approve',
   finished: 'Review the finished turn',
@@ -129,6 +138,7 @@ export const MARK_TITLES: Record<Mark, string> = {
 /** Each mark's codicon glyph in codicon.ttf, for the dock and the Chrome extension's pills; Queued's `clock` is an alias of `history`. */
 export const MARK_GLYPHS: Record<Mark, string> = {
   question: '\u{eb32}',
+  permission: '\u{eb53}', // shield
   send: '\u{ec0f}',
   review: '\u{ea70}', // eye
   finished: '\u{ea70}', // eye
@@ -151,7 +161,7 @@ export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approval
     case 'progress':
       // A question the session waits on comes before an approval it reported earlier.
       if (waitsOnQuestion(item)) {
-        return 'question';
+        return waitsOnPermission(activeSession(item)) ? 'permission' : 'question';
       }
 
       if (item.status === 'failed' || item.status === 'blocked') {

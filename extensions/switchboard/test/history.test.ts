@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, Store, handle, parsePlaybook } from '@switchboard/core';
+import { DEFAULT_SETTINGS, PERMISSION_PROMPT, Store, handle, parsePlaybook } from '@switchboard/core';
 import type { FlowEvent, HistoryChange, HistoryEvent, Playbook, Settings, TicketHistory } from '@switchboard/core';
 import { describe, expect, it, vi } from 'vitest';
 import { startHistory } from '../src/webview/historyMain.js';
@@ -472,6 +472,16 @@ describe('History model', () => {
       ['Session abc12345 is waiting for you', 'Second question?', 'warning'],
     ]);
     expect(entries[1]!.links).toEqual([]);
+  });
+
+  it('names a permission prompt in words, not by its state detail (PRD R70)', () => {
+    const run = approvedRun();
+
+    run.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: PERMISSION_PROMPT });
+
+    const entry = historyView(run.history(), run.now).sections[0]!.entries.at(-1)!;
+
+    expect([entry.text, entry.detail, entry.icon, entry.tone]).toEqual(['Session abc12345 is waiting on a permission prompt', null, 'shield', 'warning']);
   });
 
   it('keeps the waiting state of a session from before the log began when only its question changes', () => {

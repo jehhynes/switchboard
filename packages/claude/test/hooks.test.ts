@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BACKGROUND_DETAIL, CONTRACT_HOOK_SOURCE, CONTRACT_HOOK_WAIT_MS, HOOK_EVENTS, HOOK_SOURCE, markerState, planHooks } from '../src/hooks.js';
 import type { Marker } from '../src/hooks.js';
+import { PERMISSION_PROMPT } from '@switchboard/core';
 
 const HOOK = 'C:/Users/me/.switchboard/hook.mjs';
 const ENTRY = { type: 'command', command: 'node', args: [HOOK], async: true, timeout: 5 };
@@ -94,11 +95,15 @@ describe('markerState', () => {
     [{ event: 'PermissionDenied' }, { state: 'running', detail: null }],
     [{ event: 'SessionStart', source: 'compact' }, { state: 'running', detail: null }],
     [{ event: 'SessionStart', source: 'startup' }, null],
-    [{ event: 'PermissionRequest' }, { state: 'waiting', detail: null }],
+    [{ event: 'PermissionRequest', toolName: 'PowerShell' }, { state: 'waiting', detail: PERMISSION_PROMPT }],
+    [{ event: 'PermissionRequest', toolName: 'AskUserQuestion' }, { state: 'waiting', detail: null }],
+    [{ event: 'PermissionRequest', toolName: 'ExitPlanMode' }, { state: 'waiting', detail: null }],
     [{ event: 'Elicitation' }, { state: 'waiting', detail: null }],
     [{ event: 'PreToolUse', toolName: 'AskUserQuestion' }, { state: 'waiting', detail: null }],
     [{ event: 'PreToolUse', toolName: 'Bash' }, null],
-    [{ event: 'Notification', notificationType: 'permission_prompt' }, { state: 'waiting', detail: null }],
+    [{ event: 'Notification', notificationType: 'permission_prompt', promptTool: null }, { state: 'waiting', detail: null }],
+    [{ event: 'Notification', notificationType: 'worker_permission_prompt' }, { state: 'waiting', detail: PERMISSION_PROMPT }],
+    [{ event: 'Notification', notificationType: 'agent_needs_input' }, { state: 'waiting', detail: null }],
     [{ event: 'Notification', notificationType: 'idle_prompt' }, null],
     [{ event: 'Stop' }, { state: 'idle', detail: null }],
     [{ event: 'Stop', backgroundTasks: 2 }, { state: 'running', detail: BACKGROUND_DETAIL }],
@@ -107,6 +112,17 @@ describe('markerState', () => {
     [{ event: 'SessionEnd' }, null],
   ])('maps %j', (patch, expected) => {
     expect(markerState(marker(patch))).toEqual(expected);
+  });
+
+  // Claude notifies `permission_prompt` about 5 seconds after the permission request of a question as well as of a tool call (mechanics M57).
+  it("gives a permission_prompt notification the detail of the permission request's tool it carries", () => {
+    const notification = (promptTool?: string | null) => markerState(marker({ event: 'Notification', notificationType: 'permission_prompt', ...(promptTool === undefined ? {} : { promptTool }) }));
+
+    expect(notification('PowerShell')).toEqual({ state: 'waiting', detail: PERMISSION_PROMPT });
+    expect(notification('AskUserQuestion')).toEqual({ state: 'waiting', detail: null });
+    expect(notification(null)).toEqual({ state: 'waiting', detail: null });
+    // A marker written before the writer recorded the tool says nothing, so a waiting permission prompt keeps the roster's detail.
+    expect(notification()).toBeNull();
   });
 });
 
@@ -130,6 +146,31 @@ describe('hook writer', () => {
 
   const markerPath = () => join(dir, 'activity', 'abc-123.json');
 
+  it("carries a permission request's tool to the permission_prompt notification that replaces its marker (mechanics M57)", () => {
+    const written = () => JSON.parse(readFileSync(markerPath(), 'utf8'));
+
+    run({ session_id: 'abc-123', hook_event_name: 'PermissionRequest', tool_name: 'PowerShell' });
+    expect(written()).toMatchObject({ event: 'PermissionRequest', toolName: 'PowerShell', promptTool: 'PowerShell' });
+    run({ session_id: 'abc-123', hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    expect(written()).toMatchObject({ event: 'Notification', toolName: null, promptTool: 'PowerShell' });
+    run({ session_id: 'abc-123', hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    expect(written().promptTool).toBe('PowerShell');
+
+    // A permission request written before the writer recorded promptTool still gives its tool.
+    writeFileSync(markerPath(), JSON.stringify({ v: 1, sessionId: 'abc-123', event: 'PermissionRequest', at: 1, toolName: 'Bash' }));
+    run({ session_id: 'abc-123', hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    expect(written().promptTool).toBe('Bash');
+
+    // A notification after any other event, or with no marker, carries none.
+    run({ session_id: 'abc-123', hook_event_name: 'PostToolBatch' });
+    expect(written().promptTool).toBeNull();
+    run({ session_id: 'abc-123', hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    expect(written().promptTool).toBeNull();
+    run({ session_id: 'abc-123', hook_event_name: 'SessionEnd' });
+    run({ session_id: 'abc-123', hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    expect(written().promptTool).toBeNull();
+  });
+
   it('writes no marker for a debrief fork', () => {
     expect(run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...process.env, FRICTION_DEBRIEF: '1' })).toEqual({ status: 0, stdout: '' });
     expect(existsSync(markerPath())).toBe(false);
@@ -151,6 +192,7 @@ describe('hook writer', () => {
       notificationType: null,
       source: null,
       toolName: null,
+      promptTool: null,
       backgroundTasks: 0,
       error: 'rate_limit',
       errorMessage: 'x'.repeat(500),

@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { activeSession, failedAtTriage, groupOf, ownPrompt, reviewKey, START_PROMPT, waitsToStart } from './group.js';
+import { activeSession, failedAtTriage, groupOf, ownPrompt, reviewKey, START_PROMPT, waitsOnPermission, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { repoRoots } from './settings.js';
@@ -1872,6 +1872,11 @@ class Flow {
 
     if (waitsToStart(session)) {
       throw new Refusal('The session waits on a prompt before it starts; open it in a terminal to answer it.');
+    }
+
+    // Stopping the session would drop the prompt, and a tab resumed from it records the tool call as interrupted.
+    if (waitsOnPermission(session)) {
+      throw new Refusal('The session waits on a permission prompt; open it in a terminal to answer it.');
     }
 
     return session as Session & { shortId: string };

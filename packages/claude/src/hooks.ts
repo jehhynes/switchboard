@@ -1,5 +1,5 @@
 import type { LiveState } from '@switchboard/core';
-import { NODE_NAME } from '@switchboard/core';
+import { NODE_NAME, PERMISSION_PROMPT } from '@switchboard/core';
 
 /** Longest error text a marker keeps. */
 export const ERROR_MESSAGE_LIMIT = 500;
@@ -27,6 +27,16 @@ try {
       const failed = payload.hook_event_name === 'StopFailure';
       const text = (value) => (typeof value === 'string' ? value : null);
       const tmp = marker + '.' + process.pid + '.tmp';
+      // The permission_prompt notification names no tool and replaces the permission request's marker, so it keeps the request's tool.
+      let promptTool = payload.hook_event_name === 'PermissionRequest' ? text(payload.tool_name) : null;
+
+      if (payload.hook_event_name === 'Notification') {
+        try {
+          const previous = JSON.parse(readFileSync(marker, 'utf8'));
+          // A permission request written before the writer recorded promptTool still names its tool.
+          promptTool = previous.event === 'PermissionRequest' ? (text(previous.promptTool) ?? text(previous.toolName)) : previous.event === 'Notification' ? text(previous.promptTool) : null;
+        } catch {}
+      }
 
       mkdirSync(dir, { recursive: true });
       writeFileSync(tmp, JSON.stringify({
@@ -38,6 +48,7 @@ try {
         notificationType: text(payload.notification_type),
         source: text(payload.source),
         toolName: text(payload.tool_name),
+        promptTool,
         backgroundTasks: Array.isArray(payload.background_tasks) ? payload.background_tasks.length : 0,
         error: failed ? text(payload.error) : null,
         errorMessage: failed && typeof payload.last_assistant_message === 'string' ? payload.last_assistant_message.slice(0, ${ERROR_MESSAGE_LIMIT}) : null,
@@ -201,6 +212,8 @@ export interface Marker {
   notificationType: string | null;
   source: string | null;
   toolName: string | null;
+  /** The tool of the permission request a `PermissionRequest` or a `Notification` after it waits on; markers from before Switchboard recorded it have none. */
+  promptTool?: string | null;
   backgroundTasks: number;
   error: string | null;
   errorMessage: string | null;
@@ -212,7 +225,16 @@ export const BACKGROUND_DETAIL = 'turn ended with background tasks';
 const WAITING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 const WAITING_NOTIFICATIONS = new Set(['permission_prompt', 'worker_permission_prompt', 'agent_needs_input']);
 
-/** The state a marker shows, with the error of a failed turn, or null for an event that says nothing about state (GC M2, M20). */
+/** A permission request for a tool other than a question or a plan is a permission prompt (mechanics M57). */
+function permissionDetail(tool: string | null | undefined): string | null {
+  return typeof tool === 'string' && !WAITING_TOOLS.has(tool) ? PERMISSION_PROMPT : null;
+}
+
+/**
+ * The state a marker shows, with the error of a failed turn or `PERMISSION_PROMPT` for a tool call's permission prompt, or null for an event that
+ * says nothing about state (GC M2, M20). Claude sends a `permission_prompt` notification after a question's permission request as well as a
+ * tool call's, so that notification's detail comes from the request's tool, which the hook writer carries over (mechanics M57).
+ */
 export function markerState(marker: Marker): { state: LiveState; detail: string | null } | null {
   switch (marker.event) {
     case 'UserPromptSubmit':
@@ -226,11 +248,22 @@ export function markerState(marker: Marker): { state: LiveState; detail: string 
     case 'SessionStart':
       return marker.source === 'compact' ? { state: 'running', detail: null } : null;
     case 'PermissionRequest':
+      return { state: 'waiting', detail: permissionDetail(marker.toolName) };
     case 'Elicitation':
       return { state: 'waiting', detail: null };
     case 'PreToolUse':
       return marker.toolName !== null && WAITING_TOOLS.has(marker.toolName) ? { state: 'waiting', detail: null } : null;
     case 'Notification':
+      // A notification written before the writer recorded promptTool cannot tell its wait, so the roster's waitingFor decides.
+      if (marker.notificationType === 'permission_prompt') {
+        return marker.promptTool === undefined ? null : { state: 'waiting', detail: permissionDetail(marker.promptTool) };
+      }
+
+      // A subagent's permission prompt: the hook writer skips subagent events, so its permission request leaves no marker.
+      if (marker.notificationType === 'worker_permission_prompt') {
+        return { state: 'waiting', detail: PERMISSION_PROMPT };
+      }
+
       return marker.notificationType !== null && WAITING_NOTIFICATIONS.has(marker.notificationType) ? { state: 'waiting', detail: null } : null;
     case 'Stop':
       return marker.backgroundTasks > 0 ? { state: 'running', detail: BACKGROUND_DETAIL } : { state: 'idle', detail: null };

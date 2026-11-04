@@ -190,7 +190,7 @@ export interface Session {
   cwd: string;
   state: SessionState;
   stateAt: number;
-  /** Error kind of a `failed` turn, or `START_PROMPT` for a `waiting` one. */
+  /** Error kind of a `failed` turn, or `START_PROMPT` or `PERMISSION_PROMPT` for a `waiting` one. */
   stateDetail: string | null;
   outcome: SessionOutcome | null;
   outcomeDetail: string | null;

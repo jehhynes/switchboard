@@ -1,4 +1,4 @@
-import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, reviewOrder, triageLabel, turnOf, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
+import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, reviewOrder, triageLabel, turnOf, waitsOnPermission, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
 import type { OpenVSCode, Provider, TicketBlocker } from '@switchboard/core';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -115,8 +115,8 @@ export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Co
 
   const controls = controlsOf(item, mode);
 
-  // A prompt before the session starts is answered by attaching to it (PRD R41).
-  if (isBackground(activeSession(item)) && waitsToStart(activeSession(item))) {
+  // A prompt before the session starts, or a permission prompt, is answered by attaching to it (PRD R41, R70).
+  if (isBackground(activeSession(item)) && waitsInTerminal(activeSession(item))) {
     return mode === 'review' ? ANSWER_IN_TERMINAL : (controls.find((control) => control.label === 'Open in terminal') ?? null);
   }
 
@@ -301,10 +301,16 @@ export function isBackground(session: SessionView | null): session is SessionVie
 /**
  * A session waiting on the operator in its background process, which Open in Claude or Codex stops and opens in a tab (PRD R70). While a fork
  * waits for its release (PRD R78) Stop is offered instead, as Open would open the retired copy; a hub older than forks sends no `pendingFork`.
- * A session waiting on a prompt before it starts has nothing to open in a tab yet (PRD R41).
+ * A session waiting on a prompt before it starts has nothing to open in a tab yet (PRD R41), and stopping one that waits on a permission prompt
+ * drops the prompt (PRD R70).
  */
 function waitsInBackground(session: SessionView | null): session is SessionView & { shortId: string; nativeSessionId: string } {
-  return isBackground(session) && session.state === 'waiting' && !waitsToStart(session) && session.nativeSessionId !== null && (session.pendingFork ?? null) === null;
+  return isBackground(session) && session.state === 'waiting' && !waitsInTerminal(session) && session.nativeSessionId !== null && (session.pendingFork ?? null) === null;
+}
+
+/** A wait the operator answers by attaching to the session in a terminal: a prompt before it starts (PRD R41) or a permission prompt (PRD R70). */
+function waitsInTerminal(session: SessionView | null): boolean {
+  return waitsToStart(session) || waitsOnPermission(session);
 }
 
 /**
@@ -533,10 +539,16 @@ export function ticketKey(ticket: { source: string; sourceKey: string }): string
   return `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
 }
 
-/** The prompt a session waits on before it starts, for line 2 (PRD R41). */
+/** The prompt a session waits on before it starts (PRD R41), or a background session's permission prompt (PRD R70), for line 3. */
 export function startPromptText(item: WorkItemView): { text: string; title: string }[] {
-  return waitsToStart(activeSession(item))
-    ? [{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }]
+  const session = activeSession(item);
+
+  if (waitsToStart(session)) {
+    return [{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }];
+  }
+
+  return isBackground(session) && waitsOnPermission(session)
+    ? [{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.' }]
     : [];
 }
 

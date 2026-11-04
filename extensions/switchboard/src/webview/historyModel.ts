@@ -1,5 +1,5 @@
 import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
-import { adhocLabel, DONE_WORDS } from '@switchboard/core/group';
+import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core/group';
 import { ticketKey } from '@switchboard/hub/rows';
 
 /** The filter chips of History (PRD R59). */
@@ -561,6 +561,17 @@ class Builder {
           failed: { text: `${name}'s turn failed`, icon: 'error' },
           ended: { text: `${name} ended`, icon: 'circle-slash' },
         };
+        // A waiting session's detail names what it waits on, not text to show (PRD R41, R70).
+        const prompts: Record<string, { text: string; icon: string }> = {
+          [START_PROMPT]: { text: `${name} is waiting on a prompt before it starts`, icon: 'question' },
+          [PERMISSION_PROMPT]: { text: `${name} is waiting on a permission prompt`, icon: 'shield' },
+        };
+        const prompt = after === 'waiting' && typeof said === 'string' ? prompts[said] : undefined;
+
+        if (prompt !== undefined) {
+          return { category: 'session', ...prompt, detail: null };
+        }
+
         const known = texts[str(after)] ?? { text: `${name}: ${str(after)}`, icon: 'terminal' };
 
         return { category: 'session', ...known, detail: said ? str(said) : null };

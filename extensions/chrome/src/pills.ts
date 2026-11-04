@@ -8,7 +8,7 @@ export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
 export const PILL = 'switchboard-pill';
 const GROUPS: Record<Group, string> = { blocked: 'Blocked on you', review: 'Ready for review', progress: 'In progress', unstarted: 'Unstarted', done: 'Done' };
 /** The marks of work on the operator's turn in Ready for review: review, approval, a question, a block or a failure (PRD R27). */
-const TURN_MARKS: ReadonlySet<string> = new Set(['send', 'review', 'finished', 'question', 'blocked', 'failed']);
+const TURN_MARKS: ReadonlySet<string> = new Set(['send', 'review', 'finished', 'question', 'permission', 'blocked', 'failed']);
 
 function isCard(value: unknown): value is Card {
   if (typeof value !== 'object' || value === null) {

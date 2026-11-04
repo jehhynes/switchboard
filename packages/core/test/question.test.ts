@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
-import { groupOf, holdsSlot, markOf, START_PROMPT } from '../src/group.js';
+import { groupOf, holdsSlot, markOf, MARK_TITLES, PERMISSION_PROMPT, START_PROMPT } from '../src/group.js';
 import { Harness, MINUTE, issue, settings } from './flowHarness.js';
 
 /** A dev:question task session for ticket `key`, started and waiting on a question in its background process. */
@@ -264,5 +264,33 @@ describe('a session waiting on a prompt before it starts (PRD R41)', () => {
     expect(h.act({ type: 'stop', workItemId: item })).toEqual([{ type: 'stop-session', sessionId: session, provider: 'claude', shortId: 'abc12341', reason: 'operator' }]);
     h.act({ type: 'stop-succeeded', sessionId: session, reason: 'operator' });
     expect(h.store.session(session)?.state).toBe('ended');
+  });
+});
+
+describe('a session waiting on a permission prompt (PRD R70)', () => {
+  it('marks Approve a permission, blocks on the operator, refuses Open in Claude, and runs once answered', () => {
+    const h = new Harness();
+    const { item, session } = waiting(h);
+
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: PERMISSION_PROMPT });
+    expect(h.store.session(session)).toMatchObject({ state: 'waiting', stateDetail: PERMISSION_PROMPT });
+    expect(shown(h, item)).toEqual({ group: 'blocked', mark: 'permission', holdsSlot: false });
+    expect(MARK_TITLES.permission).toBe('Approve a permission');
+    // Stopping the session would drop the prompt.
+    expect(h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' })).toEqual({ actions: [], refused: 'The session waits on a permission prompt; open it in a terminal to answer it.' });
+
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(shown(h, item)).toEqual({ group: 'progress', mark: 'running', holdsSlot: true });
+  });
+
+  it('is a question again when the roster lists the wait as input needed', () => {
+    const h = new Harness();
+    const { item, session } = waiting(h);
+
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: PERMISSION_PROMPT, interactive: false }] });
+    expect(shown(h, item).mark).toBe('permission');
+    h.act({ type: 'roster', sessions: [{ sessionId: session, state: 'waiting', detail: null, interactive: false }] });
+    expect(shown(h, item).mark).toBe('question');
+    expect(h.send({ type: 'open-question', workItemId: item, nativeSessionId: 'native-1' }).refused).toBeNull();
   });
 });
