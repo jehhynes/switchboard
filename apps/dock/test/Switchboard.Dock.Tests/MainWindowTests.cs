@@ -859,7 +859,126 @@ public sealed class MainWindowTests
         Assert.Contains("selected", RowNamed(window, "Issue <8>").Classes);
         Assert.DoesNotContain("selected", RowNamed(window, "Issue <7>").Classes);
         Assert.Equal(actions.ClickReply, window.FindControl<TextBlock>("StatusLine")!.Text);
-        Assert.True(window.FindControl<TextBlock>("StatusLine")!.IsVisible);
+        Assert.True(window.FindControl<TextBlock>("StatusLine")!.IsEffectivelyVisible);
+    }
+
+    /// <summary>A dock whose status countdown reads <see cref="statusNow"/>.</summary>
+    (MainWindow Window, DockViewModel Model) OpenWithStatusClock()
+    {
+        var (window, model) = Open();
+        window.StatusClock = () => statusNow;
+
+        return (window, model);
+    }
+
+    TimeSpan statusNow = TimeSpan.FromSeconds(100);
+
+    void CheckStatus(MainWindow window, double seconds)
+    {
+        statusNow = TimeSpan.FromSeconds(seconds);
+        window.CheckStatus(statusNow);
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
+    public void CheckStatus_ShownTenSeconds_HidesTheToast()
+    {
+        var (window, model) = OpenWithStatusClock();
+        model.Status = "The terminal did not start: No such file or directory";
+
+        CheckStatus(window, 109.9);
+        Assert.Equal("The terminal did not start: No such file or directory", model.Status);
+        Assert.True(window.FindControl<Border>("StatusToast")!.IsVisible);
+
+        CheckStatus(window, 110);
+        Assert.Null(model.Status);
+        Assert.False(window.FindControl<Border>("StatusToast")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void CheckStatus_PointerOnTheToast_KeepsItUntilTenSecondsAfterThePointerLeaves()
+    {
+        var (window, model) = OpenWithStatusClock();
+        model.Status = "Copied Reply.";
+        Dispatcher.UIThread.RunJobs();
+        var toast = window.FindControl<Border>("StatusToast")!;
+
+        window.MouseMove(toast.TranslatePoint(new Point(10, 10), window)!.Value);
+        CheckStatus(window, 130);
+        Assert.Equal("Copied Reply.", model.Status);
+
+        window.MouseMove(new Point(-10, 300));
+        CheckStatus(window, 139.9);
+        Assert.Equal("Copied Reply.", model.Status);
+        CheckStatus(window, 140);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void CheckStatus_PointerOnTheToastBetweenChecks_RestartsItsTimeWhenThePointerLeaves()
+    {
+        var (window, model) = OpenWithStatusClock();
+        model.Status = "Copied Reply.";
+        Dispatcher.UIThread.RunJobs();
+        var toast = window.FindControl<Border>("StatusToast")!;
+
+        statusNow = TimeSpan.FromSeconds(109.2);
+        window.MouseMove(toast.TranslatePoint(new Point(10, 10), window)!.Value);
+        statusNow = TimeSpan.FromSeconds(109.8);
+        window.MouseMove(new Point(-10, 300));
+
+        CheckStatus(window, 119.7);
+        Assert.Equal("Copied Reply.", model.Status);
+        CheckStatus(window, 119.8);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void Status_SameMessageAgain_RestartsItsTime()
+    {
+        var (window, model) = OpenWithStatusClock();
+        model.Status = "Copied Reply.";
+
+        statusNow = TimeSpan.FromSeconds(109);
+        model.Status = "Copied Reply.";
+
+        CheckStatus(window, 118.9);
+        Assert.Equal("Copied Reply.", model.Status);
+        CheckStatus(window, 119);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void CheckStatus_DockHidden_KeepsTheToastUntilTenSecondsAfterItShows()
+    {
+        var (window, model) = OpenOnEdge(new DockSettings { AutoHide = true }, new FakeX11Edge());
+        window.StatusClock = () => statusNow;
+        Wait(window);
+        model.Status = "The terminal did not start: No such file or directory";
+
+        CheckStatus(window, 160);
+        Assert.Equal("The terminal did not start: No such file or directory", model.Status);
+
+        statusNow = TimeSpan.FromSeconds(165);
+        window.Activate();
+        Dispatcher.UIThread.RunJobs();
+        CheckStatus(window, 174.9);
+        Assert.Equal("The terminal did not start: No such file or directory", model.Status);
+        CheckStatus(window, 175);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void TapDismiss_StatusShown_HidesTheToast()
+    {
+        var (window, model) = Open();
+        model.Status = "Copied Reply.";
+        Dispatcher.UIThread.RunJobs();
+
+        Tap(window, window.FindControl<Button>("DismissStatusButton")!);
+
+        Assert.Null(model.Status);
+        Assert.False(window.FindControl<Border>("StatusToast")!.IsVisible);
     }
 
     [AvaloniaFact]

@@ -164,11 +164,16 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         set => Set(ref adhocRepo, value);
     }
 
-    /// <summary>What the last click could not do, shown until the next click.</summary>
+    /// <summary>The result of the last action, such as what a click could not do; the window shows it as a toast that hides after a time.</summary>
     public string? Status
     {
         get => status;
-        set => Set(ref status, value);
+        // Always raised, so the same message again restarts the toast's time.
+        set
+        {
+            status = value;
+            Changed(nameof(Status));
+        }
     }
 
     /// <summary>Why the dock has no current view, or null while it has one.</summary>

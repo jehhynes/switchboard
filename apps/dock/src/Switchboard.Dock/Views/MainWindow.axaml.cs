@@ -48,6 +48,13 @@ public sealed partial class MainWindow : Window
     // On X11, whether the dock or its menu has had the focus since a menu opened, and the check that closes the menus once it moves elsewhere.
     bool popupFocused;
     DispatcherTimer? popupTimer;
+    // The status toast's countdown: it hides once it has shown for StatusShown while the dock showed and the pointer was off it.
+    static readonly TimeSpan StatusShown = TimeSpan.FromSeconds(10);
+    DispatcherTimer? statusTimer;
+    TimeSpan statusSince;
+
+    /// <summary>The monotonic time the status countdown reads; tests replace it, as the headless platform runs no timers.</summary>
+    internal Func<TimeSpan> StatusClock { get; set; }
     /// <summary>Where the pointer last moved or pressed, in window coordinates; a row's menu and a tooltip open there.</summary>
     Point pointer;
     // The width the pointer has dragged to, in device-independent pixels, before rounding to physical pixels.
@@ -108,7 +115,14 @@ public sealed partial class MainWindow : Window
             {
                 ApplyTheme();
             }
+            else if (e.PropertyName is nameof(DockViewModel.Status))
+            {
+                WatchStatus();
+            }
         };
+        StatusClock = () => clock.Elapsed;
+        // The 1-second check could miss a short hover, so leaving the toast restarts its time too.
+        StatusToast.PointerExited += (_, _) => statusSince = StatusClock();
         // After the XAML, whose width is the default.
         Width = model.Settings.Width;
         AddHandler(PointerMovedEvent, (_, e) =>
@@ -286,6 +300,7 @@ public sealed partial class MainWindow : Window
         CancelShow();
         topmostTimer?.Stop();
         popupTimer?.Stop();
+        statusTimer?.Stop();
         popupWatch.Dispose();
 
         if (OperatingSystem.IsWindows())
@@ -432,6 +447,40 @@ public sealed partial class MainWindow : Window
         if (hideTimer?.IsEnabled == true && hideDelay.Hides(KeptOpen(), now))
         {
             Collapse();
+        }
+    }
+
+    /// <summary>Starts the countdown of a new status message, or stops it when the status is cleared.</summary>
+    void WatchStatus()
+    {
+        statusSince = StatusClock();
+
+        if (model.Status is null)
+        {
+            statusTimer?.Stop();
+            return;
+        }
+
+        if (statusTimer is null)
+        {
+            statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            statusTimer.Tick += (_, _) => CheckStatus(StatusClock());
+        }
+
+        statusTimer.Start();
+    }
+
+    /// <summary>The status timer's check at <paramref name="now"/>, a <see cref="StatusClock"/> time; tests call it.</summary>
+    internal void CheckStatus(TimeSpan now)
+    {
+        // A hidden dock or a pointer on the toast keeps the message for its whole time once the operator can read it.
+        if (hidden || StatusToast.IsPointerOver)
+        {
+            statusSince = now;
+        }
+        else if (now - statusSince >= StatusShown)
+        {
+            model.Status = null;
         }
     }
 
@@ -639,6 +688,7 @@ public sealed partial class MainWindow : Window
         // The composition surface keeps the clipped frame until Avalonia draws again.
         InvalidateVisual();
         hidden = false;
+        statusSince = StatusClock();
         WatchHide();
     }
 
@@ -1606,6 +1656,8 @@ public sealed partial class MainWindow : Window
             model.SearchOpen = false;
         }
     }
+
+    void OnDismissStatusClicked(object? sender, RoutedEventArgs e) => model.Status = null;
 
     void OnClearSearchClicked(object? sender, RoutedEventArgs e)
     {

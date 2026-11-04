@@ -30,8 +30,8 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="Padding" Value="0,2,0,0" />
     </Style>
-    <!-- Header icons are centred in their buttons, without the 1px offset that lines icons up with text. -->
-    <Style Selector="Button.header">
+    <!-- Header and toast icons are centred in their buttons, without the 1px offset that lines icons up with text. -->
+    <Style Selector="Button.header, Button.dismiss">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="Width" Value="28" />
       <Setter Property="Height" Value="28" />
@@ -40,11 +40,11 @@
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="CornerRadius" Value="5" />
     </Style>
-    <Style Selector="Button.header TextBlock.icon">
+    <Style Selector="Button.header TextBlock.icon, Button.dismiss TextBlock.icon">
       <Setter Property="FontSize" Value="16" />
       <Setter Property="Padding" Value="0" />
     </Style>
-    <Style Selector="Button.header:pointerover /template/ ContentPresenter">
+    <Style Selector="Button.header:pointerover /template/ ContentPresenter, Button.dismiss:pointerover /template/ ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource DockHover}" />
     </Style>
     <Style Selector="Border.separator">
@@ -203,6 +203,14 @@
     </Style>
     <Style Selector="TextBlock.warning">
       <Setter Property="Foreground" Value="{DynamicResource DockWarning}" />
+    </Style>
+    <Style Selector="Border.toast">
+      <Setter Property="Margin" Value="8" />
+      <Setter Property="Padding" Value="8,4,4,4" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockWarning}" />
+      <Setter Property="Background" Value="{DynamicResource DockWarningFill}" />
     </Style>
     <Style Selector="TextBlock.detail">
       <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
@@ -364,8 +372,15 @@
           </TextBox.InnerRightContent>
         </TextBox>
       </StackPanel>
-      <TextBlock Name="StatusLine" DockPanel.Dock="Bottom" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}"
-                 TextWrapping="Wrap" Margin="8" Classes="warning" />
+      <Border Name="StatusToast" DockPanel.Dock="Bottom" Classes="toast" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Name="StatusLine" Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" Classes="warning" />
+          <Button Name="DismissStatusButton" Grid.Column="1" Classes="dismiss" VerticalAlignment="Top" Click="OnDismissStatusClicked"
+                  ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+            <TextBlock Classes="icon" Text="&#xEA76;" />
+          </Button>
+        </Grid>
+      </Border>
       <ScrollViewer Name="RowScroller" HorizontalScrollBarVisibility="Disabled">
         <Panel>
         <StackPanel Name="ListContent">
