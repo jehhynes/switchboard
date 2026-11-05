@@ -42,6 +42,12 @@ function pullRequestOfUrl(target: string): { repo: string; number: number } | nu
 
 interface Actor {
   login: string;
+  __typename?: string;
+}
+
+/** The login, with `(bot)` for a bot account, whose GraphQL login has no `[bot]` suffix, such as the Claude app's `claude`. */
+function actorName(actor: Actor | null | undefined, fallback: string): string {
+  return actor === null || actor === undefined ? fallback : actor.__typename === 'Bot' ? `${actor.login} (bot)` : actor.login;
 }
 
 interface ProjectRef {
@@ -100,6 +106,8 @@ interface PullRequest {
   comments: { nodes: Comment[] };
   commits: { nodes: { commit: { committedDate?: string; author?: { user: Actor | null } | null; statusCheckRollup: { state: string } | null } }[] };
   reviews: { nodes: { state: string; submittedAt: string | null; author: Actor | null }[] };
+  submittedReviews: { totalCount: number; nodes: { submittedAt: string | null; author: Actor | null }[] };
+  allComments: { totalCount: number; nodes: { createdAt: string; author: Actor | null }[] };
   reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: Comment[] } }[] };
 }
 
@@ -477,7 +485,7 @@ export class GithubSource implements Source {
     }
 
     if (pr !== null) {
-      lines.push('', ...pullRequestLines(pr, roles, ids));
+      lines.push('', ...pullRequestLines(pr, roles, ids, this.config.logins));
     }
 
     return lines.join('\n');
@@ -503,7 +511,7 @@ export class GithubSource implements Source {
   }
 
   private historyLine(event: TimelineNode): string | null {
-    const who = event.actor?.login ?? 'someone';
+    const who = actorName(event.actor, 'someone');
     const at = event.createdAt?.slice(0, 16).replace('T', ' ') ?? '';
 
     if (this.isStatusEvent(event)) {
@@ -522,13 +530,34 @@ export class GithubSource implements Source {
   }
 }
 
-/** The author's roles from the roles file follow the login, and the anchor id ends it, as `### QaTester (tester), 2026-10-06 14:02 [c3]`. */
+/**
+ * `bot` for a bot account and the author's roles from the roles file follow the login, and the anchor id ends it, as
+ * `### QaTester (tester), 2026-10-06 14:02 [c3]` or `### claude (bot), 2026-10-29 12:43 [c3]`.
+ */
 function commentHeading(comment: Comment, roles: Roles, ids: CommentIds): string {
   const login = comment.author?.login ?? 'ghost';
-  const listed = roles.get(login.toLowerCase());
+  const labels = [...(comment.author?.__typename === 'Bot' ? ['bot'] : []), ...(roles.get(login.toLowerCase()) ?? [])];
   const id = ids.get(comment);
 
-  return `### ${login}${listed === undefined ? '' : ` (${listed.join(', ')})`}, ${comment.createdAt.slice(0, 16).replace('T', ' ')}${id === undefined ? '' : ` [${id}]`}`;
+  return `### ${login}${labels.length === 0 ? '' : ` (${labels.join(', ')})`}, ${comment.createdAt.slice(0, 16).replace('T', ' ')}${id === undefined ? '' : ` [${id}]`}`;
+}
+
+/**
+ * The operator's submitted reviews and pull request comments, counted in code so triage need not read them from the lists (PRD R1). Bots,
+ * other people and pending reviews do not count; review-thread replies belong to a review.
+ */
+function ownActivityLine(pr: PullRequest, logins: readonly string[]): string {
+  const own = new Set(logins.map((login) => login.toLowerCase()));
+  const mine = (author: Actor | null) => author !== null && own.has(author.login.toLowerCase());
+  const part = (times: string[], noun: string) => `${times.length} ${noun}${times.length === 1 ? '' : 's'}, the latest ${times.sort().at(-1)!.slice(0, 16).replace('T', ' ')}`;
+  const reviews = pr.submittedReviews.nodes.filter((review) => mine(review.author) && review.submittedAt !== null).map((review) => review.submittedAt!);
+  const comments = pr.allComments.nodes.filter((comment) => mine(comment.author)).map((comment) => comment.createdAt);
+  const parts = [...(reviews.length === 0 ? [] : [part(reviews, 'review')]), ...(comments.length === 0 ? [] : [part(comments, 'comment')])];
+  // Without a match, a list cut at 100 cannot show that none exists, so the line says what was not read.
+  const unread = [pr.submittedReviews, pr.allComments].some((list) => list.totalCount > list.nodes.length);
+  const none = unread ? `none in the last ${pr.submittedReviews.nodes.length} of ${pr.submittedReviews.totalCount} reviews and last ${pr.allComments.nodes.length} of ${pr.allComments.totalCount} comments; older ones were not read` : 'none';
+
+  return `Your submitted reviews and pull request comments: ${parts.length === 0 ? none : parts.join('; ')}.`;
 }
 
 /**
@@ -559,7 +588,7 @@ function pullRequestOf(nodes: PullRequest[]): PullRequest | null {
   return byRecency.find((pr) => pr.state === 'OPEN') ?? byRecency[0] ?? null;
 }
 
-function pullRequestLines(pr: PullRequest, roles: Roles, ids: CommentIds): string[] {
+function pullRequestLines(pr: PullRequest, roles: Roles, ids: CommentIds, logins: readonly string[]): string[] {
   const head = pr.commits.nodes[0]?.commit;
   const checks = head?.statusCheckRollup?.state ?? 'none';
   // The head commit's author and time let triage see a push since earlier work (PRD R80).
@@ -567,10 +596,15 @@ function pullRequestLines(pr: PullRequest, roles: Roles, ids: CommentIds): strin
   const lines = [
     `## Pull request #${pr.number}: ${pr.title} [pr]`,
     pr.url,
-    `Author: ${pr.author?.login ?? 'ghost'}. State: ${pr.state}${pr.isDraft ? ' (draft)' : ''}. Checks: ${checks}.${pushed}`,
-    '',
-    clip(pr.body, TEXT_LIMIT) || '(empty)',
+    `Author: ${actorName(pr.author, 'ghost')}. State: ${pr.state}${pr.isDraft ? ' (draft)' : ''}. Checks: ${checks}.${pushed}`,
   ];
+
+  // On the operator's own pull request the count says nothing about reviewing it.
+  if (!logins.some((login) => login.toLowerCase() === pr.author?.login.toLowerCase())) {
+    lines.push(ownActivityLine(pr, logins));
+  }
+
+  lines.push('', clip(pr.body, TEXT_LIMIT) || '(empty)');
 
   const requested = pr.reviewRequests.nodes.map((request) => request.requestedReviewer?.login ?? request.requestedReviewer?.slug).filter((name) => name !== undefined);
 
@@ -587,7 +621,7 @@ function pullRequestLines(pr: PullRequest, roles: Roles, ids: CommentIds): strin
   }
 
   if (pr.reviews.nodes.length > 0) {
-    lines.push('', '### Reviews', ...pr.reviews.nodes.map((review) => `${review.submittedAt?.slice(0, 16).replace('T', ' ') ?? ''} ${review.author?.login ?? 'ghost'}: ${review.state}`));
+    lines.push('', '### Reviews', ...pr.reviews.nodes.map((review) => `${review.submittedAt?.slice(0, 16).replace('T', ' ') ?? ''} ${actorName(review.author, 'ghost')}: ${review.state}`));
   }
 
   if (pr.reviewThreads.nodes.length > 0) {

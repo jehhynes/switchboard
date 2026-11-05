@@ -372,7 +372,7 @@ describe('GithubSource.context', () => {
     expect(text).toContain('Issue body ends here.\n\n## Status and assignment history\n2026-09-07 12:18 user-b: status (none) → 🆕 New\n2026-09-07 12:18 user-a: status 🆕 New → 🔖 Planned\n2026-09-07 12:18 user-a: assigned user-a\n');
     expect(text.match(/\[…\d+ characters omitted…\]/g)).toEqual(['[…39262 characters omitted…]', '[…984 characters omitted…]', '[…50924 characters omitted…]', '[…8178 characters omitted…]', '[…1335 characters omitted…]']);
     expect(text.match(/^### .*, \d{4}-\d\d-\d\d \d\d:\d\d \[c\d+\]$/gm)).toHaveLength(5 + 5 + 10);
-    expect(text).toContain('## Pull request #19515: Pull request 19515 [pr]\nhttps://github.com/acme/widgets/pull/19515\nAuthor: user-a. State: OPEN. Checks: SUCCESS. Head commit: user-a, 2026-09-22 14:50.\n\nPR body starts here.');
+    expect(text).toContain('## Pull request #19515: Pull request 19515 [pr]\nhttps://github.com/acme/widgets/pull/19515\nAuthor: user-a. State: OPEN. Checks: SUCCESS. Head commit: user-a, 2026-09-22 14:50.\nYour submitted reviews and pull request comments: 3 comments, the latest 2026-10-02 20:58.\n\nPR body starts here.');
     expect(text).toContain('### Last 5 pull request comments\n### user-a, 2026-09-10 12:01 [c11]\nComment starts here.');
     expect(text).toContain('### Reviews\n2026-09-07 20:31 user-e: COMMENTED\n');
     expect(text).toContain('### Last 5 review threads\n\n#### Resolved thread\n### ');
@@ -505,6 +505,83 @@ describe('GithubSource.context', () => {
     expect(await activityAt([comment('user-a', 5)], pr([], [comment('user-b', 12)], [], [commit('user-b', 44)]))).toBe(Date.parse(at(44)));
     expect(await activityAt([comment('user-a', 5)], pr([], [comment('user-b', 12)], [], [commit('WORK-LOGIN', 44)]))).toBe(Date.parse(at(12)));
     expect(await activityAt([], pr([], [], [], [commit(null, 46)]))).toBe(Date.parse(at(46)));
+  });
+
+  describe('bots and the operator\'s reviews', () => {
+    const at = (minute: number) => `2026-10-29T12:${String(minute).padStart(2, '0')}:00Z`;
+    const user = (login: string) => ({ __typename: 'User', login });
+    const bot = (login: string) => ({ __typename: 'Bot', login });
+    const comment = (author: object, minute: number) => ({ body: 'x', createdAt: at(minute), url: `https://github.com/acme/widgets/pull/8#issuecomment-${minute}`, author });
+    const review = (author: object, minute: number) => ({ state: 'COMMENTED', submittedAt: at(minute), author });
+    type Summary = { reviews?: object[]; comments?: object[]; reviewTotal?: number; commentTotal?: number };
+    // The summary lists default to the shown ones; a test passes its own to show which lists the count reads.
+    const contextOf = async (prAuthor: object, reviews: object[], comments: object[], threads: object[] = [], summary: Summary = {}) => {
+      const summaryReviews = summary.reviews ?? reviews;
+      const summaryComments = summary.comments ?? comments;
+      const pr = {
+        number: 8, title: 'P', url: 'https://github.com/acme/widgets/pull/8', state: 'OPEN', isDraft: false, updatedAt: at(0), body: 'PR body', author: prAuthor,
+        reviewRequests: { nodes: [] }, comments: { nodes: comments }, commits: { nodes: [] }, reviews: { nodes: reviews }, reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: threads } }] },
+        submittedReviews: { totalCount: summary.reviewTotal ?? summaryReviews.length, nodes: summaryReviews },
+        allComments: { totalCount: summary.commentTotal ?? summaryComments.length, nodes: summaryComments },
+      };
+      const issue = {
+        number: 7, title: 'T', url: 'https://github.com/acme/widgets/issues/7', body: '', projectItems: { nodes: [] }, assignees: { nodes: [{ login: 'work-login' }] }, comments: { nodes: [] },
+        timelineItems: { nodes: [{ __typename: 'AssignedEvent', createdAt: at(59), actor: bot('acme-codebot'), assignee: { login: 'work-login' } }] },
+        closedByPullRequestsReferences: { nodes: [pr] },
+      };
+      const readRoles = vi.fn(async () => ({ roles: new Map([['claude', ['dev']], ['user-a', ['dev']]]) }));
+      return ((await new GithubSource(config({ rolesFile: '/r.json' }), fakeGh({ json: { data: { repository: { issue } } } }), readRoles).context(ticket('7'))) as { context: string }).context;
+    };
+
+    it('marks bot authors of reviews, comments, assignments and the pull request, before their roles', async () => {
+      const text = await contextOf(bot('dependabot'), [review(bot('claude'), 43), review(user('user-a'), 50)], [comment(bot('github-actions'), 10)], [comment(bot('claude'), 43), comment(user('user-a'), 50)]);
+
+      expect(text).toContain('\n2026-10-29 12:59 acme-codebot (bot): assigned work-login\n');
+      expect(text).toContain('\nAuthor: dependabot (bot). State: OPEN.');
+      expect(text).toContain('\n### github-actions (bot), 2026-10-29 12:10 [c1]\n');
+      expect(text).toContain('\n### Reviews\n2026-10-29 12:43 claude (bot): COMMENTED\n2026-10-29 12:50 user-a: COMMENTED\n');
+      expect(text).toContain('\n### claude (bot, dev), 2026-10-29 12:43 [c2]\n');
+      expect(text).toContain('\n### user-a (dev), 2026-10-29 12:50 [c3]\n');
+    });
+
+    it('counts none when only a bot and the author reviewed somebody else\'s pull request', async () => {
+      const text = await contextOf(user('user-a'), [review(bot('claude'), 43), review(user('user-a'), 50)], [comment(user('user-b'), 10)]);
+
+      expect(text).toContain('\nAuthor: user-a. State: OPEN. Checks: none.\nYour submitted reviews and pull request comments: none.\n\nPR body');
+    });
+
+    it('counts the operator\'s reviews and comments under any of their logins, ignoring case, with the latest of each', async () => {
+      const reviews = [review(user('work-login'), 30), review(bot('claude'), 45), review(user('Work-AI-Login'), 40), review(user('user-a'), 50)];
+      const text = await contextOf(user('user-a'), reviews, [comment(user('work-login'), 5), comment(user('user-b'), 20)]);
+
+      expect(text).toContain('\nYour submitted reviews and pull request comments: 2 reviews, the latest 2026-10-29 12:40; 1 comment, the latest 2026-10-29 12:05.\n');
+      expect(await contextOf(user('user-a'), [], [comment(user('work-ai-login'), 5), comment(user('work-login'), 7)])).toContain('\nYour submitted reviews and pull request comments: 2 comments, the latest 2026-10-29 12:07.\n');
+    });
+
+    it('counts from the 100-item summary lists, not the shown last 5 comments and 20 reviews', async () => {
+      const shown = [comment(user('user-b'), 20)];
+      const text = await contextOf(user('user-a'), [review(user('user-a'), 50)], shown, [], { reviews: [review(user('work-login'), 15)], comments: [comment(user('work-ai-login'), 3), ...shown] });
+
+      expect(text).toContain('\nYour submitted reviews and pull request comments: 1 review, the latest 2026-10-29 12:15; 1 comment, the latest 2026-10-29 12:03.\n');
+      expect(await contextOf(user('user-a'), [review(user('work-login'), 15)], [comment(user('work-login'), 3)], [], { reviews: [], comments: [] })).toContain('comments: none.\n');
+    });
+
+    it('says which reviews and comments were not read when a summary list is cut and holds none of the operator\'s', async () => {
+      const cut = await contextOf(user('user-a'), [review(bot('claude'), 43)], [comment(user('user-b'), 20)], [], { reviewTotal: 130 });
+
+      expect(cut).toContain('\nYour submitted reviews and pull request comments: none in the last 1 of 130 reviews and last 1 of 1 comments; older ones were not read.\n');
+
+      const found = await contextOf(user('user-a'), [review(user('work-login'), 43)], [], [], { commentTotal: 250 });
+
+      expect(found).toContain('\nYour submitted reviews and pull request comments: 1 review, the latest 2026-10-29 12:43.\n');
+    });
+
+    it('leaves the count out on the operator\'s own pull request', async () => {
+      const text = await contextOf(user('Work-Login'), [review(user('user-a'), 30)], []);
+
+      expect(text).not.toContain('Your submitted reviews');
+      expect(text).toContain('\nAuthor: Work-Login. State: OPEN. Checks: none.\n\nPR body');
+    });
   });
 
   it('fails when the issue is missing, gh fails, or the response is malformed', async () => {

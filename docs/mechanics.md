@@ -698,3 +698,12 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Findings:** the `permission_prompt` notification follows both kinds of wait and names no tool, and each marker replaces the last, so the notification alone cannot tell them apart. The permission request's tool name and the roster's `waitingFor` can. Stopping the session drops the prompt; `claude attach` shows it and answers it (M47).
 - **Not verified:** turning the plugin off; `ExitPlanMode` and MCP elicitation `waitingFor` values; Linux.
 - **Current use:** the hook writer copies the permission request's tool to the notification's marker as `promptTool`; `markerState` and the roster read's `stateOf` give such a wait the detail `PERMISSION_PROMPT`, and its row offers Open in terminal in place of Open in Claude (PRD R70, architecture.md § Claude Code runner).
+
+## M58. Bot reviewers and submitted reviews through `gh api graphql`
+
+- **Date:** 2026-11-05.
+- **Incident:** triage chose `dev:review-pr-followup` for gh 21157 (PR #21163) and gh 21150 (PR #21151), which the operator had never reviewed. Each pull request's only reviews were the Claude GitHub app's, listed in the context as `claude: COMMENTED`, followed by the author's "Fixed in …" replies. About 23 other `dev:review-pr` triages with the same app reviews were classified correctly, so the classifier (`claude-sonnet-5-5`) misjudged now and then rather than every time.
+- **Probe:** `pullRequest(number:21163){ author{ __typename login } reviews(last:20){ nodes{ state author{ __typename login } } } submitted: reviews(last:100, states:[APPROVED,CHANGES_REQUESTED,COMMENTED,DISMISSED]){ totalCount nodes{ submittedAt author{ __typename login } } } }`.
+- **Result:** the app's review author is `{"__typename":"Bot","login":"claude"}`: the login has no `[bot]` suffix, so only `__typename` tells a bot from a person. The `states` filter accepts the list and returned both submitted reviews.
+- **Not verified:** that the filter leaves out the operator's own pending review, which only the operator's token sees; GitHub documents `PENDING` as a separate state.
+- **Current use:** the context query reads `__typename` on authors and actors, and the context shows bots as `<login> (bot)`. On somebody else's pull request, the source counts the operator's submitted reviews and pull request comments in code and writes them on one line for triage (architecture.md § Settings, GitHub reads).

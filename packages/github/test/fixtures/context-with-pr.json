@@ -661,6 +661,154 @@
                   }
                 ]
               },
+              "submittedReviews": {
+                "totalCount": 18,
+                "nodes": [
+                  {
+                    "submittedAt": "2026-09-07T20:31:28Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:31:29Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:31:36Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:31:41Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:31:44Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:31:49Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:31:54Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:31:59Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T20:32:06Z",
+                    "author": {
+                      "login": "user-e"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:08:55Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:08:58Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:09:01Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:09:04Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:09:07Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:09:10Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:09:13Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:09:16Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "submittedAt": "2026-09-07T21:09:18Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  }
+                ]
+              },
+              "allComments": {
+                "totalCount": 5,
+                "nodes": [
+                  {
+                    "createdAt": "2026-09-10T12:01:51Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "createdAt": "2026-09-25T11:38:55Z",
+                    "author": {
+                      "login": "user-a"
+                    }
+                  },
+                  {
+                    "createdAt": "2026-09-28T22:17:54Z",
+                    "author": {
+                      "login": "work-ai-login"
+                    }
+                  },
+                  {
+                    "createdAt": "2026-10-02T12:52:16Z",
+                    "author": {
+                      "login": "work-ai-login"
+                    }
+                  },
+                  {
+                    "createdAt": "2026-10-02T20:58:06Z",
+                    "author": {
+                      "login": "work-ai-login"
+                    }
+                  }
+                ]
+              },
               "reviewThreads": {
                 "nodes": [
                   {
