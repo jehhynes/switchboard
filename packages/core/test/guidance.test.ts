@@ -141,7 +141,7 @@ describe('Start with guidance (PRD R77)', () => {
 });
 
 describe('pick with guidance (PRD R48, R77)', () => {
-  const zoho = (key: string): PolledTicket => ({ sourceKey: key, ref: `R${key}`, sourceId: null, title: `Case ${key}`, url: `https://desk.example.test/${key}`, assigned: false, pool: true, sortAt: null, enteredAt: null });
+  const zoho = (key: string): PolledTicket => ({ sourceKey: key, ref: `R${key}`, repo: '', sourceId: null, title: `Case ${key}`, url: `https://desk.example.test/${key}`, assigned: false, pool: true, sortAt: null, enteredAt: null });
 
   it("ends the picked work item's task prompt with the guidance", () => {
     const h = new Harness({ playbooks: playbooks(undefined, { 'support:case': { description: 'A Support case', workdir: 'repoRoot', template: '/support-process {{ticket.ref}}' } }) });

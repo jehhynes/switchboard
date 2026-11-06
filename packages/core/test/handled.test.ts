@@ -5,7 +5,7 @@ function setup() {
   const h = new Harness();
   const action = h.act({ type: 'adhoc', prompt: 'Publish the prepared fix', repoRoot: 'D:/repo', start: true })[0];
   const sessionId = h.started(action);
-  const event = { type: 'handled' as const, sessionId, source: 'github', sourceKey: '7', ref: '#7', title: 'Fix', url: 'https://github.com/acme/widgets/issues/7', key: 'issue:assignment-1', release: false, assigned: true };
+  const event = { type: 'handled' as const, sessionId, source: 'github', sourceKey: '7', ref: '#7', repo: '', title: 'Fix', url: 'https://github.com/acme/widgets/issues/7', key: 'issue:assignment-1', release: false, assigned: true };
   return { h, event };
 }
 
@@ -133,7 +133,7 @@ describe('handled assignments', () => {
     const { h, event } = setup();
     h.act(event);
     const ticket = h.store.findTicket('github', '7')!;
-    expect(h.send({ type: 'ticket', sessionId: event.sessionId, source: 'github', sourceKey: '7', ref: '#7', title: 'Fix', url: ticket.url, playbook: null }).refused).toContain('already has');
+    expect(h.send({ type: 'ticket', sessionId: event.sessionId, source: 'github', sourceKey: '7', ref: '#7', repo: '', title: 'Fix', url: ticket.url, playbook: null }).refused).toContain('already has');
     expect(() => h.store.deleteBareTicket(ticket.id)).toThrow('handled assignment');
   });
 
@@ -150,7 +150,7 @@ describe('handled assignments', () => {
   it('retains separate clearing reasons when one poll sees unassignment and reassignment', () => {
     const { h, event } = setup();
     h.act(event);
-    h.act({ ...event, sourceKey: '8', ref: '#8', url: event.url.replace('/7', '/8') });
+    h.act({ ...event, sourceKey: '8', ref: '#8', repo: '', url: event.url.replace('/7', '/8') });
     const first = h.store.findTicket('github', '7')!;
     const second = h.store.findTicket('github', '8')!;
     h.act({ type: 'poll', source: 'github', tickets: [], assignments: [

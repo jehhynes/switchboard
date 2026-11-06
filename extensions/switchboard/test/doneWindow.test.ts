@@ -65,7 +65,7 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     reopenable: false,
     playbookChoices: [],
     waits: [],
-    ticket: { id: 7, source: 'github', sourceKey: '107', ref: '#107', sourceId: null, title: 'Issue 7', url: 'https://github.com/o/r/issues/107', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '', adhocKey: null, blockers: [] },
+    ticket: { id: 7, source: 'github', sourceKey: '107', ref: '#107', repo: '', sourceId: null, title: 'Issue 7', url: 'https://github.com/o/r/issues/107', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '', adhocKey: null, blockers: [] },
     triage: null,
     focus: null,
     sessions: [session(1, 'running')],

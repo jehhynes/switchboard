@@ -5,7 +5,7 @@ import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenTerminal, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -545,7 +545,7 @@ export class Runtime {
         assignments.push({ ticketId: ticket.id, expectedKey: ticket.handledAssignmentKey!, key: assignment.assignmentKey });
         const polled = result.tickets.find((entry) => entry.sourceKey === ticket.sourceKey);
         if (polled !== undefined) polled.assigned = assignment.assigned;
-        else result.tickets.push({ sourceKey: ticket.sourceKey, ref: assignment.ticket.ref, title: assignment.ticket.title, url: assignment.ticket.url, sourceId: ticket.sourceId, assigned: assignment.assigned, pool: false, sortAt: ticket.sortAt, enteredAt: null });
+        else result.tickets.push({ sourceKey: ticket.sourceKey, ref: assignment.ticket.ref, repo: assignment.ticket.repo, title: assignment.ticket.title, url: assignment.ticket.url, sourceId: ticket.sourceId, assigned: assignment.assigned, pool: false, sortAt: ticket.sortAt, enteredAt: null });
       }
     }
 
@@ -1139,7 +1139,7 @@ export class Runtime {
       return refuse(`The ${found.source} source changed during the lookup. Send the report again.`);
     }
 
-    const { refused } = this.send({ type: 'ticket', sessionId, source: found.source, sourceKey: ticket.sourceKey, ref: ticket.ref, title: ticket.title, url: ticket.url, playbook });
+    const { refused } = this.send({ type: 'ticket', sessionId, source: found.source, sourceKey: ticket.sourceKey, ref: ticket.ref, repo: ticket.repo, title: ticket.title, url: ticket.url, playbook });
 
     if (refused !== null) {
       return { refused };
@@ -1313,7 +1313,7 @@ export class Runtime {
           return { ticket, triage, focus: effectiveFocus(triages, ticket.url), links: store.linksFor(ticket.id), returned: returned(items, triage?.playbook ?? null, ticket), playbookChoices: playbookChoices(triage?.playbook ?? null, ticket.source, playbooks) };
         }),
       playbooks: [...playbooks.values()].filter((playbook) => playbook.kind === 'task').map(({ name, description }) => ({ name, description })),
-      repoRoots: repoRoots(settings),
+      repoRoots: repoRoots(settings, store.reposBySource()),
       schedules: Object.entries(settings.schedules).map(([name, schedule]) => ({ name, playbook: schedule.playbook })),
       sources: [...this.sources.keys()],
       sourceStates: Object.entries(settings.sources)
@@ -1391,8 +1391,8 @@ export class Runtime {
 
   /** Links worktrees by branch name (PRD R25). */
   private async findWorktrees(name: string, source: Source): Promise<void> {
-    const repoRoot = this.config.settings.sources[name]?.repoRoot ?? '';
-    const worktrees = repoRoot === '' ? null : await listWorktrees(repoRoot, this.deps.exec);
+    const home = ticketRoot(this.config.settings, { source: name, repo: '', repoRoot: '' }, this.deps.store.reposBySource()[name]);
+    const worktrees = 'error' in home ? null : await listWorktrees(home.root, this.deps.exec);
 
     for (const worktree of worktrees ?? []) {
       const key = worktree.branch === null ? null : source.keyOfBranch(worktree.branch);

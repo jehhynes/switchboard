@@ -4,7 +4,7 @@ import { Harness, T0, playbooks } from './flowHarness.js';
 
 /** A Zoho ticket: in the pool, assigned to the operator, or neither. Its R ref shows that the source, not core, chooses the reference. */
 function zoho(key: string, state: 'pool' | 'assigned' | 'neither', sortAt = Number(key)): PolledTicket {
-  return { sourceKey: key, ref: `R${key}`, sourceId: `id-${key}`, title: `Case ${key}`, url: `https://desk.example.test/${key}`, assigned: state === 'assigned', pool: state === 'pool', sortAt, enteredAt: null };
+  return { sourceKey: key, ref: `R${key}`, repo: '', sourceId: `id-${key}`, title: `Case ${key}`, url: `https://desk.example.test/${key}`, assigned: state === 'assigned', pool: state === 'pool', sortAt, enteredAt: null };
 }
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {

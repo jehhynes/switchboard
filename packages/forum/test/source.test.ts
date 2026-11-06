@@ -32,6 +32,7 @@ describe('ForumSource.poll', () => {
     expect(tickets.find((ticket) => ticket.sourceKey === '90100')).toEqual({
       sourceKey: '90100',
       ref: 'T90100',
+      repo: '',
       sourceId: null,
       title: 'Topic 90100',
       url: 'https://forum.example.com/t/forum/topic-90100',
@@ -51,7 +52,7 @@ describe('ForumSource.poll', () => {
     const topics = (audit: QueryResult) => async (sql: string) => (sql.includes('AuditEntity') ? audit : parseRows(row));
 
     expect(await new ForumSource(CONFIG, topics({ rows: [] })).poll()).toEqual({
-      tickets: [{ sourceKey: '5', ref: 'T5', sourceId: null, title: 't', url: 'https://forum.example.com/t/forum/k', assigned: false, pool: true, inQueue: true, assigneeId: null, sortAt: Date.UTC(2026, 0, 2, 3, 4, 5), enteredAt: Date.UTC(2026, 0, 2, 3, 4, 5) }],
+      tickets: [{ sourceKey: '5', ref: 'T5', repo: '', sourceId: null, title: 't', url: 'https://forum.example.com/t/forum/k', assigned: false, pool: true, inQueue: true, assigneeId: null, sortAt: Date.UTC(2026, 0, 2, 3, 4, 5), enteredAt: Date.UTC(2026, 0, 2, 3, 4, 5) }],
     });
     expect(await new ForumSource(CONFIG, topics({ error: 'Access denied to audit.' })).poll()).toEqual({ error: 'Access denied to audit.' });
     // With no topic, the audit store is not read.
@@ -64,7 +65,7 @@ describe('ForumSource.poll', () => {
 });
 
 describe('ForumSource.context', () => {
-  const ticket: Ticket = { id: 1, source: 'forum', sourceKey: '90001', ref: 'T90001', sourceId: null, title: 'Topic 90001', url: 'https://forum.example.com/t/forum/topic-90001', assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null, blockers: [] };
+  const ticket: Ticket = { id: 1, source: 'forum', sourceKey: '90001', ref: 'T90001', repo: '', sourceId: null, title: 'Topic 90001', url: 'https://forum.example.com/t/forum/topic-90001', assigned: false, pool: true, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null, blockers: [] };
 
   it('lists the public posts oldest first, without deleted posts, private notes or the AI analysis', async () => {
     const query = vi.fn<Query>(async () => parseRows(raw('posts')));

@@ -283,7 +283,7 @@ describe('paste reports (PRD R60)', () => {
 });
 
 describe('Snoozed (PRD R49)', () => {
-  const pool = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: key, title: key, url: '', assigned: false, pool: true, sortAt: 1, enteredAt: null });
+  const pool = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, repo: '', sourceId: key, title: key, url: '', assigned: false, pool: true, sortAt: 1, enteredAt: null });
   const snoozedTicket = (patch: { source?: string; sourceKey?: string; pool?: boolean; snoozedUntil?: number | null; title?: string; url?: string } = {}) => ({
     source: 'github',
     sourceKey: '1',

@@ -23,7 +23,7 @@ function playbooks(): Map<string, Playbook> {
   return new Map(Object.entries(entries).map(([name, entry]) => [name, (parsePlaybook(name, entry) as { playbook: Playbook }).playbook]));
 }
 
-const ISSUE = { sourceKey: '77', ref: '#77', sourceId: null, title: 'Inbox badge', url: 'https://github.com/o/r/issues/77', assigned: true, pool: false, sortAt: null, enteredAt: null };
+const ISSUE = { sourceKey: '77', ref: '#77', repo: '', sourceId: null, title: 'Inbox badge', url: 'https://github.com/o/r/issues/77', assigned: true, pool: false, sortAt: null, enteredAt: null };
 
 /** Drives a real store through the flow, so the history is what the hub would return. */
 class Run {
@@ -71,7 +71,7 @@ describe('History model', () => {
   it('explains handled registration and release without exposing assignment keys', () => {
     const run = new Run();
     run.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
-    const event = { type: 'handled' as const, sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', title: 'Fix', url: ISSUE.url, key: 'I:opaque-event-id', release: false, assigned: false };
+    const event = { type: 'handled' as const, sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', repo: '', title: 'Fix', url: ISSUE.url, key: 'I:opaque-event-id', release: false, assigned: false };
     run.send(event);
     run.send({ ...event, release: true });
     const view = historyView(run.store.ticketHistory(2)!, run.now);
@@ -83,7 +83,7 @@ describe('History model', () => {
   it('says a handled assignment ended with the reporting work item, not what ended that work item (PRD R85)', () => {
     const run = new Run();
     run.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
-    run.send({ type: 'handled', sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', title: 'Fix', url: ISSUE.url, key: 'I:A', release: false, assigned: false });
+    run.send({ type: 'handled', sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', repo: '', title: 'Fix', url: ISSUE.url, key: 'I:A', release: false, assigned: false });
     run.send({ type: 'mark-done', workItemId: 1 });
     const entries = historyView(run.store.ticketHistory(2)!, run.now).sections.flatMap((section) => section.entries);
     expect(texts(entries)).toEqual(['Registered the assignment as already handled', 'Handled assignment ended: the work that handled it ended']);
@@ -91,7 +91,7 @@ describe('History model', () => {
   it('words only the ticket entry as the release when the ended registration gives an assigned ticket a work item (PRD R85)', () => {
     const run = new Run();
     run.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
-    run.send({ type: 'handled', sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', title: 'Fix', url: ISSUE.url, key: 'I:A', release: false, assigned: true });
+    run.send({ type: 'handled', sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', repo: '', title: 'Fix', url: ISSUE.url, key: 'I:A', release: false, assigned: true });
     run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
     run.send({ type: 'mark-done', workItemId: 1 });
     const sections = historyView(run.store.ticketHistory(2)!, run.now).sections;
@@ -149,7 +149,7 @@ describe('History model', () => {
     expect(historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections[0]!.title).toBe('Registered session');
 
     // A ticket report keeps the section's origin, and its entry hides the ticket's own field changes (PRD R83).
-    run.send({ type: 'ticket', sessionId: 's1', source: 'github', sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: 'https://github.com/o/r/issues/115', playbook: null });
+    run.send({ type: 'ticket', sessionId: 's1', source: 'github', sourceKey: '115', ref: '#115', repo: '', title: 'Snapshot wrapper', url: 'https://github.com/o/r/issues/115', playbook: null });
     const moved = historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections[0]!;
 
     expect(moved.title).toBe('Registered session');
@@ -157,7 +157,7 @@ describe('History model', () => {
 
     // A later work item of the ticket, here with no playbook loaded to triage it, is not the moved one.
     run.send({ type: 'mark-done', workItemId: 2 });
-    run.send({ type: 'poll', source: 'github', tickets: [{ ...ISSUE, sourceKey: '115', ref: '#115', url: 'https://github.com/o/r/issues/115' }] });
+    run.send({ type: 'poll', source: 'github', tickets: [{ ...ISSUE, sourceKey: '115', ref: '#115', repo: '', url: 'https://github.com/o/r/issues/115' }] });
     const sections = historyView(JSON.parse(JSON.stringify(run.store.ticketHistory(2))) as TicketHistory, run.now).sections;
 
     expect(sections.map((section) => section.title)).toEqual(['No playbook yet', 'Registered session', 'Ticket']);

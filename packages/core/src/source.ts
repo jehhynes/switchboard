@@ -31,7 +31,7 @@ export type ContextResult = { context: string; links?: SourceLink[]; anchors?: A
 export type LinkCheck = { refused: string | null } | { error: string };
 
 /** The ticket at a URL a ticket report names (PRD R83), as the source reads it, or why the read failed. */
-export type TicketLookup = { ticket: { sourceKey: string; ref: string; title: string; url: string; open: boolean } } | { error: string };
+export type TicketLookup = { ticket: { sourceKey: string; ref: string; repo: string; title: string; url: string; open: boolean } } | { error: string };
 
 export type AssignmentLookup = { ticket: Extract<TicketLookup, { ticket: unknown }>['ticket']; assignmentKey: string | null; assigned: boolean } | { error: string };
 

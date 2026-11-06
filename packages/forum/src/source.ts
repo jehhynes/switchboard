@@ -180,6 +180,7 @@ export class ForumSource implements Source {
         assigneeId: assignee,
         // The last public post is how long the asker has waited; a topic without one falls back to its creation.
         sortAt: utc(row['LastPublicPostUtc']) ?? utc(row['CreatedUtc']),
+        repo: '',
         enteredAt: assignee !== null && assignee !== this.config.userId ? null : opened.at.get(String(row['Id'])) ?? utc(row['CreatedUtc']),
       });
     }

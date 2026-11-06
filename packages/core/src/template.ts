@@ -10,6 +10,8 @@ export const TEMPLATE_VARIABLES = [
   'ticket.source',
   'ticket.sourceKey',
   'ticket.ref',
+  'ticket.repo',
+  'ticket.number',
   'ticket.title',
   'ticket.url',
   'ticket.context',

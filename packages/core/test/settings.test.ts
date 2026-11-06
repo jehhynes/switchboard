@@ -122,6 +122,16 @@ describe('parseSettings', () => {
     expect(sources['widgets-dashboard']).toMatchObject({ kind: 'github', options: {} });
   });
 
+  it("takes {name} and {owner} in a source's repo root once each, {owner} only with {name}, and neither in ad-hoc's or a schedule's (PRD R16)", () => {
+    const sources = (repoRoot: string) => parseSettings(JSON.stringify({ sources: { github: { repoRoot } } }));
+
+    expect(sources('D:/git/{owner}/{name}')).toMatchObject({ settings: { sources: { github: { repoRoot: 'D:/git/{owner}/{name}' } } } });
+    expect(sources('D:/{name}/{name}')).toEqual({ errors: ['sources.github.repoRoot may hold {name} and {owner} at most once each.'] });
+    expect(sources('D:/git/{owner}')).toEqual({ errors: ['sources.github.repoRoot holds {owner} without {name}.'] });
+    expect(parseSettings(JSON.stringify({ sources: { adhoc: { repoRoot: 'D:/git/{name}' } } }))).toEqual({ errors: ['sources.adhoc.repoRoot names one folder and cannot hold {name} or {owner}.'] });
+    expect(parseSettings(JSON.stringify({ schedules: { nightly: { playbook: 'ops:x', repoRoot: 'D:/{owner}' } } }))).toEqual({ errors: ['schedules.nightly.repoRoot names one folder and cannot hold {name} or {owner}.'] });
+  });
+
   it('rejects a source name that is not lowercase letters, digits and hyphens, or is schedule, and a kind on adhoc', () => {
     expect(parseSettings(JSON.stringify({ sources: { 'Widgets Dashboard': {}, schedule: {}, adhoc: { kind: 'github' }, kindless: { kind: 3 } } }))).toEqual({
       errors: [

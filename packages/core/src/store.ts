@@ -331,6 +331,8 @@ export const MIGRATIONS = [
   ALTER TABLE sessions ADD COLUMN movedAt INTEGER;`,
   // The open issues blocking a ticket, as JSON (PRD R90).
   `ALTER TABLE tickets ADD COLUMN blockers TEXT NOT NULL DEFAULT '[]';`,
+  // A ticket's repository (PRD R44); empty is the source's home repository, which cannot change while the source has tickets.
+  `ALTER TABLE tickets ADD COLUMN repo TEXT NOT NULL DEFAULT '';`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
@@ -408,7 +410,7 @@ function toParams(values: Row): Record<string, SQLInputValue> {
   return result;
 }
 
-export type NewTicket = Omit<Ticket, 'id' | 'adhocKey'> & { adhocKey?: string | null };
+export type NewTicket = Omit<Ticket, 'id' | 'adhocKey' | 'repo'> & { adhocKey?: string | null; repo?: string };
 export type NewWorkItem = Omit<WorkItem, 'id'>;
 export type NewTriage = Omit<Triage, 'id'>;
 export type NewWorktree = Omit<Worktree, 'id'>;
@@ -728,7 +730,7 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    const row = { adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [], ...ticket };
+    const row = { adhocKey: null, repo: '', inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [], ...ticket };
 
     return { id: this.#insert('tickets', row as unknown as Row), ...row };
   }
@@ -757,6 +759,18 @@ export class Store {
   /** Every ad-hoc key in use, including those of tickets a ticket report moved to a source (PRD R83). */
   adhocKeys(): string[] {
     return (this.#db.prepare("SELECT sourceKey AS key FROM tickets WHERE source = 'adhoc' UNION SELECT adhocKey FROM tickets WHERE adhocKey IS NOT NULL").all() as { key: string }[]).map((row) => row.key);
+  }
+
+  /** The repositories each source's tickets record, without the empty home repository (PRD R44). */
+  reposBySource(): Record<string, string[]> {
+    const rows = this.#db.prepare("SELECT DISTINCT source, repo FROM tickets WHERE repo != '' ORDER BY source, repo").all() as { source: string; repo: string }[];
+    const repos: Record<string, string[]> = {};
+
+    for (const row of rows) {
+      (repos[row.source] ??= []).push(row.repo);
+    }
+
+    return repos;
   }
 
   updateTicket(id: number, patch: Partial<NewTicket>): void {

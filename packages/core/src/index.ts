@@ -5,6 +5,7 @@ export * from './hubRecord.js';
 export * from './model.js';
 export * from './paths.js';
 export * from './playbook.js';
+export * from './repo.js';
 export * from './settings.js';
 export * from './store.js';
 export * from './template.js';

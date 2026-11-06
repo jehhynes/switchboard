@@ -12,7 +12,7 @@ const counts = (h: Harness, week = '2026-10-05') => weeklyVolume(h.store.volumeD
 describe('observed Support volume', () => {
   it('baselines existing assigned tickets whose assignment predates change recording', () => {
     const h = new Harness();
-    h.store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', sourceId: null, title: 'Old', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    h.store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'Old', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     h.now = monday;
     poll(h, [{ key: '1', mine: true }]);
     expect(counts(h).counts).toMatchObject({ seen: 1, assigned: 1, mine: 1, entered: 0 });
@@ -20,7 +20,7 @@ describe('observed Support volume', () => {
   });
   it('does not count a pre-log assignment that ends at the baseline poll', () => {
     const h = new Harness();
-    h.store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', sourceId: null, title: 'Old', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    h.store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'Old', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     h.now = monday;
     poll(h, [{ key: '1' }]);
     expect(counts(h).counts).toMatchObject({ seen: 1, assigned: 0, mine: 0, entered: 0 });

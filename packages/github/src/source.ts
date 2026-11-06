@@ -201,7 +201,7 @@ export class GithubSource implements Source {
       return { error: UNEXPECTED };
     }
 
-    return { ticket: { sourceKey: String(found.number), ref: `#${found.number}`, title: found.title, url: found.url, open: found.state === 'OPEN' } };
+    return { ticket: { sourceKey: String(found.number), ref: `#${found.number}`, repo: this.config.repo.toLowerCase(), title: found.title, url: found.url, open: found.state === 'OPEN' } };
   }
 
   private async checkPullRequest(ticket: Ticket, number: number): Promise<LinkCheck> {
@@ -311,7 +311,7 @@ export class GithubSource implements Source {
       if (read.assigned) {
         // The search's blockers are current; an issue missing from the search keeps the stored ones, or none while the check is off (PRD R90).
         const blockers = this.config.waitForBlockers ? tickets[index]?.blockers : [];
-        const entry: PolledTicket = { sourceKey: ticket.sourceKey, ref: ticket.ref, sourceId: null, title: ticket.title, url: ticket.url, assigned: true, pool: false, sortAt: ticket.sortAt, enteredAt: null, ...(blockers === undefined ? {} : { blockers }) };
+        const entry: PolledTicket = { sourceKey: ticket.sourceKey, ref: ticket.ref, repo: ticket.repo, sourceId: null, title: ticket.title, url: ticket.url, assigned: true, pool: false, sortAt: ticket.sortAt, enteredAt: null, ...(blockers === undefined ? {} : { blockers }) };
         tickets.splice(index === -1 ? tickets.length : index, index === -1 ? 0 : 1, entry);
       }
     }
@@ -359,6 +359,7 @@ export class GithubSource implements Source {
         tickets.push({
           sourceKey: String(node.number),
           ref: `#${node.number}`,
+          repo: this.config.repo.toLowerCase(),
           sourceId: null,
           title: node.title,
           url: node.url,

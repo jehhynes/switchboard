@@ -2,7 +2,7 @@ import type { Playbook } from './playbook.js';
 import { activeSession, failedAtTriage, groupOf, ownPrompt, reviewKey, START_PROMPT, waitsOnPermission, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
-import { repoRoots } from './settings.js';
+import { repoOf, repoRoots, samePath, ticketRoot } from './repo.js';
 import type { PermissionMode, Provider, ScheduleSettings, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, WorkItem, WorkItemStatus } from './model.js';
@@ -100,6 +100,8 @@ export interface PolledTicket {
   sourceKey: string;
   /** The reference people use, such as `#123` or `T456`; the source sets it (`{{ticket.ref}}`). */
   ref: string;
+  /** The repository, `owner/name` in lowercase, for a source with repositories; empty otherwise. */
+  repo: string;
   sourceId: string | null;
   title: string;
   url: string;
@@ -153,7 +155,7 @@ export interface ObservedFork {
 
 export type FlowEvent =
   | { type: 'poll'; source: string; tickets: PolledTicket[]; assignments?: { ticketId: number; expectedKey: string; key: string | null }[] }
-  | { type: 'handled'; sessionId: string; source: string; sourceKey: string; ref: string; title: string; url: string; key: string; release: boolean; assigned: boolean }
+  | { type: 'handled'; sessionId: string; source: string; sourceKey: string; ref: string; repo: string; title: string; url: string; key: string; release: boolean; assigned: boolean }
   | { type: 'poll-failed'; source: string; error: string }
   | {
       type: 'triage-succeeded';
@@ -194,7 +196,7 @@ export type FlowEvent =
    * A ticket report: the session's ad-hoc work item continues as the work item of the source's ticket the hub read, with `playbook` when
    * the report names one (PRD R83).
    */
-  | { type: 'ticket'; sessionId: string; source: string; sourceKey: string; ref: string; title: string; url: string; playbook: string | null }
+  | { type: 'ticket'; sessionId: string; source: string; sourceKey: string; ref: string; repo: string; title: string; url: string; playbook: string | null }
   /** Run now: a queued work item for the named schedule (PRD R82). */
   | { type: 'run-schedule'; name: string }
   /** `retry` retries a failed work item from the step that failed (PRD R34). */
@@ -327,13 +329,6 @@ function editedPrompt(store: Store, workItemId: number, prompt: string | null | 
 /** The operator's text, such as Start's guidance (PRD R77) or a comment (PRD R49, R87), trimmed, or null when blank. */
 function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
-}
-
-/** Compares repo paths as Windows does: either separator, any case, no trailing separator. */
-function samePath(a: string, b: string): boolean {
-  const key = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
-
-  return key(a) === key(b);
 }
 
 const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
@@ -688,6 +683,7 @@ class Flow {
       const known = this.store.findTicket(source, entry.sourceKey);
       const fields = {
         ref: entry.ref,
+        repo: entry.repo,
         sourceId: entry.sourceId,
         title: entry.title,
         url: entry.url,
@@ -952,7 +948,7 @@ class Flow {
       this.store.deleteBareTicket(existing.id);
     }
 
-    this.store.updateTicket(ticket.id, { source: event.source, sourceKey: event.sourceKey, ref: event.ref, sourceId: null, title: event.title, url: event.url, assigned: false, pool: false, adhocKey: ticket.sourceKey });
+    this.store.updateTicket(ticket.id, { source: event.source, sourceKey: event.sourceKey, ref: event.ref, repo: event.repo, sourceId: null, title: event.title, url: event.url, assigned: false, pool: false, adhocKey: ticket.sourceKey });
     this.store.noteEvent({ adhocKey: ticket.sourceKey });
 
     if (playbook !== null) {
@@ -989,8 +985,9 @@ class Flow {
 
     const parent = this.store.workItem(session.workItemId)!;
     const ticket = this.store.ticket(parent.ticketId)!;
-    const wanted = report.repo ?? (ticket.repoRoot || this.context.settings.sources[ticket.source]?.repoRoot || '');
-    const roots = repoRoots(this.context.settings);
+    const own = ticketRoot(this.context.settings, ticket, this.store.reposBySource()[ticket.source]);
+    const wanted = report.repo ?? ('root' in own ? own.root : '');
+    const roots = repoRoots(this.context.settings, this.store.reposBySource());
     const repoRoot = roots.find((root) => samePath(root, wanted));
 
     if (repoRoot === undefined) {
@@ -1353,7 +1350,7 @@ class Flow {
     if (ticket !== null && (ticket.handledAssignmentKey != null || this.store.assignmentEnded(ticket.id, event.key))) throw new Refusal('This assignment was already released or another assignment is registered.');
     const items = ticket === null ? [] : this.store.workItemsForTicket(ticket.id).filter((item) => item.status !== 'done');
     if (items.some((item) => this.store.sessionsFor(item.id).length > 0)) throw new Refusal('This ticket already has started work; resolve it before registering the assignment.');
-    ticket ??= this.store.insertTicket({ source: event.source, sourceKey: event.sourceKey, ref: event.ref, title: event.title, url: event.url, sourceId: null, assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    ticket ??= this.store.insertTicket({ source: event.source, sourceKey: event.sourceKey, ref: event.ref, repo: event.repo, title: event.title, url: event.url, sourceId: null, assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     for (const item of items) this.store.deleteWorkItem(item.id);
     this.store.updateTicket(ticket.id, { handledAssignmentKey: event.key });
     this.store.noteEvent({ reportedByWorkItemId: origin.id, reportedByPlaybook: origin.playbook });
@@ -2408,13 +2405,14 @@ class Flow {
     }
 
     const worktree = this.store.worktreeFor(ticket.id);
-    const repoRoot = ticket.repoRoot || source?.repoRoot || '';
+    const resolved = ticketRoot(this.context.settings, ticket, this.store.reposBySource()[ticket.source]);
+    const repoRoot = 'root' in resolved ? resolved.root : '';
     const approved = item.approvalPrompt !== null;
     const kind: SessionKind = !approved && playbook?.requiresWorktree === true && worktree === null ? 'setup' : 'task';
     const cwd = playbook?.workdir === 'repoRoot' ? repoRoot : (worktree?.path ?? repoRoot);
 
     if (cwd === '') {
-      this.fail(item, `sources.${ticket.source}.repoRoot is not set.`);
+      this.fail(item, 'error' in resolved ? resolved.error : `sources.${ticket.source}.repoRoot is not set.`);
       return;
     }
 
@@ -2510,11 +2508,14 @@ class Flow {
 
   private values(ticket: Ticket, item: WorkItem): Record<Exclude<TemplateVariable, 'session.id'>, string> {
     const triage = this.store.triagesFor(item.id).filter((entry) => entry.playbook !== null).at(-1);
+    const repo = repoOf(this.context.settings, ticket);
 
     return {
       'ticket.source': ticket.source,
       'ticket.sourceKey': ticket.sourceKey,
       'ticket.ref': ticket.ref,
+      'ticket.repo': repo,
+      'ticket.number': repo === '' ? '' : ticket.ref.slice(ticket.ref.lastIndexOf('#') + 1),
       'ticket.title': ticket.title,
       'ticket.url': ticket.url,
       'ticket.context': triage?.context ?? '',

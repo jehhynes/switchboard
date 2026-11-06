@@ -33,7 +33,7 @@ describe('schedules (PRD R82)', () => {
 
     tick(h, at(15, 10));
 
-    expect(ticket(h)).toMatchObject({ source: 'schedule', sourceKey: 'cleanup', ref: 'cleanup', title: 'Remove finished worktrees', url: '', assigned: true, repoRoot: 'D:/git/widgets', lastPolledAt: at(15, 10) });
+    expect(ticket(h)).toMatchObject({ source: 'schedule', sourceKey: 'cleanup', ref: 'cleanup', repo: '', title: 'Remove finished worktrees', url: '', assigned: true, repoRoot: 'D:/git/widgets', lastPolledAt: at(15, 10) });
     expect(ticket(h, 'review')).toMatchObject({ title: 'Measure review outcomes', repoRoot: 'D:/git/research' });
     expect(items(h)).toEqual([]);
   });

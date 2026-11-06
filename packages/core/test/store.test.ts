@@ -52,6 +52,31 @@ describe('Store', () => {
     store.close();
   });
 
+  it("adds each ticket's repository as empty, the home repository, keeping keys and IDs, and lists the repositories polls record (PRD R44)", () => {
+    const version = MIGRATIONS.length - 1;
+    const path = join(dir, `v${version}.db`);
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version};
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (7, 'github', '18941', 'One', '', 1, ''), (8, 'zoho', '5', 'Two', '', 1, '');`);
+    raw.close();
+    const store = Store.open(path);
+
+    expect([store.findTicket('github', '18941'), store.findTicket('zoho', '5')].map((ticket) => [ticket?.id, ticket?.repo])).toEqual([
+      [7, ''],
+      [8, ''],
+    ]);
+    expect(store.reposBySource()).toEqual({});
+
+    store.updateTicket(7, { repo: 'acme/widgets' });
+    const { id: _seven, ...seven } = store.ticket(7)!;
+    const { id: _eight, ...eight } = store.ticket(8)!;
+    store.insertTicket({ ...seven, sourceKey: 'acme/widgets-dashboard#63', repo: 'acme/widgets-dashboard', url: 'u63' });
+    store.insertTicket({ ...eight, source: 'personal', sourceKey: '4', repo: 'work-login/switchboard', url: 'u4' });
+    expect(store.reposBySource()).toEqual({ github: ['acme/widgets', 'acme/widgets-dashboard'], personal: ['work-login/switchboard'] });
+    store.close();
+  });
+
   it('seeds the latest successful Support classification when upgrading version 29', () => {
     const path = join(dir, 'v29.db');
     const raw = new DatabaseSync(path);
@@ -120,7 +145,7 @@ describe('Store', () => {
     const path = join(dir, 'switchboard.db');
     const store = Store.open(path);
 
-    store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '' });
+    store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '' });
     store.close();
 
     const raw = new DatabaseSync(path);
@@ -129,7 +154,7 @@ describe('Store', () => {
     raw.close();
 
     const reopened = Store.open(path);
-    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [] });
+    expect(reopened.findTicket('github', '1')).toEqual({ id: 1, source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: 'u', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: 5, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [] });
     reopened.close();
   });
 
@@ -537,20 +562,20 @@ describe('Store', () => {
 
     expect(() =>
       store.transaction(() => {
-        store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+        store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
         throw new Error('boom');
       }),
     ).toThrow('boom');
     expect(store.tickets('github')).toEqual([]);
 
-    expect(store.transaction(() => store.insertTicket({ source: 'github', sourceKey: '2', ref: '#2', sourceId: null, title: 'Two', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' }).id)).toBe(1);
+    expect(store.transaction(() => store.insertTicket({ source: 'github', sourceKey: '2', ref: '#2', repo: '', sourceId: null, title: 'Two', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' }).id)).toBe(1);
     expect(store.tickets('github')).toHaveLength(1);
   });
 
   it('finds an assigned or pool ticket by URL ignoring case, and no ticket out of scope or without a URL', () => {
     const store = Store.open(':memory:');
     const add = (sourceKey: string, url: string, assigned: boolean, pool: boolean) =>
-      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: sourceKey, url, assigned, pool, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' }).id;
+      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, repo: '', sourceId: null, title: sourceKey, url, assigned, pool, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' }).id;
 
     add('1', 'https://github.com/o/r/issues/1', false, false);
     const assigned = add('2', 'https://github.com/O/R/issues/2', true, false);
@@ -606,7 +631,7 @@ describe('Store', () => {
 
   it('replaces a ticket worktree link', () => {
     const store = Store.open(':memory:');
-    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
     store.linkWorktree({ ticketId: ticket.id, path: 'D:/wt/a', branch: '1-a', linkedBy: 'convention' });
     store.linkWorktree({ ticketId: ticket.id, path: 'D:/wt/b', branch: null, linkedBy: 'report' });
@@ -616,7 +641,7 @@ describe('Store', () => {
 
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
     const store = Store.open(':memory:');
-    const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     const item = (id: number) => ({ ticketId: ticket.id, playbook: 'support:defect', status: 'running', stage: null, stageAt: null, taskPrompt: null, guidance: null, reportedPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
     const first = store.insertWorkItem(item(1));
     const second = store.insertWorkItem(item(2));

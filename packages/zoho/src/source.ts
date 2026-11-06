@@ -211,6 +211,7 @@ export class ZohoSource implements Source {
       inQueue: true,
       assigneeId: ticket.assigneeId,
       sortAt: Number.isNaN(waiting) ? null : waiting,
+      repo: '',
       enteredAt: holder === 'engineer' ? null : await this.enteredScope(ticket),
     };
   }

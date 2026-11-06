@@ -59,7 +59,7 @@ describe('assigned-state transitions', () => {
       type: 'triage',
       triageId: 1,
       workItemId: 1,
-      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [] },
+      ticket: { id: 1, source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'Issue 1', url: 'https://github.com/acme/widgets/issues/1', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: T0, lastPolledAt: T0, repoRoot: '', adhocKey: null, inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [] },
       systemPrompt: 'Classify the GitHub issue.\n\nChoose one playbook:\n- dev:develop: Plan and build the change\n- dev:question: Answer a question\n- support:defect: Research a defect',
       choices: [
         { name: 'dev:develop', description: 'Plan and build the change', focus: null },
@@ -828,7 +828,7 @@ describe('sessions', () => {
     h.triaged(h.poll(issue('7'))[0], 'dev:question');
     h.act({ type: 'mark-done', workItemId: 1 });
     const sessionId = h.started(h.act({ type: 'adhoc', prompt: 'Publish the prepared fix', repoRoot: 'D:/repo', start: true })[0]);
-    h.act({ type: 'handled', sessionId, source: 'github', sourceKey: '7', ref: '#7', title: 'Fix', url: 'https://github.com/acme/widgets/issues/7', key: 'issue:assignment-1', release: false, assigned: true });
+    h.act({ type: 'handled', sessionId, source: 'github', sourceKey: '7', ref: '#7', repo: '', title: 'Fix', url: 'https://github.com/acme/widgets/issues/7', key: 'issue:assignment-1', release: false, assigned: true });
 
     expect(h.send({ type: 'reopen', workItemId: 1 }).refused).toBe("Another session handles the ticket's assignment.");
     expect(h.status(1)).toBe('done');
@@ -1462,6 +1462,59 @@ describe('ad-hoc', () => {
   });
 });
 
+describe("a ticket's repository and repo root (PRD R16, R21, R44)", () => {
+  function patterned(): Harness {
+    const h = new Harness({ playbooks: playbooks(undefined, { 'dev:repo': { description: 'Name the repository', autoStart: true, workdir: 'repoRoot', template: '{{ticket.repo}} {{ticket.number}} {{ticket.ref}} {{ticket.sourceKey}}' } }) });
+    h.settings.sources['github'] = { ...h.settings.sources['github']!, repoRoot: 'D:/git/{name}', options: { repo: 'Acme/Widgets' } };
+    return h;
+  }
+
+  it("starts a home-repository ticket in the pattern's root and fills {{ticket.repo}} and {{ticket.number}}", () => {
+    const h = patterned();
+    const [triage] = h.poll({ ...issue('18941'), repo: 'acme/widgets' });
+    const [start] = h.triaged(triage, 'dev:repo');
+
+    expect(h.store.ticket(1)?.repo).toBe('acme/widgets');
+    expect(start).toMatchObject({ type: 'start-session', cwd: 'D:/git/widgets', prompt: expect.stringContaining('acme/widgets 18941 #18941 18941') });
+  });
+
+  it('takes the home repository for a ticket stored before the repository was recorded', () => {
+    const h = patterned();
+    const [triage] = h.poll(issue('18941'));
+    const [start] = h.triaged(triage, 'dev:repo');
+
+    expect(h.store.ticket(1)?.repo).toBe('');
+    expect(start).toMatchObject({ cwd: 'D:/git/widgets', prompt: expect.stringContaining('acme/widgets 18941 ') });
+  });
+
+  it("fails a start of another repository's ticket from a root without {name}, with the reason", () => {
+    const h = patterned();
+    h.settings.sources['github']!.repoRoot = 'D:/git/widgets';
+    const [triage] = h.poll({ ...issue('63'), repo: 'acme/widgets-dashboard' });
+    h.triaged(triage, 'dev:repo');
+
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: 'sources.github.repoRoot has no {name}, so acme/widgets-dashboard has no repo root.' });
+  });
+
+  it('leaves {{ticket.repo}} and {{ticket.number}} empty for a ticket without a repository', () => {
+    const h = new Harness({ playbooks: playbooks(['triage:zoho'], { 'support:repo': { description: 'Name the repository', autoStart: true, workdir: 'repoRoot', template: '[{{ticket.repo}}][{{ticket.number}}]' } }) });
+    const [triage] = h.act({ type: 'poll', source: 'zoho', tickets: [{ ...issue('5'), ref: 'T5' }] });
+    const [start] = h.triaged(triage, 'support:repo');
+
+    expect(start).toMatchObject({ cwd: 'D:/git/support', prompt: expect.stringContaining('[][]') });
+  });
+
+  it("offers a task report the resolved roots and defaults to the ticket's, never a pattern (PRD R68)", () => {
+    const h = patterned();
+    const [triage] = h.poll({ ...issue('18941'), repo: 'acme/widgets' });
+    const session = h.started(h.triaged(triage, 'dev:repo')[0]);
+
+    expect(h.report(session, { kind: 'task', prompt: 'Follow up', repo: 'D:/git/{name}', title: null }).refused).toBe('D:/git/{name} is not a configured repo root. Repo roots: D:/git/widgets, D:/git/support.');
+    expect(h.report(session, { kind: 'task', prompt: 'Follow up', repo: null, title: null }).refused).toBeNull();
+    expect(h.store.ticket(2)).toMatchObject({ source: 'adhoc', repoRoot: 'D:/git/widgets' });
+  });
+});
+
 describe('task reports (PRD R68)', () => {
   /** Runs GitHub issue 18941 under dev:question, whose playbook lists no task report. */
   function parent(h: Harness): { item: number; session: string } {
@@ -1479,7 +1532,7 @@ describe('task reports (PRD R68)', () => {
 
     h.now += MINUTE;
     expect(h.report(session, { kind: 'task', prompt, repo: null, title: null })).toEqual({ actions: [], refused: null });
-    expect(h.store.ticket(2)).toMatchObject({ source: 'adhoc', sourceKey: '1', ref: '#1', title: 'Fix the flaky CartTests', url: '', assigned: true, repoRoot: 'D:/git/widgets', scopeAt: T0 + MINUTE });
+    expect(h.store.ticket(2)).toMatchObject({ source: 'adhoc', sourceKey: '1', ref: '#1', repo: '', title: 'Fix the flaky CartTests', url: '', assigned: true, repoRoot: 'D:/git/widgets', scopeAt: T0 + MINUTE });
     expect(h.item(2)).toMatchObject({ ticketId: 2, playbook: null, status: 'unstarted', taskPrompt: prompt, parentId: item, queuedAt: null, runStartedAt: null, statusAt: T0 + MINUTE });
     expect(h.item(item)).toMatchObject({ status: 'running', parentId: null });
 
@@ -1540,7 +1593,7 @@ describe('registered sessions (PRD R81)', () => {
     const h = new Harness();
 
     expect(register(h)).toEqual({ actions: [], refused: null });
-    expect(h.store.ticket(1)).toMatchObject({ source: 'adhoc', sourceKey: '1', ref: '#1', title: 'Fix the badge', url: '', assigned: true, repoRoot: 'D:/git/widgets.worktrees/18941', scopeAt: T0 });
+    expect(h.store.ticket(1)).toMatchObject({ source: 'adhoc', sourceKey: '1', ref: '#1', repo: '', title: 'Fix the badge', url: '', assigned: true, repoRoot: 'D:/git/widgets.worktrees/18941', scopeAt: T0 });
     expect(h.item(1)).toMatchObject({ ticketId: 1, playbook: null, status: 'running', taskPrompt: null, queuedAt: null, runStartedAt: T0, statusAt: T0, parentId: null });
     expect(h.store.sessionsFor(1)).toEqual([
       expect.objectContaining({ id: 's1', kind: 'task', provider: 'claude', nativeSessionId: NATIVE, shortId: '9273f594', cwd: 'D:/git/widgets.worktrees/18941', state: 'running', released: true, releasing: false, external: true, reports: ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task'] }),
@@ -1595,21 +1648,21 @@ describe('ticket reports (PRD R83)', () => {
   const URL = 'https://github.com/acme/widgets/issues/115';
   const AD_HOC_REPORTS = ['stage', 'worktree', 'done', 'approval', 'link', 'paste', 'task'];
   const register = (h: Harness) => h.send({ type: 'register', nativeSessionId: NATIVE, shortId: '9273f594', cwd: 'D:/git/widgets.worktrees/115', title: 'Explore snapshots' });
-  const move = (h: Harness, playbook: string | null = 'dev:develop', sessionId = 's1') => h.send({ type: 'ticket', sessionId, source: 'github', sourceKey: '115', ref: '#115', title: 'Issue 115', url: URL, playbook });
+  const move = (h: Harness, playbook: string | null = 'dev:develop', sessionId = 's1') => h.send({ type: 'ticket', sessionId, source: 'github', sourceKey: '115', ref: '#115', repo: '', title: 'Issue 115', url: URL, playbook });
   const harness = () => {
     const h = new Harness();
     h.settings.sources['github']!.namespace = 'dev';
     return h;
   };
   /** The ad-hoc ticket as it stands, to show a refusal changed nothing. */
-  const unmoved = { source: 'adhoc', sourceKey: '1', ref: '#1', title: 'Explore snapshots', url: '', assigned: true, adhocKey: null };
+  const unmoved = { source: 'adhoc', sourceKey: '1', ref: '#1', repo: '', title: 'Explore snapshots', url: '', assigned: true, adhocKey: null };
 
   it("moves a registered session's work item onto the issue in place, out of the assigned state, and gives the session the playbook's reports", () => {
     const h = harness();
     register(h);
 
     expect(move(h)).toEqual({ actions: [], refused: null });
-    expect(h.store.ticket(1)).toMatchObject({ source: 'github', sourceKey: '115', ref: '#115', sourceId: null, title: 'Issue 115', url: URL, assigned: false, pool: false, repoRoot: 'D:/git/widgets.worktrees/115', adhocKey: '1', scopeAt: T0 });
+    expect(h.store.ticket(1)).toMatchObject({ source: 'github', sourceKey: '115', ref: '#115', repo: '', sourceId: null, title: 'Issue 115', url: URL, assigned: false, pool: false, repoRoot: 'D:/git/widgets.worktrees/115', adhocKey: '1', scopeAt: T0 });
     expect(h.store.findTicket('adhoc', '1')).toBeNull();
     expect(h.item(1)).toMatchObject({ ticketId: 1, playbook: 'dev:develop', status: 'running' });
     expect(h.store.session('s1')!.reports).toEqual(FINISHING_REPORTS);
@@ -1754,7 +1807,7 @@ describe('in-queue times (PRD R27)', () => {
 
     // A ticket with no scope entry, such as one done before migration 6 polled it, keeps the work item's creation.
     const g = new Harness();
-    g.store.insertTicket({ source: 'github', sourceKey: '9', ref: '#9', sourceId: null, title: 't', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    g.store.insertTicket({ source: 'github', sourceKey: '9', ref: '#9', repo: '', sourceId: null, title: 't', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     g.store.insertWorkItem({ ...h.item(1), ticketId: 1, status: 'unstarted', createdAt: T0 - 7_000, scopeAt: null, doneAt: null, doneReason: null });
     g.now = T0 + 9_000;
     g.act({ type: 'mark-done', workItemId: 1 });

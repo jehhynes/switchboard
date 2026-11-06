@@ -83,7 +83,7 @@ export async function readAssignment(config: GithubConfig, gh: Gh, number: numbe
       if (snapshot !== null && snapshot !== current) return { error: `Assignment changed while reading #${number}; retry.` };
       snapshot = current;
       held ??= new Set(names.filter((login) => own.has(login)));
-      const ticket = { sourceKey: String(number), ref: `#${number}`, title: issue.title, url: issue.url, open: issue.state === 'OPEN' };
+      const ticket = { sourceKey: String(number), ref: `#${number}`, repo: config.repo.toLowerCase(), title: issue.title, url: issue.url, open: issue.state === 'OPEN' };
       if (held.size === 0) return { ticket, assignmentKey: null, assigned };
 
       for (const event of [...issue.timelineItems.nodes].reverse()) {

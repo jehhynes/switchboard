@@ -50,7 +50,7 @@ export function settings(patch: { sessions?: Partial<Settings['sessions']>; tria
 }
 
 export function issue(key: string, assigned = true): PolledTicket {
-  return { sourceKey: key, ref: `#${key}`, sourceId: null, title: `Issue ${key}`, url: `https://github.com/acme/widgets/issues/${key}`, assigned, pool: false, sortAt: null, enteredAt: null };
+  return { sourceKey: key, ref: `#${key}`, repo: '', sourceId: null, title: `Issue ${key}`, url: `https://github.com/acme/widgets/issues/${key}`, assigned, pool: false, sortAt: null, enteredAt: null };
 }
 
 /** Drives the flow against an in-memory store with a settable clock and sequential session IDs. */

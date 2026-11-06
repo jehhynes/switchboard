@@ -123,11 +123,6 @@ export const DEFAULT_SETTINGS: Settings = {
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
 };
 
-/** The repos an ad-hoc prompt or a task report can run in: each source's repo root, the first being the default. */
-export function repoRoots(settings: Settings): string[] {
-  return [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))];
-}
-
 /** A source's or schedule's name: it keys tickets in the store and History. */
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -329,10 +324,17 @@ export function parseSettings(text: string): SettingsResult {
       read.errors.push(`${path}.enabled is not a setting; turn a source on and off in the dock's header.`);
     }
 
+    const root = read.string(common, 'repoRoot', path, SOURCE_DEFAULTS.repoRoot);
+    const rootError = name === ADHOC_SOURCE ? literalRootError(root) : patternError(root);
+
+    if (rootError !== null) {
+      read.errors.push(`${path}.repoRoot ${rootError}`);
+    }
+
     sources[name] = {
       kind: read.string(common, 'kind', path, SOURCE_DEFAULTS.kind) || name,
       pollIntervalSeconds: read.integer(common, 'pollIntervalSeconds', path, SOURCE_DEFAULTS.pollIntervalSeconds, 10),
-      repoRoot: read.string(common, 'repoRoot', path, SOURCE_DEFAULTS.repoRoot),
+      repoRoot: root,
       triagePlaybook: read.string(common, 'triagePlaybook', path, SOURCE_DEFAULTS.triagePlaybook),
       setupPrompt: read.string(common, 'setupPrompt', path, SOURCE_DEFAULTS.setupPrompt),
       namespace: read.string(common, 'namespace', path, SOURCE_DEFAULTS.namespace),
@@ -364,6 +366,22 @@ export function parseSettings(text: string): SettingsResult {
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock } };
 }
 
+/** Why a source's repo root is not a usable pattern: `{name}` and `{owner}` each at most once, and `{owner}` only with `{name}` (PRD R16). */
+function patternError(root: string): string | null {
+  const count = (part: string) => root.split(part).length - 1;
+
+  if (count('{name}') > 1 || count('{owner}') > 1) {
+    return 'may hold {name} and {owner} at most once each.';
+  }
+
+  return count('{owner}') === 1 && count('{name}') === 0 ? 'holds {owner} without {name}.' : null;
+}
+
+/** Why a root that names one folder holds a pattern's placeholder. */
+function literalRootError(root: string): string | null {
+  return /\{(name|owner)\}/.test(root) ? 'names one folder and cannot hold {name} or {owner}.' : null;
+}
+
 function parseSchedule(read: Reader, entry: Json, path: string): ScheduleSettings {
   read.unknown(entry, ['playbook', 'repoRoot', 'every', 'day', 'at'], path);
 
@@ -375,6 +393,10 @@ function parseSchedule(read: Reader, entry: Json, path: string): ScheduleSetting
 
   if (playbook === '') {
     read.errors.push(`${path}.playbook must name a task playbook.`);
+  }
+
+  if (literalRootError(repoRoot) !== null) {
+    read.errors.push(`${path}.repoRoot ${literalRootError(repoRoot)}`);
   }
 
   if (repoRoot === '') {

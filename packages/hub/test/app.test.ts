@@ -337,7 +337,7 @@ describe('createHubApp', () => {
   it('registers and releases a handled assignment through the HTTP route, refusing bad requests', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { github: { repoRoot: '' } } });
     const url = 'https://github.com/o/r/issues/7';
-    const source = { name: 'github', poll: async () => ({ tickets: [] }), keyOfBranch: () => null, context: async () => ({ context: '' }), assignmentAt: async () => ({ ticket: { sourceKey: '7', ref: '#7', title: 'Fix', url, open: true }, assignmentKey: 'I:A', assigned: false }) };
+    const source = { name: 'github', poll: async () => ({ tickets: [] }), keyOfBranch: () => null, context: async () => ({ context: '' }), assignmentAt: async () => ({ ticket: { sourceKey: '7', ref: '#7', repo: '', title: 'Fix', url, open: true }, assignmentKey: 'I:A', assigned: false }) };
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, makeSource: () => ({ source }) } });
     closers.push(() => app.close());
     await app.post['/sources']!({ name: 'github', enabled: true });
@@ -459,7 +459,7 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false } });
     const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
     const ticket = (sourceKey: string, url: string, snoozed: boolean, snoozedUntil: number | null) =>
-      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: 't', url, assigned: true, pool: false, snoozed, snoozedUntil, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, repo: '', sourceId: null, title: 't', url, assigned: true, pool: false, snoozed, snoozedUntil, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
     ticket('1', 'https://github.com/o/r/issues/1', true, null);
     ticket('2', 'https://github.com/o/r/issues/2', true, 2000);
@@ -478,7 +478,7 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false } });
     const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
     const ticket = (sourceKey: string, assigned: boolean, pool: boolean) =>
-      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: 't', url: `https://github.com/O/r/issues/${sourceKey}`, assigned, pool, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+      store.insertTicket({ source: 'github', sourceKey, ref: `#${sourceKey}`, repo: '', sourceId: null, title: 't', url: `https://github.com/O/r/issues/${sourceKey}`, assigned, pool, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
 
     ticket('1', true, false);
     ticket('2', false, true);
@@ -503,7 +503,7 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false } });
     const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
 
-    store.insertTicket({ source: 'github', sourceKey: '7', ref: '#7', sourceId: null, title: 'Seven', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    store.insertTicket({ source: 'github', sourceKey: '7', ref: '#7', repo: '', sourceId: null, title: 'Seven', url: '', assigned: false, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
     store.close();
 
     const app = await start();

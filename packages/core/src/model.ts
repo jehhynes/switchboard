@@ -62,6 +62,11 @@ export interface Ticket {
   lastPolledAt: number | null;
   /** The repo an ad-hoc prompt chose. Empty takes the source's `repoRoot` setting. */
   repoRoot: string;
+  /**
+   * The ticket's repository, `owner/name` in lowercase, which the source's `repoRoot` pattern resolves (PRD R44). Empty for a source without
+   * repositories, and for the source's home repository until a poll fills it.
+   */
+  repo: string;
   /** The ad-hoc key of a ticket a ticket report moved to a source (PRD R83), so the key is not used again and the item window keeps its name. */
   adhocKey: string | null;
   /** The open issues the source lists as blocking this ticket, from the last complete poll that saw it (PRD R90); absent from an older hub's snapshot. */

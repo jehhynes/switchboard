@@ -37,7 +37,7 @@ function fakeGh(...answers: GhResult[]) {
 
 const SINGLE_SELECT: GhResult = { json: { data: { repositoryOwner: { projectV2: { field: { __typename: 'ProjectV2SingleSelectField' } } } } } };
 
-const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, sourceId: null, title: '', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null, blockers: [] });
+const ticket = (sourceKey: string): Ticket => ({ id: 1, source: 'github', sourceKey, ref: `#${sourceKey}`, repo: '', sourceId: null, title: '', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '', adhocKey: null, blockers: [] });
 
 describe('GithubSource.poll', () => {
   it('lists every searched issue, assigned only when its project status is configured', async () => {
@@ -49,6 +49,7 @@ describe('GithubSource.poll', () => {
       tickets: [20190, 20127, 19964, 19769, 19504, 19484, 19231, 19230, 18531, 18388, 18111].map((number) => ({
         sourceKey: String(number),
         ref: `#${number}`,
+        repo: 'acme/widgets',
         sourceId: null,
         title: `Issue ${number}`,
         url: `https://github.com/acme/widgets/issues/${number}`,
@@ -142,7 +143,7 @@ describe('GithubSource.poll', () => {
     };
     const gh = fakeGh(SINGLE_SELECT, { json });
     const result = await new GithubSource(config({ requireAssignee: false }), gh).poll();
-    const listed = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Issue ${number}`, url: `u${number}`, assigned: true, pool: false, sortAt: Date.parse('2026-10-04T00:00:00Z'), enteredAt: null, blockers: [] });
+    const listed = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, repo: 'acme/widgets', sourceId: null, title: `Issue ${number}`, url: `u${number}`, assigned: true, pool: false, sortAt: Date.parse('2026-10-04T00:00:00Z'), enteredAt: null, blockers: [] });
 
     expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'repo:acme/widgets is:issue is:open project:acme/3', status: 'Status' });
     expect(result).toEqual({ tickets: [listed(1), listed(2), listed(3)] });
@@ -262,7 +263,7 @@ describe('GithubSource.poll', () => {
       },
     });
     const stored = (number: number, patch: Partial<Ticket> = {}): Ticket => ({ ...ticket(String(number)), title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, sortAt: 1000 + number, ...patch });
-    const kept = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, sourceId: null, title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, assigned: true, pool: false, sortAt: 1000 + number, enteredAt: null, blockers: [] as TicketBlocker[] });
+    const kept = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, repo: '', sourceId: null, title: `Stored ${number}`, url: `https://github.com/acme/widgets/issues/${number}`, assigned: true, pool: false, sortAt: 1000 + number, enteredAt: null, blockers: [] as TicketBlocker[] });
 
     it('reads each one on its own and keeps those still assigned, so an empty search ends no work item', async () => {
       const gh = fakeGh(
@@ -611,7 +612,7 @@ describe('GithubSource.ticketAt', () => {
     const gh = fakeGh(answer('OPEN'), answer('CLOSED'));
     const source = new GithubSource(config(), gh);
 
-    expect(await source.ticketAt('https://github.com/Acme/Widgets/issues/115/')).toEqual({ ticket: { sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: 'https://github.com/acme/widgets/issues/115', open: true } });
+    expect(await source.ticketAt('https://github.com/Acme/Widgets/issues/115/')).toEqual({ ticket: { sourceKey: '115', ref: '#115', repo: 'acme/widgets', title: 'Snapshot wrapper', url: 'https://github.com/acme/widgets/issues/115', open: true } });
     expect(gh).toHaveBeenCalledWith(ISSUE_QUERY, { owner: 'acme', name: 'widgets', number: 115 });
     expect(await source.ticketAt('https://github.com/acme/widgets/issues/115#issuecomment-1')).toMatchObject({ ticket: { open: false } });
   });

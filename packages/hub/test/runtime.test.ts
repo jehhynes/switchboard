@@ -79,11 +79,14 @@ class FakeCli {
   stopResult = ok('');
   worktrees = 'worktree D:/git/widgets\nHEAD abc\nbranch refs/heads/master\n\nworktree D:/git/widgets-wt/7-fix\nHEAD def\nbranch refs/heads/7-fix\n';
   private started = 0;
+  /** The folder of each git call. */
+  gitCwds: string[] = [];
 
   exec: Exec = async (file, args, options) => {
     this.calls.push([file, ...args]);
 
     if (file === 'git') {
+      this.gitCwds.push(options.cwd ?? '');
       this.gitEntered?.();
       const gate = this.gitGate;
       this.gitGate = null;
@@ -167,7 +170,7 @@ class FakeSource implements Source {
   }
 }
 
-const issue = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null, enteredAt: null });
+const issue = (key: string): PolledTicket => ({ sourceKey: key, ref: `#${key}`, repo: '', sourceId: null, title: `Issue ${key}`, url: `u/${key}`, assigned: true, pool: false, sortAt: null, enteredAt: null });
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = () => {};
@@ -283,7 +286,7 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
 
 describe('handled assignment reports', () => {
   const url = 'https://github.com/acme/widgets/issues/7';
-  const lookup = (key: string | null = 'I:A', assigned = true) => ({ ticket: { sourceKey: '7', ref: '#7', title: 'Fix', url, open: true }, assignmentKey: key, assigned });
+  const lookup = (key: string | null = 'I:A', assigned = true) => ({ ticket: { sourceKey: '7', ref: '#7', repo: '', title: 'Fix', url, open: true }, assignmentKey: key, assigned });
   async function ready() {
     const h = setup();
     h.runtime.send({ type: 'adhoc', prompt: 'Prepare a fix', repoRoot: 'D:/repo', start: true });
@@ -414,7 +417,7 @@ describe('Runtime', () => {
       let now = T0;
       const { store, source, runtime } = setup(config(), () => now);
       source.result = { tickets: [issue('5')] };
-      store.insertTicket({ source: 'github', sourceKey: '5', ref: '#5', sourceId: null, title: 'Issue 5', url: 'u', assigned: true, pool: false, snoozed: true, snoozedUntil: T0 + WAKE_MS, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+      store.insertTicket({ source: 'github', sourceKey: '5', ref: '#5', repo: '', sourceId: null, title: 'Issue 5', url: 'u', assigned: true, pool: false, snoozed: true, snoozedUntil: T0 + WAKE_MS, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
       let changes = 0;
       runtime.onChange(() => changes++);
       runtime.start();
@@ -433,6 +436,19 @@ describe('Runtime', () => {
     }
   });
 
+
+  it("lists worktrees in the home repository's resolved root and offers no pattern as a repo root (PRD R6, R25)", async () => {
+    const cfg = config();
+    cfg.settings.sources['github'] = { ...cfg.settings.sources['github']!, repoRoot: 'D:/git/{name}', options: { repo: 'acme/widgets' } };
+    const { store, cli, source, runtime } = setup(cfg);
+    source.result = { tickets: [{ ...issue('7'), repo: 'acme/widgets' }] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(cli.gitCwds[0]).toBe('D:/git/widgets');
+    expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', linkedBy: 'convention' });
+    expect(runtime.snapshot().repoRoots).toEqual(['D:/git/widgets']);
+  });
 
   it('sends no worktree-found event for a ticket whose worktree is linked, so a poll rebuilds the views once', async () => {
     const { store, source, runtime } = setup();
@@ -1198,7 +1214,7 @@ describe('Runtime', () => {
 
   it('reconciles at startup and installs hooks when enabled', async () => {
     const { store, runtime } = setup(config({ installHooks: true }));
-    store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'x', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
+    store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'x', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: 'D:/x' });
     runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/scratch', start: true });
     await runtime.settled();
     store.updateSession('s1', { state: 'starting', shortId: null });
@@ -2299,7 +2315,7 @@ describe('registered sessions (PRD R81)', () => {
 describe('ticket reports (PRD R83)', () => {
   const NATIVE = '9273f594-1111-4222-8333-444455556666';
   const URL = 'https://github.com/o/r/issues/115';
-  const found = (open = true) => ({ ticket: { sourceKey: '115', ref: '#115', title: 'Snapshot wrapper', url: URL, open } });
+  const found = (open = true) => ({ ticket: { sourceKey: '115', ref: '#115', repo: '', title: 'Snapshot wrapper', url: URL, open } });
 
   async function registered() {
     const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
