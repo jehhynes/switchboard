@@ -26,58 +26,59 @@ function strings(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry !== '') ? (value as string[]) : null;
 }
 
-/** Reads the GitHub keys of `sources.github`. The source refuses to poll until repo, logins, project and statuses are set. */
-export function parseGithubConfig(options: Record<string, unknown>): ConfigResult {
+/** Reads the GitHub keys of the source `name`. The source refuses to poll until repo, logins, project and statuses are set. */
+export function parseGithubConfig(options: Record<string, unknown>, name = 'github'): ConfigResult {
+  const path = `sources.${name}`;
   const unknown = Object.keys(options).filter((key) => !KEYS.includes(key));
 
   if (unknown.length > 0) {
-    return { error: `sources.github.${unknown[0]} is not a setting.` };
+    return { error: `${path}.${unknown[0]} is not a setting.` };
   }
 
   const { ghPath = 'gh', repo, logins, requireAssignee = true, waitForBlockers = false, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
 
   if (typeof repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
-    return { error: 'sources.github.repo must be set to owner/name.' };
+    return { error: `${path}.repo must be set to owner/name.` };
   }
 
   const loginList = strings(logins);
 
   if (loginList === null || loginList.length === 0) {
-    return { error: 'sources.github.logins must list at least one login.' };
+    return { error: `${path}.logins must list at least one login.` };
   }
 
   if (typeof requireAssignee !== 'boolean') {
-    return { error: 'sources.github.requireAssignee must be true or false.' };
+    return { error: `${path}.requireAssignee must be true or false.` };
   }
 
   if (typeof waitForBlockers !== 'boolean') {
-    return { error: 'sources.github.waitForBlockers must be true or false.' };
+    return { error: `${path}.waitForBlockers must be true or false.` };
   }
 
   const p = project as { owner?: unknown; number?: unknown; statusField?: unknown } | undefined;
 
   if (typeof p?.owner !== 'string' || p.owner === '' || typeof p.number !== 'number' || !Number.isInteger(p.number)) {
-    return { error: 'sources.github.project must give owner and number.' };
+    return { error: `${path}.project must give owner and number.` };
   }
 
   const statuses = strings(assignedStatuses);
 
   if (statuses === null || statuses.length === 0) {
-    return { error: 'sources.github.assignedStatuses must list at least one status.' };
+    return { error: `${path}.assignedStatuses must list at least one status.` };
   }
 
   if (typeof ghPath !== 'string' || ghPath === '') {
-    return { error: 'sources.github.ghPath must be a path.' };
+    return { error: `${path}.ghPath must be a path.` };
   }
 
   if (typeof maxPages !== 'number' || !Number.isInteger(maxPages) || maxPages < 1) {
-    return { error: 'sources.github.maxPages must be a whole number of at least 1.' };
+    return { error: `${path}.maxPages must be a whole number of at least 1.` };
   }
 
   const rolesPath = typeof rolesFile === 'string' ? rolesFile.trim() : null;
 
   if (rolesPath === null || (rolesPath !== '' && !isAbsolute(rolesPath) && !/^~([\\/]|$)/.test(rolesPath))) {
-    return { error: 'sources.github.rolesFile must be an absolute path or start with ~.' };
+    return { error: `${path}.rolesFile must be an absolute path or start with ~.` };
   }
 
   let pattern: RegExp;
@@ -85,7 +86,7 @@ export function parseGithubConfig(options: Record<string, unknown>): ConfigResul
   try {
     pattern = new RegExp(String(branchPattern));
   } catch {
-    return { error: 'sources.github.branchPattern is not a valid regular expression.' };
+    return { error: `${path}.branchPattern is not a valid regular expression.` };
   }
 
   return {

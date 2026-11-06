@@ -27,6 +27,7 @@ public sealed class ReviewOrderTests
             "dev:develop",
             $"gh {id}",
             "github",
+            "github",
             $"https://github.com/o/r/issues/{id}",
             null,
             [],

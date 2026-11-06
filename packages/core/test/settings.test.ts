@@ -32,6 +32,7 @@ describe('parseSettings', () => {
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
           github: {
+            kind: 'github',
             pollIntervalSeconds: 300,
             repoRoot: 'D:/git/widgets',
             triagePlaybook: 'triage:github',
@@ -55,7 +56,7 @@ describe('parseSettings', () => {
   it('fills defaults for a source that sets nothing', () => {
     expect(parseSettings('{"sources":{"adhoc":{}}}')).toEqual({
       settings: expect.objectContaining({
-        sources: { adhoc: { pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} } },
+        sources: { adhoc: { kind: 'adhoc', pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} } },
       }),
     });
   });
@@ -111,6 +112,25 @@ describe('parseSettings', () => {
     expect(nodePath('$HOME/bin/node')).toEqual(refused);
     expect(nodePath('/usr/bin/bun')).toEqual(refused);
     expect(nodePath('/usr/bin/nodejs')).toEqual(refused);
+  });
+
+  it('takes a source\'s kind from its name unless it sets one, so one plugin can read several sources (PRD R3)', () => {
+    const result = parseSettings(JSON.stringify({ sources: { github: {}, 'widgets-dashboard': { kind: 'github' } } }));
+    const sources = 'settings' in result ? result.settings.sources : {};
+
+    expect(sources['github']?.kind).toBe('github');
+    expect(sources['widgets-dashboard']).toMatchObject({ kind: 'github', options: {} });
+  });
+
+  it('rejects a source name that is not lowercase letters, digits and hyphens, or is schedule, and a kind on adhoc', () => {
+    expect(parseSettings(JSON.stringify({ sources: { 'Widgets Dashboard': {}, schedule: {}, adhoc: { kind: 'github' }, kindless: { kind: 3 } } }))).toEqual({
+      errors: [
+        "sources.Widgets Dashboard: a source's name must be lowercase letters, digits and hyphens.",
+        'sources.schedule: schedules are set under schedules.',
+        'sources.adhoc.kind is not a setting; adhoc holds only the ad-hoc repo root.',
+        'sources.kindless.kind must be a string.',
+      ],
+    });
   });
 
   it('rejects a section that is not an object', () => {

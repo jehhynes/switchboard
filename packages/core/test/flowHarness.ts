@@ -41,8 +41,8 @@ export function settings(patch: { sessions?: Partial<Settings['sessions']>; tria
     sessions: { ...DEFAULT_SETTINGS.sessions, ...patch.sessions },
     triage: { ...DEFAULT_SETTINGS.triage, ...patch.triage },
     sources: {
-      github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', namespace: '', options: {} },
-      zoho: { pollIntervalSeconds: 300, repoRoot: 'D:/git/support', triagePlaybook: 'triage:zoho', setupPrompt: '', namespace: 'support', options: {} },
+      github: { kind: 'github', pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', namespace: '', options: {} },
+      zoho: { kind: 'zoho', pollIntervalSeconds: 300, repoRoot: 'D:/git/support', triagePlaybook: 'triage:zoho', setupPrompt: '', namespace: 'support', options: {} },
     },
     schedules: patch.schedules ?? {},
     dock: DEFAULT_SETTINGS.dock,

@@ -45,7 +45,7 @@ function config(patch: Partial<Settings['sessions']> = {}): Config {
     settings: {
       ...DEFAULT_SETTINGS,
       sessions: { ...DEFAULT_SETTINGS.sessions, installHooks: false, ...patch },
-      sources: { github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
+      sources: { github: { kind: 'github', pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
     },
     settingsError: null,
     playbooks: PLAYBOOKS,
@@ -246,7 +246,7 @@ class FakeCodex {
 }
 
 /** A null `codex` leaves the runtime to build its own Codex runner. */
-function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex: FakeCodex | null = new FakeCodex()) {
+function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex: FakeCodex | null = new FakeCodex(), named: Record<string, FakeSource> = {}) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
 
@@ -266,7 +266,7 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
       home,
       store,
       exec: cli.exec,
-      makeSource: (name) => (name === 'github' ? { source } : null),
+      makeSource: (name, settings) => (named[name] !== undefined ? { source: named[name] } : settings.kind === 'github' ? { source } : null),
       now,
       sleep: (ms) => (ms === REPORT_CHECK_MS ? late.promise : ms === RECHECK_MS ? recheck.promise : Promise.resolve()),
       newSessionId: () => `s${++ids}`,
@@ -1102,10 +1102,10 @@ describe('Runtime', () => {
 
   it('names the build error on Refresh when the only source that is on cannot be built', () => {
     const cfg = config();
-    cfg.settings.sources = { zoho: cfg.settings.sources['github']! };
+    cfg.settings.sources = { jira: { ...cfg.settings.sources['github']!, kind: 'jira' } };
     const { runtime } = setup(cfg);
 
-    expect(runtime.pollNow()).toBe('zoho: Switchboard has no source named zoho.');
+    expect(runtime.pollNow()).toBe('jira: Switchboard has no source kind jira.');
   });
 
   it('drops a read that finishes after its source is turned off', async () => {
@@ -1757,7 +1757,7 @@ describe('Runtime', () => {
     expect(runtime.setSourceEnabled('github', false)).toBeNull();
     expect(store.enabledSources()).toEqual(new Set());
     expect(runtime.snapshot().pool).toEqual([]);
-    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', enabled: false }]);
+    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', kind: 'github', enabled: false }]);
     expect(runtime.snapshot().namespaces).toEqual({ github: 'dev' });
     expect(runtime.setSourceEnabled('zoho', true)).toBe('settings.json has no source named zoho.');
     expect(runtime.setSourceEnabled('adhoc', true)).toBe('settings.json has no source named adhoc.');
@@ -1902,15 +1902,39 @@ describe('Runtime', () => {
     expect(store.enabledSources()).toEqual(new Set());
 
     runtime.reload(config());
-    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', enabled: false }]);
+    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', kind: 'github', enabled: false }]);
   });
 
-  it('reports an unknown or misconfigured source', () => {
+  it('reports a source whose kind has no plugin', () => {
     const cfg = config();
-    cfg.settings.sources['zoho'] = { ...cfg.settings.sources['github']! };
+    cfg.settings.sources['jira'] = { ...cfg.settings.sources['github']!, kind: 'jira' };
     const { runtime } = setup(cfg);
 
-    expect(runtime.snapshot().errors.sources).toEqual({ zoho: 'Switchboard has no source named zoho.' });
+    expect(runtime.snapshot().errors.sources).toEqual({ jira: 'Switchboard has no source kind jira.' });
+  });
+
+  it('polls a second source of one kind under its own name, with its own tickets and toggle (PRD R3)', async () => {
+    const cfg = config();
+    cfg.settings.sources['widgets-dashboard'] = { ...cfg.settings.sources['github']!, repoRoot: 'D:/git/widgets-dashboard' };
+    const dashboard = new FakeSource();
+    const { runtime, store, source } = setup(cfg, undefined, undefined, undefined, { 'widgets-dashboard': dashboard });
+
+    expect(runtime.snapshot().sourceStates).toEqual([
+      { name: 'github', kind: 'github', enabled: true },
+      { name: 'widgets-dashboard', kind: 'github', enabled: true },
+    ]);
+
+    source.result = { tickets: [issue('63')] };
+    dashboard.result = { tickets: [{ ...issue('63'), title: 'Dashboard 63' }] };
+    await runtime.pollSource('github');
+    await runtime.pollSource('widgets-dashboard');
+
+    expect(store.findTicket('github', '63')).toMatchObject({ title: 'Issue 63' });
+    expect(store.findTicket('widgets-dashboard', '63')).toMatchObject({ title: 'Dashboard 63' });
+
+    expect(runtime.setSourceEnabled('widgets-dashboard', false)).toBeNull();
+    expect(runtime.snapshot().sources).toEqual(['github']);
+    expect(runtime.snapshot().errors.sources).toEqual({});
   });
 });
 

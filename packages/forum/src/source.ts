@@ -18,31 +18,32 @@ export type ConfigResult = { config: ForumConfig } | { error: string };
 
 const KEYS = ['queryCommand', 'forumId', 'userId', 'maxRows', 'auditDatabase'];
 
-/** Reads the Forum keys of `sources.forum`. */
-export function parseForumConfig(options: Record<string, unknown>): ConfigResult {
+/** Reads the Forum keys of the source `name`. */
+export function parseForumConfig(options: Record<string, unknown>, name = 'forum'): ConfigResult {
+  const path = `sources.${name}`;
   const unknown = Object.keys(options).filter((key) => !KEYS.includes(key));
 
   if (unknown.length > 0) {
-    return { error: `sources.forum.${unknown[0]} is not a setting.` };
+    return { error: `${path}.${unknown[0]} is not a setting.` };
   }
 
   const { queryCommand = 'bash ~/.claude/scripts/run-forum-sql.sh', forumId = 1, userId, maxRows = 500, auditDatabase = 'audit' } = options;
 
   if (typeof queryCommand !== 'string' || queryCommand === '') {
-    return { error: 'sources.forum.queryCommand must be a non-empty string.' };
+    return { error: `${path}.queryCommand must be a non-empty string.` };
   }
 
   if (typeof userId !== 'string' || !/^\d+$/.test(userId)) {
-    return { error: 'sources.forum.userId must be set to your forum user ID, as a string.' };
+    return { error: `${path}.userId must be set to your forum user ID, as a string.` };
   }
 
   if (typeof auditDatabase !== 'string' || !/^\w+$/.test(auditDatabase)) {
-    return { error: 'sources.forum.auditDatabase must be a database name.' };
+    return { error: `${path}.auditDatabase must be a database name.` };
   }
 
   for (const [key, value] of Object.entries({ forumId, maxRows })) {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-      return { error: `sources.forum.${key} must be a whole number of at least 1.` };
+      return { error: `${path}.${key} must be a whole number of at least 1.` };
     }
   }
 
@@ -133,11 +134,10 @@ function stripHtml(html: string): string {
 }
 
 export class ForumSource implements Source {
-  readonly name = 'forum';
-
   constructor(
     private readonly config: ForumConfig,
     private readonly query: Query,
+    readonly name = 'forum',
   ) {}
 
   /** All open topics; only yours and the unassigned pool are actionable (PRD R5, R47). */
@@ -154,7 +154,7 @@ export class ForumSource implements Source {
     }
 
     if (result.rows.length >= this.config.maxRows) {
-      return { error: `${this.config.maxRows} or more open Forum topics; raise sources.forum.maxRows.` };
+      return { error: `${this.config.maxRows} or more open Forum topics; raise sources.${this.name}.maxRows.` };
     }
 
     const tickets: PolledTicket[] = [];

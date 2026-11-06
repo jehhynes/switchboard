@@ -18,6 +18,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 113",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/113",
           "mark": {
             "kind": "running",
@@ -160,6 +161,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 107",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/107",
           "mark": {
             "kind": "finished",
@@ -336,6 +338,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 110",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/110",
           "mark": {
             "kind": "review",
@@ -505,6 +508,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 114",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/114",
           "mark": {
             "kind": "failed",
@@ -613,6 +617,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 108",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/108",
           "mark": {
             "kind": "question",
@@ -759,6 +764,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 109",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/109",
           "mark": null,
           "details": [],
@@ -877,6 +883,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 104",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/104",
           "mark": null,
           "details": [],
@@ -962,6 +969,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 111",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/111",
           "mark": {
             "kind": "done-session",
@@ -1054,6 +1062,7 @@
           "playbook": "dev:develop",
           "ticket": "gh 112",
           "source": "github",
+          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/112",
           "mark": {
             "kind": "done-session",
@@ -1177,12 +1186,26 @@
   ],
   "sources": [
     {
-      "name": "github",
-      "enabled": true
+      "kind": "github",
+      "enabled": true,
+      "title": "github: polled\nClick to stop polling it.",
+      "sources": [
+        {
+          "name": "github",
+          "enabled": true
+        }
+      ]
     },
     {
-      "name": "zoho",
-      "enabled": false
+      "kind": "zoho",
+      "enabled": false,
+      "title": "zoho: not polled\nClick to poll it.",
+      "sources": [
+        {
+          "name": "zoho",
+          "enabled": false
+        }
+      ]
     }
   ],
   "repoRoots": [

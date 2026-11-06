@@ -390,21 +390,21 @@ describe('createHubApp', () => {
     const states = () => (app.snapshot() as { sourceStates: unknown }).sourceStates;
     const enabled = async () => ((await app.post['/config/read']!({})).body as { enabled: Record<string, boolean> }).enabled;
 
-    expect(states()).toEqual([{ name: 'zoho', enabled: false }]);
+    expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', enabled: false }]);
     expect(await enabled()).toEqual({ zoho: false, adhoc: false });
-    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
-    expect(states()).toEqual([{ name: 'zoho', enabled: true }]);
+    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', enabled: true }]);
     expect(await enabled()).toEqual({ zoho: true, adhoc: false });
     expect(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).toBe(text);
 
-    expect(await app.post['/sources']!({ name: 'forum', enabled: true })).toEqual({ status: 409, body: { error: 'settings.json has no source named forum.' } });
+    expect(await app.post['/sources']!({ name: 'forum', kind: 'forum', enabled: true })).toEqual({ status: 409, body: { error: 'settings.json has no source named forum.' } });
     expect(await app.post['/sources']!({ name: 'zoho', enabled: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {name, enabled}.' } });
     app.close();
 
     // The state is kept in the store, so a new hub starts the source again.
     const again = await start();
 
-    expect((again.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: true }]);
+    expect((again.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', enabled: true }]);
   });
 
   it('tells an open Settings window to read again after a toggle, and not after a refused one', async () => {
@@ -416,9 +416,9 @@ describe('createHubApp', () => {
       sent.push(event);
       return 1;
     });
-    expect(await app.post['/sources']!({ name: 'forum', enabled: true })).toMatchObject({ status: 409 });
+    expect(await app.post['/sources']!({ name: 'forum', kind: 'forum', enabled: true })).toMatchObject({ status: 409 });
     expect(sent).not.toContain('config');
-    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(sent).toContain('config');
   });
 
@@ -428,7 +428,7 @@ describe('createHubApp', () => {
     const check = async (settings: unknown) => ((await app.post['/config/check']!({ settings })).body as { errors: string[] }).errors;
 
     expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([]);
-    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([expect.stringMatching(/^sources\.zoho\./)]);
     expect(await check({ sources: { zoho: { enabled: true } } })).toEqual(["sources.zoho.enabled is not a setting; turn a source on and off in the dock's header."]);
   });
@@ -441,7 +441,7 @@ describe('createHubApp', () => {
     const app = await createHubApp({ home: temp.home, configDir, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());
 
-    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: false }]);
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', enabled: false }]);
     expect((app.snapshot() as { configDir: string }).configDir).toBe(configDir);
 
     writeFileSync(
@@ -450,8 +450,8 @@ describe('createHubApp', () => {
     );
     await until(() => ((app.snapshot() as { playbooks: unknown[] }).playbooks.length === 1 ? true : null));
 
-    expect(await app.post['/sources']!({ name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
-    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', enabled: true }]);
+    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', enabled: true }]);
     expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'))).toEqual({ sessions: { installHooks: false } });
   });
 

@@ -1,3 +1,6 @@
+import { ADHOC_SOURCE } from './flow.js';
+import { SCHEDULE_SOURCE } from './schedule.js';
+
 /** Claude Code's `--permission-mode` choices. */
 export const PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan'] as const;
 
@@ -52,6 +55,8 @@ export interface TriageSettings {
 
 /** Fields every source has. The source plugin validates its own keys in `options`. */
 export interface SourceSettings {
+  /** The plugin, such as `github`; the source's name when not set, so one plugin can read several sources (PRD R3). */
+  kind: string;
   pollIntervalSeconds: number;
   repoRoot: string;
   triagePlaybook: string;
@@ -123,7 +128,10 @@ export function repoRoots(settings: Settings): string[] {
   return [...new Set(Object.values(settings.sources).map((source) => source.repoRoot).filter((root) => root !== ''))];
 }
 
-const SOURCE_DEFAULTS = { pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '' };
+/** A source's or schedule's name: it keys tickets in the store and History. */
+const NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+const SOURCE_DEFAULTS = { kind: '', pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '' };
 
 export type SettingsResult = { settings: Settings } | { errors: string[] };
 
@@ -306,14 +314,23 @@ export function parseSettings(text: string): SettingsResult {
   for (const name of Object.keys(sourcesIn)) {
     const path = `sources.${name}`;
     const sourceIn = read.section(sourcesIn, name, path);
-    const { enabled, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace, ...options } = sourceIn;
-    const common = { pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace };
+    const { enabled, kind, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace, ...options } = sourceIn;
+    const common = { kind, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace };
+
+    if (!NAME.test(name)) {
+      read.errors.push(`${path}: a source's name must be lowercase letters, digits and hyphens.`);
+    } else if (name === SCHEDULE_SOURCE) {
+      read.errors.push(`${path}: schedules are set under schedules.`);
+    } else if (name === ADHOC_SOURCE && kind !== undefined) {
+      read.errors.push(`${path}.kind is not a setting; adhoc holds only the ad-hoc repo root.`);
+    }
 
     if (enabled !== undefined) {
       read.errors.push(`${path}.enabled is not a setting; turn a source on and off in the dock's header.`);
     }
 
     sources[name] = {
+      kind: read.string(common, 'kind', path, SOURCE_DEFAULTS.kind) || name,
       pollIntervalSeconds: read.integer(common, 'pollIntervalSeconds', path, SOURCE_DEFAULTS.pollIntervalSeconds, 10),
       repoRoot: read.string(common, 'repoRoot', path, SOURCE_DEFAULTS.repoRoot),
       triagePlaybook: read.string(common, 'triagePlaybook', path, SOURCE_DEFAULTS.triagePlaybook),
@@ -329,7 +346,7 @@ export function parseSettings(text: string): SettingsResult {
   for (const name of Object.keys(schedulesIn)) {
     const path = `schedules.${name}`;
 
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+    if (!NAME.test(name)) {
       read.errors.push(`${path}: a schedule's name must be lowercase letters, digits and hyphens.`);
       continue;
     }

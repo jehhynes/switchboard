@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { MESSAGES, PERMISSION_PROMPT } from '@switchboard/core';
 import { wakeText } from '@switchboard/core/snooze';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dockView, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
+import { dockView, sourceGroups, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
 import { CONTROL_GLYPHS } from '../src/rows.js';
 import type { Snapshot, WorkItemView } from '../src/runtime.js';
@@ -333,10 +333,49 @@ describe('dockView', () => {
   });
 
   it('lists the sources and repo roots for the header', () => {
-    const view = dockView(snapshot([], { sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] }), NOW, W);
+    const view = dockView(snapshot([], { sourceStates: [{ name: 'github', kind: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', enabled: false }] }), NOW, W);
 
-    expect(view.sources).toEqual([{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }]);
+    expect(view.sources).toEqual([
+      { kind: 'github', enabled: true, title: 'github: polled\nClick to stop polling it.', sources: [{ name: 'github', enabled: true }] },
+      { kind: 'zoho', enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
+    ]);
     expect(view.repoRoots).toEqual(['D:/git/widgets', 'D:/git/support']);
+  });
+
+  it('groups the sources of one kind under one icon, which is on while any of them is polled (PRD R71)', () => {
+    const groups = sourceGroups([
+      { name: 'github', kind: 'github', enabled: false },
+      { name: 'zoho', kind: 'zoho', enabled: false },
+      { name: 'personal', kind: 'github', enabled: true },
+    ]);
+
+    expect(groups).toEqual([
+      {
+        kind: 'github',
+        enabled: true,
+        title: 'github: not polled\npersonal: polled\nClick to choose which to poll.',
+        sources: [
+          { name: 'github', enabled: false },
+          { name: 'personal', enabled: true },
+        ],
+      },
+      { kind: 'zoho', enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
+    ]);
+    expect(sourceGroups([{ name: 'github', kind: 'github', enabled: false }, { name: 'personal', kind: 'github', enabled: false }])[0]!.enabled).toBe(false);
+  });
+
+  it('gives each row its source\'s kind, or the source name for a source no longer configured (PRD R3)', () => {
+    const dashboard = item(8);
+    dashboard.ticket = { ...dashboard.ticket, source: 'widgets-dashboard' };
+    const removed = item(9);
+    removed.ticket = { ...removed.ticket, source: 'forum' };
+    const view = dockView(snapshot([dashboard, removed], { sourceStates: [{ name: 'widgets-dashboard', kind: 'github', enabled: true }] }), NOW, W);
+    const rows = view.groups.flatMap((group) => group.rows);
+
+    expect(rows.map((row) => [row.ticket, row.source, row.sourceKind])).toEqual([
+      ['widgets-dashboard 108', 'widgets-dashboard', 'github'],
+      ['forum 109', 'forum', 'forum'],
+    ]);
   });
 
   it('gives a pool row its ticket, its triage state and its pool controls, and no window', () => {
@@ -410,7 +449,7 @@ describe('dockView', () => {
           item(11, { status: 'done', doneAt: NOW - 60_000 }),
           item(12, { status: 'done', doneAt: NOW - 30 * 86_400_000 }),
         ],
-        { pool: [pool(4)], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: false }] },
+        { pool: [pool(4)], sourceStates: [{ name: 'github', kind: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', enabled: false }] },
       ),
       NOW,
       W,

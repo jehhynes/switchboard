@@ -98,7 +98,6 @@ function json(result: DeskResult): unknown {
 class DeskError extends Error {}
 
 export class ZohoSource implements Source {
-  readonly name = 'zoho';
   private teams: { teamOf: Map<string, string[]>; names: Map<string, string>; until: number } | null = null;
   /** Each Support ticket's scope entry, by ticket ID, with the modifiedTime it was read at. */
   private entered = new Map<string, { modifiedTime: string; at: number | null }>();
@@ -107,6 +106,7 @@ export class ZohoSource implements Source {
     private readonly config: ZohoConfig,
     private readonly get: DeskGet,
     private readonly now: () => number = Date.now,
+    readonly name = 'zoho',
   ) {}
 
   /**
@@ -119,7 +119,7 @@ export class ZohoSource implements Source {
       const rows = await this.search();
 
       if (rows === null) {
-        return { error: `More than ${this.config.maxPages} pages of Open Support tickets; raise sources.zoho.maxPages.` };
+        return { error: `More than ${this.config.maxPages} pages of Open Support tickets; raise sources.${this.name}.maxPages.` };
       }
 
       const found = new Set(rows.map((row) => String(row.id)));

@@ -124,13 +124,12 @@ interface ContextIssue {
 }
 
 export class GithubSource implements Source {
-  readonly name = 'github';
-
   constructor(
     private readonly config: GithubConfig,
     private readonly gh: Gh,
     /** Reads `config.rolesFile`; called only when it is set. */
     private readonly readRoles: (path: string) => Promise<RolesResult> = async () => ({ roles: new Map() }),
+    readonly name = 'github',
   ) {}
 
   /**
@@ -379,7 +378,7 @@ export class GithubSource implements Source {
       after = search.pageInfo.endCursor;
     }
 
-    return { error: `More than ${maxPages} pages of searched issues; raise sources.github.maxPages.` };
+    return { error: `More than ${maxPages} pages of searched issues; raise sources.${this.name}.maxPages.` };
   }
 
   private async readContext(ticket: Ticket): Promise<ContextResult> {
@@ -430,7 +429,7 @@ export class GithubSource implements Source {
   /** Why the configured project's status field cannot hold a status, or null when it is a single-select field. */
   private async fieldProblem(): Promise<string | null> {
     const { owner, number, statusField } = this.config.project;
-    const missing = `Project ${owner}/${number} has no field named "${statusField}". Set sources.github.project.statusField.`;
+    const missing = `Project ${owner}/${number} has no field named "${statusField}". Set sources.${this.name}.project.statusField.`;
     const result = await this.gh(FIELD_QUERY, { owner, number, status: statusField });
 
     if ('error' in result) {

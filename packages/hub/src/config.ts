@@ -25,7 +25,7 @@ export interface Config {
   playbookErrors: PlaybookError[];
 }
 
-/** The sources Switchboard has, by their key under `sources`. */
+/** The source plugins, which a source names by its `kind` or, without one, its key under `sources`. */
 export const SOURCE_KINDS = ['github', 'zoho', 'forum'] as const;
 
 export function settingsPath(configDir: string): string {
@@ -33,11 +33,57 @@ export function settingsPath(configDir: string): string {
 }
 
 /** Why a source's own keys are invalid, or null. */
-export function sourceOptionsError(name: string, options: Record<string, unknown>): string | null {
+export function sourceOptionsError(name: string, kind: string, options: Record<string, unknown>): string | null {
   const parsed =
-    name === 'github' ? parseGithubConfig(options) : name === 'zoho' ? parseZohoConfig(options) : name === 'forum' ? parseForumConfig(options) : { error: `sources.${name}: Switchboard has no source named ${name}.` };
+    kind === 'github'
+      ? parseGithubConfig(options, name)
+      : kind === 'zoho'
+        ? parseZohoConfig(options, name)
+        : kind === 'forum'
+          ? parseForumConfig(options, name)
+          : { error: `sources.${name}: ${noKind(kind)}` };
 
   return 'error' in parsed ? parsed.error : null;
+}
+
+/**
+ * Errors between sources, which reject the file whole (PRD R42): only a GitHub source may be named apart from its kind, because Support volume
+ * reporting finds Zoho and Forum tickets by source name; no source may take another kind's name; and no two GitHub sources may read one project
+ * board, including a source that is off, because an issue would then belong to both.
+ */
+export function sourcesErrors(settings: Settings): string[] {
+  const errors: string[] = [];
+  const boards = new Map<string, string>();
+
+  for (const [name, source] of Object.entries(settings.sources)) {
+    const path = `sources.${name}`;
+
+    if (source.kind !== name && (SOURCE_KINDS as readonly string[]).includes(name)) {
+      errors.push(`${path}: ${name} is a source kind, so a source of kind ${source.kind} needs another name.`);
+    } else if (source.kind !== name && (SOURCE_KINDS as readonly string[]).includes(source.kind) && source.kind !== 'github') {
+      errors.push(`${path}.kind: only a GitHub source may be named apart from its kind.`);
+    }
+
+    const project = source.kind === 'github' ? (source.options['project'] as { owner?: unknown; number?: unknown } | undefined) : undefined;
+
+    if (typeof project?.owner === 'string' && typeof project.number === 'number') {
+      const board = `${project.owner.toLowerCase()}/${project.number}`;
+      const other = boards.get(board);
+
+      if (other === undefined) {
+        boards.set(board, name);
+      } else {
+        errors.push(`${path}.project: sources.${other} already reads project ${board}.`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+/** Why a source has no plugin. */
+export function noKind(kind: string): string {
+  return `Switchboard has no source kind ${kind}.`;
 }
 
 /** A hash of a file's text, so a save can refuse to overwrite a change made since it was read. Null for a missing file. */
@@ -78,7 +124,7 @@ export function checkSettings(value: unknown, enabled: ReadonlySet<string>): str
     return parsed.errors;
   }
 
-  const errors: string[] = [];
+  const errors = sourcesErrors(parsed.settings);
 
   for (const [name, source] of Object.entries(parsed.settings.sources)) {
     const setupError = templateError(source.setupPrompt);
@@ -87,7 +133,7 @@ export function checkSettings(value: unknown, enabled: ReadonlySet<string>): str
       errors.push(`sources.${name}.setupPrompt: ${setupError}`);
     }
 
-    const error = enabled.has(name) && name !== ADHOC_SOURCE ? sourceOptionsError(name, source.options) : null;
+    const error = enabled.has(name) && name !== ADHOC_SOURCE ? sourceOptionsError(name, source.kind, source.options) : null;
 
     if (error !== null) {
       errors.push(error);
@@ -199,8 +245,10 @@ export function loadConfig(configDir: string, previous: Config = { settings: DEF
 
   const parsed = parseSettings(text);
 
-  if ('errors' in parsed) {
-    return { ...previous, settingsError: parsed.errors.join(' ') };
+  const rejected = 'errors' in parsed ? parsed.errors : sourcesErrors(parsed.settings);
+
+  if ('errors' in parsed || rejected.length > 0) {
+    return { ...previous, settingsError: rejected.join(' ') };
   }
 
   const { playbooks, errors } = parsePlaybooks((JSON.parse(text) as { playbooks?: unknown }).playbooks, parsed.settings.sessions.provider);

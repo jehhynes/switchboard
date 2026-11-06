@@ -1520,10 +1520,66 @@ public sealed partial class MainWindow : Window
 
     async void OnSourceClicked(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is SourceViewModel source)
+        if (sender is not Button button || button.DataContext is not SourceViewModel group)
         {
-            model.Status = await hub.SetSource(source.Name, !source.Enabled);
+            return;
         }
+
+        if (!group.IsMenu)
+        {
+            model.Status = await hub.SetSource(group.Name, !group.Enabled);
+            return;
+        }
+
+        var menu = SourceMenu(group, new Point(model.GripOnLeft ? button.Bounds.Width : 0, button.Bounds.Height));
+
+        button.ContextMenu = menu;
+        menu.Open(button);
+
+        // A snapshot that adds or removes a source replaces the icons, so the menu's entries would be stale.
+        void Replaced(object? _, System.Collections.Specialized.NotifyCollectionChangedEventArgs __) => menu.Close();
+
+        model.Sources.CollectionChanged += Replaced;
+        menu.Closed += (_, _) => model.Sources.CollectionChanged -= Replaced;
+    }
+
+    /// <summary>
+    /// A kind's menu of its sources, each with a check box that turns only that source on or off (PRD R71). It stays open on a click, so several
+    /// can be changed, and each check box follows the hub's snapshots, so a refused toggle shows unchanged.
+    /// </summary>
+    internal ContextMenu SourceMenu(SourceViewModel group, Point at)
+    {
+        var items = group.Entries.Select((entry) =>
+        {
+            var item = new MenuItem { Header = entry.Name, ToggleType = MenuItemToggleType.CheckBox, StaysOpenOnClick = true, DataContext = entry };
+
+            item.Bind(MenuItem.IsCheckedProperty, new Avalonia.Data.Binding(nameof(SourceEntryViewModel.Enabled)) { Mode = Avalonia.Data.BindingMode.OneWay });
+            item.Click += async (_, _) =>
+            {
+                var status = await hub.SetSource(entry.Name, !entry.Enabled);
+
+                model.Status = status;
+                if (status is not null)
+                {
+                    item.SetCurrentValue(MenuItem.IsCheckedProperty, entry.Enabled);
+                }
+            };
+
+            return (Control)item;
+        }).ToList();
+        var menu = RowMenu(items, model.GripOnLeft, at);
+
+        // Space toggles a check box as Enter does; Avalonia's menus take only Enter.
+        menu.AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Space && items.OfType<MenuItem>().FirstOrDefault((item) => item.IsSelected) is { } selected)
+            {
+                selected.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                e.Handled = true;
+            }
+        });
+
+        return menu;
     }
 
     /// <summary>The header's More Actions menu, below the button and opening away from the screen edge the dock is on.</summary>

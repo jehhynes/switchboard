@@ -148,6 +148,8 @@ export interface DockRow {
   /** The source and key, such as `gh 18941`. */
   ticket: string;
   source: string;
+  /** The source's plugin, such as `github`, which picks its icon; the source's name when it is no longer configured. */
+  sourceKind: string;
   url: string;
   /** The mark, its codicon glyph and its meaning in words. */
   mark: { kind: Mark; glyph: string; title: string } | null;
@@ -218,8 +220,8 @@ export interface DockView {
   groups: DockGroup[];
   /** Snooze's choices with their wake times, (PRD R49); the dock posts the chosen `until`. */
   snooze: SnoozeChoice[];
-  /** Each configured source but ad-hoc and whether it is polled, for the header's toggles (PRD R3). */
-  sources: { name: string; enabled: boolean }[];
+  /** The configured sources but ad-hoc, by kind in order of first appearance, for the header's icons (PRD R3, R71). */
+  sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
   repoRoots: string[];
   /** The schedules the New Ad-hoc Session window can run now (PRD R82). */
@@ -238,6 +240,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     'done',
   ];
   const order = groups.review.map((entry) => (entry as WorkItemView).id);
+  const kinds = new Map(snapshot.sourceStates.map((source) => [source.name, source.kind]));
   const row = (group: RowGroup) => (entry: WorkItemView | PoolView) => {
     const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
 
@@ -246,20 +249,45 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
 
     const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode, snapshot.openTerminal) : poolRow(entry, now, snapshot.namespaces);
 
-    return { ...shown, search, links: linksOf(entry), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
+    return { ...shown, sourceKind: kinds.get(entry.ticket.source) ?? entry.ticket.source, search, links: linksOf(entry), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
   };
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
     groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
     snooze: snoozeChoices(new Date(now)),
-    sources: snapshot.sourceStates,
+    sources: sourceGroups(snapshot.sourceStates),
     repoRoots: snapshot.repoRoots,
     schedules: snapshot.schedules,
   };
 }
 
+/**
+ * One header icon: the sources of one kind. The icon is on while any of them is polled. A kind with one source toggles it on click; a kind with
+ * several opens a menu with a check box per source (PRD R71).
+ */
+export interface DockSourceGroup {
+  kind: string;
+  enabled: boolean;
+  /** The icon's tooltip: each source and whether it is polled, then what a click does. */
+  title: string;
+  sources: { name: string; enabled: boolean }[];
+}
+
+export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[] {
+  const kinds = [...new Set(states.map((state) => state.kind))];
+
+  return kinds.map((kind) => {
+    const sources = states.filter((state) => state.kind === kind).map(({ name, enabled }) => ({ name, enabled }));
+    const lines = sources.map((source) => `${source.name}: ${source.enabled ? 'polled' : 'not polled'}`);
+    const only = sources.length === 1 ? sources[0]! : null;
+    const action = only === null ? 'Click to choose which to poll.' : only.enabled ? 'Click to stop polling it.' : 'Click to poll it.';
+
+    return { kind, enabled: sources.some((source) => source.enabled), title: [...lines, action].join('\n'), sources };
+  });
+}
+
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal): Omit<DockRow, 'search' | 'links' | 'returned' | 'comment' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const kind = markOf(item);
   const controls = order === null ? controlsOf(item, mode) : [...controlsOf(item, mode), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
@@ -308,7 +336,7 @@ function orMarkTitle(kind: Mark | null, details: DockText[]): DockText[] {
   return kind !== null && details.length === 0 ? [{ text: MARK_TITLES[kind], title: null, tone: null }] : details;
 }
 
-function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'search' | 'links' | 'returned' | 'comment' | 'band'> {
+function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const { ticket, triage } = entry;
   const { main, controls } = poolControls(entry);
   const triaging = triage !== null && triage.endedAt === null;

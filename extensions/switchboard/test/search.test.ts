@@ -48,7 +48,7 @@ describe('Open in Switchboard (PRD R69)', () => {
       item(5, { ticketId: 8, status: 'done', doneAt: NOW, ticket: zoho(8, { snoozed: true }) }),
       item(6, { ticketId: 8, status: 'unstarted', ticket: zoho(8, { snoozed: true }) }),
     ],
-    { sources: ['github', 'zoho'], sourceStates: [{ name: 'github', enabled: true }, { name: 'zoho', enabled: true }], pool: [{ ticket: zoho(10, { pool: true, assigned: false }), triage: null, focus: null, returned: 0, playbookChoices: [], links: [link('https://github.com/o/r/pull/77')] }] },
+    { sources: ['github', 'zoho'], sourceStates: [{ name: 'github', kind: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', enabled: true }], pool: [{ ticket: zoho(10, { pool: true, assigned: false }), triage: null, focus: null, returned: 0, playbookChoices: [], links: [link('https://github.com/o/r/pull/77')] }] },
   );
 
   it("finds the row of the ticket with the URL, by GitHub's case and any page tab, before a work item that links to it", () => {

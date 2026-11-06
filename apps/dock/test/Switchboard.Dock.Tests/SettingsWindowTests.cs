@@ -610,6 +610,23 @@ public sealed class SettingsWindowTests
     }
 
     [AvaloniaFact]
+    public void NewSource_KindAndNameCreated_OpensTheSourcePageWithTheKindsFields()
+    {
+        var (window, _) = Open();
+
+        Click(window.GetVisualDescendants().OfType<Button>().Single((button) => (string?)button.Tag == "new-source"));
+        window.GetVisualDescendants().OfType<ComboBox>().Single((box) => box.Name == "NewKind").SelectedIndex = 0;
+        window.GetVisualDescendants().OfType<TextBox>().Single((box) => box.Name == "NewName").Text = "widgets-dashboard";
+        Settle();
+        Click(PageButton(window, "create"));
+
+        Assert.Contains("current", NavButton(window, "source:widgets-dashboard").Classes);
+        Assert.Contains("widgets-dashboard (GitHub)", Texts(NavButton(window, "source:widgets-dashboard")));
+        Assert.NotNull(Field<TextBox>(window, "sources.widgets-dashboard.repo"));
+        Assert.Empty(hub.Saves);
+    }
+
+    [AvaloniaFact]
     public void RemoveSource_Clicked_RemovesItWithoutAskingAndDiscardRestoresIt()
     {
         var (window, _) = Open();

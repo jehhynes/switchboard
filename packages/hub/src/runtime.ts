@@ -6,6 +6,7 @@ import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenTerminal, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
@@ -126,8 +127,8 @@ export interface Snapshot {
   schedules: { name: string; playbook: string }[];
   /** Sources being polled. */
   sources: string[];
-  /** Every configured source but ad-hoc, for the operator's source filter. */
-  sourceStates: { name: string; enabled: boolean }[];
+  /** Every configured source but ad-hoc with its plugin, for the operator's source filter. */
+  sourceStates: { name: string; kind: string; enabled: boolean }[];
   /** Each configured source's playbook namespace, which names a triage in progress, such as `dev:triage`. */
   namespaces: Record<string, string>;
   /** The folder holding settings.json. */
@@ -1317,7 +1318,7 @@ export class Runtime {
       sources: [...this.sources.keys()],
       sourceStates: Object.entries(settings.sources)
         .filter(([name]) => name !== ADHOC_SOURCE)
-        .map(([name]) => ({ name, enabled: enabled.has(name) })),
+        .map(([name, source]) => ({ name, kind: source.kind, enabled: enabled.has(name) })),
       namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
       openVSCode: settings.dock.openVSCode,
       openTerminal: settings.dock.openTerminal,
@@ -1362,7 +1363,7 @@ export class Runtime {
       const made = this.deps.makeSource(name, settings);
 
       if (made === null) {
-        this.sourceErrors[name] = `Switchboard has no source named ${name}.`;
+        this.sourceErrors[name] = noKind(settings.kind);
       } else if ('error' in made) {
         this.sourceErrors[name] = made.error;
       } else {

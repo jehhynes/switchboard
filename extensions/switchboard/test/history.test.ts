@@ -11,7 +11,7 @@ const MINUTE = 60_000;
 
 const SETTINGS: Settings = {
   ...DEFAULT_SETTINGS,
-  sources: { github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
+  sources: { github: { kind: 'github', pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
 };
 
 function playbooks(): Map<string, Playbook> {

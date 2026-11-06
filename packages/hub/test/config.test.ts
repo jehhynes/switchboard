@@ -31,6 +31,33 @@ describe('checkSettings', () => {
     expect(checkSettings({ sessions: { concurrency: 3 }, sources: { github: GITHUB, zoho: {} } }, new Set(['github']))).toEqual([]);
   });
 
+  it('checks a second source of one kind by its kind and names it in errors (PRD R3)', () => {
+    expect(checkSettings({ sources: { github: GITHUB, 'widgets-dashboard': { kind: 'github', repo: 'nope' } } }, new Set(['github', 'widgets-dashboard']))).toEqual([
+      'sources.widgets-dashboard.repo must be set to owner/name.',
+    ]);
+  });
+
+  it('refuses a kind other than GitHub named apart from it, a source named after another kind, and two GitHub sources on one board, even when off (PRD R3)', () => {
+    expect(
+      checkSettings(
+        {
+          sources: {
+            github: GITHUB,
+            zoho: { kind: 'github' },
+            'support-again': { kind: 'zoho' },
+            personal: { kind: 'github', project: { owner: 'O', number: 3 } },
+            other: { kind: 'github', project: { owner: 'o', number: 4 } },
+          },
+        },
+        new Set(),
+      ),
+    ).toEqual([
+      'sources.zoho: zoho is a source kind, so a source of kind github needs another name.',
+      'sources.support-again.kind: only a GitHub source may be named apart from its kind.',
+      'sources.personal.project: sources.github already reads project o/3.',
+    ]);
+  });
+
   it('reports the file errors that reject it whole', () => {
     expect(checkSettings({ sessions: { concurrency: 11, extra: 1 } }, new Set())).toEqual(['sessions.extra is not a setting.', 'sessions.concurrency must be a whole number from 1 to 10.']);
   });
@@ -49,7 +76,7 @@ describe('checkSettings', () => {
       'sources.github.repo must be set to owner/name.',
       'sources.forum.setupPrompt: Unknown template variable: x.',
       'sources.forum.userId must be set to your forum user ID, as a string.',
-      'sources.jira: Switchboard has no source named jira.',
+      'sources.jira: Switchboard has no source kind jira.',
     ]);
   });
 
@@ -98,9 +125,9 @@ describe('checkSettings', () => {
 
 describe('sourceOptionsError', () => {
   it('uses each source’s own check', () => {
-    expect(sourceOptionsError('github', GITHUB)).toBeNull();
-    expect(sourceOptionsError('zoho', { orgId: '1' })).toBe('sources.zoho.agentId must be set to your Zoho agent ID, as a string.');
-    expect(sourceOptionsError('forum', { userId: '7' })).toBeNull();
+    expect(sourceOptionsError('github', 'github', GITHUB)).toBeNull();
+    expect(sourceOptionsError('zoho', 'zoho', { orgId: '1' })).toBe('sources.zoho.agentId must be set to your Zoho agent ID, as a string.');
+    expect(sourceOptionsError('forum', 'forum', { userId: '7' })).toBeNull();
   });
 });
 
@@ -168,6 +195,18 @@ describe('loadConfig', () => {
 
     write(settingsFile(), '{ nope');
     expect([...loadConfig(configDir(), valid).playbooks.keys()]).toEqual(['dev:develop']);
+  });
+});
+
+describe('loadConfig between sources', () => {
+  it('keeps the last valid settings when two GitHub sources read one board (PRD R42)', () => {
+    write(settingsFile(), JSON.stringify({ sources: { github: GITHUB } }));
+    const valid = loadConfig(configDir());
+    write(settingsFile(), JSON.stringify({ sources: { github: GITHUB, personal: { kind: 'github', project: GITHUB.project } } }));
+    const invalid = loadConfig(configDir(), valid);
+
+    expect(invalid.settingsError).toBe('sources.personal.project: sources.github already reads project o/3.');
+    expect(Object.keys(invalid.settings.sources)).toEqual(['github']);
   });
 });
 

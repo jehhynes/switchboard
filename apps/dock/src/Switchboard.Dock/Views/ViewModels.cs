@@ -242,13 +242,21 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         Snooze = view.Snooze;
         Schedules = view.Schedules ?? [];
 
-        if (!Sources.Select((source) => (source.Name, source.Enabled)).SequenceEqual(view.Sources.Select((source) => (source.Name, source.Enabled))))
+        // Groups are updated in place, so an open source menu, its anchor and its focus survive the snapshot a toggle sends.
+        if (!Sources.Select((group) => (group.Kind, group.Names)).SequenceEqual(view.Sources.Select((group) => (group.Kind, string.Join(" ", group.Sources.Select((source) => source.Name)))), EqualityComparer<(string, string)>.Default))
         {
             Sources.Clear();
 
-            foreach (var source in view.Sources)
+            foreach (var group in view.Sources)
             {
-                Sources.Add(new SourceViewModel(source.Name, source.Enabled));
+                Sources.Add(new SourceViewModel(group));
+            }
+        }
+        else
+        {
+            foreach (var (model, group) in Sources.Zip(view.Sources))
+            {
+                model.Update(group);
             }
         }
 
@@ -581,20 +589,67 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     }
 }
 
-/// <summary>A source's on/off toggle in the header (PRD R3), labelled as its key pills are, such as <c>gh</c>.</summary>
-public sealed class SourceViewModel(string name, bool enabled)
+/// <summary>
+/// A header icon for the sources of one kind (PRD R3, R71): its kind's logo, on while any of its sources is polled. With one source a click toggles
+/// it; with several it opens a menu of <see cref="Entries"/>.
+/// </summary>
+public sealed class SourceViewModel : Observable
 {
+    bool enabled;
+    string tip;
+
+    public SourceViewModel(SourceGroup group)
+    {
+        Kind = group.Kind;
+        Names = string.Join(" ", group.Sources.Select((source) => source.Name));
+        Entries = group.Sources.Select((source) => new SourceEntryViewModel(source.Name, source.Enabled)).ToList();
+        enabled = group.Enabled;
+        tip = group.Title;
+    }
+
+    public string Kind { get; }
+
+    /// <summary>The sources' names, which identify the group across snapshots.</summary>
+    public string Names { get; }
+
+    public IReadOnlyList<SourceEntryViewModel> Entries { get; }
+
+    public bool Enabled { get => enabled; private set => Set(ref enabled, value); }
+
+    public string Tip { get => tip; private set => Set(ref tip, value); }
+
+    /// <summary>The only source's name, or the kind for a menu, for screen readers.</summary>
+    public string Name => Entries.Count == 1 ? Entries[0].Name : Kind;
+
+    public bool IsMenu => Entries.Count > 1;
+
+    public bool IsGithub => Kind == "github";
+
+    public bool IsZoho => Kind == "zoho";
+
+    public bool IsForum => Kind == "forum";
+
+    /// <summary>Takes a snapshot's states for the same sources.</summary>
+    public void Update(SourceGroup group)
+    {
+        Enabled = group.Enabled;
+        Tip = group.Title;
+
+        foreach (var (entry, source) in Entries.Zip(group.Sources))
+        {
+            entry.Enabled = source.Enabled;
+        }
+    }
+}
+
+/// <summary>One source in a kind's menu, checked while it is polled.</summary>
+public sealed class SourceEntryViewModel(string name, bool enabled) : Observable
+{
+    bool enabled = enabled;
+
     public string Name => name;
 
-    public bool Enabled => enabled;
-
-    public bool IsGithub => name == "github";
-
-    public bool IsZoho => name == "zoho";
-
-    public bool IsForum => name == "forum";
-
-    public string Tip => $"{name}: {(enabled ? "polled. Click to stop polling it." : "not polled. Click to poll it.")}";
+    public bool Enabled { get => enabled; set => Set(ref enabled, value); }
 }
 
 /// <summary>One row's texts, as the hub sent them.</summary>
@@ -638,11 +693,11 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public IReadOnlyList<DetailViewModel> Details { get; } = row.Details.Select((detail) => new DetailViewModel(detail)).ToList();
 
-    public bool IsGithub => row.Source == "github";
+    public bool IsGithub => row.SourceKind == "github";
 
-    public bool IsZoho => row.Source == "zoho";
+    public bool IsZoho => row.SourceKind == "zoho";
 
-    public bool IsForum => row.Source == "forum";
+    public bool IsForum => row.SourceKind == "forum";
 
     public bool HasThirdLine => row.Mark is not null || row.Details.Count > 0;
 

@@ -71,7 +71,24 @@ public static partial class SettingsFields
 
     public static bool IsSegment(string text) => Segment().IsMatch(text);
 
+    /// <summary>The settings every source has; a change of kind keeps only these, because each plugin rejects another's keys.</summary>
+    public static readonly IReadOnlyList<string> CommonSourceKeys = ["kind", "pollIntervalSeconds", "repoRoot", "triagePlaybook", "setupPrompt", "namespace"];
+
     public static string SourceLabel(string name) => SourceLabels.TryGetValue(name, out var label) ? label : name;
+
+    /// <summary>A source's <c>kind</c>, or its name when it sets none (PRD R3).</summary>
+    public static string SourceKind(EditorState state, string name) => SourceKind(state.SettingsValue, name);
+
+    public static string SourceKind(JsonNode? settings, string name) =>
+        GetAt(settings, $"sources.{name}.kind") is JsonValue value && value.TryGetValue<string>(out var kind) && kind != "" ? kind : name;
+
+    /// <summary>A source's title: its kind's label, such as GitHub, or for a source named apart from its kind, the name and that label.</summary>
+    public static string SourceTitle(EditorState state, string name)
+    {
+        var kind = SourceKind(state, name);
+
+        return kind == name ? SourceLabel(name) : $"{name} ({SourceLabel(kind)})";
+    }
 
     public static JsonNode? GetAt(JsonNode? root, string path)
     {
@@ -351,12 +368,20 @@ public static partial class SettingsFields
                 Options: WithCurrent([new FieldOption("", "None"), .. triage], GetAt(value, $"{path}.triagePlaybook"))),
             new Field($"{path}.setupPrompt", "Setup prompt", FieldKind.Prompt, "Runs before a playbook that requires a worktree, when the ticket has none."),
         ];
-        var options = OptionFields.TryGetValue(name, out var fields) ? fields.Select((entry) => (Field: entry.Field with { Path = $"{path}.{entry.Key}" }, entry.Advanced)).ToList() : [];
+        // adhoc holds only the ad-hoc repo root, so it has no plugin to choose.
+        if (name != "adhoc")
+        {
+            common.Insert(0, new Field($"{path}.kind", "Kind", FieldKind.Select, "The plugin that reads the source. Changing it drops the old plugin's settings.",
+                Options: WithCurrent([new FieldOption("", $"Same as the name ({name})"), .. state.Config.SourceKinds.Select((entry) => new FieldOption(entry, SourceLabel(entry)))], GetAt(value, $"{path}.kind"))));
+        }
+
+        var kind = SourceKind(state, name);
+        var options = OptionFields.TryGetValue(kind, out var fields) ? fields.Select((entry) => (Field: entry.Field with { Path = $"{path}.{entry.Key}" }, entry.Advanced)).ToList() : [];
         List<Section> sections = [new Section("Source", common)];
 
         if (options.Any((entry) => !entry.Advanced))
         {
-            sections.Add(new Section(SourceLabel(name), [.. options.Where((entry) => !entry.Advanced).Select((entry) => entry.Field)]));
+            sections.Add(new Section(SourceLabel(kind), [.. options.Where((entry) => !entry.Advanced).Select((entry) => entry.Field)]));
         }
 
         if (options.Any((entry) => entry.Advanced))

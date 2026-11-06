@@ -683,7 +683,7 @@ public sealed class SettingsWindow : Window
     Control NameFields(NewNameView names)
     {
         var space = new AutoCompleteBox { Name = "NewNamespace", Text = names.Namespace, ItemsSource = names.Namespaces, PlaceholderText = "dev", MinWidth = 160 };
-        var name = new TextBox { Name = "NewName", Text = names.Name, PlaceholderText = names.Schedule ? "cleanup-worktrees" : "develop", MinWidth = 200, VerticalContentAlignment = VerticalAlignment.Center };
+        var name = new TextBox { Name = "NewName", Text = names.Name, PlaceholderText = names.Kinds is not null ? "widgets-dashboard" : names.Schedule ? "cleanup-worktrees" : "develop", MinWidth = 200, VerticalContentAlignment = VerticalAlignment.Center };
         var nameErrors = new StackPanel();
 
         space.TextChanged += (_, _) =>
@@ -695,12 +695,35 @@ public sealed class SettingsWindow : Window
         };
         name.TextChanged += (_, _) =>
         {
-            if ((name.Text ?? "") != (names.Schedule ? editor.State?.NewSchedule.Name : editor.State?.NewPlaybook.Name))
+            if ((name.Text ?? "") != (names.Kinds is not null ? editor.State?.NewSource.Name : names.Schedule ? editor.State?.NewSchedule.Name : editor.State?.NewPlaybook.Name))
             {
                 editor.EditNewName(null, name.Text ?? "");
             }
         };
         fieldErrors["name"] = nameErrors;
+
+        if (names.Kinds is { } kinds)
+        {
+            var kind = new ComboBox { Name = "NewKind", ItemsSource = kinds.Select((entry) => entry.Label).ToList(), SelectedIndex = kinds.ToList().FindIndex((entry) => entry.Value == names.Kind), MinWidth = 200 };
+
+            kind.SelectionChanged += (_, _) =>
+            {
+                if (kind.SelectedIndex >= 0 && kinds[kind.SelectedIndex].Value != editor.State?.NewSourceKind)
+                {
+                    editor.EditNewKind(kinds[kind.SelectedIndex].Value);
+                }
+            };
+
+            return new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    Row("Kind", "The plugin that reads the source. A second source of one kind, such as another GitHub repository, needs a name of its own.", kind),
+                    Row("Name", "Lowercase letters, digits and hyphens. It names the source's tickets, such as widgets-dashboard 63. Create adds the source to settings.json when you save.", new StackPanel { Spacing = 3, Children = { name, nameErrors } }),
+                },
+            };
+        }
 
         if (names.Schedule)
         {

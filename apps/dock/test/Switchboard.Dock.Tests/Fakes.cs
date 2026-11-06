@@ -60,11 +60,14 @@ sealed class FakeHub : IHub
         return Task.FromResult<string?>(null);
     }
 
+    /// <summary>The answer to each source toggle; null accepts it.</summary>
+    public string? SourceReply { get; set; }
+
     public Task<string?> SetSource(string name, bool enabled)
     {
         Calls.Add($"source {name} {enabled}");
 
-        return Task.FromResult<string?>(null);
+        return Task.FromResult(SourceReply);
     }
 
     public string? PollReply { get; set; }

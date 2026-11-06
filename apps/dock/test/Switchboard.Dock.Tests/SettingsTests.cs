@@ -54,7 +54,8 @@ public sealed class SettingsFieldsTests
         Assert.DoesNotContain(sections[2].Fields, (field) => field.Path == "sources.github.requireAssignee");
         Assert.Equal("^(\\d+)-", sections[2].Fields.Single((field) => field.Path == "sources.github.branchPattern").Placeholder);
         Assert.DoesNotContain("sources.github.enabled", fields.Keys);
-        Assert.Equal("sources.github.pollIntervalSeconds", sections[0].Fields[0].Path);
+        Assert.Equal("sources.github.kind", sections[0].Fields[0].Path);
+        Assert.Equal("sources.github.pollIntervalSeconds", sections[0].Fields[1].Path);
     }
 
     [Fact]
@@ -375,7 +376,7 @@ public sealed class SettingsPagesTests
         var nav = SettingsPages.Nav(SettingsConfigs.State());
 
         Assert.Equal(
-            ["heading Settings", "item General", "heading Sources", "item GitHub", "item Zoho Desk off", "add Add Forum", "heading Schedules", "add New schedule", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook"],
+            ["heading Settings", "item General", "heading Sources", "item GitHub", "item Zoho Desk off", "add Add Forum", "add New source", "heading Schedules", "add New schedule", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook"],
             nav.Select((entry) => $"{entry.Kind} {entry.Label}{(entry.Note is null ? "" : $" {entry.Note}")}"));
         Assert.True(nav[1].Current);
         Assert.Equal("add-source", nav[5].Command);
@@ -605,7 +606,7 @@ public sealed class SettingsPagesTests
 
         var page = SettingsPages.Page(state);
 
-        Assert.Equal(["Switchboard has no source named jira."], page.Notes);
+        Assert.Equal(["Switchboard has no source kind jira."], page.Notes);
         Assert.Equal("remove-source", page.Buttons[0].Command);
     }
 
@@ -698,6 +699,54 @@ public sealed class SettingsPagesTests
 
         state.NewSchedule = ("Self Review", false);
         Assert.Equal("The name must be lowercase letters, digits and hyphens.", SettingsPages.Page(state).NewName!.Error);
+    }
+
+    [Fact]
+    public void Page_NewSource_OffersKindsAndShowsTheNameErrorOnlyOnceTyped()
+    {
+        var state = SettingsConfigs.State();
+
+        state.Page = "new-source";
+        var names = SettingsPages.Page(state).NewName!;
+        Assert.Equal((null, "github"), (names.Error, names.Kind));
+        Assert.Equal([("github", "GitHub"), ("zoho", "Zoho Desk"), ("forum", "Forum")], names.Kinds);
+
+        state.NewSource = ("github", "", false);
+        Assert.Equal("A source named github already exists.", SettingsPages.Page(state).NewName!.Error);
+
+        state.NewSource = ("schedule", "", false);
+        Assert.Equal("schedule names Switchboard's own tickets; choose another name.", SettingsPages.Page(state).NewName!.Error);
+
+        state.NewSource = ("adhoc", "", false);
+        Assert.Equal("adhoc names Switchboard's own tickets; choose another name.", SettingsPages.Page(state).NewName!.Error);
+
+        state.NewSource = ("Widgets Dashboard", "", false);
+        Assert.Equal("The name must be lowercase letters, digits and hyphens.", SettingsPages.Page(state).NewName!.Error);
+    }
+
+    [Fact]
+    public void Page_SourceNamedApartFromItsKind_ShowsTheKindsFieldsAndTitle()
+    {
+        var state = SettingsConfigs.State();
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "sources.widgets-dashboard", new JsonObject { ["kind"] = "github" }));
+        state.Page = "source:widgets-dashboard";
+        var page = SettingsPages.Page(state);
+
+        Assert.Equal("widgets-dashboard (GitHub)", page.Title);
+        Assert.Empty(page.Notes);
+        var kind = page.Sections[0].Fields[0];
+        Assert.Equal(("sources.widgets-dashboard.kind", "github"), (kind.Field.Path, kind.Selected));
+        Assert.Equal(["", "github", "zoho", "forum"], kind.Field.Options!.Select((option) => option.Value));
+        Assert.Equal(["Source", "GitHub", "Advanced"], page.Sections.Select((section) => section.Heading));
+        Assert.Contains(page.Sections[1].Fields, (field) => field.Field.Path == "sources.widgets-dashboard.repo");
+        Assert.Contains(SettingsPages.Nav(state), (entry) => entry.Argument == "source:widgets-dashboard" && entry.Label == "widgets-dashboard (GitHub)");
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "sources.widgets-dashboard.kind", "jira"));
+        Assert.Equal(["Switchboard has no source kind jira."], SettingsPages.Page(state).Notes);
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "sources.adhoc", new JsonObject { ["repoRoot"] = "D:/scratch" }));
+        Assert.DoesNotContain(SettingsFields.SourceFields(state, "adhoc").SelectMany((section) => section.Fields), (field) => field.Path == "sources.adhoc.kind");
     }
 
     [Fact]
@@ -835,6 +884,54 @@ public sealed class SettingsEditorTests
         Assert.NotNull(check["playbooks"]!["dev:review"]);
         Assert.NotNull(check["sources"]!["github"]);
         Assert.True(editor.State!.Dirty);
+    }
+
+    [Fact]
+    public async Task Source_CreateSecondOfKind_AddsItsKindToTheDraft()
+    {
+        var editor = await Loaded();
+
+        editor.Navigate("new-source");
+        editor.Create();
+        Assert.Equal("The name must be lowercase letters, digits and hyphens.", SettingsPages.Page(editor.State!).NewName!.Error);
+
+        editor.EditNewName(null, "widgets-dashboard");
+        editor.Create();
+
+        Assert.Equal("source:widgets-dashboard", editor.State!.Page);
+        Assert.Equal("""{"kind":"github"}""", editor.State.Draft!["sources"]!["widgets-dashboard"]!.ToJsonString());
+
+        editor.Navigate("new-source");
+        editor.EditNewKind("forum");
+        editor.EditNewName(null, "forum");
+        editor.Create();
+
+        Assert.Equal("{}", editor.State.Draft!["sources"]!["forum"]!.ToJsonString());
+        Assert.True(editor.State.Dirty);
+
+        var redraws = new List<bool>();
+        var kind = SettingsFields.SourceFields(editor.State, "widgets-dashboard")[0].Fields[0];
+
+        editor.Changed += redraws.Add;
+        editor.Navigate("source:widgets-dashboard");
+        editor.Edit(SettingsFields.SourceFields(editor.State, "widgets-dashboard")[0].Fields.Single((field) => field.Path.EndsWith(".repoRoot", StringComparison.Ordinal)), "D:/git/widgets-dashboard");
+        editor.Edit(SettingsFields.SourceFields(editor.State, "widgets-dashboard")[1].Fields.Single((field) => field.Path.EndsWith(".repo", StringComparison.Ordinal)), "acme/widgets-dashboard");
+        redraws.Clear();
+        editor.Edit(kind, "zoho");
+
+        Assert.Equal("""{"kind":"zoho","repoRoot":"D:/git/widgets-dashboard"}""", editor.State.Draft!["sources"]!["widgets-dashboard"]!.ToJsonString());
+        Assert.Equal([true], redraws);
+        Assert.Equal("Zoho Desk", SettingsPages.Page(editor.State).Sections[1].Heading);
+
+        var github = SettingsFields.SourceFields(editor.State, "github")[0].Fields[0];
+        var before = editor.State.Draft!["sources"]!["github"]!["repo"]!.ToJsonString();
+
+        editor.Navigate("source:github");
+        editor.Edit(github, "github");
+        editor.Edit(github, "");
+
+        Assert.Equal(before, editor.State.Draft!["sources"]!["github"]!["repo"]!.ToJsonString());
+        Assert.Null(editor.State.Draft!["sources"]!["github"]!["kind"]);
     }
 
     [Fact]

@@ -211,6 +211,9 @@ describe('GithubSource.poll', () => {
     expect(ISSUES_QUERY).toContain('search(query:$q, type:ISSUE, first:100, after:$after)');
 
     expect(await new GithubSource(config({ maxPages: 1 }), fakeGh(SINGLE_SELECT, page(1, 'c1'))).poll()).toEqual({ error: 'More than 1 pages of searched issues; raise sources.github.maxPages.' });
+    const named = new GithubSource(config({ maxPages: 1 }), fakeGh(SINGLE_SELECT, page(1, 'c1')), undefined, 'widgets-dashboard');
+    expect(named.name).toBe('widgets-dashboard');
+    expect(await named.poll()).toEqual({ error: 'More than 1 pages of searched issues; raise sources.widgets-dashboard.maxPages.' });
   });
 
   it("fails the read when the configured project's status field is missing or not single-select, so no issue reads as unassigned", async () => {

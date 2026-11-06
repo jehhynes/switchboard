@@ -175,6 +175,128 @@ public sealed class ControlsTests
         Assert.Equal(["source github False", "source zoho True"], hub.Calls);
     }
 
+    static DockView TwoGithubSources(bool github, bool personal) => Fixtures.View with
+    {
+        Sources =
+        [
+            new SourceGroup("github", github || personal, $"github: {(github ? "polled" : "not polled")}\npersonal: {(personal ? "polled" : "not polled")}\nClick to choose which to poll.",
+                [new SourceState("github", github), new SourceState("personal", personal)]),
+            new SourceGroup("zoho", false, "zoho: not polled\nClick to poll it.", [new SourceState("zoho", false)]),
+        ],
+    };
+
+    static Button SourceIcon(Window window, string kind) =>
+        window.FindControl<ItemsControl>("SourceList")!.GetVisualDescendants().OfType<Button>().Single((button) => ((SourceViewModel)button.DataContext!).Kind == kind);
+
+    static List<MenuItem> MenuItems(Button button) => button.ContextMenu!.Items.OfType<MenuItem>().ToList();
+
+    [AvaloniaFact]
+    public void SourceIcon_TwoSourcesOfKind_OpensMenuInsteadOfToggling()
+    {
+        var row = Fixtures.Row("item:7") with { Ticket = "personal 63", Source = "personal", SourceKind = "github" };
+        var (window, _) = Open(TwoGithubSources(false, true) with { Groups = [new DockGroup("review", "Ready for review", null, [row])] });
+        var icon = SourceIcon(window, "github");
+        var logo = icon.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single((path) => path.IsVisible);
+
+        Assert.Contains("github", logo.Classes);
+        Assert.DoesNotContain("off", logo.Classes);
+        Assert.Equal("github: not polled\npersonal: polled\nClick to choose which to poll.", ToolTip.GetTip(icon));
+        Assert.DoesNotContain(icon.GetVisualDescendants().OfType<TextBlock>(), (text) => text.IsEffectivelyVisible);
+
+        Click(icon);
+
+        Assert.Empty(hub.Calls);
+        Assert.True(icon.ContextMenu!.IsOpen);
+        Assert.NotEmpty(window.OpenMenus);
+        Assert.Equal([("github", false), ("personal", true)], MenuItems(icon).Select((item) => ((string)item.Header!, item.IsChecked)));
+        Assert.All(MenuItems(icon), (item) => Assert.True(item.StaysOpenOnClick));
+        Assert.Contains("github", RowOf(window, "item:7").GetVisualDescendants().OfType<Border>().Single((pill) => pill.Classes.Contains("pill") && pill.Tag as string == row.Url).Classes);
+    }
+
+    [AvaloniaFact]
+    public void SourceMenu_EntryClicked_TogglesOnlyItsSourceAndStaysOpenAcrossTheSnapshot()
+    {
+        var (window, model) = Open(TwoGithubSources(false, true));
+        var icon = SourceIcon(window, "github");
+
+        Click(icon);
+        var menu = icon.ContextMenu!;
+        var github = MenuItems(icon)[0];
+        github.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["source github True"], hub.Calls);
+
+        model.Show(TwoGithubSources(true, true));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Same(icon, SourceIcon(window, "github"));
+        Assert.Same(menu, icon.ContextMenu);
+        Assert.True(menu.IsOpen);
+        Assert.Equal([true, true], MenuItems(icon).Select((item) => item.IsChecked));
+        Assert.DoesNotContain("off", icon.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single((path) => path.IsVisible).Classes);
+    }
+
+    [AvaloniaFact]
+    public void SourceMenu_ToggleRefused_ShowsTheReasonAndKeepsTheCheck()
+    {
+        var (window, model) = Open(TwoGithubSources(false, true));
+        var icon = SourceIcon(window, "github");
+
+        hub.SourceReply = "settings.json has no source named github.";
+        Click(icon);
+        var github = MenuItems(icon)[0];
+        github.IsChecked = true;
+        github.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("settings.json has no source named github.", model.Status);
+        Assert.False(github.IsChecked);
+    }
+
+    [AvaloniaFact]
+    public void SourceMenu_SourceRemovedWhileOpen_ClosesTheMenu()
+    {
+        var (window, model) = Open(TwoGithubSources(true, true));
+        var icon = SourceIcon(window, "github");
+
+        Click(icon);
+        Assert.True(icon.ContextMenu!.IsOpen);
+
+        model.Show(Fixtures.View);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(icon.ContextMenu!.IsOpen);
+        Assert.Single(((SourceViewModel)SourceIcon(window, "github").DataContext!).Entries);
+    }
+
+    [AvaloniaFact]
+    public void SourceMenu_Keyboard_OpensMovesTogglesAndCloses()
+    {
+        var (window, _) = Open(TwoGithubSources(true, false));
+        var icon = SourceIcon(window, "github");
+
+        icon.Focus();
+        window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(icon.ContextMenu!.IsOpen);
+
+        window.KeyPressQwerty(PhysicalKey.ArrowDown, RawInputModifiers.None);
+        window.KeyPressQwerty(PhysicalKey.ArrowDown, RawInputModifiers.None);
+        window.KeyPressQwerty(PhysicalKey.Space, RawInputModifiers.None);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["source personal True"], hub.Calls);
+        Assert.True(icon.ContextMenu.IsOpen);
+
+        window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["source personal True", "source personal True"], hub.Calls);
+        window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(icon.ContextMenu.IsOpen);
+        Assert.True(icon.IsFocused);
+    }
+
     [AvaloniaFact]
     public void Search_Text_ShowsOnlyMatchingRowsWithTheirGroupsOpen()
     {
@@ -436,7 +558,7 @@ public sealed class ControlsTests
     [AvaloniaFact]
     public void MoreActions_NoZohoOrForumSource_OmitsTicketVolumeReport()
     {
-        var (window, _) = Open(Fixtures.View with { Sources = [new SourceState("github", true)] });
+        var (window, _) = Open(Fixtures.View with { Sources = [new SourceGroup("github", true, "github: polled", [new SourceState("github", true)])] });
         var more = window.FindControl<Button>("MoreButton")!;
 
         Click(more);

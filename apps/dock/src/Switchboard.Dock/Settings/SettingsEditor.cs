@@ -120,6 +120,16 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
 
             var next = SettingsFields.SetAt(value, field.Path, SettingsFields.ReadField(field.Kind, text, isChecked, field.ListDefault is not null));
 
+            if (SourceKind(field.Path) && field.Path.Split('.')[1] is var name
+                && SettingsFields.SourceKind(next, name) != SettingsFields.SourceKind(value, name)
+                && SettingsFields.GetAt(next, $"sources.{name}") is JsonObject source)
+            {
+                foreach (var key in source.Select((entry) => entry.Key).Where((key) => !SettingsFields.CommonSourceKeys.Contains(key)).ToList())
+                {
+                    source.Remove(key);
+                }
+            }
+
             // A weekday and a day of the month are different values, so a new period starts without the old one's day; by hand takes no time.
             if (Every(field.Path))
             {
@@ -140,10 +150,12 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
             return;
         }
 
-        // The kind and the approval report decide which playbook fields show, the agent which modes and defaults they offer, and a schedule's
-        // period which of its day and time fields show.
-        Edited(field.Path is "kind" or "reports.approval" or "provider" || Every(field.Path));
+        // The kind and the approval report decide which playbook fields show, the agent which modes and defaults they offer, a schedule's
+        // period which of its day and time fields show, and a source's kind its plugin's fields.
+        Edited(field.Path is "kind" or "reports.approval" or "provider" || Every(field.Path) || SourceKind(field.Path));
     }
+
+    static bool SourceKind(string path) => path.StartsWith("sources.", StringComparison.Ordinal) && path.EndsWith(".kind", StringComparison.Ordinal);
 
     static bool Every(string path) => path.StartsWith("schedules.", StringComparison.Ordinal) && path.EndsWith(".every", StringComparison.Ordinal);
 
@@ -192,7 +204,17 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         CheckSoon();
     }
 
-    /// <summary>The New playbook page's namespace or name, or the New schedule page's name; null leaves that part as it is.</summary>
+    /// <summary>The New source page's kind.</summary>
+    public void EditNewKind(string kind)
+    {
+        if (State is { } state)
+        {
+            state.NewSource = state.NewSource with { Kind = kind };
+            Changed?.Invoke(false);
+        }
+    }
+
+    /// <summary>The New playbook page's namespace or name, or the New schedule or New source page's name; null leaves that part as it is.</summary>
     public void EditNewName(string? space, string? name)
     {
         if (State is not { } state)
@@ -203,6 +225,13 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         if (state.Page == "new-schedule")
         {
             state.NewSchedule = (name ?? state.NewSchedule.Name, state.NewSchedule.Touched);
+            Changed?.Invoke(false);
+            return;
+        }
+
+        if (state.Page == "new-source")
+        {
+            state.NewSource = state.NewSource with { Name = name ?? state.NewSource.Name };
             Changed?.Invoke(false);
             return;
         }
@@ -244,13 +273,32 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
     }
 
     /// <summary>
-    /// Adds the New playbook page's playbook to the draft and opens its page, or on the New schedule page an empty schedule, whose errors name the
-    /// fields to fill; refuses an invalid or taken name.
+    /// Adds the New playbook page's playbook to the draft and opens its page, or on the New schedule page an empty schedule and on the New source
+    /// page a source with only its kind, whose errors name the fields to fill; refuses an invalid or taken name.
     /// </summary>
     public void Create()
     {
         if (State is not { } state)
         {
+            return;
+        }
+
+        if (state.Page == "new-source")
+        {
+            if (state.NewSourceError is not null)
+            {
+                state.NewSource = state.NewSource with { Touched = true };
+                Changed?.Invoke(false);
+                return;
+            }
+
+            var source = state.NewSource.Name.Trim();
+            var kind = state.NewSourceKind;
+
+            state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, $"sources.{source}", kind == source ? new JsonObject() : new JsonObject { ["kind"] = kind }));
+            state.NewSource = ("", "", false);
+            state.Page = $"source:{source}";
+            Edited(true);
             return;
         }
 

@@ -110,7 +110,8 @@ public sealed class DockViewTests
         var question = Fixtures.Row("item:8");
         var approval = Fixtures.Row("item:10");
 
-        Assert.Equal([new SourceState("github", true), new SourceState("zoho", false)], view.Sources);
+        Assert.Equal([("github", true, "github: polled\nClick to stop polling it."), ("zoho", false, "zoho: not polled\nClick to poll it.")], view.Sources.Select((group) => (group.Kind, group.Enabled, group.Title)));
+        Assert.Equal([new SourceState("github", true)], view.Sources[0].Sources);
         Assert.Equal(["D:/git/widgets", "D:/git/support"], view.RepoRoots);
         Assert.Equal("Open in Claude", question.Main);
         Assert.Equal("Approve", approval.Main);

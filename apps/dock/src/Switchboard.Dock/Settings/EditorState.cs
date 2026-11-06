@@ -12,7 +12,7 @@ public sealed record NewPlaybook(string Namespace, string Name, PlaybookFields P
 
 /// <summary>
 /// The Settings window's state: settings.json as read, one unsaved draft of the whole file with the version it started from, the page, and the
-/// errors. Pages are <c>general</c>, <c>source:&lt;name&gt;</c>, <c>schedule:&lt;name&gt;</c>, <c>new-schedule</c>, <c>namespace:&lt;namespace&gt;</c>,
+/// errors. Pages are <c>general</c>, <c>source:&lt;name&gt;</c>, <c>new-source</c>, <c>schedule:&lt;name&gt;</c>, <c>new-schedule</c>, <c>namespace:&lt;namespace&gt;</c>,
 /// <c>playbook:&lt;namespace:name&gt;</c> and <c>new-playbook</c>.
 /// </summary>
 public sealed class EditorState(EditorConfig config)
@@ -28,6 +28,12 @@ public sealed class EditorState(EditorConfig config)
     public string? DraftVersion { get; private set; }
 
     public NewPlaybook NewPlaybook { get; set; } = NewPlaybook.Empty;
+
+    /// <summary>The name typed and kind chosen on the New source page, empty for the first kind, and whether Create was pressed.</summary>
+    public (string Name, string Kind, bool Touched) NewSource { get; set; } = ("", "", false);
+
+    /// <summary>The New source page's kind: the one chosen, else the first the hub offers.</summary>
+    public string NewSourceKind => NewSource.Kind != "" ? NewSource.Kind : Config.SourceKinds.FirstOrDefault() ?? "";
 
     /// <summary>The name typed on the New schedule page, and whether Create was pressed, so an empty name shows its error.</summary>
     public (string Name, bool Touched) NewSchedule { get; set; } = ("", false);
@@ -109,6 +115,35 @@ public sealed class EditorState(EditorConfig config)
 
     /// <summary>The schedule names in the settings being edited, in file order.</summary>
     public IReadOnlyList<string> ScheduleNames => SettingsValue?["schedules"] is JsonObject schedules ? schedules.Select((entry) => entry.Key).ToList() : [];
+
+    /// <summary>The source names in the settings being edited, in file order.</summary>
+    public IReadOnlyList<string> SourceNames => SettingsValue?["sources"] is JsonObject sources ? sources.Select((entry) => entry.Key).ToList() : [];
+
+    /// <summary>Why the new source's name cannot be used, or null.</summary>
+    public string? NewSourceError
+    {
+        get
+        {
+            var name = NewSource.Name.Trim();
+
+            if (!SettingsFields.IsSegment(name))
+            {
+                return "The name must be lowercase letters, digits and hyphens.";
+            }
+
+            if (name is "schedule" or "adhoc")
+            {
+                return $"{name} names Switchboard's own tickets; choose another name.";
+            }
+
+            if (SettingsValue is not { } value || (value["sources"] is { } sources && sources is not JsonObject))
+            {
+                return "settings.json must hold an object with a sources object.";
+            }
+
+            return SourceNames.Contains(name) ? $"A source named {name} already exists." : null;
+        }
+    }
 
     /// <summary>Why the new schedule's name cannot be used, or null.</summary>
     public string? NewScheduleError

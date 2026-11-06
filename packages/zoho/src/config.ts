@@ -21,12 +21,13 @@ const KEYS = ['tokenCommand', 'apiBase', 'orgId', 'agentId', 'escalationField', 
 
 const ID = /^\d+$/;
 
-/** Reads the Zoho keys of `sources.zoho`. IDs are strings, because 19-digit numbers do not fit a JavaScript number. */
-export function parseZohoConfig(options: Record<string, unknown>): ConfigResult {
+/** Reads the Zoho keys of the source `name`. IDs are strings, because 19-digit numbers do not fit a JavaScript number. */
+export function parseZohoConfig(options: Record<string, unknown>, name = 'zoho'): ConfigResult {
+  const path = `sources.${name}`;
   const unknown = Object.keys(options).filter((key) => !KEYS.includes(key));
 
   if (unknown.length > 0) {
-    return { error: `sources.zoho.${unknown[0]} is not a setting.` };
+    return { error: `${path}.${unknown[0]} is not a setting.` };
   }
 
   const {
@@ -41,25 +42,25 @@ export function parseZohoConfig(options: Record<string, unknown>): ConfigResult 
   } = options;
 
   if (typeof orgId !== 'string' || !ID.test(orgId)) {
-    return { error: 'sources.zoho.orgId must be set to the Desk organization ID, as a string.' };
+    return { error: `${path}.orgId must be set to the Desk organization ID, as a string.` };
   }
 
   if (typeof agentId !== 'string' || !ID.test(agentId)) {
-    return { error: 'sources.zoho.agentId must be set to your Zoho agent ID, as a string.' };
+    return { error: `${path}.agentId must be set to your Zoho agent ID, as a string.` };
   }
 
   for (const [key, value] of Object.entries({ tokenCommand, apiBase, escalationField, escalationValue })) {
     if (typeof value !== 'string' || value === '') {
-      return { error: `sources.zoho.${key} must be a non-empty string.` };
+      return { error: `${path}.${key} must be a non-empty string.` };
     }
   }
 
   if (!Array.isArray(automationAgentIds) || !automationAgentIds.every((id) => typeof id === 'string' && ID.test(id))) {
-    return { error: 'sources.zoho.automationAgentIds must list agent IDs as strings.' };
+    return { error: `${path}.automationAgentIds must list agent IDs as strings.` };
   }
 
   if (typeof maxPages !== 'number' || !Number.isInteger(maxPages) || maxPages < 1) {
-    return { error: 'sources.zoho.maxPages must be a whole number of at least 1.' };
+    return { error: `${path}.maxPages must be a whole number of at least 1.` };
   }
 
   return {

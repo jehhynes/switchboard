@@ -7,7 +7,7 @@ namespace Switchboard.Dock.Hub;
 
 // The hub's dock view (architecture.md § Dock), built by `dockView` in packages/hub/src/dock.ts; the dock adds no rules of its own.
 
-public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceState> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null)
+public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceGroup> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null)
 {
     static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 
@@ -26,6 +26,12 @@ public sealed record ScheduleEntry(string Name, string Playbook);
 /// <summary>A configured source and whether it is polled (PRD R3).</summary>
 public sealed record SourceState(string Name, bool Enabled);
 
+/// <summary>
+/// One header icon: the sources of one kind, such as <c>github</c>, on while any of them is polled, and its tooltip. A kind with several sources
+/// opens a menu instead of toggling (PRD R71).
+/// </summary>
+public sealed record SourceGroup(string Kind, bool Enabled, string Title, IReadOnlyList<SourceState> Sources);
+
 /// <summary>A snooze choice: its wake time as epoch milliseconds, or null to snooze until restored (PRD R49).</summary>
 public sealed record SnoozeChoice(string Label, string Description, long? Until);
 
@@ -40,6 +46,7 @@ public sealed record DockRow(
     string Playbook,
     string Ticket,
     string Source,
+    string SourceKind,
     string Url,
     RowMark? Mark,
     IReadOnlyList<DockText> Details,

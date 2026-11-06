@@ -60,9 +60,15 @@ describe('parseGithubConfig', () => {
   });
 });
 
+describe('parseGithubConfig for a named source', () => {
+  it('names the source in its errors (PRD R3)', () => {
+    expect(parseGithubConfig({ repo: 'nope' }, 'widgets-dashboard')).toEqual({ error: 'sources.widgets-dashboard.repo must be set to owner/name.' });
+  });
+});
+
 describe('ghError', () => {
   it('names a missing gh, a sign-in failure and a timeout, and otherwise passes stderr through', () => {
-    expect(ghError('C:/gh.exe', 'ENOENT', false, '')).toBe('The GitHub CLI was not found at C:/gh.exe. Install it or set sources.github.ghPath.');
+    expect(ghError('C:/gh.exe', 'ENOENT', false, '')).toBe('The GitHub CLI was not found at C:/gh.exe. Install it or set ghPath in the source\'s settings.');
     expect(ghError('gh', 4, false, 'To get started with GitHub CLI, please run:  gh auth login')).toBe('The GitHub CLI is not signed in. Run gh auth login.');
     expect(ghError('gh', null, true, '')).toBe('GitHub did not answer within 30 seconds.');
     expect(ghError('gh', 1, false, ' gh: Could not resolve to an Issue \n')).toBe('gh: Could not resolve to an Issue');
@@ -78,7 +84,7 @@ describe('ghArgs', () => {
 
 describe('spawnGh', () => {
   it('reports a missing executable', async () => {
-    expect(await spawnGh('D:/no/such/gh.exe')('query', {})).toEqual({ error: 'The GitHub CLI was not found at D:/no/such/gh.exe. Install it or set sources.github.ghPath.' });
+    expect(await spawnGh('D:/no/such/gh.exe')('query', {})).toEqual({ error: 'The GitHub CLI was not found at D:/no/such/gh.exe. Install it or set ghPath in the source\'s settings.' });
   });
 
   it("passes gh's error output through", async () => {

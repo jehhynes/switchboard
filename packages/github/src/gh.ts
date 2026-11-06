@@ -10,7 +10,7 @@ const TIMEOUT_MS = 30_000;
 /** Turns gh's failure output into the message the panel shows. */
 export function ghError(ghPath: string, code: string | number | null | undefined, killed: boolean, stderr: string): string {
   if (code === 'ENOENT') {
-    return `The GitHub CLI was not found at ${ghPath}. Install it or set sources.github.ghPath.`;
+    return `The GitHub CLI was not found at ${ghPath}. Install it or set ghPath in the source's settings.`;
   }
 
   if (/gh auth login|Bad credentials|HTTP 401|requires authentication/i.test(stderr)) {

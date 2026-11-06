@@ -43,10 +43,10 @@ public sealed record PlaybookTable(IReadOnlyList<TableColumn> Columns, IReadOnly
 public sealed record TableRow(string Name, string Label, string Description, IReadOnlyList<TableCell?> Cells, bool Dirty, IReadOnlyList<string> Errors);
 
 /// <summary>
-/// The New playbook or New schedule page's name fields and the name's error, shown once a name is typed or Create was pressed. A schedule's name
-/// has no namespace (<see cref="Schedule"/>).
+/// The New playbook, New schedule or New source page's name fields and the name's error, shown once a name is typed or Create was pressed. A
+/// schedule's or source's name has no namespace (<see cref="Schedule"/>); a source also has a kind, one of <see cref="Kinds"/> as (value, label).
 /// </summary>
-public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<string> Namespaces, string? Error, bool Schedule = false);
+public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<string> Namespaces, string? Error, bool Schedule = false, IReadOnlyList<(string Value, string Label)>? Kinds = null, string Kind = "");
 
 /// <summary>What each page of the Settings window and its bar show, from the editor state alone (PRD R54).</summary>
 public static class SettingsPages
@@ -62,10 +62,11 @@ public static class SettingsPages
 
         foreach (var (name, _) in sources)
         {
-            nav.Add(Item(state, $"source:{name}", SettingsFields.SourceLabel(name), state.Config.Enabled.GetValueOrDefault(name) ? null : "off"));
+            nav.Add(Item(state, $"source:{name}", SettingsFields.SourceTitle(state, name), state.Config.Enabled.GetValueOrDefault(name) ? null : "off"));
         }
 
         nav.AddRange(missing.Select((kind) => new NavEntry("add", $"Add {SettingsFields.SourceLabel(kind)}", "add-source", kind)));
+        nav.Add(new NavEntry("add", "New source", "navigate", "new-source", Current: state.Page == "new-source"));
         nav.Add(new NavEntry("heading", "Schedules"));
         nav.AddRange(state.ScheduleNames.Select((name) => Item(state, $"schedule:{name}", name)));
         nav.Add(new NavEntry("add", "New schedule", "navigate", "new-schedule", Current: state.Page == "new-schedule"));
@@ -116,7 +117,7 @@ public static class SettingsPages
             return state.PlaybookDirty(page["playbook:".Length..]);
         }
 
-        if (page is "new-playbook" or "new-schedule" || state.Draft is null)
+        if (page is "new-playbook" or "new-schedule" or "new-source" || state.Draft is null)
         {
             return false;
         }
@@ -153,9 +154,20 @@ public static class SettingsPages
         if (page.StartsWith("source:", StringComparison.Ordinal))
         {
             var name = page["source:".Length..];
-            var notes = state.Config.SourceKinds.Contains(name) ? [] : new[] { $"Switchboard has no source named {name}." };
+            var kind = SettingsFields.SourceKind(state, name);
+            var notes = state.Config.SourceKinds.Contains(kind) ? [] : new[] { $"Switchboard has no source kind {kind}." };
 
-            return SettingsPage(state, SettingsFields.SourceLabel(name), SettingsFields.SourceFields(state, name), [new PageButton("remove-source", "Remove source", true, Argument: name)], notes);
+            return SettingsPage(state, SettingsFields.SourceTitle(state, name), SettingsFields.SourceFields(state, name), [new PageButton("remove-source", "Remove source", true, Argument: name)], notes);
+        }
+
+        if (page == "new-source")
+        {
+            var (name, _, touched) = state.NewSource;
+            var error = name == "" && !touched ? null : state.NewSourceError;
+            var kinds = state.Config.SourceKinds.Select((kind) => (kind, SettingsFields.SourceLabel(kind))).ToList();
+
+            return new PageView("New source", null, [new PageButton("create", "Create", true, Primary: true)], [], [], null, [],
+                new NewNameView("", name, [], error, Schedule: true, Kinds: kinds, Kind: state.NewSourceKind));
         }
 
         if (page.StartsWith("schedule:", StringComparison.Ordinal))

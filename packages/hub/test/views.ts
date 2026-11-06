@@ -87,7 +87,7 @@ export function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): 
     repoRoots: ['D:/git/widgets', 'D:/git/support'],
     schedules: [{ name: 'self-review', playbook: 'ops:performance-review' }],
     sources: ['github'],
-    sourceStates: [{ name: 'github', enabled: true }],
+    sourceStates: [{ name: 'github', kind: 'github', enabled: true }],
     namespaces: { github: 'dev', zoho: 'support', adhoc: '' },
     configDir: 'C:\\Users\\me\\.claude\\switchboard',
     openVSCode: 'always',

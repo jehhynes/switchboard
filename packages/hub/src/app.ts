@@ -43,13 +43,13 @@ function isReportPath(path: unknown): path is string {
 const BASH = findBash(process.platform, process.env);
 
 function makeSource(name: string, settings: SourceSettings) {
-  switch (name) {
+  switch (settings.kind) {
     case 'github':
-      return githubSource(settings);
+      return githubSource(name, settings);
     case 'zoho':
-      return zohoSource(settings, BASH);
+      return zohoSource(name, settings, BASH);
     case 'forum':
-      return forumSource(settings, BASH);
+      return forumSource(name, settings, BASH);
     default:
       return null;
   }

@@ -86,7 +86,7 @@ function snapshot(items: WorkItemView[], openVSCode: Snapshot['openVSCode'] = 'a
     repoRoots: [],
     schedules: [],
     sources: ['github'],
-    sourceStates: [{ name: 'github', enabled: true }],
+    sourceStates: [{ name: 'github', kind: 'github', enabled: true }],
     namespaces: { github: 'dev' },
     configDir: 'C:\\Users\\me\\.switchboard',
     openVSCode,
