@@ -24,6 +24,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -44,6 +47,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -64,6 +70,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -84,6 +93,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -104,6 +116,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -124,6 +139,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -144,6 +162,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -164,6 +185,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -184,6 +208,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -204,6 +231,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         },
         {
@@ -224,6 +254,9 @@
                 }
               }
             ]
+          },
+          "repository": {
+            "nameWithOwner": "acme/widgets"
           }
         }
       ]

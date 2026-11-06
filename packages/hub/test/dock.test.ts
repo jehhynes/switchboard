@@ -342,6 +342,23 @@ describe('dockView', () => {
     expect(view.repoRoots).toEqual(['D:/git/widgets', 'D:/git/support']);
   });
 
+  it("shows another repository's key by its short name and links by their repository, and keeps the window name of the stored key (PRD R27)", () => {
+    const dashboard = item(8, { worktree });
+    dashboard.ticket = { ...dashboard.ticket, sourceKey: 'acme/widgets-dashboard#63', repo: 'acme/widgets-dashboard' };
+    dashboard.links = [
+      { id: 1, ticketId: 8, label: 'Issue', target: 'https://github.com/Acme/Widgets/issues/5', reportedAt: NOW, mentioned: false },
+      { id: 2, ticketId: 8, label: 'Issue', target: 'https://github.com/alice/tools/issues/6', reportedAt: NOW, mentioned: false },
+    ];
+    const keys = { homes: { github: 'acme/widgets' }, prefixes: { 'acme/widgets-dashboard': 'dash' } };
+    const shown = (repoKeys?: typeof keys) => dockView(snapshot([dashboard], repoKeys === undefined ? {} : { repoKeys }), NOW, W).groups.flatMap((group) => group.rows)[0]!;
+
+    expect(shown(keys)).toMatchObject({ ticket: 'dash 63', links: [{ label: 'gh 5' }, { label: 'alice/tools#6' }] });
+    expect(shown(keys).search).toContain('dash 63 · gh 5 · alice/tools#6');
+    expect(shown(keys).window?.name).toMatch(/^gh-acme-widgets-dashboard-63-/);
+    expect(shown(keys).window?.name).toBe(shown().window?.name);
+    expect(shown().ticket).toBe('gh acme/widgets-dashboard#63');
+  });
+
   it('groups the sources of one kind under one icon, which is on while any of them is polled (PRD R71)', () => {
     const groups = sourceGroups([
       { name: 'github', kind: 'github', enabled: false },

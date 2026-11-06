@@ -534,9 +534,50 @@ export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
-/** The ticket's source and key, such as `gh 18941`. */
+/**
+ * The ticket's source and stored key, such as `gh 18941` or `gh acme/widgets-dashboard#63`. It does not change with labels, so it names
+ * VS Code windows and workspace files; rows show {@link shownKey}.
+ */
 export function ticketKey(ticket: { source: string; sourceKey: string }): string {
   return `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
+}
+
+/** How rows shorten repository keys (PRD R27), from the hub's snapshot. */
+export interface RepoKeys {
+  /** Each source's home repository, `owner/name` in lowercase, or empty. */
+  homes: Record<string, string>;
+  /** Each other repository's short name: its label, such as `dash`, else its name when no other owner's repository shares it. */
+  prefixes: Record<string, string>;
+}
+
+/**
+ * An issue's key as rows show it (PRD R27): `<source label> <n>` in the source's home repository (`gh 18941`), `<prefix> <n>` in a repository
+ * with a short name (`dash 63`, `widgets-dashboard 63`), else `owner/name#n`. A link names an issue in any source's home repository by that
+ * source's label, the source's own first.
+ */
+export function issueKey(source: string, repo: string, number: string, keys: RepoKeys | undefined, link = false): string {
+  if (keys === undefined) {
+    return `gh ${number}`;
+  }
+
+  const home = repo === (keys.homes[source] ?? '') ? source : link ? Object.keys(keys.homes).find((name) => repo !== '' && keys.homes[name] === repo) : undefined;
+  const prefix = keys.prefixes[repo];
+
+  return home !== undefined ? `${sourceLabel(home)} ${number}` : prefix === undefined ? `${repo}#${number}` : `${prefix} ${number}`;
+}
+
+/** The ticket's key as rows show it: {@link issueKey} for another repository's issue, else {@link ticketKey}. */
+export function shownKey(ticket: { source: string; sourceKey: string }, keys: RepoKeys | undefined): string {
+  const qualified = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(ticket.sourceKey);
+
+  return qualified === null || keys === undefined ? ticketKey(ticket) : issueKey(ticket.source, qualified[1]!, qualified[2]!, keys);
+}
+
+/** The repository, in lowercase, and number of a GitHub issue URL, or null. */
+export function issueOfUrl(target: string): { repo: string; number: string } | null {
+  const match = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/i.exec(target);
+
+  return match === null ? null : { repo: match[1]!.toLowerCase(), number: match[2]! };
 }
 
 /** The prompt a session waits on before it starts (PRD R41), or a background session's permission prompt (PRD R70), for line 3. */
@@ -720,6 +761,7 @@ export function snapshotErrors(snapshot: Snapshot): string[] {
     ...snapshot.errors.playbooks.map((error) => `Playbook ${error}`),
     snapshot.errors.hooks === null ? null : `Hooks: ${snapshot.errors.hooks}`,
     ...Object.entries(snapshot.errors.sources).map(([name, error]) => `${name}: ${error}`),
+    ...(snapshot.notes ?? []),
   ].filter((line): line is string => line !== null);
 }
 
@@ -738,20 +780,21 @@ export function setupNotes(snapshot: Snapshot): string[] {
   ].filter((line): line is string => line !== null);
 }
 
-/** The row's linked GitHub pull requests and issues as `PR #<n>` and `gh <n>`, as the row's menu names them (PRD R52). */
-export function linkedKeys(entry: WorkItemView | PoolView): string[] {
+/** The row's linked GitHub pull requests and issues as `PR #<n>` and {@link issueKey}, as the row's menu names them (PRD R52). */
+export function linkedKeys(entry: WorkItemView | PoolView, repoKeys?: RepoKeys): string[] {
   const keys = entry.links.flatMap((link) => {
     const kind = linkKind(link.target);
     const number = linkNumber(link.target);
+    const issue = issueOfUrl(link.target);
 
-    return kind === 'url' || number === null ? [] : [kind === 'pr' ? `PR #${number}` : `gh ${number}`];
+    return kind === 'url' || number === null ? [] : [kind === 'pr' ? `PR #${number}` : issueKey(entry.ticket.source, issue?.repo ?? '', number, issue === null ? undefined : repoKeys, true)];
   });
 
   // A link to the ticket itself repeats its key.
-  return [...new Set(keys)].filter((key) => key !== ticketKey(entry.ticket));
+  return [...new Set(keys)].filter((key) => key !== shownKey(entry.ticket, repoKeys));
 }
 
 /** What Go to Work Item matches besides the title and branch: the key, linked pull requests and issues, playbook and group (PRD R63). */
-export function searchDescription(entry: WorkItemView | PoolView, group: RowGroup, namespaces: Record<string, string>): string {
-  return [ticketKey(entry.ticket), ...linkedKeys(entry), playbookText(entry, namespaces), GROUP_TITLES[group]].filter((part) => part !== '').join(' · ');
+export function searchDescription(entry: WorkItemView | PoolView, group: RowGroup, namespaces: Record<string, string>, repoKeys?: RepoKeys): string {
+  return [shownKey(entry.ticket, repoKeys), ...linkedKeys(entry, repoKeys), playbookText(entry, namespaces), GROUP_TITLES[group]].filter((part) => part !== '').join(' · ');
 }

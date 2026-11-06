@@ -243,18 +243,20 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         Schedules = view.Schedules ?? [];
 
         // Groups are updated in place, so an open source menu, its anchor and its focus survive the snapshot a toggle sends.
-        if (!Sources.Select((group) => (group.Kind, group.Names)).SequenceEqual(view.Sources.Select((group) => (group.Kind, string.Join(" ", group.Sources.Select((source) => source.Name)))), EqualityComparer<(string, string)>.Default))
+        var groups = view.Sources.Select((group) => group.Current).ToList();
+
+        if (!Sources.Select((group) => (group.Kind, group.Names)).SequenceEqual(groups.Select((group) => (group.Kind, string.Join(" ", group.Sources.Select((source) => source.Name)))), EqualityComparer<(string, string)>.Default))
         {
             Sources.Clear();
 
-            foreach (var group in view.Sources)
+            foreach (var group in groups)
             {
                 Sources.Add(new SourceViewModel(group));
             }
         }
         else
         {
-            foreach (var (model, group) in Sources.Zip(view.Sources))
+            foreach (var (model, group) in Sources.Zip(groups))
             {
                 model.Update(group);
             }

@@ -30,7 +30,16 @@ public sealed record SourceState(string Name, bool Enabled);
 /// One header icon: the sources of one kind, such as <c>github</c>, on while any of them is polled, and its tooltip. A kind with several sources
 /// opens a menu instead of toggling (PRD R71).
 /// </summary>
-public sealed record SourceGroup(string Kind, bool Enabled, string Title, IReadOnlyList<SourceState> Sources);
+public sealed record SourceGroup(string Kind, bool Enabled, string Title, IReadOnlyList<SourceState> Sources, string? Name = null)
+{
+    /// <summary>
+    /// The group, or for a hub older than source groups, whose entries are one source each (<c>{name, enabled}</c>), a group of that source alone,
+    /// so the dock keeps working until the hub restarts.
+    /// </summary>
+    public SourceGroup Current => Sources is not null && Kind is not null
+        ? this
+        : new(Name ?? "", Enabled, $"{Name}: {(Enabled ? "polled. Click to stop polling it." : "not polled. Click to poll it.")}", [new SourceState(Name ?? "", Enabled)]);
+}
 
 /// <summary>A snooze choice: its wake time as epoch milliseconds, or null to snooze until restored (PRD R49).</summary>
 public sealed record SnoozeChoice(string Label, string Description, long? Until);

@@ -2,8 +2,10 @@ import { isAbsolute } from 'node:path';
 
 export interface GithubConfig {
   ghPath: string;
-  /** `owner/name`. */
+  /** The home repository, `owner/name` in lowercase: its issues keep bare keys, such as `18941` (PRD R44). */
   repo: string;
+  /** Short display names of other repositories on the board, by `owner/name` in lowercase, such as `dash` (PRD R27). */
+  labels: Record<string, string>;
   logins: string[];
   /** False puts an issue in the assigned state by its project status alone, whoever is assigned. */
   requireAssignee: boolean;
@@ -18,9 +20,11 @@ export interface GithubConfig {
   rolesFile: string | null;
 }
 
+const REPO = /^[\w.-]+\/[\w.-]+$/;
+
 export type ConfigResult = { config: GithubConfig } | { error: string };
 
-const KEYS = ['ghPath', 'repo', 'logins', 'requireAssignee', 'waitForBlockers', 'project', 'assignedStatuses', 'branchPattern', 'maxPages', 'rolesFile'];
+const KEYS = ['ghPath', 'repo', 'labels', 'logins', 'requireAssignee', 'waitForBlockers', 'project', 'assignedStatuses', 'branchPattern', 'maxPages', 'rolesFile'];
 
 function strings(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry !== '') ? (value as string[]) : null;
@@ -35,10 +39,24 @@ export function parseGithubConfig(options: Record<string, unknown>, name = 'gith
     return { error: `${path}.${unknown[0]} is not a setting.` };
   }
 
-  const { ghPath = 'gh', repo, logins, requireAssignee = true, waitForBlockers = false, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
+  const { ghPath = 'gh', repo, labels = {}, logins, requireAssignee = true, waitForBlockers = false, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
 
-  if (typeof repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+  if (typeof repo !== 'string' || !REPO.test(repo)) {
     return { error: `${path}.repo must be set to owner/name.` };
+  }
+
+  if (typeof labels !== 'object' || labels === null || Array.isArray(labels)) {
+    return { error: `${path}.labels must map owner/name to a label.` };
+  }
+
+  for (const [key, label] of Object.entries(labels)) {
+    if (!REPO.test(key)) {
+      return { error: `${path}.labels.${key}: the key must be owner/name.` };
+    }
+
+    if (typeof label !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(label)) {
+      return { error: `${path}.labels.${key} must be lowercase letters, digits and hyphens.` };
+    }
   }
 
   const loginList = strings(logins);
@@ -92,7 +110,8 @@ export function parseGithubConfig(options: Record<string, unknown>, name = 'gith
   return {
     config: {
       ghPath,
-      repo,
+      repo: repo.toLowerCase(),
+      labels: Object.fromEntries(Object.entries(labels as Record<string, string>).map(([key, label]) => [key.toLowerCase(), label])),
       logins: loginList,
       requireAssignee,
       waitForBlockers,

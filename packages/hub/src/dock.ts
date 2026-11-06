@@ -38,10 +38,13 @@ import {
   stripeOf,
   terminalCommand,
   ticketKey,
+  shownKey,
+  issueKey,
+  issueOfUrl,
   waitTexts,
   blockerTexts,
 } from './rows.js';
-import type { Control, RowGroup } from './rows.js';
+import type { Control, RepoKeys, RowGroup } from './rows.js';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
 /** A piece of a row's third line: its text, its tooltip, and `warning` or `error` to colour it. */
@@ -242,14 +245,14 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
   const order = groups.review.map((entry) => (entry as WorkItemView).id);
   const kinds = new Map(snapshot.sourceStates.map((source) => [source.name, source.kind]));
   const row = (group: RowGroup) => (entry: WorkItemView | PoolView) => {
-    const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
+    const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces, snapshot.repoKeys), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
 
     // Done is sorted newest first, so each band's rows are consecutive.
     const band = group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null;
 
-    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode, snapshot.openTerminal) : poolRow(entry, now, snapshot.namespaces);
+    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode, snapshot.openTerminal, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
 
-    return { ...shown, sourceKind: kinds.get(entry.ticket.source) ?? entry.ticket.source, search, links: linksOf(entry), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
+    return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kinds.get(entry.ticket.source) ?? entry.ticket.source, search, links: linksOf(entry, snapshot.repoKeys), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
   };
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
@@ -287,7 +290,7 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
 }
 
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal, keys: RepoKeys | undefined): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const kind = markOf(item);
   const controls = order === null ? controlsOf(item, mode) : [...controlsOf(item, mode), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
@@ -312,7 +315,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
       ...blockerTexts(item.ticket, item.status).map(({ text, title }) => ({ text, title, tone: 'warning' as const })),
       ...wake(item.ticket),
       ...[item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped(note, CAPS.note, 'warning')),
-      ...(item.parent === null ? [] : [{ text: `From ${ticketKey(item.parent)}`, title: item.parent.title, tone: null }]),
+      ...(item.parent === null ? [] : [{ text: `From ${shownKey(item.parent, keys)}`, title: item.parent.title, tone: null }]),
       ...(kind === 'question' || kind === 'permission' ? [] : progress(item, now)),
     ]),
     stripe: stripeOf(item),
@@ -373,7 +376,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
 }
 
 /** The ticket's links in the order reported, mentioned ones last, each once, named by its pull request or issue number when it has one (PRD R52, R61). */
-function linksOf(entry: WorkItemView | PoolView): DockRow['links'] {
+function linksOf(entry: WorkItemView | PoolView, keys: RepoKeys | undefined): DockRow['links'] {
   const seen = new Set<string>();
   const ordered = [...entry.links.filter((link) => !link.mentioned), ...entry.links.filter((link) => link.mentioned)];
 
@@ -394,7 +397,7 @@ function linksOf(entry: WorkItemView | PoolView): DockRow['links'] {
 
     return kind === 'pr'
       ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH, mentioned }]
-      : [{ label: `gh ${number}`, url: link.target, kind, badge: `gh ${number}`, glyph: null, mentioned }];
+      : [{ label: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), url: link.target, kind, badge: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), glyph: null, mentioned }];
   });
 }
 

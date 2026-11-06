@@ -2,7 +2,7 @@ import type { Playbook } from './playbook.js';
 import { activeSession, failedAtTriage, groupOf, ownPrompt, reviewKey, START_PROMPT, waitsOnPermission, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
-import { repoOf, repoRoots, samePath, ticketRoot } from './repo.js';
+import { homeRepo, isRootPattern, repoOf, repoRoots, samePath, ticketRoot } from './repo.js';
 import type { PermissionMode, Provider, ScheduleSettings, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
 import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, WorkItem, WorkItemStatus } from './model.js';
@@ -254,6 +254,8 @@ export type FlowAction =
       /** The runner that starts it (PRD R22). */
       provider: Provider;
       cwd: string;
+      /** The repository whose clone `cwd` must be, when a `{name}` pattern resolved it; the hub refuses a folder that is not a checkout. */
+      clone?: string;
       /** The first message. */
       prompt: string;
       /** The report contract, appended to the system prompt. */
@@ -985,7 +987,7 @@ class Flow {
 
     const parent = this.store.workItem(session.workItemId)!;
     const ticket = this.store.ticket(parent.ticketId)!;
-    const own = ticketRoot(this.context.settings, ticket, this.store.reposBySource()[ticket.source]);
+    const own = ticketRoot(this.context.settings, ticket, this.store.reposBySource());
     const wanted = report.repo ?? ('root' in own ? own.root : '');
     const roots = repoRoots(this.context.settings, this.store.reposBySource());
     const repoRoot = roots.find((root) => samePath(root, wanted));
@@ -1197,12 +1199,24 @@ class Flow {
 
     this.store.updateWorkItem(item.id, { playbook: playbook.name, taskPrompt: null, error: null });
 
-    if (playbook.autoStart && !event.stale) {
+    const outside = this.outsideHome(this.store.ticket(item.ticketId)!);
+
+    if (playbook.autoStart && !event.stale && outside === null) {
       this.queue(item);
     } else {
-      // The row says why the work item waits; Start clears it (PRD R80).
-      this.setStatus(item.id, { status: 'unstarted', error: event.stale ? MESSAGES.nothingNew : null });
+      // The row says why the work item waits; Start clears it (PRD R80, R44).
+      this.setStatus(item.id, { status: 'unstarted', error: event.stale ? MESSAGES.nothingNew : outside });
     }
+  }
+
+  /**
+   * Why a ticket outside its source's home repository waits for Start whatever its playbook's `autoStart`, or null: the source's playbooks and
+   * skills are written for its home repository, and one that starts by itself must not run them elsewhere unseen (PRD R44).
+   */
+  private outsideHome(ticket: Ticket): string | null {
+    const home = homeRepo(this.context.settings.sources[ticket.source]);
+
+    return ticket.repo === '' || home === '' || ticket.repo === home ? null : `${ticket.repo} is outside the home repository ${home}, so it waits for Start.`;
   }
 
   private triageFailed(triageId: number, error: string, context: string | null): void {
@@ -2405,13 +2419,14 @@ class Flow {
     }
 
     const worktree = this.store.worktreeFor(ticket.id);
-    const resolved = ticketRoot(this.context.settings, ticket, this.store.reposBySource()[ticket.source]);
+    const resolved = ticketRoot(this.context.settings, ticket, this.store.reposBySource());
     const repoRoot = 'root' in resolved ? resolved.root : '';
     const approved = item.approvalPrompt !== null;
     const kind: SessionKind = !approved && playbook?.requiresWorktree === true && worktree === null ? 'setup' : 'task';
     const cwd = playbook?.workdir === 'repoRoot' ? repoRoot : (worktree?.path ?? repoRoot);
 
-    if (cwd === '') {
+    // A linked worktree does not lift a refusal: the root's repository may be ambiguous or not the ticket's.
+    if (cwd === '' || 'error' in resolved) {
       this.fail(item, 'error' in resolved ? resolved.error : `sources.${ticket.source}.repoRoot is not set.`);
       return;
     }
@@ -2498,6 +2513,7 @@ class Flow {
       kind,
       provider,
       cwd,
+      ...(ticket.repoRoot === '' && cwd === repoRoot && isRootPattern(source?.repoRoot ?? '') ? { clone: repoOf(this.context.settings, ticket) } : {}),
       prompt: full,
       contract: sessionContract(id, this.context.report, reports, provider),
       name: `switchboard · ${label} · ${ticket.source} ${ticket.sourceKey}`,

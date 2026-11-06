@@ -7,6 +7,7 @@ import { GithubSource } from './source.js';
 
 export * from './config.js';
 export * from './gh.js';
+export * from './keys.js';
 export * from './roles.js';
 export * from './source.js';
 

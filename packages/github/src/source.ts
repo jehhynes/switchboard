@@ -5,6 +5,8 @@ import type { Gh } from './gh.js';
 import { CONTEXT_QUERY, FIELD_QUERY, ISSUE_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from './queries.js';
 import type { Roles, RolesResult } from './roles.js';
 import { NO_ISSUE, readAssigned, readAssignment } from './assignment.js';
+import { keyOf, ownerName, parseKey, refOf } from './keys.js';
+import type { IssueId } from './keys.js';
 
 /** Each issue body, comment and review-thread comment is clipped to this many characters (GC). */
 export const TEXT_LIMIT = 2_000;
@@ -63,6 +65,7 @@ interface IssueNode {
   number: number;
   title: string;
   url: string;
+  repository: { nameWithOwner: string };
   projectItems: ProjectItems;
   assignees?: { nodes: { login: string }[] };
   blockedBy?: { nodes: ({ number: number; title: string; url: string; state: string; repository: { nameWithOwner: string } } | null)[] };
@@ -153,71 +156,105 @@ export class GithubSource implements Source {
     }
   }
 
-  keyOfBranch(branch: string): string | null {
-    return this.config.branchPattern.exec(branch)?.[1] ?? null;
-  }
+  /** The key of the issue a branch of `repo` names, such as `63-fix` in `acme/widgets-dashboard` (PRD R25). */
+  keyOfBranch(branch: string, repo: string): string | null {
+    const number = this.config.branchPattern.exec(branch)?.[1];
 
-  async assignmentAt(target: string) {
-    const issue = githubUrlOf(target, ISSUE_PATH);
-    return issue?.repo.toLowerCase() === this.config.repo.toLowerCase() ? readAssignment(this.config, this.gh, issue.number) : null;
+    return number === undefined || !/^\d+$/.test(number) ? null : keyOf(this.config.repo, repo, Number(number));
   }
 
   /**
-   * Refuses a pull request link in the configured repository unless the pull request closes the issue or its branch names it, as the
-   * branch of a stacked pull request that does not close the issue does (PRD R52). Other links are not checked.
+   * The operator's assignment of the issue at an issue URL in any repository: null for another URL, or, unless `anyBoard`, for an issue that
+   * is not on the source's board, so another source can answer (PRD R85).
+   */
+  async assignmentAt(target: string, anyBoard = false) {
+    const issue = this.issueOfUrl(target);
+    return issue === null ? null : readAssignment(this.config, this.gh, issue, !anyBoard);
+  }
+
+  private issueOfUrl(target: string): IssueId | null {
+    const issue = githubUrlOf(target, ISSUE_PATH);
+    return issue === null ? null : { repo: issue.repo.toLowerCase(), number: issue.number };
+  }
+
+  private idOf(ticket: Ticket): IssueId {
+    const id = parseKey(this.config.repo, ticket.sourceKey);
+
+    if (id === null) {
+      throw new Error(`${ticket.sourceKey} is not a GitHub issue key.`);
+    }
+
+    return id;
+  }
+
+  /**
+   * Refuses a GitHub pull request link, read in its own repository, unless it closes the issue, matched on repository and number, or, in the
+   * issue's own repository, its branch names it, as the branch of a stacked pull request that does not close the issue does (PRD R52). Other
+   * links are not checked.
    */
   async checkLink(ticket: Ticket, target: string): Promise<LinkCheck> {
     const pr = pullRequestOfUrl(target);
 
-    if (pr?.repo.toLowerCase() !== this.config.repo.toLowerCase()) {
+    if (pr === null) {
       return { refused: null };
     }
 
     try {
-      return await this.checkPullRequest(ticket, pr.number);
+      return await this.checkPullRequest(ticket, this.idOf(ticket), { repo: pr.repo.toLowerCase(), number: pr.number });
     } catch {
       return { error: UNEXPECTED };
     }
   }
 
-  /** Reads the issue at an issue URL in the configured repository, in any spelling of the owner and name; null for any other URL (PRD R83). */
+  /**
+   * Reads the issue at an issue URL in any repository and spelling of the owner and name: null for any other URL, and for an issue that is not
+   * on the source's board in any status, so another source can answer (PRD R83).
+   */
   async ticketAt(target: string): Promise<TicketLookup | null> {
-    const issue = githubUrlOf(target, ISSUE_PATH);
+    const issue = this.issueOfUrl(target);
 
-    if (issue?.repo.toLowerCase() !== this.config.repo.toLowerCase()) {
+    if (issue === null) {
       return null;
     }
 
-    const [owner = '', name = ''] = this.config.repo.split('/');
-    const result = await this.gh(ISSUE_QUERY, { owner, name, number: issue.number });
+    const result = await this.gh(ISSUE_QUERY, { ...ownerName(issue.repo), number: issue.number });
+    const ref = refOf(this.config.repo, issue.repo, issue.number);
 
     if ('error' in result) {
-      return NO_ISSUE.test(result.error) ? { error: `#${issue.number} is not an issue in ${this.config.repo}.` } : result;
+      return NO_ISSUE.test(result.error) ? { error: `${ref} is not an issue.` } : result;
     }
 
-    const found = (result.json as { data?: { repository?: { issue?: { number?: unknown; title?: unknown; url?: unknown; state?: unknown } | null } } } | null)?.data?.repository?.issue;
+    type Found = { number?: unknown; title?: unknown; url?: unknown; state?: unknown; projectItems?: { pageInfo?: { hasNextPage?: unknown }; nodes?: { project: ProjectRef | null }[] } };
+    const found = (result.json as { data?: { repository?: { issue?: Found | null } } } | null)?.data?.repository?.issue;
 
-    if (typeof found?.number !== 'number' || typeof found.title !== 'string' || typeof found.url !== 'string' || typeof found.state !== 'string') {
+    if (typeof found?.number !== 'number' || typeof found.title !== 'string' || typeof found.url !== 'string' || typeof found.state !== 'string' || !Array.isArray(found.projectItems?.nodes)) {
       return { error: UNEXPECTED };
     }
 
-    return { ticket: { sourceKey: String(found.number), ref: `#${found.number}`, repo: this.config.repo.toLowerCase(), title: found.title, url: found.url, open: found.state === 'OPEN' } };
+    if (found.projectItems.pageInfo?.hasNextPage !== false) {
+      return { error: 'GitHub returned incomplete project membership.' };
+    }
+
+    if (!found.projectItems.nodes.some((item) => this.onProject(item.project))) {
+      return null;
+    }
+
+    return { ticket: { sourceKey: keyOf(this.config.repo, issue.repo, found.number), ref, repo: issue.repo, title: found.title, url: found.url, open: found.state === 'OPEN' } };
   }
 
-  private async checkPullRequest(ticket: Ticket, number: number): Promise<LinkCheck> {
-    const [owner = '', name = ''] = this.config.repo.split('/');
-    const result = await this.gh(PULL_REQUEST_QUERY, { owner, name, number });
+  private async checkPullRequest(ticket: Ticket, id: IssueId, { repo, number }: IssueId): Promise<LinkCheck> {
+    const result = await this.gh(PULL_REQUEST_QUERY, { ...ownerName(repo), number });
 
     if ('error' in result) {
-      return NO_PULL_REQUEST.test(result.error) ? { refused: `Pull request #${number} was not found in ${this.config.repo}.` } : result;
+      return NO_PULL_REQUEST.test(result.error) ? { refused: `Pull request #${number} was not found in ${repo}.` } : result;
     }
 
     type Closing = { pageInfo: { hasNextPage: boolean }; nodes: { number: number; repository: { nameWithOwner: string } }[] };
     const pr = (result.json as { data: { repository: { pullRequest: { headRefName: string; closingIssuesReferences: Closing } } } }).data.repository.pullRequest;
     const closing = pr.closingIssuesReferences;
-    const closes = closing.nodes.some((issue) => String(issue.number) === ticket.sourceKey && issue.repository.nameWithOwner.toLowerCase() === this.config.repo.toLowerCase());
+    const closes = closing.nodes.some((issue) => issue.number === id.number && issue.repository.nameWithOwner.toLowerCase() === id.repo);
 
-    if (closes || this.keyOfBranch(pr.headRefName) === ticket.sourceKey) {
+    if (closes || (repo === id.repo && this.keyOfBranch(pr.headRefName, id.repo) === ticket.sourceKey)) {
       return { refused: null };
     }
 
@@ -250,7 +287,7 @@ export class GithubSource implements Source {
 
       const repo = issue.repository.nameWithOwner;
 
-      return [{ url: issue.url, ref: repo.toLowerCase() === this.config.repo.toLowerCase() ? `#${issue.number}` : `${repo}#${issue.number}`, title: issue.title }];
+      return [{ url: issue.url, ref: repo.toLowerCase() === this.config.repo ? `#${issue.number}` : `${repo}#${issue.number}`, title: issue.title }];
     });
   }
 
@@ -302,7 +339,7 @@ export class GithubSource implements Source {
         continue;
       }
 
-      const read = await readAssigned(this.config, this.gh, Number(ticket.sourceKey));
+      const read = await readAssigned(this.config, this.gh, this.idOf(ticket));
 
       if ('error' in read) {
         return { error: `Could not confirm that ${ticket.ref} left the assigned state: ${read.error}` };
@@ -320,9 +357,10 @@ export class GithubSource implements Source {
   }
 
   private async readIssues(current: readonly Ticket[]): Promise<PollResult> {
-    const { repo, logins, requireAssignee, project, assignedStatuses, maxPages } = this.config;
+    const { repo: home, logins, requireAssignee, project, assignedStatuses, maxPages } = this.config;
     const assignees = requireAssignee ? logins.map((login) => `assignee:${login}`) : [];
-    const q = [`repo:${repo}`, 'is:issue', 'is:open', ...assignees, `project:${project.owner}/${project.number}`].join(' ');
+    // The board, not a repository, scopes the search, so every repository on it is read in one search (mechanics M59).
+    const q = ['is:issue', 'is:open', ...assignees, `project:${project.owner}/${project.number}`].join(' ');
     const tickets: PolledTicket[] = [];
     let after: string | null = null;
     // A field that cannot hold a status would read every issue as unassigned and end its work item.
@@ -356,10 +394,12 @@ export class GithubSource implements Source {
           continue;
         }
 
+        const repo = node.repository.nameWithOwner.toLowerCase();
+
         tickets.push({
-          sourceKey: String(node.number),
-          ref: `#${node.number}`,
-          repo: this.config.repo.toLowerCase(),
+          sourceKey: keyOf(home, repo, node.number),
+          ref: refOf(home, repo, node.number),
+          repo,
           sourceId: null,
           title: node.title,
           url: node.url,
@@ -383,8 +423,8 @@ export class GithubSource implements Source {
   }
 
   private async readContext(ticket: Ticket): Promise<ContextResult> {
-    const [owner = '', name = ''] = this.config.repo.split('/');
-    const result = await this.gh(CONTEXT_QUERY, { owner, name, number: Number(ticket.sourceKey), status: this.config.project.statusField });
+    const id = this.idOf(ticket);
+    const result = await this.gh(CONTEXT_QUERY, { ...ownerName(id.repo), number: id.number, status: this.config.project.statusField });
 
     if ('error' in result) {
       return result;
@@ -393,7 +433,7 @@ export class GithubSource implements Source {
     const issue = (result.json as { data?: { repository?: { issue?: ContextIssue | null } } } | null)?.data?.repository?.issue;
 
     if (issue === undefined || issue === null) {
-      return { error: `Issue ${ticket.sourceKey} was not found in ${this.config.repo}.` };
+      return { error: `Issue ${id.number} was not found in ${id.repo}.` };
     }
 
     const pr = pullRequestOf(issue.closedByPullRequestsReferences.nodes);
@@ -455,7 +495,7 @@ export class GithubSource implements Source {
   }
 
   private onProject(project: ProjectRef | null | undefined): boolean {
-    return project?.number === this.config.project.number && project.owner?.login === this.config.project.owner;
+    return project?.number === this.config.project.number && project.owner?.login?.toLowerCase() === this.config.project.owner.toLowerCase();
   }
 
   private format(issue: ContextIssue, pr: PullRequest | null, roles: Roles, ids: CommentIds): string {

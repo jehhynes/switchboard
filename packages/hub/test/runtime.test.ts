@@ -9,7 +9,7 @@ import { markOf } from '@switchboard/core/group';
 import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, Ticket } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import { REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 
@@ -165,8 +165,13 @@ class FakeSource implements Source {
     return result;
   }
 
-  keyOfBranch(branch: string): string | null {
-    return /^(\d+)-/.exec(branch)?.[1] ?? null;
+  /** The repository each branch was read in. */
+  branchRepos: string[] = [];
+
+  keyOfBranch(branch: string, repo: string): string | null {
+    this.branchRepos.push(repo);
+    const number = /^(\d+)-/.exec(branch)?.[1] ?? null;
+    return number === null || repo === '' || repo === 'acme/widgets' ? number : `${repo}#${number}`;
   }
 }
 
@@ -307,6 +312,23 @@ describe('handled assignment reports', () => {
     await runtime.settled();
     expect(store.ticket(ticket.id)?.handledAssignmentKey).toBeNull();
     expect(store.workItemsForTicket(ticket.id)).toHaveLength(1);
+    runtime.stop(); store.close();
+  });
+
+  it("rereads a registered ticket through its own source whatever board it is on, so leaving the board does not fail the poll (PRD R85)", async () => {
+    const { runtime, store, source } = await ready();
+    expect(await runtime.handled('s1', url, null)).toEqual({ assignmentKey: 'I:A' });
+    expect(source.assignmentAt).toHaveBeenLastCalledWith(url, false);
+    source.assignmentAt = vi.fn(async (_url: string, anyBoard?: boolean) => (anyBoard === true ? lookup('I:A', false) : null));
+    await runtime.pollSource('github');
+
+    expect(source.assignmentAt).toHaveBeenCalledWith(url, true);
+    expect(runtime.snapshot().errors.sources).toEqual({});
+    expect(store.findTicket('github', '7')).toMatchObject({ assigned: false, handledAssignmentKey: 'I:A' });
+
+    // The owning source releases it off the board, too.
+    expect(await runtime.handled('s1', url, 'I:A')).toEqual({ assignmentKey: null });
+    expect(store.findTicket('github', '7')).toMatchObject({ handledAssignmentKey: null });
     runtime.stop(); store.close();
   });
 
@@ -1941,7 +1963,7 @@ describe('Runtime', () => {
     ]);
 
     source.result = { tickets: [issue('63')] };
-    dashboard.result = { tickets: [{ ...issue('63'), title: 'Dashboard 63' }] };
+    dashboard.result = { tickets: [{ ...issue('63'), title: 'Dashboard 63', url: 'https://github.com/o/dashboard/issues/63' }] };
     await runtime.pollSource('github');
     await runtime.pollSource('widgets-dashboard');
 
@@ -1951,6 +1973,100 @@ describe('Runtime', () => {
     expect(runtime.setSourceEnabled('widgets-dashboard', false)).toBeNull();
     expect(runtime.snapshot().sources).toEqual(['github']);
     expect(runtime.snapshot().errors.sources).toEqual({});
+  });
+
+  it('leaves an issue on two boards with the source that stored it first and notes it, even after that source is turned off (PRD R44)', async () => {
+    const cfg = config();
+    cfg.settings.sources['personal'] = { ...cfg.settings.sources['github']! };
+    const personal = new FakeSource();
+    const { runtime, store, source } = setup(cfg, undefined, undefined, undefined, { personal });
+    const shared = { ...issue('63'), url: 'https://github.com/Acme/Widgets/issues/63' };
+
+    source.result = { tickets: [{ ...shared, url: 'https://github.com/acme/widgets/issues/63' }] };
+    personal.result = { tickets: [{ ...shared, sourceKey: 'acme/widgets#63' }, issue('4')] };
+    await runtime.pollSource('github');
+    await runtime.pollSource('personal');
+
+    expect(store.tickets('personal').map((ticket) => ticket.sourceKey)).toEqual(['4']);
+    expect(runtime.snapshot().notes).toEqual(['personal: https://github.com/Acme/Widgets/issues/63 belongs to github.']);
+
+    expect(runtime.setSourceEnabled('github', false)).toBeNull();
+    await runtime.pollSource('personal');
+    expect(store.tickets('personal').map((ticket) => ticket.sourceKey)).toEqual(['4']);
+  });
+
+  it('keeps one ticket for an issue two overlapping polls list, whichever stores it first (PRD R44)', async () => {
+    const cfg = config();
+    cfg.settings.sources['personal'] = { ...cfg.settings.sources['github']! };
+    const personal = new FakeSource();
+    const { runtime, store, source } = setup(cfg, undefined, undefined, undefined, { personal });
+    const shared = { ...issue('63'), url: 'https://github.com/acme/widgets/issues/63' };
+    const slow = deferred();
+
+    source.gate = slow.promise;
+    source.result = { tickets: [shared] };
+    personal.result = { tickets: [{ ...shared, sourceKey: 'acme/widgets#63' }] };
+    const first = runtime.pollSource('github');
+    await vi.waitFor(() => expect(source.polls).toBe(1));
+    await runtime.pollSource('personal');
+    slow.resolve();
+    await first;
+
+    expect([...store.tickets('github'), ...store.tickets('personal')].map((ticket) => `${ticket.source} ${ticket.sourceKey}`)).toEqual(['personal acme/widgets#63']);
+    expect(runtime.snapshot().notes).toEqual(['github: https://github.com/acme/widgets/issues/63 belongs to personal.']);
+  });
+
+  it("fails a start in a pattern's folder that holds no clone, naming the repository, and starts one that does (PRD R21)", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'switchboard-clone-'));
+    const forward = root.split(String.fromCharCode(92)).join('/');
+    try {
+      const cfg = config();
+      cfg.settings.sources['github'] = { ...cfg.settings.sources['github']!, repoRoot: `${forward}/{name}`, options: { repo: 'acme/widgets' } };
+      mkdirSync(join(root, 'widgets'));
+      const { runtime, store, source } = setup(cfg);
+      source.result = { tickets: [{ ...issue('7'), repo: 'acme/widgets' }] };
+      runtime.send({ type: 'poll', source: 'github', tickets: source.result.tickets });
+      await runtime.settled();
+      runtime.send({ type: 'triage-succeeded', triageId: 1, context: 'c', playbook: 'dev:develop', immediacy: null, severity: null, model: null });
+      await runtime.settled();
+
+      expect(store.workItem(1)).toMatchObject({ status: 'failed', error: `No clone of acme/widgets at ${forward}/widgets.` });
+
+      mkdirSync(join(root, 'widgets', '.git'));
+      runtime.send({ type: 'retry', workItemId: 1 });
+      await runtime.settled();
+      expect(store.workItem(1)?.status).not.toBe('failed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("links worktrees in each open repository's resolved root by that repository's branches (PRD R25)", async () => {
+    const cfg = config();
+    cfg.settings.sources['github'] = { ...cfg.settings.sources['github']!, repoRoot: 'D:/git/{name}', options: { repo: 'acme/widgets' } };
+    const { cli, source, runtime, store } = setup(cfg);
+    source.result = { tickets: [{ ...issue('acme/widgets-dashboard#7'), repo: 'acme/widgets-dashboard' }] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    expect(cli.gitCwds.slice(0, 2)).toEqual(['D:/git/widgets', 'D:/git/widgets-dashboard']);
+    expect(source.branchRepos).toContain('acme/widgets-dashboard');
+    // The fake clone's branch 7-fix is the dashboard's 7, not the home repository's.
+    expect(store.findTicket('github', '7')).toBeNull();
+    expect(store.worktreeFor(store.findTicket('github', 'acme/widgets-dashboard#7')!.id)).toMatchObject({ branch: '7-fix' });
+  });
+
+  it('gives rows short keys for other repositories: a label, else a unique name, else owner/name#n (PRD R27)', () => {
+    const settings = { ...config().settings };
+    settings.sources = {
+      github: { ...settings.sources['github']!, options: { repo: 'acme/widgets', labels: { 'Acme/Widgets-Dashboard': 'dash' } } },
+      personal: { ...settings.sources['github']!, options: { repo: 'work-login/switchboard' } },
+    };
+
+    expect(repoKeysOf(settings, { github: ['acme/widgets', 'acme/widgets-test', 'alice/tools'], personal: ['work-login/switchboard', 'bob/tools'] })).toEqual({
+      homes: { github: 'acme/widgets', personal: 'work-login/switchboard' },
+      prefixes: { 'acme/widgets-dashboard': 'dash', 'acme/widgets': 'widgets', 'acme/widgets-test': 'widgets-test', 'work-login/switchboard': 'switchboard' },
+    });
   });
 });
 
@@ -2331,6 +2447,35 @@ describe('ticket reports (PRD R83)', () => {
     return harness;
   }
 
+  it('asks each enabled source until one has the issue on its board, refuses when none has, and treats a failed read as a refusal (PRD R83)', async () => {
+    const real = new ClaudeRunner({ claudePath: () => 'claude', exec: async () => ok('[]'), sleep: async () => {}, now: () => T0, home, claudeSettings: join(home, '.claude', 'settings.json'), hooks: () => true, nodePath: () => 'node' });
+    const claude = Object.assign(Object.create(real) as SessionRunner, { live: async () => ({ shortId: '9273f594', cwd: 'D:/git/widgets' }), relation: (): CopyRelation => 'unrelated' });
+    const cfg = config();
+    cfg.settings.sources['personal'] = { ...cfg.settings.sources['github']! };
+    const personal = new FakeSource();
+    const { runtime, source, store } = setup(cfg, () => T0, { claude }, undefined, { personal });
+    await runtime.register(NATIVE, 'Explore snapshots');
+    const asked: string[] = [];
+    source.ticketAt = async () => (asked.push('github'), null);
+    personal.ticketAt = async () => (asked.push('personal'), { ticket: { ...found().ticket, sourceKey: 'o/r#115', ref: 'o/r#115', repo: 'o/r' } });
+
+    expect(await runtime.ticket('s1', URL, null, NATIVE)).toMatchObject({ key: 'personal o/r#115' });
+    expect(asked).toEqual(['github', 'personal']);
+    expect(store.ticket(1)).toMatchObject({ source: 'personal', sourceKey: 'o/r#115', repo: 'o/r' });
+
+    personal.ticketAt = async () => null;
+    expect(await runtime.ticket('s1', 'https://github.com/o/r/issues/9', null, NATIVE)).toEqual({ refused: 'No enabled source has https://github.com/o/r/issues/9 on its board.' });
+
+    // The owner of a stored issue answers for it; while it is off, no other source may store the issue again.
+    expect(runtime.setSourceEnabled('personal', false)).toBeNull();
+    source.ticketAt = async () => found();
+    expect(await runtime.ticket('s1', URL.toUpperCase().replace('HTTPS://GITHUB.COM', 'https://github.com'), null, NATIVE)).toEqual({ refused: `${URL.toUpperCase().replace('HTTPS://GITHUB.COM', 'https://github.com')} belongs to personal, which is off. Turn it on in the header.` });
+    expect(await runtime.handled('s1', URL, null, NATIVE)).toEqual({ refused: `${URL} belongs to personal, which is off. Turn it on in the header.` });
+    expect(runtime.setSourceEnabled('personal', true)).toBeNull();
+    source.ticketAt = async () => ({ error: 'offline' });
+    expect(await runtime.ticket('s1', 'https://github.com/o/r/issues/9', null, NATIVE)).toEqual({ refused: 'offline' });
+  });
+
   it("moves a registered session's work item onto the issue and answers its key and the playbook's contract, again for a retry and after compaction", async () => {
     const { runtime, source, store } = await registered();
     const urls: string[] = [];
@@ -2368,9 +2513,9 @@ describe('ticket reports (PRD R83)', () => {
     const { runtime, source, store, late } = await registered();
     const refused = async (url = URL, native: string | null = NATIVE, sessionId = 's1') => ((await runtime.ticket(sessionId, url, null, native)) as { refused: string }).refused;
 
-    expect(await refused()).toBe(`No enabled source has a ticket at ${URL}.`);
+    expect(await refused()).toBe(`No enabled source has ${URL} on its board.`);
     source.ticketAt = async () => null;
-    expect(await refused()).toBe(`No enabled source has a ticket at ${URL}.`);
+    expect(await refused()).toBe(`No enabled source has ${URL} on its board.`);
     source.ticketAt = async () => found(false);
     expect(await refused()).toBe('#115 is closed.');
     source.ticketAt = async () => ({ error: 'Issue #115 was not found in o/r.' });
@@ -2403,8 +2548,8 @@ describe('ticket reports (PRD R83)', () => {
 
     expect(store.ticket(1)).toMatchObject({ source: 'adhoc', sourceKey: '1', adhocKey: null });
     expect(store.ticketHistory(1)!.events.filter((event) => event.refused !== null).map((event) => [event.detail, event.refused])).toEqual([
-      [{ kind: 'ticket', url: URL }, `No enabled source has a ticket at ${URL}.`],
-      [{ kind: 'ticket', url: URL }, `No enabled source has a ticket at ${URL}.`],
+      [{ kind: 'ticket', url: URL }, `No enabled source has ${URL} on its board.`],
+      [{ kind: 'ticket', url: URL }, `No enabled source has ${URL} on its board.`],
       [{ kind: 'ticket', url: URL }, '#115 is closed.'],
       [{ kind: 'ticket', url: URL }, 'Issue #115 was not found in o/r.'],
       [{ kind: 'ticket', url: URL }, 'Error: boom'],

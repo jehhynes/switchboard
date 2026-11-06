@@ -331,7 +331,7 @@ describe('createHubApp', () => {
 
     const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
 
-    expect(await app.post['/ticket']!({ sessionId, url: 'https://github.com/o/r/issues/1', nativeSessionId: native })).toEqual({ status: 409, body: { error: 'No enabled source has a ticket at https://github.com/o/r/issues/1.' } });
+    expect(await app.post['/ticket']!({ sessionId, url: 'https://github.com/o/r/issues/1', nativeSessionId: native })).toEqual({ status: 409, body: { error: 'No enabled source has https://github.com/o/r/issues/1 on its board.' } });
   });
 
   it('registers and releases a handled assignment through the HTTP route, refusing bad requests', async () => {

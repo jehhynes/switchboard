@@ -10,7 +10,7 @@ query($q:String!, $status:String!, $after:String){
   search(query:$q, type:ISSUE, first:100, after:$after){
     pageInfo{ hasNextPage endCursor }
     nodes{ ... on Issue{
-      number title url
+      number title url repository{ nameWithOwner }
       projectItems(first:20){ nodes{
         project{ number owner{ ... on Organization{ login } ... on User{ login } } }
         fieldValueByName(name:$status){ ... on ProjectV2ItemFieldSingleSelectValue{ name updatedAt } }
@@ -70,8 +70,13 @@ query($owner:String!, $name:String!, $number:Int!){
   }
 }`;
 
-/** One issue's identity and state, for a ticket report (PRD R83). gh exits 1 when the number is not an issue of the repository. */
+/**
+ * One issue's identity, state and project boards, for a ticket report (PRD R83). gh exits 1 when the number is not an issue of the repository.
+ */
 export const ISSUE_QUERY = `
 query($owner:String!, $name:String!, $number:Int!){
-  repository(owner:$owner, name:$name){ issue(number:$number){ number title url state } }
+  repository(owner:$owner, name:$name){ issue(number:$number){
+    number title url state
+    projectItems(first:100){ pageInfo{ hasNextPage } nodes{ project{ number owner{ ... on Organization{ login } ... on User{ login } } } } }
+  } }
 }`;

@@ -333,6 +333,8 @@ export const MIGRATIONS = [
   `ALTER TABLE tickets ADD COLUMN blockers TEXT NOT NULL DEFAULT '[]';`,
   // A ticket's repository (PRD R44); empty is the source's home repository, which cannot change while the source has tickets.
   `ALTER TABLE tickets ADD COLUMN repo TEXT NOT NULL DEFAULT '';`,
+  // The home repository of each source with tickets, which bare keys mean (PRD R44), kept even when every stored key is qualified.
+  `CREATE TABLE sourceHomes (source TEXT PRIMARY KEY, repo TEXT NOT NULL);`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
@@ -788,6 +790,37 @@ export class Store {
   /** The assigned or pool ticket with this URL, ignoring case, as a GitHub URL's owner and repository do. */
   ticketInScopeByUrl(url: string): Ticket | null {
     return this.#one("SELECT * FROM tickets WHERE url <> '' AND url = ? COLLATE NOCASE AND (assigned = 1 OR pool = 1) ORDER BY id LIMIT 1", url);
+  }
+
+  /**
+   * The home repository each source's tickets record: the repository of a ticket with a bare key, which only the home repository's issues
+   * have (PRD R44). A source whose tickets record none is absent.
+   */
+  homeRepos(): Record<string, string> {
+    const rows = this.#db
+      .prepare("SELECT source, repo FROM sourceHomes UNION SELECT source, MIN(repo) FROM tickets WHERE repo != '' AND instr(sourceKey, '#') = 0 AND source NOT IN (SELECT source FROM sourceHomes) GROUP BY source")
+      .all() as { source: string; repo: string }[];
+
+    return Object.fromEntries(rows.map((row) => [row.source, row.repo]));
+  }
+
+  /**
+   * Records `repo` as the source's home repository once it has tickets, and on its bare-key tickets that record none, as tickets stored before
+   * migration 38 do. A home already recorded is kept.
+   */
+  fillHomeRepo(source: string, repo: string): void {
+    this.#db.prepare("UPDATE tickets SET repo = ? WHERE source = ? AND repo = '' AND instr(sourceKey, '#') = 0").run(repo, source);
+    this.#db.prepare('INSERT OR IGNORE INTO sourceHomes (source, repo) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM tickets WHERE source = ?)').run(source, repo, source);
+  }
+
+  /** The ticket with this URL in any source, ignoring case, as a GitHub URL's owner and repository do; the oldest when several. */
+  ticketByUrl(url: string): Ticket | null {
+    return this.#one("SELECT * FROM tickets WHERE url <> '' AND url = ? COLLATE NOCASE ORDER BY id LIMIT 1", url);
+  }
+
+  /** Each source's repositories with a ticket that is assigned, in the pool or registered, for worktree linking (PRD R25). */
+  openRepos(source: string): string[] {
+    return (this.#db.prepare('SELECT DISTINCT repo FROM tickets WHERE source = ? AND (assigned = 1 OR pool = 1 OR handledAssignmentKey IS NOT NULL) ORDER BY repo').all(source) as { repo: string }[]).map((row) => row.repo);
   }
 
   tickets(source: string): Ticket[] {

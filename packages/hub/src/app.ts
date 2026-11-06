@@ -173,7 +173,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   mkdirSync(configDir, { recursive: true });
 
   const store = Store.open(join(home, 'switchboard.db'));
-  let config = loadConfig(configDir);
+  let config = loadConfig(configDir, undefined, store.homeRepos());
   const deps: RuntimeDeps = {
     home: options.home,
     configDir,
@@ -236,7 +236,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const reload = () => {
     clearTimeout(pending);
     pending = setTimeout(() => {
-      config = loadConfig(configDir, config);
+      config = loadConfig(configDir, config, store.homeRepos());
       runtime.reload(config);
       // The dock's Settings window reads the file again (PRD R54).
       sendDock('config', {});
@@ -466,7 +466,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         },
       }),
       '/config/check': async (body) =>
-        isRecord(body) && 'settings' in body ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources()) } } : { status: 400, body: { error: 'Expected {settings}.' } },
+        isRecord(body) && 'settings' in body ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos()) } } : { status: 400, body: { error: 'Expected {settings}.' } },
       '/config/save': async (body) => {
         const version = isRecord(body) ? body['version'] : undefined;
 
@@ -480,7 +480,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           return { status: 409, body: { errors: [moved] } };
         }
 
-        const result = saveSettings(configDir, body['value'], version, runtime.enabledSources());
+        const result = saveSettings(configDir, body['value'], version, runtime.enabledSources(), store.homeRepos());
 
         return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
       },

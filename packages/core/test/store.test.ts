@@ -53,7 +53,7 @@ describe('Store', () => {
   });
 
   it("adds each ticket's repository as empty, the home repository, keeping keys and IDs, and lists the repositories polls record (PRD R44)", () => {
-    const version = MIGRATIONS.length - 1;
+    const version = 37;
     const path = join(dir, `v${version}.db`);
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
@@ -74,6 +74,19 @@ describe('Store', () => {
     store.insertTicket({ ...seven, sourceKey: 'acme/widgets-dashboard#63', repo: 'acme/widgets-dashboard', url: 'u63' });
     store.insertTicket({ ...eight, source: 'personal', sourceKey: '4', repo: 'work-login/switchboard', url: 'u4' });
     expect(store.reposBySource()).toEqual({ github: ['acme/widgets', 'acme/widgets-dashboard'], personal: ['work-login/switchboard'] });
+    // The home repository is the one a bare key records; filling records it for bare keys that record none, and nothing else.
+    expect(store.homeRepos()).toEqual({ github: 'acme/widgets', personal: 'work-login/switchboard' });
+    store.updateTicket(7, { repo: '' });
+    expect(store.homeRepos()).toEqual({ personal: 'work-login/switchboard' });
+    store.fillHomeRepo('github', 'acme/widgets');
+    store.fillHomeRepo('github', 'bob/widgets');
+    store.fillHomeRepo('nothing', 'bob/widgets');
+    // Recorded, it holds even when the source keeps only qualified keys.
+    store.updateTicket(7, { sourceKey: 'acme/widgets#18941' });
+    expect(store.homeRepos()).toEqual({ github: 'acme/widgets', personal: 'work-login/switchboard' });
+    store.updateTicket(7, { sourceKey: '18941' });
+    expect([store.ticket(7)?.repo, store.findTicket('github', 'acme/widgets-dashboard#63')?.repo, store.ticket(8)?.repo]).toEqual(['acme/widgets', 'acme/widgets-dashboard', '']);
+    expect(store.ticketByUrl('U63')?.sourceKey).toBe('acme/widgets-dashboard#63');
     store.close();
   });
 

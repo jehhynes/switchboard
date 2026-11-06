@@ -44,7 +44,7 @@ describe('GithubSource.poll', () => {
     const gh = fakeGh(SINGLE_SELECT, { json: fixture('issues') });
     const result = await new GithubSource(config(), gh).poll();
 
-    expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'repo:acme/widgets is:issue is:open assignee:work-login assignee:work-ai-login project:acme/3', status: 'Status' });
+    expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'is:issue is:open assignee:work-login assignee:work-ai-login project:acme/3', status: 'Status' });
     expect(result).toEqual({
       tickets: [20190, 20127, 19964, 19769, 19504, 19484, 19231, 19230, 18531, 18388, 18111].map((number) => ({
         sourceKey: String(number),
@@ -67,6 +67,7 @@ describe('GithubSource.poll', () => {
       number,
       title: 'T',
       url: 'u',
+      repository: { nameWithOwner: 'acme/widgets' },
       projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev', ...(statusAt === undefined ? {} : { updatedAt: statusAt }) } }] },
       timelineItems: { nodes: assignees.map(([login, createdAt]) => ({ createdAt, assignee: { login } })) },
     });
@@ -95,6 +96,7 @@ describe('GithubSource.poll', () => {
       number,
       title: 'T',
       url: 'u',
+      repository: { nameWithOwner: 'acme/widgets' },
       projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev', updatedAt: '2026-10-04T00:00:00Z' } }] },
       assignees: { nodes: assignees.map((login) => ({ login })) },
       timelineItems: { nodes: events.map(([__typename, login, createdAt]) => ({ __typename, createdAt, assignee: { login } })) },
@@ -128,6 +130,7 @@ describe('GithubSource.poll', () => {
       number,
       title: `Issue ${number}`,
       url: `u${number}`,
+      repository: { nameWithOwner: 'acme/widgets' },
       projectItems: { nodes: [{ project: { number: project, owner: { login: 'acme' } }, fieldValueByName: { name: status, updatedAt: '2026-10-04T00:00:00Z' } }] },
       assignees: { nodes: assignee === null ? [] : [{ login: assignee }] },
       timelineItems: { nodes: assignee === null ? [] : [{ __typename: 'AssignedEvent', createdAt: '2026-10-01T00:00:00Z', assignee: { login: assignee } }] },
@@ -145,7 +148,7 @@ describe('GithubSource.poll', () => {
     const result = await new GithubSource(config({ requireAssignee: false }), gh).poll();
     const listed = (number: number) => ({ sourceKey: String(number), ref: `#${number}`, repo: 'acme/widgets', sourceId: null, title: `Issue ${number}`, url: `u${number}`, assigned: true, pool: false, sortAt: Date.parse('2026-10-04T00:00:00Z'), enteredAt: null, blockers: [] });
 
-    expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'repo:acme/widgets is:issue is:open project:acme/3', status: 'Status' });
+    expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'is:issue is:open project:acme/3', status: 'Status' });
     expect(result).toEqual({ tickets: [listed(1), listed(2), listed(3)] });
   });
 
@@ -155,6 +158,7 @@ describe('GithubSource.poll', () => {
       number,
       title: 'T',
       url: 'u',
+      repository: { nameWithOwner: 'acme/widgets' },
       projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev' } }] },
       ...(blockedBy === undefined ? {} : { blockedBy }),
     });
@@ -199,7 +203,7 @@ describe('GithubSource.poll', () => {
         data: {
           search: {
             pageInfo: { hasNextPage: next !== null, endCursor: next },
-            nodes: [{ number, title: 'T', url: 'u', projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev' } }] } }, {}],
+            nodes: [{ number, title: 'T', url: 'u', repository: { nameWithOwner: 'acme/widgets' }, projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev' } }] } }, {}],
           },
         },
       },
@@ -245,6 +249,7 @@ describe('GithubSource.poll', () => {
       number,
       title: `Issue ${number}`,
       url: `https://github.com/acme/widgets/issues/${number}`,
+      repository: { nameWithOwner: 'acme/widgets' },
       projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: status === null ? null : { name: status } }] },
       timelineItems: { nodes: [] },
     });
@@ -599,28 +604,49 @@ describe('GithubSource.keyOfBranch', () => {
   it('reads the issue number from the branch pattern', () => {
     const source = new GithubSource(config(), fakeGh());
 
-    expect(source.keyOfBranch('15619-fix-foo')).toBe('15619');
-    expect(source.keyOfBranch('master')).toBeNull();
-    expect(new GithubSource(config({ branchPattern: /^issue-(\d+)$/ }), fakeGh()).keyOfBranch('issue-12')).toBe('12');
+    expect(source.keyOfBranch('15619-fix-foo', 'acme/widgets')).toBe('15619');
+    expect(source.keyOfBranch('master', 'acme/widgets')).toBeNull();
+    expect(new GithubSource(config({ branchPattern: /^issue-(\d+)$/ }), fakeGh()).keyOfBranch('issue-12', 'acme/widgets')).toBe('12');
+  });
+
+  it("keys a branch in another repository's clone to that repository's issue, so 63-fix there never links home issue 63 (PRD R25)", () => {
+    expect(new GithubSource(config(), fakeGh()).keyOfBranch('63-fix', 'acme/widgets-dashboard')).toBe('acme/widgets-dashboard#63');
   });
 });
 
 describe('GithubSource.ticketAt', () => {
-  const answer = (state: string): GhResult => ({ json: { data: { repository: { issue: { number: 115, title: 'Snapshot wrapper', url: 'https://github.com/acme/widgets/issues/115', state } } } } });
+  type Board = { number: number; owner: { login: string } };
+  const ON_BOARD: Board[] = [{ number: 3, owner: { login: 'Acme' } }];
+  const answer = (state: string, url = 'https://github.com/acme/widgets/issues/115', boards: Board[] = ON_BOARD, more = false): GhResult => ({
+    json: { data: { repository: { issue: { number: 115, title: 'Snapshot wrapper', url, state, projectItems: { pageInfo: { hasNextPage: more }, nodes: boards.map((project) => ({ project })) } } } } },
+  });
 
-  it('reads an issue of the configured repository in any spelling, and reports whether it is open (PRD R83)', async () => {
-    const gh = fakeGh(answer('OPEN'), answer('CLOSED'));
+  it('reads an issue on the board in any repository and spelling, keyed by its repository, and reports whether it is open (PRD R83)', async () => {
+    const dashboard = 'https://github.com/acme/widgets-dashboard/issues/115';
+    const gh = fakeGh(answer('OPEN'), answer('CLOSED'), answer('OPEN', dashboard));
     const source = new GithubSource(config(), gh);
 
     expect(await source.ticketAt('https://github.com/Acme/Widgets/issues/115/')).toEqual({ ticket: { sourceKey: '115', ref: '#115', repo: 'acme/widgets', title: 'Snapshot wrapper', url: 'https://github.com/acme/widgets/issues/115', open: true } });
     expect(gh).toHaveBeenCalledWith(ISSUE_QUERY, { owner: 'acme', name: 'widgets', number: 115 });
     expect(await source.ticketAt('https://github.com/acme/widgets/issues/115#issuecomment-1')).toMatchObject({ ticket: { open: false } });
+    expect(await source.ticketAt('https://github.com/Acme/Widgets-Dashboard/issues/115')).toEqual({
+      ticket: { sourceKey: 'acme/widgets-dashboard#115', ref: 'acme/widgets-dashboard#115', repo: 'acme/widgets-dashboard', title: 'Snapshot wrapper', url: dashboard, open: true },
+    });
+    expect(gh).toHaveBeenLastCalledWith(ISSUE_QUERY, { owner: 'acme', name: 'widgets-dashboard', number: 115 });
   });
 
-  it('answers null without a read for a pull request, another repository or another site', async () => {
+  it("answers null for an issue on another board or none, whatever its status, so another source can answer, and errors on incomplete membership", async () => {
+    const source = new GithubSource(config(), fakeGh(answer('OPEN', undefined, [{ number: 1, owner: { login: 'work-login' } }]), answer('OPEN', undefined, []), answer('OPEN', undefined, [], true)));
+
+    expect(await source.ticketAt('https://github.com/acme/widgets/issues/115')).toBeNull();
+    expect(await source.ticketAt('https://github.com/acme/widgets/issues/115')).toBeNull();
+    expect(await source.ticketAt('https://github.com/acme/widgets/issues/115')).toEqual({ error: 'GitHub returned incomplete project membership.' });
+  });
+
+  it('answers null without a read for a pull request or another site', async () => {
     const source = new GithubSource(config(), fakeGh());
 
-    for (const url of ['https://github.com/acme/widgets/pull/115', 'https://github.com/acme/other/issues/115', 'https://example.com/acme/widgets/issues/115', 'not a url']) {
+    for (const url of ['https://github.com/acme/widgets/pull/115', 'https://example.com/acme/widgets/issues/115', 'not a url']) {
       expect(await source.ticketAt(url)).toBeNull();
     }
   });
@@ -628,9 +654,48 @@ describe('GithubSource.ticketAt', () => {
   it('names a number the repository has no issue for, passes other gh errors through, and fails a malformed response', async () => {
     const source = new GithubSource(config(), fakeGh({ error: 'gh: Could not resolve to an Issue with the number of 9.' }, { error: 'GitHub did not answer within 30 seconds.' }, { json: { data: { repository: { issue: null } } } }));
 
-    expect(await source.ticketAt('https://github.com/acme/widgets/issues/9')).toEqual({ error: '#9 is not an issue in acme/widgets.' });
+    expect(await source.ticketAt('https://github.com/acme/widgets-dashboard/issues/9')).toEqual({ error: 'acme/widgets-dashboard#9 is not an issue.' });
     expect(await source.ticketAt('https://github.com/acme/widgets/issues/9')).toEqual({ error: 'GitHub did not answer within 30 seconds.' });
     expect(await source.ticketAt('https://github.com/acme/widgets/issues/9')).toEqual({ error: 'GitHub returned an unexpected response.' });
+  });
+});
+
+describe('GithubSource on the whole board (PRD R44)', () => {
+  it('searches the board without a repository and keys each issue by its repository, from a recorded board', async () => {
+    const gh = fakeGh(SINGLE_SELECT, { json: fixture('board') });
+    const result = await new GithubSource(config({ assignedStatuses: ['🔍 Review', '🎁 Assigned'] }), gh).poll();
+
+    expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'is:issue is:open assignee:work-login assignee:work-ai-login project:acme/3', status: 'Status' });
+    expect(ISSUES_QUERY).toContain('repository{ nameWithOwner }');
+    expect('tickets' in result && result.tickets.map(({ sourceKey, ref, repo, assigned }) => ({ sourceKey, ref, repo, assigned }))).toEqual([
+      { sourceKey: '21512', ref: '#21512', repo: 'acme/widgets', assigned: true },
+      { sourceKey: '21510', ref: '#21510', repo: 'acme/widgets', assigned: false },
+      { sourceKey: 'acme/widgets-dashboard#65', ref: 'acme/widgets-dashboard#65', repo: 'acme/widgets-dashboard', assigned: false },
+      { sourceKey: 'acme/widgets-infra#191', ref: 'acme/widgets-infra#191', repo: 'acme/widgets-infra', assigned: true },
+    ]);
+  });
+
+  it('keeps an issue in another repository with the same number apart from the home one, across pages', async () => {
+    const node = (repo: string, number: number) => ({ number, title: `Issue ${number}`, url: `https://github.com/${repo}/issues/${number}`, repository: { nameWithOwner: repo }, projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: { name: '⚒️ Dev' } }] } });
+    const page = (nodes: unknown[], next: string | null): GhResult => ({ json: { data: { search: { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes } } } });
+    const result = await new GithubSource(config(), fakeGh(SINGLE_SELECT, page([node('acme/widgets', 63)], 'c1'), page([node('Acme/Widgets-Dashboard', 63)], null))).poll();
+
+    expect('tickets' in result && result.tickets.map((ticket) => [ticket.sourceKey, ticket.url])).toEqual([
+      ['63', 'https://github.com/acme/widgets/issues/63'],
+      ['acme/widgets-dashboard#63', 'https://github.com/Acme/Widgets-Dashboard/issues/63'],
+    ]);
+  });
+
+  it('confirms and reads the context of an issue in another repository there, by its key', async () => {
+    const stored: Ticket = { ...ticket('acme/widgets-dashboard#63'), ref: 'acme/widgets-dashboard#63', repo: 'acme/widgets-dashboard', url: 'https://github.com/acme/widgets-dashboard/issues/63' };
+    const gh = fakeGh(SINGLE_SELECT, { json: { data: { search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } }, { error: 'gh: Could not resolve to an Issue with the number of 63.' }, { error: 'offline' });
+    const source = new GithubSource(config(), gh);
+
+    expect(await source.poll([stored])).toEqual({ tickets: [] });
+    expect(gh).toHaveBeenNthCalledWith(3, expect.any(String), expect.objectContaining({ owner: 'acme', name: 'widgets-dashboard', number: 63 }));
+    expect(await source.context(stored)).toEqual({ error: 'offline' });
+    expect(gh).toHaveBeenLastCalledWith(CONTEXT_QUERY, { owner: 'acme', name: 'widgets-dashboard', number: 63, status: 'Status' });
+    expect(await source.context({ ...stored, sourceKey: 'not a key' })).toEqual({ error: 'GitHub returned an unexpected response.' });
   });
 });
 
@@ -689,10 +754,33 @@ describe('GithubSource.checkLink', () => {
     expect(await source.checkLink(ticket('20356'), 'https://github.com/acme/widgets/pull/99999')).toEqual({ refused: 'Pull request #99999 was not found in acme/widgets.' });
   });
 
-  it('does not check an issue, another repository or another site', async () => {
+  it("checks a pull request in another repository's ticket there, and matches its closing reference on repository and number", async () => {
+    const dashboard: Ticket = { ...ticket('acme/widgets-dashboard#63'), ref: 'acme/widgets-dashboard#63', repo: 'acme/widgets-dashboard' };
+    const gh = fakeGh(pullRequest({ headRefName: 'x', closes: [[63, 'Acme/Widgets-Dashboard']] }), pullRequest({ headRefName: '63-fix', closes: [] }), pullRequest({ headRefName: 'x', closes: [[63, 'acme/widgets']] }));
+    const source = new GithubSource(config(), gh);
+    const pr = 'https://github.com/acme/widgets-dashboard/pull/70';
+
+    expect(await source.checkLink(dashboard, pr)).toEqual({ refused: null });
+    expect(gh).toHaveBeenCalledWith(PULL_REQUEST_QUERY, { owner: 'acme', name: 'widgets-dashboard', number: 70 });
+    expect(await source.checkLink(dashboard, pr)).toEqual({ refused: null });
+    expect(await source.checkLink(dashboard, pr)).toMatchObject({ refused: expect.stringContaining('does not close acme/widgets-dashboard#63') });
+  });
+
+  it("checks a pull request in another repository there, where only a closing reference to the ticket's repository and number accepts it", async () => {
+    const gh = fakeGh(pullRequest({ headRefName: '19953-fix', closes: [] }), pullRequest({ headRefName: 'x', closes: [[19953, 'acme/widgets']] }));
+    const source = new GithubSource(config(), gh);
+    const other = 'https://github.com/acme/widgets-dashboard/pull/70';
+
+    // The branch names the home issue's number, but in another repository it names that repository's issue.
+    expect(await source.checkLink(ticket('19953'), other)).toMatchObject({ refused: expect.stringContaining('does not close #19953') });
+    expect(gh).toHaveBeenCalledWith(PULL_REQUEST_QUERY, { owner: 'acme', name: 'widgets-dashboard', number: 70 });
+    expect(await source.checkLink(ticket('19953'), other)).toEqual({ refused: null });
+  });
+
+  it('does not check an issue or another site', async () => {
     const source = new GithubSource(config(), fakeGh());
 
-    for (const target of ['https://github.com/acme/widgets/issues/20401', 'https://github.com/acme/other/pull/1', 'https://github.com/acme/widgets-x/pull/1', 'https://example.com/acme/widgets/pull/1', 'https://github.com/acme/widgets/pull/1x', 'not a url']) {
+    for (const target of ['https://github.com/acme/widgets/issues/20401', 'https://example.com/acme/widgets/pull/1', 'https://github.com/acme/widgets/pull/1x', 'not a url']) {
       expect(await source.checkLink(ticket('20356'), target)).toEqual({ refused: null });
     }
   });

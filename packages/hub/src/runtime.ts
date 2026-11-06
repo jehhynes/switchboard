@@ -1,15 +1,16 @@
-import { mkdirSync, statSync, watch } from 'node:fs';
+import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { classify, ClaudeRunner } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, OpenTerminal, OpenVSCode, ObservedSession, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, repoRoots, SCHEDULE_SOURCE, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, OpenTerminal, OpenVSCode, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Settings, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, homeRepo, repoOf, repoRoots, SCHEDULE_SOURCE, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { doneSince } from './rows.js';
+import type { RepoKeys } from './rows.js';
 
 const NOT_SWITCHBOARD = "This session is not one of Switchboard's work items.";
 const NEVER_BACKGROUND = 'This session never ran in the background, so it cannot continue there.';
@@ -138,6 +139,32 @@ export interface Snapshot {
   /** `dock.openTerminal`: where the dock's Open in terminal runs with `always` (PRD R28). */
   openTerminal: OpenTerminal;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
+  /** What the enabled sources' last polls left out, such as `personal: <url> belongs to github.` (PRD R44); absent from an older hub's. */
+  notes?: string[];
+  /** How rows shorten other repositories' keys (PRD R27); absent from an older hub's. */
+  repoKeys?: RepoKeys;
+}
+
+/** Each source's home repository and label, and each other repository's short name: its label, else its name when no other owner shares it. */
+export function repoKeysOf(settings: Settings, stored: Readonly<Record<string, readonly string[]>>): RepoKeys {
+  const labels: Record<string, string> = {};
+
+  for (const source of Object.values(settings.sources)) {
+    const entries = source.kind === 'github' ? source.options['labels'] : undefined;
+
+    for (const [repo, label] of typeof entries === 'object' && entries !== null ? Object.entries(entries) : []) {
+      if (typeof label === 'string') {
+        labels[repo.toLowerCase()] = label;
+      }
+    }
+  }
+
+  const repos = [...new Set([...Object.keys(labels), ...Object.values(stored).flat()])];
+  const nameOf = (repo: string) => repo.slice(repo.indexOf('/') + 1);
+  const count = (name: string) => repos.filter((repo) => nameOf(repo) === name).length;
+  const prefixes = Object.fromEntries(repos.flatMap((repo) => (labels[repo] !== undefined ? [[repo, labels[repo]]] : count(nameOf(repo)) === 1 ? [[repo, nameOf(repo)]] : [])));
+
+  return { homes: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, homeRepo(source)])), prefixes };
 }
 
 export type ReportBody =
@@ -156,6 +183,8 @@ export class Runtime {
   private config: Config;
   private sources = new Map<string, Source>();
   private sourceErrors: Record<string, string> = {};
+  /** What each source's last poll left out, such as an issue another source owns (PRD R44). */
+  private sourceNotes: Record<string, string[]> = {};
   /** Each runner's hook error from its last install. */
   private hookErrors: Record<Provider, string | null> = { claude: null, codex: null };
   /** Why `sessions.nodePath` cannot run, which the hooks and session reports need; shown with the hook errors. */
@@ -533,7 +562,7 @@ export class Runtime {
     const assignments: NonNullable<Extract<FlowEvent, { type: 'poll' }>['assignments']> = [];
     if (!('error' in result)) {
       for (const ticket of this.deps.store.handledTickets(name)) {
-        const assignment = await this.assignmentRead(source, ticket.url);
+        const assignment = await this.assignmentRead(source, ticket.url, true);
         if (assignment === null || 'error' in assignment) {
           const error = assignment === null ? `The ${name} source cannot read the assignment of ${ticket.ref}.` : assignment.error;
           if (this.sources.get(name) === source) {
@@ -560,7 +589,23 @@ export class Runtime {
       return null;
     }
 
+    // An issue on two boards belongs to the source that stored it first (PRD R44). Checked after the last await, so another source's poll
+    // cannot store the issue between this check and this poll's event.
+    const notes: string[] = [];
+
+    result.tickets = result.tickets.filter((entry) => {
+      const owner = entry.url === '' ? null : this.deps.store.ticketByUrl(entry.url);
+
+      if (owner !== null && owner.source !== name) {
+        notes.push(`${entry.url} belongs to ${owner.source}.`);
+        return false;
+      }
+
+      return true;
+    });
+
     delete this.sourceErrors[name];
+    this.sourceNotes[name] = notes;
     this.send({ type: 'poll', source: name, tickets: result.tickets, assignments });
     await this.findWorktrees(name, source);
 
@@ -1105,7 +1150,13 @@ export class Runtime {
 
     let found: { source: string; reader: Source; lookup: TicketLookup } | null = null;
 
-    for (const [name, source] of [...this.sources]) {
+    const { sources, refusal } = this.byOwner(url);
+
+    if (refusal !== null) {
+      return refuse(refusal);
+    }
+
+    for (const [name, source] of sources) {
       const lookup = source.ticketAt === undefined ? null : await Promise.race([source.ticketAt(url).catch((error: unknown) => ({ error: String(error) })), this.deps.sleep(REPORT_CHECK_MS).then(() => ({ error: `${name} did not answer within ${REPORT_CHECK_MS / 1000} seconds.` }))]);
 
       if (lookup !== null) {
@@ -1115,7 +1166,7 @@ export class Runtime {
     }
 
     if (found === null) {
-      return refuse(`No enabled source has a ticket at ${url}.`);
+      return refuse(`No enabled source has ${url} on its board.`);
     }
 
     if ('error' in found.lookup) {
@@ -1150,10 +1201,10 @@ export class Runtime {
     return { key: `${found.source} ${ticket.sourceKey}`, contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider) };
   }
 
-  private async assignmentRead(source: Source, url: string) {
+  private async assignmentRead(source: Source, url: string, anyBoard = false) {
     if (source.assignmentAt === undefined) return null;
     return Promise.race([
-      source.assignmentAt(url).catch((error: unknown) => ({ error: String(error) })),
+      source.assignmentAt(url, anyBoard).catch((error: unknown) => ({ error: String(error) })),
       this.deps.sleep(REPORT_CHECK_MS).then(() => ({ error: 'The assignment read timed out. Retry the report or poll.' })),
     ]);
   }
@@ -1163,9 +1214,12 @@ export class Runtime {
       this.refuseReport(sessionId, { kind: 'handled', url, releaseKey }, refused);
       return { refused };
     };
-    for (const [name, source] of [...this.sources]) {
+    const { sources, owner, refusal } = this.byOwner(url);
+    if (refusal !== null) return refuse(refusal);
+    for (const [name, source] of sources) {
       const result = await this.sourceOperation(name, async () => {
-        const lookup = await this.assignmentRead(source, url);
+        // The owning source reads its ticket on any board, so a registered issue that left the board can still be released.
+        const lookup = await this.assignmentRead(source, url, name === owner);
         if (lookup === null) return null;
         if ('error' in lookup) return refuse(lookup.error);
         if (this.stopped || this.sources.get(name) !== source) return refuse(`The ${name} source changed during the lookup. Retry the report.`);
@@ -1178,7 +1232,22 @@ export class Runtime {
       });
       if (result !== null) return result;
     }
-    return refuse('No enabled source supports assignments for this ticket URL.');
+    return refuse(`No enabled source has ${url} on its board.`);
+  }
+
+  /**
+   * The enabled sources, the one that already stores a ticket at `url` first, so an issue on two boards stays with it (PRD R44, R83, R85), or
+   * why none may answer: the owner is configured but off, and another source would store the issue a second time.
+   */
+  private byOwner(url: string): { sources: [string, Source][]; owner: string | undefined; refusal: string | null } {
+    const owner = this.deps.store.ticketByUrl(url)?.source;
+    const off = owner !== undefined && this.config.settings.sources[owner] !== undefined && !this.sources.has(owner);
+
+    return {
+      sources: [...this.sources].sort(([a], [b]) => Number(b === owner) - Number(a === owner)),
+      owner,
+      refusal: off ? `${url} belongs to ${owner}, which is off. Turn it on in the header.` : null,
+    };
   }
 
   /**
@@ -1329,6 +1398,8 @@ export class Runtime {
         hooks: [this.nodeError, ...PROVIDERS.map((provider) => this.hookErrors[provider])].filter((error) => error !== null).join(' ') || null,
         sources: { ...this.sourceErrors },
       },
+      notes: [...this.sources.keys()].flatMap((name) => (this.sourceNotes[name] ?? []).map((note) => `${name}: ${note}`)),
+      repoKeys: repoKeysOf(settings, store.reposBySource()),
     };
   }
 
@@ -1347,10 +1418,20 @@ export class Runtime {
   private buildSources(): void {
     this.sources.clear();
     this.sourceErrors = {};
+    this.sourceNotes = {};
 
     // Only a valid file lists the configured sources; with an invalid one the previous settings stay in force.
     if (this.config.settingsError === null) {
       this.deps.store.keepSourceStates(Object.keys(this.config.settings.sources));
+
+      // Tickets stored before tickets recorded their repository are the home repository's, which the file cannot change from now on (PRD R44).
+      for (const [name, source] of Object.entries(this.config.settings.sources)) {
+        const home = homeRepo(source);
+
+        if (home !== '' && source.kind === 'github') {
+          this.deps.store.fillHomeRepo(name, home);
+        }
+      }
     }
 
     const enabled = this.enabledSources();
@@ -1389,13 +1470,23 @@ export class Runtime {
     }
   }
 
-  /** Links worktrees by branch name (PRD R25). */
+  /** Links worktrees by branch name in the root of each repository with open tickets in the source (PRD R25). */
   private async findWorktrees(name: string, source: Source): Promise<void> {
-    const home = ticketRoot(this.config.settings, { source: name, repo: '', repoRoot: '' }, this.deps.store.reposBySource()[name]);
-    const worktrees = 'error' in home ? null : await listWorktrees(home.root, this.deps.exec);
+    const settings = this.config.settings;
+    const stored = this.deps.store.reposBySource();
+    const repos = [...new Set([homeRepo(settings.sources[name]), ...this.deps.store.openRepos(name).map((repo) => repoOf(settings, { source: name, repo }))])];
+
+    for (const repo of repos) {
+      await this.findWorktreesIn(name, source, repo, stored);
+    }
+  }
+
+  private async findWorktreesIn(name: string, source: Source, repo: string, stored: Record<string, string[]>): Promise<void> {
+    const root = ticketRoot(this.config.settings, { source: name, repo, repoRoot: '' }, stored);
+    const worktrees = 'error' in root ? null : await listWorktrees(root.root, this.deps.exec);
 
     for (const worktree of worktrees ?? []) {
-      const key = worktree.branch === null ? null : source.keyOfBranch(worktree.branch);
+      const key = worktree.branch === null ? null : source.keyOfBranch(worktree.branch, repo);
       const ticket = key === null ? null : this.deps.store.findTicket(name, key);
 
       // The flow links only a ticket without a worktree, and each event rebuilds the views, so a linked ticket gets none.
@@ -1473,6 +1564,12 @@ export class Runtime {
         return;
       }
       case 'start-session': {
+        // Switchboard never clones: a folder a pattern names must already hold the repository's clone.
+        if (action.clone !== undefined && !existsSync(join(action.cwd, '.git'))) {
+          this.send({ type: 'session-start-failed', sessionId: action.sessionId, message: `No clone of ${action.clone} at ${action.cwd}.` });
+          return;
+        }
+
         const result = await this.runners[action.provider].start(action);
 
         this.send(

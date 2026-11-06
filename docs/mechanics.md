@@ -707,3 +707,11 @@ These mechanisms are planned but not yet verified for Switchboard:
 - **Result:** the app's review author is `{"__typename":"Bot","login":"claude"}`: the login has no `[bot]` suffix, so only `__typename` tells a bot from a person. The `states` filter accepts the list and returned both submitted reviews.
 - **Not verified:** that the filter leaves out the operator's own pending review, which only the operator's token sees; GitHub documents `PENDING` as a separate state.
 - **Current use:** the context query reads `__typename` on authors and actors, and the context shows bots as `<login> (bot)`. On somebody else's pull request, the source counts the operator's submitted reviews and pull request comments in code and writes them on one line for triage (architecture.md § Settings, GitHub reads).
+
+## M59. Board-wide issue search across repositories
+
+Checked 2026-11-05 with `gh` 2.100.0 against project `acme/3`, through `gh api graphql` with `ISSUES_QUERY` (which reads `repository { nameWithOwner }`).
+
+- `is:issue is:open project:acme/3`, with no `repo:` qualifier, returns the open issues of every repository on the board in one result set: the first page of 100 held 96 `acme/widgets`, 1 `acme/widgets-dashboard` and 3 `acme/widgets-infra` issues, and `endCursor` continued into the next page. The same query with `-repo:acme/widgets` returned 56 issues from six other repositories in one page.
+- With `assignee:work-login assignee:work-ai-login`, the qualifiers are ORed and the search returned 10 issues on one page.
+- Current use: a GitHub source searches its board without `repo:` and keys each issue by `repository.nameWithOwner` (PRD R44). With `requireAssignee` off, the board's whole open issue count is paged and counts against `maxPages` (16 pages for `acme/3`), so that setting suits a small board.

@@ -36,10 +36,10 @@ export type RootResult = { root: string } | { error: string };
 /**
  * A ticket's repo root (PRD R16, R21): its own `repoRoot` when it has one, as an ad-hoc, schedule or reported ticket does; else its source's
  * `repoRoot` with `{owner}` and `{name}` replaced by the ticket's repository; else, for a root without `{name}`, that root for the home
- * repository only. `stored` lists the repositories with tickets in the source: two that resolve to one root are refused, so neither runs in
- * the other's clone.
+ * repository only. `stored` lists the repositories with tickets in each source: two repositories, in any sources, that resolve to one root
+ * are refused, so neither runs in the other's clone.
  */
-export function ticketRoot(settings: Settings, ticket: Pick<Ticket, 'source' | 'repo' | 'repoRoot'>, stored: readonly string[] = []): RootResult {
+export function ticketRoot(settings: Settings, ticket: Pick<Ticket, 'source' | 'repo' | 'repoRoot'>, stored: Readonly<Record<string, readonly string[]>> = {}): RootResult {
   if (ticket.repoRoot !== '') {
     return { root: ticket.repoRoot };
   }
@@ -54,18 +54,29 @@ export function ticketRoot(settings: Settings, ticket: Pick<Ticket, 'source' | '
   const home = homeRepo(source);
   const repo = ticket.repo || home;
 
-  if (!isRootPattern(source.repoRoot)) {
-    return repo === home ? { root: source.repoRoot } : { error: `${path} has no {name}, so ${repo} has no repo root.` };
+  if (!isRootPattern(source.repoRoot) && repo !== home) {
+    return { error: `${path} has no {name}, so ${repo} has no repo root.` };
   }
 
   if (repo === '') {
-    return { error: `${path} names {name}, but the ticket has no repository.` };
+    return isRootPattern(source.repoRoot) ? { error: `${path} names {name}, but the ticket has no repository.` } : { root: source.repoRoot };
   }
 
-  const root = fill(source.repoRoot, repo);
-  const other = [...new Set([home, ...stored])].find((entry) => entry !== '' && entry !== repo && samePath(fill(source.repoRoot, entry), root));
+  const root = plainRoot(source, repo)!;
+  const other = Object.entries(settings.sources)
+    .flatMap(([name, entry]) => [homeRepo(entry), ...(stored[name] ?? [])].map((each) => ({ each, root: plainRoot(entry, each) })))
+    .find(({ each, root: theirs }) => each !== '' && each !== repo && theirs !== null && samePath(theirs, root))?.each;
 
-  return other === undefined ? { root } : { error: `${repo} and ${other} both resolve to ${root}; add {owner} to ${path}.` };
+  return other === undefined ? { root } : { error: `${repo} and ${other} both resolve to ${root}; add {owner} to the repo root patterns.` };
+}
+
+/** The root a source gives a repository, without checking collisions; null when it gives none. */
+function plainRoot(source: SourceSettings, repo: string): string | null {
+  if (source.repoRoot === '') {
+    return null;
+  }
+
+  return isRootPattern(source.repoRoot) ? (repo === '' ? null : fill(source.repoRoot, repo)) : repo === homeRepo(source) ? source.repoRoot : null;
 }
 
 /**
@@ -80,7 +91,7 @@ export function repoRoots(settings: Settings, stored: Readonly<Record<string, re
     const repos = stored[name] ?? [];
 
     for (const repo of isRootPattern(source.repoRoot) ? [homeRepo(source), ...repos] : ['']) {
-      const result = ticketRoot(settings, { source: name, repo, repoRoot: '' }, repos);
+      const result = ticketRoot(settings, { source: name, repo, repoRoot: '' }, stored);
 
       if ('root' in result && !roots.some((root) => samePath(root, result.root))) {
         roots.push(result.root);

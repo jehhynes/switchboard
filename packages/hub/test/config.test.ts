@@ -198,6 +198,29 @@ describe('loadConfig', () => {
   });
 });
 
+describe('labels and home repositories between sources (PRD R27, R44)', () => {
+  it('refuses a label that names a source or repeats for another repository', () => {
+    expect(
+      checkSettings({ sources: { github: { ...GITHUB, labels: { 'o/dash': 'dash', 'o/x': 'personal', 'o/y': 'gh' } }, personal: { kind: 'github', labels: { 'o/other': 'dash', 'O/Dash': 'dash' } } } }, new Set()),
+    ).toEqual(['sources.github.labels.o/x: personal names a source.', 'sources.github.labels.o/y: gh names a source.', 'sources.personal.labels.o/other: dash already labels o/dash.']);
+  });
+
+  it("refuses a home repository other than the one the source's tickets record, at check, save and load, and allows one for a source without tickets", () => {
+    const moved = { sources: { github: { ...GITHUB, repo: 'O/Elsewhere' } } };
+    const error = 'sources.github.repo cannot change from o/r while the source has tickets; add another source for o/elsewhere.';
+
+    expect(checkSettings(moved, new Set(), { github: 'o/r' })).toEqual([error]);
+    expect(checkSettings({ sources: { github: { ...GITHUB, repo: 'O/R' } } }, new Set(), { github: 'o/r' })).toEqual([]);
+    expect(checkSettings(moved, new Set(), { personal: 'o/r' })).toEqual([]);
+
+    write(settingsFile(), JSON.stringify({ sources: { github: GITHUB } }));
+    const valid = loadConfig(configDir(), undefined, { github: 'o/r' });
+    write(settingsFile(), JSON.stringify(moved));
+    expect(loadConfig(configDir(), valid, { github: 'o/r' })).toMatchObject({ settingsError: error, settings: valid.settings });
+    expect(saveSettings(configDir(), moved, fileVersion(readFileSync(settingsFile(), 'utf8')), new Set(), { github: 'o/r' })).toEqual({ errors: [error], version: null });
+  });
+});
+
 describe('loadConfig between sources', () => {
   it('keeps the last valid settings when two GitHub sources read one board (PRD R42)', () => {
     write(settingsFile(), JSON.stringify({ sources: { github: GITHUB } }));

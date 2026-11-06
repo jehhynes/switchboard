@@ -30,9 +30,18 @@ describe('ticketRoot (PRD R16, R21)', () => {
   });
 
   it('refuses two stored repositories that resolve to one root, naming both, until the pattern adds {owner}', () => {
-    expect(ticketRoot(withGithub('D:/git/{name}'), ticket('bob/widgets'), ['bob/widgets'])).toEqual({ error: 'bob/widgets and acme/widgets both resolve to D:/git/widgets; add {owner} to sources.github.repoRoot.' });
-    expect(ticketRoot(withGithub('D:/git/{name}'), ticket(''), ['alice/project', 'bob/widgets'])).toEqual({ error: 'acme/widgets and bob/widgets both resolve to D:/git/widgets; add {owner} to sources.github.repoRoot.' });
-    expect(ticketRoot(withGithub('D:/git/{owner}/{name}'), ticket('bob/widgets'), ['bob/widgets'])).toEqual({ root: 'D:/git/bob/widgets' });
+    expect(ticketRoot(withGithub('D:/git/{name}'), ticket('bob/widgets'), { github: ['bob/widgets'] })).toEqual({ error: 'bob/widgets and acme/widgets both resolve to D:/git/widgets; add {owner} to the repo root patterns.' });
+    expect(ticketRoot(withGithub('D:/git/{name}'), ticket(''), { github: ['alice/project', 'bob/widgets'] })).toEqual({ error: 'acme/widgets and bob/widgets both resolve to D:/git/widgets; add {owner} to the repo root patterns.' });
+    expect(ticketRoot(withGithub('D:/git/{owner}/{name}'), ticket('bob/widgets'), { github: ['bob/widgets'] })).toEqual({ root: 'D:/git/bob/widgets' });
+  });
+
+  it("refuses a repository in another source that resolves to the same root, and allows the same repository in two sources", () => {
+    const value = withGithub('D:/git/widgets');
+    value.sources['personal'] = { ...value.sources['github']!, repoRoot: 'D:/git/{name}', options: { repo: 'work-login/switchboard' } };
+
+    expect(ticketRoot(value, { source: 'personal', repo: 'bob/widgets', repoRoot: '' }, { personal: ['bob/widgets'] })).toEqual({ error: 'bob/widgets and acme/widgets both resolve to D:/git/widgets; add {owner} to the repo root patterns.' });
+    expect(ticketRoot(value, ticket(''), { personal: ['bob/widgets'] })).toEqual({ error: 'acme/widgets and bob/widgets both resolve to D:/git/widgets; add {owner} to the repo root patterns.' });
+    expect(ticketRoot(value, { source: 'personal', repo: 'acme/widgets', repoRoot: '' }, { personal: ['acme/widgets'] })).toEqual({ root: 'D:/git/widgets' });
   });
 
   it('reports a missing root, and a pattern for a ticket with no repository', () => {

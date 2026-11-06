@@ -1,0 +1,148 @@
+{
+  "data": {
+    "search": {
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOjQ="
+      },
+      "nodes": [
+        {
+          "number": 21512,
+          "title": "Issue 21512",
+          "url": "https://github.com/acme/widgets/issues/21512",
+          "repository": {
+            "nameWithOwner": "acme/widgets"
+          },
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🔍 Review"
+                }
+              }
+            ]
+          },
+          "assignees": {
+            "nodes": [
+              {
+                "login": "someone"
+              }
+            ]
+          },
+          "blockedBy": {
+            "nodes": []
+          },
+          "timelineItems": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 21510,
+          "title": "Issue 21510",
+          "url": "https://github.com/acme/widgets/issues/21510",
+          "repository": {
+            "nameWithOwner": "acme/widgets"
+          },
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🔖 Planned"
+                }
+              }
+            ]
+          },
+          "assignees": {
+            "nodes": []
+          },
+          "blockedBy": {
+            "nodes": []
+          },
+          "timelineItems": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 65,
+          "title": "Issue 65",
+          "url": "https://github.com/acme/widgets-dashboard/issues/65",
+          "repository": {
+            "nameWithOwner": "acme/widgets-dashboard"
+          },
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🆕 New"
+                }
+              }
+            ]
+          },
+          "assignees": {
+            "nodes": []
+          },
+          "blockedBy": {
+            "nodes": []
+          },
+          "timelineItems": {
+            "nodes": []
+          }
+        },
+        {
+          "number": 191,
+          "title": "Issue 191",
+          "url": "https://github.com/acme/widgets-infra/issues/191",
+          "repository": {
+            "nameWithOwner": "acme/widgets-infra"
+          },
+          "projectItems": {
+            "nodes": [
+              {
+                "project": {
+                  "number": 3,
+                  "owner": {
+                    "login": "acme"
+                  }
+                },
+                "fieldValueByName": {
+                  "name": "🎁 Assigned"
+                }
+              }
+            ]
+          },
+          "assignees": {
+            "nodes": [
+              {
+                "login": "someone"
+              }
+            ]
+          },
+          "blockedBy": {
+            "nodes": []
+          },
+          "timelineItems": {
+            "nodes": []
+          }
+        }
+      ]
+    }
+  }
+}

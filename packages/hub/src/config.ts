@@ -4,9 +4,11 @@ import { dirname, join } from 'node:path';
 import {
   ADHOC_SOURCE,
   DEFAULT_SETTINGS,
+  homeRepo,
   parsePlaybook,
   parsePlaybooks,
   parseSettings,
+  SCHEDULE_SOURCE,
   TEMPLATE_VARIABLES,
   templateError,
   TRIAGE_VARIABLES,
@@ -51,9 +53,11 @@ export function sourceOptionsError(name: string, kind: string, options: Record<s
  * reporting finds Zoho and Forum tickets by source name; no source may take another kind's name; and no two GitHub sources may read one project
  * board, including a source that is off, because an issue would then belong to both.
  */
-export function sourcesErrors(settings: Settings): string[] {
+export function sourcesErrors(settings: Settings, recorded: Readonly<Record<string, string>> = {}): string[] {
   const errors: string[] = [];
   const boards = new Map<string, string>();
+  const labels = new Map<string, string>();
+  const names = new Set([...Object.keys(settings.sources), 'gh', ADHOC_SOURCE, SCHEDULE_SOURCE]);
 
   for (const [name, source] of Object.entries(settings.sources)) {
     const path = `sources.${name}`;
@@ -65,6 +69,29 @@ export function sourcesErrors(settings: Settings): string[] {
     }
 
     const project = source.kind === 'github' ? (source.options['project'] as { owner?: unknown; number?: unknown } | undefined) : undefined;
+
+    const home = homeRepo(source);
+
+    // Bare keys mean the home repository, so it cannot change under stored tickets (PRD R44).
+    if (recorded[name] !== undefined && home !== '' && home !== recorded[name]) {
+      errors.push(`${path}.repo cannot change from ${recorded[name]} while the source has tickets; add another source for ${home}.`);
+    }
+
+    const sourceLabels = source.kind === 'github' ? source.options['labels'] : undefined;
+
+    for (const [repo, label] of typeof sourceLabels === 'object' && sourceLabels !== null ? Object.entries(sourceLabels) : []) {
+      if (typeof label !== 'string') {
+        continue;
+      }
+
+      if (names.has(label)) {
+        errors.push(`${path}.labels.${repo}: ${label} names a source.`);
+      } else if (labels.has(label) && labels.get(label) !== repo.toLowerCase()) {
+        errors.push(`${path}.labels.${repo}: ${label} already labels ${labels.get(label)}.`);
+      } else {
+        labels.set(label, repo.toLowerCase());
+      }
+    }
 
     if (typeof project?.owner === 'string' && typeof project.number === 'number') {
       const board = `${project.owner.toLowerCase()}/${project.number}`;
@@ -117,14 +144,14 @@ const changed = (file: string) => `${file} changed on disk after the editor read
  * in `enabled`, which disable that source, unknown variables in `setupPrompt`, and each playbook's, as `playbooks.<name>: <error>`,
  * which leave that playbook out. Unknown template variables are included because the hub finds them only when rendering fails.
  */
-export function checkSettings(value: unknown, enabled: ReadonlySet<string>): string[] {
+export function checkSettings(value: unknown, enabled: ReadonlySet<string>, recorded: Readonly<Record<string, string>> = {}): string[] {
   const parsed = parseSettings(JSON.stringify(value));
 
   if ('errors' in parsed) {
     return parsed.errors;
   }
 
-  const errors = sourcesErrors(parsed.settings);
+  const errors = sourcesErrors(parsed.settings, recorded);
 
   for (const [name, source] of Object.entries(parsed.settings.sources)) {
     const setupError = templateError(source.setupPrompt);
@@ -210,14 +237,14 @@ export function readConfigFile(configDir: string): SettingsFile {
 export type SaveResult = { errors: string[]; version: string | null };
 
 /** Writes settings.json as formatted JSON. Refuses when the file changed since `version` was read, or with the errors of {@link checkSettings}. */
-export function saveSettings(configDir: string, value: unknown, version: string | null, enabled: ReadonlySet<string>): SaveResult {
+export function saveSettings(configDir: string, value: unknown, version: string | null, enabled: ReadonlySet<string>, recorded: Readonly<Record<string, string>> = {}): SaveResult {
   const path = settingsPath(configDir);
 
   if (fileVersion(readText(path)) !== version) {
     return { errors: [changed('settings.json')], version: null };
   }
 
-  const errors = checkSettings(value, enabled);
+  const errors = checkSettings(value, enabled, recorded);
 
   if (errors.length > 0) {
     return { errors, version: null };
@@ -229,8 +256,15 @@ export function saveSettings(configDir: string, value: unknown, version: string 
   return { errors: [], version: fileVersion(text) };
 }
 
-/** Reads settings.json. A missing file means the defaults and no playbooks; an invalid one keeps `previous` (PRD R42). */
-export function loadConfig(configDir: string, previous: Config = { settings: DEFAULT_SETTINGS, settingsError: null, playbooks: new Map(), playbookErrors: [] }): Config {
+/**
+ * Reads settings.json. A missing file means the defaults and no playbooks; an invalid one keeps `previous` (PRD R42). `recorded` holds the
+ * home repository each source's tickets record, which the file may not change.
+ */
+export function loadConfig(
+  configDir: string,
+  previous: Config = { settings: DEFAULT_SETTINGS, settingsError: null, playbooks: new Map(), playbookErrors: [] },
+  recorded: Readonly<Record<string, string>> = {},
+): Config {
   let text: string;
 
   try {
@@ -245,7 +279,7 @@ export function loadConfig(configDir: string, previous: Config = { settings: DEF
 
   const parsed = parseSettings(text);
 
-  const rejected = 'errors' in parsed ? parsed.errors : sourcesErrors(parsed.settings);
+  const rejected = 'errors' in parsed ? parsed.errors : sourcesErrors(parsed.settings, recorded);
 
   if ('errors' in parsed || rejected.length > 0) {
     return { ...previous, settingsError: rejected.join(' ') };

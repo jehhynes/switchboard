@@ -1492,8 +1492,31 @@ describe("a ticket's repository and repo root (PRD R16, R21, R44)", () => {
     h.settings.sources['github']!.repoRoot = 'D:/git/widgets';
     const [triage] = h.poll({ ...issue('63'), repo: 'acme/widgets-dashboard' });
     h.triaged(triage, 'dev:repo');
+    h.act({ type: 'start', workItemId: 1 });
 
     expect(h.item(1)).toMatchObject({ status: 'failed', error: 'sources.github.repoRoot has no {name}, so acme/widgets-dashboard has no repo root.' });
+  });
+
+  it("fails a start whose root is refused even when a worktree is linked, so the worktree cannot stand in for an unknown clone", () => {
+    const h = patterned();
+    h.settings.sources['github']!.repoRoot = 'D:/git/widgets';
+    const [triage] = h.poll({ ...issue('acme/widgets-dashboard#63'), repo: 'acme/widgets-dashboard' });
+    h.act({ type: 'worktree-found', source: 'github', sourceKey: 'acme/widgets-dashboard#63', path: 'D:/git/widgets-wt/63-fix', branch: '63-fix' });
+    h.triaged(triage, 'dev:develop');
+
+    expect(h.act({ type: 'start', workItemId: 1 })).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: 'sources.github.repoRoot has no {name}, so acme/widgets-dashboard has no repo root.' });
+  });
+
+  it("holds another repository's auto-start work for Start, saying why, and starts it in its own root on Start (PRD R44)", () => {
+    const h = patterned();
+    const [triage] = h.poll({ ...issue('acme/widgets-dashboard#63'), ref: 'acme/widgets-dashboard#63', repo: 'acme/widgets-dashboard', url: 'https://github.com/acme/widgets-dashboard/issues/63' });
+
+    expect(h.triaged(triage, 'dev:repo')).toEqual([]);
+    expect(h.item(1)).toMatchObject({ status: 'unstarted', error: 'acme/widgets-dashboard is outside the home repository acme/widgets, so it waits for Start.' });
+    expect(h.act({ type: 'start', workItemId: 1 })).toEqual([
+      expect.objectContaining({ type: 'start-session', cwd: 'D:/git/widgets-dashboard', prompt: expect.stringContaining('acme/widgets-dashboard 63 acme/widgets-dashboard#63 acme/widgets-dashboard#63') }),
+    ]);
   });
 
   it('leaves {{ticket.repo}} and {{ticket.number}} empty for a ticket without a repository', () => {

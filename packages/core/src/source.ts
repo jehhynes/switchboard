@@ -43,12 +43,15 @@ export interface Source {
   poll(current: readonly Ticket[]): Promise<PollResult>;
   /** The triage context: the ticket's text, clipped and formatted for the classifier. */
   context(ticket: Ticket): Promise<ContextResult>;
-  /** The ticket key a worktree's branch names by convention, or null (PRD R25). */
-  keyOfBranch(branch: string): string | null;
+  /** The ticket key a worktree's branch in `repo`, `owner/name` in lowercase or empty, names by convention, or null (PRD R25). */
+  keyOfBranch(branch: string, repo: string): string | null;
   /** Checks a link a session reports for the ticket; a source without it accepts every link (PRD R52). */
   checkLink?(ticket: Ticket, target: string): Promise<LinkCheck>;
-  /** Reads the ticket at `url`, or answers null when the URL is not one of this source's tickets (PRD R83). */
+  /** Reads the ticket at `url`, or answers null when the URL is not one of this source's tickets, such as an issue on another board (PRD R83). */
   ticketAt?(url: string): Promise<TicketLookup | null>;
-  /** Actual operator assignment, independent of status/project eligibility; null for another source's URL. */
-  assignmentAt?(url: string): Promise<AssignmentLookup | null>;
+  /**
+   * Actual operator assignment, independent of status; null for another source's URL, or, unless `anyBoard`, for an issue outside the
+   * source's board (PRD R85). A registered ticket is read with `anyBoard`, so leaving the board does not fail the poll.
+   */
+  assignmentAt?(url: string, anyBoard?: boolean): Promise<AssignmentLookup | null>;
 }

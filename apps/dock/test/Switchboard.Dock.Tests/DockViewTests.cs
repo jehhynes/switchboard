@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Switchboard.Dock.Hub;
+using Switchboard.Dock.Views;
 
 namespace Switchboard.Dock.Tests;
 
@@ -177,5 +178,18 @@ public sealed class DockViewTests
         var link = System.Text.Json.JsonSerializer.Deserialize<DockLink>("""{"label":"PR #19002","url":"https://github.com/o/r/pull/19002"}""", new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
 
         Assert.Equal(("PR #19002", false), (link.Text, link.HasGlyph));
+    }
+
+    [Avalonia.Headless.XUnit.AvaloniaFact]
+    public void Show_OlderHubSources_ShowsEachAsAToggleOfOne()
+    {
+        var json = System.Text.Json.Nodes.JsonNode.Parse(Fixtures.DockJson)!;
+        json["sources"] = System.Text.Json.Nodes.JsonNode.Parse("""[{"name":"github","enabled":true},{"name":"zoho","enabled":false}]""");
+        var model = new DockViewModel(new DockSettings(), (_) => { });
+
+        model.Show(DockView.Parse(json.ToJsonString()));
+
+        Assert.Equal([("github", "github", true, false), ("zoho", "zoho", false, false)], model.Sources.Select((group) => (group.Kind, group.Name, group.Enabled, group.IsMenu)));
+        Assert.Equal("zoho: not polled. Click to poll it.", model.Sources[1].Tip);
     }
 }

@@ -11,6 +11,7 @@ describe('parseGithubConfig', () => {
       config: {
         ghPath: 'gh',
         repo: 'acme/widgets',
+        labels: {},
         logins: ['work-login'],
         requireAssignee: true,
         waitForBlockers: false,
@@ -21,6 +22,13 @@ describe('parseGithubConfig', () => {
         rolesFile: null,
       },
     });
+  });
+
+  it('reads the home repository and labels in lowercase, and refuses a label key or value it cannot use (PRD R27, R44)', () => {
+    expect(parseGithubConfig({ ...VALID, repo: 'Acme/Widgets', labels: { 'Acme/Widgets-Dashboard': 'dash' } })).toMatchObject({ config: { repo: 'acme/widgets', labels: { 'acme/widgets-dashboard': 'dash' } } });
+    expect(parseGithubConfig({ ...VALID, labels: ['dash'] })).toEqual({ error: 'sources.github.labels must map owner/name to a label.' });
+    expect(parseGithubConfig({ ...VALID, labels: { dashboard: 'dash' } })).toEqual({ error: 'sources.github.labels.dashboard: the key must be owner/name.' });
+    expect(parseGithubConfig({ ...VALID, labels: { 'acme/widgets-dashboard': 'Dash Board' } })).toEqual({ error: 'sources.github.labels.acme/widgets-dashboard must be lowercase letters, digits and hyphens.' });
   });
 
   it('keeps requireAssignee off', () => {
