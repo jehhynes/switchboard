@@ -393,7 +393,7 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
 
         if (version != Config["settings"]!["version"]?.GetValue<string>())
         {
-            return new(["settings.json changed on disk after the editor read it. Discard to load it."], null);
+            return new(["settings.json changed on disk after the editor read it. Discard your changes and open Settings again to load it."], null);
         }
 
         var written = $"s{++saves}";

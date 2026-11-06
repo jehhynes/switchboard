@@ -42,6 +42,8 @@ public sealed class SettingsWindowTests
         var saved = new List<string>();
         var dock = new DockViewModel(new DockSettings { Theme = "vscode" }, settings => saved.Add(settings.Theme));
         var (window, _) = Open(dock: dock);
+        var closed = false;
+        window.Closed += (_, _) => closed = true;
         var theme = ThemeBox(window);
 
         Assert.Equal(1, theme.SelectedIndex);
@@ -56,8 +58,7 @@ public sealed class SettingsWindowTests
         Assert.Equal(["light"], saved);
         Assert.Equal("light", dock.Theme);
         Assert.Empty(hub.Saves);
-        Assert.False(PageButton(window, "save").IsEnabled);
-        Assert.Contains("Saved", Texts(window));
+        Assert.True(closed);
     }
 
     [AvaloniaFact]
@@ -65,11 +66,14 @@ public sealed class SettingsWindowTests
     {
         var dock = new DockViewModel(new DockSettings { Theme = "dark" }, _ => throw new InvalidOperationException("Unexpected save"));
         var (window, _) = Open(dock: dock);
+        var closed = false;
+        window.Closed += (_, _) => closed = true;
         ThemeBox(window).SelectedIndex = 2;
+        Settle();
         Click(PageButton(window, "discard"));
-        Assert.Equal(3, ThemeBox(window).SelectedIndex);
+        Assert.True(closed);
+        Assert.Empty(window.OwnedWindows);
         Assert.Equal("dark", dock.Theme);
-        Assert.False(PageButton(window, "save").IsEnabled);
     }
 
     [AvaloniaFact]
@@ -77,8 +81,11 @@ public sealed class SettingsWindowTests
     {
         var dock = new DockViewModel(new DockSettings(), _ => throw new IOException("disk full"));
         var (window, _) = Open(dock: dock);
+        var closed = false;
+        window.Closed += (_, _) => closed = true;
         ThemeBox(window).SelectedIndex = 2;
         Click(PageButton(window, "save"));
+        Assert.False(closed);
         Assert.Equal("system", dock.Theme);
         Assert.Equal(2, ThemeBox(window).SelectedIndex);
         Assert.Contains("The dock could not save its settings: disk full", Texts(window));
@@ -123,6 +130,8 @@ public sealed class SettingsWindowTests
         var saved = new List<string>();
         var dock = new DockViewModel(new DockSettings(), settings => saved.Add(settings.Theme));
         var (window, _) = Open(dock: dock);
+        var closed = false;
+        window.Closed += (_, _) => closed = true;
         ThemeBox(window).SelectedIndex = 2;
         Field<TextBox>(window, "sessions.concurrency").Text = "3";
         Settle();
@@ -134,6 +143,7 @@ public sealed class SettingsWindowTests
         Settle();
         Assert.Equal(["light"], saved);
         Assert.Equal("light", dock.Theme);
+        Assert.False(closed);
         Assert.Equal(3, ThemeBox(window).SelectedIndex);
         Assert.True(PageButton(window, "save").IsEnabled);
         Assert.Contains("Unsaved changes", Texts(window));
@@ -239,8 +249,10 @@ public sealed class SettingsWindowTests
     public void CtrlS_InATextBox_SavesTheFile()
     {
         var (window, _) = Open();
+        var closed = false;
         var box = Field<TextBox>(window, "sessions.concurrency");
 
+        window.Closed += (_, _) => closed = true;
         box.Text = "3";
         box.Focus();
         Settle();
@@ -249,6 +261,7 @@ public sealed class SettingsWindowTests
 
         Assert.Single(hub.Saves);
         Assert.Equal("Saved", FileStatus(window));
+        Assert.False(closed);
     }
 
     [AvaloniaFact]
@@ -273,18 +286,74 @@ public sealed class SettingsWindowTests
     }
 
     [AvaloniaFact]
-    public void Discard_Clicked_ShowsTheFileAgain()
+    public void Discard_Clicked_ClosesWithoutAskingOrSaving()
     {
-        var (window, editor) = Open();
+        var (window, closed) = Changed(close: false);
 
-        Field<TextBox>(window, "sessions.concurrency").Text = "3";
-        Settle();
         Click(PageButton(window, "discard"));
 
-        Assert.Equal("2", Field<TextBox>(window, "sessions.concurrency").Text);
-        Assert.Null(editor.State!.Draft);
-        Assert.False(PageButton(window, "discard").IsEnabled);
+        Assert.True(closed());
+        Assert.Empty(window.OwnedWindows);
         Assert.Empty(hub.Saves);
+    }
+
+    [AvaloniaFact]
+    public void Save_Clicked_SavesAndCloses()
+    {
+        var (window, closed) = Changed(close: false);
+
+        Click(PageButton(window, "save"));
+
+        Assert.True(closed());
+        Assert.Contains("\"concurrency\":3", Assert.Single(hub.Saves));
+    }
+
+    [AvaloniaFact]
+    public void Save_FinishesAfterCloseKeepEditing_StaysOpen()
+    {
+        var (window, closed) = Changed(close: false);
+        var release = new TaskCompletionSource();
+
+        hub.HoldSave = () => release.Task;
+        Click(PageButton(window, "save"));
+        window.Close();
+        Settle();
+        Click(DialogButton(window, "CloseKeep"));
+        release.SetResult();
+        Settle();
+
+        Assert.False(closed());
+        Assert.Single(hub.Saves);
+        Assert.Equal("Saved", FileStatus(window));
+    }
+
+    [AvaloniaFact]
+    public void Save_FinishesWhileCloseAsks_LeavesTheQuestionOpen()
+    {
+        var (window, closed) = Changed(close: false);
+        var release = new TaskCompletionSource();
+
+        hub.HoldSave = () => release.Task;
+        Click(PageButton(window, "save"));
+        window.Close();
+        Settle();
+        release.SetResult();
+        Settle();
+
+        Assert.False(closed());
+        Assert.Single(window.OwnedWindows);
+    }
+
+    [AvaloniaFact]
+    public void Save_ClickedAndRefused_StaysOpenAndShowsWhy()
+    {
+        var (window, closed) = Changed(close: false);
+
+        hub.SaveReplies.Enqueue(["Switchboard is not running."]);
+        Click(PageButton(window, "save"));
+
+        Assert.False(closed());
+        Assert.Contains("Switchboard is not running.", Texts(window));
     }
 
     [AvaloniaFact]
@@ -423,8 +492,8 @@ public sealed class SettingsWindowTests
 
     static Button DialogButton(Window window, string name) => Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
 
-    /// <summary>A window with an unsaved change, and a flag that turns true when it closes.</summary>
-    (SettingsWindow Window, Func<bool> Closed) Changed()
+    /// <summary>A window with an unsaved change, closed with its close button unless told not to, and a flag that turns true when it closes.</summary>
+    (SettingsWindow Window, Func<bool> Closed) Changed(bool close = true)
     {
         var (window, _) = Open();
         var closed = false;
@@ -432,8 +501,12 @@ public sealed class SettingsWindowTests
         window.Closed += (_, _) => closed = true;
         Field<TextBox>(window, "sessions.concurrency").Text = "3";
         Settle();
-        window.Close();
-        Settle();
+
+        if (close)
+        {
+            window.Close();
+            Settle();
+        }
 
         return (window, () => closed);
     }
@@ -637,9 +710,11 @@ public sealed class SettingsWindowTests
         Assert.Empty(window.OwnedWindows);
         Assert.DoesNotContain(window.GetVisualDescendants().OfType<Button>(), (button) => (string?)button.Tag == "source:github");
 
+        var closed = false;
+        window.Closed += (_, _) => closed = true;
         Click(PageButton(window, "discard"));
 
-        Assert.NotNull(NavButton(window, "source:github"));
+        Assert.True(closed);
         Assert.Empty(hub.Saves);
     }
 }

@@ -137,7 +137,7 @@ function writeAtomic(path: string, text: string): void {
   renameSync(`${path}.tmp`, path);
 }
 
-const changed = (file: string) => `${file} changed on disk after the editor read it. Discard to load it.`;
+const changed = (file: string) => `${file} changed on disk after the editor read it. Discard your changes and open Settings again to load it.`;
 
 /**
  * Every error the hub would report for these settings: the file's own, which reject it whole (PRD R42), then the keys of each source

@@ -247,8 +247,8 @@ describe('saveSettings', () => {
   it('refuses a file changed since it was read, and invalid settings, leaving the file alone', () => {
     write(settingsFile(), '{}');
 
-    expect(saveSettings(configDir(), { triage: {} }, fileVersion('{"old": 1}'), new Set(['github']))).toEqual({ errors: ['settings.json changed on disk after the editor read it. Discard to load it.'], version: null });
-    expect(saveSettings(configDir(), { triage: {} }, null, new Set(['github']))).toEqual({ errors: ['settings.json changed on disk after the editor read it. Discard to load it.'], version: null });
+    expect(saveSettings(configDir(), { triage: {} }, fileVersion('{"old": 1}'), new Set(['github']))).toEqual({ errors: ['settings.json changed on disk after the editor read it. Discard your changes and open Settings again to load it.'], version: null });
+    expect(saveSettings(configDir(), { triage: {} }, null, new Set(['github']))).toEqual({ errors: ['settings.json changed on disk after the editor read it. Discard your changes and open Settings again to load it.'], version: null });
     expect(saveSettings(configDir(), { triage: { timeoutSeconds: 0 } }, fileVersion('{}'), new Set(['github']))).toEqual({ errors: ['triage.timeoutSeconds must be a whole number of at least 1.'], version: null });
     expect(readFileSync(settingsFile(), 'utf8')).toBe('{}');
   });

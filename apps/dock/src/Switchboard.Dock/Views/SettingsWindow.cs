@@ -36,6 +36,8 @@ public sealed class SettingsWindow : Window
     // Set once the window may close without asking again, and while a close waits for an answer or a save.
     bool closing;
     bool asking;
+    // Counts close requests that asked first, so a Save click that finishes after one leaves the answer to that request.
+    int closeRequests;
     StackPanel notes = new();
     StackPanel errors = new();
     readonly Decorator table = new();
@@ -116,15 +118,19 @@ public sealed class SettingsWindow : Window
         var border = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(16, 8), Child = grid };
 
         save.Classes.Add("accent");
-        ToolTip.SetTip(save, "Save settings (Ctrl+S)");
-        ToolTip.SetTip(discard, "Drop every unsaved change and reload settings");
-        save.Click += async (_, _) => await Save();
-        discard.Click += async (_, _) =>
+        ToolTip.SetTip(save, "Save settings and close (Ctrl+S saves and stays open)");
+        ToolTip.SetTip(discard, "Drop every unsaved change and close settings");
+        save.Click += async (_, _) =>
         {
-            theme = dock.Theme;
-            await editor.Discard();
-            Draw();
+            var requests = closeRequests;
+
+            // A change made while the save ran stays open as unsaved.
+            if (await Save() && requests == closeRequests && !ThemeDirty && editor.State is not { Dirty: true })
+            {
+                CloseNow();
+            }
         };
+        discard.Click += (_, _) => CloseNow();
         Grid.SetColumn(buttons, 1);
         border.Bind(Border.BorderBrushProperty, this.GetResourceObservable("DockBorder"));
         Tinted(fileStatus, "DockMuted");
@@ -151,6 +157,7 @@ public sealed class SettingsWindow : Window
         }
 
         e.Cancel = true;
+        closeRequests++;
 
         if (asking)
         {
@@ -173,6 +180,12 @@ public sealed class SettingsWindow : Window
             asking = false;
         }
 
+        CloseNow();
+    }
+
+    /// <summary>Closes without asking; the draft and theme choice go with the window.</summary>
+    void CloseNow()
+    {
         closing = true;
         Close();
     }

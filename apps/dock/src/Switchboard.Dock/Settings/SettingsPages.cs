@@ -137,7 +137,7 @@ public static class SettingsPages
         var status = state.Saving ? "Saving…"
             : state.SettingsValue is null ? "settings.json cannot be read"
             : string.Join(" · ", [state.Dirty ? "Unsaved changes" : "Saved", .. count == 0 ? Array.Empty<string>() : [count == 1 ? "1 error" : $"{count} errors"]]);
-        var warning = state.ChangedOnDisk ? "settings.json changed on disk, so your changes cannot be saved. Discard to load it." : null;
+        var warning = state.ChangedOnDisk ? "settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it." : null;
 
         return new BarView(status, warning, state.BarErrors, state.Dirty && !state.ChangedOnDisk && !state.Saving, (state.Dirty || state.ChangedOnDisk) && !state.Saving);
     }

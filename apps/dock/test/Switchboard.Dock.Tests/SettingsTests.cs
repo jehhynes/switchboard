@@ -800,7 +800,7 @@ public sealed class SettingsPagesTests
 
         var changed = SettingsPages.Bar(state);
 
-        Assert.Equal("settings.json changed on disk, so your changes cannot be saved. Discard to load it.", changed.Warning);
+        Assert.Equal("settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it.", changed.Warning);
         Assert.False(changed.CanSave);
         Assert.True(changed.CanDiscard);
 
