@@ -14,6 +14,7 @@ export interface GithubConfig {
   /** True puts a closed issue in the assigned state like an open one, for a team that closes issues before merging (PRD R44). */
   includeClosed: boolean;
   project: { owner: string; number: number; statusField: string };
+  /** Empty puts an issue in any status, or none, in the assigned state. */
   assignedStatuses: string[];
   /** Its first group is the issue number a worktree branch names. */
   branchPattern: RegExp;
@@ -32,7 +33,12 @@ function strings(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry !== '') ? (value as string[]) : null;
 }
 
-/** Reads the GitHub keys of the source `name`. The source refuses to poll until repo, logins, project and statuses are set. */
+/** Whether an issue's project status puts it in the assigned state: any status, or none, while no status is configured. */
+export function inAssignedStatus(config: GithubConfig, status: string | undefined): boolean {
+  return config.assignedStatuses.length === 0 || (status !== undefined && config.assignedStatuses.includes(status));
+}
+
+/** Reads the GitHub keys of the source `name`. The source refuses to poll until repo, logins and project are set. */
 export function parseGithubConfig(options: Record<string, unknown>, name = 'github'): ConfigResult {
   const path = `sources.${name}`;
   const unknown = Object.keys(options).filter((key) => !KEYS.includes(key));
@@ -41,7 +47,7 @@ export function parseGithubConfig(options: Record<string, unknown>, name = 'gith
     return { error: `${path}.${unknown[0]} is not a setting.` };
   }
 
-  const { ghPath = 'gh', repo, labels = {}, logins, requireAssignee = true, waitForBlockers = false, includeClosed = false, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
+  const { ghPath = 'gh', repo, labels = {}, logins, requireAssignee = true, waitForBlockers = false, includeClosed = false, project, assignedStatuses = [], branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
 
   if (typeof repo !== 'string' || !REPO.test(repo)) {
     return { error: `${path}.repo must be set to owner/name.` };
@@ -87,8 +93,8 @@ export function parseGithubConfig(options: Record<string, unknown>, name = 'gith
 
   const statuses = strings(assignedStatuses);
 
-  if (statuses === null || statuses.length === 0) {
-    return { error: `${path}.assignedStatuses must list at least one status.` };
+  if (statuses === null) {
+    return { error: `${path}.assignedStatuses must list statuses.` };
   }
 
   if (typeof ghPath !== 'string' || ghPath === '') {

@@ -66,6 +66,16 @@ describe('operator assignment identity', () => {
     expect(await readAssignment({ ...config, requireAssignee: false }, gh, WIDGETS_7)).toMatchObject({ assignmentKey: null, assigned: true });
   });
 
+  it('reads an issue in any status, or none, as assigned while no status is configured, but not one off the board (PRD R44)', async () => {
+    const data = issue();
+    data.projectItems.nodes[0]!.fieldValueByName = null as unknown as { name: string };
+    const gh = vi.fn<Gh>().mockResolvedValue(response(data));
+    expect(await readAssignment(config, gh, WIDGETS_7)).toMatchObject({ assigned: false });
+    expect(await readAssignment({ ...config, assignedStatuses: [] }, gh, WIDGETS_7)).toMatchObject({ assigned: true });
+    data.projectItems.nodes = [];
+    expect(await readAssignment({ ...config, assignedStatuses: [] }, gh, WIDGETS_7)).toMatchObject({ assigned: false });
+  });
+
   it('reads a closed issue as unassigned and not open, unless includeClosed is on (PRD R44)', async () => {
     const gh = vi.fn<Gh>().mockResolvedValue(response({ ...issue(), state: 'CLOSED' }));
     expect(await readAssignment(config, gh, WIDGETS_7)).toMatchObject({ assignmentKey: 'I1:a1', assigned: false, ticket: { open: false } });

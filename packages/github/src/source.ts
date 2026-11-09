@@ -1,6 +1,7 @@
 import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket, TicketBlocker, TicketLookup } from '@switchboard/core';
 import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
+import { inAssignedStatus } from './config.js';
 import type { Gh } from './gh.js';
 import { CONTEXT_QUERY, FIELD_QUERY, ISSUE_QUERY, ISSUES_QUERY, PULL_REQUEST_QUERY } from './queries.js';
 import type { Roles, RolesResult } from './roles.js';
@@ -137,8 +138,8 @@ export class GithubSource implements Source {
 
   /**
    * Reads every open issue assigned to a configured login on the project, and lists an issue whose status is not configured as not
-   * assigned. With `requireAssignee` off, reads every open issue on the project and lists only those on a configured status. With
-   * `includeClosed`, closed issues are read too. A malformed response is a failed read. An issue of `current` stored as assigned that the search drops or lists outside scope is read on its own.
+   * assigned. With `requireAssignee` off, reads every open issue on the project and lists only those on a configured status, or on any
+   * status while none is configured. With `includeClosed`, closed issues are read too. A malformed response is a failed read. An issue of `current` stored as assigned that the search drops or lists outside scope is read on its own.
    */
   async poll(current: readonly Ticket[] = []): Promise<PollResult> {
     try {
@@ -357,7 +358,7 @@ export class GithubSource implements Source {
   }
 
   private async readIssues(current: readonly Ticket[]): Promise<PollResult> {
-    const { repo: home, logins, requireAssignee, includeClosed, project, assignedStatuses, maxPages } = this.config;
+    const { repo: home, logins, requireAssignee, includeClosed, project, maxPages } = this.config;
     const assignees = requireAssignee ? logins.map((login) => `assignee:${login}`) : [];
     // The board, not a repository, scopes the search, so every repository on it is read in one search (mechanics M59). Without `is:open`
     // the search returns both states (mechanics M60).
@@ -385,9 +386,10 @@ export class GithubSource implements Source {
           continue;
         }
 
-        const field = node.projectItems.nodes.find((item) => this.onProject(item.project))?.fieldValueByName;
-        const status = field?.name;
-        const assigned = status !== undefined && assignedStatuses.includes(status);
+        const item = node.projectItems.nodes.find((entry) => this.onProject(entry.project));
+        const field = item?.fieldValueByName;
+        // An issue on more projects than the query reads has no item for the board, and is not assigned.
+        const assigned = item !== undefined && inAssignedStatus(this.config, field?.name);
 
         // Without the assignee filter the search returns the whole board, so only issues in scope are listed. The flow reads an unlisted
         // ticket as having left the assigned state.

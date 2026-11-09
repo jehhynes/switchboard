@@ -158,6 +158,13 @@ describe('GithubSource.poll', () => {
 
     expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'is:issue is:open project:acme/3', status: 'Status' });
     expect(result).toEqual({ tickets: [listed(1), listed(2), listed(3)] });
+
+    // With no status configured, any status or none is in scope, but an issue with no item for the board is not.
+    const noStatus = { ...node(6, 3, '', null), projectItems: { nodes: [{ project: { number: 3, owner: { login: 'acme' } }, fieldValueByName: null }] } };
+    (json.data.search.nodes as unknown[]).push(noStatus);
+    const all = await new GithubSource(config({ requireAssignee: false, assignedStatuses: [] }), fakeGh(SINGLE_SELECT, { json })).poll();
+
+    expect(all).toEqual({ tickets: [listed(1), listed(2), listed(3), listed(4), { ...listed(6), sortAt: null }] });
   });
 
   it('with waitForBlockers, lists the open issues blocking each issue, by number in the configured repository and by full name in another (PRD R90)', async () => {

@@ -40,6 +40,12 @@ describe('parseGithubConfig', () => {
     expect(parseGithubConfig({ ...VALID, waitForBlockers: true })).toMatchObject({ config: { waitForBlockers: true } });
   });
 
+  it('reads a missing or empty assignedStatuses as no status filter', () => {
+    const { assignedStatuses: _, ...unset } = VALID;
+    expect(parseGithubConfig(unset)).toMatchObject({ config: { assignedStatuses: [] } });
+    expect(parseGithubConfig({ ...VALID, assignedStatuses: [] })).toMatchObject({ config: { assignedStatuses: [] } });
+  });
+
   it('keeps includeClosed on', () => {
     expect(parseGithubConfig({ ...VALID, includeClosed: true })).toMatchObject({ config: { includeClosed: true } });
   });
@@ -59,7 +65,8 @@ describe('parseGithubConfig', () => {
     [{ waitForBlockers: 'yes' }, 'sources.github.waitForBlockers must be true or false.'],
     [{ includeClosed: 1 }, 'sources.github.includeClosed must be true or false.'],
     [{ project: { owner: 'acme' } }, 'sources.github.project must give owner and number.'],
-    [{ assignedStatuses: 'Dev' }, 'sources.github.assignedStatuses must list at least one status.'],
+    [{ assignedStatuses: 'Dev' }, 'sources.github.assignedStatuses must list statuses.'],
+    [{ assignedStatuses: [''] }, 'sources.github.assignedStatuses must list statuses.'],
     [{ ghPath: '' }, 'sources.github.ghPath must be a path.'],
     [{ maxPages: 0 }, 'sources.github.maxPages must be a whole number of at least 1.'],
     [{ branchPattern: '(' }, 'sources.github.branchPattern is not a valid regular expression.'],

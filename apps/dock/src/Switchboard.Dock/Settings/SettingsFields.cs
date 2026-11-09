@@ -327,7 +327,7 @@ public static partial class SettingsFields
             ("project.owner", new Field("", "Project owner", FieldKind.Text, ""), false),
             ("project.number", new Field("", "Project number", FieldKind.Integer, ""), false),
             ("project.statusField", new Field("", "Status field", FieldKind.Text, "", "Status"), false),
-            ("assignedStatuses", new Field("", "Assigned statuses", FieldKind.List, "One per line. An issue in one of these project statuses is yours."), false),
+            ("assignedStatuses", new Field("", "Assigned statuses", FieldKind.List, "One per line. An issue in one of these project statuses is yours. Empty, an issue in any status, or none, is yours."), false),
             ("rolesFile", new Field("", "Roles file", FieldKind.Text, "A JSON file of {\"login\": {\"roles\": [\"tester\"]}}. Triage shows each comment author's roles. Starts with ~ or is absolute."), true),
             ("branchPattern", new Field("", "Branch pattern", FieldKind.Text, "A regular expression whose first group is the issue number a worktree branch names.", "^(\\d+)-"), true),
             ("ghPath", new Field("", "gh path", FieldKind.Text, "", "gh"), true),

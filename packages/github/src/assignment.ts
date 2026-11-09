@@ -1,5 +1,6 @@
 import type { AssignmentLookup } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
+import { inAssignedStatus } from './config.js';
 import type { Gh } from './gh.js';
 import { keyOf, ownerName, refOf } from './keys.js';
 import type { IssueId } from './keys.js';
@@ -53,7 +54,7 @@ async function readIssue(config: GithubConfig, gh: Gh, { repo, number }: IssueId
   if (issue.projectItems.pageInfo.hasNextPage !== false) return { error: 'GitHub returned incomplete project membership.' };
   const item = issue.projectItems.nodes.find(({ project }) => project.number === config.project.number && project.owner.login.toLowerCase() === config.project.owner.toLowerCase());
   const status = item?.fieldValueByName?.name;
-  const assigned = (issue.state === 'OPEN' || config.includeClosed) && status !== undefined && config.assignedStatuses.includes(status) && (!config.requireAssignee || names.some((login) => own.has(login)));
+  const assigned = (issue.state === 'OPEN' || config.includeClosed) && item !== undefined && inAssignedStatus(config, status) && (!config.requireAssignee || names.some((login) => own.has(login)));
   return { issue, names, assigned, onBoard: item !== undefined };
 }
 
