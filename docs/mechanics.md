@@ -715,3 +715,12 @@ Checked 2026-11-05 with `gh` 2.100.0 against project `acme/3`, through `gh api g
 - `is:issue is:open project:acme/3`, with no `repo:` qualifier, returns the open issues of every repository on the board in one result set: the first page of 100 held 96 `acme/widgets`, 1 `acme/widgets-dashboard` and 3 `acme/widgets-infra` issues, and `endCursor` continued into the next page. The same query with `-repo:acme/widgets` returned 56 issues from six other repositories in one page.
 - With `assignee:work-login assignee:work-ai-login`, the qualifiers are ORed and the search returned 10 issues on one page.
 - Current use: a GitHub source searches its board without `repo:` and keys each issue by `repository.nameWithOwner` (PRD R44). With `requireAssignee` off, the board's whole open issue count is paged and counts against `maxPages` (16 pages for `acme/3`), so that setting suits a small board.
+
+## M60. Closed issues in a board search
+
+Checked 2026-11-09 with `gh` against project `acme/3`, through `gh api graphql` `search(type:ISSUE)`.
+
+- `is:issue assignee:work-login assignee:work-ai-login project:acme/3`, with no state qualifier, returned 19 issues: the 8 open ones and the 11 that `is:closed` returns, so a search without `is:open` reads both states.
+- Of the 11 closed issues, 7 were in `⚒️ Dev`, closed between 2026-11-07 and 2026-11-09 as `COMPLETED`, and 4 were in `🚀 Releasable`, which is not an assigned status.
+- `is:issue is:closed project:acme/3` without assignees counted 5,826 issues, 59 pages of 100.
+- Current use: with `includeClosed` on, a GitHub source searches without `is:open` (PRD R44). With `requireAssignee` also off, every closed issue on the board is paged against `maxPages`, so that pair suits only a small board.

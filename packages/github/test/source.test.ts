@@ -62,6 +62,14 @@ describe('GithubSource.poll', () => {
     });
   });
 
+  it('with includeClosed, searches open and closed issues (PRD R44, mechanics M60)', async () => {
+    const gh = fakeGh(SINGLE_SELECT, { json: fixture('issues') });
+
+    expect(await new GithubSource(config({ includeClosed: true }), gh).poll()).toHaveProperty('tickets');
+    expect(gh).toHaveBeenCalledWith(ISSUES_QUERY, { q: 'is:issue assignee:work-login assignee:work-ai-login project:acme/3', status: 'Status' });
+    expect(gh).not.toHaveBeenCalledWith(ISSUES_QUERY, expect.objectContaining({ q: expect.stringContaining('is:open') }));
+  });
+
   it("sets the sort time to the later of the operator's latest assignment and the last Status change", async () => {
     const node = (number: number, statusAt: string | undefined, assignees: [string, string][]) => ({
       number,
@@ -286,6 +294,12 @@ describe('GithubSource.poll', () => {
       expect(await new GithubSource(config(), gh).poll(current)).toEqual({ tickets: [kept(1)] });
       expect(gh).toHaveBeenNthCalledWith(3, ASSIGNMENT_QUERY, { owner: 'acme', name: 'widgets', number: 1, status: 'Status' });
       expect(gh).toHaveBeenCalledTimes(8);
+    });
+
+    it('with includeClosed, keeps a closed issue that is still assigned (PRD R44)', async () => {
+      const gh = fakeGh(SINGLE_SELECT, search(), issue(4, '🔍 Review', ['work-login'], 'CLOSED'), issue(5, '🆕 New', ['work-login'], 'CLOSED'));
+
+      expect(await new GithubSource(config({ includeClosed: true }), gh).poll([stored(4), stored(5)])).toEqual({ tickets: [kept(4)] });
     });
 
     it('replaces a search entry without a status with the stored ticket when the issue is still assigned, and reads no issue the search lists as assigned or the store holds as unassigned', async () => {
@@ -633,6 +647,10 @@ describe('GithubSource.ticketAt', () => {
       ticket: { sourceKey: 'acme/widgets-dashboard#115', ref: 'acme/widgets-dashboard#115', repo: 'acme/widgets-dashboard', title: 'Snapshot wrapper', url: dashboard, open: true },
     });
     expect(gh).toHaveBeenLastCalledWith(ISSUE_QUERY, { owner: 'acme', name: 'widgets-dashboard', number: 115 });
+  });
+
+  it('reports a closed issue as open with includeClosed, so a session can move onto it (PRD R44, R83)', async () => {
+    expect(await new GithubSource(config({ includeClosed: true }), fakeGh(answer('CLOSED'))).ticketAt('https://github.com/acme/widgets/issues/115')).toMatchObject({ ticket: { open: true } });
   });
 
   it("answers null for an issue on another board or none, whatever its status, so another source can answer, and errors on incomplete membership", async () => {

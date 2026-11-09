@@ -15,6 +15,7 @@ describe('parseGithubConfig', () => {
         logins: ['work-login'],
         requireAssignee: true,
         waitForBlockers: false,
+        includeClosed: false,
         project: { owner: 'acme', number: 3, statusField: 'Status' },
         assignedStatuses: ['⚒️ Dev'],
         branchPattern: /^(\d+)-/,
@@ -39,6 +40,10 @@ describe('parseGithubConfig', () => {
     expect(parseGithubConfig({ ...VALID, waitForBlockers: true })).toMatchObject({ config: { waitForBlockers: true } });
   });
 
+  it('keeps includeClosed on', () => {
+    expect(parseGithubConfig({ ...VALID, includeClosed: true })).toMatchObject({ config: { includeClosed: true } });
+  });
+
   it('keeps a roles file that is absolute or starts with ~', () => {
     expect(parseGithubConfig({ ...VALID, rolesFile: ' ~/.claude/skills/sb-handoff/roster.json ' })).toMatchObject({ config: { rolesFile: '~/.claude/skills/sb-handoff/roster.json' } });
     expect(parseGithubConfig({ ...VALID, rolesFile: resolve('/roles.json') })).toMatchObject({ config: { rolesFile: resolve('/roles.json') } });
@@ -52,6 +57,7 @@ describe('parseGithubConfig', () => {
     [{ logins: [''] }, 'sources.github.logins must list at least one login.'],
     [{ requireAssignee: 'no' }, 'sources.github.requireAssignee must be true or false.'],
     [{ waitForBlockers: 'yes' }, 'sources.github.waitForBlockers must be true or false.'],
+    [{ includeClosed: 1 }, 'sources.github.includeClosed must be true or false.'],
     [{ project: { owner: 'acme' } }, 'sources.github.project must give owner and number.'],
     [{ assignedStatuses: 'Dev' }, 'sources.github.assignedStatuses must list at least one status.'],
     [{ ghPath: '' }, 'sources.github.ghPath must be a path.'],

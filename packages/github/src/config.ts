@@ -11,6 +11,8 @@ export interface GithubConfig {
   requireAssignee: boolean;
   /** True reads each issue's open blockers, so its work waits until they close (PRD R90). */
   waitForBlockers: boolean;
+  /** True puts a closed issue in the assigned state like an open one, for a team that closes issues before merging (PRD R44). */
+  includeClosed: boolean;
   project: { owner: string; number: number; statusField: string };
   assignedStatuses: string[];
   /** Its first group is the issue number a worktree branch names. */
@@ -24,7 +26,7 @@ const REPO = /^[\w.-]+\/[\w.-]+$/;
 
 export type ConfigResult = { config: GithubConfig } | { error: string };
 
-const KEYS = ['ghPath', 'repo', 'labels', 'logins', 'requireAssignee', 'waitForBlockers', 'project', 'assignedStatuses', 'branchPattern', 'maxPages', 'rolesFile'];
+const KEYS = ['ghPath', 'repo', 'labels', 'logins', 'requireAssignee', 'waitForBlockers', 'includeClosed', 'project', 'assignedStatuses', 'branchPattern', 'maxPages', 'rolesFile'];
 
 function strings(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry !== '') ? (value as string[]) : null;
@@ -39,7 +41,7 @@ export function parseGithubConfig(options: Record<string, unknown>, name = 'gith
     return { error: `${path}.${unknown[0]} is not a setting.` };
   }
 
-  const { ghPath = 'gh', repo, labels = {}, logins, requireAssignee = true, waitForBlockers = false, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
+  const { ghPath = 'gh', repo, labels = {}, logins, requireAssignee = true, waitForBlockers = false, includeClosed = false, project, assignedStatuses, branchPattern = '^(\\d+)-', maxPages = 5, rolesFile = '' } = options;
 
   if (typeof repo !== 'string' || !REPO.test(repo)) {
     return { error: `${path}.repo must be set to owner/name.` };
@@ -71,6 +73,10 @@ export function parseGithubConfig(options: Record<string, unknown>, name = 'gith
 
   if (typeof waitForBlockers !== 'boolean') {
     return { error: `${path}.waitForBlockers must be true or false.` };
+  }
+
+  if (typeof includeClosed !== 'boolean') {
+    return { error: `${path}.includeClosed must be true or false.` };
   }
 
   const p = project as { owner?: unknown; number?: unknown; statusField?: unknown } | undefined;
@@ -115,6 +121,7 @@ export function parseGithubConfig(options: Record<string, unknown>, name = 'gith
       logins: loginList,
       requireAssignee,
       waitForBlockers,
+      includeClosed,
       project: { owner: p.owner, number: p.number, statusField: typeof p.statusField === 'string' && p.statusField !== '' ? p.statusField : 'Status' },
       assignedStatuses: statuses,
       branchPattern: pattern,

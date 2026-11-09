@@ -137,8 +137,8 @@ export class GithubSource implements Source {
 
   /**
    * Reads every open issue assigned to a configured login on the project, and lists an issue whose status is not configured as not
-   * assigned. With `requireAssignee` off, reads every open issue on the project and lists only those on a configured status. A malformed
-   * response is a failed read. An issue of `current` stored as assigned that the search drops or lists outside scope is read on its own.
+   * assigned. With `requireAssignee` off, reads every open issue on the project and lists only those on a configured status. With
+   * `includeClosed`, closed issues are read too. A malformed response is a failed read. An issue of `current` stored as assigned that the search drops or lists outside scope is read on its own.
    */
   async poll(current: readonly Ticket[] = []): Promise<PollResult> {
     try {
@@ -239,7 +239,7 @@ export class GithubSource implements Source {
       return null;
     }
 
-    return { ticket: { sourceKey: keyOf(this.config.repo, issue.repo, found.number), ref, repo: issue.repo, title: found.title, url: found.url, open: found.state === 'OPEN' } };
+    return { ticket: { sourceKey: keyOf(this.config.repo, issue.repo, found.number), ref, repo: issue.repo, title: found.title, url: found.url, open: found.state === 'OPEN' || this.config.includeClosed } };
   }
 
   private async checkPullRequest(ticket: Ticket, id: IssueId, { repo, number }: IssueId): Promise<LinkCheck> {
@@ -357,10 +357,11 @@ export class GithubSource implements Source {
   }
 
   private async readIssues(current: readonly Ticket[]): Promise<PollResult> {
-    const { repo: home, logins, requireAssignee, project, assignedStatuses, maxPages } = this.config;
+    const { repo: home, logins, requireAssignee, includeClosed, project, assignedStatuses, maxPages } = this.config;
     const assignees = requireAssignee ? logins.map((login) => `assignee:${login}`) : [];
-    // The board, not a repository, scopes the search, so every repository on it is read in one search (mechanics M59).
-    const q = ['is:issue', 'is:open', ...assignees, `project:${project.owner}/${project.number}`].join(' ');
+    // The board, not a repository, scopes the search, so every repository on it is read in one search (mechanics M59). Without `is:open`
+    // the search returns both states (mechanics M60).
+    const q = ['is:issue', ...(includeClosed ? [] : ['is:open']), ...assignees, `project:${project.owner}/${project.number}`].join(' ');
     const tickets: PolledTicket[] = [];
     let after: string | null = null;
     // A field that cannot hold a status would read every issue as unassigned and end its work item.

@@ -51,6 +51,8 @@ public sealed class SettingsFieldsTests
         Assert.Equal(FieldKind.Boolean, fields["sources.github.waitForBlockers"].Kind);
         Assert.False(SettingsPages.FieldViewOf(fields["sources.github.waitForBlockers"], null, []).Checked);
         Assert.True(SettingsPages.FieldViewOf(fields["sources.github.waitForBlockers"], true, []).Checked);
+        Assert.Equal(FieldKind.Boolean, fields["sources.github.includeClosed"].Kind);
+        Assert.False(SettingsPages.FieldViewOf(fields["sources.github.includeClosed"], null, []).Checked);
         Assert.DoesNotContain(sections[2].Fields, (field) => field.Path == "sources.github.requireAssignee");
         Assert.Equal("^(\\d+)-", sections[2].Fields.Single((field) => field.Path == "sources.github.branchPattern").Placeholder);
         Assert.DoesNotContain("sources.github.enabled", fields.Keys);

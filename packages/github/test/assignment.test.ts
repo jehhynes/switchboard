@@ -66,6 +66,12 @@ describe('operator assignment identity', () => {
     expect(await readAssignment({ ...config, requireAssignee: false }, gh, WIDGETS_7)).toMatchObject({ assignmentKey: null, assigned: true });
   });
 
+  it('reads a closed issue as unassigned and not open, unless includeClosed is on (PRD R44)', async () => {
+    const gh = vi.fn<Gh>().mockResolvedValue(response({ ...issue(), state: 'CLOSED' }));
+    expect(await readAssignment(config, gh, WIDGETS_7)).toMatchObject({ assignmentKey: 'I1:a1', assigned: false, ticket: { open: false } });
+    expect(await readAssignment({ ...config, includeClosed: true }, gh, WIDGETS_7)).toMatchObject({ assignmentKey: 'I1:a1', assigned: true, ticket: { open: true } });
+  });
+
   it('refuses incomplete history and an assignment changed during pagination', async () => {
     const recent = issue([event('foreign', 'someone')]);
     recent.timelineItems.pageInfo.hasPreviousPage = true;

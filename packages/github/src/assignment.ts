@@ -53,7 +53,7 @@ async function readIssue(config: GithubConfig, gh: Gh, { repo, number }: IssueId
   if (issue.projectItems.pageInfo.hasNextPage !== false) return { error: 'GitHub returned incomplete project membership.' };
   const item = issue.projectItems.nodes.find(({ project }) => project.number === config.project.number && project.owner.login.toLowerCase() === config.project.owner.toLowerCase());
   const status = item?.fieldValueByName?.name;
-  const assigned = issue.state === 'OPEN' && status !== undefined && config.assignedStatuses.includes(status) && (!config.requireAssignee || names.some((login) => own.has(login)));
+  const assigned = (issue.state === 'OPEN' || config.includeClosed) && status !== undefined && config.assignedStatuses.includes(status) && (!config.requireAssignee || names.some((login) => own.has(login)));
   return { issue, names, assigned, onBoard: item !== undefined };
 }
 
@@ -96,7 +96,7 @@ export async function readAssignment(config: GithubConfig, gh: Gh, id: IssueId, 
       if (snapshot !== null && snapshot !== current) return { error: `Assignment changed while reading ${ref}; retry.` };
       snapshot = current;
       held ??= new Set(names.filter((login) => own.has(login)));
-      const ticket = { sourceKey: keyOf(config.repo, repo, number), ref, repo, title: issue.title, url: issue.url, open: issue.state === 'OPEN' };
+      const ticket = { sourceKey: keyOf(config.repo, repo, number), ref, repo, title: issue.title, url: issue.url, open: issue.state === 'OPEN' || config.includeClosed };
       if (held.size === 0) return { ticket, assignmentKey: null, assigned };
 
       for (const event of [...issue.timelineItems.nodes].reverse()) {
