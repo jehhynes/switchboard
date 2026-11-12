@@ -1,8 +1,10 @@
-[data-board-column]:not([data-switchboard-shown]) [data-switchboard-snoozed] {
+[data-board-column]:not([data-switchboard-shown]) [data-switchboard-snoozed],
+[data-switchboard-rows]:not([data-switchboard-shown]) > * > [data-switchboard-snoozed] {
   display: none !important;
 }
 
-[data-switchboard-snoozed] {
+[data-board-card-id][data-switchboard-snoozed],
+[role="row"][data-switchboard-snoozed] > * > * {
   opacity: 0.6;
 }
 
@@ -16,6 +18,20 @@
   font-size: 12px;
   text-align: center;
   cursor: pointer;
+}
+
+/* A short table's add-item bar sits at a fixed offset after every row; a long table's is fixed at the bottom of the view. */
+#project-items-region [class*="OmnibarContainer"]:not(:has([class*="isFixed"])) {
+  translate: 0 calc(var(--switchboard-hidden-rows, 0) * var(--table-cell-height, 37px) * -1);
+}
+
+/* In a table's header row, after the group's count or the Title column's name. */
+[data-switchboard-toggle] > .switchboard-snoozed-toggle {
+  display: inline;
+  width: auto;
+  padding: 0 0 0 8px;
+  font-weight: normal;
+  white-space: nowrap;
 }
 
 .switchboard-snoozed-toggle:hover {
@@ -32,6 +48,17 @@
   line-height: 18px;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* At the right of the title cell; a long title gives way, not the pill. */
+[role="rowheader"] .switchboard-pill {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* The automatic margin leaves no gap when the title fills the cell. */
+[role="rowheader"] :has(+ .switchboard-pill) {
+  margin-right: 6px;
 }
 
 /* VS Code's icon font, as the dock draws the marks; an SVG of the same paths renders thin and grainy at fractional display scales. */

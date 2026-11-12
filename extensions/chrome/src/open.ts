@@ -1,3 +1,4 @@
+import { itemHref } from './board.js';
 import { PILL } from './pills.js';
 
 /** The VS Code URI whose handler runs the click of the ticket's row, bringing its item window forward (PRD R69). */
@@ -6,8 +7,8 @@ export function openUri(ticketUrl: string): string {
 }
 
 /**
- * Opens a board card's ticket in Switchboard when its pill is clicked or has focus when Enter is pressed, before GitHub's own
- * handlers open the card's side panel. The URL is the card's title link, the issue the pill was matched by.
+ * Opens a board card's or table row's ticket in Switchboard when its pill is clicked or has focus when Enter is pressed,
+ * before GitHub's own handlers open the item's side panel. The URL is the item's title link, the issue the pill was matched by.
  */
 export function openFromPill(event: Event, open: (uri: string) => void): void {
   if (event instanceof KeyboardEvent && event.key !== 'Enter') {
@@ -15,7 +16,7 @@ export function openFromPill(event: Event, open: (uri: string) => void): void {
   }
 
   const pill = event.target instanceof Element ? event.target.closest(`.${PILL}`) : null;
-  const href = pill?.closest('[data-board-card-id]')?.querySelector('h3[id^="board-card-title-"]')?.closest('a')?.href;
+  const href = pill === null || pill === undefined ? undefined : itemHref(pill);
 
   if (href === undefined) {
     return;

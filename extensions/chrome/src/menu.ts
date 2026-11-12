@@ -1,4 +1,5 @@
 import type { Card } from '@switchboard/core/group';
+import { itemHref } from './board.js';
 import { openUri } from './open.js';
 import type { SnoozeMenus } from './snooze.js';
 
@@ -12,13 +13,16 @@ const CLOCKFACE =
 const DEBUG_RESTART =
   'M14 8C14 8.81 13.842 9.596 13.528 10.336C13.224 11.053 12.791 11.694 12.241 12.243C11.694 12.791 11.053 13.224 10.337 13.528C9.59602 13.841 8.81002 14 8.00002 14C7.19002 14 6.40402 13.842 5.66402 13.528C4.94702 13.224 4.30602 12.791 3.75702 12.242C3.20802 11.693 2.77602 11.053 2.47202 10.337C2.31002 9.956 2.48802 9.516 2.86902 9.354C3.25102 9.19 3.69002 9.37 3.85202 9.751C4.08102 10.288 4.40502 10.77 4.81802 11.181C5.23002 11.595 5.71202 11.919 6.24902 12.148C7.35602 12.615 8.64302 12.615 9.75202 12.148C10.288 11.919 10.77 11.595 11.181 11.183C11.595 10.77 11.919 10.288 12.148 9.751C12.381 9.197 12.501 8.608 12.501 8C12.501 7.392 12.382 6.803 12.148 6.248C11.919 5.712 11.595 5.23 11.182 4.819C10.77 4.405 10.288 4.081 9.75102 3.852C8.64402 3.385 7.35702 3.385 6.24802 3.852C5.71202 4.081 5.23002 4.405 4.81902 4.817C4.60802 5.027 4.42002 5.256 4.25702 5.5H6.24902C6.66302 5.5 6.99902 5.836 6.99902 6.25C6.99902 6.664 6.66302 7 6.24902 7H2.74902C2.33502 7 1.99902 6.664 1.99902 6.25V2.75C1.99902 2.336 2.33502 2 2.74902 2C3.16302 2 3.49902 2.336 3.49902 2.75V4.032C3.58202 3.938 3.66802 3.845 3.75802 3.757C4.30502 3.209 4.94602 2.776 5.66202 2.472C7.14402 1.845 8.85402 1.845 10.335 2.472C11.052 2.776 11.693 3.209 12.242 3.758C12.791 4.307 13.223 4.947 13.527 5.663C13.84 6.404 13.999 7.19 13.999 8H14Z';
 
-/** The board card whose More actions button opened `list`: the button and the menu share the tooltip id in `aria-labelledby`. */
+/**
+ * The board card whose More actions button, or the table row whose Row actions button, opened `list`: the button and the menu
+ * share the tooltip id in `aria-labelledby`.
+ */
 export function menuCard(doc: Document, list: Element): { card: Element; button: Element } | null {
   const label = list.getAttribute('aria-labelledby');
 
-  for (const button of doc.querySelectorAll('[data-board-card-id] button[aria-haspopup="true"]')) {
+  for (const button of doc.querySelectorAll('[data-board-card-id] button[aria-haspopup="true"], #project-items-region [role="row"] button[aria-haspopup="true"]')) {
     if (label !== null && button.getAttribute('aria-labelledby') === label) {
-      return { card: button.closest('[data-board-card-id]')!, button };
+      return { card: button.closest('[data-board-card-id], [role="row"]')!, button };
     }
   }
 
@@ -79,7 +83,7 @@ function menuItem(template: Element, label: string, iconPath: string, run: () =>
 }
 
 /**
- * Keeps Switchboard's items after a divider at the bottom of a card's More actions menu, for a card whose issue the hub lists:
+ * Keeps Switchboard's items after a divider at the bottom of a card's More actions menu or a table row's Row actions menu, for a card whose issue the hub lists:
  * Open in Switchboard (PRD R69), and outside Done, Snooze in Switchboard or, on a snoozed card, Unsnooze in Switchboard (PRD R66).
  * Items that already match the card are left alone, so a pass that changes nothing makes no mutation. A menu without a plain
  * GitHub item to copy gets none.
@@ -87,7 +91,7 @@ function menuItem(template: Element, label: string, iconPath: string, run: () =>
 export function addMenuItems(doc: Document, list: Element, card: (url: string) => Card | undefined, snooze: SnoozeMenus, open: (uri: string) => void): void {
   const owner = menuCard(doc, list);
   const template = list.querySelector(`:scope > li[role="menuitem"]:not([aria-haspopup]):not([data-variant]):not(.${ITEM})`);
-  const url = owner?.card.querySelector('h3[id^="board-card-title-"]')?.closest('a')?.href;
+  const url = owner === null ? undefined : itemHref(owner.card);
   const found = url === undefined ? undefined : card(url);
   const target = owner !== null && template !== null && url !== undefined && found !== undefined ? { button: owner.button, template, url, found } : null;
   const wanted = target === null ? '' : target.found.group === 'done' ? 'open' : target.found.snoozed ? 'open unsnooze' : 'open snooze';
@@ -136,7 +140,7 @@ export function addMenuItems(doc: Document, list: Element, card: (url: string) =
   list.append(...(divider === undefined ? [] : [divider]), ...items);
 }
 
-/** Watches for GitHub opening a card's More actions menu in its portal and adds Switchboard's items before it paints. */
+/** Watches for GitHub opening a card's or table row's actions menu in its portal and adds Switchboard's items before it paints. */
 export function watchCardMenus(doc: Document, card: (url: string) => Card | undefined, snooze: SnoozeMenus, open: (uri: string) => void): { stop(): void } {
   const observer = new MutationObserver(() => {
     for (const list of doc.querySelectorAll('ul[role="menu"][aria-labelledby]')) {

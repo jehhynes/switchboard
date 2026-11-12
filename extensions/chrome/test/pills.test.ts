@@ -64,6 +64,31 @@ describe('cardsByIssue', () => {
   });
 });
 
+describe('applyPills in a project table', () => {
+  it('puts a pill after the issue number in each matching row\'s title, once, and removes it when the card goes', async () => {
+    document.body.innerHTML = readFileSync(join(import.meta.dirname, 'fixtures', 'table.html'), 'utf8');
+
+    const cards = cardsByIssue([needs, working]);
+    const rowPills = () =>
+      [...document.querySelectorAll<HTMLElement>('[role="rowheader"] .switchboard-pill')].map((pill) => [pill.closest('[role="row"]')!.querySelector('a')!.getAttribute('href'), pill.previousElementSibling?.textContent, pill.textContent]);
+
+    applyPills(document, cards);
+
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => records.push(...batch));
+
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    applyPills(document, cards);
+    await Promise.resolve();
+    observer.disconnect();
+    expect(records).toEqual([]);
+    expect(rowPills()).toEqual([['https://github.com/github/roadmap/issues/1035', ' #1035', 'dev:review-pr']]);
+
+    applyPills(document, new Map());
+    expect(rowPills()).toEqual([]);
+  });
+});
+
 describe('applyPills', () => {
   beforeEach(() => {
     document.body.innerHTML = COLUMN;

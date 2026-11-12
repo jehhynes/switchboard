@@ -1,6 +1,6 @@
 import { MARK_GLYPHS, MARK_TITLES } from '@switchboard/core/group';
 import type { Card, Group } from '@switchboard/core/group';
-import { REFRESH_MS, issueKey } from './board.js';
+import { PROJECT, REFRESH_MS, issueKey, itemHref, tableRows } from './board.js';
 import { BROWSER_PORT } from './hub.js';
 
 export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
@@ -88,14 +88,27 @@ function pill(doc: Document, card: Card): HTMLElement {
 }
 
 /**
- * Puts a pill after the issue reference in each loaded card's header, with the dock row's mark and the playbook Switchboard
- * chose, coloured by the dock's group (PRD R67). A pill that matches its card is left alone, so a pass that changes nothing makes no mutation.
+ * Puts a pill after the issue reference in each loaded card's header and each table row's title, with the dock row's mark and
+ * the playbook Switchboard chose, coloured by the dock's group (PRD R67). A pill that matches its card is left alone, so a pass
+ * that changes nothing makes no mutation.
  */
 export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): void {
-  for (const element of root.querySelectorAll<HTMLElement>('[data-board-column] [data-board-card-id]')) {
-    // The title link, because a card's fields can link other issues.
-    const href = element.querySelector('h3[id^="board-card-title-"]')?.closest('a')?.href;
-    const header = element.querySelector('[id^="board-card-header-title-"]');
+  const items = [
+    ...[...root.querySelectorAll('[data-board-column] [data-board-card-id]')].map((element) => ({
+      element,
+      header: element.querySelector('[id^="board-card-header-title-"]'),
+    })),
+    ...tableRows(root).map(({ row, title }) => {
+      const link = title.querySelector('a[href]');
+      // The issue number follows the title link.
+      const next = link?.nextElementSibling;
+
+      return { element: row, header: next == null || next.classList.contains(PILL) ? (link ?? null) : next };
+    }),
+  ];
+
+  for (const { element, header } of items) {
+    const href = itemHref(element);
     const existing = element.querySelector(`.${PILL}`);
     const key = href === undefined ? null : issueKey(href);
     const card = key === null ? undefined : cards.get(key);
@@ -115,8 +128,8 @@ export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): 
 }
 
 /**
- * Keeps the pills on a GitHub project board's cards while GitHub renders it. Reads the cards only while a board is on the
- * page, when one appears, every `REFRESH_MS`, when the tab becomes visible and on `refresh`. A failed read removes every pill.
+ * Keeps the pills on a GitHub project's cards and table rows while GitHub renders it. Reads the cards only while a board or
+ * table is on the page, when one appears, every `REFRESH_MS`, when the tab becomes visible and on `refresh`. A failed read removes every pill.
  */
 export function watchPills(
   doc: Document,
@@ -130,7 +143,7 @@ export function watchPills(
   let pending: ReturnType<typeof setTimeout> | undefined;
 
   const update = (): void => {
-    if (doc.querySelector('[data-board-column]') === null) {
+    if (doc.querySelector(PROJECT) === null) {
       return;
     }
 

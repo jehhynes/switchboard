@@ -168,3 +168,36 @@ describe('watchCardMenus', () => {
     expect(snooze.unsnooze).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('watchCardMenus in a project table', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('adds the Switchboard items to a table row\'s Row actions menu, and snoozes under its button', async () => {
+    const snooze = { choose: vi.fn(), unsnooze: vi.fn(), stop: vi.fn() };
+    const opened: string[] = [];
+
+    document.body.innerHTML = readFileSync(join(import.meta.dirname, 'fixtures', 'row-menu.html'), 'utf8');
+
+    const watch = watchCardMenus(document, (url) => (issueKey(url) === 'github/roadmap#1090' ? card('blocked') : undefined), snooze as unknown as SnoozeMenus, (uri) => opened.push(uri));
+    const button = document.querySelector('[role="row"] button[aria-haspopup="true"]')!;
+
+    document.body.append(document.querySelector<HTMLTemplateElement>('template#menu')!.content.cloneNode(true));
+    await new Promise((done) => setTimeout(done, 0));
+
+    const list = document.querySelector('#__primerPortalRoot__ ul[role="menu"]')!;
+    const labels = [...list.querySelectorAll(':scope > li')].map((item) => (item.getAttribute('data-component') === 'ActionList.Divider' ? '---' : item.querySelector('[data-component="ActionList.Item.Label"]')?.textContent));
+
+    expect(menuCard(document, list)).toEqual({ card: document.querySelector('[role="row"]'), button });
+    expect(labels).toEqual(['Archive', 'Remove from project', '---', 'Move item', '---', 'Open in Switchboard', 'Snooze in Switchboard…']);
+
+    const items = [...list.querySelectorAll<HTMLElement>('.switchboard-menu-item')];
+
+    items[0]!.click();
+    expect(opened).toEqual([openUri(ISSUE)]);
+    items[1]!.click();
+    expect(snooze.choose).toHaveBeenCalledExactlyOnceWith(ISSUE, button);
+    watch.stop();
+  });
+});

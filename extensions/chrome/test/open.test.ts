@@ -43,6 +43,17 @@ describe('watchPillClicks', () => {
     expect(reachedGitHub).toHaveBeenCalledTimes(1);
   });
 
+  it('opens the ticket of a clicked table row pill', () => {
+    const opened: string[] = [];
+
+    document.body.innerHTML = readFileSync(join(import.meta.dirname, 'fixtures', 'table.html'), 'utf8');
+    applyPills(document, cardsByIssue([{ url: 'https://github.com/github/roadmap/issues/1040', playbook: 'dev:review-pr', group: 'blocked', snoozed: false }]));
+    watch = watchPillClicks(document, (uri) => opened.push(uri));
+    document.querySelector('[role="rowheader"] .switchboard-pill')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(opened).toEqual([openUri('https://github.com/github/roadmap/issues/1040')]);
+  });
+
   it('opens the ticket when Enter is pressed on the focusable pill, and ignores other keys', () => {
     const opened: string[] = [];
     const reachedGitHub = vi.fn();
