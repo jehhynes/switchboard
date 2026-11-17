@@ -87,6 +87,7 @@ describe('the status bar item (PRD R64, R71)', () => {
     const contributes = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
 
     assert.deepStrictEqual(contributes.commands.map((entry) => entry.command), ['switchboard.showDock', 'switchboard.showHubLog', 'switchboard.newClaudeTab', 'switchboard.continueInBackground', 'switchboard.continueSidebarInBackground']);
-    assert.strictEqual(contributes.views, undefined, 'the panel view is gone');
+    // The only views are the Switchboard pane's, in the Explorer and Source Control (PRD R92); the list is in the dock (PRD R71).
+    assert.deepStrictEqual(Object.fromEntries(Object.entries(contributes.views).map(([container, views]) => [container, views.map((view) => view.id)])), { explorer: ['switchboard.pane'], scm: ['switchboard.paneScm'] });
   });
 });

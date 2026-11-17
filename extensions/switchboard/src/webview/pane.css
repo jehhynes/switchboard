@@ -1,0 +1,16 @@
+body { margin: 0; padding: 0; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+#root { padding: 6px 12px 8px 20px; }
+button, .pill { display: inline-flex; max-width: 100%; overflow-wrap: anywhere; text-align: left; align-items: center; gap: 4px; font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: var(--vscode-cornerRadius-small, 4px); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 1px 8px; line-height: 18px; }
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+button.main { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+button.main:hover { background: var(--vscode-button-hoverBackground); }
+.codicon { font: normal normal normal 14px/1 codicon; }
+.item + .item { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-widget-border, transparent); }
+.pills, .actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.actions { margin-top: 6px; }
+.pill { box-sizing: border-box; border: 1px solid; border-radius: 10px; padding: 0 7px; font-size: 12px; background: color-mix(in srgb, var(--vscode-badge-background) 35%, transparent); color: var(--vscode-foreground); border-color: var(--vscode-badge-background); }
+.pill.pr { background: color-mix(in srgb, var(--vscode-charts-purple, #a371f7) 20%, transparent); border-color: var(--vscode-charts-purple, #a371f7); }
+.pill.mentioned { background: transparent; border-color: var(--vscode-descriptionForeground); color: var(--vscode-descriptionForeground); }
+span.pill { cursor: default; }
+.idle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--vscode-descriptionForeground); }

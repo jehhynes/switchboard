@@ -55,6 +55,22 @@
         }
       }
     },
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "switchboard.pane",
+          "name": "Switchboard"
+        }
+      ],
+      "scm": [
+        {
+          "type": "webview",
+          "id": "switchboard.paneScm",
+          "name": "Switchboard"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "switchboard.showDock",

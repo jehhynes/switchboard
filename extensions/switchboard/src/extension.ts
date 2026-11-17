@@ -17,10 +17,14 @@ import { startHub } from './hubProcess.js';
 import { needsStatus } from './needs.js';
 import { NeedsYouToasts } from './notify.js';
 import { claimIsFor } from './claims.js';
-import { claimOpen, newClaudeTab, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, providerOf, workspaceFile } from './open.js';
+import { act, claimOpen, newClaudeTab, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, providerOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
+import { Pane } from './pane.js';
+import { mainTerminal, paneModel, windowRows } from './paneModel.js';
+import type { PaneModel } from './paneModel.js';
 import { HubState } from './state.js';
 import { ItemTabs } from './tabs.js';
+import type { PaneMessage } from './webview/paneRender.js';
 
 export interface SwitchboardApi {
   /** The hub this window is connected to, or null. */
@@ -53,6 +57,10 @@ export interface SwitchboardApi {
   receive(state: string): Promise<boolean>;
   /** Handles a focus change as VS Code reports it. */
   windowStateChanged(focused: boolean): Promise<unknown>;
+  /** What each resolved Switchboard pane view last rendered, by view ID (PRD R92). */
+  pane(): Record<string, PaneModel>;
+  /** Runs a click in the Switchboard pane. */
+  paneClick(message: PaneMessage): Promise<unknown>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -109,7 +117,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
   const state = new HubState();
   const tabs = new ItemTabs(workspaceFile(), windowsDir(home), openTab);
-  let done = new DoneWindow(workspaceFile(), windowsDir(home), vscode.window.state.focused, Date.now());
+  // The workspace file this window was opened from; the suite's window sets another to act as an item window.
+  let windowFile = workspaceFile();
+  let done = new DoneWindow(windowFile, windowsDir(home), vscode.window.state.focused, Date.now());
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   /** Records a focus change, then closes a done window or checks again when its close is due; a window with unsaved changes is checked each minute. */
   const closeDone = async (focused?: boolean): Promise<boolean> => {
@@ -164,6 +174,66 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     }
   };
   const opening = (record: HubRecord | null = keeper.current(), waitMs?: number): OpenContext => ({ record, state, home, run: runCommand, ...(waitMs === undefined ? {} : { waitMs }) });
+  /** Runs a row's main control from the pane as the dock does: a hub action, after its question or text, a VS Code command, or else the row's click (PRD R92). */
+  const runMain = async (key: string): Promise<unknown> => {
+    const snapshot = state.current();
+    const row = snapshot === null || windowFile === null ? undefined : windowRows(snapshot, windowFile, windowsDir(home), Date.now()).find((shown) => shown.key === key);
+
+    if (row === undefined || row.main === null) {
+      return undefined;
+    }
+
+    const control = row.controls.find((shown) => shown.label === row.main);
+
+    if (control !== undefined) {
+      const { confirm, input } = control;
+
+      if (confirm !== undefined && (await vscode.window.showWarningMessage(confirm.question, { modal: true, detail: confirm.detail }, confirm.action)) !== confirm.action) {
+        return undefined;
+      }
+
+      // As in the dock, a blank text is not accepted, because the hub reads it as no text (PRD R77).
+      const text = input === undefined ? undefined : await vscode.window.showInputBox({ title: input.question, prompt: input.detail, value: input.text ?? '', ignoreFocusOut: true, validateInput: (value) => (value.trim() === '' ? `${input.action} needs a text.` : null) });
+
+      if (input !== undefined && text === undefined) {
+        return undefined;
+      }
+
+      return act(keeper.current(), input === undefined ? control.action : { ...control.action, [input.field]: text });
+    }
+
+    const terminal = mainTerminal(row);
+    const record = keeper.current();
+
+    // Open in terminal goes through the hub, which adds the agent's CLI from `sessions.claudePath` or `sessions.codexPath` (PRD R28).
+    if (terminal !== null && record !== null) {
+      const left = await postToHub(record, '/window', { workspace: windowFile, command: terminal }, 10_000);
+
+      if (left?.status !== 200) {
+        void vscode.window.showErrorMessage(`Switchboard: ${left?.error ?? 'the hub did not answer.'}`);
+        return undefined;
+      }
+
+      return claimOpen(record, runCommand, windowFile);
+    }
+
+    // Open in Claude or Codex, and Answer in terminal, are the row's click.
+    return openRow(opening(), key);
+  };
+  const paneClick = (message: PaneMessage): Promise<unknown> => {
+    switch (message.type) {
+      case 'open':
+        // Links and reports open in VS Code, as an item window's tabs do (PRD R72).
+        return openTab(message.target);
+      case 'main':
+        return runMain(message.key);
+      case 'dock':
+        return showDock(keeper.current(), home);
+      default:
+        return Promise.resolve(undefined);
+    }
+  };
+  const pane = new Pane(context.extensionUri, () => paneModel(state.current(), windowFile, windowsDir(home), Date.now()), paneClick);
 
   const status = vscode.window.createStatusBarItem('switchboard.needs', vscode.StatusBarAlignment.Left, 100);
   const showStatus = (): void => {
@@ -207,6 +277,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     hubLog,
     { dispose: () => unwatchFile(hubLogPath(home), readLog) },
     history.register(),
+    pane.register(),
     vscode.commands.registerCommand('switchboard.showHubLog', showHubLog),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
@@ -255,6 +326,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
     state.update(data);
     showStatus();
+    pane.changed();
     history.changed();
     toasts.update(snapshot);
     void tabs.update(snapshot).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
@@ -295,6 +367,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     show: (text) => {
       state.update(text);
       showStatus();
+      pane.changed();
     },
     status: () => ({ text: status.text, tooltip: typeof status.tooltip === 'string' ? status.tooltip : undefined }),
     historyTabs: () => history.shown(),
@@ -306,10 +379,14 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     openTab,
     background: (hub, workItemIds, where) => continueInBackground({ record: hub, workItemIds }, where),
     itemWindow: (file) => {
-      done = new DoneWindow(file ?? workspaceFile(), windowsDir(home), vscode.window.state.focused, Date.now());
+      windowFile = file ?? workspaceFile();
+      done = new DoneWindow(windowFile, windowsDir(home), vscode.window.state.focused, Date.now());
+      pane.changed();
     },
     receive: stateReceived,
     windowStateChanged,
+    pane: () => pane.shown(),
+    paneClick,
   };
 }
 

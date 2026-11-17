@@ -186,11 +186,11 @@ export function workspaceFile(): string | null {
 }
 
 /** Opens a session another window or the dock left for this window, and runs the dock's commands for it. Runs when the window connects or gains focus. */
-export async function claimOpen(record: HubRecord, run: (command: WindowCommand) => Promise<unknown> = async () => {}): Promise<string | null> {
+export async function claimOpen(record: HubRecord, run: (command: WindowCommand) => Promise<unknown> = async () => {}, workspace: string | null = workspaceFile()): Promise<string | null> {
   // A window with no folder claims only the dock's commands for any window.
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   // Only the focused window takes the dock's commands for any window, so a window reconnecting in the background does not (PRD R71).
-  const reply = await postToHub(record, '/claim', { folder, workspace: workspaceFile(), focused: vscode.window.state.focused }, ACTION_TIMEOUT_MS);
+  const reply = await postToHub(record, '/claim', { folder, workspace, focused: vscode.window.state.focused }, ACTION_TIMEOUT_MS);
   const body = reply?.body as { sessionId?: unknown; provider?: unknown; commands?: unknown } | null | undefined;
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : null;
   const commands = Array.isArray(body?.commands) ? (body.commands as WindowCommand[]) : [];

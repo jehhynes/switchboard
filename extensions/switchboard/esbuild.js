@@ -21,9 +21,9 @@ const options = {
   logLevel: 'info',
 };
 
-// The History script runs in a webview, a browser.
+// The History and pane scripts run in webviews, browsers.
 const webview = {
-  entryPoints: { history: 'src/webview/historyMain.ts' },
+  entryPoints: { history: 'src/webview/historyMain.ts', pane: 'src/webview/paneMain.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -43,6 +43,7 @@ function copyAssets() {
   }
 
   fs.copyFileSync('src/webview/history.css', 'dist/history.css');
+  fs.copyFileSync('src/webview/pane.css', 'dist/pane.css');
 }
 
 async function main() {
