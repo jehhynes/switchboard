@@ -103,6 +103,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The desk had 707 Open tickets: 8 search requests, about 5.5 seconds a poll. 5 had escalation `Support`. 3 were held by support agents and went to the pool; 2 were held by an engineer and were left out.
   - `/tickets/search` returns `cf` and `createdTime`. The conversation list and the history come newest first. The list omits thread bodies, so each thread is read on its own.
   - A history `Case Owner` change carries agent IDs, and a `Team` change carries team IDs.
+  - 2026-11-16: `GET /tickets/{id}` on a ticket in the trash returns 200 with its last status, such as `Open`, and `isTrashed` and `isDeleted` true; `/tickets/search` omits it, and `/tickets/{id}/history` answers 404 `URL_NOT_FOUND`.
   - One ticket's triage context came to 26,209 characters over 20 conversation entries.
   - The pool listed the 3 tickets oldest first. Each was triaged into `support:case` with a summary in the `<ask> — <intake type>, <immediacy>/<severity>` form; one was rated NON-BLOCKING and two BLOCKING. No work item or session was created, and nothing was written to Zoho.
 - **Fixtures:** `packages/zoho/test/fixtures`, built from these responses by whitelist: synthetic IDs, ticket numbers, names and text (synthetic 19-digit IDs except the operator's own and the two automations, ticket numbers from 900001, "Customer N" and "Agent N", same-length filler for every text, and only cf_queue kept as recorded).

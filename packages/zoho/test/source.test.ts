@@ -240,20 +240,22 @@ describe('ZohoSource.poll', () => {
     expect(await keys(['1', '2'])).toEqual(['91', '92', '93']);
     expect(details()).toEqual([]);
 
-    // 1 is still Open and Support, 2 was closed, 3 was deleted, and a ticket without an ID is not read.
+    // 1 is still Open and Support, 2 was closed, 3 was deleted, 4 and 5 are in the trash, still Open, and a ticket without an ID is not read.
     rows = [];
     detail['/tickets/1'] = { json: row('1') };
     detail['/tickets/2'] = { json: row('2', 'Closed') };
     detail['/tickets/3'] = { error: 'Zoho Desk answered HTTP 404 for /tickets/3.', status: 404 };
-    expect(await keys(['1', '2', '3', null])).toEqual(['91']);
-    expect(details()).toEqual(['/tickets/1', '/tickets/2', '/tickets/3']);
+    detail['/tickets/4'] = { json: { ...row('4'), isTrashed: true } };
+    detail['/tickets/5'] = { json: { ...row('5'), isDeleted: true } };
+    expect(await keys(['1', '2', '3', '4', '5', null])).toEqual(['91']);
+    expect(details()).toEqual(['/tickets/1', '/tickets/2', '/tickets/3', '/tickets/4', '/tickets/5']);
 
     // A failed read fails the poll, so the ticket is not reported gone, and the next poll reads it again.
     detail['/tickets/1'] = { error: 'Zoho Desk answered HTTP 500 for /tickets/1.', status: 500 };
     expect(await poll(['1'])).toEqual({ error: 'Zoho Desk answered HTTP 500 for /tickets/1.' });
     detail['/tickets/1'] = { json: row('1', 'Closed') };
     expect(await keys(['1'])).toEqual([]);
-    expect(details()).toEqual(['/tickets/1', '/tickets/2', '/tickets/3', '/tickets/1', '/tickets/1']);
+    expect(details()).toEqual(['/tickets/1', '/tickets/2', '/tickets/3', '/tickets/4', '/tickets/5', '/tickets/1', '/tickets/1']);
   });
 
   it('reads the teams once per six hours', async () => {

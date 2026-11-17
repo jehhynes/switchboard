@@ -30,6 +30,9 @@ interface SearchTicket {
   customerResponseTime?: string | null;
   assigneeId: string | null;
   cf?: Record<string, string | null>;
+  /** Set on a ticket in the trash, which a read by ID still returns with its last status. */
+  isTrashed?: boolean;
+  isDeleted?: boolean;
 }
 
 interface Team {
@@ -177,7 +180,7 @@ export class ZohoSource implements Source {
     return null;
   }
 
-  /** The ticket when it is still Open and Support, read by its ID; null when it is not, or no longer exists. */
+  /** The ticket when it is still Open and Support, read by its ID; null when it is not, is in the trash, or no longer exists. */
   private async stillListed(id: string): Promise<SearchTicket | null> {
     const result = await this.get(`/tickets/${encodeURIComponent(id)}`);
 
@@ -187,7 +190,7 @@ export class ZohoSource implements Source {
 
     const ticket = json(result) as SearchTicket | null;
 
-    return ticket !== null && ticket.status === 'Open' && this.inScope(ticket) ? ticket : null;
+    return ticket !== null && !ticket.isTrashed && !ticket.isDeleted && ticket.status === 'Open' && this.inScope(ticket) ? ticket : null;
   }
 
   private inScope(ticket: SearchTicket): boolean {
