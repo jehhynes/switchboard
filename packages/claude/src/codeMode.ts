@@ -1,0 +1,528 @@
+import { randomUUID } from 'node:crypto';
+import { START_PROMPT } from '@switchboard/core';
+import type { LiveState, StopReason, MarkerReading, ObservedFork, ObservedSession, PermissionMode, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult } from '@switchboard/core';
+import type { SessionEntry, SpawnRequest } from '@switchboard/holder';
+import { executableDirOnPath } from '@switchboard/core';
+import { markerState } from './hooks.js';
+import type { Marker } from './hooks.js';
+import { readMarkers } from './install.js';
+
+/** The line Claude prints under its banner when Code Mode is on, the start's positive evidence (mechanics M63). */
+export const CODE_MODE_ON = 'Code Mode (experimental) is on';
+/** The start of the line Claude prints when it starts without Code Mode, followed by the reason (mechanics M64, M71). */
+export const CODE_MODE_OFF = "Code Mode (experimental) isn't available:";
+/** The direct Anthropic API, which Code Mode requires in place of a gateway (mechanics M64). */
+export const DIRECT_API = 'https://api.anthropic.com';
+/** How long a start waits for the evidence and its first marker. */
+export const CODE_MODE_START_MS = 60_000;
+/** A live process with no marker of its launch after this long waits on a prompt in its terminal (mechanics M70). */
+export const START_PROMPT_MS = 20_000;
+const POLL_MS = 1_000;
+const COLS = 120;
+const ROWS = 40;
+
+export const HOOKS_REQUIRED = 'Code Mode sessions need sessions.installHooks.';
+
+/**
+ * Removed from the hub's environment: VS Code's runtime, Node.js options, credentials (mechanics M64), and the markers a parent Claude session
+ * leaves, which make a child think it is a subprocess: the dock's list and claude-collab's. Other `CLAUDE_CODE_*` settings pass through.
+ */
+const REMOVED =
+  /^(ELECTRON_.*|VSCODE_.*|NODE_OPTIONS|CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_VERSION|CLAUDE_EFFORT|AI_AGENT|CLAUDE_CODE_(CHILD_SESSION|SESSION_ID|ENTRYPOINT|EXECPATH|SSE_PORT|SESSION_ATTENDED|MESSAGING_\w+|EMIT_STARTUP_TIMING|STARTUP_FAILURE_RESULTS|ENABLE_SDK_FILE_CHECKPOINTING|QUESTION_PREVIEW_FORMAT|ENABLE_TASKS)|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
+
+/**
+ * The environment of a Code Mode session's process, from the hub's: Code Mode on, the direct API, the launch, and an absolute
+ * `sessions.claudePath`'s folder first on PATH. `CLAUDE_CONFIG_DIR` passes through as for background sessions.
+ */
+export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, claudePath: string): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(base)) {
+    if (value !== undefined && !REMOVED.test(name)) {
+      env[name] = value;
+    }
+  }
+
+  return { ...env, ...executableDirOnPath(claudePath, env), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: DIRECT_API, SWITCHBOARD_LAUNCH: launchId };
+}
+
+/**
+ * `--settings` overrides user settings, so a gateway or credential there cannot apply; empty strings remove the credential variables, so the
+ * session uses the subscription sign-in (mechanics M64).
+ */
+export function codeModeSettings(): string {
+  return JSON.stringify({ env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' } });
+}
+
+/** An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). */
+export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt'>, nativeSessionId: string): string[] {
+  return [
+    '--session-id',
+    nativeSessionId,
+    '--permission-mode',
+    action.permissionMode,
+    '-n',
+    action.name,
+    ...(action.model === null ? [] : ['--model', action.model]),
+    '--append-system-prompt',
+    action.contract,
+    '--settings',
+    codeModeSettings(),
+    action.prompt,
+  ];
+}
+
+/** A promptless resume, which reads as idle until the operator types (mechanics M68). */
+export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null): string[] {
+  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--settings', codeModeSettings()];
+}
+
+/** The file the pseudo-terminal runs: Windows looks for `claude.exe` when the path names no extension. */
+export function claudeFile(claudePath: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' && !/\.[A-Za-z0-9]+$/.test(claudePath.split(/[\\/]/).pop() ?? '') ? `${claudePath}.exe` : claudePath;
+}
+
+/**
+ * Terminal output as text: a cursor move forward as the spaces it skips, other escape sequences removed, and runs of whitespace, including line
+ * ends, as one space, so a line wrapped at the terminal's width reads whole.
+ */
+export function plainText(output: string): string {
+  return output
+    .replace(/\u001b\[(\d*)C/g, (_match, count: string) => ' '.repeat(Math.min(Number(count || '1'), 200)))
+    .replace(/\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g, '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b[()][A-Za-z0-9]/g, '')
+    .replace(/\u001b./g, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** What the start of a session's output says about Code Mode: on, off with Claude's reason, or nothing yet. */
+export function codeModeEvidence(head: string): { on: true } | { off: string } | null {
+  const text = plainText(head);
+  const off = text.indexOf(CODE_MODE_OFF);
+  const on = text.indexOf(CODE_MODE_ON);
+
+  // The first of the two is Claude's own line under the banner; a later one may be output quoting it.
+  if (off !== -1 && (on === -1 || off < on)) {
+    const rest = text.slice(off);
+    const end = rest.indexOf('Starting with the ordinary tools.');
+
+    return { off: (end === -1 ? rest.slice(0, 400) : rest.slice(0, end + 'Starting with the ordinary tools.'.length)).trim() };
+  }
+
+  return on === -1 ? null : { on: true };
+}
+
+/** A dialog Claude shows before the session starts, such as folder trust or the first Code Mode confirmation (mechanics M70). */
+export function showsStartPrompt(screen: string): boolean {
+  return /Enter to confirm/.test(screen);
+}
+
+/** The screen's last non-empty lines, which say why a process exited. */
+function lastLines(screen: string, count = 5): string {
+  return screen
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== '')
+    .slice(-count)
+    .join('\n');
+}
+
+/** The holder calls the runner makes; `HolderClient` provides them. */
+export interface HolderAccess {
+  spawn(request: SpawnRequest): Promise<{ session: string; pid: number }>;
+  list(): Promise<SessionEntry[]>;
+  kill(session: string): Promise<number | null>;
+  screen(session: string): Promise<{ head: string; text: string }>;
+}
+
+/** `gone`: no holder holds the lock, so every session it held has ended (PRD R94). */
+export type HolderLookup = { holder: HolderAccess } | { gone: true } | { error: string };
+
+export interface CodeModeRunnerDeps {
+  /** Read at each use, so a change to `sessions.claudePath` applies to the next start. */
+  claudePath(): string;
+  /** The Switchboard home, which holds the activity markers. */
+  home: string;
+  /** Whether hook markers are written (`sessions.installHooks`); Code Mode sessions need them (PRD R93). */
+  hooks(): boolean;
+  /** The running holder; with `start`, one is started when none runs. */
+  holder(start: boolean): Promise<HolderLookup>;
+  now(): number;
+  sleep(ms: number): Promise<void>;
+  newId?(): string;
+  /**
+   * The roster's live entries, which confirm a held process's new session ID after `/clear`, `/branch` or `/resume` (mechanics M67); without
+   * it no ID change is followed.
+   */
+  roster?(): Promise<Array<{ sessionId: string; pid?: number }> | { error: string }>;
+  /** How long one holder request may take before it counts as failed; 5 seconds by default. */
+  readTimeoutMs?: number;
+  /** The environment a session's is built from; the hub's by default. */
+  environment?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}
+
+/** Waits for a holder request at most `ms`, so an unanswered one counts as failed. */
+function bounded<T>(request: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+
+  return Promise.race([request, new Promise<never>((_resolve, reject) => (timer = setTimeout(() => reject(new Error(`The terminal holder did not answer within ${ms / 1000} seconds.`)), ms)))]).finally(() => clearTimeout(timer));
+}
+
+/** Kills a session, returning what to add to a failure's message when that fails too, since Claude may still run. */
+async function end(holder: HolderAccess, session: string, ms: number): Promise<string> {
+  return bounded(holder.kill(session), ms).then(
+    () => '',
+    (error: Error) => ` Ending it failed too: ${error.message}`,
+  );
+}
+
+/** The session's marker: one of its current session ID and launch. */
+function ownMarker(markers: ReadonlyMap<string, Marker>, session: Pick<Session, 'nativeSessionId' | 'launchId'>): Marker | undefined {
+  const marker = session.nativeSessionId === null ? undefined : markers.get(session.nativeSessionId);
+
+  return marker !== undefined && session.launchId != null && marker.launch === session.launchId ? marker : undefined;
+}
+
+/**
+ * A marker's state for a held process. A start runs its prompt; a resume, `/clear` or `/branch` waits for input (mechanics M68, M73); a
+ * compaction says nothing, because a manual `/compact` ends with no Stop while an automatic one runs mid-turn (mechanics M65).
+ */
+export function heldState(marker: Marker): { state: LiveState; detail: string | null } | null {
+  if (marker.event !== 'SessionStart') {
+    return markerState(marker);
+  }
+
+  return marker.source === 'startup' ? { state: 'running', detail: null } : marker.source === 'compact' ? null : { state: 'idle', detail: null };
+}
+
+/** Code Mode sessions, held in the terminal holder (architecture.md § Code Mode sessions). */
+export class CodeModeRunner implements SessionRunner {
+  constructor(private readonly deps: CodeModeRunnerDeps) {}
+
+  private readMs(): number {
+    return this.deps.readTimeoutMs ?? 5_000;
+  }
+
+  private newId(): string {
+    return this.deps.newId?.() ?? randomUUID();
+  }
+
+  private markerMap(): Map<string, Marker> {
+    return this.deps.hooks() ? readMarkers(this.deps.home) : new Map();
+  }
+
+  async start(action: StartAction): Promise<StartResult> {
+    if (!this.deps.hooks()) {
+      return { error: HOOKS_REQUIRED };
+    }
+
+    const nativeSessionId = action.nativeSessionId ?? this.newId();
+    const launchId = action.launchId ?? this.newId();
+    const spawned = await this.spawn(action.sessionId, `${action.name} ${nativeSessionId}`, codeModeStartArgs(action, nativeSessionId), action.cwd, launchId);
+
+    if ('error' in spawned) {
+      return spawned;
+    }
+
+    return this.check(spawned.holder, action.sessionId, nativeSessionId, launchId, this.deps.now());
+  }
+
+  /** Resumes an ended session in the holder with a new launch; the session keeps the mode, model and permission mode it started with. */
+  async resumeHeld(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd'>, permissionMode: PermissionMode, model: string | null, label: string): Promise<{ launchId: string } | { error: string }> {
+    if (session.nativeSessionId === null) {
+      return { error: 'The session never started, so it cannot be resumed.' };
+    }
+
+    const launchId = this.newId();
+    const spawned = await this.spawn(session.id, label, codeModeResumeArgs(session.nativeSessionId, permissionMode, model), session.cwd, launchId);
+
+    return 'error' in spawned ? spawned : { launchId };
+  }
+
+  private async spawn(session: string, label: string, args: string[], cwd: string, launchId: string): Promise<{ holder: HolderAccess } | { error: string }> {
+    const found = await this.deps.holder(true);
+
+    if (!('holder' in found)) {
+      return { error: 'error' in found ? found.error : 'The terminal holder did not start.' };
+    }
+
+    const claudePath = this.deps.claudePath();
+
+    try {
+      await found.holder.spawn({ session, label, file: claudeFile(claudePath, this.deps.platform), args, cwd, env: codeModeEnvironment(this.deps.environment ?? process.env, launchId, claudePath), cols: COLS, rows: ROWS });
+    } catch (error) {
+      return { error: (error as Error).message };
+    }
+
+    return found;
+  }
+
+  /**
+   * The start check (architecture.md § Code Mode sessions): Claude's refusal line, or a marker of the launch without the `is on` line, fails
+   * the start and ends the process; an exit fails it with the screen's last lines; a dialog on screen, or no marker past the start-prompt wait,
+   * starts it waiting on that prompt.
+   */
+  private async check(holder: HolderAccess, sessionId: string, nativeSessionId: string, launchId: string, startedAt: number): Promise<StartResult> {
+    let markedAt: number | null = null;
+    let unread: string | null = null;
+
+    for (;;) {
+      const verdict = await this.verdict(holder, sessionId, { nativeSessionId, launchId }, startedAt, markedAt);
+
+      if (verdict !== null && 'marked' in verdict) {
+        markedAt ??= this.deps.now();
+      } else if (verdict !== null && 'unread' in verdict) {
+        // A holder read that failed says nothing about the session; it is tried again until the deadline.
+        unread = verdict.unread;
+      } else if (verdict !== null) {
+        return 'error' in verdict ? verdict : { shortId: nativeSessionId.slice(0, 8), nativeSessionId, launchId, ...(verdict.startPrompt ? { startPrompt: true as const } : {}) };
+      }
+
+      if (this.deps.now() - startedAt >= CODE_MODE_START_MS) {
+        const ended = await end(holder, sessionId, this.readMs());
+
+        return { error: `The session did not start within ${CODE_MODE_START_MS / 1000} seconds${unread === null ? '.' : `: ${unread}`}${ended}` };
+      }
+
+      await this.deps.sleep(POLL_MS);
+    }
+  }
+
+  /** One look at a starting session; null to look again, `marked` when a marker came before the evidence, which gets one more look. */
+  private async verdict(
+    holder: HolderAccess,
+    sessionId: string,
+    session: { nativeSessionId: string; launchId: string },
+    startedAt: number,
+    markedAt: number | null,
+  ): Promise<{ error: string } | { startPrompt: boolean } | { marked: true } | { unread: string } | null> {
+    let screen: { head: string; text: string };
+    let entry: SessionEntry | undefined;
+
+    try {
+      entry = (await bounded(holder.list(), this.readMs())).find((one) => one.session === sessionId);
+      screen = entry === undefined ? { head: '', text: '' } : await bounded(holder.screen(sessionId), this.readMs());
+    } catch (error) {
+      return { unread: (error as Error).message };
+    }
+
+    const evidence = codeModeEvidence(screen.head);
+
+    if (evidence !== null && 'off' in evidence) {
+      return { error: `${evidence.off}${await end(holder, sessionId, this.readMs())}` };
+    }
+
+    if (entry === undefined || entry.exitedAt !== null) {
+      const lines = lastLines(screen.text);
+
+      return { error: `Claude exited with code ${String(entry?.exitCode ?? null)} before the session started${lines === '' ? '.' : `: ${lines}`}` };
+    }
+
+    const marked = ownMarker(this.markerMap(), session) !== undefined;
+
+    if (marked && evidence !== null) {
+      return { startPrompt: false };
+    }
+
+    if (marked) {
+      // The banner is drawn before the first hook runs; one more look covers output still on its way.
+      if (markedAt !== null && this.deps.now() - markedAt >= POLL_MS) {
+        return { error: `Claude started the session without Code Mode: its output has no "${CODE_MODE_ON}" line.${await end(holder, sessionId, this.readMs())}` };
+      }
+
+      return { marked: true };
+    }
+
+    return showsStartPrompt(screen.text) || this.deps.now() - startedAt >= START_PROMPT_MS ? { startPrompt: true } : null;
+  }
+
+  /**
+   * Liveness from the holder's list, state from markers of the current launch; a session the holder no longer holds live has ended. A launch's
+   * SessionStart with source clear, fork or resume under another session ID is the held process changing its ID (mechanics M73), reported as a
+   * fork. A session started waiting on a prompt is checked for Code Mode when its first marker arrives.
+   */
+  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[]; gone?: true } | { error: string }> {
+    const found = await this.deps.holder(false);
+
+    if ('gone' in found) {
+      return { sessions: [], forks: [], gone: true };
+    }
+
+    if ('error' in found) {
+      return found;
+    }
+
+    let entries: SessionEntry[];
+
+    try {
+      entries = await found.holder.list();
+    } catch (error) {
+      return { error: (error as Error).message };
+    }
+
+    const markers = this.markerMap();
+    const observed: ObservedSession[] = [];
+    const forks: ObservedFork[] = [];
+
+    for (const session of sessions) {
+      const entry = entries.find((one) => one.session === session.id);
+
+      if (entry === undefined || entry.exitedAt !== null) {
+        continue;
+      }
+
+      const marker = ownMarker(markers, session);
+      // The old ID's marker goes with its SessionEnd; while it stays, another ID with the launch is a nested run, such as `claude -p --resume`.
+      const candidates =
+        marker === undefined
+          ? [...markers.values()].filter((other) => other.launch === session.launchId && session.launchId != null && other.sessionId !== session.nativeSessionId && ['clear', 'fork', 'resume'].includes(other.startSource ?? ''))
+          : [];
+      const moved = candidates.length === 0 ? undefined : await this.confirmed(candidates, entry);
+
+      if (moved !== undefined) {
+        forks.push({ sessionId: session.id, nativeSessionId: moved.sessionId, shortId: moved.sessionId.slice(0, 8), ...(heldState(moved) ?? { state: 'running', detail: null }) });
+      }
+
+      if (marker !== undefined && session.stateDetail === START_PROMPT) {
+        const screen = await found.holder.screen(session.id).catch(() => null);
+        const evidence = screen === null ? null : codeModeEvidence(screen.head);
+
+        // A failed read is no evidence either way; the next observation looks again.
+        if (screen === null) {
+          observed.push({ sessionId: session.id, state: session.state === 'starting' || session.state === 'ended' ? 'waiting' : session.state, detail: session.stateDetail, interactive: false });
+          continue;
+        }
+
+        if (evidence === null || 'off' in evidence) {
+          const ended = await end(found.holder, session.id, this.readMs());
+
+          observed.push({ sessionId: session.id, state: 'failed', detail: `${evidence === null ? `Claude started the session without Code Mode: its output has no "${CODE_MODE_ON}" line.` : evidence.off}${ended}` });
+          continue;
+        }
+      }
+
+      const state = marker === undefined ? null : heldState(marker);
+
+      observed.push({ sessionId: session.id, ...(state ?? { state: session.state === 'starting' || session.state === 'ended' ? 'running' : session.state, detail: session.stateDetail }), interactive: false });
+    }
+
+    return { sessions: observed, forks };
+  }
+
+  /**
+   * The candidate the roster lists for the held process, which a nested run with the same launch is not (mechanics M67, M77). No roster, or one
+   * that lists none, follows no change; the next observation asks again.
+   */
+  private async confirmed(candidates: Marker[], entry: SessionEntry): Promise<Marker | undefined> {
+    const roster = await this.deps.roster?.().catch((error: Error) => ({ error: error.message }));
+
+    if (roster === undefined || !Array.isArray(roster)) {
+      return undefined;
+    }
+
+    const pids = new Set([entry.pid, ...(entry.tree ?? []).map((member) => member.pid)]);
+    const held = new Set(roster.filter((one) => one.pid !== undefined && pids.has(one.pid)).map((one) => one.sessionId));
+
+    return candidates.find((candidate) => held.has(candidate.sessionId));
+  }
+
+  markers(sessions: Session[]): Map<string, MarkerReading> {
+    const readings = new Map<string, MarkerReading>();
+    const markers = this.markerMap();
+
+    for (const session of sessions) {
+      const marker = ownMarker(markers, session);
+
+      if (marker !== undefined) {
+        readings.set(marker.sessionId, { at: marker.at ?? 0, cwd: marker.cwd ?? null, observed: heldState(marker), recheck: false });
+      }
+    }
+
+    return readings;
+  }
+
+  /** A Code Mode session runs in Switchboard's own process while the holder holds it live. */
+  async isBackground(target: SessionTarget): Promise<boolean> {
+    const found = await this.deps.holder(false);
+
+    if (!('holder' in found)) {
+      return false;
+    }
+
+    try {
+      return (await found.holder.list()).some((entry) => entry.session === target.sessionId && entry.exitedAt === null);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Ends the session's process tree in the holder; a session the holder does not hold has ended already. */
+  async stop(target: SessionTarget, _reason?: StopReason): Promise<{ error: string } | null> {
+    const found = await this.deps.holder(false);
+
+    if ('gone' in found) {
+      return null;
+    }
+
+    if ('error' in found) {
+      return found;
+    }
+
+    try {
+      await found.holder.kill(target.sessionId);
+
+      return null;
+    } catch (error) {
+      const message = (error as Error).message;
+
+      return message === `No session ${target.sessionId} is held.` ? null : { error: message };
+    }
+  }
+
+  /** A session a stopped hub left starting is checked once with the holder; one it no longer holds failed to start (PRD R43). */
+  async reconcile(sessions: Session[]): Promise<Reconciled[]> {
+    const found = await this.deps.holder(false);
+
+    return Promise.all(
+      sessions.map(async (session): Promise<Reconciled> => {
+        if (!('holder' in found)) {
+          return 'error' in found ? { sessionId: session.id, pending: found.error } : { sessionId: session.id, failed: 'The hub stopped while the session was starting.' };
+        }
+
+        const held = await found.holder.list().then((entries) => entries.some((one) => one.session === session.id), () => null);
+
+        if (held === null) {
+          return { sessionId: session.id, pending: 'The terminal holder did not answer.' };
+        }
+
+        if (!held || session.nativeSessionId === null || session.launchId == null) {
+          return { sessionId: session.id, failed: 'The hub stopped while the session was starting.' };
+        }
+
+        // The banner came long before a restarted hub looks, so a marker without the evidence fails at once.
+        const verdict = await this.verdict(found.holder, session.id, { nativeSessionId: session.nativeSessionId, launchId: session.launchId }, session.startedAt, session.startedAt - POLL_MS);
+
+        if (verdict !== null && 'unread' in verdict) {
+          return { sessionId: session.id, pending: verdict.unread };
+        }
+
+        if (verdict === null || 'marked' in verdict) {
+          return { sessionId: session.id, pending: 'The session is still starting.' };
+        }
+
+        if ('error' in verdict) {
+          return { sessionId: session.id, failed: verdict.error };
+        }
+
+        return { sessionId: session.id, started: { shortId: session.nativeSessionId.slice(0, 8), nativeSessionId: session.nativeSessionId, ...(verdict.startPrompt ? { startPrompt: true as const } : {}) } };
+      }),
+    );
+  }
+
+  /** The Claude runner installs the hooks both runners read. */
+  installHooks(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+}

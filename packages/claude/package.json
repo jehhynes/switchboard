@@ -19,7 +19,8 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@switchboard/core": "*"
+    "@switchboard/core": "*",
+    "@switchboard/holder": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

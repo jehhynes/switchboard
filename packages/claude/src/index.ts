@@ -7,3 +7,4 @@ export * from './install.js';
 export * from './debrief.js';
 export * from './fork.js';
 export * from './sessionRunner.js';
+export * from './codeMode.js';
