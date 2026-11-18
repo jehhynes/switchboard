@@ -257,6 +257,17 @@ describe('Debriefs', () => {
     expect(forks).toHaveLength(1);
   });
 
+  it('skips a Code Mode session, which claude -p --resume refuses, and logs it once (PRD R55)', async () => {
+    sessions = [session({ codeMode: true, launchId: 'launch-1' })];
+    const debrief = debriefs();
+
+    await debrief.scan();
+    await debrief.scan();
+
+    expect(forks).toEqual([]);
+    expect(logs.filter((line) => line.includes('Code Mode'))).toEqual(['debrief: session s1 skipped, because Code Mode sessions cannot be debriefed']);
+  });
+
   it('skips a session the roster shows working, and forks one it shows idle', async () => {
     const entry = { id: 'aaaaaaaa', sessionId: NATIVE, pid: 7, kind: 'background', cwd: CWD };
 

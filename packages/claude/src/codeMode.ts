@@ -17,6 +17,8 @@ export const DIRECT_API = 'https://api.anthropic.com';
 export const CODE_MODE_START_MS = 60_000;
 /** A live process with no marker of its launch after this long waits on a prompt in its terminal (mechanics M70). */
 export const START_PROMPT_MS = 20_000;
+/** A held session with no terminal attached and no input or output for this long is ended (PRD R95). */
+export const CODE_MODE_IDLE_MS = 4 * 60 * 60_000;
 const POLL_MS = 1_000;
 const COLS = 120;
 const ROWS = 40;
@@ -343,11 +345,11 @@ export class CodeModeRunner implements SessionRunner {
    * SessionStart with source clear, fork or resume under another session ID is the held process changing its ID (mechanics M73), reported as a
    * fork. A session started waiting on a prompt is checked for Code Mode when its first marker arrives.
    */
-  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[]; gone?: true } | { error: string }> {
+  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[]; gone?: true; idle: string[] } | { error: string }> {
     const found = await this.deps.holder(false);
 
     if ('gone' in found) {
-      return { sessions: [], forks: [], gone: true };
+      return { sessions: [], forks: [], gone: true, idle: [] };
     }
 
     if ('error' in found) {
@@ -365,12 +367,18 @@ export class CodeModeRunner implements SessionRunner {
     const markers = this.markerMap();
     const observed: ObservedSession[] = [];
     const forks: ObservedFork[] = [];
+    const idle: string[] = [];
+    const now = this.deps.now();
 
     for (const session of sessions) {
       const entry = entries.find((one) => one.session === session.id);
 
       if (entry === undefined || entry.exitedAt !== null) {
         continue;
+      }
+
+      if (entry.clients === 0 && now - Math.max(entry.startedAt, entry.lastInputAt ?? 0, entry.lastOutputAt ?? 0) >= CODE_MODE_IDLE_MS) {
+        idle.push(session.id);
       }
 
       const marker = ownMarker(markers, session);
@@ -408,7 +416,7 @@ export class CodeModeRunner implements SessionRunner {
       observed.push({ sessionId: session.id, ...(state ?? { state: session.state === 'starting' || session.state === 'ended' ? 'running' : session.state, detail: session.stateDetail }), interactive: false });
     }
 
-    return { sessions: observed, forks };
+    return { sessions: observed, forks, idle };
   }
 
   /**
@@ -428,6 +436,14 @@ export class CodeModeRunner implements SessionRunner {
     return candidates.find((candidate) => held.has(candidate.sessionId));
   }
 
+  /** The session whose held process, or a nested run of it, wrote the native session's marker under its launch, or null. */
+  heldBy(nativeSessionId: string, sessions: Session[]): Session | null {
+    // Read whatever the hooks setting, since a held session can change its ID before hooks are turned off.
+    const launch = readMarkers(this.deps.home).get(nativeSessionId)?.launch;
+
+    return launch == null ? null : (sessions.find((session) => session.codeMode === true && session.launchId === launch) ?? null);
+  }
+
   markers(sessions: Session[]): Map<string, MarkerReading> {
     const readings = new Map<string, MarkerReading>();
     const markers = this.markerMap();
@@ -436,11 +452,32 @@ export class CodeModeRunner implements SessionRunner {
       const marker = ownMarker(markers, session);
 
       if (marker !== undefined) {
-        readings.set(marker.sessionId, { at: marker.at ?? 0, cwd: marker.cwd ?? null, observed: heldState(marker), recheck: false });
+        readings.set(marker.sessionId, { at: marker.at ?? 0, cwd: marker.cwd ?? null, observed: heldState(marker), recheck: false, ...(marker.event === 'SessionStart' && marker.source === 'compact' ? { compacted: true as const } : {}) });
       }
     }
 
     return readings;
+  }
+
+  /** The terminals attached to the held session and its last input; none when the holder does not hold it live. */
+  async heldActivity(sessionId: string): Promise<{ clients: number; lastInputAt: number | null; lastOutputAt: number | null } | { error: string }> {
+    const found = await this.deps.holder(false);
+
+    if ('gone' in found) {
+      return { clients: 0, lastInputAt: null, lastOutputAt: null };
+    }
+
+    if ('error' in found) {
+      return found;
+    }
+
+    try {
+      const entry = (await bounded(found.holder.list(), this.readMs())).find((one) => one.session === sessionId && one.exitedAt === null);
+
+      return { clients: entry?.clients ?? 0, lastInputAt: entry?.lastInputAt ?? null, lastOutputAt: entry?.lastOutputAt ?? null };
+    } catch (error) {
+      return { error: (error as Error).message };
+    }
   }
 
   /** A Code Mode session runs in Switchboard's own process while the holder holds it live. */

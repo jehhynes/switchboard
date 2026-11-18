@@ -216,6 +216,8 @@ export class Debriefs {
   private unsaved: { lines: DebriefLogEntry[]; change: Change } | null = null;
   /** The last condition logged, so a scan repeating it every minute says it once. */
   private said = '';
+  /** Code Mode sessions whose skip was logged (PRD R55). */
+  private readonly skippedCodeMode = new Set<string>();
 
   constructor(private readonly deps: DebriefDeps) {}
 
@@ -334,6 +336,16 @@ export class Debriefs {
       const ended = session.endedAt === null ? false : now - session.endedAt >= DEBRIEF_EXPIRY_MS;
 
       if (session.nativeSessionId === null || tried.has(session.id) || ended || !['idle', 'failed', 'ended'].includes(session.state)) {
+        continue;
+      }
+
+      // `claude -p --resume` refuses a Code Mode session, and resuming it without Code Mode is refused too (mechanics M74).
+      if (session.codeMode === true) {
+        if (!this.skippedCodeMode.has(session.id)) {
+          this.skippedCodeMode.add(session.id);
+          this.deps.log(`debrief: session ${session.id} skipped, because Code Mode sessions cannot be debriefed`);
+        }
+
         continue;
       }
 

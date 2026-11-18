@@ -6,6 +6,7 @@ import { PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import type { Session, StartAction } from '@switchboard/core';
 import type { SessionEntry, SpawnRequest } from '@switchboard/holder';
 import {
+  CODE_MODE_IDLE_MS,
   CodeModeRunner,
   HOOKS_REQUIRED,
   claudeFile,
@@ -376,7 +377,7 @@ describe('CodeModeRunner.observe', () => {
     holder.entries = [entry('sb-1'), entry('sb-2', true)];
     marker(NATIVE, { event: 'Stop', launch: LAUNCH });
 
-    expect(await runner().observe([session(), session({ id: 'sb-2' }), session({ id: 'sb-3' })])).toEqual({ sessions: [{ sessionId: 'sb-1', state: 'idle', detail: null, interactive: false }], forks: [] });
+    expect(await runner().observe([session(), session({ id: 'sb-2' }), session({ id: 'sb-3' })])).toEqual({ sessions: [{ sessionId: 'sb-1', state: 'idle', detail: null, interactive: false }], forks: [], idle: [] });
   });
 
   it('keeps the last state when no marker of the launch exists, and reads a promptless resume as idle (mechanics M68)', async () => {
@@ -452,7 +453,7 @@ describe('CodeModeRunner.observe', () => {
 
   it('reports a gone holder and a failed read apart', async () => {
     lookup = { gone: true };
-    expect(await runner().observe([session()])).toEqual({ sessions: [], forks: [], gone: true });
+    expect(await runner().observe([session()])).toEqual({ sessions: [], forks: [], gone: true, idle: [] });
 
     lookup = { error: 'The terminal holder did not answer.' };
     expect(await runner().observe([session()])).toEqual({ error: 'The terminal holder did not answer.' });
@@ -462,12 +463,53 @@ describe('CodeModeRunner.observe', () => {
     expect(await runner().observe([session()])).toEqual({ error: 'The terminal holder closed the connection.' });
   });
 
+  it('names held sessions with no terminal attached and no input or output for the idle limit (PRD R95)', async () => {
+    clock = CODE_MODE_IDLE_MS + 1_000;
+    holder.entries = [
+      { ...entry('sb-1'), lastOutputAt: clock - CODE_MODE_IDLE_MS },
+      { ...entry('sb-2'), lastOutputAt: clock - CODE_MODE_IDLE_MS, clients: 1 },
+      { ...entry('sb-3'), lastInputAt: clock - CODE_MODE_IDLE_MS + 1 },
+      { ...entry('sb-4'), startedAt: clock - CODE_MODE_IDLE_MS + 1 },
+    ];
+
+    const observed = await runner().observe(['sb-1', 'sb-2', 'sb-3', 'sb-4'].map((id) => session({ id, state: 'idle' })));
+
+    expect(observed).toMatchObject({ idle: ['sb-1'] });
+  });
+
+  it('finds the held session whose launch wrote a marker of another session ID, as after /clear (PRD R81)', () => {
+    marker('cleared-uuid', { event: 'SessionStart', source: 'clear', launch: LAUNCH });
+    marker('own-uuid', { event: 'Stop' });
+
+    expect(runner().heldBy('cleared-uuid', [session({ id: 'sb-0', codeMode: false, launchId: null }), session()])?.id).toBe('sb-1');
+    expect(runner().heldBy('own-uuid', [session()])).toBeNull();
+    expect(runner().heldBy('unknown', [session()])).toBeNull();
+    hooks = false;
+    expect(runner().heldBy('cleared-uuid', [session()])?.id).toBe('sb-1');
+  });
+
+  it('reads the terminals attached to a held session and its last input, none for an exited one or a gone holder, and fails a failed read', async () => {
+    holder.entries = [{ ...entry('sb-1'), clients: 2 }, { ...entry('sb-2', true), clients: 1 }];
+
+    holder.entries[0]!.lastInputAt = 900;
+    holder.entries[0]!.lastOutputAt = 950;
+    expect(await runner().heldActivity('sb-1')).toEqual({ clients: 2, lastInputAt: 900, lastOutputAt: 950 });
+    expect(await runner().heldActivity('sb-2')).toEqual({ clients: 0, lastInputAt: null, lastOutputAt: null });
+    lookup = { gone: true };
+    expect(await runner().heldActivity('sb-1')).toEqual({ clients: 0, lastInputAt: null, lastOutputAt: null });
+    lookup = { error: 'The terminal holder holds its lock but does not answer.' };
+    expect(await runner().heldActivity('sb-1')).toEqual({ error: 'The terminal holder holds its lock but does not answer.' });
+  });
+
   it('reads markers of its sessions\' own launches only, and none with hooks off', () => {
     marker(NATIVE, { event: 'PermissionRequest', toolName: 'Bash', launch: LAUNCH, at: 42 });
     marker('other', { event: 'Stop', launch: 'x' });
 
     expect([...runner().markers([session()])]).toEqual([[NATIVE, { at: 42, cwd: null, observed: { state: 'waiting', detail: PERMISSION_PROMPT }, recheck: false }]]);
     expect(runner().markers([session({ launchId: 'other' })]).size).toBe(0);
+
+    marker(NATIVE, { event: 'SessionStart', source: 'compact', launch: LAUNCH, at: 43 });
+    expect(runner().markers([session()]).get(NATIVE)).toEqual({ at: 43, cwd: null, observed: null, recheck: false, compacted: true });
 
     hooks = false;
     expect(runner().markers([session()]).size).toBe(0);

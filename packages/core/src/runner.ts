@@ -27,6 +27,8 @@ export interface MarkerReading {
   cwd?: string | null;
   observed: { state: LiveState; detail: string | null } | null;
   recheck: boolean;
+  /** A held session's compaction, which says nothing about whether a turn runs: a manual `/compact` ends with no Stop (mechanics M65). */
+  compacted?: true;
 }
 
 /** What a restarted hub learns about a session it left starting; `pending` says why it cannot tell yet, and the hub asks again at its next roster read. */
@@ -43,7 +45,7 @@ export interface SessionRunner {
    * Liveness and state of the given started sessions; a session left out has ended. `forks` holds live forks that may replace a session
    * (PRD R78). A failed read changes nothing.
    */
-  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks?: ObservedFork[] } | { error: string }>;
+  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks?: ObservedFork[]; gone?: true; idle?: string[] } | { error: string }>;
   /** How a native session relates to the session's current copy; a provider without forks leaves it out (PRD R78). */
   relation?(nativeSessionId: string, session: Session): CopyRelation;
   /** The session of which the native session is a newer fork, among the given sessions, or null. */
@@ -60,8 +62,15 @@ export interface SessionRunner {
   resume?(nativeSessionId: string, prompt: string, cwd: string): Promise<{ copy: string | null } | { error: string }>;
   /** The short ID of the session's background process when the roster lists it with a process, null when not. */
   background?(nativeSessionId: string): Promise<{ shortId: string } | null | { error: string }>;
+  /** The Code Mode runner only: the given session whose held process, or a nested run of it, wrote the native session's marker, or null (PRD R81). */
+  heldBy?(nativeSessionId: string, sessions: Session[]): Session | null;
   /** Fast readings of the given started sessions by native session ID, read without starting a process. */
   markers(sessions: Session[]): Map<string, MarkerReading>;
+  /**
+   * The Code Mode runner only: the terminals attached to a held session and its last input, which defer its end (PRD R95). Its observation adds `gone` when
+   * the terminal holder is gone, so its sessions end through `holder-lost` (PRD R94), and `idle` for held sessions past the idle limit.
+   */
+  heldActivity?(sessionId: string): Promise<{ clients: number; lastInputAt: number | null; lastOutputAt?: number | null } | { error: string }>;
   /** Whether the session runs in Switchboard's background process, so a release may stop it (PRD R39). */
   isBackground(target: SessionTarget): Promise<boolean>;
   stop(target: SessionTarget, reason: StopReason): Promise<{ error: string } | null>;

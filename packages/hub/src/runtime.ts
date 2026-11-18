@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { classify, ClaudeRunner } from '@switchboard/claude';
+import { classify, ClaudeRunner, CodeModeRunner, readRoster } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, OpenTerminal, OpenVSCode, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Settings, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
@@ -9,6 +9,7 @@ import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFoc
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
+import { HolderLink } from './holder.js';
 import { doneSince } from './rows.js';
 import type { RepoKeys } from './rows.js';
 
@@ -39,6 +40,16 @@ export const RESUME_CONFIRM_MS = 60_000;
 const RESUME_POLL_MS = 2_000;
 /** How long `<sessions.nodePath> --version` may take. */
 const NODE_CHECK_TIMEOUT_MS = 10_000;
+/** How long input to a held session after its turn defers its end, for the prompt's marker to be read. */
+export const INPUT_SETTLE_MS = 60_000;
+
+/** A runner per agent, and the Code Mode runner for Claude sessions held in the terminal holder (PRD R93). */
+export type RunnerKey = Provider | 'codeMode';
+const RUNNER_KEYS: readonly RunnerKey[] = [...PROVIDERS, 'codeMode'];
+
+function runnerKey(session: { provider: Provider; codeMode?: boolean }): RunnerKey {
+  return session.codeMode === true ? 'codeMode' : session.provider;
+}
 
 export interface RuntimeDeps {
   /** The operator's home; the Switchboard home is `<home>/.switchboard`. */
@@ -57,7 +68,7 @@ export interface RuntimeDeps {
   /** Codex's home (`CODEX_HOME` or `~/.codex`) and the variables Codex runs need; defaults for tests that run no Codex session. */
   codex?: { home: string; env: Record<string, string> };
   /** Stand-in runners for tests; each runner is built from the fields above otherwise. */
-  runners?: Partial<Record<Provider, SessionRunner>>;
+  runners?: Partial<Record<RunnerKey, SessionRunner>>;
   /** Whether a process runs; a stand-in for tests. */
   alive?(pid: number): boolean;
   log(line: string): void;
@@ -217,14 +228,21 @@ export class Runtime {
   private reads = new Map<string, Promise<void>>();
   /** Sessions a stopped hub left starting that a runner could not settle yet. */
   private unreconciled = new Set<string>();
-  /** One runner per agent, chosen by each session's provider (PRD R22). */
-  private readonly runners: Record<Provider, SessionRunner>;
+  /** One runner per agent, chosen by each session's provider (PRD R22), and one for Code Mode sessions (PRD R93). */
+  private readonly runners: Record<RunnerKey, SessionRunner>;
+  /** The terminal holder of this home, connected on first use (PRD R94). */
+  private readonly holder: HolderLink;
+  /** Code Mode sessions whose end runs now, so a retry does not end one twice (PRD R95). */
+  private readonly ending = new Set<string>();
+  /** Code Mode sessions whose end waits for an attached terminal, logged once each. */
+  private readonly deferred = new Set<string>();
 
   constructor(
     private readonly deps: RuntimeDeps,
     config: Config,
   ) {
     this.config = config;
+    this.holder = new HolderLink({ home: this.home, nodePath: () => this.config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep, gone: () => this.holderGone() });
 
     const hooks = () => this.config.settings.sessions.installHooks;
     const codex = deps.codex ?? { home: join(deps.home, '.codex'), env: {} };
@@ -239,6 +257,22 @@ export class Runtime {
       codex:
         deps.runners?.codex ??
         new CodexRunner({ codexPath, nodePath, exec: deps.exec, sleep: deps.sleep, now: deps.now, home: this.home, codexHome: codex.home, env: codex.env, hooks }),
+      codeMode:
+        deps.runners?.codeMode ??
+        new CodeModeRunner({
+          claudePath,
+          home: this.home,
+          hooks,
+          holder: (start) => this.holder.find(start),
+          now: deps.now,
+          sleep: deps.sleep,
+          // Confirms a held process's new session ID after /clear, /branch or /resume (mechanics M67).
+          roster: async () => {
+            const roster = await readRoster(claudePath(), deps.exec);
+
+            return 'error' in roster ? roster : roster.entries.map((entry) => ({ sessionId: entry.sessionId, ...(entry.pid === undefined ? {} : { pid: entry.pid }) }));
+          },
+        }),
     };
     this.buildSources();
   }
@@ -420,8 +454,10 @@ export class Runtime {
 
   /** Settles sessions a stopped hub left starting; one the runner cannot tell about yet is asked about again at the next roster read. */
   private async reconcile(starting: Session[]): Promise<void> {
-    for (const provider of PROVIDERS) {
-      for (const result of await this.runners[provider].reconcile(starting.filter((session) => session.provider === provider))) {
+    for (const key of RUNNER_KEYS) {
+      const own = starting.filter((session) => runnerKey(session) === key);
+
+      for (const result of own.length === 0 ? [] : await this.runners[key].reconcile(own)) {
         if ('pending' in result) {
           this.unreconciled.add(result.sessionId);
           this.deps.log(`session ${result.sessionId} left starting by the hub that stopped is not settled yet: ${result.pending}`);
@@ -457,6 +493,7 @@ export class Runtime {
     this.markerRead = null;
     clearTimeout(this.markerWatchRetry ?? undefined);
     this.markerWatchRetry = null;
+    this.holder.close();
   }
 
   /** Reads the markers soon after a hook writes one; the `MARKER_MS` timer stays as a fallback. */
@@ -745,26 +782,37 @@ export class Runtime {
     const observed: ObservedSession[] = [];
     const forks: ObservedFork[] = [];
     const checked: string[] = [];
+    // Sessions of a terminal holder that is gone, and held sessions past the idle limit (PRD R94, R95).
+    const lost: string[] = [];
+    const idle: string[] = [];
     // A question reported, or a move to the background begun or ended, while the reads ran makes their result stale for that session, which the
     // next read decides (PRD R70, R89). Checked once all providers' reads are done, since the event applies them together.
     const marks = (session: Session | null) => `${session?.question?.id ?? ''}|${session?.move?.id ?? ''}|${session?.movedAt ?? ''}`;
     const asked = new Map(sessions.map((session) => [session.id, marks(session)]));
 
-    for (const provider of PROVIDERS) {
-      const own = sessions.filter((session) => session.provider === provider);
+    for (const key of RUNNER_KEYS) {
+      const own = sessions.filter((session) => runnerKey(session) === key);
 
-      if (own.length === 0) {
+      // Only a resume through the holder revives an ended Code Mode session, so ended ones need no holder read.
+      if (own.length === 0 || (key === 'codeMode' && own.every((session) => session.state === 'ended'))) {
         continue;
       }
 
-      const roster = await this.runners[provider].observe(own);
+      const roster = await this.runners[key].observe(own);
 
       // A failed read changes none of the provider's sessions.
       if ('error' in roster) {
-        this.deps.log(`${provider} roster read failed: ${roster.error}`);
+        this.deps.log(`${key} roster read failed: ${roster.error}`);
         continue;
       }
 
+      // Interrupted work ends with the cause, not through the roster's end path (PRD R94).
+      if (roster.gone === true) {
+        lost.push(...own.filter((session) => session.state !== 'ended').map((session) => session.id));
+        continue;
+      }
+
+      idle.push(...(roster.idle ?? []));
       observed.push(...roster.sessions);
       forks.push(...(roster.forks ?? []));
       checked.push(...own.map((session) => session.id));
@@ -782,6 +830,22 @@ export class Runtime {
       const filteredForks = forks.filter((fork) => !stale.has(fork.sessionId));
 
       this.send({ type: 'roster', sessions: observed.filter((entry) => !stale.has(entry.sessionId)), checked: fresh, ...(filteredForks.length > 0 ? { forks: filteredForks } : {}) });
+    }
+
+    for (const sessionId of lost) {
+      this.deps.log(`session ${sessionId} ended: the terminal holder stopped`);
+      this.send({ type: 'holder-lost', sessionId });
+    }
+
+    for (const sessionId of idle.filter((id) => !stale.has(id))) {
+      this.send({ type: 'held-idle', sessionId });
+    }
+
+    // An end deferred while a terminal is attached, including one a stopped hub left, is tried again (PRD R95).
+    for (const session of this.deps.store.activeSessions()) {
+      if (session.codeMode === true && session.releasing && !session.released && !this.ending.has(session.id)) {
+        this.track(this.run({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'release', codeMode: true }));
+      }
     }
   }
 
@@ -809,8 +873,8 @@ export class Runtime {
     const started = this.deps.store.startedSessions();
     const markers = new Map<string, MarkerReading>();
 
-    for (const provider of PROVIDERS) {
-      for (const [id, reading] of this.runners[provider].markers(started.filter((session) => session.provider === provider))) {
+    for (const key of RUNNER_KEYS) {
+      for (const [id, reading] of this.runners[key].markers(started.filter((session) => runnerKey(session) === key))) {
         markers.set(id, reading);
       }
     }
@@ -883,6 +947,13 @@ export class Runtime {
       return null;
     }
 
+    // A Code Mode session follows only its own held process's ID changes, which a roster read adopts (PRD R93).
+    if (session.codeMode === true) {
+      void this.readRoster();
+
+      return `Session ${nativeSessionId.slice(0, 8)} is not the session Switchboard started, so the report was not recorded.`;
+    }
+
     const relation = this.runners.claude.relation?.(nativeSessionId, session) ?? 'unrelated';
 
     if (relation === 'newer') {
@@ -897,7 +968,7 @@ export class Runtime {
    * for the hook that restores it after compaction, or null.
    */
   contract(nativeSessionId: string): string | null {
-    const session = this.deps.store.sessionByNativeId(nativeSessionId) ?? this.runners.claude.forkOf?.(nativeSessionId, this.deps.store.startedSessions()) ?? null;
+    const session = this.deps.store.sessionByNativeId(nativeSessionId) ?? this.runners.claude.forkOf?.(nativeSessionId, this.deps.store.startedSessions().filter((one) => one.codeMode !== true)) ?? null;
 
     if (session === null) {
       return null;
@@ -925,10 +996,17 @@ export class Runtime {
       return { key: keyOf(known), contract: sessionContract(known.id, this.reportCommand, known.reports, known.provider), already: true };
     }
 
-    const family = this.deps.store.startedSessions().find((session) => session.provider === 'claude' && (session.retiredIds.includes(nativeSessionId) || (this.runners.claude.relation?.(nativeSessionId, session) ?? 'unrelated') !== 'unrelated'));
+    const family = this.deps.store.startedSessions().find((session) => session.provider === 'claude' && (session.retiredIds.includes(nativeSessionId) || (session.codeMode !== true && (this.runners.claude.relation?.(nativeSessionId, session) ?? 'unrelated') !== 'unrelated')));
 
     if (family !== undefined) {
       return { refused: `This session is a copy of ${keyOf(family)}, which Switchboard continues in its latest copy.` };
+    }
+
+    // After /clear, /branch or /resume in a held session's terminal its new ID is followed there, not registered (PRD R81, R93).
+    const held = this.runners.codeMode.heldBy?.(nativeSessionId, this.deps.store.activeSessions()) ?? null;
+
+    if (held !== null) {
+      return { refused: `This session runs in the terminal holder for ${keyOf(held)}, which Switchboard follows there.` };
     }
 
     const live = this.runners.claude.live === undefined ? { error: 'The Claude runner cannot register sessions.' } : await this.runners.claude.live(nativeSessionId);
@@ -1496,6 +1574,79 @@ export class Runtime {
     }
   }
 
+  /**
+   * No holder holds the lock, so the sessions the last one held have ended (PRD R94). Found here, before a start replaces it, as well as at a roster
+   * read; a session still starting is settled by its own start check.
+   */
+  private holderGone(): void {
+    for (const session of this.deps.store.activeSessions()) {
+      if (session.codeMode === true && session.state !== 'starting') {
+        this.deps.log(`session ${session.id} ended: the terminal holder stopped`);
+        this.send({ type: 'holder-lost', sessionId: session.id });
+      }
+    }
+  }
+
+  /**
+   * Whether a Code Mode session's release ends it now: not when a new turn cancelled it, and not while a terminal is attached, which defers it to a
+   * later roster read (PRD R95).
+   */
+  private async endsNow(action: Extract<FlowAction, { type: 'stop-session' }>): Promise<boolean> {
+    const waiting = () => {
+      const session = this.deps.store.session(action.sessionId);
+
+      return session !== null && session.releasing && !session.released ? session : null;
+    };
+
+    if (waiting() === null) {
+      this.deferred.delete(action.sessionId);
+      this.deps.log(`end of held session ${action.sessionId} skipped: it no longer waits to end`);
+      return false;
+    }
+
+    const activity = (await this.runners.codeMode.heldActivity?.(action.sessionId)) ?? { clients: 0, lastInputAt: null };
+    // A new turn during the read cancels the end.
+    const session = waiting();
+
+    if (session === null) {
+      this.deferred.delete(action.sessionId);
+      this.deps.log(`end of held session ${action.sessionId} skipped: it no longer waits to end`);
+      return false;
+    }
+
+    // The marker read now may show a new turn the flow has not applied; it cancels the end when it is.
+    const reading = session.nativeSessionId === null ? undefined : this.runners.codeMode.markers([session]).get(session.nativeSessionId);
+
+    // Only a turn-end marker lets the end go on: any other, such as a PreToolUse that replaced the prompt's marker, belongs to a new turn. A
+    // compaction says neither, since a manual `/compact` ends with no Stop, so recent output, such as a running turn's spinner, defers the end instead.
+    const compacted = reading?.compacted === true;
+
+    if (reading !== undefined && !compacted && reading.observed?.state !== 'idle' && reading.observed?.state !== 'failed') {
+      this.deps.log(`end of held session ${action.sessionId} skipped: its last marker is not a turn end`);
+      return false;
+    }
+
+    // Input after the turn's own end, by its marker's time, may be a prompt whose marker has not been written yet, so the end waits for it a while (PRD R95).
+    // After a compaction the turn end's own time is gone, and the time the hub applied it can be later than newer activity, so any recent activity counts.
+    const turnEnd = compacted ? -Infinity : (reading?.at ?? session.stateAt);
+    const recent = (at: number | null | undefined) => at != null && at > turnEnd && this.deps.now() - at < INPUT_SETTLE_MS;
+    const typed = !('error' in activity) && (recent(activity.lastInputAt) || (compacted && recent(activity.lastOutputAt)));
+
+    if (!('error' in activity) && activity.clients === 0 && !typed) {
+      this.deferred.delete(action.sessionId);
+      return true;
+    }
+
+    if (!this.deferred.has(action.sessionId)) {
+      this.deferred.add(action.sessionId);
+      const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : 'input arrived after its turn';
+
+      this.deps.log(`end of held session ${action.sessionId} deferred: ${why}`);
+    }
+
+    return false;
+  }
+
   private async run(action: FlowAction): Promise<void> {
     switch (action.type) {
       case 'triage': {
@@ -1570,43 +1721,80 @@ export class Runtime {
           return;
         }
 
-        const result = await this.runners[action.provider].start(action);
+        const runner = this.runners[runnerKey(action)];
+        const result = await runner.start(action);
+
+        // Delete during a Code Mode start removes the row while the holder spawns, so the process is ended here (PRD R76, R95).
+        if (!('error' in result) && action.codeMode === true && this.deps.store.session(action.sessionId) === null) {
+          const failure = await runner.stop({ sessionId: action.sessionId, shortId: result.shortId }, 'operator');
+
+          this.deps.log(`session ${action.sessionId} started after its work item was deleted; ${failure === null ? 'ended it' : `ending it failed, so it may still be running: ${failure.error}`}`);
+          return;
+        }
 
         this.send(
           'error' in result
             ? { type: 'session-start-failed', sessionId: action.sessionId, message: result.error }
-            : { type: 'session-started', sessionId: action.sessionId, nativeSessionId: result.nativeSessionId, shortId: result.shortId, ...(result.startPrompt ? { startPrompt: true as const } : {}) },
+            : {
+                type: 'session-started',
+                sessionId: action.sessionId,
+                nativeSessionId: result.nativeSessionId,
+                shortId: result.shortId,
+                ...(result.startPrompt ? { startPrompt: true as const } : {}),
+                ...(result.launchId === undefined ? {} : { launchId: result.launchId }),
+              },
         );
         return;
       }
       case 'resume-session':
         return this.resumeSession(action);
       case 'stop-session': {
-        const runner = this.runners[action.provider];
+        const runner = this.runners[runnerKey(action)];
 
-        if (action.reason === 'release' && action.shortId !== null && !(await runner.isBackground(action))) {
+        if (action.codeMode === true && action.reason === 'release') {
+          if (this.ending.has(action.sessionId)) {
+            return;
+          }
+
+          this.ending.add(action.sessionId);
+
+          try {
+            if (await this.endsNow(action)) {
+              await this.stopSession(action);
+            }
+          } finally {
+            this.ending.delete(action.sessionId);
+          }
+
+          return;
+        }
+
+        if (action.codeMode !== true && action.reason === 'release' && action.shortId !== null && !(await runner.isBackground(action))) {
           // The operator resumed it, such as in a VS Code tab; a release never stops their session (PRD R39).
           this.deps.log(`release skipped: session ${action.sessionId} is not a background process`);
           return;
         }
 
-        const failure = await runner.stop(action, action.reason);
-
-        if (failure === null) {
-          await this.findSetupWorktrees();
-        } else if (this.deps.store.session(action.sessionId) === null) {
-          // Delete removed the session row, so the flow has nowhere to show the failure (PRD R76).
-          this.deps.log(`stop of deleted session ${action.sessionId} (${action.shortId}) failed; it may still be running: ${failure.error}`);
-        }
-
-        this.send(
-          failure === null
-            ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason, shortId: action.shortId }
-            : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error, shortId: action.shortId },
-        );
-        return;
+        return this.stopSession(action);
       }
     }
+  }
+
+  private async stopSession(action: Extract<FlowAction, { type: 'stop-session' }>): Promise<void> {
+    const failure = await this.runners[runnerKey(action)].stop(action, action.reason);
+
+    if (failure === null) {
+      await this.findSetupWorktrees();
+    } else if (this.deps.store.session(action.sessionId) === null) {
+      // Delete removed the session row, so the flow has nowhere to show the failure (PRD R76).
+      this.deps.log(`stop of deleted session ${action.sessionId} (${action.shortId}) failed; it may still be running: ${failure.error}`);
+    }
+
+    this.send(
+      failure === null
+        ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason, shortId: action.shortId }
+        : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error, shortId: action.shortId },
+    );
   }
 }
 

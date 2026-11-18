@@ -35,6 +35,9 @@ export const MESSAGES = {
   noTaskPlaybooks: 'No task playbooks to choose from.',
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
   nothingNew: 'Nothing is newer than the earlier work item',
+  holderStopped: 'The terminal holder stopped.',
+  codeModeQuestion: 'A Code Mode session is answered in its terminal; use Open in terminal.',
+  codeModeBackground: 'A Code Mode session runs in the terminal holder, which keeps it running when the window closes.',
 } as const;
 
 /** The first message of a session resumed in its background process after its tab closed mid-turn (PRD R89, mechanics M55). */
@@ -175,11 +178,16 @@ export type FlowEvent =
   | { type: 'triage-failed'; triageId: number; error: string; context: string | null }
   /** The hub stopped during triage. Nothing failed, so the work item is triaged again. */
   | { type: 'triage-cancelled'; triageId: number }
-  | { type: 'session-started'; sessionId: string; nativeSessionId: string | null; shortId: string; startPrompt?: true }
+  /** `launchId`: the launch of a Code Mode session's process (PRD R93). */
+  | { type: 'session-started'; sessionId: string; nativeSessionId: string | null; shortId: string; startPrompt?: true; launchId?: string }
   | { type: 'session-start-failed'; sessionId: string; message: string }
   /** `checked` lists the sessions the read looked for, so a session whose start completed during the read is not ended; all when absent. */
   | { type: 'roster'; sessions: ObservedSession[]; checked?: string[]; forks?: ObservedFork[] }
   | { type: 'marker'; sessionId: string; state: LiveState; detail: string | null }
+  /** The terminal holder that held this Code Mode session is gone (PRD R94). */
+  | { type: 'holder-lost'; sessionId: string }
+  /** The holder lists this Code Mode session with no terminal attached and no input or output for the idle limit (PRD R95). */
+  | { type: 'held-idle'; sessionId: string }
   | { type: 'report'; sessionId: string; report: Report }
   /** The hub's recheck of a done report whose first read still listed the ticket as assigned (PRD R10). */
   /** 	oken is the session's outcomeDetail when the hub scheduled the read, so a check of a superseded report changes nothing. */
@@ -266,9 +274,11 @@ export type FlowAction =
       /** A Code Mode session's Claude session ID and the launch of its process, chosen before the start so a restarted hub can find it (PRD R93). */
       nativeSessionId?: string;
       launchId?: string;
+      /** Runs in Code Mode in the terminal holder (PRD R93). */
+      codeMode?: true;
     }
   /** The provider travels with the action, because Delete removes the session's row before its stop runs. */
-  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason }
+  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason; codeMode?: true }
   /** Waits for the tab's process `pid` to exit, then resumes the session in its background process with `prompt` (PRD R89). */
   | { type: 'resume-session'; sessionId: string; moveId: string; provider: Provider; nativeSessionId: string; cwd: string; pid: number; prompt: string };
 
@@ -366,6 +376,11 @@ function actorOf(type: FlowEvent['type']): Actor {
   }
 }
 
+/** The flag a Code Mode session's actions carry, because Delete removes the session's row before its stop runs. */
+function codeModeOf(session: Pick<Session, 'codeMode'>): { codeMode?: true } {
+  return session.codeMode === true ? { codeMode: true } : {};
+}
+
 /** A stop result for a copy that a fork retired after the stop was sent. */
 function retiredStop(session: Session, shortId: string | null | undefined): boolean {
   return shortId !== undefined && shortId !== session.shortId;
@@ -384,7 +399,7 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
     case 'triage-cancelled':
       return { triageId: event.triageId };
     case 'session-started':
-      return { shortId: event.shortId, ...(event.startPrompt ? { startPrompt: true } : {}) };
+      return { shortId: event.shortId, ...(event.startPrompt ? { startPrompt: true } : {}), ...(event.launchId === undefined ? {} : { launchId: event.launchId }) };
     case 'session-start-failed':
       return { message: event.message };
     case 'marker':
@@ -561,13 +576,17 @@ class Flow {
       case 'triage-cancelled':
         return this.triageCancelled(event.triageId);
       case 'session-started':
-        return this.sessionStarted(event.sessionId, event.nativeSessionId, event.shortId, event.startPrompt === true);
+        return this.sessionStarted(event.sessionId, event.nativeSessionId, event.shortId, event.startPrompt === true, event.launchId);
       case 'session-start-failed':
         return this.sessionStartFailed(event.sessionId, event.message);
       case 'roster':
         return this.roster(event.sessions, event.checked, event.forks ?? []);
       case 'marker':
         return this.marker(event.sessionId, event.state, event.detail);
+      case 'holder-lost':
+        return this.holderLost(event.sessionId);
+      case 'held-idle':
+        return this.heldIdle(event.sessionId);
       case 'report':
         return this.report(event.sessionId, event.report);
       case 'done-checked':
@@ -1375,13 +1394,13 @@ class Flow {
     this.store.noteEvent({ reportedByWorkItemId: origin.id, reportedByPlaybook: origin.playbook });
   }
 
-  private sessionStarted(sessionId: string, nativeSessionId: string | null, shortId: string, startPrompt: boolean): void {
+  private sessionStarted(sessionId: string, nativeSessionId: string | null, shortId: string, startPrompt: boolean, launchId: string | undefined): void {
     const session = this.session(sessionId);
 
     if (session.state === 'starting') {
       const state = startPrompt ? { state: 'waiting' as const, stateDetail: START_PROMPT } : { state: 'running' as const };
 
-      this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now });
+      this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now, ...(launchId === undefined ? {} : { launchId }) });
       const item = this.store.workItem(session.workItemId)!;
 
       // The started task session's prompt holds the guidance (PRD R77).
@@ -1421,10 +1440,12 @@ class Flow {
     const listed = new Map(observed.map((entry) => [entry.sessionId, entry]));
 
     for (const fork of forks) {
+      // A Code Mode session's new ID is the same held process (PRD R93), never the operator's interactive one.
+      const held = this.store.session(fork.sessionId)?.codeMode === true;
       const adopted = this.adoptFork(fork);
 
       if (adopted) {
-        listed.set(fork.sessionId, { sessionId: fork.sessionId, state: fork.state, detail: fork.detail, interactive: true });
+        listed.set(fork.sessionId, { sessionId: fork.sessionId, state: fork.state, detail: fork.detail, interactive: !held });
       }
     }
 
@@ -1477,15 +1498,17 @@ class Flow {
     const session = this.store.session(fork.sessionId);
 
     // A moving session resumes its own ID, so a fork waits until the move ends (PRD R89).
-    if (session === null || session.state === 'starting' || session.move !== null || session.nativeSessionId === null || session.nativeSessionId === fork.nativeSessionId || session.retiredIds.includes(fork.nativeSessionId)) {
+    // A held process can resume an ID it left, such as `/resume` back to the ID before a `/clear` (mechanics M73).
+    if (session === null || session.state === 'starting' || session.move !== null || session.nativeSessionId === null || session.nativeSessionId === fork.nativeSessionId || (session.codeMode !== true && session.retiredIds.includes(fork.nativeSessionId))) {
       return false;
     }
 
-    if (this.store.sessionsFor(session.workItemId).at(-1)?.id !== session.id) {
+    // A Code Mode session's ID change, by /clear, /branch or /resume in its terminal, is its own held process, so it is followed at once (PRD R93).
+    if (session.codeMode !== true && this.store.sessionsFor(session.workItemId).at(-1)?.id !== session.id) {
       return false;
     }
 
-    if (!session.released || session.releasing) {
+    if (session.codeMode !== true && (!session.released || session.releasing)) {
       if (session.pendingFork !== fork.shortId) {
         this.store.updateSession(session.id, { pendingFork: fork.shortId });
       }
@@ -1493,7 +1516,7 @@ class Flow {
       return false;
     }
 
-    this.store.updateSession(session.id, { nativeSessionId: fork.nativeSessionId, shortId: fork.shortId, retiredIds: [...session.retiredIds, session.nativeSessionId], pendingFork: null });
+    this.store.updateSession(session.id, { nativeSessionId: fork.nativeSessionId, shortId: fork.shortId, retiredIds: [...session.retiredIds.filter((id) => id !== fork.nativeSessionId), session.nativeSessionId], pendingFork: null });
 
     return true;
   }
@@ -1524,7 +1547,15 @@ class Flow {
     const resumed = (state === 'running' || state === 'waiting') && (session.state === 'ended' || TURN_ENDED.includes(session.state));
 
     if (TURN_ENDED.includes(state)) {
-      this.release(current);
+      if (current.codeMode === true) {
+        this.endHeld(current);
+      } else {
+        this.release(current);
+      }
+    } else if (current.codeMode === true && current.releasing && !current.released) {
+      // A new turn, such as one typed in an attached terminal, cancels an end that waited for the terminal to detach; its turn end decides again (PRD R95).
+      this.store.updateSession(session.id, { releasing: false });
+      current.releasing = false;
     }
 
     const item = this.latest(current);
@@ -1628,7 +1659,7 @@ class Flow {
   private setupState(item: WorkItem, session: Session, state: LiveState, resumed: boolean): void {
     if (resumed && item.status === 'failed' && item.error === MESSAGES.setupWithoutWorktree) {
       this.setStatus(item.id, { status: 'setup', error: null });
-    } else if (TURN_ENDED.includes(state) && session.released && !session.releasing && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
+    } else if (TURN_ENDED.includes(state) && (session.codeMode === true || (session.released && !session.releasing)) && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
       this.finishSetup(item, session);
     }
   }
@@ -1651,14 +1682,105 @@ class Flow {
     }
   }
 
-  /** PRD R39: stop a session whose turn has ended, once, so it can resume in VS Code. */
+  /**
+   * PRD R39: stop a session whose turn has ended, once, so it can resume in VS Code. A Code Mode session is `released` only once the holder confirms
+   * its exit, so no observation takes a pending end for an ended session (PRD R95).
+   */
   private release(session: Session): void {
-    if (session.released) {
+    if (session.released || (session.codeMode === true && session.releasing)) {
       return;
     }
 
-    this.store.updateSession(session.id, { released: true, releasing: true });
-    this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'release' });
+    this.store.updateSession(session.id, session.codeMode === true ? { releasing: true } : { released: true, releasing: true });
+    this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'release', ...codeModeOf(session) });
+  }
+
+  /**
+   * PRD R95: a held Code Mode session whose turn has ended ends when it is a setup session, its work item is done, or a newer session of its work
+   * item has started; otherwise it keeps running in the holder.
+   */
+  private endHeld(session: Session): void {
+    const item = this.store.workItem(session.workItemId);
+
+    if (item === null || session.released || session.releasing) {
+      return;
+    }
+
+    if (session.kind === 'setup' || item.status === 'done' || this.store.sessionsFor(item.id).at(-1)?.id !== session.id) {
+      this.release(session);
+    }
+  }
+
+  /** Applies the end rule to the work item's held Code Mode sessions whose turn has ended, as when it becomes done or a newer session starts. */
+  private endHeldSessions(workItemId: number): void {
+    for (const session of this.store.sessionsFor(workItemId)) {
+      if (session.codeMode === true && TURN_ENDED.includes(session.state)) {
+        this.endHeld(session);
+      }
+    }
+  }
+
+  /**
+   * The holder that held a Code Mode session is gone (PRD R94). Interrupted work blocks its work item with the cause rather than taking the
+   * roster's end path, whose `finished` rule would read it as a finished run; a session whose turn had ended leaves its work item as it was.
+   */
+  private holderLost(sessionId: string): void {
+    const session = this.store.session(sessionId);
+
+    if (session === null || session.codeMode !== true || session.state === 'ended') {
+      return;
+    }
+
+    if (session.state === 'starting') {
+      this.sessionStartFailed(sessionId, MESSAGES.holderStopped);
+      return;
+    }
+
+    const turnEnded = TURN_ENDED.includes(session.state);
+
+    this.store.updateSession(sessionId, {
+      state: 'ended',
+      stateAt: this.now,
+      stateDetail: null,
+      endedAt: this.now,
+      released: true,
+      releasing: false,
+      question: null,
+      ...(turnEnded || session.outcome !== null ? {} : { outcome: 'failed' as const, outcomeDetail: MESSAGES.holderStopped }),
+    });
+
+    // A session that reported done ends as its process would, so a done report that waits for its second read still settles (PRD R10).
+    if (session.outcome === 'done') {
+      this.ended({ ...session, state: 'ended' });
+      return;
+    }
+
+    const item = turnEnded ? null : this.latest(session);
+
+    if (item === null) {
+      return;
+    }
+
+    if (item.unassignedAt !== null) {
+      this.done(item, 'unassigned', null);
+    } else if (item.approvalHeld || item.status === 'awaiting-approval') {
+      this.restoreApproval(item, MESSAGES.holderStopped);
+    } else {
+      this.block(item, MESSAGES.holderStopped);
+    }
+  }
+
+  /** The idle limit ends a held session after its turn, or in any state while hooks are off and it is unobserved (PRD R95). */
+  private heldIdle(sessionId: string): void {
+    const session = this.store.session(sessionId);
+
+    if (session === null || session.codeMode !== true || session.state === 'starting' || session.state === 'ended') {
+      return;
+    }
+
+    if (TURN_ENDED.includes(session.state) || !this.context.settings.sessions.installHooks) {
+      this.release(session);
+    }
   }
 
   private report(sessionId: string, report: Report): void {
@@ -1776,7 +1898,7 @@ class Flow {
       return;
     }
 
-    this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
+    this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator', ...codeModeOf(session) });
   }
 
   /**
@@ -1786,13 +1908,21 @@ class Flow {
   private delete(item: WorkItem): void {
     const session = this.activeSession(item);
 
-    if (session?.state === 'starting') {
+    // A starting Code Mode session is held under its Switchboard session ID, so the holder can end it (PRD R95).
+    if (session?.state === 'starting' && session.codeMode !== true) {
       throw new Refusal('The session is starting. Delete the work item once it has started.');
     }
 
     // A session whose release stop has not finished may still run in its background process.
-    if (session !== null && (!session.released || session.releasing)) {
+    if (session !== null && session.codeMode !== true && (!session.released || session.releasing)) {
       this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'operator' });
+    }
+
+    // The holder keeps every Code Mode session of the work item running until it is ended, including older ones whose end waits on a terminal.
+    for (const held of this.store.sessionsFor(item.id)) {
+      if (held.codeMode === true && held.state !== 'ended') {
+        this.actions.push({ type: 'stop-session', sessionId: held.id, provider: held.provider, shortId: held.shortId, reason: 'operator', codeMode: true });
+      }
     }
 
     // Its follow-ups lose their parentId, so their tickets keep the origin, as tickets made before it was stored did not (PRD R27).
@@ -1859,10 +1989,20 @@ class Flow {
   /** The session stays as it was, so the operator can stop it again. */
   private stopFailed(sessionId: string, reason: StopReason, message: string, shortId: string | null | undefined): void {
     const session = this.session(sessionId);
+
+    // A late failure of a second end of a held session that has ended says nothing about it.
+    if (session.codeMode === true && session.state === 'ended') {
+      return;
+    }
     const item = retiredStop(session, shortId) ? null : this.latest(session);
 
     if (item !== null) {
       this.store.updateWorkItem(item.id, { error: `${reason === 'release' ? 'Release' : 'Stop'} failed: ${message}` });
+    }
+
+    // A held session whose end failed is still held, so a later turn end or the idle limit can end it.
+    if (session.codeMode === true && reason === 'release') {
+      this.store.updateSession(sessionId, { releasing: false });
     }
   }
 
@@ -1908,6 +2048,10 @@ class Flow {
 
     if (session === null || item === null || session.nativeSessionId !== event.nativeSessionId || !event.workItemIds.includes(item.id)) {
       throw new Refusal("This session is not one of Switchboard's work items.");
+    }
+
+    if (session.codeMode === true) {
+      throw new Refusal(MESSAGES.codeModeBackground);
     }
 
     if (session.provider !== 'claude' || session.external) {
@@ -2013,6 +2157,10 @@ class Flow {
 
   /** Stops the background session, so the window can open it in a Claude tab, which asks the question again (PRD R70). */
   private openQuestion(item: WorkItem, nativeSessionId: string): void {
+    if (this.activeSession(item)?.codeMode === true) {
+      throw new Refusal(MESSAGES.codeModeQuestion);
+    }
+
     const session = this.waitingBackground(item, nativeSessionId);
 
     this.actions.push({ type: 'stop-session', sessionId: session.id, provider: session.provider, shortId: session.shortId, reason: 'open' });
@@ -2302,6 +2450,7 @@ class Flow {
     const approvalHeld = !reported && (current.status === 'awaiting-approval' || current.approvalHeld || (current.status === 'queued' && current.approvalPrompt !== null));
 
     this.setStatus(item.id, { status: 'done', doneAt: this.now, doneReason: reason, warning, queuedAt: null, scopeAt, approvalHeld });
+    this.endHeldSessions(item.id);
   }
 
   private fail(item: WorkItem, cause: string): void {
@@ -2513,6 +2662,8 @@ class Flow {
       launchId: null,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
+    // Rows open only the latest session, so an older held one ends (PRD R95).
+    this.endHeldSessions(item.id);
     this.actions.push({
       type: 'start-session',
       sessionId: id,

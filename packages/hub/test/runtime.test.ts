@@ -9,7 +9,7 @@ import { markOf } from '@switchboard/core/group';
 import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, Ticket } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import { INPUT_SETTLE_MS, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 
@@ -2558,5 +2558,302 @@ describe('ticket reports (PRD R83)', () => {
       [{ kind: 'ticket', url: URL }, 'Session 9273f594 was replaced by fork f0f0f0f0, so the report was not recorded.'],
       [{ kind: 'ticket', url: URL }, 'The github source changed during the lookup. Send the report again.'],
     ]);
+  });
+});
+
+
+describe('Code Mode sessions (PRD R93-R95)', () => {
+  /** A stand-in runner whose observation and stops a test sets. */
+  function fakeRunner(overrides: Partial<SessionRunner> = {}): SessionRunner & { stops: string[]; starts: string[] } {
+    const stops: string[] = [];
+    const starts: string[] = [];
+
+    return {
+      start: async (action) => {
+        starts.push(action.sessionId);
+        return { shortId: `${action.sessionId}-short`, nativeSessionId: `${action.sessionId}-native`, ...(action.codeMode === true ? { launchId: `${action.sessionId}-launch` } : {}) };
+      },
+      observe: async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) }),
+      markers: () => new Map(),
+      isBackground: async () => true,
+      stop: async (target) => {
+        stops.push(target.sessionId);
+        return null;
+      },
+      reconcile: async () => [],
+      installHooks: async () => null,
+      stops,
+      starts,
+      ...overrides,
+    };
+  }
+
+  /** A background session s1 and a held Code Mode session s2, both running. */
+  async function twoSessions(codeMode: SessionRunner) {
+    const claude = fakeRunner();
+    const context = setup(config(), () => T0, { claude, codeMode });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'background', repoRoot: 'D:/git/widgets', start: true });
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.store.updateSession('s2', { codeMode: true, launchId: 'launch-2' });
+
+    return { ...context, claude };
+  }
+
+  it('starts a Code Mode session with the Code Mode runner and records its launch', async () => {
+    const claude = fakeRunner();
+    const codeMode = fakeRunner();
+    const { runtime, store } = setup(config(), () => T0, { claude, codeMode });
+
+    runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: false });
+    const session = { id: 's9', workItemId: 1, kind: 'task' as const, provider: 'claude' as const, cwd: 'D:/git/widgets', state: 'starting' as const, stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: null, shortId: null, codeMode: true, launchId: null };
+
+    store.insertSession(session);
+    await runtime['run']({ type: 'start-session', sessionId: 's9', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/git/widgets', prompt: 'p', contract: 'c', name: 'n', permissionMode: 'auto', model: null, codeMode: true });
+
+    expect(codeMode.starts).toEqual(['s9']);
+    expect(claude.starts).toEqual([]);
+    expect(store.session('s9')).toMatchObject({ state: 'running', nativeSessionId: 's9-native', launchId: 's9-launch' });
+    runtime.stop();
+  });
+
+  it('applies the background runner\'s observation when the holder read fails, and changes no held session', async () => {
+    const codeMode = fakeRunner({ observe: async () => ({ error: 'The terminal holder did not answer.' }) });
+    const { runtime, store, claude, logs } = await twoSessions(codeMode);
+
+    claude.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) });
+    await runtime.readRoster();
+
+    // The background session's turn end applied, so it was released.
+    expect(claude.stops).toEqual(['s1']);
+    expect(store.session('s1')).toMatchObject({ released: true });
+    expect(store.session('s2')).toMatchObject({ state: 'running', released: false });
+    expect(logs).toContain('codeMode roster read failed: The terminal holder did not answer.');
+    runtime.stop();
+  });
+
+  it('ends the sessions of a gone holder with the cause, not as finished runs', async () => {
+    const codeMode = fakeRunner({ observe: async () => ({ sessions: [], forks: [], gone: true }) });
+    const { runtime, store } = await twoSessions(codeMode);
+
+    await runtime.readRoster();
+
+    expect(store.session('s2')).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: 'The terminal holder stopped.' });
+    expect(store.workItem(store.session('s2')!.workItemId)).toMatchObject({ status: 'blocked', error: 'The terminal holder stopped.' });
+    expect(store.session('s1')).toMatchObject({ state: 'running' });
+    runtime.stop();
+  });
+
+  it('defers the idle end of a held session while a terminal is attached, then ends it at a later read', async () => {
+    let clients = 1;
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients, lastInputAt: null }) });
+    const { runtime, store, logs } = await twoSessions(codeMode);
+
+    codeMode.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })), idle: ['s2'] });
+    await runtime.readRoster();
+    await runtime.settled();
+
+    expect(store.session('s2')).toMatchObject({ state: 'idle', releasing: true, released: false });
+    expect(codeMode.stops).toEqual([]);
+    expect(logs).toContain('end of held session s2 deferred: 1 terminal is attached');
+
+    clients = 0;
+    await runtime.readRoster();
+    await runtime.settled();
+
+    expect(codeMode.stops).toEqual(['s2']);
+    expect(store.session('s2')).toMatchObject({ state: 'ended', released: true, releasing: false });
+    runtime.stop();
+  });
+
+  it('drops a deferred end once a new turn cancels it', async () => {
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 1, lastInputAt: null }) });
+    const { runtime, store, logs } = await twoSessions(codeMode);
+
+    codeMode.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })), idle: ['s2'] });
+    await runtime.readRoster();
+    await runtime.settled();
+    codeMode.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) });
+    await runtime.readRoster();
+    await runtime.settled();
+
+    await runtime.readRoster();
+    await runtime.settled();
+
+    expect(store.session('s2')).toMatchObject({ state: 'running', releasing: false, released: false });
+    expect(codeMode.stops).toEqual([]);
+    expect(logs.filter((line) => line.startsWith('end of held session s2'))).toEqual(['end of held session s2 deferred: 1 terminal is attached']);
+    runtime.stop();
+  });
+
+  it('ends the held sessions when a holder lookup finds none, as before a start replaces it, but not a starting one', async () => {
+    const { runtime, store, logs } = await twoSessions(fakeRunner());
+
+    store.updateSession('s1', { codeMode: true, state: 'starting' });
+    expect(await runtime['holder'].find(false)).toEqual({ gone: true });
+
+    expect(store.session('s2')).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: 'The terminal holder stopped.' });
+    expect(store.session('s1')).toMatchObject({ state: 'starting' });
+    expect(logs).toContain('session s2 ended: the terminal holder stopped');
+    runtime.stop();
+  });
+
+  it('defers an end while input after the turn may be a prompt not yet observed, and ends it once that input is old', async () => {
+    let now = T0;
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: T0 + 1_000 }) });
+    const claude = fakeRunner();
+    const context = setup(config(), () => now, { claude, codeMode });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.store.updateSession('s1', { codeMode: true, launchId: 'launch-1', state: 'idle', stateAt: T0, releasing: true });
+    claude.observe = codeMode.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) });
+    now = T0 + 2_000;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+    expect(context.logs).toContain('end of held session s1 deferred: input arrived after its turn');
+
+    now = T0 + 1_000 + INPUT_SETTLE_MS;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual(['s1']);
+    context.runtime.stop();
+  });
+
+  it('measures input against the turn end its marker records, not when the hub applied it, and skips an end the marker shows a new turn for', async () => {
+    let now = T0 + 3_000;
+    let marker = { at: T0, observed: { state: 'idle' as const, detail: null }, recheck: false };
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: T0 + 1_000 }), markers: () => new Map([['s1-native', marker]]) as never });
+    const claude = fakeRunner();
+    const context = setup(config(), () => now, { claude, codeMode });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.store.updateSession('s1', { codeMode: true, launchId: 'launch-1', state: 'idle', stateAt: T0 + 2_000, releasing: true });
+    codeMode.observe = async () => ({ error: 'not read in this test' });
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+    expect(context.logs).toContain('end of held session s1 deferred: input arrived after its turn');
+
+    marker = { at: T0 + 1_500, observed: { state: 'running', detail: null } as never, recheck: false };
+    now = T0 + 1_000 + INPUT_SETTLE_MS;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+    expect(context.logs).toContain('end of held session s1 skipped: its last marker is not a turn end');
+    context.runtime.stop();
+  });
+
+  it('ends a session whose last marker is a manual compaction once its input and output are older than the settle time', async () => {
+    let now = T0 + 3_000;
+    const marker = { at: T0 + 2_000, observed: null, recheck: false, compacted: true as const };
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: T0 + 1_000, lastOutputAt: T0 + 2_500 }), markers: () => new Map([['s1-native', marker]]) as never });
+    const claude = fakeRunner();
+    const context = setup(config(), () => now, { claude, codeMode });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.store.updateSession('s1', { codeMode: true, launchId: 'launch-1', state: 'idle', stateAt: T0, releasing: true });
+    codeMode.observe = async () => ({ error: 'not read in this test' });
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+
+    now = T0 + 2_500 + INPUT_SETTLE_MS;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual(['s1']);
+    context.runtime.stop();
+  });
+
+  it('skips an end when a marker with no state, such as a PreToolUse that replaced the prompt marker, is newer than the input', async () => {
+    const now = T0 + 3_000;
+    const marker = { at: T0 + 2_000, observed: null, recheck: true };
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: T0 + 1_000 }), markers: () => new Map([['s1-native', marker]]) as never });
+    const claude = fakeRunner();
+    const context = setup(config(), () => now, { claude, codeMode });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.store.updateSession('s1', { codeMode: true, launchId: 'launch-1', state: 'idle', stateAt: T0, releasing: true });
+    codeMode.observe = async () => ({ error: 'not read in this test' });
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+    expect(context.logs).toContain('end of held session s1 skipped: its last marker is not a turn end');
+    context.runtime.stop();
+  });
+
+  it('ends a held session a stopped hub left waiting to end, once, at the next roster read', async () => {
+    let answer = () => {};
+    const codeMode = fakeRunner({ heldActivity: () => new Promise((done) => (answer = () => done({ clients: 0, lastInputAt: null }))) });
+    const { runtime, store } = await twoSessions(codeMode);
+
+    codeMode.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) });
+    store.updateSession('s2', { state: 'idle', releasing: true });
+    const first = runtime.readRoster();
+
+    await first;
+    await runtime.readRoster();
+    answer();
+    await runtime.settled();
+
+    expect(codeMode.stops).toEqual(['s2']);
+    expect(store.session('s2')).toMatchObject({ state: 'ended', released: true });
+    runtime.stop();
+  });
+
+  it('ends a Code Mode session that finishes starting after Delete removed its work item', async () => {
+    let started = () => {};
+    const codeMode = fakeRunner();
+    const { runtime, store, logs } = setup(config(), () => T0, { claude: fakeRunner(), codeMode });
+
+    codeMode.start = (action) => new Promise((done) => (started = () => done({ shortId: 'short', nativeSessionId: 'native', launchId: 'launch' })));
+    runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: false });
+    store.insertSession({ id: 's9', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/git/widgets', state: 'starting', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: null, shortId: null, codeMode: true, launchId: null });
+
+    const start = runtime['run']({ type: 'start-session', sessionId: 's9', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/git/widgets', prompt: 'p', contract: 'c', name: 'n', permissionMode: 'auto', model: null, codeMode: true });
+
+    expect(runtime.send({ type: 'delete', workItemId: 1 }).refused).toBeNull();
+    await runtime.settled();
+    started();
+    await start;
+
+    expect(store.session('s9')).toBeNull();
+    expect(codeMode.stops).toEqual(['s9', 's9']);
+    expect(logs).toContain('session s9 started after its work item was deleted; ended it');
+    runtime.stop();
+  });
+
+  it('refuses to register the new ID of a held session after /clear', async () => {
+    const codeMode = fakeRunner({ heldBy: (nativeSessionId, sessions) => (nativeSessionId === 'cleared-uuid' ? (sessions.find((session) => session.id === 's2') ?? null) : null) });
+    const { runtime, store } = await twoSessions(codeMode);
+    const key = (() => {
+      const ticket = store.ticket(store.workItem(store.session('s2')!.workItemId)!.ticketId)!;
+
+      return `${ticket.source} ${ticket.sourceKey}`;
+    })();
+
+    expect(await runtime.register('cleared-uuid', 'Mine')).toEqual({ refused: `This session runs in the terminal holder for ${key}, which Switchboard follows there.` });
+    runtime.stop();
+  });
+
+  it('refuses a report from another Claude session ID than the held session\'s', async () => {
+    const { runtime, store } = await twoSessions(fakeRunner());
+
+    expect(await runtime.report({ sessionId: 's2', kind: 'stage', stage: 'testing' } as never, 'other-native-uuid')).toEqual({ refused: 'Session other-na is not the session Switchboard started, so the report was not recorded.' });
+    expect(await runtime.report({ sessionId: 's2', kind: 'stage', stage: 'testing' } as never, 's2-native')).toEqual({ refused: null });
+    expect(store.workItem(store.session('s2')!.workItemId)?.stage).toBe('testing');
+    runtime.stop();
   });
 });
