@@ -69,6 +69,8 @@ class Fake {
   spawnedFiles: string[] = [];
   trusted: ReadonlySet<string>[] = [];
   trustResult: string | null = null;
+  /** Switchboard homes whose hub holds its lock. */
+  runningHubs = new Set<string>();
   onSpawn: (files: { stdout: string; stderr: string }, pid: number) => void = (files) => writeFileSync(files.stdout, STARTED + TURN);
 
   runner(): CodexRunner {
@@ -145,6 +147,7 @@ class Fake {
         this.trusted.push(commands);
         return this.trustResult;
       },
+      hubRunning: async (other) => this.runningHubs.has(other),
     });
   }
 }
@@ -497,6 +500,22 @@ describe('installHooks', () => {
     expect(readFileSync(join(home, 'codex-hook.mjs'), 'utf8')).toBe(CODEX_HOOK_SOURCE);
     expect(readFileSync(join(codexHome, 'hooks.json'), 'utf8')).toContain('codex-hook.mjs');
     expect([...fake.trusted[0]!]).toEqual([`node "${join(home, 'codex-hook.mjs').replaceAll('\\', '/')}"`, `node "${join(home, 'contract.mjs').replaceAll('\\', '/')}"`]);
+  });
+
+  it("removes the entries of a Switchboard home whose hub does not run, and keeps a running hub's", async () => {
+    const fake = new Fake();
+    const stopped = 'C:/Temp/sb-live-home-a/.switchboard';
+    const running = 'C:/Temp/sb-live-home-b/.switchboard';
+    const entry = (other: string) => ({ hooks: [{ type: 'command', command: `node "${other}/codex-hook.mjs"`, timeout: 5 }] });
+
+    fake.runningHubs.add(running);
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'hooks.json'), JSON.stringify({ hooks: { Stop: [entry(stopped), entry(running)] } }));
+
+    expect(await fake.runner().installHooks()).toBeNull();
+    const stop = (JSON.parse(readFileSync(join(codexHome, 'hooks.json'), 'utf8')) as { hooks: { Stop: unknown[] } }).hooks.Stop;
+
+    expect(stop).toEqual([entry(running), { hooks: [{ type: 'command', command: `node "${join(home, 'codex-hook.mjs').replaceAll('\\', '/')}"`, timeout: 5 }] }]);
   });
 
   it('reports a hooks file it must not change and a trust failure', async () => {

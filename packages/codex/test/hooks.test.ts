@@ -92,6 +92,36 @@ describe('planCodexHooks', () => {
     expect(hooks['Stop']).toEqual([{ hooks: [check] }, { hooks: [shell] }, { hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout: 5 }] }]);
   });
 
+  it('removes the entries of another Switchboard home whose hub is gone, and keeps those of a home whose hub runs', () => {
+    const gone = 'C:/Temp/sb-live-home-a/.switchboard';
+    const live = 'D:/acceptance/.switchboard';
+    const entry = (home: string, script: string) => ({ type: 'command', command: `node "${home}/${script}"`, timeout: 5 });
+    const support = { type: 'command', command: 'node support.js' };
+    const file = {
+      hooks: {
+        Stop: [{ hooks: [support] }, { hooks: [entry(gone, 'codex-hook.mjs')] }, { hooks: [entry(live, 'codex-hook.mjs')] }],
+        SessionStart: [{ hooks: [entry(gone, 'codex-hook.mjs')] }, { hooks: [entry(gone, 'contract.mjs')] }],
+        Interrupt: [{ hooks: [entry(gone, 'codex-hook.mjs')] }],
+        PreToolUse: [{ matcher: 'x', hooks: [support, entry(gone, 'codex-hook.mjs')] }],
+        // Not a Switchboard home: the script's folder is not named .switchboard.
+        PostToolUse: [{ hooks: [entry('C:/tools', 'codex-hook.mjs')] }],
+      },
+    };
+    const asked: string[] = [];
+    const plan = planCodexHooks(JSON.stringify(file), HOOK, CONTRACT, 'node', (home) => (asked.push(home), home === gone)) as { text: string };
+    const hooks = ours(plan.text).hooks;
+    const own = (timeout = 5) => ({ hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout }] });
+
+    expect(hooks['Stop']).toEqual([{ hooks: [support] }, { hooks: [entry(live, 'codex-hook.mjs')] }, own()]);
+    expect(hooks['SessionStart']).toEqual([own(), { hooks: [{ type: 'command', command: `node "${CONTRACT}"`, timeout: 10 }] }]);
+    expect(hooks['Interrupt']).toBeUndefined();
+    expect(hooks['PreToolUse']).toEqual([{ matcher: 'x', hooks: [support] }, own()]);
+    expect(hooks['PostToolUse']).toEqual([{ hooks: [entry('C:/tools', 'codex-hook.mjs')] }, own()]);
+    // This hub's own home is never checked.
+    expect([...new Set(asked)].sort()).toEqual([live, gone].sort());
+    expect(planCodexHooks(plan.text, HOOK, CONTRACT, 'node', (home) => home === gone)).toEqual({ unchanged: true });
+  });
+
   it('leaves a file it cannot read as hooks alone', () => {
     expect(planCodexHooks('{ not json', HOOK, CONTRACT, 'node')).toEqual({ error: 'Codex hooks.json is not valid JSON, so Switchboard left it alone.' });
     expect(planCodexHooks('[]', HOOK, CONTRACT, 'node')).toEqual({ error: 'Codex hooks.json is not a JSON object, so Switchboard left it alone.' });
@@ -106,6 +136,9 @@ describe('the hook script', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'switchboard-codex-hook-'));
     writeFileSync(join(dir, 'codex-hook.mjs'), CODEX_HOOK_SOURCE);
+    // The run record of Switchboard's session on thread t1, as writeRecord leaves it.
+    mkdirSync(join(dir, 'codex'));
+    writeFileSync(join(dir, 'codex', 's1.json'), JSON.stringify({ v: 2, sessionId: 's1', threadId: 't1' }));
   });
 
   afterEach(() => {
@@ -134,13 +167,28 @@ describe('the hook script', () => {
 
   it.skipIf(process.platform !== 'linux')('records the nearest ancestor named codex with its /proc start time', async () => {
     // A shell started as `codex` is named codex, and runs the hook as its child because a command follows it.
-    symlinkSync('/bin/sh', join(dir, 'codex'));
+    // In bin/, since codex/ holds the run records.
+    mkdirSync(join(dir, 'bin'));
+    symlinkSync('/bin/sh', join(dir, 'bin', 'codex'));
     writeFileSync(join(dir, 'payload.json'), JSON.stringify({ session_id: 't1', hook_event_name: 'UserPromptSubmit' }));
-    const shell = spawn(join(dir, 'codex'), ['-c', `"${process.execPath}" codex-hook.mjs < payload.json; true`], { cwd: dir, stdio: 'ignore' });
+    const shell = spawn(join(dir, 'bin', 'codex'),['-c', `"${process.execPath}" codex-hook.mjs < payload.json; true`], { cwd: dir, stdio: 'ignore' });
     const created = await new Promise<string>((done) => shell.once('spawn', () => done(readFileSync(`/proc/${shell.pid}/stat`, 'utf8').split(') ')[1]!.split(' ')[19]!)));
 
     expect(await new Promise((done) => shell.once('exit', done))).toBe(0);
     expect(read()).toMatchObject({ event: 'UserPromptSubmit', pid: shell.pid, created });
+  });
+
+  it("writes nothing for a thread no run record names, such as another tool's Codex session", () => {
+    // The thread's run log names it too, but only a record counts.
+    writeFileSync(join(dir, 'codex', 's2.jsonl'), '{"type":"thread.started","thread_id":"t2"}\n"threadId":"t2"\n');
+
+    expect(run({ session_id: 't2', hook_event_name: 'UserPromptSubmit', turn_id: 'u1' }).status).toBe(0);
+    expect(run({ session_id: 't2', hook_event_name: 'Stop', turn_id: 'u1' }).status).toBe(0);
+    expect(existsSync(join(dir, 'activity'))).toBe(false);
+
+    rmSync(join(dir, 'codex'), { recursive: true });
+    expect(run({ session_id: 't1', hook_event_name: 'Stop', turn_id: 'u1' }).status).toBe(0);
+    expect(existsSync(join(dir, 'activity'))).toBe(false);
   });
 
   it('writes nothing for a debrief fork, a malformed ID or a payload that is not JSON, and still exits 0', () => {

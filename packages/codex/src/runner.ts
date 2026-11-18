@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Exec, MarkerReading, ObservedSession, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason } from '@switchboard/core';
-import { executableDirOnPath, isCodexPermissionMode } from '@switchboard/core';
+import { executableDirOnPath, hubRunning, isCodexPermissionMode, stoppedHomes } from '@switchboard/core';
 import { startArgs } from './args.js';
 import type { RunOptions } from './args.js';
 import { CODEX_HOOK_SOURCE, codexHookCommands, parseCodexMarker, planCodexHooks } from './hooks.js';
@@ -46,6 +46,8 @@ export interface CodexRunnerDeps {
   alive?: (pid: number) => boolean;
   kill?: (pid: number) => Promise<{ error: string } | null>;
   trust?: (commands: ReadonlySet<string>) => Promise<string | null>;
+  /** Whether another Switchboard home's hub runs, so its hook entries stay. */
+  hubRunning?: (home: string) => Promise<boolean>;
 }
 
 type Spawned = { pid: number; identity: ProcessIdentity | null } | { error: string };
@@ -534,7 +536,9 @@ export class CodexRunner implements SessionRunner {
         writeFileSync(hookPath, CODEX_HOOK_SOURCE);
       }
 
-      const plan = planCodexHooks(readText(hooksPath) || null, hookPath, contractPath, nodePath);
+      const text = readText(hooksPath) || null;
+      const stopped = await stoppedHomes((stale) => planCodexHooks(text, hookPath, contractPath, nodePath, stale), this.deps.hubRunning ?? hubRunning);
+      const plan = planCodexHooks(text, hookPath, contractPath, nodePath, (other) => stopped.has(other));
 
       if ('error' in plan) {
         return plan.error;

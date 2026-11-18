@@ -76,6 +76,32 @@ describe('planHooks', () => {
     expect(settings.hooks.Stop).toEqual([{ hooks: [check] }, { hooks: [wrapped] }, { hooks: [ENTRY] }]);
   });
 
+  it('removes the entries of another Switchboard home whose hub is gone, and keeps those of a running hub and of Ground Control', () => {
+    const gone = 'C:/Temp/sb-live-home-a/.switchboard';
+    const live = 'D:/acceptance/.switchboard';
+    const entry = (script: string) => ({ type: 'command', command: 'node', args: [script], async: true, timeout: 5 });
+    const gc = entry('C:/Users/me/.ground-control/hook.mjs');
+    const existing = {
+      hooks: {
+        Stop: [{ hooks: [gc] }, { hooks: [entry(`${gone}/hook.mjs`)] }, { hooks: [entry(`${live}/hook.mjs`)] }],
+        SessionStart: [{ matcher: 'compact', hooks: [entry(`${gone}/contract.mjs`)] }],
+        Setup: [{ hooks: [entry(`${gone}/hook.mjs`)] }],
+        PostToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'fmt' }, entry(`${gone}/hook.mjs`)] }],
+      },
+    };
+    const asked: string[] = [];
+    const plan = planHooks(JSON.stringify(existing), HOOK, CONTRACT_HOOK, 'node', (home) => (asked.push(home), home !== live)) as { text: string };
+    const hooks = JSON.parse(plan.text).hooks;
+
+    expect(hooks.Stop).toEqual([{ hooks: [gc] }, { hooks: [entry(`${live}/hook.mjs`)] }, { hooks: [ENTRY] }]);
+    expect(hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [CONTRACT_ENTRY] }]);
+    expect(hooks.Setup).toBeUndefined();
+    expect(hooks.PostToolUse).toEqual([{ matcher: 'Write', hooks: [{ type: 'command', command: 'fmt' }] }, { matcher: 'AskUserQuestion|ExitPlanMode', hooks: [ENTRY] }]);
+    // This hub's own home and Ground Control's are never checked.
+    expect([...new Set(asked)].sort()).toEqual([live, gone].sort());
+    expect(planHooks(plan.text, HOOK, CONTRACT_HOOK, 'node', (home) => home !== live)).toEqual({ unchanged: true });
+  });
+
   it('refuses malformed settings', () => {
     expect(planHooks('{ "hooks": ', HOOK, CONTRACT_HOOK, 'node')).toEqual({ error: 'Claude settings.json is not valid JSON, so Switchboard did not add its hooks.' });
     expect(planHooks('{ "hooks": [] }', HOOK, CONTRACT_HOOK, 'node')).toEqual({ error: 'Claude settings.json has an unexpected shape, so Switchboard did not add its hooks.' });

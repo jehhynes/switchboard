@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { hubRunning, stoppedHomes } from '@switchboard/core';
 import { CONTRACT_HOOK_SOURCE, HOOK_SOURCE, planHooks } from './hooks.js';
 import type { Marker } from './hooks.js';
 
@@ -45,10 +46,15 @@ function writeAtomically(path: string, text: string): void {
 }
 
 /**
- * Writes `<switchboard home>/hook.mjs` and `contract.mjs` and adds their entries to Claude's settings. Returns why settings were
- * left alone, or null.
+ * Writes `<switchboard home>/hook.mjs` and `contract.mjs`, adds their entries to Claude's settings, and removes the entries of other
+ * Switchboard homes whose hub does not run (`running`). Returns why settings were left alone, or null.
  */
-export function installHooks(switchboardHome: string, settingsPath: string, nodePath: string): string | null {
+export async function installHooks(
+  switchboardHome: string,
+  settingsPath: string,
+  nodePath: string,
+  running: (home: string) => Promise<boolean> = hubRunning,
+): Promise<string | null> {
   const hookPath = join(switchboardHome, 'hook.mjs').replaceAll('\\', '/');
   const contractPath = join(switchboardHome, 'contract.mjs').replaceAll('\\', '/');
 
@@ -63,7 +69,9 @@ export function installHooks(switchboardHome: string, settingsPath: string, node
     }
   }
 
-  const plan = planHooks(readText(settingsPath), hookPath, contractPath, nodePath);
+  const text = readText(settingsPath);
+  const stopped = await stoppedHomes((stale) => planHooks(text, hookPath, contractPath, nodePath, stale), running);
+  const plan = planHooks(text, hookPath, contractPath, nodePath, (other) => stopped.has(other));
 
   if ('error' in plan) {
     return plan.error;

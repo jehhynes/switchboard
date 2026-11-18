@@ -23,13 +23,13 @@ describe('claudeSettingsPath', () => {
 });
 
 describe('installHooks', () => {
-  it('writes the hooks and adds entries, keeping existing settings', () => {
+  it('writes the hooks and adds entries, keeping existing settings', async () => {
     const home = join(dir, '.switchboard');
     const settings = join(dir, '.claude', 'settings.json');
     mkdirSync(join(dir, '.claude'));
     writeFileSync(settings, JSON.stringify({ theme: 'dark' }));
 
-    expect(installHooks(home, settings, 'node')).toBeNull();
+    expect(await installHooks(home, settings, 'node')).toBeNull();
     expect(readFileSync(join(home, 'hook.mjs'), 'utf8')).toBe(HOOK_SOURCE);
     expect(readFileSync(join(home, 'contract.mjs'), 'utf8')).toBe(CONTRACT_HOOK_SOURCE);
 
@@ -39,19 +39,35 @@ describe('installHooks', () => {
     expect(written.hooks.SessionStart[1].hooks[0].args).toEqual([join(home, 'contract.mjs').replaceAll('\\', '/')]);
 
     const before = readFileSync(settings, 'utf8');
-    expect(installHooks(home, settings, 'node')).toBeNull();
+    expect(await installHooks(home, settings, 'node')).toBeNull();
     expect(readFileSync(settings, 'utf8')).toBe(before);
   });
 
-  it('creates missing settings, and leaves malformed settings untouched with the reason', () => {
+  it('creates missing settings, and leaves malformed settings untouched with the reason', async () => {
     const settings = join(dir, 'new', 'settings.json');
 
-    expect(installHooks(join(dir, 'sb'), settings, 'node')).toBeNull();
+    expect(await installHooks(join(dir, 'sb'), settings, 'node')).toBeNull();
     expect(Object.keys(JSON.parse(readFileSync(settings, 'utf8')).hooks)).toHaveLength(13);
 
     writeFileSync(settings, '{ broken');
-    expect(installHooks(join(dir, 'sb'), settings, 'node')).toBe('Claude settings.json is not valid JSON, so Switchboard did not add its hooks.');
+    expect(await installHooks(join(dir, 'sb'), settings, 'node')).toBe('Claude settings.json is not valid JSON, so Switchboard did not add its hooks.');
     expect(readFileSync(settings, 'utf8')).toBe('{ broken');
+  });
+
+  it("removes the entries of a Switchboard home whose hub does not run, and keeps a running hub's", async () => {
+    const home = join(dir, '.switchboard');
+    const settings = join(dir, '.claude', 'settings.json');
+    const stopped = 'C:/Temp/sb-live-home-a/.switchboard';
+    const running = 'C:/Temp/sb-live-home-b/.switchboard';
+    const entry = (other: string) => ({ hooks: [{ type: 'command', command: 'node', args: [`${other}/hook.mjs`], async: true, timeout: 5 }] });
+    const asked: string[] = [];
+
+    mkdirSync(join(dir, '.claude'));
+    writeFileSync(settings, JSON.stringify({ hooks: { Stop: [entry(stopped), entry(running)] } }));
+
+    expect(await installHooks(home, settings, 'node', async (other) => (asked.push(other), other === running))).toBeNull();
+    expect(JSON.parse(readFileSync(settings, 'utf8')).hooks.Stop).toEqual([entry(running), entry(home.replaceAll('\\', '/'))]);
+    expect(asked.sort()).toEqual([running, stopped].sort());
   });
 });
 

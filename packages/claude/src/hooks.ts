@@ -1,5 +1,5 @@
 import type { LiveState } from '@switchboard/core';
-import { NODE_NAME, PERMISSION_PROMPT } from '@switchboard/core';
+import { NODE_NAME, PERMISSION_PROMPT, scriptHome } from '@switchboard/core';
 
 /** Longest error text a marker keeps. */
 export const ERROR_MESSAGE_LIMIT = 500;
@@ -141,16 +141,28 @@ function isOurs(group: unknown, hookPath: string): group is Json & { hooks: unkn
   return isObject(group) && Array.isArray(group['hooks']) && group['hooks'].some((entry) => isOurEntry(entry, hookPath));
 }
 
+/** The Switchboard home of an entry that runs a Switchboard script from a home other than this hub's, or null. */
+function otherHome(entry: unknown, own: readonly string[]): string | null {
+  if (!isObject(entry) || typeof entry['command'] !== 'string' || !NODE_NAME.test(entry['command']) || !Array.isArray(entry['args']) || entry['args'].length !== 1) {
+    return null;
+  }
+
+  const script = entry['args'][0];
+
+  return typeof script === 'string' && !own.includes(script) ? scriptHome(script) : null;
+}
+
 export type HookPlan = { text: string } | { unchanged: true } | { error: string };
 
 /**
  * Adds Switchboard's hook entries to each event that lacks them, keeping every other entry, including Ground Control's: the
  * activity writer to every event in {@link HOOK_EVENTS}, and the contract hook to `SessionStart` after compaction. The contract
  * hook runs synchronously, because Claude reads its output. An entry of Switchboard's, found by its script, gets `nodePath`
- * (`sessions.nodePath`) as its command. `text` is the settings file's content, or null when it does not exist. Malformed
- * settings are left alone.
+ * (`sessions.nodePath`) as its command. An entry that runs a script of another Switchboard home whose hub is gone (`stale`) is
+ * removed, with its group when nothing else is left in it. `text` is the settings file's content, or null when it does not exist.
+ * Malformed settings are left alone.
  */
-export function planHooks(text: string | null, hookPath: string, contractPath: string, nodePath: string): HookPlan {
+export function planHooks(text: string | null, hookPath: string, contractPath: string, nodePath: string, stale: (home: string) => boolean = () => false): HookPlan {
   let settings: unknown = {};
 
   if (text !== null && text.trim() !== '') {
@@ -167,6 +179,35 @@ export function planHooks(text: string | null, hookPath: string, contractPath: s
 
   const hooks: Json = { ...((settings['hooks'] as Json | undefined) ?? {}) };
   let changed = 0;
+  const isStale = (entry: unknown) => {
+    const home = otherHome(entry, [hookPath, contractPath]);
+
+    return home !== null && stale(home);
+  };
+
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!Array.isArray(groups) || !groups.some((group) => isObject(group) && Array.isArray(group['hooks']) && group['hooks'].some(isStale))) {
+      continue;
+    }
+
+    const kept = groups.flatMap((group) => {
+      if (!isObject(group) || !Array.isArray(group['hooks']) || !group['hooks'].some(isStale)) {
+        return [group];
+      }
+
+      const entries = group['hooks'].filter((entry) => !isStale(entry));
+
+      return entries.length === 0 ? [] : [{ ...group, hooks: entries }];
+    });
+
+    if (kept.length === 0) {
+      delete hooks[event];
+    } else {
+      hooks[event] = kept;
+    }
+
+    changed++;
+  }
 
   const entries = [
     ...HOOK_EVENTS.map(([event, matcher]) => ({ event, matcher, path: hookPath, entry: { type: 'command', command: nodePath, args: [hookPath], async: true, timeout: 5 } })),
