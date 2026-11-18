@@ -217,7 +217,7 @@ export class SideBars {
   private panel: number | null = null;
   /** Polls to wait after setting the side bars, the pane's `outer` then, and the primary's width and steps, to check that the pane is in it. */
   private cooldown = 0;
-  private restored: { outer: number; primary: number; steps: number } | null = null;
+  private restored: { outer: number; primary: number; editor: number; steps: number } | null = null;
   /** The pane is not in the primary side bar, so nothing is read until it is hidden and shown again. */
   private elsewhere = false;
   /** CSS pixels per `outer` pixel, by pixel ratio, as resizes measured them in this window. */
@@ -387,8 +387,16 @@ export class SideBars {
 
     this.restored = null;
 
-    // Only a restore that stepped the primary alone, in a window that held its width since, tells where the pane is.
-    if (restored !== null && restored.steps !== 0 && reading.outer === restored.outer && reading.widths.primary !== null && Math.abs(reading.widths.primary - restored.primary) < STEP / 2) {
+    // Only a restore that stepped the primary alone, in a window that held its width since, tells where the pane is, and only when the editor
+    // took the steps: its minimum can cut them short.
+    if (
+      restored !== null &&
+      restored.steps !== 0 &&
+      reading.outer === restored.outer &&
+      Math.abs(reading.editor.width - restored.editor) >= STEP / 2 &&
+      reading.widths.primary !== null &&
+      Math.abs(reading.widths.primary - restored.primary) < STEP / 2
+    ) {
       this.elsewhere = true;
       this.io.log('Stopped until the pane is hidden and shown again: the pane did not follow the primary side bar\'s steps, so it is not in it.');
     }
@@ -410,6 +418,12 @@ export class SideBars {
     // A zoom level's scale is 1.2 to a whole or half power; one far from any, as a panel beside the editor that resized with the window makes,
     // is not a scale.
     const measured = (reading.editor.width - before.editor.width) / (reading.outer - before.outer);
+
+    // An editor that narrowed as the window widened, or held, as when a panel beside it closed, measures nothing.
+    if (!(measured > 0)) {
+      return false;
+    }
+
     const level = Math.round(Math.log(measured) / Math.log(1.2) * 2) / 2;
     const scale = 1.2 ** level;
 
@@ -502,6 +516,8 @@ export class SideBars {
     };
     const secondary = reading.editor.groups > 1 || this.panel !== null ? 0 : steps('secondary');
     const primary = reading.editor.groups > 1 ? 0 : steps('primary');
+    // A primary not widened because the editor is at its minimum may be once the secondary's narrowing frees room: set again after the cooldown.
+    const again = !widen && secondary < 0 && reading.editor.groups === 1 && wanted.primary !== null && reading.widths.primary !== null && stepsBetween(reading.widths.primary, wanted.primary.width) > 0;
 
     this.base = null;
 
@@ -547,7 +563,8 @@ export class SideBars {
     }
 
     this.cooldown = COOLDOWN;
-    this.restored = { outer: reading.outer, primary: reading.widths.primary ?? 0, steps: secondary === 0 ? primary : 0 };
+    this.restored = { outer: reading.outer, primary: reading.widths.primary ?? 0, editor: reading.editor.width, steps: secondary === 0 ? primary : 0 };
+    this.resized = again;
     this.last = null;
 
     return 'restored';

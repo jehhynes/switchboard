@@ -636,6 +636,57 @@ describe('SideBars widths (PRD R91)', () => {
 
     expect(outcomes.every((outcome) => outcome === 'idle')).toBe(true);
   });
+
+  it('measures no scale from an editor that widened as the window narrowed, and still sets the side bars', async () => {
+    const { window, bars } = await settled();
+
+    // A panel beside the editor closes as the window narrows: the editor widens 200 pixels while the window loses 100.
+    window.panel = 300;
+    await polls(bars, 8);
+    window.resize(1600);
+    window.panel = 0;
+    await polls(bars, 16);
+    expect(window.logged.some((line) => line.startsWith('Measured'))).toBe(false);
+
+    window.resize(1200);
+    await polls(bars, 16);
+    window.resize(1700);
+    expect(await polls(bars, 16)).toMatch(/^restored/);
+    expect(widths(window)).toEqual({ primary: 300, secondary: 400 });
+  });
+
+  it('does not take a primary step the editor minimum cut short for a pane outside the primary', async () => {
+    const window = new Workbench();
+
+    window.room = 1200;
+    window.primary.width = 170;
+    window.secondary.width = 800;
+    window.kept = { points: { primary: [{ room: 1200, width: 300, at: 1 }] } };
+
+    const bars = new SideBars(window.io);
+
+    expect(await polls(bars)).toMatch(/^restored/);
+    await polls(bars, 12);
+    expect(window.logged.some((line) => line.includes('not in it'))).toBe(false);
+
+    window.ran = [];
+    window.resize(1700);
+    expect(await polls(bars, 16)).toMatch(/^restored/);
+    expect(window.ran.length).toBeGreaterThan(0);
+  });
+
+  it('widens the primary once narrowing the secondary frees the editor from its minimum', async () => {
+    const { window, bars } = await settled((window) => {
+      window.secondary.width = 1000;
+    });
+
+    // 300 and 1000 at 1700 want 272 and 907 at 1400: the squeeze leaves the primary at 180 and the editor at its minimum.
+    window.resize(1400);
+    expect(await polls(bars, 16)).toMatch(/^restored/);
+    expect(await polls(bars, 16)).toMatch(/^restored/);
+    expect(Math.abs(window.primary.width - 272)).toBeLessThanOrEqual(30);
+    expect(Math.abs(window.secondary.width - 907)).toBeLessThanOrEqual(30);
+  });
 });
 
 describe('side bar arithmetic (PRD R91)', () => {
