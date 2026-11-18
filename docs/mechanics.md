@@ -916,9 +916,10 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - The prototype holder: about 100 MB working set with one or two sessions; one session's 10,000-line scrollback added about 110 MB working set and 140 MB private.
   - An idle session wrote nothing to its pseudo-terminal for 450 s.
   - Reading memory: `tasklist /FO CSV` 1.3 s; `pwsh -NoProfile -Command` with `Get-CimInstance Win32_Process` 1.4 s (0.5 s in a running PowerShell); `Get-Process` with `.Parent` 22.6 s; `wmic` absent. In a running PowerShell, `Get-Process` of every process took 16 ms and `Get-Process -Id` of 20 pids 190 ms. PowerShell started in 450 ms.
-- **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit. **Partial.** Measured: every one-shot command took over a second; inside a running PowerShell each command was timed on its own (`.wip/code-mode-exp/memtime.ps1`). Proposed, not measured: a long-lived PowerShell that answers `Get-Process` for all processes, joined with process trees from `Win32_Process` read less often; the combined lookup, sum and reply for 20 sessions was not timed. Outstanding: that measurement and an hour-long run; the memory numbers cover 7 minutes.
+- **Sampled read (2026-11-18, the holder's `MemorySampler`):** one `Get-CimInstance Win32_Process` query in Windows PowerShell returning pid, parent, creation time and working set of 630 processes took 828 to 863 ms over three runs, and summing 20 process trees from it 1.5 to 2.8 ms (`.wip/code-mode-exp/memsample.mjs`). The holder runs that read in the background about every 30 seconds and answers `list` from the last one, so a list does not wait on it.
+- **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit. **Partial.** Passed: `list` answers from the sampled read, under 3 ms for 20 trees. Outstanding: an hour-long run; the memory numbers cover 7 minutes.
 - **Not verified:** Linux `/proc`; growth over an hour.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the terminal holder's `list` reports each session's tree memory from a background read of the process table (architecture.md § Terminal holder); Code Mode sessions are not implemented yet.
 
 ## M76. node-pty from a packaged extension
 

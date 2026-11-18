@@ -420,7 +420,7 @@ Not its job: reading a screen for meaning, deciding when to kill or resume, retr
 ### Record and lock
 
 - `<home>/holder.json` holds `protocol`, `build`, `port`, `token` (32 random bytes, hex), `pid` and `startedAt`, written only by the lock holder and readable by the operator only, as `hub.json` is.
-- The lock is the named pipe `\\.\pipe\switchboard-holder-<hash of home>` on Windows and `<home>/holder.sock` elsewhere. A holder that cannot take it exits. A client accepts a record only when `welcome` answers with its pid, as for a hub record a forced exit left.
+- The lock is the named pipe `\\.\pipe\switchboard-holder-<hash of home>` on Windows and `<home>/holder.sock` elsewhere. A holder that cannot take it exits, after trying for 2 seconds while the recorded holder does not answer, because a holder ended by force can keep its pipe for a moment. A client accepts a record only when `welcome` answers with its pid, as for a hub record a forced exit left.
 
 ### Lifecycle
 
