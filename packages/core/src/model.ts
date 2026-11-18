@@ -219,6 +219,10 @@ export interface Session {
   move: SessionMove | null;
   /** When the last move ended, so a roster read that started before it does not change the session. */
   movedAt: number | null;
+  /** Runs in Claude Code's Code Mode in the terminal holder, as `sessions.codeMode` said at its start; its resumes keep it (PRD R93). Absent reads as false. */
+  codeMode?: boolean;
+  /** The launch of a Code Mode session's current process, passed as `SWITCHBOARD_LAUNCH`; only markers of this launch count (PRD R93). */
+  launchId?: string | null;
 }
 
 /**

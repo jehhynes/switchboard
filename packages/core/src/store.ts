@@ -335,9 +335,12 @@ export const MIGRATIONS = [
   `ALTER TABLE tickets ADD COLUMN repo TEXT NOT NULL DEFAULT '';`,
   // The home repository of each source with tickets, which bare keys mean (PRD R44), kept even when every stored key is qualified.
   `CREATE TABLE sourceHomes (source TEXT PRIMARY KEY, repo TEXT NOT NULL);`,
+  // Code Mode sessions (PRD R93): the mode a session started in, and the launch of its current process.
+  `ALTER TABLE sessions ADD COLUMN codeMode INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN launchId TEXT;`,
 ];
 
-const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned']);
+const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -486,7 +489,8 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
   // The register event names an external session, and its end already shows when it was cleared.
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt']),
+  // The session-started event names a Code Mode session; its launch is bookkeeping (PRD R93).
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

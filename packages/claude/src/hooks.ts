@@ -38,6 +38,22 @@ try {
         } catch {}
       }
 
+      // A Code Mode session's process carries its launch (PRD R93). Its marker keeps the source of the SessionStart that began its session ID,
+      // through later events and compaction, because the marker is replaced on each event, and only a clear, fork or resume source shows the held
+      // process changed its ID (mechanics M73, M77).
+      const launch = text(process.env.SWITCHBOARD_LAUNCH) || null;
+      let startSource = null;
+
+      if (launch !== null) {
+        if (payload.hook_event_name === 'SessionStart' && payload.source !== 'compact') {
+          startSource = ['clear', 'fork', 'resume'].includes(payload.source) ? payload.source : null;
+        } else {
+          try {
+            startSource = text(JSON.parse(readFileSync(marker, 'utf8')).startSource);
+          } catch {}
+        }
+      }
+
       mkdirSync(dir, { recursive: true });
       writeFileSync(tmp, JSON.stringify({
         v: 1,
@@ -52,6 +68,7 @@ try {
         backgroundTasks: Array.isArray(payload.background_tasks) ? payload.background_tasks.length : 0,
         error: failed ? text(payload.error) : null,
         errorMessage: failed && typeof payload.last_assistant_message === 'string' ? payload.last_assistant_message.slice(0, ${ERROR_MESSAGE_LIMIT}) : null,
+        ...(launch === null ? {} : { launch, startSource }),
       }));
       // Two hooks of one session can race; Windows then refuses the rename, so the newer marker wins and the file goes.
       try {
@@ -258,6 +275,10 @@ export interface Marker {
   backgroundTasks: number;
   error: string | null;
   errorMessage: string | null;
+  /** The `SWITCHBOARD_LAUNCH` of a Code Mode session's process; absent for other sessions (PRD R93). */
+  launch?: string;
+  /** For a Code Mode process: `clear`, `fork` or `resume` when a SessionStart of that source began this session ID, else null (mechanics M73). */
+  startSource?: string | null;
 }
 
 /** The detail of a turn that ended while background tasks remain: the session is `running`, but not on a prompt or tool call. */

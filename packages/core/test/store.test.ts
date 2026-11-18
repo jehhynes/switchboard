@@ -395,6 +395,34 @@ describe('Store', () => {
     reopened.close();
   });
 
+  it('gives an existing session no Code Mode and no launch, keeps them across a reopen, and leaves them out of the activity log (PRD R93)', () => {
+    const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN codeMode'));
+    const path = join(dir, 'code-mode.db');
+    const raw = new DatabaseSync(path);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version}`);
+    raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
+    raw.exec("INSERT INTO workItems (id, ticketId, status, createdAt, statusAt) VALUES (1, 1, 'running', 1, 1)");
+    raw.exec("INSERT INTO sessions (id, workItemId, kind, provider, nativeSessionId, shortId, cwd, state, stateAt, startedAt, released) VALUES ('s1', 1, 'task', 'claude', 'n1', 'n1', 'C:/r', 'running', 1, 1, 0)");
+    raw.close();
+
+    const store = Store.open(path);
+
+    expect(store.session('s1')).toMatchObject({ codeMode: false, launchId: null });
+    store.beginEvent({ at: 2, type: 'marker', actor: 'session', ticketId: 1, workItemId: 1, sessionId: 's1', detail: null });
+    store.updateSession('s1', { codeMode: true, launchId: 'launch-1', state: 'idle' });
+    store.endEvent();
+
+    const changes = store.ticketHistory(1)!.events.flatMap((event) => event.changes);
+
+    expect(changes.map((change) => Object.keys(change.fields))).toEqual([['state']]);
+    store.close();
+
+    const reopened = Store.open(path);
+    expect(reopened.session('s1')).toMatchObject({ codeMode: true, launchId: 'launch-1' });
+    reopened.close();
+  });
+
   it('clears the warning of a version 9 work item done because its ticket left the assigned state', () => {
     const path = join(dir, 'v9.db');
     const raw = new DatabaseSync(path);

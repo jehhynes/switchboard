@@ -263,6 +263,9 @@ export type FlowAction =
       name: string;
       permissionMode: PermissionMode;
       model: string | null;
+      /** A Code Mode session's Claude session ID and the launch of its process, chosen before the start so a restarted hub can find it (PRD R93). */
+      nativeSessionId?: string;
+      launchId?: string;
     }
   /** The provider travels with the action, because Delete removes the session's row before its stop runs. */
   | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason }
@@ -905,6 +908,8 @@ class Flow {
       external: true,
       move: null,
       movedAt: null,
+      codeMode: false,
+      launchId: null,
     });
   }
 
@@ -2504,6 +2509,8 @@ class Flow {
       external: false,
       move: null,
       movedAt: null,
+      codeMode: false,
+      launchId: null,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     this.actions.push({

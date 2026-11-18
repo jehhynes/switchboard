@@ -7,7 +7,8 @@ export type CopyRelation = 'newer' | 'older' | 'unrelated';
 export type StartAction = Extract<FlowAction, { type: 'start-session' }>;
 
 /** `startPrompt`: the session runs but waits on a prompt before it starts, which the operator answers through Open in terminal (PRD R41). */
-export type StartResult = { shortId: string; nativeSessionId: string; startPrompt?: true } | { error: string };
+/** `launchId`: the launch of a Code Mode session's process (PRD R93). */
+export type StartResult = { shortId: string; nativeSessionId: string; startPrompt?: true; launchId?: string } | { error: string };
 
 /** The session a stop acts on; a deleted session's row is gone, so the action carries what the runner needs. */
 export interface SessionTarget {
@@ -30,7 +31,7 @@ export interface MarkerReading {
 
 /** What a restarted hub learns about a session it left starting; `pending` says why it cannot tell yet, and the hub asks again at its next roster read. */
 export type Reconciled =
-  | { sessionId: string; started: { shortId: string; nativeSessionId: string } }
+  | { sessionId: string; started: { shortId: string; nativeSessionId: string; startPrompt?: true } }
   | { sessionId: string; failed: string }
   | { sessionId: string; pending: string };
 

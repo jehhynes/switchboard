@@ -197,6 +197,43 @@ describe('hook writer', () => {
     expect(written().promptTool).toBeNull();
   });
 
+  it("records a Code Mode process's launch, and keeps a clear, fork or resume start source across later events of the session ID (mechanics M73, M77)", () => {
+    const written = () => JSON.parse(readFileSync(markerPath(), 'utf8'));
+    const held = { ...process.env, SWITCHBOARD_LAUNCH: 'launch-1' };
+
+    run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source: 'startup' }, held);
+    expect(written()).toMatchObject({ event: 'SessionStart', launch: 'launch-1', startSource: null });
+    run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source: 'clear' }, held);
+    run({ session_id: 'abc-123', hook_event_name: 'UserPromptSubmit' }, held);
+    run({ session_id: 'abc-123', hook_event_name: 'Stop' }, held);
+    expect(written()).toMatchObject({ event: 'Stop', launch: 'launch-1', startSource: 'clear' });
+
+    // Compaction keeps the session ID, so it keeps how the ID began.
+    run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source: 'compact' }, held);
+    expect(written()).toMatchObject({ event: 'SessionStart', source: 'compact', startSource: 'clear' });
+    run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source: 'startup' }, held);
+    expect(written()).toMatchObject({ startSource: null });
+
+    for (const source of ['fork', 'resume']) {
+      run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source }, held);
+      run({ session_id: 'abc-123', hook_event_name: 'PostToolBatch' }, held);
+      expect(written()).toMatchObject({ event: 'PostToolBatch', startSource: source });
+    }
+  });
+
+  it('records no launch or start source for a session without SWITCHBOARD_LAUNCH', () => {
+    const env = { ...process.env };
+
+    delete env['SWITCHBOARD_LAUNCH'];
+    run({ session_id: 'abc-123', hook_event_name: 'SessionStart', source: 'clear' }, env);
+    run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...env, SWITCHBOARD_LAUNCH: '' });
+
+    const marker = JSON.parse(readFileSync(markerPath(), 'utf8'));
+
+    expect('launch' in marker).toBe(false);
+    expect('startSource' in marker).toBe(false);
+  });
+
   it('writes no marker for a debrief fork', () => {
     expect(run({ session_id: 'abc-123', hook_event_name: 'Stop' }, { ...process.env, FRICTION_DEBRIEF: '1' })).toEqual({ status: 0, stdout: '' });
     expect(existsSync(markerPath())).toBe(false);
