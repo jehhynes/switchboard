@@ -703,6 +703,43 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/attach', { sessionId: 'held-1' }, 5000)).toEqual({ status: 200, error: null, body: { port: 4100, token: 'holder-token', session: 'held-1' } });
   });
 
+  it('lists and stops held sessions through the server, refusing a request without the token, a bad body and an unknown ID (PRD R94)', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const kills: string[] = [];
+    const entry = { session: 'orphan-1', label: 'switchboard · ad-hoc · adhoc 9 9273f594-1111', pid: 9, cwd: 'D:/scratch', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null };
+    const connection = {
+      welcome: { protocol: 1, build: 'b', pid: 4243 },
+      compatible: true,
+      spawn: async () => ({ session: 's', pid: 1 }),
+      list: async () => (kills.length === 0 ? [entry] : []),
+      kill: async (session: string) => {
+        kills.push(session);
+        return 0;
+      },
+      screen: async () => ({ head: '', text: '' }),
+      shutdown: async () => {},
+      onClose: () => {},
+      close: () => {},
+    };
+
+    writeFileSync(join(temp.home, '.switchboard', 'holder.json'), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, holder: { connect: async () => connection, lockHeld: async () => true } } });
+    closers.push(() => app.close());
+    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
+    closers.push(() => server.close());
+    const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
+
+    expect(await postToHub({ ...record, token: 'wrong' }, '/holder/list', {}, 5000)).toMatchObject({ status: 401 });
+    expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { sessions: [expect.objectContaining({ session: 'orphan-1', key: 'adhoc 9', nativeSessionId: '9273f594-1111', state: 'live', orphan: true })] } });
+    expect(await postToHub({ ...record, token: 'wrong' }, '/holder/stop', { id: 'orphan-1' }, 5000)).toMatchObject({ status: 401 });
+    expect(await postToHub(record, '/holder/stop', { id: '' }, 5000)).toMatchObject({ status: 400, error: 'Expected {id}.' });
+    expect(await postToHub(record, '/holder/stop', { id: 'nope' }, 5000)).toMatchObject({ status: 404, error: 'No held session nope.' });
+    expect(kills).toEqual([]);
+    expect(await postToHub(record, '/holder/stop', { id: '9273f594' }, 5000)).toEqual({ status: 200, error: null, body: { stopped: 'orphan-1' } });
+    expect(kills).toEqual(['orphan-1']);
+    expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { sessions: [] } });
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex' } });
     const logs: string[] = [];

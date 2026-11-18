@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { ATTACH_TIMEOUT_MS, buildOf, createHubApp, findHub, gitBashRoot, handledBody, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, connectHolder, createHubApp, findHub, gitBashRoot, handledBody, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -187,16 +187,35 @@ function attach(home: string, argv: readonly string[]): Promise<number> {
   });
 }
 
+/** Lists or stops held sessions (architecture.md § Visibility of held sessions). Exit codes as `runHolder`'s. */
+function holder(home: string, argv: readonly string[]): Promise<number> {
+  return runHolder(argv, {
+    post: async (path, body) => {
+      const hub = await findHub(home, REPORT_TIMEOUT_MS);
+      // A stop waits for the holder's kill, which answers within 15 seconds.
+      const reply = hub === null ? null : await postToHub(hub, path, body, REGISTER_TIMEOUT_MS);
+
+      return reply ?? noHub(home);
+    },
+    holder: () => connectHolder(switchboardHome(home)),
+    now: () => Date.now(),
+    out: (text) => process.stdout.write(text),
+    err: (text) => process.stderr.write(text),
+  });
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home.
     const home = flag(argv, 'home') || (bundle === undefined ? homedir() : dirname(dirname(resolve(bundle))));
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    return argv[0] === 'report' ? report(home, rest) : argv[0] === 'register' ? register(home, rest) : attach(home, rest);
+    const commands = { report, register, attach, holder };
+
+    return commands[argv[0] as keyof typeof commands](home, rest);
   }
 
   const home = flag(argv, 'home') || homedir();

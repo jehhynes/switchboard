@@ -38,6 +38,7 @@ Test behavior that types cannot establish:
   - Delete of a held session (idle, attached, running, failed stop), of a starting Code Mode session killed in the holder by its Switchboard session ID, and of a session resumed through Open in terminal; the resume guard (a live process of the last tree, a reused pid, Stop offered on the ended session).
   - Holder loss: a session running, waiting, idle, starting, a setup session and a held approval; never `finished`.
   - Identity: a report from another native ID, the contract restore, an ID change by `/clear`, `/branch` and `/resume`, a nested `claude -p` marker that changes nothing, registration of a held ID, and an attach by Switchboard session ID that reuses its terminal after an ID change.
+  - Held sessions (R94): orphan detection (an unknown session, an ended one still live, not an older session whose end waits), each orphan logged once, the list read with no active Code Mode session, a failed read keeping the last list and a gone holder emptying it; `hub.js holder list` and `stop` with the hub up and down, by each ID form, with an ambiguous prefix, an unknown ID, an exited session and a failed stop, and their exit codes; a stop that an attach waits for.
   - Holder protocol refusals: the token, the hello deadline, the line size, a malformed message, another protocol, `shutdown` with live sessions, and a slow client; `list`, `kill` and `shutdown` from a client of another protocol.
 
 Do not test type declarations, pass-through property bags, or simple settings reads.

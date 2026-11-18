@@ -10,6 +10,10 @@ import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFoc
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
+import { recordPath } from '@switchboard/holder';
+import type { SessionEntry } from '@switchboard/holder';
+import { findHeld, heldFromHolder } from './held.js';
+import type { HeldSession } from './held.js';
 import { HolderLink } from './holder.js';
 import type { HolderLinkDeps } from './holder.js';
 import { doneSince } from './rows.js';
@@ -165,6 +169,8 @@ export interface Snapshot {
   notes?: string[];
   /** How rows shorten other repositories' keys (PRD R27); absent from an older hub's. */
   repoKeys?: RepoKeys;
+  /** The terminal holder's sessions joined with the store, orphans first (PRD R94); absent when it holds none. */
+  held?: HeldSession[];
 }
 
 /** Each source's home repository and label, and each other repository's short name: its label, else its name when no other owner shares it. */
@@ -253,6 +259,11 @@ export class Runtime {
   private readonly attaching = new Map<string, Promise<AttachResult>>();
   /** Code Mode sessions whose end waits for an attached terminal, logged once each. */
   private readonly deferred = new Set<string>();
+  /** The holder's last list (PRD R94); a failed read keeps it. */
+  private heldEntries: SessionEntry[] = [];
+  private heldError: string | null = null;
+  /** Orphans logged, so each is logged once. */
+  private readonly orphansLogged = new Set<string>();
 
   constructor(
     private readonly deps: RuntimeDeps,
@@ -784,6 +795,11 @@ export class Runtime {
   }
 
   private async readRosterOnce(): Promise<void> {
+    await this.readSessions();
+    await this.readHeld();
+  }
+
+  private async readSessions(): Promise<void> {
     if (this.unreconciled.size > 0) {
       await this.reconcile(this.deps.store.activeSessions().filter((session) => session.state === 'starting' && this.unreconciled.has(session.id)));
     }
@@ -1459,6 +1475,7 @@ export class Runtime {
       return items.filter((item) => item.playbook !== null && counted.has(item.playbook) && started(item)).length;
     };
     const used = heldSlots(store);
+    const held = this.heldSessions();
 
     return {
       workItems: store.workItems(doneSince(this.deps.now())).map((item) => {
@@ -1514,6 +1531,7 @@ export class Runtime {
       },
       notes: [...this.sources.keys()].flatMap((name) => (this.sourceNotes[name] ?? []).map((note) => `${name}: ${note}`)),
       repoKeys: repoKeysOf(settings, store.reposBySource()),
+      ...(held.length > 0 ? { held } : {}),
     };
   }
 
@@ -1608,6 +1626,162 @@ export class Runtime {
         this.send({ type: 'worktree-found', source: name, sourceKey: key, path: worktree.path, branch: worktree.branch! });
       }
     }
+  }
+
+  /**
+   * Reads the holder's list for the held sessions (architecture.md § Visibility of held sessions), whether or not a Code Mode session is active, so
+   * the orphans of a reset store show. Without a holder record it never connects, so a hub that never held a session does nothing.
+   */
+  private async readHeld(): Promise<void> {
+    const found = existsSync(recordPath(this.home)) ? await this.holder.find(false) : { gone: true as const };
+    let entries: SessionEntry[] = [];
+    let error: string | null = null;
+
+    if ('error' in found) {
+      error = found.error;
+    } else if ('holder' in found) {
+      try {
+        entries = await found.holder.list();
+      } catch (failure) {
+        error = (failure as Error).message;
+      }
+    }
+
+    if (error !== null) {
+      if (error !== this.heldError) {
+        this.deps.log(`held session list failed: ${error}`);
+      }
+
+      this.heldError = error;
+      return;
+    }
+
+    const before = JSON.stringify(this.heldEntries);
+
+    this.heldError = null;
+    this.heldEntries = [...entries];
+
+    for (const held of this.heldSessions().filter((one) => one.orphan && !this.orphansLogged.has(one.session))) {
+      this.orphansLogged.add(held.session);
+      this.deps.log(`held session ${held.session} has no work item: ${held.label}`);
+    }
+
+    if (JSON.stringify(entries) !== before) {
+      this.changed();
+    }
+  }
+
+  /**
+   * The holder's last list joined with the store, orphans first. An orphan is a live process whose session is no active session of the store; a
+   * known older session still held, such as one whose end waits for its terminal, is not one, nor is a session whose resume spawn runs.
+   */
+  heldSessions(): HeldSession[] {
+    const store = this.deps.store;
+    const joined = this.heldEntries.map((entry): HeldSession => {
+      const own = heldFromHolder(entry);
+      const session = store.session(entry.session);
+      const active = session !== null && session.state !== 'ended';
+      const orphan = entry.exitedAt === null && !active && !this.resuming.has(entry.session);
+
+      if (session === null) {
+        return { ...own, orphan };
+      }
+
+      const item = store.workItem(session.workItemId);
+      const ticket = item === null ? null : store.ticket(item.ticketId);
+
+      return {
+        ...own,
+        workItemId: session.workItemId,
+        key: ticket === null ? own.key : `${ticket.source} ${ticket.sourceKey}`,
+        nativeSessionId: session.nativeSessionId ?? own.nativeSessionId,
+        state: active ? session.state : own.state,
+        orphan,
+      };
+    });
+
+    return [...joined.filter((one) => one.orphan), ...joined.filter((one) => !one.orphan)];
+  }
+
+  /** `POST /holder/list`: the held sessions, read again first. */
+  async listHeld(): Promise<HeldSession[]> {
+    await this.readHeld();
+
+    return this.heldSessions();
+  }
+
+  /**
+   * `POST /holder/stop` (PRD R94): stops the held session `id` names, a Switchboard session ID, a Claude session ID, current or retired, or its
+   * first 8 characters. An active session stops through the flow, as Stop does, so its result reaches the flow before an attach decides; an orphan
+   * ends in the holder directly.
+   */
+  async stopHeld(id: string): Promise<{ stopped: string } | { refused: string; status: 404 | 409 }> {
+    const store = this.deps.store;
+    let found: ReturnType<typeof findHeld<HeldSession>>;
+
+    for (;;) {
+      await this.readHeld();
+      found = findHeld(this.heldSessions(), id, (entry) => store.session(entry.session)?.retiredIds ?? []);
+
+      const resume = 'refused' in found ? undefined : this.attaching.get(found.session);
+
+      // A session whose resume spawn runs is still ended in the store, so the stop waits for the resume and then stops it through the flow.
+      if ('refused' in found || !this.resuming.has(found.session) || resume === undefined) {
+        break;
+      }
+
+      await resume;
+    }
+
+    if ('refused' in found) {
+      return found;
+    }
+
+    if (found.exitedAt !== null) {
+      return { refused: `Held session ${found.session} has exited.`, status: 409 };
+    }
+
+    const session = store.session(found.session);
+
+    if (session !== null && session.state !== 'ended') {
+      const result = this.send({ type: 'stop', workItemId: session.workItemId, sessionId: session.id });
+
+      if (result.refused !== null) {
+        return { refused: result.refused, status: 409 };
+      }
+
+      while (this.ending.has(session.id)) {
+        await this.ending.get(session.id);
+      }
+
+      const after = store.session(session.id);
+
+      if (after === null || after.state === 'ended') {
+        return { stopped: session.id };
+      }
+
+      const error = store.workItem(session.workItemId)?.error ?? null;
+
+      return { refused: error?.startsWith('Stop failed') ? error : `Stop of held session ${session.id} failed; it is still held.`, status: 409 };
+    }
+
+    // An attach of the session waits for the kill, as for any stop of a held session.
+    const stopping = this.runners.codeMode.stop({ sessionId: found.session, shortId: session?.shortId ?? null }, 'operator');
+
+    await this.trackEnd(found.session, async () => {
+      await stopping;
+    });
+
+    const failure = await stopping;
+
+    if (failure !== null) {
+      return { refused: `Stop failed: ${failure.error}`, status: 409 };
+    }
+
+    this.deps.log(`stopped orphaned held session ${found.session}: ${found.label}`);
+    await this.readHeld();
+
+    return { stopped: found.session };
   }
 
   /**

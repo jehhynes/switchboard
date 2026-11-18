@@ -42,7 +42,7 @@ function startWith(extra: Record<string, string | undefined>, ...args: string[])
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' || args[0] === 'register' || args[0] === 'attach' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(['report', 'register', 'attach', 'holder'].includes(args[0] ?? '') ? [] : ['--browser-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -379,6 +379,51 @@ describe('hub entry point', () => {
       expect(bodies).toEqual([
         { path: '/attach', body: { sessionId: 's1' } },
         { path: '/attach', body: { sessionId: 's1' } },
+      ]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('lists and stops held sessions through the hub, with exit codes for usage, refusal and nothing answering', async () => {
+    expect(await start('holder').exited).toMatchObject({ code: 1, stderr: expect.stringContaining('Usage:\n  holder list\n') });
+    expect(await start('holder', 'list').exited).toMatchObject({ code: 0, stdout: 'No terminal holder is running.\n' });
+    expect(await start('holder', 'stop', 's1').exited).toMatchObject({ code: 2, stderr: 'The Switchboard hub is not running, and no terminal holder is running.\n' });
+
+    const bodies: unknown[] = [];
+    const replies = [
+      { status: 200, body: { sessions: [{ session: 's1', label: 'l', workItemId: 1, key: 'gh 7', nativeSessionId: 'n1', cwd: 'D:/git/widgets', state: 'idle', idleSince: Date.now(), memoryBytes: null, clients: 1, exitedAt: null, exitCode: null, orphan: false }] } },
+      { status: 404, body: { error: 'No held session nope.' } },
+      { status: 200, body: { stopped: 's1' } },
+    ];
+    const server = createServer((req, res) => {
+      let text = '';
+      req.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      req.on('end', () => {
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid }));
+          return;
+        }
+
+        bodies.push({ path: req.url, body: JSON.parse(text) });
+        const reply = replies.shift()!;
+        res.statusCode = reply.status;
+        res.end(JSON.stringify(reply.body));
+      });
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+
+    try {
+      expect(await start('holder', 'list').exited).toMatchObject({ code: 0, stdout: expect.stringMatching(/^Work item +Switchboard ID.*\ngh 7 +s1 +n1 +D:\/git\/widgets +idle +0m +- +1\n$/) });
+      expect(await start('holder', 'stop', 'nope').exited).toMatchObject({ code: 3, stderr: 'Refused: No held session nope.\n' });
+      expect(await start('holder', 'stop', 's1').exited).toMatchObject({ code: 0, stdout: 'Stopped held session s1.\n' });
+      expect(bodies).toEqual([
+        { path: '/holder/list', body: {} },
+        { path: '/holder/stop', body: { id: 'nope' } },
+        { path: '/holder/stop', body: { id: 's1' } },
       ]);
     } finally {
       server.close();

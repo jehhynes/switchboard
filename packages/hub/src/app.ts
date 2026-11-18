@@ -307,6 +307,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
       },
+      // hub.js holder list and stop (PRD R94).
+      '/holder/list': async () => ({ status: 200, body: { sessions: await runtime.listHeld() } }),
+      '/holder/stop': async (body) => {
+        if (!isRecord(body) || typeof body['id'] !== 'string' || body['id'] === '') {
+          return { status: 400, body: { error: 'Expected {id}.' } };
+        }
+
+        const result = await runtime.stopHeld(body['id']);
+
+        return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
+      },
       // Continue in Background from an item window's Claude tab (PRD R89).
       '/background': async (body) => {
         const { label, hostPid, workItemIds } = isRecord(body) ? body : {};

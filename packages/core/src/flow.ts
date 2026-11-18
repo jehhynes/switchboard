@@ -217,7 +217,9 @@ export type FlowEvent =
   /** Run now: a queued work item for the named schedule (PRD R82). */
   | { type: 'run-schedule'; name: string }
   /** `retry` retries a failed work item from the step that failed (PRD R34). */
-  | { type: 'approve' | 'mark-done' | 'reopen' | 'retry' | 'stop' | 'delete'; workItemId: number }
+  | { type: 'approve' | 'mark-done' | 'reopen' | 'retry' | 'delete'; workItemId: number }
+  /** `sessionId` names a held session of the work item to stop, which may be an older one whose end waits for its terminal (PRD R94). */
+  | { type: 'stop'; workItemId: number; sessionId?: string }
   /** `guidance` is added to the task session's prompt (PRD R77); `playbook` replaces triage's choice (PRD R35); `prompt` replaces an ad-hoc one (PRD R77). */
   | { type: 'start'; workItemId: number; guidance?: string | null; playbook?: string | null; prompt?: string | null }
   | { type: 'pick'; ticketId: number; guidance?: string | null; playbook?: string | null }
@@ -650,7 +652,7 @@ class Flow {
       case 'retry':
         return this.retry(this.openItem(event.workItemId));
       case 'stop':
-        return this.stop(this.knownItem(event.workItemId));
+        return this.stop(this.knownItem(event.workItemId), event.sessionId ?? null);
       case 'delete':
         return this.delete(this.knownItem(event.workItemId));
       case 'open-question':
@@ -1936,8 +1938,20 @@ class Flow {
     return name;
   }
 
-  private stop(item: WorkItem): void {
+  private stop(item: WorkItem, sessionId: string | null): void {
     const session = this.activeSession(item);
+
+    // An older held session ends as Stop ends one; only the latest session's work item is blocked (stopSucceeded).
+    if (sessionId !== null && sessionId !== session?.id) {
+      const older = this.store.session(sessionId);
+
+      if (older === null || older.workItemId !== item.id || older.codeMode !== true || older.state === 'ended') {
+        throw new Refusal(`Session ${sessionId} is not a running held session of the work item.`);
+      }
+
+      this.actions.push({ type: 'stop-session', sessionId: older.id, provider: older.provider, shortId: older.shortId, reason: 'operator', codeMode: true });
+      return;
+    }
 
     if (session === null) {
       const last = this.store.sessionsFor(item.id).at(-1);

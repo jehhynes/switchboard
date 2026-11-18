@@ -7,6 +7,7 @@ import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switch
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
+import type { HeldSession } from './held.js';
 import {
   age,
   CAPS,
@@ -229,6 +230,8 @@ export interface DockView {
   repoRoots: string[];
   /** The schedules the New Ad-hoc Session window can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
+  /** The snapshot's held sessions, orphans first (PRD R94); absent when the holder holds none. */
+  held?: HeldSession[];
 }
 
 /** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
@@ -261,6 +264,7 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     sources: sourceGroups(snapshot.sourceStates),
     repoRoots: snapshot.repoRoots,
     schedules: snapshot.schedules,
+    ...(snapshot.held === undefined ? {} : { held: snapshot.held }),
   };
 }
 

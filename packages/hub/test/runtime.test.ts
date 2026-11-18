@@ -3367,5 +3367,203 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 'launch-2' });
       context.runtime.stop();
     });
+    describe('held sessions (PRD R94)', () => {
+      const CLAUDE = '9273f594-1111-4222-8333-444455556666';
+      const label = (key: string, native: string) => `switchboard · ad-hoc · ${key} ${native}`;
+
+      it('lists the holder\'s sessions joined with the store, orphans first, and logs each orphan once', async () => {
+        const context = await attaching(resumer());
+
+        context.store.updateSession('s1', { nativeSessionId: CLAUDE });
+        context.entries.splice(0, 1, { ...held('s1'), label: label('adhoc 1', 'old-native'), lastInputAt: T0 + 5, lastOutputAt: T0 + 9, clients: 2, memoryBytes: 300 * 1024 * 1024 }, { ...held('gone-1'), label: label('gh 7', 'aaaabbbb-0000') });
+        await context.runtime.readRoster();
+        await context.runtime.readRoster();
+
+        expect(context.runtime.snapshot().held).toEqual([
+          { session: 'gone-1', label: label('gh 7', 'aaaabbbb-0000'), workItemId: null, key: 'gh 7', nativeSessionId: 'aaaabbbb-0000', cwd: 'D:/git/widgets', state: 'live', idleSince: T0, memoryBytes: null, clients: 0, exitedAt: null, exitCode: null, orphan: true },
+          { session: 's1', label: label('adhoc 1', 'old-native'), workItemId: 1, key: 'adhoc 1', nativeSessionId: CLAUDE, cwd: 'D:/git/widgets', state: 'running', idleSince: T0 + 9, memoryBytes: 300 * 1024 * 1024, clients: 2, exitedAt: null, exitCode: null, orphan: false },
+        ]);
+        expect(context.logs.filter((line) => line.startsWith('held session'))).toEqual([`held session gone-1 has no work item: ${label('gh 7', 'aaaabbbb-0000')}`]);
+        context.runtime.stop();
+      });
+
+      it('counts an ended session still live as an orphan, but not an older session whose end waits, nor an exited one', async () => {
+        const context = await attaching(resumer());
+
+        context.runtime.send({ type: 'adhoc', prompt: 'other', repoRoot: 'D:/git/widgets', start: true });
+        await context.runtime.settled();
+        context.store.updateSession('s2', { codeMode: true, state: 'ended', endedAt: T0, released: true });
+        context.store.updateSession('s1', { state: 'idle', releasing: true });
+        context.entries.splice(0, 1, held('s1'), held('s2'), held('s3', true));
+
+        expect((await context.runtime.listHeld()).map((one) => [one.session, one.orphan, one.state])).toEqual([
+          ['s2', true, 'live'],
+          ['s1', false, 'idle'],
+          ['s3', false, 'exited'],
+        ]);
+        context.runtime.stop();
+      });
+
+      it('reads the list with no active Code Mode session, keeps it when a read fails, and empties it once the holder is gone', async () => {
+        const context = await attaching(resumer());
+        const connection = await context.runtime['holder'].find(false);
+        let closed = (): void => {};
+        let fail: string | null = null;
+
+        if (!('holder' in connection)) {
+          throw new Error('no holder');
+        }
+
+        connection.holder.onClose = (listener) => (closed = listener);
+        connection.holder.list = async () => (fail === null ? context.entries : Promise.reject(new Error(fail)));
+        context.runtime.send({ type: 'delete', workItemId: 1 });
+        await context.runtime.settled();
+        context.runtime['holder'].close();
+        context.entries.splice(0, 1, held('s9'));
+
+        await context.runtime.readRoster();
+        expect(context.runtime.snapshot().held?.map((one) => one.session)).toEqual(['s9']);
+
+        fail = 'The terminal holder did not answer.';
+        await context.runtime.readRoster();
+        await context.runtime.readRoster();
+        expect(context.runtime.snapshot().held?.map((one) => one.session)).toEqual(['s9']);
+        expect(context.logs.filter((line) => line.startsWith('held session list failed'))).toEqual(['held session list failed: The terminal holder did not answer.']);
+
+        context.runtime['holder']['deps'].connect = async () => Promise.reject(new Error('refused'));
+        context.runtime['holder']['deps'].lockHeld = async () => false;
+        closed();
+        await context.runtime.readRoster();
+        expect(context.runtime.snapshot().held).toBeUndefined();
+        context.runtime.stop();
+      });
+
+      it('never connects without a holder record', async () => {
+        const connect = vi.fn(async () => Promise.reject(new Error('no holder')));
+        const { runtime } = setup(config({ installHooks: true }), () => T0, { claude: fakeRunner(), codeMode: resumer() }, new FakeCodex(), {}, { holder: { connect, lockHeld: async () => false } });
+
+        expect(await runtime.listHeld()).toEqual([]);
+        await runtime.readRoster();
+        expect(connect).not.toHaveBeenCalled();
+        expect(runtime.snapshot().held).toBeUndefined();
+        runtime.stop();
+      });
+
+      it('stops an active held session through the flow by its Switchboard ID, Claude ID, a retired ID or 8 characters of one', async () => {
+        for (const id of ['s1', CLAUDE, 'retired-claude-id', CLAUDE.slice(0, 8)]) {
+          const codeMode = resumer();
+          const context = await attaching(codeMode);
+
+          context.store.updateSession('s1', { nativeSessionId: CLAUDE, retiredIds: ['retired-claude-id'] });
+
+          expect(await context.runtime.stopHeld(id)).toEqual({ stopped: 's1' });
+          expect(codeMode.stops).toEqual(['s1']);
+          expect(context.store.session('s1')).toMatchObject({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' });
+          expect(context.store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
+          context.runtime.stop();
+        }
+      });
+
+      it('refuses an unknown ID, a prefix of several sessions, an exited session and a failed stop', async () => {
+        const codeMode = resumer({ stop: async () => ({ error: 'The process did not exit.' }) });
+        const context = await attaching(codeMode);
+
+        context.store.updateSession('s1', { nativeSessionId: CLAUDE });
+        context.entries.push({ ...held('o1'), label: label('gh 7', `${CLAUDE.slice(0, 8)}-other`) }, held('x1', true));
+
+        expect(await context.runtime.stopHeld('nope')).toEqual({ refused: 'No held session nope.', status: 404 });
+        expect(await context.runtime.stopHeld(CLAUDE.slice(0, 8))).toEqual({ refused: `${CLAUDE.slice(0, 8)} matches more than one held session: o1, s1.`, status: 409 });
+        expect(await context.runtime.stopHeld('x1')).toEqual({ refused: 'Held session x1 has exited.', status: 409 });
+        expect(await context.runtime.stopHeld('s1')).toEqual({ refused: 'Stop failed: The process did not exit.', status: 409 });
+        expect(await context.runtime.stopHeld('o1')).toEqual({ refused: 'Stop failed: The process did not exit.', status: 409 });
+        expect(context.store.session('s1')).toMatchObject({ state: 'running' });
+        context.runtime.stop();
+      });
+
+      it('ends an orphan in the holder directly and logs it', async () => {
+        const codeMode = resumer();
+        const context = await attaching(codeMode);
+
+        context.entries.push({ ...held('o1'), label: label('gh 7', 'n') });
+
+        expect(await context.runtime.stopHeld('o1')).toEqual({ stopped: 'o1' });
+        expect(codeMode.stops).toEqual(['o1']);
+        expect(context.logs).toContain(`stopped orphaned held session o1: ${label('gh 7', 'n')}`);
+        expect(context.store.session('s1')).toMatchObject({ state: 'running' });
+        context.runtime.stop();
+      });
+
+      it('waits for a resume in progress, then stops the resumed session through the flow', async () => {
+        let spawn = (): void => {};
+        const codeMode = resumer();
+        const context = await attaching(codeMode);
+        const resumeHeld = codeMode.resumeHeld!;
+
+        endIt(context);
+        codeMode.resumeHeld = async (...args) => {
+          context.entries.splice(0, 1, held('s1'));
+          await new Promise<void>((done) => (spawn = done));
+          return resumeHeld(...args);
+        };
+        codeMode.stop = async (target) => {
+          codeMode.stops.push(target.sessionId);
+          context.entries.splice(0, 1, held('s1', true));
+          return null;
+        };
+
+        const attach = context.runtime.attach('s1');
+
+        await vi.waitFor(() => expect(context.runtime['resuming'].has('s1')).toBe(true));
+
+        const stop = context.runtime.stopHeld('s1');
+
+        await new Promise((done) => setTimeout(done, 10));
+        expect(codeMode.stops).toEqual([]);
+        spawn();
+
+        expect(await attach).toEqual(HOLDER);
+        expect(await stop).toEqual({ stopped: 's1' });
+        expect(codeMode.stops).toEqual(['s1']);
+        expect(context.store.session('s1')).toMatchObject({ state: 'ended', outcome: 'stopped', outcomeDetail: 'Stopped by you.' });
+        expect(context.logs.some((line) => line.startsWith('stopped orphaned held session'))).toBe(false);
+        context.runtime.stop();
+      });
+
+      it('makes an attach wait for a held stop, which it then resumes', async () => {
+        const order: string[] = [];
+        let ended = (): void => {};
+        const codeMode = resumer({ observe: idleObservation });
+        const context = await attaching(codeMode);
+        const resumeHeld = codeMode.resumeHeld!;
+
+        codeMode.stop = (target) =>
+          new Promise((done) => {
+            ended = () => {
+              order.push(`stop ${target.sessionId}`);
+              context.entries.splice(0, 1, held('s1', true));
+              done(null);
+            };
+          });
+        codeMode.resumeHeld = async (...args) => {
+          order.push(`resume ${args[0].id}`);
+          return resumeHeld(...args);
+        };
+
+        const stop = context.runtime.stopHeld('s1');
+
+        await vi.waitFor(() => expect(context.runtime['ending'].has('s1')).toBe(true));
+
+        const attach = context.runtime.attach('s1');
+
+        await Promise.resolve();
+        expect(order).toEqual([]);
+        ended();
+
+        expect(await stop).toEqual({ stopped: 's1' });
+        expect(await attach).toEqual(HOLDER);
+        expect(order).toEqual(['stop s1', 'resume s1']);
+        context.runtime.stop();
+      });
+    });
   });
 });

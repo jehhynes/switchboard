@@ -253,6 +253,26 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
     expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.stopped });
   });
 
+  it('stops an older held session named by its ID, ending it as stopped without blocking the work item, and refuses one that is not held', () => {
+    const h = new Harness();
+    const first = heldTask(h);
+
+    h.report(first, { kind: 'approval', prompt: '/publish 7', summary: 'Post the answer', report: null });
+    h.act({ type: 'marker', sessionId: first, state: 'idle', detail: null });
+
+    const second = held(h, h.act({ type: 'approve', workItemId: 1 })[1], 'launch-2');
+
+    expect(h.act({ type: 'stop', workItemId: 1, sessionId: first })).toEqual([{ type: 'stop-session', sessionId: first, provider: 'claude', shortId: `${first}-short`, reason: 'operator', codeMode: true }]);
+    h.act({ type: 'stop-succeeded', sessionId: first, reason: 'operator', shortId: `${first}-short` });
+    expect(h.store.session(first)).toMatchObject({ state: 'ended', released: true, outcome: 'stopped', outcomeDetail: MESSAGES.stopped });
+    expect(h.store.session(second)).toMatchObject({ state: 'running' });
+    expect(h.status(1)).toBe('running');
+
+    expect(h.send({ type: 'stop', workItemId: 1, sessionId: first }).refused).toBe(`Session ${first} is not a running held session of the work item.`);
+    expect(h.send({ type: 'stop', workItemId: 1, sessionId: 'nope' }).refused).toBe('Session nope is not a running held session of the work item.');
+    expect(h.act({ type: 'stop', workItemId: 1, sessionId: second })).toEqual([{ type: 'stop-session', sessionId: second, provider: 'claude', shortId: `${second}-short`, reason: 'operator', codeMode: true }]);
+  });
+
   it('refuses Open in Claude and Continue in Background', () => {
     const h = new Harness();
     const id = heldTask(h);

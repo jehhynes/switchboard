@@ -42,6 +42,13 @@ describe('dockView', () => {
     ]);
   });
 
+  it("passes the snapshot's held sessions on, and leaves them out when there are none (PRD R94)", () => {
+    const held = [{ session: 'o1', label: 'x', workItemId: null, key: null, nativeSessionId: null, cwd: 'D:/git/widgets', state: 'live', idleSince: NOW, memoryBytes: null, clients: 0, exitedAt: null, exitCode: null, orphan: true }];
+
+    expect(dockView(snapshot([], { held }), NOW, W).held).toEqual(held);
+    expect('held' in dockView(snapshot([]), NOW, W)).toBe(false);
+  });
+
   it('lists the groups in order, with Snoozed before Done and only when it has rows', () => {
     const view = dockView(snapshot([item(1, { status: 'blocked' }), item(2), item(3, { status: 'unstarted' })], { pool: [pool(4)] }), NOW, W);
 
