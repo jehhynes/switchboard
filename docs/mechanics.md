@@ -751,3 +751,197 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Rollout records**, tallied over the 400 newest rollouts in `~/.codex/sessions`: `event_msg` records of type `task_started` (763), `task_complete` (707) and `turn_aborted` (55) carry the turn ID, so the rollout shows when a turn runs and how it ended; a question shows as a `request_user_input_async` function call until its output. No record type marks a pending permission prompt, and the rollout names no process. The file grows while its turn runs, but its modification time can stay at the session's start: a reviewer's rollout written until 12:28 UTC listed 12:08, so a reader must check its size, not its time.
 - **Not verified:** whether a permission prompt leaves any record in the rollout under `on-request` approval.
 - **Current use:** at each install the hub removes the hook entries of another Switchboard home whose hub lock no one holds, except the profile's own `~/.switchboard`, and the Codex hook writes markers only for threads its run records name (architecture.md § Claude Code runner, § Codex runner). Markers still decide a resumed Codex session's state (PRD R36).
+
+## M63. Code Mode in a hidden pseudo-terminal, and how to tell it is on
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; Node.js 24.14.0, node-pty 1.1.0, @xterm/headless 6.0.0; VS Code 1.146.0 (Electron 43.8.6, Node 24.22.1).
+- **Experiment:** a stand-in for the hub ran under VS Code's `Code.exe` with `ELECTRON_RUN_AS_NODE=1`, `VSCODE_PID` and `NODE_OPTIONS` set, and started a prototype terminal holder on system Node.js, detached. The holder removed `ELECTRON_*`, `VSCODE_*`, `NODE_OPTIONS`, `ANTHROPIC_*` and Claude's session markers (`CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID`, `CLAUDE_EFFORT`, `AI_AGENT`) from its environment and spawned, in a node-pty pseudo-terminal of 120×40, `claude --session-id <uuid> -n <name> --permission-mode auto --model haiku --append-system-prompt <contract with a code word> --settings <json> <prompt>` with `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` and `SWITCHBOARD_LAUNCH=<uuid>`, in a scratch git repository under `.wip/`. The `--settings` JSON set `env.ANTHROPIC_BASE_URL` to `https://api.anthropic.com` and added a hook on every event that logged the payload and the hook's environment.
+- **Result:** after the trust dialog (M70), the session printed `⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on` under the banner, and `/status` showed `Code Mode: on (experimental) · CLAUDE_CODE_EXPERIMENTAL_CODE_MODE in the shell environment`. The prompt ran as the first turn; the transcript's tool uses were `REPL`, `PowerShell`, `REPL`, `Poll`, and the answer named the contract's code word. Every hook carried the given session ID, and the transcript was `<session id>.jsonl`. `claude agents --json` listed the process as `kind: "interactive"` with its pid, the given `sessionId` and the `-n` name. Each hook process saw `SWITCHBOARD_LAUNCH`, `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` and `ANTHROPIC_BASE_URL` set by `--settings`.
+- **Hook order of one turn:** `SessionStart` (`startup`), `UserPromptSubmit`, `PreToolUse` `REPL`, `PreToolUse` of each tool the code calls under its own name, `PostToolBatch`, `PostToolUse` of each, `PostToolUse` `REPL`, `UserPromptSubmit` with `source: "poll_event"`, `Stop`. A `SubagentStop` with an `agent_id` followed some `Stop`s, and `Notification` `idle_prompt` came 60 seconds after a `Stop`. Async hooks finish out of order: `PostToolBatch` was sometimes logged before the `PreToolUse` it follows, and several events shared one millisecond.
+- **Pass criteria (plan E1):** Code Mode on, shown by a fixed screen line readable by a program; prompt as first turn; transcript with the given session ID; the `-n` name in the roster; the contract's code word known. **Passed.**
+- **Not verified:** Linux; the holder started by a real hub.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work. Re-run M63, M65, M70 and M71 after a Claude Code upgrade, since Code Mode is experimental and may change in any release.
+
+## M64. Skipping the gateway for a Code Mode session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300. The operator's `~/.claude/settings.json` `env` sets `ANTHROPIC_BASE_URL` to a local gateway and `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL`; it has no `apiKeyHelper`.
+- **Experiment:** promptless starts through the M63 holder with `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` and the process environment's `ANTHROPIC_*` variables removed, varying the overrides; then `/status`. Credential cases put the variable in the scratch repository's `.claude/settings.local.json`, which ranks above user settings and below `--settings`.
+- **Result:**
+
+  | Overrides | Code Mode |
+  |---|---|
+  | none | off: `isn't available: for now it only works directly with the Anthropic API (not through a cloud provider such as Bedrock, a gateway or another address in ANTHROPIC_BASE_URL). Starting with the ordinary tools.`; `/status` shows the gateway address |
+  | `ANTHROPIC_BASE_URL` in the process environment only | off, the same line: user settings `env` wins |
+  | `--settings {"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}` | on; `/status`: login by the Claude account, base URL `https://api.anthropic.com` |
+  | that, with `ANTHROPIC_API_KEY` in settings | on, but a start prompt "Detected a custom API key in your environment. Do you want to use this API key?" |
+  | that, with `ANTHROPIC_AUTH_TOKEN` in settings | off: `isn't available: for now it doesn't work with an API key helper, ANTHROPIC_AUTH_TOKEN or custom auth headers.` |
+  | that, with `ANTHROPIC_CUSTOM_HEADERS: "X-Api-Key: …"` in settings | off: `isn't available: Claude Code couldn't read your organization's settings or policy (starting Claude Code again may help).` |
+  | that, with `"ANTHROPIC_API_KEY": ""`, `"ANTHROPIC_AUTH_TOKEN": ""` and `"ANTHROPIC_CUSTOM_HEADERS": ""` added to `--settings` `env`, against each of the three above | on; `/status`: login by the Claude account, base URL `https://api.anthropic.com` |
+  | `apiKeyHelper` in settings, `--settings` `"apiKeyHelper": ""` | off, the API key helper line |
+  | `apiKeyHelper` in settings, `--settings` `"apiKeyHelper": null` | settings error dialog: `apiKeyHelper: Expected string, but received null` |
+
+  `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` from user settings did not stop Code Mode once the base URL was overridden.
+- **Pass criteria (plan E2):** one combination starts Code Mode with `/status` showing the direct API and the subscription sign-in, also when settings set `ANTHROPIC_API_KEY`. **Passed:** `--settings` `env` with the base URL and the three credential variables as empty strings. The process environment needs no override.
+- **Not verified:** `ANTHROPIC_API_KEY` in user settings themselves (local settings stood in); an `Authorization` header; a managed-settings gateway. An `apiKeyHelper` in user settings cannot be overridden by `--settings`, so it keeps Code Mode off.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M65. Hook events in a Code Mode session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Experiment:** an M63 session with an extra synchronous `PreToolUse` hook on `Bash|PowerShell` (timeout 3 s) that exits 1 with stderr for one command, sleeps 10 s for another and returns `updatedInput` for a third; an async `PreToolUse` hook that always exits 1; and a synchronous `SessionStart` hook on `compact` that returns `additionalContext` with a second code word. Turns: four Bash calls from code; `AskUserQuestion`; a permission prompt in manual mode (reached with Shift+Tab); long-running code; `/compact`; two concurrent `REPL` calls in auto mode.
+- **Result:**
+  - A synchronous `PreToolUse` hook that exited 1 did not stop the call: the command ran. One that ran past its timeout refused it with `Permission denied for Bash: PreToolUse:Bash hook error: [node]: the hook did not finish, so this call was not run.`, and the refused call had no `PostToolUse` or `PostToolUseFailure`. `updatedInput` replaced the command. The failing async hook never refused a call.
+  - `AskUserQuestion` exists in Code Mode and waits as in M57: `PreToolUse` `REPL`, `PermissionRequest` with `tool_name: "AskUserQuestion"`, then `Notification` `permission_prompt` 6 s later; the roster said `status: "waiting", waitingFor: "input needed"`. After the answer: `PostToolUse` `AskUserQuestion`, `poll_event`, `Stop`.
+  - A permission prompt for `Bash` from code: `PreToolUse` `Bash`, `PermissionRequest` with `tool_name: "Bash"`, `Notification` `permission_prompt` 6 s later; roster `waitingFor: "permission prompt"`.
+  - Code does not outlive its turn. While a `REPL` script runs, the turn stays running (`esc to interrupt`, `1 background task` on the status line, roster `busy`), and `Stop` follows the script's end; every `Stop` had `background_tasks: []`. A script's own time is capped at 30 s, so a 45-second `sleep()` in code ended at 30 s; an un-awaited timer dies when its script ends; `Bash` with `run_in_background: true` is refused with `run_in_background is not available in the async REPL`. A 50-second shell command awaited in code ran to its end inside the turn. In auto mode each code result reached the model as `UserPromptSubmit` `poll_event` before the turn's `Stop`. In the manual-mode turn whose `Bash` call waited on a permission prompt, `PostToolUse` `REPL` and `PostToolBatch` were followed by `Stop` with no `poll_event`.
+  - `/compact` gave `PreCompact`, `SubagentStop`, then `SessionStart` `compact` and no `Stop`. The `compact` hook's `additionalContext` reached the model: after compaction it named both code words.
+  - Two `REPL` calls in one reply both started, but their `Bash` calls ran one after the other: the second call's `PreToolUse` came 60 ms after the first call's 25-second command ended. No prompt was raised; this run did not exercise tool calls that overlap.
+- **States:** running is `UserPromptSubmit` (either source), `PreToolUse`, `PostToolUse` or `PostToolBatch`; a question or permission wait is `PermissionRequest` and its `Notification`, told apart by the request's tool (M57); idle is `Stop`, or `SessionStart` `compact` after `/compact`; ended is `SessionEnd` (M68). A turn can end without a `poll_event`.
+- **Pass criteria (plan E3):** each state has an identifying marker sequence; background code is visible so idle is not reported while code runs; a `poll_event` turn ends with `Stop`; Switchboard's async `PreToolUse` entry never refuses a call; the contract survives compaction. **Partial.** Passed: running, a question or permission wait, idle and ended each have an identifying sequence; the turn stays open until code ends, so idle is not reported while code runs; each `poll_event` turn ended with `Stop`; the async `PreToolUse` entry never refused a call; the contract survived compaction. Outstanding: the failed state, since no `StopFailure` was produced.
+- **Not verified:** `StopFailure` (an unknown model in `/model` was refused before any request); the auto-mode prompt with a two-minute countdown, which needs tool calls that overlap; `Elicitation`; whether output can arrive after `Stop` by another route, such as `Monitor`.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M66. Reports from a Code Mode session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; the installed `hub.js` bundle copied to a scratch home with a stand-in hub that answered `GET /status` and recorded requests.
+- **Experiment:** the M63 session ran `node <home>/.switchboard/hub.js report stage …` with the `Bash` tool and `report worktree … /d/git/x` with the `PowerShell` tool, both from code, and printed `CLAUDE_CODE_SESSION_ID` and `SWITCHBOARD_LAUNCH`.
+- **Result:** both commands printed `recorded`; each `POST /report` carried the session's ID as `nativeSessionId`. Both shells saw `CLAUDE_CODE_SESSION_ID` and `SWITCHBOARD_LAUNCH`, and Bash also `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` and the overridden base URL. From PowerShell, `/d/git/x` arrived as `D:\d\git\x`, as for any PowerShell call (M20 concerns Git Bash only).
+- **Pass criteria (plan E4):** the stand-in receives the report with the right session ID. **Passed.**
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M67. The roster, `claude stop` and `claude attach` for a held session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Result:** `claude agents --json` and `--all` list a held interactive session as `{pid, cwd, kind: "interactive", startedAt, sessionId, name, status}` with `status` `busy`, `idle` or `waiting` and, when waiting, `waitingFor` `input needed` or `permission prompt`; it has no short `id`. `claude stop` and `claude attach` with the first 8 characters, the full ID or the name print `No session matching '<arg>'. Run 'claude agents' to list running sessions.` and exit 1, and leave the session running. After `/clear`, `/branch` or `/resume` the entry keeps the pid and shows the new session ID and name (M73).
+- **Pass criteria (plan E5):** recorded either way. **Passed.**
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M68. Resuming a Code Mode session after its process ends
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Experiment:** the M65 session was killed with `taskkill /T /F` 8 s into a turn running `sleep 30`, then resumed in a new pseudo-terminal with `claude --resume <id> --permission-mode auto --model haiku --settings <same>`, a new `SWITCHBOARD_LAUNCH`, with no prompt and then with one; then once without `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`.
+- **Result:**
+  - The kill left no `SessionEnd` and no `Stop`: Switchboard's marker stayed at `PostToolBatch`, which reads as running. The hook payloads logged with the killed launch's `SWITCHBOARD_LAUNCH` tell it from later launches.
+  - A promptless resume showed the Code Mode line, the conversation and the `-n` name; its only hook was `SessionStart` `resume` with the same session ID and the new launch, and the roster said `idle`. Model and permission mode were as passed. The interrupted turn did not continue.
+  - A resume with a prompt ran it as a turn: `SessionStart` `resume`, `UserPromptSubmit`, `Stop`. The model knew both code words and that the killed command's result was lost.
+  - Without the variable Claude printed `This session was started in Code Mode (experimental), which is off, so it can't be resumed. To resume it, set the environment variable CLAUDE_CODE_EXPERIMENTAL_CODE_MODE to 1, then run claude --resume <id>.` and exited 1.
+- **Pass criteria (plan E6):** same session ID, conversation and contract; Code Mode on; model and permission mode settable; a promptless resume reads as idle; the stale marker of a killed process distinguishable by its launch ID; the refusal recorded. **Passed**, with the launch ID taken from the hook's environment, which the hook writer does not record yet. The resume passed no `--append-system-prompt`, so the contract seen came from the conversation.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M69. Held sessions when the holder dies
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Experiment:** the holder held three Code Mode sessions: two idle and one running the Bash command `sleep 40; echo e7done > e7done.txt` from code. The holder process alone was killed with `taskkill /PID <holder> /F` 25 s into the command.
+- **Result:** every `claude` and the members of its process tree seen before the kill were gone within 5 s. Each session logged `SessionEnd` with `reason: "other"` 1 to 2 s after the kill, so Switchboard's hook writer removed its marker, and the roster no longer listed it. The shell command did not stop: `e7done.txt` was written 15 s after its `claude` had exited. Its `sleep` was not under `claude.exe` in the process table, so neither the tree nor the roster shows it.
+- **Pass criteria (plan E7):** each `claude` exits within 30 s, or a survivor is detectable. **Passed** for `claude`. A tool's shell command can outlive its session unseen.
+- **Not verified:** Linux and `SIGKILL`; whether `taskkill /T` on `claude` (M68) also leaves such a command running.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M70. Prompts before a Code Mode session starts
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Experiment:** a start in a new folder with a project `.mcp.json` server, on a scratch `CLAUDE_CONFIG_DIR` holding copies of the operator's sign-in, `.claude.json` without `codeModeCaveatsAcceptedV1` and `codeModeAutoModeCaveatAcceptedV1`, and settings without hooks, with `--session-id` and a prompt.
+- **Result:** the dialogs came one after another, each answered by keys sent to the pseudo-terminal:
+  1. Folder trust ("Accessing workspace: … Quick safety check: Is this a project you created or one you trust?"), with `❯ No, exit` selected, naming `.mcp.json` when there is one.
+  2. "New MCP server found in this project: e8dummy", `❯ Continue without using this MCP server` selected.
+  3. "Allow external CLAUDE.md file imports?", because the folder's parent `CLAUDE.md` imports `AGENTS.md`; `❯ No, disable external imports` selected.
+  4. "Code Mode (experimental)", with `❯ No, start without it` selected, so Enter starts without Code Mode.
+
+  No hook fired until all four were answered; then `SessionStart` `startup` with the given session ID, the prompt as the first turn, and `Stop`. The pseudo-terminal's process kept its pid; a second `claude`-level process appeared under it. One answer saved both caveats to `.claude.json`. M63's scratch repository asked for trust and imports at its first start only. An API key in settings adds its own dialog (M64).
+- **Pass criteria (plan E8):** a start prompt is detectable without a marker; the confirmation keeps the session ID and prompt. **Passed:** a live process with no marker of its launch is waiting on a dialog, and the prompt and session ID survived.
+- **Side effect:** killing a session while its dialogs showed made the next Claude start on the machine print `Claude Code's fullscreen renderer didn't finish starting last time on this machine, so this launch is using the classic renderer.`; that start used the classic renderer once.
+- **Not verified:** the name of the second process; what the operator's terminal shows after an attach mid-dialog.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M71. Starts that Claude makes without Code Mode
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Result:** with the M64 overrides, `--model claude-sonnet-5` started without Code Mode, printing `⚠ Code Mode (experimental) isn't available: for now it only works with Opus 5.5, Sonnet 5.5 and later models. Starting with the ordinary tools.` `DISABLE_TELEMETRY=1` printed `⚠ Code Mode (experimental) isn't available: it needs settings that Claude Code downloads from Anthropic, and this session doesn't download them (DISABLE_TELEMETRY, DO_NOT_TRACK, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC or CLAUDE_CODE_DISABLE_FEATURE_FLAGS turns that off). Starting with the ordinary tools.` In both, `/status` showed `Code Mode: off · <reason>` and the `is on` line was absent. Haiku 5.5 runs Code Mode though the message names only Opus and Sonnet. Every refusal line in M64 and here starts `⚠ Code Mode (experimental) isn't available:` and wraps at the terminal's width.
+- **Pass criteria (plan E9):** both lines recorded. **Passed.**
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M72. Replaying and attaching to a held session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; @xterm/addon-serialize 0.14.0.
+- **Experiment:** the holder kept each session in `@xterm/headless` (10,000 lines of scrollback) with `SerializeAddon`, and a raw output buffer. Replays of each were written into fresh headless terminals and compared with the holder's screen. Attach clients connected over loopback TCP, sent their size, received the replay and the output stream, and sent keys: a headless client, and a raw-mode Node.js client (`process.stdin.setRawMode`) running inside a second ConPTY, standing in for Windows Terminal and VS Code's terminal.
+- **Result:**
+  - At the session's size both replays reproduced the visible screen and scrollback exactly, and re-serializing the replay gave the same bytes. Replayed at another size without a resize, both were garbled.
+  - The holder resizing the pseudo-terminal to the client's size before the replay made Claude redraw at that size, so a 90-column client showed a clean screen. The raw-mode client's terminal resize reached Claude.
+  - Through both clients, a bracketed paste appeared in the input box, Shift+Tab cycled the mode (manual, accept edits, plan, auto), Ctrl+O opened the detailed transcript and Esc closed it; Ctrl+U cleared the box.
+  - Attaching mid-turn showed the spinner and `esc to interrupt`; detaching left the turn running, and attaching after it showed the result.
+  - With two clients of 120 and 80 columns, the later one set the size and the wider client showed lines drawn for 80 columns until it resized.
+  - A serialized replay of 10,040 lines of 106 characters was 1,094,259 bytes, and the raw buffer 2,180,075.
+- **Pass criteria (plan E10):** one replay method shows the screen as Claude drew it in both terminals, and keys reach Claude unchanged. **Partial.** Passed with the headless client and the raw-mode client in a second ConPTY: serialization after a resize to the client's size reproduced the screen, and keys reached Claude. Outstanding: the replay and keys in Windows Terminal and in VS Code's terminal, checked by eye, which the criteria name.
+- **Not verified:** Linux; mouse input; a raw buffer that has dropped its start.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M73. Session ID changes inside a held session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Result:** in a held session started with `--session-id`:
+  - `/clear`: `SessionEnd` of the old ID, then `SessionStart` with `source: "clear"` and a new ID, from the same process and the same `SWITCHBOARD_LAUNCH`. A report afterwards sent the new ID; the roster showed the same pid with the new ID.
+  - `/fork` is refused: `This session is in Code Mode (experimental), which background sessions can't use yet, so it can't be moved or copied to the background.` No hook fired.
+  - `/branch` printed `Branched session. You're now in the new one (<id>)`: `SessionEnd` of the old ID, `SessionStart` `source: "fork"` with the new one.
+  - `/resume <other id>`: `SessionEnd`, `SessionStart` `source: "resume"` with the other ID; the roster then showed the other session's ID and name for the same pid.
+
+  Since Switchboard's hook writer removes a marker on `SessionEnd`, each change removes the old ID's marker and writes one for the new ID.
+- **Pass criteria (plan E12):** each ID change is detectable from markers carrying the launch ID. **Passed**, given a hook writer that records `SWITCHBOARD_LAUNCH`; nested `claude -p` markers also carry the launch ID, so the source of the change must be kept (M77).
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M74. Debrief forks of a Code Mode session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Result:** `claude -p --resume <Code Mode session> --fork-session` with `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` printed `Warning: Code Mode (experimental) isn't available: for now it only works in the interactive terminal.` and, with or without the variable, `Failed to resume session: This session was started in Code Mode (experimental), which isn't available because for now it only works in the interactive terminal, so it can't be resumed here.` and exited 1.
+- **Pass criteria (plan E13):** recorded. **Passed:** refused.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M75. Memory of held sessions and how to read it
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; 643 processes on the machine.
+- **Result:**
+  - A Code Mode `claude.exe`: 395 to 399 MB working set and 741 to 757 MB private while idle for 7 minutes, 433 and 839 MB in a turn. Its tree also runs the operator's stdio MCP servers from user settings (two here, about 300 MB), about 700 MB working set and 950 MB private in all.
+  - The prototype holder: about 100 MB working set with one or two sessions; one session's 10,000-line scrollback added about 110 MB working set and 140 MB private.
+  - An idle session wrote nothing to its pseudo-terminal for 450 s.
+  - Reading memory: `tasklist /FO CSV` 1.3 s; `pwsh -NoProfile -Command` with `Get-CimInstance Win32_Process` 1.4 s (0.5 s in a running PowerShell); `Get-Process` with `.Parent` 22.6 s; `wmic` absent. In a running PowerShell, `Get-Process` of every process took 16 ms and `Get-Process -Id` of 20 pids 190 ms. PowerShell started in 450 ms.
+- **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit. **Partial.** Measured: every one-shot command took over a second; inside a running PowerShell each command was timed on its own (`.wip/code-mode-exp/memtime.ps1`). Proposed, not measured: a long-lived PowerShell that answers `Get-Process` for all processes, joined with process trees from `Win32_Process` read less often; the combined lookup, sum and reply for 20 sessions was not timed. Outstanding: that measurement and an hour-long run; the memory numbers cover 7 minutes.
+- **Not verified:** Linux `/proc`; growth over an hour.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M76. node-pty from a packaged extension
+
+- **Date:** 2026-11-18.
+- **Versions:** node-pty 1.1.0, @vscode/vsce from the repository; Node.js 24.14.0 and VS Code 1.146.0's Electron 43.8.6 in Node mode; Windows 11 x64.
+- **Experiment:** a probe extension whose `holder/` folder held the holder script, `@xterm/headless`, `@xterm/addon-serialize` and node-pty's `package.json`, `lib/**/*.js` without tests (including `worker/conoutSocketWorker.js` and `conpty_console_list_agent.js`) and `prebuilds/win32-x64` without `.pdb` files (`conpty.node`, `conpty_console_list.node`, `pty.node`, `winpty.dll`, `winpty-agent.exe`, `conpty/conpty.dll`, `conpty/OpenConsole.exe`). `vsce package --no-dependencies` included the nested `node_modules` (42 files, 1.78 MB). The VSIX was unzipped under the temp folder, away from any checkout, and a script spawned a pseudo-terminal from it, resized it from 80×24 to 132×40 and killed it.
+- **Result:**
+  - Spawn, resize (the child read 132×40) and kill worked under Node.js 24 (ABI 137) and under Electron 43 (ABI 148), since node-pty's prebuilds use N-API.
+  - The kill printed `Error: AttachConsole failed` from `conpty_console_list_agent.js` on stderr and still ended the child.
+  - With `conpty.node` removed, the holder started and listened, and only a spawn failed: `Failed to load native module: conpty.node, checked: build/Release, build/Debug, prebuilds/win32-x64: …`.
+  - While a process had `.node` files loaded, Node.js `writeFileSync` and `copyFileSync` over one failed with `EBUSY`, and `rmSync` and `renameSync` over one with `EPERM`. A second copy of the build in another folder ran beside the first.
+- **Pass criteria (plan E11):** spawn, resize and kill from the extracted folder on each platform; a running holder survives a new build installed beside it; a missing binary fails only a Code Mode start. **Partial.** Passed on Windows x64: spawn, resize and kill from the extracted folder under Node.js 24 and Electron 43; a second build in its own folder ran beside a running one, whose loaded `.node` files cannot be replaced; with `conpty.node` missing the holder started and only a spawn failed. Outstanding: Node.js 22, and the hub started with the binary missing. Linux x64 is deferred (plan Q8).
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M77. Claude runs nested in a Code Mode session
+
+- **Date:** 2026-11-18.
+- **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
+- **Experiment:** a held session's `Bash` tool printed its environment and ran `claude -p` and `claude --bg`, each with `--settings` naming a hook that logs its environment.
+- **Result:**
+  - The shell had `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1`, `SWITCHBOARD_LAUNCH`, `CLAUDE_CODE_SESSION_ID` and `ANTHROPIC_BASE_URL=https://api.anthropic.com`.
+  - `claude -p` printed `Warning: Code Mode (experimental) isn't available: for now it only works in the interactive terminal.` and answered. Its hooks had a new session ID, `SessionStart` `startup`, the parent's `SWITCHBOARD_LAUNCH` and the variable, and `ANTHROPIC_BASE_URL` set to the gateway: user settings `env` replaced the inherited direct address.
+  - `claude --bg` started a background session (stopped with `claude stop`) whose hooks had no `SWITCHBOARD_LAUNCH`, no variable and the gateway address, since the background service starts it.
+- **Pass criteria (plan E15):** nested runs work, and their markers cannot be read as the held session's or as its ID change. **Partial.** Nested runs work and their session IDs differ from the held session's. A `claude -p` run's hooks carry the held session's launch ID, and only its first event is `SessionStart` `startup`; the hook writer replaces the marker on each event, so its later markers look like those of a held process whose ID changed (M73). Telling them apart needs evidence that outlives the next event, such as a `SessionStart` source the marker keeps, or the roster listing the held pid with the new ID (M67).
+- **Not verified:** whether the roster lists a nested `claude -p` run.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
