@@ -11,6 +11,7 @@
     "packages/github",
     "packages/zoho",
     "packages/forum",
+    "packages/holder",
     "packages/claude",
     "packages/codex",
     "packages/hub",

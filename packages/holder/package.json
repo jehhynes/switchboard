@@ -1,0 +1,38 @@
+{
+  "name": "@switchboard/holder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Terminal holder: holds programs in hidden pseudo-terminals and lets clients attach over loopback. Depends on nothing in Switchboard; the client entry imports no native module.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "default": "./dist/host.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -b -w",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.1.0"
+  }
+}

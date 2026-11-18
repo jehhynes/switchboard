@@ -1,0 +1,580 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { Attachment, HolderClient, HolderError } from '../src/client.js';
+import { Raw, TOKEN, startHost, tick } from './fakes.js';
+import type { TestHost } from './fakes.js';
+
+let current: TestHost | null = null;
+
+afterEach(async () => {
+  await current?.host.close();
+  current = null;
+});
+
+async function started(options: Parameters<typeof startHost>[0] = {}): Promise<TestHost> {
+  current = await startHost(options);
+
+  return current;
+}
+
+const spawnRequest = (session: string, extra: Record<string, unknown> = {}) => ({ session, label: `label-${session}`, file: 'claude', args: ['--session-id', session], cwd: 'D:/work', env: { A: '1' }, cols: 100, rows: 30, ...extra });
+
+describe('handshake', () => {
+  it('welcomes a client with the right token with the protocol, build and pid', async () => {
+    const { port } = await started();
+    const client = await HolderClient.connect({ port, token: TOKEN });
+
+    expect(client.welcome).toEqual({ protocol: 1, build: 'build-1', pid: 4242 });
+    client.close();
+  });
+
+  it('allows only list, kill and shutdown, and no attach, to a holder of another protocol', async () => {
+    const state = await started({ protocol: 2 });
+    const { port } = state;
+    const current = await HolderClient.connect({ port, token: TOKEN });
+
+    // A session the other version spawned, which this client can still list and stop.
+    current.welcome = { ...current.welcome, protocol: 1 };
+    await current.spawn(spawnRequest('s1'));
+    current.close();
+
+    const client = await HolderClient.connect({ port, token: TOKEN });
+
+    expect(client.compatible).toBe(false);
+    expect((await client.list()).map((entry) => entry.session)).toEqual(['s1']);
+    await expect(client.spawn(spawnRequest('s2'))).rejects.toThrow('The terminal holder speaks protocol 2, not 1.');
+    await expect(client.screen('s1')).rejects.toThrow('The terminal holder speaks protocol 2, not 1.');
+    expect(await client.kill('s1')).toBe(1);
+    await client.shutdown();
+    await expect(Attachment.open({ port, token: TOKEN, session: 's1', cols: 80, rows: 24, onData: () => undefined })).rejects.toThrow('The terminal holder speaks protocol 2, not 1.');
+    client.close();
+  });
+
+  it('refuses a wrong token and closes the connection', async () => {
+    const { port } = await started();
+
+    await expect(HolderClient.connect({ port, token: 'b'.repeat(64) })).rejects.toThrow('Wrong token.');
+  });
+
+  it('cuts off a refused peer that keeps its side of the connection open', async () => {
+    const state = await started();
+    const raw = await Raw.open(state.port, true);
+
+    raw.send({ type: 'hello', token: 'wrong' });
+    await raw.until((m) => m.type === 'error');
+    expect(state.host.connections()).toBe(1);
+    await tick(1500);
+    expect(state.host.connections()).toBe(0);
+    expect(raw.messages).toEqual([{ type: 'error', message: 'Wrong token.' }]);
+    raw.socket.destroy();
+  });
+
+  it('refuses a first message that is not hello', async () => {
+    const { port } = await started();
+    const raw = await Raw.open(port);
+
+    raw.send({ type: 'list', id: 1 });
+    await raw.untilClosed();
+    expect(raw.messages).toEqual([{ type: 'error', message: 'The first message must be hello.' }]);
+  });
+
+  it('closes a connection that sends no hello within the deadline', async () => {
+    const { port } = await started({ helloDeadlineMs: 100 });
+    const raw = await Raw.open(port);
+
+    await raw.untilClosed();
+    expect(raw.messages).toEqual([{ type: 'error', message: 'No hello within the deadline.' }]);
+  });
+
+  it('closes a connection on a malformed message, an unknown type and a line over 1 MiB', async () => {
+    const { port } = await started();
+
+    for (const [line, error] of [
+      ['not json', 'The message is not JSON.'],
+      ['{"type":"teleport"}', 'Unknown message type "teleport".'],
+      ['x'.repeat(1024 * 1024 + 1), 'The message is too long.'],
+    ] as const) {
+      const raw = await Raw.ready(port);
+
+      raw.socket.write(line + '\n');
+      await raw.untilClosed();
+      expect(raw.messages.at(-1)).toEqual({ type: 'error', message: error });
+    }
+  });
+
+  it('refuses a control request from an attached client', async () => {
+    const { port } = await started();
+    const client = await HolderClient.connect({ port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+
+    const raw = await Raw.ready(port);
+
+    raw.send({ type: 'attach', session: 's1', cols: 100, rows: 30 });
+    await raw.until((m) => m.type === 'replayed');
+    raw.send({ type: 'list', id: 9 });
+    await raw.untilClosed();
+    expect(raw.messages.at(-1)).toEqual({ type: 'error', message: 'An attached client cannot send list.' });
+    client.close();
+  });
+
+  it('refuses input from a client that is not attached', async () => {
+    const { port } = await started();
+    const raw = await Raw.ready(port);
+
+    raw.send({ type: 'input', data: 'x' });
+    await raw.untilClosed();
+    expect(raw.messages.at(-1)).toEqual({ type: 'error', message: 'input needs an attached session.' });
+  });
+});
+
+describe('sessions', () => {
+  it('spawns with the given file, arguments, folder, environment and size, and lists the session', async () => {
+    const state = await started({ now: () => 5000 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    expect(await client.spawn(spawnRequest('s1'))).toEqual({ session: 's1', pid: 1000 });
+    expect(state.ptys[0]).toMatchObject({ file: 'claude', args: ['--session-id', 's1'], options: { cwd: 'D:/work', env: { A: '1' }, cols: 100, rows: 30 } });
+    expect(await client.list()).toEqual([
+      { session: 's1', label: 'label-s1', pid: 1000, cwd: 'D:/work', startedAt: 5000, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null },
+    ]);
+    expect(state.live).toEqual([1]);
+    client.close();
+  });
+
+  it('refuses to spawn a session it holds alive, and replaces one that exited', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await expect(client.spawn(spawnRequest('s1'))).rejects.toThrow('Session s1 is already held.');
+    state.ptys[0]!.exit(0);
+    expect(await client.spawn(spawnRequest('s1'))).toEqual({ session: 's1', pid: 1001 });
+
+    const list = await client.list();
+
+    expect(list.length).toBe(1);
+    expect(list[0]).toMatchObject({ pid: 1001, exitedAt: null });
+    client.close();
+  });
+
+  it('answers a spawn that fails with the reason and holds nothing', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await expect(client.spawn(spawnRequest('s1', { file: 'missing' }))).rejects.toThrow('missing could not be started: File not found');
+    expect(await client.list()).toEqual([]);
+    client.close();
+  });
+
+  it('reports memory from the memory reader for live sessions only', async () => {
+    const state = await started({ memory: (pids) => new Map(pids.map((pid) => [pid, pid * 10])) });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await client.spawn(spawnRequest('s2'));
+    state.ptys[1]!.exit(0);
+    expect((await client.list()).map((entry) => entry.memoryBytes)).toEqual([10000, null]);
+    client.close();
+  });
+
+  it('kills the process tree and answers with the exit code once it exited', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    expect(await client.kill('s1')).toBe(1);
+    expect(state.killed).toEqual([1000]);
+    expect((await client.list())[0]).toMatchObject({ exitCode: 1 });
+    expect(state.live).toEqual([1, 0]);
+    client.close();
+  });
+
+  it('answers a kill of an exited session at once, and refuses an unknown one', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    state.ptys[0]!.exit(3);
+    expect(await client.kill('s1')).toBe(3);
+    expect(state.killed).toEqual([]);
+    await expect(client.kill('nope')).rejects.toThrow('No session nope is held.');
+    client.close();
+  });
+
+  it('fails a kill whose process does not exit within the deadline, or whose tree kill fails', async () => {
+    const state = await started({ exitOnKill: false, killDeadlineMs: 100 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await expect(client.kill('s1')).rejects.toThrow('Session s1 did not exit within 0.1 seconds.');
+    client.close();
+
+    const failing = await startHost({ killTree: () => Promise.resolve({ error: 'Access is denied.' }) });
+    const other = await HolderClient.connect({ port: failing.port, token: TOKEN });
+
+    await other.spawn(spawnRequest('s1'));
+    await expect(other.kill('s1')).rejects.toThrow('Session s1 could not be ended: Access is denied.');
+    other.close();
+    await failing.host.close();
+  });
+
+  it('keeps an exited session for the retention time, then forgets it', async () => {
+    const state = await started({ exitRetentionMs: 100 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    state.ptys[0]!.exit(0);
+    expect((await client.list()).length).toBe(1);
+    await tick(200);
+    expect(await client.list()).toEqual([]);
+    client.close();
+  });
+
+  it('returns the start of the output and the visible screen as text', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 40, rows: 3 }));
+    state.ptys[0]!.emit('⚠ Code Mode (experimental) is on\r\n');
+
+    for (let line = 1; line <= 5; line++) {
+      state.ptys[0]!.emit(`line ${line}\r\n`);
+    }
+
+    const screen = await client.screen('s1');
+
+    expect(screen.head).toBe('⚠ Code Mode (experimental) is on\r\nline 1\r\nline 2\r\nline 3\r\nline 4\r\nline 5\r\n');
+    expect(screen.text).toBe('line 4\nline 5\n');
+    await expect(client.screen('nope')).rejects.toThrow('No session nope is held.');
+    client.close();
+  });
+
+  it('keeps only the first 64 Ki characters of output as the head', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    state.ptys[0]!.emit('a'.repeat(60 * 1024));
+    state.ptys[0]!.emit('b'.repeat(10 * 1024));
+
+    const { head } = await client.screen('s1');
+
+    expect(head.length).toBe(64 * 1024);
+    expect(head.endsWith('b'.repeat(4 * 1024))).toBe(true);
+    client.close();
+  });
+
+  it('refuses shutdown while a session is live, and accepts it once none is', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await expect(client.shutdown()).rejects.toThrow('The terminal holder holds 1 live session.');
+    expect(state.shutdowns).toBe(0);
+    state.ptys[0]!.exit(0);
+    await client.shutdown();
+    expect(state.shutdowns).toBe(1);
+    client.close();
+  });
+
+  it('rejects pending and later requests once the connection closes', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+    const closed: HolderError[] = [];
+
+    client.onClose((error) => closed.push(error));
+    await state.host.close();
+    await tick(50);
+    expect(closed.map((error) => error.message)).toEqual(['The terminal holder closed the connection.']);
+    await expect(client.list()).rejects.toThrow('The terminal holder closed the connection.');
+    current = null;
+  });
+});
+
+describe('watch', () => {
+  it('streams exits, attaches and detaches to watching clients only', async () => {
+    const state = await started();
+    const watcher = await HolderClient.connect({ port: state.port, token: TOKEN });
+    const other = await HolderClient.connect({ port: state.port, token: TOKEN });
+    const unwatched = await Raw.ready(state.port);
+    const events: unknown[] = [];
+
+    await watcher.watch((event) => events.push(event));
+    await other.spawn(spawnRequest('s1'));
+
+    const attachment = await Attachment.open({ port: state.port, token: TOKEN, session: 's1', cols: 100, rows: 30, onData: () => undefined });
+
+    await tick();
+    attachment.close();
+    await tick();
+    state.ptys[0]!.exit(7);
+    await tick();
+    expect(events).toEqual([
+      { type: 'attached', session: 's1', clients: 1 },
+      { type: 'detached', session: 's1', clients: 0 },
+      { type: 'exited', session: 's1', exitCode: 7 },
+    ]);
+    expect(unwatched.messages).toEqual([{ type: 'welcome', protocol: 1, build: 'build-1', pid: 4242 }]);
+    unwatched.socket.destroy();
+    watcher.close();
+    other.close();
+  });
+});
+
+describe('attach', () => {
+  async function attachTo(state: TestHost, session: string, cols: number, rows: number) {
+    const received: string[] = [];
+    const exits: Array<number | null> = [];
+    const closes: Array<string | null> = [];
+    let replayed = false;
+    const attachment = await Attachment.open({
+      port: state.port,
+      token: TOKEN,
+      session,
+      cols,
+      rows,
+      onData: (data) => received.push(data),
+      onReplayed: () => (replayed = true),
+      onExit: (code) => exits.push(code),
+      onClose: (error) => closes.push(error === null ? null : error.message),
+    });
+
+    return { attachment, received, exits, closes, isReplayed: () => replayed };
+  }
+
+  it('resizes to the client, replays the screen, then streams output and passes input', async () => {
+    const state = await started({ now: () => 9000 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 80, rows: 24 }));
+    state.ptys[0]!.emit('hello \u001b[1mworld\u001b[0m\r\n');
+
+    const one = await attachTo(state, 's1', 120, 40);
+
+    await tick();
+    expect(state.ptys[0]!.sizes).toEqual([[120, 40]]);
+    expect(one.isReplayed()).toBe(true);
+    expect(one.received.join('')).toContain('hello \u001b[1mworld');
+    state.ptys[0]!.emit('more');
+    one.attachment.input('\u001b[200~pasted\u001b[201~\r');
+    await tick();
+    expect(one.received.at(-1)).toBe('more');
+    expect(state.ptys[0]!.writes).toEqual(['\u001b[200~pasted\u001b[201~\r']);
+    expect((await client.list())[0]).toMatchObject({ clients: 1, lastInputAt: 9000, lastOutputAt: 9000 });
+    one.attachment.close();
+    client.close();
+  });
+
+  it('lets the later client set the size, and the client that types take it back', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 80, rows: 24 }));
+
+    const wide = await attachTo(state, 's1', 120, 40);
+
+    await tick();
+
+    const narrow = await attachTo(state, 's1', 80, 30);
+
+    await tick();
+    state.ptys[0]!.emit('to both');
+    wide.attachment.input('k');
+    await tick();
+    expect(state.ptys[0]!.sizes).toEqual([[120, 40], [80, 30], [120, 40]]);
+    expect(wide.received.at(-1)).toBe('to both');
+    expect(narrow.received.at(-1)).toBe('to both');
+    narrow.attachment.resize(90, 30);
+    await tick();
+    expect(state.ptys[0]!.sizes.at(-1)).toEqual([90, 30]);
+    wide.attachment.close();
+    narrow.attachment.close();
+    client.close();
+  });
+
+  it('tells an attached client that the program exited and closes it', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+
+    const one = await attachTo(state, 's1', 100, 30);
+
+    await tick();
+    state.ptys[0]!.emit('bye\r\n');
+    state.ptys[0]!.exit(2);
+    await tick(100);
+    expect(one.exits).toEqual([2]);
+    expect(one.closes).toEqual([null]);
+    expect(one.received.at(-1)).toBe('bye\r\n');
+    client.close();
+  });
+
+  it('replays the last screen and the exit code to a client attaching after the exit, and ignores its input', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    state.ptys[0]!.emit('last words');
+    state.ptys[0]!.exit(5);
+
+    const late = await attachTo(state, 's1', 100, 30);
+
+    late.attachment.input('typed after the exit');
+    await tick(100);
+    expect(late.received.join('')).toContain('last words');
+    expect(late.exits).toEqual([5]);
+    expect(state.ptys[0]!.sizes).toEqual([]);
+    expect(state.ptys[0]!.writes).toEqual([]);
+    client.close();
+  });
+
+  it('refuses to attach to a session it does not hold', async () => {
+    const state = await started();
+    const one = await attachTo(state, 'nope', 100, 30);
+
+    await tick(100);
+    expect(one.closes).toEqual(['No session nope is held.']);
+  });
+
+  it('sends a replay over 512 KiB as several replay messages in order, each line under 1 MiB, at the pace the client reads', async () => {
+    // A queue limit far below the replay's size: the replay waits for the client instead of dropping it.
+    const state = await started({ clientQueueBytes: 64 * 1024 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 100, rows: 30 }));
+
+    for (let line = 0; line < 6000; line++) {
+      state.ptys[0]!.emit(`\u001b[3${line % 8}m${String(line).padStart(5, '0')} ${'x'.repeat(90)}\u001b[0m\r\n`);
+    }
+
+    const raw = await Raw.ready(state.port);
+
+    raw.send({ type: 'attach', session: 's1', cols: 100, rows: 30 });
+    await raw.until((m) => m.type === 'replayed');
+
+    const replays = raw.messages.filter((m) => m.type === 'replay');
+    const replay = replays.map((m) => m.data as string).join('');
+
+    expect(replays.length).toBeGreaterThan(1);
+
+    for (const message of replays) {
+      expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThan(1024 * 1024);
+    }
+
+    expect(replay).toContain('00000 ');
+    expect(replay).toContain('05999 ');
+    expect(replay.indexOf('01000 ')).toBeLessThan(replay.indexOf('02000 '));
+    raw.socket.destroy();
+    client.close();
+  });
+
+  it('sends output that arrives while the replay is prepared after the replay', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 80, rows: 24 }));
+    state.ptys[0]!.emit('before');
+    state.ptys[0]!.onResize = (pty) => queueMicrotask(() => pty.emit('redrawn'));
+
+    const raw = await Raw.ready(state.port);
+
+    raw.send({ type: 'attach', session: 's1', cols: 100, rows: 30 });
+    await raw.until((m) => m.type === 'output');
+
+    const types = raw.messages.slice(1).map((m) => m.type);
+
+    expect(types.indexOf('replayed')).toBeLessThan(types.indexOf('output'));
+    expect(raw.messages.filter((m) => m.type === 'replay').map((m) => m.data as string).join('')).not.toContain('redrawn');
+    expect(raw.messages.find((m) => m.type === 'output')).toEqual({ type: 'output', data: 'redrawn' });
+    raw.socket.destroy();
+    client.close();
+  });
+
+  it('resizes the screen after the output already queued, which was drawn at the old size', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 80, rows: 5 }));
+    // Output that arrives with the attach, before it is parsed: a mark at column 70 of an 80-column screen.
+    state.ptys[0]!.onResize = (pty) => pty.emit('\u001b[1;70HX');
+
+    const one = await attachTo(state, 's1', 40, 5);
+
+    await tick(100);
+
+    const screen = await client.screen('s1');
+
+    // Drawn at 80 columns, the mark lies past the 40 columns the screen shrinks to; drawn at 40, it would end the first row.
+    expect(screen.text.split('\n')[0]).toBe('');
+    one.attachment.close();
+    client.close();
+  });
+
+  it('answers a kill whose tree kill never returns once the deadline passes', async () => {
+    const state = await started({ killTree: () => new Promise(() => undefined), killDeadlineMs: 50 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await expect(client.kill('s1')).rejects.toThrow('Session s1 did not exit within 0.05 seconds.');
+    client.close();
+  });
+
+  it('answers a screen reply over 1 MiB, and refuses a label over 1000 characters', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 1000, rows: 1000 }));
+    state.ptys[0]!.emit('é'.repeat(1000 * 999));
+    expect((await client.screen('s1')).text.length).toBeGreaterThan(999_000);
+    await expect(client.spawn(spawnRequest('s2', { label: 'l'.repeat(1001) }))).rejects.toThrow('Invalid spawn message.');
+  });
+
+  it('lists the process tree of a live session from the tree reader', async () => {
+    const state = await started({ tree: (pid) => [{ pid, created: '7' }, { pid: pid + 1, created: '8' }] });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await client.spawn(spawnRequest('s2'));
+    state.ptys[1]!.exit(0);
+
+    const list = await client.list();
+
+    expect(list[0]!.tree).toEqual([{ pid: 1000, created: '7' }, { pid: 1001, created: '8' }]);
+    expect(list[1]!.tree).toBeUndefined();
+    client.close();
+  });
+
+  it('drops a client whose queued output passes the limit, and keeps the session and other clients', async () => {
+    const state = await started({ clientQueueBytes: 64 * 1024 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+
+    const slow = await Raw.ready(state.port);
+
+    slow.send({ type: 'attach', session: 's1', cols: 100, rows: 30 });
+    await slow.until((m) => m.type === 'replayed');
+    slow.socket.pause();
+
+    const fast = await attachTo(state, 's1', 100, 30);
+
+    await tick();
+
+    // In batches the fast client keeps up with; the paused one falls behind.
+    for (let batch = 0; batch < 40; batch++) {
+      for (let index = 0; index < 10; index++) {
+        state.ptys[0]!.emit('y'.repeat(4096));
+      }
+
+      await tick(10);
+    }
+
+    await tick(200);
+    expect((await client.list())[0]).toMatchObject({ clients: 1, exitedAt: null });
+    expect(fast.received.join('').length).toBeGreaterThanOrEqual(400 * 4096);
+    fast.attachment.close();
+    slow.socket.destroy();
+    client.close();
+  });
+});
