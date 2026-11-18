@@ -69,12 +69,16 @@ export interface SwitchboardApi {
   sideBarWidths(): Kept;
   /** Polls the side bars as the timer does. */
   pollSideBars(): Promise<Outcome>;
+  /** Expands the pane once in this workspace when it has not loaded; resolves to whether it did. */
+  expandPaneOnce(): Promise<boolean>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
 /** How long a window the dock opened waits for the hub's first state before opening its tabs (PRD R72). */
 const TABS_STATE_WAIT_MS = 15_000;
+/** How long after activation a visible pane has loaded; one that has not is expanded (PRD R91). */
+const EXPAND_MS = 3_000;
 
 export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   // SWITCHBOARD_HOME points a window at another home, such as live acceptance's; the hub gets it as --home.
@@ -304,11 +308,31 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         return 'idle' as const;
       },
     );
+  const rememberWidths = (): boolean => vscode.workspace.getConfiguration('switchboard').get<boolean>('rememberSideBarWidths', true);
   const sideBarTimer = setInterval(() => {
-    if (vscode.workspace.getConfiguration('switchboard').get<boolean>('rememberSideBarWidths', true)) {
+    if (rememberWidths()) {
       void pollSideBars();
     }
   }, POLL_MS);
+  // A pane that has not loaded, as one collapsed in a new worktree's window, reads no widths, so it is expanded once per workspace; a pane
+  // that has loaded marks the workspace too, so one the operator collapses stays collapsed (PRD R91).
+  const EXPANDED = 'pane.expanded';
+  const expandPaneOnce = async (): Promise<boolean> => {
+    if (!rememberWidths() || context.workspaceState.get<boolean>(EXPANDED) === true) {
+      return false;
+    }
+
+    await context.workspaceState.update(EXPANDED, true);
+
+    if (pane.resolved()) {
+      return false;
+    }
+
+    await vscode.commands.executeCommand('switchboard.pane.focus', { preserveFocus: true });
+    sideBarLog.info('Expanded the Switchboard pane once in this workspace: the side bar widths are read only while it is visible.');
+    return true;
+  };
+  const expandTimer = setTimeout(() => void expandPaneOnce(), EXPAND_MS);
 
   const status = vscode.window.createStatusBarItem('switchboard.needs', vscode.StatusBarAlignment.Left, 100);
   const showStatus = (): void => {
@@ -356,9 +380,11 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     sideBarLog,
     vscode.commands.registerCommand('switchboard.forgetSideBarWidths', async () => {
       await forgetWidths();
+      await context.workspaceState.update(EXPANDED, undefined);
       sideBarLog.info('Forgot the kept widths.');
     }),
     { dispose: () => clearInterval(sideBarTimer) },
+    { dispose: () => clearTimeout(expandTimer) },
     vscode.commands.registerCommand('switchboard.showHubLog', showHubLog),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
@@ -471,6 +497,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     paneSize: () => pane.size(),
     sideBarWidths: keptWidths,
     pollSideBars,
+    expandPaneOnce,
   };
 }
 

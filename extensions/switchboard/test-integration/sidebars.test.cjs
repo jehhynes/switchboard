@@ -61,4 +61,38 @@ describe('side bar widths (PRD R91)', () => {
     await vscode.commands.executeCommand('switchboard.forgetSideBarWidths');
     assert.deepStrictEqual(extension.sideBarWidths(), { points: {} });
   });
+
+  it('expands a pane that has not loaded once per workspace, not one that loaded, and not while the widths are off', async () => {
+    const settings = vscode.workspace.getConfiguration('switchboard');
+
+    // Both panes removed, so neither has loaded.
+    await vscode.commands.executeCommand('switchboard.pane.removeView');
+    await vscode.commands.executeCommand('switchboard.paneScm.removeView');
+    await until(() => extension.paneSize() === null, 'the removed pane still counted');
+    assert.strictEqual(await extension.expandPaneOnce(), false, 'expanded with the widths off');
+
+    await settings.update('rememberSideBarWidths', true, vscode.ConfigurationTarget.Global);
+
+    try {
+      // A pane that loaded marks the workspace, so it stays collapsed or removed after.
+      await vscode.commands.executeCommand('switchboard.pane.focus');
+      await until(() => extension.paneSize(), 'the pane never reported');
+      assert.strictEqual(await extension.expandPaneOnce(), false, 'expanded a pane that had loaded');
+      await vscode.commands.executeCommand('switchboard.pane.removeView');
+      await until(() => extension.paneSize() === null, 'the removed pane still counted');
+      assert.strictEqual(await extension.expandPaneOnce(), false, 'expanded a pane that had loaded in this workspace');
+
+      await vscode.commands.executeCommand('switchboard.forgetSideBarWidths');
+      assert.strictEqual(await extension.expandPaneOnce(), true);
+      await until(() => extension.paneSize(), 'the expanded pane never reported');
+
+      await vscode.commands.executeCommand('switchboard.pane.removeView');
+      await until(() => extension.paneSize() === null, 'the removed pane still counted');
+      assert.strictEqual(await extension.expandPaneOnce(), false, 'expanded twice in one workspace');
+    } finally {
+      await settings.update('rememberSideBarWidths', false, vscode.ConfigurationTarget.Global);
+      await vscode.commands.executeCommand('switchboard.forgetSideBarWidths');
+      await vscode.commands.executeCommand('switchboard.pane.focus');
+    }
+  });
 });

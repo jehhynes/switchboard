@@ -56,6 +56,11 @@ export class Pane implements vscode.WebviewViewProvider {
     return null;
   }
 
+  /** Whether a view has been shown, so its page loaded. */
+  resolved(): boolean {
+    return this.views.size > 0;
+  }
+
   /** What each resolved view last rendered, by view ID. */
   shown(): Record<string, PaneModel> {
     return Object.fromEntries(this.shownModels);
