@@ -28,6 +28,9 @@
     },
     {
       "path": "../forum"
+    },
+    {
+      "path": "../holder"
     }
   ]
 }

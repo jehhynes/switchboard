@@ -17,3 +17,4 @@ export * from './windowQueue.js';
 export * from './report.js';
 export * from './debriefs.js';
 export * from './dock.js';
+export * from './holderInstall.js';

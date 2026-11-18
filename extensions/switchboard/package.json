@@ -164,6 +164,7 @@
   },
   "dependencies": {
     "@switchboard/core": "*",
+    "@switchboard/holder": "*",
     "@switchboard/hub": "*"
   },
   "devDependencies": {

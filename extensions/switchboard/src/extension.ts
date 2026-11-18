@@ -1,10 +1,10 @@
-import { unwatchFile, watchFile } from 'node:fs';
+import { appendFileSync, unwatchFile, watchFile } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
-import { buildOf, findHub, installBundle, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
+import { buildOf, findHub, installBundle, installHolder, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
 import { continueInBackground } from './background.js';
 import { closeDueAt, closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
@@ -103,6 +103,17 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   reportConfigError();
   installBundle(context.asAbsolutePath('dist/hub.js'), bundle);
 
+  // A holder that cannot be installed fails only Code Mode starts; the cause goes to the hub log, which every window shows (PRD R94).
+  void installHolder(context.asAbsolutePath('dist/holder'), switchboardHome(home)).then((installed) => {
+    if ('error' in installed) {
+      try {
+        appendFileSync(hubLogPath(home), `${new Date().toISOString()} ${installed.error}\n`);
+      } catch {
+        // The home cannot be written, which the hub's own start reports.
+      }
+    }
+  });
+
   // A hub from another build or config folder, such as one started before this extension was updated, is replaced.
   const ensure = makeEnsure({
     find: () => findHub(home),
@@ -118,6 +129,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   // Every window follows hub.log, so the Output view's channel is current whichever window shows it.
   const hubLog = vscode.window.createOutputChannel('Switchboard Hub', 'log');
   const logTail = new LogTail(hubLogPath(home), (text) => hubLog.append(text));
+
   const readLog = (): void => logTail.read();
   const showHubLog = (): void => {
     readLog();

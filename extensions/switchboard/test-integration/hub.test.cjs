@@ -1,5 +1,5 @@
 const assert = require('node:assert');
-const { mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
+const { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { request } = require('node:http');
 const { dirname, join } = require('node:path');
 const vscode = require('vscode');
@@ -71,6 +71,17 @@ describe('the hub process', () => {
     const connected = await until(() => extension.hub(), 'the extension never connected to the hub');
 
     assert.strictEqual(connected.pid, started.pid);
+  });
+
+  it('installs the terminal holder build in the home at activation', async () => {
+    await api();
+
+    const holder = join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'holder');
+    const current = await until(() => (existsSync(join(holder, 'current.json')) ? JSON.parse(readFileSync(join(holder, 'current.json'), 'utf8')) : null), 'no holder build was named current');
+
+    assert.match(current.build, /^[0-9a-f]{16}$/);
+    assert.ok(existsSync(join(holder, current.build, 'holder.js')), 'holder.js is missing');
+    assert.ok(existsSync(join(holder, current.build, 'node_modules', 'node-pty', 'package.json')), 'node-pty is missing');
   });
 
   it('refuses requests without the token', async () => {

@@ -14,7 +14,7 @@ Use automated checks for behavior and integration, and visual inspection for pre
 
 `npm run verify` builds, typechecks, and runs workspace tests with coverage thresholds. Build first: spawn tests run built bundles.
 
-The dock's build and tests need the .NET 10 SDK, on Linux as on Windows.
+The dock's build and tests need the .NET 10 SDK, on Linux as on Windows. node-pty, the terminal holder's optional native dependency, has prebuilt binaries for Windows; on Linux npm builds it from source, which needs Python and a C++ toolchain, and without them the holder builds with no pseudo-terminals and its spawn tests fail.
 
 ## What earns a test
 
