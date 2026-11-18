@@ -218,6 +218,20 @@ describe('HolderLink (architecture.md § Terminal holder)', () => {
     expect(found).toEqual([0, 1, 2].map(() => ({ holder: connection })));
   });
 
+  it('gives the port and token of the holder it is connected to, and none before it connects or after the connection closes', async () => {
+    const home = newHome();
+    let close = (): void => {};
+    const connection = { welcome: { protocol: 1, build: BUILD, pid: 4243 }, compatible: true, spawn: async () => ({ session: 's', pid: 1 }), list: async () => [], kill: async () => 0, screen: async () => ({ head: '', text: '' }), shutdown: async () => {}, onClose: (listener: () => void) => (close = listener), close: () => {} };
+    const { link: holder } = link(home, { connect: async () => connection });
+
+    writeFileSync(recordPath(home), JSON.stringify({ protocol: 1, build: BUILD, port: 2, token: 't', pid: 4243, startedAt: '2026-11-18T00:00:01.000Z' }));
+    expect(holder.record()).toBeNull();
+    await holder.find(false);
+    expect(holder.record()).toEqual({ port: 2, token: 't' });
+    close();
+    expect(holder.record()).toBeNull();
+  });
+
   it('reports a holder that holds its lock but does not answer as a failed read, not as gone', async () => {
     const home = newHome();
     const { link: holder } = link(home, { lockHeld: async () => true });

@@ -42,7 +42,7 @@ function startWith(extra: Record<string, string | undefined>, ...args: string[])
     delete env[key];
   }
 
-  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' || args[0] === 'register' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
+  const child = spawn(process.execPath, [main, ...args, `--home=${home}`, ...(args[0] === 'report' || args[0] === 'register' || args[0] === 'attach' ? [] : ['--browser-port=0'])], { windowsHide: true, env });
   let stdout = '';
   let stderr = '';
 
@@ -317,6 +317,69 @@ describe('hub entry point', () => {
       expect(await startWith(native, 'register', '--title', 'Copy').exited).toMatchObject({ code: 3, stderr: 'Refused: This session is a copy of adhoc 4, which Switchboard continues in its latest copy.\n' });
       expect(bodies.map((entry) => (entry as { body: { title: string } }).body.title)).toEqual(['Fix the badge', 'Again', 'Copy']);
       expect(bodies[0]).toEqual({ path: '/register', body: { nativeSessionId: native.CLAUDE_CODE_SESSION_ID, title: 'Fix the badge' } });
+    } finally {
+      server.close();
+    }
+  });
+
+  it('takes --code-mode-idle-ms as a whole number of milliseconds and refuses anything else', async () => {
+    expect(await start('--code-mode-idle-ms=soon').exited).toMatchObject({ code: 1, stderr: '--code-mode-idle-ms takes a whole number of milliseconds above 0, not "soon".\n' });
+
+    const hub = start('--idle-ms=60000', '--code-mode-idle-ms=60000');
+
+    await recorded();
+    await start('--stop').exited;
+    expect(await hub.exited).toMatchObject({ code: 0, stdout: expect.stringContaining('Code Mode idle limit: 60000 ms') });
+  });
+
+  it('attaches by session ID through the hub, printing a refusal and asking again on Enter until input ends', async () => {
+    expect(await start('attach').exited).toMatchObject({ code: 1, stderr: 'Usage: attach <session ID>\n' });
+
+    const down = start('attach', 's1');
+
+    down.child.stdin!.end();
+    expect(await down.exited).toMatchObject({ code: 0, stdout: 'The Switchboard hub is not running. Press Enter to try again, or close this terminal.\r\n' });
+
+    const bodies: unknown[] = [];
+    const server = createServer((req, res) => {
+      let text = '';
+      req.on('data', (chunk: Buffer) => (text += chunk.toString('utf8')));
+      req.on('end', () => {
+        if (req.method === 'GET') {
+          res.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.0.0', pid: process.pid }));
+          return;
+        }
+
+        bodies.push({ path: req.url, body: JSON.parse(text) });
+        res.statusCode = 409;
+        res.end(JSON.stringify({ error: 'Session abc is still ending; try again.' }));
+      });
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address() as AddressInfo;
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), JSON.stringify({ protocol: 1, version: '0.0.0', build: 'b', configDir: home, port, token: 't', pid: process.pid, startedAt: 'now' }));
+
+    try {
+      const attach = start('attach', 's1');
+      const refusal = 'Refused: Session abc is still ending; try again.\r\nPress Enter to try again, or close this terminal.\r\n';
+
+      for (const deadline = Date.now() + 10_000; bodies.length === 0 && Date.now() < deadline; ) {
+        await new Promise((done) => setTimeout(done, 50));
+      }
+
+      attach.child.stdin!.write('\n');
+
+      for (const deadline = Date.now() + 10_000; bodies.length < 2 && Date.now() < deadline; ) {
+        await new Promise((done) => setTimeout(done, 50));
+      }
+
+      attach.child.stdin!.end();
+      expect(await attach.exited).toMatchObject({ code: 0, stdout: refusal + refusal });
+      expect(bodies).toEqual([
+        { path: '/attach', body: { sessionId: 's1' } },
+        { path: '/attach', body: { sessionId: 's1' } },
+      ]);
     } finally {
       server.close();
     }

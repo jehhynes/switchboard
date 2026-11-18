@@ -145,6 +145,8 @@ export interface ObservedSession {
   detail: string | null;
   /** Listed as an interactive session, such as a VS Code tab, rather than Switchboard's background process. */
   interactive?: boolean;
+  /** A held session's process tree as the holder last read it, which the resume guard checks (PRD R95). */
+  tree?: Array<{ pid: number; created: string }>;
 }
 
 /** A live fork that may replace a session (PRD R78), with the fork's own state. */
@@ -188,13 +190,20 @@ export type FlowEvent =
   | { type: 'holder-lost'; sessionId: string }
   /** The holder lists this Code Mode session with no terminal attached and no input or output for the idle limit (PRD R95). */
   | { type: 'held-idle'; sessionId: string }
+  /** `POST /attach` is about to resume this ended Code Mode session under this launch, stored first so a hub restart during the spawn can recognize it (PRD R95). */
+  | { type: 'held-resuming'; sessionId: string; launchId: string }
+  /** `POST /attach` resumed this ended Code Mode session in the holder under a new launch, or the hub found it live under its stored launch (PRD R95). */
+  | { type: 'held-resumed'; sessionId: string; launchId: string }
   | { type: 'report'; sessionId: string; report: Report }
   /** The hub's recheck of a done report whose first read still listed the ticket as assigned (PRD R10). */
   /** 	oken is the session's outcomeDetail when the hub scheduled the read, so a check of a superseded report changes nothing. */
   | { type: 'done-checked'; sessionId: string; token: string; assigned: boolean }
-  /** `shortId` is the copy the stop targeted; a result for a copy a fork retired changes nothing (PRD R78). */
-  | { type: 'stop-succeeded'; sessionId: string; reason: StopReason; shortId?: string | null }
-  | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string; shortId?: string | null }
+  /**
+   * `shortId` is the copy the stop targeted; a result for a copy a fork retired changes nothing (PRD R78). `leftovers`: the stop ended the processes an
+   * ended Code Mode session's last run left (PRD R95).
+   */
+  | { type: 'stop-succeeded'; sessionId: string; reason: StopReason; shortId?: string | null; leftovers?: true }
+  | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string; shortId?: string | null; leftovers?: true }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   /** `start` queues the work item to run now; otherwise it waits `unstarted` for Start (PRD R6). */
   | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean }
@@ -277,8 +286,11 @@ export type FlowAction =
       /** Runs in Code Mode in the terminal holder (PRD R93). */
       codeMode?: true;
     }
-  /** The provider travels with the action, because Delete removes the session's row before its stop runs. */
-  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason; codeMode?: true }
+  /**
+   * The provider travels with the action, because Delete removes the session's row before its stop runs. `leftovers`: ends the processes of an ended
+   * Code Mode session's last process tree that still run (PRD R95).
+   */
+  | { type: 'stop-session'; sessionId: string; provider: Provider; shortId: string | null; reason: StopReason; codeMode?: true; leftovers?: true }
   /** Waits for the tab's process `pid` to exit, then resumes the session in its background process with `prompt` (PRD R89). */
   | { type: 'resume-session'; sessionId: string; moveId: string; provider: Provider; nativeSessionId: string; cwd: string; pid: number; prompt: string };
 
@@ -386,6 +398,22 @@ function retiredStop(session: Session, shortId: string | null | undefined): bool
   return shortId !== undefined && shortId !== session.shortId;
 }
 
+/** The permission mode and model a session of this kind starts with: a task session's playbook's, else the provider's settings. */
+export function launchOptions(settings: Settings, playbook: Playbook | null, kind: SessionKind, provider: Provider): { permissionMode: PermissionMode; model: string | null } {
+  const own = kind === 'task' ? playbook : null;
+  const sessions = settings.sessions;
+
+  return {
+    permissionMode: own?.permissionMode ?? (provider === 'codex' ? sessions.codex.permissionMode : sessions.permissionMode),
+    model: own?.model ?? ((provider === 'codex' ? sessions.codex.model : sessions.model) || null),
+  };
+}
+
+/** The name a session starts with, which a Code Mode session's holder label also carries. */
+export function sessionName(kind: SessionKind, item: Pick<WorkItem, 'playbook'>, ticket: Pick<Ticket, 'source' | 'sourceKey'>): string {
+  return `switchboard · ${kind === 'task' ? (item.playbook ?? 'ad-hoc') : kind} · ${ticket.source} ${ticket.sourceKey}`;
+}
+
 /** The event's own fields for the log: no prompt, context or polled list, except the prompt the operator edited in Start with prompt… (PRD R77). */
 function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | null {
   switch (event.type) {
@@ -400,6 +428,8 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { triageId: event.triageId };
     case 'session-started':
       return { shortId: event.shortId, ...(event.startPrompt ? { startPrompt: true } : {}), ...(event.launchId === undefined ? {} : { launchId: event.launchId }) };
+    case 'held-resumed':
+      return { launchId: event.launchId };
     case 'session-start-failed':
       return { message: event.message };
     case 'marker':
@@ -411,9 +441,9 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
     case 'done-checked':
       return { assigned: event.assigned };
     case 'stop-succeeded':
-      return { reason: event.reason };
+      return { reason: event.reason, ...(event.leftovers ? { leftovers: true } : {}) };
     case 'stop-failed':
-      return { reason: event.reason, message: event.message };
+      return { reason: event.reason, message: event.message, ...(event.leftovers ? { leftovers: true } : {}) };
     case 'worktree-found':
       return { path: event.path, branch: event.branch };
     case 'adhoc':
@@ -587,14 +617,18 @@ class Flow {
         return this.holderLost(event.sessionId);
       case 'held-idle':
         return this.heldIdle(event.sessionId);
+      case 'held-resuming':
+        return this.heldResuming(event.sessionId, event.launchId);
+      case 'held-resumed':
+        return this.heldResumed(event.sessionId, event.launchId);
       case 'report':
         return this.report(event.sessionId, event.report);
       case 'done-checked':
         return this.doneChecked(event.sessionId, event.token, event.assigned);
       case 'stop-succeeded':
-        return this.stopSucceeded(event.sessionId, event.reason, event.shortId);
+        return this.stopSucceeded(event.sessionId, event.reason, event.shortId, event.leftovers === true);
       case 'stop-failed':
-        return this.stopFailed(event.sessionId, event.reason, event.message, event.shortId);
+        return this.stopFailed(event.sessionId, event.reason, event.message, event.shortId, event.leftovers === true);
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
@@ -1439,6 +1473,14 @@ class Flow {
   private roster(observed: ObservedSession[], checked: string[] | undefined, forks: ObservedFork[]): void {
     const listed = new Map(observed.map((entry) => [entry.sessionId, entry]));
 
+    for (const entry of observed) {
+      const session = entry.tree === undefined || entry.tree.length === 0 ? null : this.store.session(entry.sessionId);
+
+      if (session?.codeMode === true && JSON.stringify(session.lastTree ?? null) !== JSON.stringify(entry.tree)) {
+        this.store.updateSession(session.id, { lastTree: entry.tree! });
+      }
+    }
+
     for (const fork of forks) {
       // A Code Mode session's new ID is the same held process (PRD R93), never the operator's interactive one.
       const held = this.store.session(fork.sessionId)?.codeMode === true;
@@ -1783,6 +1825,25 @@ class Flow {
     }
   }
 
+  private heldResuming(sessionId: string, launchId: string): void {
+    const session = this.store.session(sessionId);
+
+    if (session?.codeMode === true && session.state === 'ended') {
+      this.store.updateSession(sessionId, { launchId });
+    }
+  }
+
+  /** A resume through `POST /attach` holds the ended session again; its outcome and its work item's status stand until a new turn (PRD R95). */
+  private heldResumed(sessionId: string, launchId: string): void {
+    const session = this.store.session(sessionId);
+
+    if (session === null || session.codeMode !== true || session.state !== 'ended') {
+      return;
+    }
+
+    this.store.updateSession(sessionId, { state: 'idle', stateAt: this.now, stateDetail: null, endedAt: null, released: false, releasing: false, launchId, lastTree: null });
+  }
+
   private report(sessionId: string, report: Report): void {
     const session = this.session(sessionId);
 
@@ -1879,6 +1940,14 @@ class Flow {
     const session = this.activeSession(item);
 
     if (session === null) {
+      const last = this.store.sessionsFor(item.id).at(-1);
+
+      // Processes an ended Code Mode session's last run left can block its resume, so Stop ends them (PRD R95).
+      if (last?.codeMode === true && (last.lastTree?.length ?? 0) > 0) {
+        this.actions.push({ type: 'stop-session', sessionId: last.id, provider: last.provider, shortId: last.shortId, reason: 'operator', codeMode: true, leftovers: true });
+        return;
+      }
+
       throw new Refusal('The work item has no active session.');
     }
 
@@ -1940,8 +2009,13 @@ class Flow {
     }
   }
 
-  private stopSucceeded(sessionId: string, reason: StopReason, shortId: string | null | undefined): void {
+  private stopSucceeded(sessionId: string, reason: StopReason, shortId: string | null | undefined, leftovers = false): void {
     const session = this.session(sessionId);
+
+    if (leftovers) {
+      this.store.updateSession(sessionId, { lastTree: null });
+      return;
+    }
 
     if (session.state === 'ended' || retiredStop(session, shortId)) {
       return;
@@ -1987,11 +2061,11 @@ class Flow {
   }
 
   /** The session stays as it was, so the operator can stop it again. */
-  private stopFailed(sessionId: string, reason: StopReason, message: string, shortId: string | null | undefined): void {
+  private stopFailed(sessionId: string, reason: StopReason, message: string, shortId: string | null | undefined, leftovers: boolean): void {
     const session = this.session(sessionId);
 
     // A late failure of a second end of a held session that has ended says nothing about it.
-    if (session.codeMode === true && session.state === 'ended') {
+    if (session.codeMode === true && session.state === 'ended' && !leftovers) {
       return;
     }
     const item = retiredStop(session, shortId) ? null : this.latest(session);
@@ -2631,8 +2705,6 @@ class Flow {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
     }
 
-    const label = kind === 'task' ? (item.playbook ?? 'ad-hoc') : kind;
-    const own = kind === 'task' ? playbook : null;
 
     this.store.insertSession({
       id,
@@ -2674,9 +2746,8 @@ class Flow {
       ...(ticket.repoRoot === '' && cwd === repoRoot && isRootPattern(source?.repoRoot ?? '') ? { clone: repoOf(this.context.settings, ticket) } : {}),
       prompt: full,
       contract: sessionContract(id, this.context.report, reports, provider),
-      name: `switchboard · ${label} · ${ticket.source} ${ticket.sourceKey}`,
-      permissionMode: own?.permissionMode ?? (provider === 'codex' ? sessions.codex.permissionMode : sessions.permissionMode),
-      model: own?.model ?? ((provider === 'codex' ? sessions.codex.model : sessions.model) || null),
+      name: sessionName(kind, item, ticket),
+      ...launchOptions(this.context.settings, playbook, kind, provider),
     });
   }
 

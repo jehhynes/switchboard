@@ -1,15 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { classify, ClaudeRunner, CodeModeRunner, readRoster } from '@switchboard/claude';
+import { classify, ClaudeRunner, CodeModeRunner, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, OpenTerminal, OpenVSCode, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Settings, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, homeRepo, repoOf, repoRoots, SCHEDULE_SOURCE, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, launchOptions, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, homeRepo, repoOf, repoRoots, SCHEDULE_SOURCE, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { HolderLink } from './holder.js';
+import type { HolderLinkDeps } from './holder.js';
 import { doneSince } from './rows.js';
 import type { RepoKeys } from './rows.js';
 
@@ -42,6 +44,11 @@ const RESUME_POLL_MS = 2_000;
 const NODE_CHECK_TIMEOUT_MS = 10_000;
 /** How long input to a held session after its turn defers its end, for the prompt's marker to be read. */
 export const INPUT_SETTLE_MS = 60_000;
+/** How long `POST /attach` defers a held session's end for its client to connect (architecture.md § Code Mode sessions). */
+export const ATTACH_RESERVATION_MS = 15_000;
+
+/** `POST /attach`'s answer: the holder to connect to and the session to attach, or why not, with its HTTP status. */
+export type AttachResult = { port: number; token: string; session: string } | { refused: string; status: 404 | 409 };
 
 /** A runner per agent, and the Code Mode runner for Claude sessions held in the terminal holder (PRD R93). */
 export type RunnerKey = Provider | 'codeMode';
@@ -72,6 +79,10 @@ export interface RuntimeDeps {
   /** Whether a process runs; a stand-in for tests. */
   alive?(pid: number): boolean;
   log(line: string): void;
+  /** The Code Mode idle limit, shorter than the default for tests and live acceptance (`--code-mode-idle-ms`). */
+  codeModeIdleMs?: number;
+  /** Stand-ins for the holder link's connection, lock check and start, for tests. */
+  holder?: Partial<Pick<HolderLinkDeps, 'connect' | 'lockHeld' | 'launch'>>;
 }
 
 /** `kill(pid, 0)` sends nothing; EPERM means the process exists but belongs to someone else. */
@@ -232,8 +243,14 @@ export class Runtime {
   private readonly runners: Record<RunnerKey, SessionRunner>;
   /** The terminal holder of this home, connected on first use (PRD R94). */
   private readonly holder: HolderLink;
-  /** Code Mode sessions whose end runs now, so a retry does not end one twice (PRD R95). */
-  private readonly ending = new Set<string>();
+  /** Code Mode sessions whose end runs now, so a retry does not end one twice and an attach waits for it (PRD R95). */
+  private readonly ending = new Map<string, Promise<void>>();
+  /** Attach reservations: until when each defers its session's end, for the client to connect (PRD R95). */
+  private readonly reservations = new Map<string, number>();
+  /** Sessions whose resume spawn runs now; roster reads leave them out (PRD R95). */
+  private readonly resuming = new Set<string>();
+  /** The attach in flight per session, which concurrent attaches share, so a session is never resumed twice. */
+  private readonly attaching = new Map<string, Promise<AttachResult>>();
   /** Code Mode sessions whose end waits for an attached terminal, logged once each. */
   private readonly deferred = new Set<string>();
 
@@ -242,7 +259,7 @@ export class Runtime {
     config: Config,
   ) {
     this.config = config;
-    this.holder = new HolderLink({ home: this.home, nodePath: () => this.config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep, gone: () => this.holderGone() });
+    this.holder = new HolderLink({ home: this.home, nodePath: () => this.config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep, gone: () => this.holderGone(), ...deps.holder });
 
     const hooks = () => this.config.settings.sessions.installHooks;
     const codex = deps.codex ?? { home: join(deps.home, '.codex'), env: {} };
@@ -266,6 +283,7 @@ export class Runtime {
           holder: (start) => this.holder.find(start),
           now: deps.now,
           sleep: deps.sleep,
+          ...(deps.codeModeIdleMs === undefined ? {} : { idleMs: deps.codeModeIdleMs }),
           // Confirms a held process's new session ID after /clear, /branch or /resume (mechanics M67).
           roster: async () => {
             const roster = await readRoster(claudePath(), deps.exec);
@@ -770,7 +788,8 @@ export class Runtime {
       await this.reconcile(this.deps.store.activeSessions().filter((session) => session.state === 'starting' && this.unreconciled.has(session.id)));
     }
 
-    const sessions = this.deps.store.startedSessions();
+    // A session being resumed has no launch the read could tell its new process by, so the read leaves it to the next one (PRD R95).
+    const sessions = this.deps.store.startedSessions().filter((session) => !this.resuming.has(session.id));
 
     if (sessions.length === 0) {
       return;
@@ -786,9 +805,12 @@ export class Runtime {
     const lost: string[] = [];
     const idle: string[] = [];
     // A question reported, or a move to the background begun or ended, while the reads ran makes their result stale for that session, which the
-    // next read decides (PRD R70, R89). Checked once all providers' reads are done, since the event applies them together.
+    // next read decides (PRD R70, R89). A held session resumed, or being resumed, meanwhile is left to the next timed read and its markers (PRD R95).
+    // Checked once all providers' reads are done, since the event applies them together.
     const marks = (session: Session | null) => `${session?.question?.id ?? ''}|${session?.move?.id ?? ''}|${session?.movedAt ?? ''}`;
     const asked = new Map(sessions.map((session) => [session.id, marks(session)]));
+    const launches = new Map(sessions.map((session) => [session.id, session.launchId ?? null]));
+    const endedBefore = new Set(sessions.filter((session) => session.state === 'ended').map((session) => session.id));
 
     for (const key of RUNNER_KEYS) {
       const own = sessions.filter((session) => runnerKey(session) === key);
@@ -824,7 +846,21 @@ export class Runtime {
       this.rosterAgain = true;
     }
 
+    for (const session of sessions) {
+      const now = this.deps.store.session(session.id);
+
+      // A session that ended during the read, as by Stop, was read live before its end, so the read says nothing about it.
+      if (this.resuming.has(session.id) || (now?.launchId ?? null) !== launches.get(session.id) || (now?.state === 'ended' && !endedBefore.has(session.id))) {
+        stale.add(session.id);
+      }
+    }
+
     const fresh = checked.filter((id) => !stale.has(id));
+
+    // Only a session already ended when the read began can be one a stopped hub resumed.
+    for (const entry of observed.filter((one) => !stale.has(one.sessionId) && endedBefore.has(one.sessionId))) {
+      this.reviveHeld(entry.sessionId);
+    }
 
     if (fresh.length > 0) {
       const filteredForks = forks.filter((fork) => !stale.has(fork.sessionId));
@@ -832,7 +868,7 @@ export class Runtime {
       this.send({ type: 'roster', sessions: observed.filter((entry) => !stale.has(entry.sessionId)), checked: fresh, ...(filteredForks.length > 0 ? { forks: filteredForks } : {}) });
     }
 
-    for (const sessionId of lost) {
+    for (const sessionId of lost.filter((id) => !stale.has(id))) {
       this.deps.log(`session ${sessionId} ended: the terminal holder stopped`);
       this.send({ type: 'holder-lost', sessionId });
     }
@@ -1434,7 +1470,7 @@ export class Runtime {
           ticket,
           triage: triages.at(-1) ?? null,
           focus: effectiveFocus(triages, ticket.url),
-          sessions: store.sessionsFor(item.id),
+          sessions: store.sessionsFor(item.id).map(({ lastTree: _lastTree, ...session }) => session),
           worktree: store.worktreeFor(item.ticketId),
           links: store.linksFor(item.ticketId),
           pastes: store.pastesFor(item.id),
@@ -1588,6 +1624,200 @@ export class Runtime {
   }
 
   /**
+   * `POST /attach` (architecture.md § Code Mode sessions): the holder to attach to for a Code Mode session, resumed when it has ended. Takes an
+   * attach reservation, which defers an end until the client connects, waits for an end in progress, and refuses a resume while processes of the
+   * session's last run still run. Concurrent attaches of one session share one attempt, so it is resumed once.
+   */
+  attach(sessionId: string): Promise<AttachResult> {
+    const running = this.attaching.get(sessionId);
+
+    if (running !== undefined) {
+      return running;
+    }
+
+    const attempt = this.attachOnce(sessionId).finally(() => this.attaching.delete(sessionId));
+
+    this.attaching.set(sessionId, attempt);
+
+    return attempt;
+  }
+
+  private async attachOnce(sessionId: string): Promise<AttachResult> {
+    const store = this.deps.store;
+    const first = store.session(sessionId);
+
+    if (first === null) {
+      return { refused: `No session ${sessionId}.`, status: 404 };
+    }
+
+    const name = first.shortId ?? sessionId;
+
+    if (first.codeMode !== true) {
+      return { refused: `Session ${name} is not a Code Mode session; open it in Claude.`, status: 409 };
+    }
+
+    for (const [id, until] of this.reservations) {
+      if (until <= this.deps.now()) {
+        this.reservations.delete(id);
+      }
+    }
+
+    this.reservations.set(sessionId, this.deps.now() + ATTACH_RESERVATION_MS);
+
+    const result = await this.attachHeld(sessionId, name);
+
+    if ('refused' in result) {
+      this.reservations.delete(sessionId);
+    }
+
+    return result;
+  }
+
+  private async attachHeld(sessionId: string, name: string): Promise<AttachResult> {
+    const store = this.deps.store;
+    const refuse = (refused: string, status: 404 | 409 = 409): AttachResult => ({ refused, status });
+    const answer = (): AttachResult => {
+      const record = this.holder.record();
+
+      return record === null ? refuse('The terminal holder closed the connection.') : { port: record.port, token: record.token, session: sessionId };
+    };
+
+    // An end or stop of the session can start during any wait below, so each decision is taken again once none is pending.
+    for (;;) {
+      while (this.ending.has(sessionId)) {
+        await this.ending.get(sessionId);
+      }
+
+      const found = await this.holder.find(true);
+
+      if (!('holder' in found)) {
+        return refuse('error' in found ? found.error : 'The terminal holder did not start.');
+      }
+
+      let live: boolean;
+
+      try {
+        live = (await found.holder.list()).some((entry) => entry.session === sessionId && entry.exitedAt === null);
+      } catch (error) {
+        return refuse((error as Error).message);
+      }
+
+      if (this.ending.has(sessionId)) {
+        continue;
+      }
+
+      // A starting session is attached too, so the operator can answer a prompt before its start.
+      if (live) {
+        this.reviveHeld(sessionId);
+        return answer();
+      }
+
+      if (store.session(sessionId)?.state !== 'ended') {
+        await this.readRoster();
+
+        if (this.ending.has(sessionId)) {
+          continue;
+        }
+      }
+
+      const session = store.session(sessionId);
+
+      if (session === null) {
+        return refuse(`No session ${sessionId}.`, 404);
+      }
+
+      if (session.state !== 'ended') {
+        return refuse(`Session ${name} is still ${session.state === 'starting' ? 'starting' : 'ending'}; try again.`);
+      }
+
+      if (!this.config.settings.sessions.installHooks) {
+        return refuse(HOOKS_REQUIRED);
+      }
+
+      const left = (await this.runners.codeMode.leftovers?.(session.lastTree ?? [])) ?? [];
+
+      if (!Array.isArray(left)) {
+        return refuse(left.error);
+      }
+
+      if (left.length > 0) {
+        const pids = left.map((member) => member.pid).join(', ');
+
+        return refuse(`Session ${name} still has ${left.length} ${left.length === 1 ? 'process' : 'processes'} from its previous run (${left.length === 1 ? 'pid' : 'pids'} ${pids}). Stop them or wait for them to end.`);
+      }
+
+      if (this.ending.has(sessionId)) {
+        continue;
+      }
+
+      return this.resume(session, name, answer, refuse);
+    }
+  }
+
+  /**
+   * An ended Code Mode session the holder lists live was resumed by a hub that stopped before it recorded the resume; its launch was stored before
+   * the spawn, so the session is held again under it (PRD R95).
+   */
+  private reviveHeld(sessionId: string): void {
+    const session = this.deps.store.session(sessionId);
+
+    if (session?.codeMode === true && session.state === 'ended' && session.launchId != null && !this.resuming.has(sessionId)) {
+      this.deps.log(`session ${sessionId} is live in the terminal holder under launch ${session.launchId}; holding it again`);
+      this.send({ type: 'held-resumed', sessionId, launchId: session.launchId });
+    }
+  }
+
+  /** Spawns the ended session again; roster reads leave it alone meanwhile, since they cannot tell its new process from its old launch. */
+  private async resume(session: Session, name: string, answer: () => AttachResult, refuse: (refused: string, status?: 404 | 409) => AttachResult): Promise<AttachResult> {
+    const store = this.deps.store;
+    const sessionId = session.id;
+    const item = store.workItem(session.workItemId);
+
+    if (item === null) {
+      return refuse(`No work item holds session ${name}.`, 404);
+    }
+
+    const ticket = store.ticket(item.ticketId)!;
+    const playbook = item.playbook === null ? null : (this.config.playbooks.get(item.playbook) ?? null);
+    const options = launchOptions(this.config.settings, playbook, session.kind, session.provider);
+
+    this.resuming.add(sessionId);
+
+    try {
+      // Stored before the spawn, so a hub that stops during it finds the live process under this launch.
+      const launchId = this.runners.codeMode.newLaunchId?.() ?? randomUUID();
+
+      this.send({ type: 'held-resuming', sessionId, launchId });
+
+      const resumed = this.runners.codeMode.resumeHeld === undefined
+        ? { error: 'The Code Mode runner cannot resume sessions.' }
+        : await this.runners.codeMode.resumeHeld(session, options.permissionMode, options.model, `${sessionName(session.kind, item, ticket)} ${session.nativeSessionId ?? ''}`, launchId);
+
+      if ('error' in resumed) {
+        return refuse(resumed.error);
+      }
+
+      // Delete during the spawn leaves the new process no session to hold it, so it is ended.
+      const after = store.session(sessionId);
+
+      if (after === null || after.state !== 'ended') {
+        const failure = await this.runners.codeMode.stop({ sessionId, shortId: session.shortId }, 'operator');
+
+        this.deps.log(`session ${sessionId} changed while it resumed; ${failure === null ? 'ended the resumed process' : `ending the resumed process failed, so it may still be running: ${failure.error}`}`);
+
+        return after === null ? refuse(`No session ${sessionId}.`, 404) : refuse(`Session ${name} changed while it resumed; try again.`);
+      }
+
+      this.deps.log(`session ${sessionId} resumed in the terminal holder`);
+      this.send({ type: 'held-resumed', sessionId, launchId: resumed.launchId });
+
+      return answer();
+    } finally {
+      this.resuming.delete(sessionId);
+    }
+  }
+
+  /**
    * Whether a Code Mode session's release ends it now: not when a new turn cancelled it, and not while a terminal is attached, which defers it to a
    * later roster read (PRD R95).
    */
@@ -1631,15 +1861,17 @@ export class Runtime {
     const turnEnd = compacted ? -Infinity : (reading?.at ?? session.stateAt);
     const recent = (at: number | null | undefined) => at != null && at > turnEnd && this.deps.now() - at < INPUT_SETTLE_MS;
     const typed = !('error' in activity) && (recent(activity.lastInputAt) || (compacted && recent(activity.lastOutputAt)));
+    // An attach reservation counts as a terminal until its client connects (PRD R95).
+    const reserved = (this.reservations.get(action.sessionId) ?? -Infinity) > this.deps.now();
 
-    if (!('error' in activity) && activity.clients === 0 && !typed) {
+    if (!('error' in activity) && activity.clients === 0 && !typed && !reserved) {
       this.deferred.delete(action.sessionId);
       return true;
     }
 
     if (!this.deferred.has(action.sessionId)) {
       this.deferred.add(action.sessionId);
-      const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : 'input arrived after its turn';
+      const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : reserved ? 'a terminal is attaching' : 'input arrived after its turn';
 
       this.deps.log(`end of held session ${action.sessionId} deferred: ${why}`);
     }
@@ -1756,17 +1988,20 @@ export class Runtime {
             return;
           }
 
-          this.ending.add(action.sessionId);
-
-          try {
+          return this.trackEnd(action.sessionId, async () => {
             if (await this.endsNow(action)) {
               await this.stopSession(action);
             }
-          } finally {
-            this.ending.delete(action.sessionId);
-          }
+          });
+        }
 
-          return;
+        // An attach waits for every stop of a held session, operator stops included, until its result reaches the flow.
+        if (action.codeMode === true) {
+          const earlier = this.ending.get(action.sessionId);
+
+          return this.trackEnd(action.sessionId, async () => {
+            await Promise.all([earlier, this.stopSession(action)]);
+          });
         }
 
         if (action.codeMode !== true && action.reason === 'release' && action.shortId !== null && !(await runner.isBackground(action))) {
@@ -1780,8 +2015,22 @@ export class Runtime {
     }
   }
 
+  /** Runs a held session's end or stop as the one `POST /attach` waits for, until it and any it joined finish. */
+  private trackEnd(sessionId: string, work: () => Promise<void>): Promise<void> {
+    const end: Promise<void> = work().finally(() => {
+      if (this.ending.get(sessionId) === end) {
+        this.ending.delete(sessionId);
+      }
+    });
+
+    this.ending.set(sessionId, end);
+
+    return end;
+  }
+
   private async stopSession(action: Extract<FlowAction, { type: 'stop-session' }>): Promise<void> {
-    const failure = await this.runners[runnerKey(action)].stop(action, action.reason);
+    const { leftovers, ...target } = action;
+    const failure = await this.runners[runnerKey(action)].stop(leftovers === true ? { ...target, lastTree: this.deps.store.session(action.sessionId)?.lastTree ?? [] } : target, action.reason);
 
     if (failure === null) {
       await this.findSetupWorktrees();
@@ -1792,8 +2041,8 @@ export class Runtime {
 
     this.send(
       failure === null
-        ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason, shortId: action.shortId }
-        : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error, shortId: action.shortId },
+        ? { type: 'stop-succeeded', sessionId: action.sessionId, reason: action.reason, shortId: action.shortId, ...(action.leftovers === true ? { leftovers: true as const } : {}) }
+        : { type: 'stop-failed', sessionId: action.sessionId, reason: action.reason, message: failure.error, shortId: action.shortId, ...(action.leftovers === true ? { leftovers: true as const } : {}) },
     );
   }
 }

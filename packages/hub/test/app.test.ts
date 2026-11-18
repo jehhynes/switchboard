@@ -668,6 +668,41 @@ describe('createHubApp', () => {
     expect(await second.post['/window']!({ workspace: file, command: { type: 'openTabs' } })).toEqual({ status: 500, body: { error: 'The hub could not save the command; see its log.' } });
   });
 
+  it('attaches to a held session through the server, refusing a request without the token, a bad body and an unknown session (PRD R95)', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const logs: string[] = [];
+    const connection = {
+      welcome: { protocol: 1, build: 'b', pid: 4243 },
+      compatible: true,
+      spawn: async () => ({ session: 's', pid: 1 }),
+      list: async () => [{ session: 'held-1', label: 'l', pid: 9, cwd: 'D:/scratch', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null }],
+      kill: async () => 0,
+      screen: async () => ({ head: '', text: '' }),
+      shutdown: async () => {},
+      onClose: () => {},
+      close: () => {},
+    };
+
+    writeFileSync(join(temp.home, '.switchboard', 'holder.json'), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+    const app = await createHubApp({ home: temp.home, log: (line) => logs.push(line), codeModeIdleMs: 60_000, deps: { exec: noCli, holder: { connect: async () => connection, lockHeld: async () => true } } });
+    closers.push(() => app.close());
+    const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
+    closers.push(() => server.close());
+    const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
+
+    app.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/scratch', start: false });
+    app.runtime['deps'].store.insertSession({
+      id: 'held-1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/scratch', state: 'idle', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false,
+      question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: 'n', shortId: 'n', codeMode: true, launchId: 'l',
+    });
+
+    expect(logs).toContain('Code Mode idle limit: 60000 ms');
+    expect(await postToHub({ ...record, token: 'wrong' }, '/attach', { sessionId: 'held-1' }, 5000)).toMatchObject({ status: 401 });
+    expect(await postToHub(record, '/attach', { sessionId: '' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId}.' });
+    expect(await postToHub(record, '/attach', { sessionId: 'nope' }, 5000)).toMatchObject({ status: 404, error: 'No session nope.' });
+    expect(await postToHub(record, '/attach', { sessionId: 'held-1' }, 5000)).toEqual({ status: 200, error: null, body: { port: 4100, token: 'holder-token', session: 'held-1' } });
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex' } });
     const logs: string[] = [];

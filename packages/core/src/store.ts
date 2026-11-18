@@ -338,13 +338,15 @@ export const MIGRATIONS = [
   // Code Mode sessions (PRD R93): the mode a session started in, and the launch of its current process.
   `ALTER TABLE sessions ADD COLUMN codeMode INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE sessions ADD COLUMN launchId TEXT;`,
+  // The process tree a Code Mode session's holder last listed, as JSON, which the resume guard checks (PRD R95).
+  `ALTER TABLE sessions ADD COLUMN lastTree TEXT;`,
 ];
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
-const OBJECTS = new Set(['question', 'move', 'blockers']);
+const OBJECTS = new Set(['question', 'move', 'blockers', 'lastTree']);
 
 type Row = Record<string, unknown>;
 
@@ -489,8 +491,8 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
   // The register event names an external session, and its end already shows when it was cleared.
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
-  // The session-started event names a Code Mode session; its launch is bookkeeping (PRD R93).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId']),
+  // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

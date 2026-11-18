@@ -161,6 +161,8 @@ export interface AppOptions {
   /** The folder holding settings.json; the Switchboard home when left out. */
   configDir?: string;
   log(line: string): void;
+  /** The Code Mode idle limit (`--code-mode-idle-ms`); 4 hours when left out. */
+  codeModeIdleMs?: number;
   /** Overrides for tests. */
   deps?: Partial<RuntimeDeps>;
 }
@@ -187,8 +189,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     // Codex reads CODEX_HOME when the operator set it, else ~/.codex.
     codex: { home: process.env['CODEX_HOME'] || join(homedir(), '.codex'), env: {} },
     log: options.log,
+    ...(options.codeModeIdleMs === undefined ? {} : { codeModeIdleMs: options.codeModeIdleMs }),
     ...options.deps,
   };
+
+  if (deps.codeModeIdleMs !== undefined) {
+    deps.log(`Code Mode idle limit: ${deps.codeModeIdleMs} ms`);
+  }
+
   const runtime = new Runtime(deps, config);
   // Kept in a file, because the window the dock is opening may replace this hub before it claims (architecture.md § Claude Code runner).
   const windowQueue = WindowQueue.load(join(home, 'window-queue.json'), deps.now, deps.log);
@@ -288,6 +296,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         const result = await runtime.register(body['nativeSessionId'], body['title']);
 
         return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
+      },
+      // The attach client of a Code Mode session (PRD R95).
+      '/attach': async (body) => {
+        if (!isRecord(body) || typeof body['sessionId'] !== 'string' || body['sessionId'] === '') {
+          return { status: 400, body: { error: 'Expected {sessionId}.' } };
+        }
+
+        const result = await runtime.attach(body['sessionId']);
+
+        return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
       },
       // Continue in Background from an item window's Claude tab (PRD R89).
       '/background': async (body) => {

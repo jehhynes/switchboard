@@ -67,6 +67,8 @@ function launchDetached(nodePath: string, args: string[], logPath: string): void
  */
 export class HolderLink {
   #client: { holder: HolderConnection } | null = null;
+  /** The record of the holder `#client` is connected to. */
+  #answered: HolderRecord | null = null;
   #connecting: Promise<HolderFound> | null = null;
   #starting: Promise<HolderFound> | null = null;
 
@@ -86,6 +88,11 @@ export class HolderLink {
     });
 
     return this.#starting;
+  }
+
+  /** The port and token of the holder this link is connected to, which an attach client uses; null while none answered. */
+  record(): { port: number; token: string } | null {
+    return this.#client === null || this.#answered === null ? null : { port: this.#answered.port, token: this.#answered.token };
   }
 
   /** Closes the connection; the holder and its sessions keep running. */
@@ -128,7 +135,7 @@ export class HolderLink {
   }
 
   async #connect(notify: boolean): Promise<HolderFound> {
-    const record = this.#record();
+    const record = this.#readRecord();
 
     if (record !== null) {
       try {
@@ -139,6 +146,7 @@ export class HolderLink {
           const found = { holder: client };
 
           this.#client = found;
+          this.#answered = record;
           client.onClose(() => {
             if (this.#client === found) {
               this.#client = null;
@@ -165,7 +173,7 @@ export class HolderLink {
     return { gone: true };
   }
 
-  #record(): HolderRecord | null {
+  #readRecord(): HolderRecord | null {
     try {
       return parseHolderRecord(readFileSync(recordPath(this.deps.home), 'utf8'));
     } catch {

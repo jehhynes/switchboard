@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
-import { MESSAGES } from '../src/flow.js';
-import { Harness, issue, settings } from './flowHarness.js';
+import { launchOptions, MESSAGES } from '../src/flow.js';
+import { Harness, issue, playbooks, settings } from './flowHarness.js';
 
 function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Extract<FlowAction, { type: T }> {
   expect(actions.map((action) => action.type)).toEqual([type]);
@@ -299,5 +299,141 @@ describe('Code Mode fixes from the step 8 confirming review', () => {
 
     move(native);
     expect(h.store.session(id)).toMatchObject({ nativeSessionId: native, retiredIds: ['native-b'] });
+  });
+});
+
+describe('Code Mode attach and the resume guard (PRD R95)', () => {
+  const TREE = [{ pid: 100, created: '133' }, { pid: 101, created: '134' }];
+
+  /** A held task session whose process the holder no longer holds. */
+  function ended(h: Harness): string {
+    const id = heldTask(h);
+
+    h.act({ type: 'roster', checked: [id], sessions: [{ sessionId: id, state: 'running', detail: null, interactive: false, tree: TREE }] });
+    h.act({ type: 'holder-lost', sessionId: id });
+
+    return id;
+  }
+
+  it('reads a session without a stored process tree as having none, and stores one as written', () => {
+    const h = new Harness();
+    const id = heldTask(h);
+
+    expect(h.store.session(id)!.lastTree).toBeNull();
+    h.store.updateSession(id, { lastTree: TREE });
+    expect(h.store.session(id)!.lastTree).toEqual(TREE);
+  });
+
+  it('stores the process tree a roster read gives a held session, without logging it', () => {
+    const h = new Harness();
+    const id = heldTask(h);
+
+    expect(h.act({ type: 'roster', checked: [id], sessions: [{ sessionId: id, state: 'running', detail: null, interactive: false, tree: TREE }] })).toEqual([]);
+    expect(h.store.session(id)!.lastTree).toEqual(TREE);
+
+    h.act({ type: 'roster', checked: [id], sessions: [{ sessionId: id, state: 'running', detail: null, interactive: false, tree: [] }] });
+    expect(h.store.session(id)!.lastTree).toEqual(TREE);
+
+    const changes = h.store.ticketHistory(1)!.events.flatMap((event) => event.changes);
+
+    expect(changes.some((change) => 'lastTree' in change.fields)).toBe(false);
+  });
+
+  it('does not store a tree for a background session', () => {
+    const h = new Harness();
+    const [triage] = h.poll(issue('7'));
+
+    h.triaged(triage, 'dev:question');
+    const id = h.started(h.act({ type: 'start', workItemId: 1 })[0]);
+
+    h.act({ type: 'roster', checked: [id], sessions: [{ sessionId: id, state: 'running', detail: null, interactive: false, tree: TREE }] });
+    expect(h.store.session(id)!.lastTree).toBeNull();
+  });
+
+  it('holds an ended session again on a resume, leaving its outcome and work item as they were', () => {
+    const h = new Harness();
+    const id = ended(h);
+
+    expect(h.act({ type: 'held-resumed', sessionId: id, launchId: 'launch-2' })).toEqual([]);
+    expect(h.store.session(id)).toMatchObject({ state: 'idle', stateDetail: null, endedAt: null, released: false, releasing: false, launchId: 'launch-2', lastTree: null, outcome: 'failed' });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.holderStopped });
+
+    h.act({ type: 'marker', sessionId: id, state: 'running', detail: null });
+    expect(h.status(1)).toBe('running');
+  });
+
+  it('stores the launch of a resume about to spawn on the ended session, and nothing for a live one', () => {
+    const h = new Harness();
+    const id = ended(h);
+
+    expect(h.act({ type: 'held-resuming', sessionId: id, launchId: 'launch-2' })).toEqual([]);
+    expect(h.store.session(id)).toMatchObject({ state: 'ended', launchId: 'launch-2', released: true });
+
+    const live = new Harness();
+    const running = heldTask(live);
+
+    live.act({ type: 'held-resuming', sessionId: running, launchId: 'launch-2' });
+    expect(live.store.session(running)).toMatchObject({ state: 'running', launchId: 'launch-1' });
+  });
+
+  it('ignores a resume of a live session or a background session', () => {
+    const h = new Harness();
+    const id = heldTask(h);
+
+    h.act({ type: 'held-resumed', sessionId: id, launchId: 'launch-2' });
+    expect(h.store.session(id)).toMatchObject({ state: 'running', launchId: 'launch-1' });
+
+    const other = new Harness();
+    const [triage] = other.poll(issue('7'));
+
+    other.triaged(triage, 'dev:question');
+    const background = other.started(other.act({ type: 'start', workItemId: 1 })[0]);
+
+    other.act({ type: 'stop', workItemId: 1 });
+    other.act({ type: 'stop-succeeded', sessionId: background, reason: 'operator', shortId: 'abc12345' });
+    other.act({ type: 'held-resumed', sessionId: background, launchId: 'launch-2' });
+    expect(other.store.session(background)).toMatchObject({ state: 'ended', launchId: null });
+  });
+
+  it("stops the processes an ended session's last run left, and clears its tree once they have ended", () => {
+    const h = new Harness();
+    const id = ended(h);
+
+    expect(h.act({ type: 'stop', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: id, provider: 'claude', shortId: `${id}-short`, reason: 'operator', codeMode: true, leftovers: true }]);
+    h.act({ type: 'stop-succeeded', sessionId: id, reason: 'operator', shortId: `${id}-short`, leftovers: true });
+    expect(h.store.session(id)).toMatchObject({ state: 'ended', lastTree: null, outcome: 'failed' });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.holderStopped });
+    expect(h.send({ type: 'stop', workItemId: 1 }).refused).toBe('The work item has no active session.');
+  });
+
+  it('shows a failed stop of those processes on the work item', () => {
+    const h = new Harness();
+    const id = ended(h);
+
+    h.act({ type: 'stop', workItemId: 1 });
+    h.act({ type: 'stop-failed', sessionId: id, reason: 'operator', message: 'Process 100 could not be ended: Access is denied.', shortId: `${id}-short`, leftovers: true });
+    expect(h.item(1).error).toBe('Stop failed: Process 100 could not be ended: Access is denied.');
+    expect(h.store.session(id)!.lastTree).toEqual(TREE);
+  });
+
+  it('refuses Stop of an ended session that left no process tree', () => {
+    const h = new Harness();
+    const id = heldTask(h);
+
+    h.act({ type: 'holder-lost', sessionId: id });
+    expect(h.send({ type: 'stop', workItemId: 1 }).refused).toBe('The work item has no active session.');
+  });
+});
+
+describe('launchOptions', () => {
+  it("takes a task session's playbook mode and model, and the settings' for a setup session or another provider", () => {
+    const all = playbooks();
+    const own = all.get('dev:question')!;
+    const s = settings({ sessions: { permissionMode: 'auto', model: 'haiku', codex: { ...settings().sessions.codex, permissionMode: 'bypassPermissions', model: 'gpt-5' } } });
+
+    expect(launchOptions(s, own, 'task', 'claude')).toEqual({ permissionMode: 'plan', model: 'opus' });
+    expect(launchOptions(s, own, 'setup', 'claude')).toEqual({ permissionMode: 'auto', model: 'haiku' });
+    expect(launchOptions(s, null, 'task', 'codex')).toEqual({ permissionMode: 'bypassPermissions', model: 'gpt-5' });
+    expect(launchOptions(settings({ sessions: { model: '' } }), null, 'task', 'claude').model).toBeNull();
   });
 });

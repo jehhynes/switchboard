@@ -19,3 +19,4 @@ export * from './debriefs.js';
 export * from './dock.js';
 export * from './holderInstall.js';
 export * from './holder.js';
+export * from './attach.js';

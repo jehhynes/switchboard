@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { START_PROMPT } from '@switchboard/core';
 import type { LiveState, StopReason, MarkerReading, ObservedFork, ObservedSession, PermissionMode, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult } from '@switchboard/core';
-import type { SessionEntry, SpawnRequest } from '@switchboard/holder';
+import { killTree, processTable } from '@switchboard/holder';
+import type { ProcessRow, SessionEntry, SpawnRequest } from '@switchboard/holder';
 import { executableDirOnPath } from '@switchboard/core';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
@@ -163,6 +164,58 @@ export interface CodeModeRunnerDeps {
   /** The environment a session's is built from; the hub's by default. */
   environment?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
+  /** The idle limit; `CODE_MODE_IDLE_MS` by default, shorter for tests and live acceptance. */
+  idleMs?: number;
+  /** The process table, which the resume guard reads; `processTable` by default. */
+  processes?(): Promise<ProcessRow[] | { error: string }>;
+  /** Ends a process and its descendants; `killTree` by default. */
+  killTree?(pid: number): Promise<{ error: string } | null>;
+}
+
+/** The members of a tree the table lists with the same pid and creation time, so a reused pid does not match. */
+function matching(tree: Array<{ pid: number; created: string }>, rows: ProcessRow[]): Array<{ pid: number; created: string }> {
+  return tree.filter((member) => member.created !== '' && rows.some((row) => row.pid === member.pid && row.created === member.created));
+}
+
+/** Whether a creation time is not after another; an unreadable one counts as earlier, as `treeOf` reads them. */
+function notAfter(created: string, other: string): boolean {
+  try {
+    return created === '' || other === '' || BigInt(created) <= BigInt(other);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The member to end first: one with no other running member above it, where a parent counts only when it was created before its child, since
+ * Windows keeps a dead parent's pid as the parent of its children; else the earliest created, so a round always ends one.
+ */
+function topmost(running: Array<{ pid: number; created: string }>, rows: ProcessRow[]): { pid: number; created: string } | undefined {
+  const pids = new Set(running.map((member) => member.pid));
+  const byPid = new Map(rows.map((row) => [row.pid, row]));
+  const top = running.find((member) => {
+    const seen = new Set<number>();
+
+    for (let row = byPid.get(member.pid); row !== undefined && !seen.has(row.pid); ) {
+      seen.add(row.pid);
+
+      const parent = byPid.get(row.ppid);
+
+      if (parent === undefined || parent.pid === row.pid || !notAfter(parent.created, row.created)) {
+        return true;
+      }
+
+      if (pids.has(parent.pid)) {
+        return false;
+      }
+
+      row = parent;
+    }
+
+    return true;
+  });
+
+  return top ?? [...running].sort((a, b) => (a.created === b.created ? 0 : notAfter(a.created, b.created) ? -1 : 1))[0];
 }
 
 /** Waits for a holder request at most `ms`, so an unanswered one counts as failed. */
@@ -231,13 +284,17 @@ export class CodeModeRunner implements SessionRunner {
     return this.check(spawned.holder, action.sessionId, nativeSessionId, launchId, this.deps.now());
   }
 
+  newLaunchId(): string {
+    return this.newId();
+  }
+
   /** Resumes an ended session in the holder with a new launch; the session keeps the mode, model and permission mode it started with. */
-  async resumeHeld(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd'>, permissionMode: PermissionMode, model: string | null, label: string): Promise<{ launchId: string } | { error: string }> {
+  async resumeHeld(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd'>, permissionMode: PermissionMode, model: string | null, label: string, launch?: string): Promise<{ launchId: string } | { error: string }> {
     if (session.nativeSessionId === null) {
       return { error: 'The session never started, so it cannot be resumed.' };
     }
 
-    const launchId = this.newId();
+    const launchId = launch ?? this.newId();
     const spawned = await this.spawn(session.id, label, codeModeResumeArgs(session.nativeSessionId, permissionMode, model), session.cwd, launchId);
 
     return 'error' in spawned ? spawned : { launchId };
@@ -377,7 +434,9 @@ export class CodeModeRunner implements SessionRunner {
         continue;
       }
 
-      if (entry.clients === 0 && now - Math.max(entry.startedAt, entry.lastInputAt ?? 0, entry.lastOutputAt ?? 0) >= CODE_MODE_IDLE_MS) {
+      const tree = entry.tree === undefined ? {} : { tree: entry.tree };
+
+      if (entry.clients === 0 && now - Math.max(entry.startedAt, entry.lastInputAt ?? 0, entry.lastOutputAt ?? 0) >= (this.deps.idleMs ?? CODE_MODE_IDLE_MS)) {
         idle.push(session.id);
       }
 
@@ -399,21 +458,21 @@ export class CodeModeRunner implements SessionRunner {
 
         // A failed read is no evidence either way; the next observation looks again.
         if (screen === null) {
-          observed.push({ sessionId: session.id, state: session.state === 'starting' || session.state === 'ended' ? 'waiting' : session.state, detail: session.stateDetail, interactive: false });
+          observed.push({ sessionId: session.id, state: session.state === 'starting' || session.state === 'ended' ? 'waiting' : session.state, detail: session.stateDetail, interactive: false, ...tree });
           continue;
         }
 
         if (evidence === null || 'off' in evidence) {
           const ended = await end(found.holder, session.id, this.readMs());
 
-          observed.push({ sessionId: session.id, state: 'failed', detail: `${evidence === null ? `Claude started the session without Code Mode: its output has no "${CODE_MODE_ON}" line.` : evidence.off}${ended}` });
+          observed.push({ sessionId: session.id, state: 'failed', detail: `${evidence === null ? `Claude started the session without Code Mode: its output has no "${CODE_MODE_ON}" line.` : evidence.off}${ended}`, ...tree });
           continue;
         }
       }
 
       const state = marker === undefined ? null : heldState(marker);
 
-      observed.push({ sessionId: session.id, ...(state ?? { state: session.state === 'starting' || session.state === 'ended' ? 'running' : session.state, detail: session.stateDetail }), interactive: false });
+      observed.push({ sessionId: session.id, ...(state ?? { state: session.state === 'starting' || session.state === 'ended' ? 'running' : session.state, detail: session.stateDetail }), interactive: false, ...tree });
     }
 
     return { sessions: observed, forks, idle };
@@ -495,8 +554,30 @@ export class CodeModeRunner implements SessionRunner {
     }
   }
 
-  /** Ends the session's process tree in the holder; a session the holder does not hold has ended already. */
+  /** The members of a session's last process tree still running: a pid listed with the same creation time, so a reused pid does not match (PRD R95). */
+  async leftovers(tree: Array<{ pid: number; created: string }>): Promise<Array<{ pid: number; created: string }> | { error: string }> {
+    if (tree.length === 0) {
+      return [];
+    }
+
+    const rows = await (this.deps.processes ?? processTable)();
+
+    if (!Array.isArray(rows)) {
+      return { error: `The process table could not be read: ${rows.error}` };
+    }
+
+    return matching(tree, rows);
+  }
+
+  /**
+   * Ends the session's process tree in the holder; a session the holder does not hold has ended already. With `lastTree`, ends instead each process of
+   * that tree that still runs.
+   */
   async stop(target: SessionTarget, _reason?: StopReason): Promise<{ error: string } | null> {
+    if (target.lastTree !== undefined) {
+      return this.endLeftovers(target.lastTree);
+    }
+
     const found = await this.deps.holder(false);
 
     if ('gone' in found) {
@@ -516,6 +597,43 @@ export class CodeModeRunner implements SessionRunner {
 
       return message === `No session ${target.sessionId} is held.` ? null : { error: message };
     }
+  }
+
+  private async endLeftovers(tree: Array<{ pid: number; created: string }>): Promise<{ error: string } | null> {
+    const failures: Array<{ pid: number; error: string }> = [];
+    const tried = new Set<number>();
+    const failed = (error: string | null): { error: string } | null => {
+      const ended = failures.length === 0 ? null : `${failures.length === 1 ? 'Process' : 'Processes'} ${failures.map((failure) => failure.pid).join(', ')} could not be ended: ${failures[0]!.error}`;
+
+      return error === null && ended === null ? null : { error: [error, ended].filter((part) => part !== null).join(' ') };
+    };
+
+    // Each round reads the table and ends one member still running, with its tree, so every kill follows a read that checked its pid; a kill
+    // can take long enough for another member to exit and its pid to be reused.
+    for (let round = 0; round <= tree.length; round++) {
+      const rows = await (this.deps.processes ?? processTable)();
+
+      if (!Array.isArray(rows)) {
+        return failed(`The process table could not be read: ${rows.error}`);
+      }
+
+      const running = matching(tree, rows).filter((member) => !tried.has(member.pid));
+      const member = topmost(running, rows);
+
+      if (member === undefined) {
+        return failed(null);
+      }
+
+      tried.add(member.pid);
+
+      const failure = await (this.deps.killTree ?? ((pid: number) => killTree(pid, this.deps.platform)))(member.pid);
+
+      if (failure !== null) {
+        failures.push({ pid: member.pid, error: failure.error });
+      }
+    }
+
+    return failed(null);
   }
 
   /** A session a stopped hub left starting is checked once with the holder; one it no longer holds failed to start (PRD R43). */

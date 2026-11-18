@@ -1,5 +1,6 @@
 import type { FlowAction, LiveState, ObservedFork, ObservedSession, StopReason } from './flow.js';
 import type { Session } from './model.js';
+import type { PermissionMode } from './settings.js';
 
 /** `newer` and `older`: a fork of the session's family created after or before its current copy, or a retired copy (PRD R78). */
 export type CopyRelation = 'newer' | 'older' | 'unrelated';
@@ -14,6 +15,8 @@ export type StartResult = { shortId: string; nativeSessionId: string; startPromp
 export interface SessionTarget {
   sessionId: string;
   shortId: string | null;
+  /** The Code Mode runner only: ends these processes of the ended session's last tree that still run, instead of the session (PRD R95). */
+  lastTree?: Array<{ pid: number; created: string }>;
 }
 
 /**
@@ -71,6 +74,12 @@ export interface SessionRunner {
    * the terminal holder is gone, so its sessions end through `holder-lost` (PRD R94), and `idle` for held sessions past the idle limit.
    */
   heldActivity?(sessionId: string): Promise<{ clients: number; lastInputAt: number | null; lastOutputAt?: number | null } | { error: string }>;
+  /** The Code Mode runner only: resumes an ended session in the holder under a new launch (PRD R95). */
+  resumeHeld?(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd'>, permissionMode: PermissionMode, model: string | null, label: string, launchId?: string): Promise<{ launchId: string } | { error: string }>;
+  /** The Code Mode runner only: a new launch ID for a resume, which the hub stores before the spawn (PRD R95). */
+  newLaunchId?(): string;
+  /** The Code Mode runner only: the members of a process tree that still run, matched by pid and creation time (PRD R95). */
+  leftovers?(tree: Array<{ pid: number; created: string }>): Promise<Array<{ pid: number; created: string }> | { error: string }>;
   /** Whether the session runs in Switchboard's background process, so a release may stop it (PRD R39). */
   isBackground(target: SessionTarget): Promise<boolean>;
   stop(target: SessionTarget, reason: StopReason): Promise<{ error: string } | null>;

@@ -601,6 +601,9 @@ class Builder {
       case 'session-resumed':
         skip.add('state').add('shortId').add('released').add('releasing').add('endedAt');
         return { category: 'session', icon: 'terminal', text: `${capital(session)} continues in the background` };
+      case 'held-resumed':
+        skip.add('state').add('released').add('endedAt');
+        return { category: 'session', icon: 'terminal', text: `${capital(session)} resumed in the terminal holder` };
       case 'resume-failed':
         skip.add('state').add('outcome').add('outcomeDetail').add('released').add('error');
         return { category: 'session', icon: 'error', text: 'Continuing in the background failed', detail: str(detail['message']), tone: 'error' };

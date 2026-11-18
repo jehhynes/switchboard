@@ -17,7 +17,7 @@ import {
   codeModeStartArgs,
   showsStartPrompt,
 } from '../src/codeMode.js';
-import type { HolderAccess, HolderLookup } from '../src/codeMode.js';
+import type { CodeModeRunnerDeps, HolderAccess, HolderLookup } from '../src/codeMode.js';
 
 const fixture = (name: string): { head: string; text: string } => JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'codemode', `${name}.json`), 'utf8')) as { head: string; text: string };
 const ON = fixture('on');
@@ -211,7 +211,7 @@ function marker(sessionId: string, fields: Record<string, unknown>): void {
   writeFileSync(join(home, 'activity', `${sessionId}.json`), JSON.stringify({ v: 1, sessionId, at: clock, notificationType: null, source: null, toolName: null, backgroundTasks: 0, error: null, errorMessage: null, ...fields }));
 }
 
-function runner(): CodeModeRunner {
+function runner(extra: Partial<CodeModeRunnerDeps> = {}): CodeModeRunner {
   return new CodeModeRunner({
     claudePath: () => 'claude',
     home,
@@ -229,6 +229,7 @@ function runner(): CodeModeRunner {
     readTimeoutMs: 20,
     environment: { PATH: 'C:/bin' },
     platform: 'linux',
+    ...extra,
   });
 }
 
@@ -576,5 +577,164 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
 
     lookup = { error: 'The terminal holder did not answer.' };
     expect(await runner().reconcile([session({ state: 'starting' })])).toEqual([{ sessionId: 'sb-1', pending: 'The terminal holder did not answer.' }]);
+  });
+});
+
+describe('CodeModeRunner attach support (PRD R95)', () => {
+  const TREE = [{ pid: 100, created: '133' }, { pid: 101, created: '134' }, { pid: 102, created: '135' }];
+  const row = (pid: number, created: string) => ({ pid, ppid: 1, created, memoryBytes: 0 });
+
+  it("carries a held session's process tree when the holder gives one", async () => {
+    holder.entries = [{ ...entry('sb-1'), tree: TREE }, entry('sb-2')];
+
+    const observed = await runner().observe([session(), session({ id: 'sb-2' })]);
+
+    expect(observed).toMatchObject({ sessions: [{ sessionId: 'sb-1', tree: TREE }, { sessionId: 'sb-2' }] });
+    expect('error' in observed ? null : observed.sessions[1]).not.toHaveProperty('tree');
+  });
+
+  it('names held sessions idle after the idle limit it was given', async () => {
+    clock = 61_000;
+    holder.entries = [{ ...entry('sb-1'), lastOutputAt: 1_000 }, { ...entry('sb-2'), lastOutputAt: 2_000 }];
+
+    expect(await runner({ idleMs: 60_000 }).observe(['sb-1', 'sb-2'].map((id) => session({ id, state: 'idle' })))).toMatchObject({ idle: ['sb-1'] });
+  });
+
+  it('finds the members of a tree that still run with the same creation time, not a reused pid', async () => {
+    let reads = 0;
+    const processes = async () => {
+      reads += 1;
+      return [row(100, '133'), row(101, '999'), row(7, '1')];
+    };
+
+    expect(await runner({ processes }).leftovers(TREE)).toEqual([{ pid: 100, created: '133' }]);
+    expect(reads).toBe(1);
+    expect(await runner({ processes }).leftovers([])).toEqual([]);
+    expect(reads).toBe(1);
+  });
+
+  it('fails the check when the process table cannot be read', async () => {
+    expect(await runner({ processes: async () => ({ error: 'Access is denied.' }) }).leftovers(TREE)).toEqual({ error: 'The process table could not be read: Access is denied.' });
+  });
+
+  it('stops only the leftover processes that still run, not the session, and names those it could not end', async () => {
+    const killed: number[] = [];
+    const processes = async () => [row(100, '133'), row(102, '135'), row(101, 'reused')];
+    const stop = (failing: number[]) =>
+      runner({
+        processes,
+        killTree: async (pid) => {
+          killed.push(pid);
+          return failing.includes(pid) ? { error: 'Access is denied.' } : null;
+        },
+      }).stop({ sessionId: 'sb-1', shortId: null, lastTree: TREE }, 'operator');
+
+    holder.entries = [entry('sb-1')];
+    expect(await stop([])).toBeNull();
+    expect(killed).toEqual([100, 102]);
+    expect(holder.killed).toEqual([]);
+
+    killed.length = 0;
+    expect(await stop([102])).toEqual({ error: 'Process 102 could not be ended: Access is denied.' });
+    expect(await stop([100, 102])).toEqual({ error: 'Processes 100, 102 could not be ended: Access is denied.' });
+  });
+
+  it('ends a leftover with its tree and reads the table again before ending members under it, so a pid reused meanwhile is spared', async () => {
+    let child = '134';
+    let reads = 0;
+    const killed: number[] = [];
+    const processes = async () => {
+      reads += 1;
+      return [row(100, '133'), { ...row(101, child), ppid: 100 }];
+    };
+    const killTree = async (pid: number) => {
+      killed.push(pid);
+
+      // Ending 100 with its tree ends 101 too, and another process takes pid 101.
+      if (pid === 100) {
+        child = 'unrelated';
+      }
+
+      return null;
+    };
+
+    expect(await runner({ processes, killTree }).stop({ sessionId: 'sb-1', shortId: null, lastTree: [{ pid: 100, created: '133' }, { pid: 101, created: '134' }] }, 'operator')).toBeNull();
+    expect(killed).toEqual([100]);
+    expect(reads).toBe(2);
+  });
+
+  it('reads the table again before each kill, so an independent leftover whose pid is reused during an earlier kill is spared', async () => {
+    let first = true;
+    let second = '134';
+    const killed: number[] = [];
+    const processes = async () => [...(first ? [{ ...row(100, '133'), ppid: 50 }] : []), { ...row(101, second), ppid: 50 }];
+    const killTree = async (pid: number) => {
+      killed.push(pid);
+      first = false;
+      second = '999';
+      return null;
+    };
+
+    expect(await runner({ processes, killTree }).stop({ sessionId: 'sb-1', shortId: null, lastTree: [{ pid: 100, created: '133' }, { pid: 101, created: '134' }] }, 'operator')).toBeNull();
+    expect(killed).toEqual([100]);
+  });
+
+  it('ignores a parent created after its child, as when a dead parent pid is reused under it, and ends the leftovers', async () => {
+    let reads = 0;
+    const killed: number[] = [];
+    const processes = async () =>
+      [
+        { pid: 2000, ppid: 1000, created: '20', memoryBytes: 0 },
+        { pid: 3000, ppid: 2000, created: '30', memoryBytes: 0 },
+        { pid: 1000, ppid: 3000, created: '40', memoryBytes: 0 },
+      ].filter((one) => (reads++, !killed.includes(2000) || one.pid === 1000));
+    const killTree = async (pid: number) => {
+      killed.push(pid);
+      return null;
+    };
+
+    expect(await runner({ processes, killTree }).stop({ sessionId: 'sb-1', shortId: null, lastTree: [{ pid: 1000, created: '10' }, { pid: 2000, created: '20' }, { pid: 3000, created: '30' }] }, 'operator')).toBeNull();
+    expect(killed).toEqual([2000]);
+  });
+
+  it('ends the earliest member when each has another above it, and stops after one round per member', async () => {
+    let reads = 0;
+    const killed: number[] = [];
+    const processes = async () => {
+      reads += 1;
+      return [{ pid: 100, ppid: 101, created: '5', memoryBytes: 0 }, { pid: 101, ppid: 100, created: '5', memoryBytes: 0 }];
+    };
+    const killTree = async (pid: number) => {
+      killed.push(pid);
+      return { error: 'Access is denied.' };
+    };
+
+    expect(await runner({ processes, killTree }).stop({ sessionId: 'sb-1', shortId: null, lastTree: [{ pid: 100, created: '5' }, { pid: 101, created: '5' }] }, 'operator')).toEqual({ error: 'Processes 100, 101 could not be ended: Access is denied.' });
+    expect(killed).toEqual([100, 101]);
+    expect(reads).toBe(3);
+  });
+
+  it('ends a nested tree of leftovers with one kill of its topmost member and two reads of the table', async () => {
+    const tree = Array.from({ length: 52 }, (_, index) => ({ pid: 100 + index, created: String(1000 + index) }));
+    let alive = true;
+    let reads = 0;
+    const killed: number[] = [];
+    const processes = async () => {
+      reads += 1;
+      return alive ? tree.map((member, index) => ({ pid: member.pid, ppid: index === 0 ? 1 : 100, created: member.created, memoryBytes: 0 })) : [];
+    };
+    const killTree = async (pid: number) => {
+      killed.push(pid);
+      alive = false;
+      return null;
+    };
+
+    expect(await runner({ processes, killTree }).stop({ sessionId: 'sb-1', shortId: null, lastTree: tree }, 'operator')).toBeNull();
+    expect(killed).toEqual([100]);
+    expect(reads).toBe(2);
+  });
+
+  it('fails a leftover stop when the process table cannot be read', async () => {
+    expect(await runner({ processes: async () => ({ error: 'Access is denied.' }) }).stop({ sessionId: 'sb-1', shortId: null, lastTree: TREE }, 'operator')).toEqual({ error: 'The process table could not be read: Access is denied.' });
   });
 });

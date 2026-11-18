@@ -223,6 +223,8 @@ export interface Session {
   codeMode?: boolean;
   /** The launch of a Code Mode session's current process, passed as `SWITCHBOARD_LAUNCH`; only markers of this launch count (PRD R93). */
   launchId?: string | null;
+  /** The process tree the holder last listed for a Code Mode session, pids with creation times; the resume guard checks it (PRD R95). */
+  lastTree?: Array<{ pid: number; created: string }> | null;
 }
 
 /**

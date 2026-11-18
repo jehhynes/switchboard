@@ -5,11 +5,14 @@ import { ClaudeRunner } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
+import { recordPath } from '@switchboard/holder';
+import type { SessionEntry } from '@switchboard/holder';
 import { markOf } from '@switchboard/core/group';
 import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, Ticket } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
-import { INPUT_SETTLE_MS, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import type { HolderConnection } from '../src/holder.js';
+import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 
@@ -254,7 +257,7 @@ class FakeCodex {
 }
 
 /** A null `codex` leaves the runtime to build its own Codex runner. */
-function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex: FakeCodex | null = new FakeCodex(), named: Record<string, FakeSource> = {}) {
+function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'], codex: FakeCodex | null = new FakeCodex(), named: Record<string, FakeSource> = {}, extra: Partial<RuntimeDeps> = {}) {
   const store = Store.open(':memory:');
   const cli = new FakeCli();
 
@@ -282,6 +285,7 @@ function setup(cfg = config(), now = () => T0, runners?: RuntimeDeps['runners'],
       configDir: join(home, 'cfg'),
       log: (line) => logs.push(line),
       runners: { ...(codex === null ? {} : { codex: codex.runner() }), ...runners },
+      ...extra,
     },
     cfg,
   );
@@ -2855,5 +2859,513 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(await runtime.report({ sessionId: 's2', kind: 'stage', stage: 'testing' } as never, 's2-native')).toEqual({ refused: null });
     expect(store.workItem(store.session('s2')!.workItemId)?.stage).toBe('testing');
     runtime.stop();
+  });
+
+  describe('attach (PRD R95)', () => {
+    const HOLDER = { port: 4100, token: 'holder-token', session: 's1' };
+
+    function held(session: string, exited = false): SessionEntry {
+      return { session, label: 'l', pid: 900, cwd: 'D:/git/widgets', startedAt: T0, lastInputAt: null, lastOutputAt: null, exitedAt: exited ? T0 : null, exitCode: exited ? 0 : null, clients: 0, memoryBytes: null };
+    }
+
+    /** A held Code Mode session s1 and a holder whose list the test sets; `now` is settable. */
+    async function attaching(codeMode: SessionRunner, cfg = config({ installHooks: true })) {
+      const clock = { now: T0 };
+      const entries: SessionEntry[] = [held('s1')];
+      const connection: HolderConnection = {
+        welcome: { protocol: 1, build: 'b', pid: 4243 },
+        compatible: true,
+        spawn: async () => ({ session: 's', pid: 1 }),
+        list: async () => entries,
+        kill: async () => 0,
+        screen: async () => ({ head: '', text: '' }),
+        shutdown: async () => {},
+        onClose: () => {},
+        close: () => {},
+      };
+
+      mkdirSync(join(home, '.switchboard'), { recursive: true });
+      writeFileSync(recordPath(join(home, '.switchboard')), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+
+      const context = setup(cfg, () => clock.now, { claude: fakeRunner(), codeMode }, new FakeCodex(), {}, { holder: { connect: async () => connection, lockHeld: async () => true } });
+
+      context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+      await context.runtime.settled();
+      context.store.updateSession('s1', { codeMode: true, launchId: 'launch-1' });
+
+      return { ...context, clock, entries };
+    }
+
+    /** The session's process has exited and the flow has ended it. */
+    function endIt(context: { store: Store; entries: SessionEntry[] }): void {
+      context.entries.splice(0, context.entries.length, held('s1', true));
+      context.store.updateSession('s1', { state: 'ended', endedAt: T0, released: true });
+    }
+
+    const idleObservation: SessionRunner['observe'] = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) });
+
+    function resumer(overrides: Partial<SessionRunner> = {}): SessionRunner & { stops: string[]; starts: string[]; resumes: Array<{ id: string; permissionMode: string; model: string | null; label: string }> } {
+      const resumes: Array<{ id: string; permissionMode: string; model: string | null; label: string }> = [];
+
+      return {
+        ...fakeRunner({
+          resumeHeld: async (session, permissionMode, model, label) => {
+            resumes.push({ id: session.id, permissionMode, model, label });
+            return { launchId: `launch-${resumes.length + 1}` };
+          },
+          leftovers: async () => [],
+          ...overrides,
+        }),
+        resumes,
+      };
+    }
+
+    it('answers the holder of a live session at once, without resuming it', async () => {
+      const codeMode = resumer();
+      const { runtime } = await attaching(codeMode);
+
+      expect(await runtime.attach('s1')).toEqual(HOLDER);
+      expect(codeMode.resumes).toEqual([]);
+      runtime.stop();
+    });
+
+    it('refuses an unknown session with 404 and a background session with 409', async () => {
+      const { runtime, store } = await attaching(resumer());
+
+      expect(await runtime.attach('nope')).toEqual({ refused: 'No session nope.', status: 404 });
+      store.updateSession('s1', { codeMode: false });
+      expect(await runtime.attach('s1')).toEqual({ refused: 'Session s1-short is not a Code Mode session; open it in Claude.', status: 409 });
+      runtime.stop();
+    });
+
+    it('refuses with the holder lookup failure', async () => {
+      const { runtime, store } = setup(config({ installHooks: true }), () => T0, { claude: fakeRunner(), codeMode: resumer() }, new FakeCodex(), {}, { holder: { connect: async () => Promise.reject(new Error('refused')), lockHeld: async () => true } });
+
+      runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+      await runtime.settled();
+      store.updateSession('s1', { codeMode: true, launchId: 'launch-1' });
+      mkdirSync(join(home, '.switchboard'), { recursive: true });
+      writeFileSync(recordPath(join(home, '.switchboard')), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+
+      expect(await runtime.attach('s1')).toEqual({ refused: 'The terminal holder holds its lock but does not answer.', status: 409 });
+      runtime.stop();
+    });
+
+    it("resumes an ended session with its work item's mode and model and a label as its start had, then answers the holder", async () => {
+      const codeMode = resumer();
+      const context = await attaching(codeMode, config({ installHooks: true, permissionMode: 'auto', model: 'haiku' }));
+
+      endIt(context);
+      expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+      expect(codeMode.resumes).toEqual([{ id: 's1', permissionMode: 'auto', model: 'haiku', label: 'switchboard · ad-hoc · adhoc 1 s1-native' }]);
+      expect(context.store.session('s1')).toMatchObject({ state: 'idle', released: false, launchId: 'launch-2' });
+      expect(context.logs).toContain('session s1 resumed in the terminal holder');
+      context.runtime.stop();
+    });
+
+    it('ends a session the holder no longer lists with a roster read before resuming it, and refuses one still listed by the roster', async () => {
+      const codeMode = resumer({ observe: async () => ({ sessions: [] }) });
+      const context = await attaching(codeMode);
+
+      context.entries.splice(0, 1);
+      expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+      expect(codeMode.resumes.map((resume) => resume.id)).toEqual(['s1']);
+
+      const still = resumer();
+      const other = await attaching(still);
+
+      other.entries.splice(0, 1);
+      expect(await other.runtime.attach('s1')).toEqual({ refused: 'Session s1-short is still ending; try again.', status: 409 });
+      expect(still.resumes).toEqual([]);
+      context.runtime.stop();
+      other.runtime.stop();
+    });
+
+    it("passes an ended session's last tree to the runner for Stop, and clears it once the processes have ended", async () => {
+      const targets: unknown[] = [];
+      const codeMode = resumer({
+        stop: async (target) => {
+          targets.push(target);
+          return null;
+        },
+      });
+      const context = await attaching(codeMode);
+      const tree = [{ pid: 100, created: '1' }];
+
+      endIt(context);
+      context.store.updateSession('s1', { lastTree: tree });
+      expect(context.runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
+      await context.runtime.settled();
+
+      expect(targets).toEqual([{ type: 'stop-session', sessionId: 's1', provider: 'claude', shortId: 's1-short', reason: 'operator', codeMode: true, lastTree: tree }]);
+      expect(context.store.session('s1')!.lastTree).toBeNull();
+      context.runtime.stop();
+    });
+
+    it('ends a resumed process and refuses the attach when Delete removed the session during the spawn', async () => {
+      const spawning = deferred();
+      const spawned = deferred();
+      const codeMode = resumer();
+      const context = await attaching(codeMode);
+      const resumeHeld = codeMode.resumeHeld!;
+
+      codeMode.resumeHeld = async (...args) => {
+        spawning.resolve();
+        await spawned.promise;
+        return resumeHeld(...args);
+      };
+      endIt(context);
+
+      const attach = context.runtime.attach('s1');
+
+      await spawning.promise;
+      expect(context.runtime.send({ type: 'delete', workItemId: 1 }).refused).toBeNull();
+      await context.runtime.settled();
+      expect(codeMode.stops).toEqual([]);
+      spawned.resolve();
+
+      expect(await attach).toEqual({ refused: 'No session s1.', status: 404 });
+      expect(codeMode.stops).toEqual(['s1']);
+      expect(context.logs).toContain('session s1 changed while it resumed; ended the resumed process');
+      context.runtime.stop();
+    });
+
+    it('does not end a session resumed while a roster read that left it out was running', async () => {
+      const listed = deferred();
+      const release = deferred();
+      const codeMode = resumer();
+      const context = await attaching(codeMode);
+
+      endIt(context);
+      context.runtime.send({ type: 'adhoc', prompt: 'other', repoRoot: 'D:/git/widgets', start: true });
+      await context.runtime.settled();
+      context.store.updateSession('s2', { codeMode: true, launchId: 'launch-s2' });
+      context.entries.push(held('s2'));
+      codeMode.observe = async (sessions) => {
+        const live = sessions.filter((session) => context.entries.some((entry) => entry.session === session.id && entry.exitedAt === null));
+
+        listed.resolve();
+        await release.promise;
+        return { sessions: live.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) };
+      };
+
+      const read = context.runtime.readRoster();
+
+      await listed.promise;
+      expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+      release.resolve();
+      await read;
+
+      expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 'launch-2', released: false });
+      context.runtime.stop();
+    });
+
+    it('waits for an operator Stop to reach the flow before resuming the stopped session', async () => {
+      const killed = deferred();
+      const reported = deferred();
+      const codeMode = resumer({ observe: idleObservation });
+      const context = await attaching(codeMode);
+      let discoveries = 0;
+
+      codeMode.stop = async () => {
+        context.entries.splice(0, 1, held('s1', true));
+        return null;
+      };
+      context.runtime['findSetupWorktrees'] = async () => {
+        if (discoveries++ === 0) {
+          killed.resolve();
+          await reported.promise;
+        }
+      };
+      expect(context.runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
+      await killed.promise;
+
+      const attach = context.runtime.attach('s1');
+
+      await new Promise((done) => setImmediate(done));
+      expect(codeMode.resumes).toEqual([]);
+      reported.resolve();
+
+      expect(await attach).toEqual(HOLDER);
+      await context.runtime.settled();
+      expect(codeMode.resumes.map((resume) => resume.id)).toEqual(['s1']);
+      expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 'launch-2', released: false });
+      context.runtime.stop();
+    });
+
+    it('waits for a Stop that starts while the attach looks up the holder, then resumes the stopped session', async () => {
+      const looking = deferred();
+      const found = deferred();
+      const killed = deferred();
+      const reported = deferred();
+      const codeMode = resumer({ observe: idleObservation });
+      const context = await attaching(codeMode);
+      const holder = context.runtime['holder'];
+      const find = holder.find.bind(holder);
+      let discoveries = 0;
+
+      holder.find = async (start) => {
+        const result = await find(start);
+
+        looking.resolve();
+        await found.promise;
+        return result;
+      };
+      codeMode.stop = async () => {
+        context.entries.splice(0, 1, held('s1', true));
+        return null;
+      };
+      context.runtime['findSetupWorktrees'] = async () => {
+        if (discoveries++ === 0) {
+          killed.resolve();
+          await reported.promise;
+        }
+      };
+
+      const attach = context.runtime.attach('s1');
+
+      await looking.promise;
+      expect(context.runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
+      await killed.promise;
+      found.resolve();
+      await new Promise((done) => setImmediate(done));
+      expect(codeMode.resumes).toEqual([]);
+      reported.resolve();
+
+      expect(await attach).toEqual(HOLDER);
+      await context.runtime.settled();
+      expect(codeMode.resumes.map((resume) => resume.id)).toEqual(['s1']);
+      expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 'launch-2', released: false });
+      context.runtime.stop();
+    });
+
+    it('leaves a session being resumed out of a roster read that lists its new process', async () => {
+      const codeMode = resumer();
+      const context = await attaching(codeMode);
+      const resumeHeld = codeMode.resumeHeld!;
+
+      endIt(context);
+      context.runtime.send({ type: 'adhoc', prompt: 'other', repoRoot: 'D:/git/widgets', start: true });
+      await context.runtime.settled();
+      context.store.updateSession('s2', { codeMode: true, launchId: 'launch-s2' });
+      context.entries.push(held('s2'));
+      codeMode.observe = async (sessions) => ({
+        sessions: sessions.filter((session) => context.entries.some((entry) => entry.session === session.id && entry.exitedAt === null)).map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })),
+      });
+      codeMode.resumeHeld = async (...args) => {
+        context.entries.splice(0, 1, held('s1'));
+        await context.runtime.readRoster();
+        return resumeHeld(...args);
+      };
+
+      expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+      expect(codeMode.stops).toEqual([]);
+      expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 'launch-2', released: false });
+      context.runtime.stop();
+    });
+
+    it('stores the launch before the spawn, so a hub restarted during it holds the live process under that launch', async () => {
+      const spawned = deferred();
+      const never = deferred();
+      const codeMode = resumer();
+      const context = await attaching(codeMode);
+      const launches: Array<string | undefined> = [];
+
+      codeMode.newLaunchId = () => 'launch-stored';
+      codeMode.resumeHeld = async (session, _mode, _model, _label, launchId) => {
+        launches.push(launchId);
+        context.entries.splice(0, 1, held('s1'));
+        spawned.resolve();
+        await never.promise;
+        return { launchId: launchId! };
+      };
+      endIt(context);
+      void context.runtime.attach('s1');
+      await spawned.promise;
+      expect(context.store.session('s1')).toMatchObject({ state: 'ended', launchId: 'launch-stored' });
+      context.runtime.stop();
+
+      const restarted = new Runtime(context.runtime['deps'], context.runtime['config']);
+
+      try {
+        expect(await restarted.attach('s1')).toEqual(HOLDER);
+        expect(launches).toEqual(['launch-stored']);
+        expect(context.store.session('s1')).toMatchObject({ state: 'idle', released: false, launchId: 'launch-stored' });
+        expect(context.logs).toContain('session s1 is live in the terminal holder under launch launch-stored; holding it again');
+      } finally {
+        restarted.stop();
+      }
+    });
+
+    it('holds again an ended session that a roster read finds live under its stored launch', async () => {
+      const codeMode = resumer({ observe: async (sessions) => ({ sessions: sessions.filter((session) => context.entries.some((entry) => entry.session === session.id && entry.exitedAt === null)).map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) }) });
+      const context = await attaching(codeMode);
+
+      endIt(context);
+      context.store.updateSession('s1', { launchId: 'launch-stored' });
+      context.runtime.send({ type: 'adhoc', prompt: 'other', repoRoot: 'D:/git/widgets', start: true });
+      await context.runtime.settled();
+      context.store.updateSession('s2', { codeMode: true, launchId: 'launch-s2' });
+      context.entries.splice(0, 1, held('s1'), held('s2'));
+      await context.runtime.readRoster();
+
+      expect(context.store.session('s1')).toMatchObject({ state: 'idle', released: false, launchId: 'launch-stored' });
+      context.runtime.stop();
+    });
+
+    it('ignores a roster result for a session that Stop ended while the read ran', async () => {
+      const listed = deferred();
+      const release = deferred();
+      const codeMode = resumer();
+      const context = await attaching(codeMode);
+
+      codeMode.observe = async (sessions) => {
+        listed.resolve();
+        await release.promise;
+        return { sessions: sessions.map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) };
+      };
+
+      const read = context.runtime.readRoster();
+
+      await listed.promise;
+      expect(context.runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
+      await context.runtime.settled();
+      expect(context.store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
+      release.resolve();
+      await read;
+
+      expect(context.store.session('s1')).toMatchObject({ state: 'ended', released: true });
+      expect(context.store.workItem(1)).toMatchObject({ status: 'blocked', error: 'Stopped by you.' });
+      expect(context.logs.some((line) => line.includes('holding it again'))).toBe(false);
+      context.runtime.stop();
+    });
+
+    it('refuses a resume with hooks off', async () => {
+      const codeMode = resumer();
+      const context = await attaching(codeMode, config({ installHooks: false }));
+
+      endIt(context);
+      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Code Mode sessions need sessions.installHooks.', status: 409 });
+      expect(codeMode.resumes).toEqual([]);
+      context.runtime.stop();
+    });
+
+    it('refuses a resume while processes of the last run still run, or when they cannot be checked', async () => {
+      let left: Awaited<ReturnType<NonNullable<SessionRunner['leftovers']>>> = [{ pid: 100, created: '1' }, { pid: 101, created: '2' }];
+      const trees: unknown[] = [];
+      const codeMode = resumer({
+        leftovers: async (tree) => {
+          trees.push(tree);
+          return left;
+        },
+      });
+      const context = await attaching(codeMode);
+
+      endIt(context);
+      context.store.updateSession('s1', { lastTree: [{ pid: 100, created: '1' }, { pid: 101, created: '2' }, { pid: 102, created: '3' }] });
+      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Session s1-short still has 2 processes from its previous run (pids 100, 101). Stop them or wait for them to end.', status: 409 });
+      expect(trees).toEqual([[{ pid: 100, created: '1' }, { pid: 101, created: '2' }, { pid: 102, created: '3' }]]);
+
+      left = [{ pid: 100, created: '1' }];
+      expect(await context.runtime.attach('s1')).toMatchObject({ refused: 'Session s1-short still has 1 process from its previous run (pid 100). Stop them or wait for them to end.' });
+
+      left = { error: 'The process table could not be read: Access is denied.' };
+      expect(await context.runtime.attach('s1')).toEqual({ refused: 'The process table could not be read: Access is denied.', status: 409 });
+
+      left = [];
+      expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+      expect(codeMode.resumes).toHaveLength(1);
+      context.runtime.stop();
+    });
+
+    it('refuses with the reason a resume fails, and leaves the session ended', async () => {
+      const codeMode = resumer({ resumeHeld: async () => ({ error: 'The terminal holder did not start.' }) });
+      const context = await attaching(codeMode);
+
+      endIt(context);
+      expect(await context.runtime.attach('s1')).toEqual({ refused: 'The terminal holder did not start.', status: 409 });
+      expect(context.store.session('s1')).toMatchObject({ state: 'ended' });
+      context.runtime.stop();
+    });
+
+    it('resumes once for attaches made together', async () => {
+      const gate = deferred();
+      const codeMode = resumer();
+      const context = await attaching(codeMode);
+      const resumeHeld = codeMode.resumeHeld!;
+
+      codeMode.resumeHeld = async (...args) => {
+        await gate.promise;
+        return resumeHeld(...args);
+      };
+      endIt(context);
+
+      const attaches = [context.runtime.attach('s1'), context.runtime.attach('s1')];
+
+      gate.resolve();
+
+      expect(await Promise.all(attaches)).toEqual([HOLDER, HOLDER]);
+      expect(codeMode.resumes).toHaveLength(1);
+      context.runtime.stop();
+    });
+
+    it('defers an end that reads the terminals while an attach arrives, until the reservation expires', async () => {
+      let answer = (): void => {};
+      const codeMode = resumer({ heldActivity: () => new Promise((done) => (answer = () => done({ clients: 0, lastInputAt: null }))), observe: idleObservation });
+      const context = await attaching(codeMode);
+
+      context.store.updateSession('s1', { state: 'idle', releasing: true });
+      await context.runtime.readRoster();
+
+      const attach = context.runtime.attach('s1');
+
+      answer();
+      expect(await attach).toEqual(HOLDER);
+      await context.runtime.settled();
+
+      expect(codeMode.stops).toEqual([]);
+      expect(context.logs).toContain('end of held session s1 deferred: a terminal is attaching');
+
+      context.clock.now = T0 + ATTACH_RESERVATION_MS;
+      codeMode.heldActivity = async () => ({ clients: 0, lastInputAt: null });
+      await context.runtime.readRoster();
+      await context.runtime.settled();
+
+      expect(codeMode.stops).toEqual(['s1']);
+      context.runtime.stop();
+    });
+
+    it('waits for an end in progress, then resumes the ended session', async () => {
+      let ended = (): void => {};
+      const order: string[] = [];
+      const codeMode = resumer({ heldActivity: async () => ({ clients: 0, lastInputAt: null }), observe: idleObservation });
+      const context = await attaching(codeMode);
+      const resumeHeld = codeMode.resumeHeld!;
+
+      codeMode.stop = (target) =>
+        new Promise((done) => {
+          ended = () => {
+            order.push(`stop ${target.sessionId}`);
+            context.entries.splice(0, 1, held('s1', true));
+            done(null);
+          };
+        });
+      codeMode.resumeHeld = async (...args) => {
+        order.push(`resume ${args[0].id}`);
+        return resumeHeld(...args);
+      };
+      context.store.updateSession('s1', { state: 'idle', releasing: true });
+      await context.runtime.readRoster();
+
+      const attach = context.runtime.attach('s1');
+
+      await vi.waitFor(() => expect(order).toEqual([]));
+      ended();
+
+      expect(await attach).toEqual(HOLDER);
+      expect(order).toEqual(['stop s1', 'resume s1']);
+      expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 'launch-2' });
+      context.runtime.stop();
+    });
   });
 });

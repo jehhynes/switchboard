@@ -348,6 +348,10 @@ describe('History model', () => {
         ]),
         { text: 'Continuing in the background failed', detail: 'Claude started a copy as 4df6b678.', lines: ['Status: Running → Blocked'], tone: 'error' },
       ],
+      [
+        event('held-resumed', 'hub', { launchId: 'launch-2' }, [change('session', 'update', { state: ['ended', 'idle'], released: [true, false], endedAt: [5, null] }, { sessionId: 's1' })]),
+        { text: 'Session abc12345 resumed in the terminal holder', lines: [], category: 'session' },
+      ],
       [event('move-cancelled', 'hub', null, []), { text: 'Session abc12345 stayed in its tab, whose process did not exit', lines: [], category: 'session' }],
       [event('start', 'operator', { guidance: 'Check the 2024 thread.' }, [], null), { text: 'You started it with guidance', detail: 'Check the 2024 thread.', category: 'you', tone: 'accent' }],
       [event('pick', 'operator', { guidance: 'Reply in Spanish.' }, [], null), { text: 'You picked it from the pool with guidance', detail: 'Reply in Spanish.', category: 'you' }],

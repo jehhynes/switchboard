@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { buildOf, createHubApp, findHub, gitBashRoot, handledBody, postToHub, recordedHubPid, registerTitle, reportBody, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, createHubApp, findHub, gitBashRoot, handledBody, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -155,16 +155,48 @@ async function register(home: string, argv: readonly string[]): Promise<number> 
   return 0;
 }
 
+/** Attaches this terminal to a Code Mode session until input ends (architecture.md § Attach client). Exit codes: 0 done, 1 usage. */
+function attach(home: string, argv: readonly string[]): Promise<number> {
+  if (argv.length !== 1 || argv[0] === '') {
+    process.stderr.write('Usage: attach <session ID>\n');
+    return Promise.resolve(1);
+  }
+
+  const stdin = process.stdin;
+
+  stdin.setEncoding('utf8');
+
+  return runAttach({
+    sessionId: argv[0]!,
+    post: async (body) => {
+      const hub = await findHub(home);
+      const reply = hub === null ? null : await postToHub(hub, '/attach', body, ATTACH_TIMEOUT_MS);
+
+      return reply ?? `${noHub(home)}.`;
+    },
+    size: () => ({ cols: process.stdout.columns || 120, rows: process.stdout.rows || 40 }),
+    write: (text) => process.stdout.write(text),
+    raw: (on) => {
+      if (stdin.isTTY) {
+        stdin.setRawMode(on);
+      }
+    },
+    onInput: (listener) => stdin.on('data', listener),
+    onResize: (listener) => process.stdout.on('resize', listener),
+    onEnd: (listener) => stdin.on('end', listener),
+  });
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home.
     const home = flag(argv, 'home') || (bundle === undefined ? homedir() : dirname(dirname(resolve(bundle))));
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    return argv[0] === 'report' ? report(home, rest) : register(home, rest);
+    return argv[0] === 'report' ? report(home, rest) : argv[0] === 'register' ? register(home, rest) : attach(home, rest);
   }
 
   const home = flag(argv, 'home') || homedir();
@@ -179,12 +211,20 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   const idle = Number(flag(argv, 'idle-ms'));
+  const codeModeIdle = flag(argv, 'code-mode-idle-ms');
+
+  if (codeModeIdle !== null && !/^[1-9]\d*$/.test(codeModeIdle)) {
+    process.stderr.write(`--code-mode-idle-ms takes a whole number of milliseconds above 0, not "${codeModeIdle}".\n`);
+
+    return 1;
+  }
+
   // --browser-port=0 serves no browser endpoint, for a second hub such as a test's.
   const browserPort = flag(argv, 'browser-port');
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
   const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const configDir = resolve(flag(argv, 'config') || switchboardHome(home));
-  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }) });
+  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }) });
 
   if ('existing' in result) {
     process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);
