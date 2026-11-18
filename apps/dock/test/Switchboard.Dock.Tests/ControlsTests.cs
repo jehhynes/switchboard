@@ -321,7 +321,7 @@ public sealed class ControlsTests
         Dispatcher.UIThread.RunJobs();
         Assert.Equal("", model.Filter);
         Assert.False(window.FindControl<TextBox>("SearchBox")!.IsVisible);
-        Assert.Equal(7, VisibleTitles(window).Count);
+        Assert.Equal(8, VisibleTitles(window).Count);
     }
 
     [AvaloniaFact]
@@ -341,7 +341,7 @@ public sealed class ControlsTests
         Click(window.FindControl<Button>("SearchButton")!);
         Assert.False(box.IsVisible);
         Assert.Equal("", model.Filter);
-        Assert.Equal(7, VisibleTitles(window).Count);
+        Assert.Equal(8, VisibleTitles(window).Count);
     }
 
     [AvaloniaFact]
@@ -358,7 +358,7 @@ public sealed class ControlsTests
         Click(window.FindControl<Button>("ClearSearchButton")!);
         Assert.True(box.IsVisible);
         Assert.Equal("", model.Filter);
-        Assert.Equal(7, VisibleTitles(window).Count);
+        Assert.Equal(8, VisibleTitles(window).Count);
         Assert.Equal("", box.Text);
         Assert.True(box.IsFocused);
     }
@@ -551,7 +551,7 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Ticket Volume Report", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Ticket Volume Report", "Held Sessions", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
         Assert.All(more.ContextMenu.Items.OfType<MenuItem>(), (item) => Assert.NotNull(item.Icon));
     }
 
@@ -563,7 +563,7 @@ public sealed class ControlsTests
 
         Click(more);
 
-        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Show Hub Log"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Held Sessions", "Show Hub Log"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
     }
 
     [AvaloniaFact]

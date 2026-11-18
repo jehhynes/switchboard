@@ -3278,6 +3278,36 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       context.runtime.stop();
     });
 
+    it('offers Stop on the row while the guard refuses, until a leftover stop or a resume succeeds (PRD R95)', async () => {
+      let left: Awaited<ReturnType<NonNullable<SessionRunner['leftovers']>>> = [{ pid: 100, created: '1' }];
+      const codeMode = resumer({ leftovers: async () => left });
+      const context = await attaching(codeMode);
+      const shown = () => context.runtime.snapshot().workItems[0]!;
+      const tree = [{ pid: 100, created: '1' }];
+
+      endIt(context);
+      context.store.updateSession('s1', { lastTree: tree });
+      expect(shown().leftovers).toBeUndefined();
+      expect(controlsOf(shown()).map((control) => control.label)).not.toContain('Stop');
+
+      await context.runtime.attach('s1');
+      expect(shown().leftovers).toEqual([100]);
+      expect(controlsOf(shown()).find((control) => control.label === 'Stop')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 1 } });
+
+      expect(context.runtime.send({ type: 'stop', workItemId: 1 }).refused).toBeNull();
+      await context.runtime.settled();
+      expect(context.store.session('s1')?.lastTree ?? null).toBeNull();
+      expect(shown().leftovers).toBeUndefined();
+
+      context.store.updateSession('s1', { lastTree: tree });
+      await context.runtime.attach('s1');
+      expect(shown().leftovers).toEqual([100]);
+      left = [];
+      expect(await context.runtime.attach('s1')).toEqual(HOLDER);
+      expect(shown().leftovers).toBeUndefined();
+      context.runtime.stop();
+    });
+
     it('refuses with the reason a resume fails, and leaves the session ended', async () => {
       const codeMode = resumer({ resumeHeld: async () => ({ error: 'The terminal holder did not start.' }) });
       const context = await attaching(codeMode);

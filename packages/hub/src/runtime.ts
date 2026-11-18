@@ -126,6 +126,8 @@ export interface WorkItemView extends WorkItem {
   reopenable: boolean;
   /** The playbooks Start with guidance… offers an `unstarted` work item, its own among them; empty otherwise (PRD R35). */
   playbookChoices: string[];
+  /** The pids that last kept the latest session, an ended Code Mode session, from resuming, which Stop ends (PRD R95); absent otherwise. */
+  leftovers?: number[];
 }
 
 /** A pool ticket the operator may pick, with its pool triage (PRD R47). */
@@ -264,6 +266,8 @@ export class Runtime {
   private heldError: string | null = null;
   /** Orphans logged, so each is logged once. */
   private readonly orphansLogged = new Set<string>();
+  /** The leftover pids the resume guard last refused an attach for, per ended Code Mode session, until a resume or a leftover stop succeeds (PRD R95). */
+  private readonly guarded = new Map<string, number[]>();
 
   constructor(
     private readonly deps: RuntimeDeps,
@@ -1488,6 +1492,7 @@ export class Runtime {
           triage: triages.at(-1) ?? null,
           focus: effectiveFocus(triages, ticket.url),
           sessions: store.sessionsFor(item.id).map(({ lastTree: _lastTree, ...session }) => session),
+          ...this.leftoversOf(store.sessionsFor(item.id).at(-1)),
           worktree: store.worktreeFor(item.ticketId),
           links: store.linksFor(item.ticketId),
           pastes: store.pastesFor(item.id),
@@ -1539,6 +1544,13 @@ export class Runtime {
     const tracked = work.catch((error: unknown) => this.deps.log(`action failed: ${String(error)}`)).finally(() => this.pending.delete(tracked));
 
     this.pending.add(tracked);
+  }
+
+  /** The pids the resume guard found for the latest session, while it is an ended Code Mode session with a stored tree (PRD R95). */
+  private leftoversOf(latest: Session | undefined): { leftovers?: number[] } {
+    const pids = latest === undefined ? undefined : this.guarded.get(latest.id);
+
+    return pids === undefined || latest?.codeMode !== true || latest.state !== 'ended' || (latest.lastTree?.length ?? 0) === 0 ? {} : { leftovers: pids };
   }
 
   private changed(): void {
@@ -1917,6 +1929,9 @@ export class Runtime {
       if (left.length > 0) {
         const pids = left.map((member) => member.pid).join(', ');
 
+        this.guarded.set(sessionId, left.map((member) => member.pid));
+        this.changed();
+
         return refuse(`Session ${name} still has ${left.length} ${left.length === 1 ? 'process' : 'processes'} from its previous run (${left.length === 1 ? 'pid' : 'pids'} ${pids}). Stop them or wait for them to end.`);
       }
 
@@ -1937,6 +1952,7 @@ export class Runtime {
 
     if (session?.codeMode === true && session.state === 'ended' && session.launchId != null && !this.resuming.has(sessionId)) {
       this.deps.log(`session ${sessionId} is live in the terminal holder under launch ${session.launchId}; holding it again`);
+      this.guarded.delete(sessionId);
       this.send({ type: 'held-resumed', sessionId, launchId: session.launchId });
     }
   }
@@ -1983,6 +1999,7 @@ export class Runtime {
       }
 
       this.deps.log(`session ${sessionId} resumed in the terminal holder`);
+      this.guarded.delete(sessionId);
       this.send({ type: 'held-resumed', sessionId, launchId: resumed.launchId });
 
       return answer();
@@ -2207,6 +2224,10 @@ export class Runtime {
     const failure = await this.runners[runnerKey(action)].stop(leftovers === true ? { ...target, lastTree: this.deps.store.session(action.sessionId)?.lastTree ?? [] } : target, action.reason);
 
     if (failure === null) {
+      if (leftovers === true) {
+        this.guarded.delete(action.sessionId);
+      }
+
       await this.findSetupWorktrees();
     } else if (this.deps.store.session(action.sessionId) === null) {
       // Delete removed the session row, so the flow has nowhere to show the failure (PRD R76).

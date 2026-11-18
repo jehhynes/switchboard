@@ -319,6 +319,54 @@ public sealed class TerminalTests
         Assert.Equal(["-w", "new", "--title", $"Issue <8> · sb:{Name}", "--suppressApplicationTitle", "-d", "D:/git/widgets", "--", "claude", "attach", "aaaa1111"], start.ArgumentList);
     }
 
+    /// <summary>The recorded Code Mode row's attach terminal as the hub's dock view runs it: hub.js with Node.js.</summary>
+    static DockTerminal AttachTerminal(string node) =>
+        Fixtures.View.Held![1].Terminal! with { Executable = node, Args = ["C:/Users/op/.switchboard/hub.js", "attach", "cm15"] };
+
+    [Fact]
+    public void WindowsTerminal_CodeModeAttach_RunsHubJsWithNodeInTheSessionFolder()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "nodejs");
+        var shown = AttachTerminal(Path.Combine(folder, "node.exe"));
+        var start = Terminals.WindowsTerminal(shown, new Hashtable { ["Path"] = "C:/Windows", ["VSCODE_PID"] = "1", ["CLAUDECODE"] = "1" });
+
+        Assert.Equal(["-w", "new", "--title", shown.Title, "--suppressApplicationTitle", "-d", "D:/git/widgets", "--", Path.Combine(folder, "node.exe"), "C:/Users/op/.switchboard/hub.js", "attach", "cm15"], start.ArgumentList);
+        Assert.Equal($"{folder}{Path.PathSeparator}C:/Windows", start.Environment["Path"]);
+        Assert.False(start.Environment.ContainsKey("VSCODE_PID"));
+        Assert.False(start.Environment.ContainsKey("CLAUDECODE"));
+    }
+
+    [Fact]
+    public async Task Terminal_CodeModeFromTheHeldSessionsWindow_OpensItWithNoRowAndShowsTheOneAlreadyOpen()
+    {
+        var shown = AttachTerminal("node");
+
+        windows.Terminals[shown.Name] = (54, 1);
+        Assert.Null(await Switcher().Terminal(null, shown, Cancel));
+        Assert.Equal(["C:/Users/op/.switchboard/hub.js", "attach", "cm15"], Assert.Single(terminal.Opened).Args);
+
+        Assert.Null(await Switcher().Terminal(null, shown, Cancel));
+        Assert.Single(terminal.Opened);
+        Assert.Equal(["show 54", "show 54"], windows.Calls);
+        Assert.Empty(hub.Calls);
+    }
+
+    [Fact]
+    public async Task Click_CodeModeWithReview_OpensTheAttachTerminalNamedByItsSwitchboardId()
+    {
+        var shown = AttachTerminal("node");
+        var row = Fixtures.Row("item:15") with { Open = new DockOpen("terminal", null, shown.SessionId, shown.Cwd, null, "claude", shown.Args, shown.Name, shown.Title, null, false, "node", true), Main = "Answer in terminal" };
+
+        windows.Terminals[shown.Name] = (55, 1);
+        Assert.Null(await Switcher().Click(row, Cancel));
+
+        var opened = Assert.Single(terminal.Opened);
+
+        Assert.Equal(("node", shown.Args, shown.Name, true), (opened.Executable, opened.Args, opened.Name, opened.CodeMode));
+        Assert.EndsWith("-cm15", opened.Name);
+        Assert.Equal(["show 55"], windows.Calls);
+    }
+
     [Fact]
     public void CliEnvironment_DropsVsCodeAndSessionVariablesAndPutsTheCliFolderFirstOnPath()
     {

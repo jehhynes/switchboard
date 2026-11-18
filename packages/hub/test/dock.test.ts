@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dockView, sourceGroups, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
 import { CONTROL_GLYPHS } from '../src/rows.js';
+import type { HeldSession } from '../src/held.js';
 import type { Snapshot, WorkItemView } from '../src/runtime.js';
 import { item, NOW, pool, session, snapshot, triage } from './views.js';
 
@@ -42,11 +43,9 @@ describe('dockView', () => {
     ]);
   });
 
-  it("passes the snapshot's held sessions on, and leaves them out when there are none (PRD R94)", () => {
-    const held = [{ session: 'o1', label: 'x', workItemId: null, key: null, nativeSessionId: null, cwd: 'D:/git/widgets', state: 'live', idleSince: NOW, memoryBytes: null, clients: 0, exitedAt: null, exitCode: null, orphan: true }];
-
-    expect(dockView(snapshot([], { held }), NOW, W).held).toEqual(held);
+  it("leaves out the held sessions and their note when the holder holds none (PRD R94)", () => {
     expect('held' in dockView(snapshot([]), NOW, W)).toBe(false);
+    expect('heldNote' in dockView(snapshot([]), NOW, W)).toBe(false);
   });
 
   it('lists the groups in order, with Snoozed before Done and only when it has rows', () => {
@@ -469,11 +468,19 @@ describe('dockView', () => {
           }),
           item(13, { status: 'running', readyAt: NOW - 5 * 3_600_000, orderAt: NOW - 6 * 3_600_000, stage: 'posting', stageAt: NOW - 60_000, sessions: [session({ cwd: 'D:/git/widgets' })] }),
           item(14, { status: 'failed', error: 'Setup ended without a worktree.', statusAt: NOW - 600_000 }),
+          item(15, { sessions: [session({ id: 'cm15', workItemId: 15, codeMode: true, state: 'waiting', nativeSessionId: 'eeee5555-native', shortId: 'eeee5555', cwd: 'D:/git/widgets' })] }),
           // Done rows carry their date band; 12:00 UTC less a minute is the same local day in any zone within ±11 hours.
           item(11, { status: 'done', doneAt: NOW - 60_000 }),
           item(12, { status: 'done', doneAt: NOW - 30 * 86_400_000 }),
         ],
-        { pool: [pool(4)], sourceStates: [{ name: 'github', kind: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', enabled: false }] },
+        {
+          pool: [pool(4)],
+          sourceStates: [{ name: 'github', kind: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', enabled: false }],
+          held: [
+            { session: 'o1', label: 'switchboard · ad-hoc · adhoc 9 9273f594-1111', workItemId: null, key: 'adhoc 9', nativeSessionId: '9273f594-1111', cwd: 'D:/scratch', state: 'live', idleSince: NOW - 3 * 60_000, memoryBytes: 52_428_800, clients: 0, exitedAt: null, exitCode: null, orphan: true },
+            { session: 'cm15', label: 'switchboard · dev:develop · gh 115 eeee5555-native', workItemId: 15, key: 'gh 115', nativeSessionId: 'eeee5555-native', cwd: 'D:/git/widgets', state: 'waiting', idleSince: NOW - 125 * 60_000, memoryBytes: 314_572_800, clients: 1, exitedAt: null, exitCode: null, orphan: false },
+          ],
+        },
       ),
       NOW,
       W,
@@ -578,6 +585,98 @@ describe('dockView with dock.openVSCode review (PRD R71)', () => {
     expect(row(ended).terminal).toBeNull();
     expect(row(ended).commands.map((command) => command.label)).toContain('Open in terminal');
     expect(row(ended).open).toEqual({ type: 'session', sessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', provider: 'claude' });
+  });
+});
+
+describe('dockView of Code Mode sessions (PRD R95)', () => {
+  const held = (patch: Partial<WorkItemView['sessions'][number]> = {}) => session({ codeMode: true, ...patch });
+  const shown = (entry: WorkItemView, patch: Partial<Snapshot> = {}): DockRow => dockView(snapshot([entry], patch), NOW, W).groups.flatMap((group) => group.rows)[0]!;
+  const base = windowOf(item(7, { sessions: [session()] }), W)!.name;
+  const attach = { provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', args: ['attach', 's1'], name: `${base}-s1`, title: `Issue <7> · sb:${base}-s1`, handoff: null, active: false, codeMode: true };
+  const open = { type: 'session', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude' };
+
+  it('with always, leaves a turn in progress running and opens the attach terminal in the item window on a wait, after the turn and once ended', () => {
+    expect(shown(item(7, { sessions: [held()] })).open).toBeNull();
+    expect(shown(item(7, { sessions: [held({ state: 'starting', shortId: null })] })).open).toBeNull();
+    expect(shown(item(7, { sessions: [held({ state: 'waiting' })] })).open).toEqual(open);
+    expect(shown(item(7, { sessions: [held({ state: 'waiting', stateDetail: PERMISSION_PROMPT })] })).open).toEqual(open);
+    expect(shown(item(7, { status: 'awaiting-approval', sessions: [held({ state: 'idle', releasing: true })] })).open).toEqual(open);
+    expect(shown(item(7, { status: 'blocked', sessions: [held({ state: 'ended' })] })).open).toEqual(open);
+  });
+
+  it('with review, attaches in the terminal app to every held session, releasing included, and resumes an ended one unless its work is on review', () => {
+    const review = (entry: WorkItemView) => shown(entry, { openVSCode: 'review' }).open;
+
+    expect(review(item(7, { sessions: [held()] }))).toEqual({ type: 'terminal', ...attach });
+    expect(review(item(7, { status: 'awaiting-approval', sessions: [held({ state: 'idle', releasing: true })] }))).toEqual({ type: 'terminal', ...attach });
+    expect(review(item(7, { status: 'blocked', sessions: [held({ state: 'ended' })] }))).toEqual({ type: 'terminal', ...attach });
+    expect(review(item(7, { status: 'finished', sessions: [held({ state: 'ended' })] }))).toEqual(open);
+    expect(review(item(7, { sessions: [held({ state: 'starting', shortId: null })] }))).toEqual({ type: 'url', url: 'https://github.com/o/r/issues/107' });
+  });
+
+  it("names the terminal app window by the Switchboard session ID, so a Claude session ID change keeps it, and names Code Mode in the main control's tooltip", () => {
+    const waiting = shown(item(7, { sessions: [held({ state: 'waiting' })] }), { openTerminal: 'app' });
+    const changed = shown(item(7, { sessions: [held({ state: 'waiting', nativeSessionId: 'dddd4444-native', shortId: 'dddd4444' })] }), { openTerminal: 'app' });
+
+    expect(waiting.terminal).toEqual(attach);
+    expect(changed.terminal?.name).toBe(attach.name);
+    expect(waiting.main).toBe('Open in terminal');
+    expect(waiting.mainTitle).toBe('Open in terminal: attaches to the Code Mode session');
+    expect(shown(item(7, { sessions: [held({ state: 'waiting' })] }), { openVSCode: 'review' }).mainTitle).toBe('Answer in terminal: attaches to the Code Mode session');
+    expect(shown(item(7, { sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT })] })).mainTitle).toBe('Open in terminal');
+  });
+
+  it('sends the item window the attach terminal command, with no Open in Claude', () => {
+    const row = shown(item(7, { sessions: [held({ state: 'waiting' })] }));
+
+    expect(row.commands.find((command) => command.label === 'Open in terminal')?.command).toEqual({ type: 'terminal', provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false, codeMode: true });
+    expect(row.controls.map((control) => control.label)).toContain('Stop');
+    expect(row.open?.type).not.toBe('question');
+  });
+});
+
+describe('dockView held sessions (PRD R94)', () => {
+  const entry = (patch: Partial<HeldSession> = {}): HeldSession => ({ session: 's1', label: 'dev · gh 107 aaaa1111-native', workItemId: 7, key: 'gh 107', nativeSessionId: 'aaaa1111-native', cwd: 'D:/git/widgets', state: 'idle', idleSince: NOW - 125 * 60_000, memoryBytes: 300 * 1024 * 1024, clients: 1, exitedAt: null, exitCode: null, orphan: false, ...patch });
+  const owner = item(7, { sessions: [session({ codeMode: true, state: 'idle' })] });
+  const base = windowOf(owner, W)!.name;
+
+  it('lists each held session with its columns and the attach terminal of a session the store has', () => {
+    const view = dockView(snapshot([owner], { held: [entry()] }), NOW, W);
+
+    expect(view.held).toEqual([
+      {
+        session: 's1',
+        item: 'gh 107',
+        nativeSessionId: 'aaaa1111-native',
+        cwd: 'D:/git/widgets',
+        state: 'idle',
+        idle: '2h 5m',
+        memory: '300 MB',
+        clients: 1,
+        orphan: false,
+        exited: false,
+        terminal: { provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', args: ['attach', 's1'], name: `${base}-s1`, title: `Issue <7> · sb:${base}-s1`, handoff: null, active: false, codeMode: true },
+      },
+    ]);
+    expect('heldNote' in view).toBe(false);
+  });
+
+  it('gives an orphan no terminal and counts orphans in a note above the groups', () => {
+    const orphan = entry({ session: 'o1', workItemId: null, key: 'gh 9', nativeSessionId: null, state: 'live', memoryBytes: null, exitedAt: NOW, orphan: true });
+    const view = dockView(snapshot([owner], { held: [orphan, entry()] }), NOW, W);
+
+    expect(view.held?.[0]).toMatchObject({ session: 'o1', item: 'No work item', nativeSessionId: '-', idle: '-', memory: '-', orphan: true, exited: true, terminal: null });
+    expect(view.heldNote).toBe('1 held session without a work item');
+    expect(dockView(snapshot([], { held: [orphan, { ...orphan, session: 'o2' }] }), NOW, W).heldNote).toBe('2 held sessions without a work item');
+  });
+
+  it("keeps an older held session's terminal name after a newer session starts in another folder", () => {
+    const setup = session({ codeMode: true, state: 'idle', releasing: true });
+    const before = dockView(snapshot([item(7, { sessions: [setup] })], { held: [entry()] }), NOW, W).held?.[0]?.terminal?.name;
+    const after = dockView(snapshot([item(7, { worktree, sessions: [setup, session({ id: 's2', codeMode: true, cwd: worktree.path })] })], { held: [entry()] }), NOW, W).held?.[0]?.terminal?.name;
+
+    expect(after).toBe(before);
+    expect(after).toBe(`${base}-s1`);
   });
 });
 

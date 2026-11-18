@@ -13,7 +13,7 @@ public sealed class DockViewTests
 
         Assert.Equal(["review", "blocked", "progress", "unstarted", "done"], view.Groups.Select((group) => group.Key));
         Assert.Equal(["item:13", "item:7", "item:10"], view.Groups[0].Rows.Select((row) => row.Key));
-        Assert.Equal(["item:14", "item:8"], view.Groups[1].Rows.Select((row) => row.Key));
+        Assert.Equal(["item:14", "item:8", "item:15"], view.Groups[1].Rows.Select((row) => row.Key));
         Assert.Equal(7, view.Snooze.Count);
         Assert.Equal(new SnoozeChoice("Indefinitely", "", null), view.Snooze[^1]);
         Assert.Equal(1791093600000, view.Snooze[0].Until);
@@ -168,8 +168,52 @@ public sealed class DockViewTests
         var view = DockView.Parse(json.ToJsonString());
         var rows = view.Groups.SelectMany((group) => group.Rows).ToList();
 
-        Assert.Equal(9, rows.Count);
+        Assert.Equal(10, rows.Count);
         Assert.All(rows, (row) => Assert.Equal((null, false, false), (row.Turn, row.Dim, row.Movable)));
+    }
+
+    [Fact]
+    public void Parse_RecordedCodeModeRow_OpensTheSessionAndOffersItsAttachTerminal()
+    {
+        var row = Fixtures.Row("item:15");
+        var terminal = row.Commands.Single((command) => command.Label == "Open in terminal").Command;
+
+        Assert.Equal(new DockOpen("session", null, "cm15", "D:/git/widgets", null, "claude"), row.Open);
+        Assert.Equal(("Open in terminal", "Open in terminal: attaches to the Code Mode session"), (row.Main, row.MainTitle));
+        Assert.Equal(("cm15", true), (terminal["sessionId"]!.GetValue<string>(), terminal["codeMode"]!.GetValue<bool>()));
+        Assert.DoesNotContain(row.Controls, (control) => control.Label == "Open in Claude");
+    }
+
+    [Fact]
+    public void Parse_RecordedHeldSessions_ReadsOrphansFirstWithTheirNoteAndAttachTerminals()
+    {
+        var view = Fixtures.View;
+
+        Assert.Equal("1 held session without a work item", view.HeldNote);
+        Assert.Equal(
+            [("o1", "No work item", "9273f594-1111", "live", "3m", "50 MB", 0, true), ("cm15", "gh 115", "eeee5555-native", "waiting", "2h 5m", "300 MB", 1, false)],
+            view.Held!.Select((held) => (held.Session, held.Item, held.NativeSessionId, held.State, held.Idle, held.Memory, held.Clients, held.Orphan)));
+        Assert.Null(view.Held![0].Terminal);
+
+        var terminal = view.Held[1].Terminal!;
+
+        Assert.Equal(("cm15", true, false), (terminal.SessionId, terminal.CodeMode, terminal.Active));
+        Assert.Equal(["attach", "cm15"], terminal.Args);
+        Assert.EndsWith("-cm15", terminal.Name);
+        Assert.EndsWith($"sb:{terminal.Name}", terminal.Title);
+    }
+
+    [Fact]
+    public void Parse_HubWithoutHeldSessions_ReadsNone()
+    {
+        var json = JsonNode.Parse(Fixtures.DockJson)!.AsObject();
+
+        json.Remove("held");
+        json.Remove("heldNote");
+
+        var view = DockView.Parse(json.ToJsonString());
+
+        Assert.Equal((null, null), (view.Held, view.HeldNote));
     }
 
     [Fact]

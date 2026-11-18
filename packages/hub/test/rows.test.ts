@@ -209,6 +209,47 @@ describe('Codex sessions (PRD R22)', () => {
   });
 });
 
+describe('Code Mode sessions (PRD R95)', () => {
+  const held = (patch: Partial<WorkItemView['sessions'][number]> = {}) => session({ codeMode: true, ...patch });
+  const terminal = (entry: WorkItemView) => controlsOf(entry).find((control) => control.label === 'Open in terminal')?.message ?? null;
+  const attach = { type: 'terminal', provider: 'claude', sessionId: 's1', cwd: 'D:/git/widgets', name: 'gh 107', shortId: 'aaaa1111', active: false, codeMode: true };
+
+  it('opens its attach terminal by its Switchboard session ID in every state, starting and ended included', () => {
+    for (const patch of [{ state: 'starting' as const, shortId: null }, {}, { state: 'waiting' as const }, { state: 'idle' as const, releasing: true }, { state: 'ended' as const }]) {
+      expect(terminal(item(7, { status: 'blocked', sessions: [held(patch)] }))).toEqual({ ...attach, shortId: patch.shortId === undefined ? 'aaaa1111' : null });
+    }
+  });
+
+  it('offers Open in terminal, not Open in Claude, on a question, a permission prompt and a start prompt, and Answer in terminal with review', () => {
+    for (const stateDetail of [null, PERMISSION_PROMPT, START_PROMPT]) {
+      const waiting = item(7, { sessions: [held({ state: 'waiting', stateDetail })] });
+
+      expect(openQuestion(waiting)).toBeNull();
+      expect(labels(waiting)).not.toContain('Open in Claude');
+      expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: attach });
+      expect(mainControl(waiting, 'review')).toBe(ANSWER_IN_TERMINAL);
+    }
+  });
+
+  it('offers Stop while held, after its turn too, and no main control while it runs or after its turn', () => {
+    expect(labels(item(7, { sessions: [held({ state: 'idle' })] }))).toContain('Stop');
+    expect(mainControl(item(7, { sessions: [held()] }))).toBeNull();
+    expect(mainControl(item(7, { status: 'blocked', sessions: [held({ state: 'idle' })] }))).toBeNull();
+  });
+
+  it('offers Stop on an ended session only while the resume guard found leftover processes', () => {
+    const ended = item(7, { status: 'blocked', sessions: [held({ state: 'ended' })] });
+
+    expect(labels(ended)).not.toContain('Stop');
+    expect(controlsOf({ ...ended, leftovers: [4242] }).find((control) => control.label === 'Stop')?.message).toEqual({ type: 'action', action: { type: 'stop', workItemId: 7 } });
+  });
+
+  it('names the Code Mode session in the start and permission prompt tooltips', () => {
+    expect(startPromptText(item(7, { sessions: [held({ state: 'waiting', stateDetail: START_PROMPT })] }))[0]?.title).toBe('Claude asks before the Code Mode session starts, such as to trust the folder. Open in terminal to answer it.');
+    expect(startPromptText(item(7, { sessions: [held({ state: 'waiting', stateDetail: PERMISSION_PROMPT })] }))[0]?.title).toBe('Claude asks to approve a tool call in the Code Mode session. Open in terminal to answer it; stopping the session would drop the prompt.');
+  });
+});
+
 describe('mainControl', () => {
   it('picks the one primary control of a Blocked on you, Ready for review or Unstarted row', () => {
 

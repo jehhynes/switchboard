@@ -202,6 +202,17 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task StopHeld_HubRefusesOrAccepts_PostsTheIdAndReturnsTheRefusal()
+    {
+        using var server = new LoopbackHub((_, body, stream) => body.Contains("\"nope\"", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 404, "{\"error\":\"No held session nope.\"}") : LoopbackHub.Reply(stream, 200, "{\"stopped\":\"o1\"}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal("No held session nope.", await client.StopHeld("nope"));
+        Assert.Null(await client.StopHeld("o1"));
+        Assert.Contains("POST /holder/stop HTTP/1.1 {\"id\":\"o1\"}", server.Requests);
+    }
+
+    [Fact]
     public async Task Act_NoHub_SaysSwitchboardIsNotRunning()
     {
         using var client = new HubClient(Fixtures.TempFolder());

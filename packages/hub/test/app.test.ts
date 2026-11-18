@@ -740,6 +740,54 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/holder/list', {}, 5000)).toEqual({ status: 200, error: null, body: { sessions: [] } });
   });
 
+  it('turns a claimed open of a Code Mode session into its attach terminal and runs hub.js with sessions.nodePath in the dock view (PRD R95)', async () => {
+    writeSettings({ sessions: { installHooks: false, nodePath: '/opt/node/bin/node' }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openTerminal: 'app' } });
+    const logs: string[] = [];
+    const entry = { session: 'held-1', label: 'l', pid: 9, cwd: 'D:/scratch', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null };
+    const connection = {
+      welcome: { protocol: 1, build: 'b', pid: 4243 },
+      compatible: true,
+      spawn: async () => ({ session: 's', pid: 1 }),
+      list: async () => [entry],
+      kill: async () => 0,
+      screen: async () => ({ head: '', text: '' }),
+      shutdown: async () => {},
+      onClose: () => {},
+      close: () => {},
+    };
+
+    writeFileSync(join(temp.home, '.switchboard', 'holder.json'), JSON.stringify({ protocol: 1, build: 'b', port: 4100, token: 'holder-token', pid: 4243, startedAt: '2026-11-18T00:00:00.000Z' }));
+    const node: Exec = async (file, args, options) => noCli(file === '/opt/node/bin/node' ? 'node' : file, args, options);
+    const app = await createHubApp({ home: temp.home, log: (line) => logs.push(line), deps: { exec: node, holder: { connect: async () => connection, lockHeld: async () => true } } });
+    closers.push(() => app.close());
+    app.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/scratch', start: false });
+    app.runtime['deps'].store.insertSession({
+      id: 'held-1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/scratch', state: 'idle', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false,
+      question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: 'n-native', shortId: 'n-native', codeMode: true, launchId: 'l',
+    });
+    const file = 'C:/h/windows/adhoc-1.code-workspace';
+    const run = { executable: '/opt/node/bin/node', args: [join(temp.home, '.switchboard', 'hub.js'), 'attach', 'held-1'] };
+    const attach = { type: 'terminal', provider: 'claude', sessionId: 'held-1', cwd: 'D:/scratch', shortId: 'n-native', active: false, codeMode: true, ...run };
+
+    // The dock's click names the Switchboard session ID, and a Claude session ID, as History's link would send, finds the same session.
+    for (const sessionId of ['held-1', 'n-native']) {
+      expect(await app.post['/open']!({ sessionId, cwd: 'D:/scratch', workspace: file })).toMatchObject({ status: 200 });
+      expect(await app.post['/claim']!({ folder: 'D:/scratch', workspace: file })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [expect.objectContaining(attach)] } });
+    }
+
+    expect(logs).toContain(`session held-1 claimed by ${file} as its attach terminal`);
+
+    // A window command the dock left gets the same run.
+    expect(await app.post['/window']!({ workspace: file, command: { type: 'terminal', provider: 'claude', sessionId: 'held-1', cwd: 'D:/scratch', name: 'adhoc 1', shortId: 'n-native', active: false, codeMode: true } })).toMatchObject({ status: 200 });
+    expect(await app.post['/claim']!({ folder: 'D:/elsewhere', workspace: file })).toMatchObject({ body: { commands: [expect.objectContaining(run)] } });
+
+    await app.post['/holder/list']!({});
+    const view = app.dock() as { groups: { rows: { terminal: Record<string, unknown> | null }[] }[]; held?: { terminal: Record<string, unknown> | null }[] };
+
+    expect(view.groups.flatMap((group) => group.rows)[0]?.terminal).toMatchObject(run);
+    expect(view.held?.[0]?.terminal).toMatchObject(run);
+  });
+
   it('answers posts through the server', async () => {
     writeSettings({ sessions: { installHooks: false, claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex' } });
     const logs: string[] = [];

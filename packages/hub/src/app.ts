@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { Store, switchboardHome } from '@switchboard/core';
+import { hubBundlePath, Store, switchboardHome } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -15,6 +15,7 @@ import { cardsOf } from './cards.js';
 import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
 import type { DockTerminal } from './dock.js';
 import { isPastePath } from './report.js';
+import { codeModeTerminal } from './rows.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
 import type { HubApp } from './serve.js';
@@ -227,6 +228,29 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    * Tells the window opened from `workspace` to claim what was left for it, because VS Code reports no focus change when the dock brings an open
    * window forward; a window claims on focus too. Nothing left for any window is announced, because only the window brought forward takes it.
    */
+  /**
+   * What a terminal runs, from the settings as they are when the window or dock takes it: the agent's CLI from `sessions.claudePath` or
+   * `sessions.codexPath` (PRD R28), or for a Code Mode session `hub.js attach <Switchboard session ID>` with `sessions.nodePath` (PRD R95).
+   */
+  const terminalRun = (terminal: { provider?: unknown; codeMode?: unknown; sessionId?: unknown }): { executable: string; args?: string[] } => {
+    const sessions = config.settings.sessions;
+
+    if (terminal.codeMode === true) {
+      return { executable: sessions.nodePath, args: [hubBundlePath(options.home), 'attach', String(terminal.sessionId)] };
+    }
+
+    return { executable: terminal.provider === 'codex' ? sessions.codexPath : sessions.claudePath };
+  };
+
+  /** The attach terminal command for a claimed open of a Code Mode session, which the Claude view refuses (PRD R95); null for any other session. */
+  const codeModeOpen = (sessionId: string): Record<string, unknown> | null => {
+    const session = store.session(sessionId) ?? store.sessionByNativeId(sessionId);
+    const item = session?.codeMode === true ? store.workItem(session.workItemId) : null;
+    const ticket = item === null ? null : store.ticket(item.ticketId);
+
+    return session === null || ticket === null ? null : codeModeTerminal(ticket, session);
+  };
+
   const askToClaim = (workspace: string | null): void => {
     if (workspace !== null) {
       sendWindows('claim', { workspace });
@@ -400,16 +424,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         const workspace = body['workspace'] ?? null;
-        const sessionId = windowQueue.claimOpen(body['folder'], workspace);
-        // A terminal runs the agent's CLI from `sessions.claudePath` or `sessions.codexPath` as they are when the window takes it.
-        const commands = windowQueue
-          .claimCommands(workspace, body['focused'] === true)
-          .map((command) => (command['type'] === 'terminal' ? { ...command, executable: command['provider'] === 'codex' ? config.settings.sessions.codexPath : config.settings.sessions.claudePath } : command));
+        const claimed = windowQueue.claimOpen(body['folder'], workspace);
+        const attach = claimed === null ? null : codeModeOpen(claimed);
+        const sessionId = attach === null ? claimed : null;
+        const commands = [...(attach === null ? [] : [attach]), ...windowQueue.claimCommands(workspace, body['focused'] === true)].map((command) =>
+          command['type'] === 'terminal' ? { ...command, ...terminalRun(command) } : command,
+        );
         const claimant = workspace ?? (body['folder'] || 'a window with no folder');
 
         // The log shows whether a window took what the dock left for it (PRD R71).
-        if (sessionId !== null) {
-          deps.log(`session ${sessionId} claimed by ${claimant}`);
+        if (claimed !== null) {
+          deps.log(`session ${claimed} claimed by ${claimant}${attach === null ? '' : ' as its attach terminal'}`);
         }
 
         if (commands.length > 0) {
@@ -538,11 +563,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
       }
 
-      // A terminal runs the agent's CLI from `sessions.claudePath` or `sessions.codexPath` as they are when the dock gets the view (PRD R28).
-      const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, executable: terminal.provider === 'codex' ? config.settings.sessions.codexPath : config.settings.sessions.claudePath });
+      const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, ...terminalRun(terminal) });
 
       return {
         ...view,
+        ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
         groups: view.groups.map((group) => ({
           ...group,
           rows: group.rows.map((row) => ({ ...row, open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open, terminal: row.terminal === null ? null : executable(row.terminal) })),

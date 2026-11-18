@@ -30,6 +30,19 @@ public sealed class SwitcherTests
     }
 
     [Fact]
+    public async Task Click_CodeModeSessionWithAlways_LeavesItsSwitchboardIdForTheItemWindowThenBringsItForward()
+    {
+        var row = Fixtures.Row("item:15");
+
+        windows.Open[row.Window!.Name] = (44, 0);
+
+        Assert.Null(await Switcher().Click(row, TestContext.Current.CancellationToken));
+        Assert.Equal([$"open cm15 D:/git/widgets {row.Window.Name}.code-workspace"], hub.Calls);
+        Assert.Equal(["show 44"], windows.Calls);
+        Assert.DoesNotContain(hub.Calls, (call) => call.Contains("open-question", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Click_NoWindowYet_OpensTheWorkspaceAndWaitsForTheWindow()
     {
         windows.Open["gh-107-58c609"] = (43, 3);

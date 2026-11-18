@@ -393,6 +393,12 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          <!-- Held sessions without a work item (PRD R94); a click opens the held sessions window. -->
+          <Button Name="HeldNoteButton" Click="OnHeldNoteClicked" IsVisible="{Binding HeldNote, Converter={x:Static ObjectConverters.IsNotNull}}"
+                  Background="Transparent" BorderThickness="0" Padding="8,4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                  ToolTip.Tip="Open Held Sessions" AutomationProperties.Name="Open Held Sessions">
+            <TextBlock Text="{Binding HeldNote}" TextWrapping="Wrap" Classes="warning" />
+          </Button>
           <ItemsControl Name="GroupList" ItemsSource="{Binding Groups}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="views:GroupViewModel">

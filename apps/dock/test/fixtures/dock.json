@@ -18,7 +18,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 113",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/113",
           "mark": {
             "kind": "running",
@@ -126,12 +125,12 @@
               "glyph": "",
               "command": {
                 "type": "terminal",
+                "provider": "claude",
                 "sessionId": "aaaa1111-native",
                 "cwd": "D:/git/widgets",
                 "name": "gh 113",
                 "shortId": "aaaa1111",
-                "active": false,
-                "provider": "claude"
+                "active": false
               }
             },
             {
@@ -144,6 +143,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <13> · gh 113 · dev:develop · Ready for review",
           "links": [],
           "returned": 0,
@@ -161,7 +161,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 107",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/107",
           "mark": {
             "kind": "finished",
@@ -286,12 +285,12 @@
               "glyph": "",
               "command": {
                 "type": "terminal",
+                "provider": "claude",
                 "sessionId": "aaaa1111-native",
                 "cwd": "D:/git/widgets/.worktrees/107-fix",
                 "name": "gh 107",
                 "shortId": null,
-                "active": false,
-                "provider": "claude"
+                "active": false
               }
             },
             {
@@ -304,6 +303,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <7> · gh 107 · PR #19002 · gh 20087 · dev:develop · Ready for review · 107-fix",
           "links": [
             {
@@ -338,7 +338,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 110",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/110",
           "mark": {
             "kind": "review",
@@ -457,12 +456,12 @@
               "glyph": "",
               "command": {
                 "type": "terminal",
+                "provider": "claude",
                 "sessionId": "aaaa1111-native",
                 "cwd": "D:/git/support",
                 "name": "gh 110",
                 "shortId": null,
-                "active": false,
-                "provider": "claude"
+                "active": false
               }
             },
             {
@@ -483,6 +482,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <10> · gh 110 · dev:develop · Ready for review",
           "links": [],
           "returned": 0,
@@ -508,7 +508,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 114",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/114",
           "mark": {
             "kind": "failed",
@@ -600,6 +599,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <14> · gh 114 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
@@ -617,7 +617,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 108",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/108",
           "mark": {
             "kind": "question",
@@ -714,12 +713,12 @@
               "glyph": "",
               "command": {
                 "type": "terminal",
+                "provider": "claude",
                 "sessionId": "aaaa1111-native",
                 "cwd": "D:/git/widgets",
                 "name": "gh 108",
                 "shortId": "aaaa1111",
-                "active": false,
-                "provider": "claude"
+                "active": false
               }
             },
             {
@@ -732,7 +731,140 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <8> · gh 108 · dev:develop · Blocked on you",
+          "links": [],
+          "returned": 0,
+          "comment": null,
+          "band": null
+        },
+        {
+          "key": "item:15",
+          "title": "Issue <15>",
+          "priority": null,
+          "time": {
+            "text": "0m",
+            "title": "Waiting since 2026-10-03 12:00 UTC"
+          },
+          "playbook": "dev:develop",
+          "ticket": "gh 115",
+          "source": "github",
+          "url": "https://github.com/o/r/issues/115",
+          "mark": {
+            "kind": "question",
+            "glyph": "",
+            "title": "Answer a question"
+          },
+          "details": [
+            {
+              "text": "Answer a question",
+              "title": null,
+              "tone": null
+            }
+          ],
+          "stripe": "warning",
+          "turn": "operator",
+          "dim": false,
+          "movable": false,
+          "window": {
+            "name": "gh-115-widgets-655280",
+            "title": "Issue <15>",
+            "folders": [
+              "D:/git/widgets"
+            ],
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-115-widgets-655280.code-workspace"
+          },
+          "open": {
+            "type": "session",
+            "sessionId": "cm15",
+            "cwd": "D:/git/widgets",
+            "provider": "claude"
+          },
+          "terminal": null,
+          "controls": [
+            {
+              "label": "Stop",
+              "glyph": "",
+              "action": {
+                "type": "stop",
+                "workItemId": 15
+              }
+            },
+            {
+              "label": "Mark done",
+              "glyph": "",
+              "action": {
+                "type": "mark-done",
+                "workItemId": 15
+              }
+            },
+            {
+              "label": "Snooze…",
+              "glyph": "",
+              "action": {
+                "type": "snooze",
+                "ticketId": 15
+              }
+            },
+            {
+              "label": "Add comment…",
+              "glyph": "",
+              "action": {
+                "type": "comment",
+                "workItemId": 15
+              },
+              "input": {
+                "question": "Add comment",
+                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "field": "text",
+                "action": "Add"
+              }
+            },
+            {
+              "label": "Delete",
+              "glyph": "",
+              "action": {
+                "type": "delete",
+                "workItemId": 15
+              },
+              "confirm": {
+                "question": "Delete gh 115?",
+                "detail": "Its running session is stopped. Switchboard deletes the work item, its sessions and its history. The ticket, its worktree and Claude's session files stay. The ticket gets a new work item only when it is assigned to you again.",
+                "action": "Delete"
+              }
+            }
+          ],
+          "main": "Open in terminal",
+          "mainGlyph": "",
+          "mainTitle": "Open in terminal: attaches to the Code Mode session",
+          "pastes": [],
+          "commands": [
+            {
+              "label": "Open in terminal",
+              "glyph": "",
+              "command": {
+                "type": "terminal",
+                "provider": "claude",
+                "sessionId": "cm15",
+                "cwd": "D:/git/widgets",
+                "name": "gh 115",
+                "shortId": "eeee5555",
+                "active": false,
+                "codeMode": true
+              }
+            },
+            {
+              "label": "History",
+              "glyph": "",
+              "command": {
+                "type": "history",
+                "ticketId": 15,
+                "key": "gh 115"
+              }
+            }
+          ],
+          "sourceKind": "github",
+          "search": "Issue <15> · gh 115 · dev:develop · Blocked on you",
           "links": [],
           "returned": 0,
           "comment": null,
@@ -764,7 +896,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 109",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/109",
           "mark": null,
           "details": [],
@@ -869,6 +1000,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <9> · gh 109 · dev:develop · Unstarted",
           "links": [],
           "returned": 0,
@@ -883,7 +1015,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 104",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/104",
           "mark": null,
           "details": [],
@@ -944,6 +1075,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <4> · gh 104 · dev:develop · Unstarted",
           "links": [],
           "returned": 0,
@@ -969,7 +1101,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 111",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/111",
           "mark": {
             "kind": "done-session",
@@ -1045,6 +1176,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <11> · gh 111 · dev:develop · Done",
           "links": [],
           "returned": 0,
@@ -1062,7 +1194,6 @@
           "playbook": "dev:develop",
           "ticket": "gh 112",
           "source": "github",
-          "sourceKind": "github",
           "url": "https://github.com/o/r/issues/112",
           "mark": {
             "kind": "done-session",
@@ -1138,6 +1269,7 @@
               }
             }
           ],
+          "sourceKind": "github",
           "search": "Issue <12> · gh 112 · dev:develop · Done",
           "links": [],
           "returned": 0,
@@ -1217,5 +1349,47 @@
       "name": "self-review",
       "playbook": "ops:performance-review"
     }
-  ]
+  ],
+  "held": [
+    {
+      "session": "o1",
+      "item": "No work item",
+      "nativeSessionId": "9273f594-1111",
+      "cwd": "D:/scratch",
+      "state": "live",
+      "idle": "3m",
+      "memory": "50 MB",
+      "clients": 0,
+      "orphan": true,
+      "exited": false,
+      "terminal": null
+    },
+    {
+      "session": "cm15",
+      "item": "gh 115",
+      "nativeSessionId": "eeee5555-native",
+      "cwd": "D:/git/widgets",
+      "state": "waiting",
+      "idle": "2h 5m",
+      "memory": "300 MB",
+      "clients": 1,
+      "orphan": false,
+      "exited": false,
+      "terminal": {
+        "provider": "claude",
+        "sessionId": "cm15",
+        "cwd": "D:/git/widgets",
+        "args": [
+          "attach",
+          "cm15"
+        ],
+        "name": "gh-115-widgets-655280-cm15",
+        "title": "Issue <15> · sb:gh-115-widgets-655280-cm15",
+        "handoff": null,
+        "active": false,
+        "codeMode": true
+      }
+    }
+  ],
+  "heldNote": "1 held session without a work item"
 }

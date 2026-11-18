@@ -116,9 +116,9 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
     /// <summary>
     /// Brings the session's terminal forward, or opens it (PRD R28, R71): after Open in Codex's stop for a Codex question, with the terminal the
     /// row then offers; a session resumed elsewhere whose terminal is not found shows in its item window instead, so it is never resumed twice.
-    /// Returns why not, or null.
+    /// The held sessions window names no row (PRD R94). Returns why not, or null.
     /// </summary>
-    public async Task<string?> Terminal(DockRow row, DockTerminal shown, CancellationToken cancel = default)
+    public async Task<string?> Terminal(DockRow? row, DockTerminal shown, CancellationToken cancel = default)
     {
         if (!windows.FindsTerminals || terminal is null)
         {
@@ -127,7 +127,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
         if (shown.Handoff is { } handoff)
         {
-            var stopped = await Stop(row.Key, handoff.WorkItemId, handoff.SessionId, "Codex");
+            var stopped = await Stop(row?.Key ?? "", handoff.WorkItemId, handoff.SessionId, "Codex");
 
             if (cancel.IsCancellationRequested)
             {
@@ -157,7 +157,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
         if (shown.Active)
         {
-            return row.Window is { } window
+            return row?.Window is { } window
                 ? await ItemWindow(window, new DockOpen("session", null, shown.SessionId, shown.Cwd, null, shown.Provider), cancel)
                 : "The session runs in a window the dock cannot find.";
         }

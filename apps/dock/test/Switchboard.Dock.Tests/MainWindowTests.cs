@@ -768,7 +768,7 @@ public sealed class MainWindowTests
         var headerTexts = window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("group"))
             .SelectMany((header) => header.GetVisualDescendants().OfType<TextBlock>()).Select((text) => text.Text);
 
-        Assert.Equal(["Ready for review", "3", "Blocked on you", "2", "In progress", "0", "Unstarted", "2", "Done", "2"], headerTexts.Where(headers.Contains));
+        Assert.Equal(["Ready for review", "3", "Blocked on you", "3", "In progress", "0", "Unstarted", "2", "Done", "2"], headerTexts.Where(headers.Contains));
         Assert.Contains("Nothing is in progress.", texts);
         Assert.Contains("Issue <7>", texts);
         Assert.Contains("gh 107", texts);
@@ -1382,7 +1382,10 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void Show_SearchClosed_PutsTheFirstGroupDirectlyBelowTheTitleBar()
     {
-        var (window, _) = Open();
+        var (window, model) = Open();
+
+        model.Show(Fixtures.View with { HeldNote = null });
+        Dispatcher.UIThread.RunJobs();
         var titleBar = (Control)window.FindControl<TextBlock>("MoveHandle")!.Parent!;
         var first = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("group"));
 
@@ -1435,7 +1438,10 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void OpenDone_QuickClicksOnBand_TogglesOnEveryClick()
     {
-        var (window, _) = Open(new DockSettings { Groups = { ["done"] = true } });
+        var (window, shown) = Open(new DockSettings { Groups = { ["done"] = true } });
+
+        shown.Show(Fixtures.View with { HeldNote = null });
+        Dispatcher.UIThread.RunJobs();
         var band = window.GetVisualDescendants().OfType<Border>().First((border) => border.Classes.Contains("band") && border.IsEffectivelyVisible);
         var model = (BandViewModel)band.DataContext!;
         var seen = new List<bool>();

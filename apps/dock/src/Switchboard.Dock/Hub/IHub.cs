@@ -25,6 +25,9 @@ public interface IHub
     /// </summary>
     Task<string?> Open(string sessionId, string cwd, string workspace);
 
+    /// <summary>Stops a held session by its Switchboard session ID (PRD R94).</summary>
+    Task<string?> StopHeld(string session);
+
     /// <summary>The first view, from the current one on, that passes <paramref name="test"/>, or null after <paramref name="within"/>.</summary>
     Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within);
 }

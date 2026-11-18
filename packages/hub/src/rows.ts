@@ -115,7 +115,7 @@ export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Co
 
   const controls = controlsOf(item, mode);
 
-  // A prompt before the session starts, or a permission prompt, is answered by attaching to it (PRD R41, R70).
+  // A prompt before the session starts, a permission prompt, or any wait of a Code Mode session is answered by attaching to it (PRD R41, R70, R95).
   if (isBackground(activeSession(item)) && waitsInTerminal(activeSession(item))) {
     return mode === 'review' ? ANSWER_IN_TERMINAL : (controls.find((control) => control.label === 'Open in terminal') ?? null);
   }
@@ -131,9 +131,16 @@ export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Co
   return controls.find((control) => control.label === wanted) ?? null;
 }
 
-/** The main control's tooltip: Approve names the prompt it runs, so the operator can read the exact command before approving (PRD R27). */
+/**
+ * The main control's tooltip: Approve names the prompt it runs, so the operator can read the exact command before approving (PRD R27), and a
+ * terminal control names a Code Mode session, which the row does not show (PRD R22).
+ */
 export function mainTitle(item: WorkItemView, control: Control): string {
-  return control.label === 'Approve' && item.approvalPrompt !== null ? `Approve: runs ${item.approvalPrompt}` : control.label;
+  if (control.label === 'Approve' && item.approvalPrompt !== null) {
+    return `Approve: runs ${item.approvalPrompt}`;
+  }
+
+  return control.icon === 'terminal' && item.sessions.at(-1)?.codeMode === true ? `${control.label}: attaches to the Code Mode session` : control.label;
 }
 
 /** The controls that apply to a work item (PRD R27); with `dock.openVSCode: review`, Answer in terminal replaces Open in Claude or Codex. */
@@ -163,7 +170,8 @@ export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Con
     controls.push(mode === 'review' ? ANSWER_IN_TERMINAL : { label: `Open in ${PROVIDER_NAMES[question.provider]}`, icon: 'comment-discussion', message: question });
   }
 
-  if (isBackground(session)) {
+  // Processes an ended Code Mode session left can keep it from resuming, so Stop ends them (PRD R95).
+  if (isBackground(session) || (session === null && (item.leftovers?.length ?? 0) > 0)) {
     controls.push({ label: 'Stop', icon: 'debug-stop', message: action('stop') });
   }
 
@@ -217,12 +225,16 @@ function deleteConfirm(item: WorkItemView, stops: boolean): NonNullable<Control[
 /**
  * Open in terminal (PRD R28): `claude attach` while a Claude session runs in its background process, else `claude --resume` or `codex resume`
  * once it has ended; Codex has no attach (mechanics M31). `active` marks a session the operator resumed, in a terminal or a VS Code tab, which is
- * shown rather than resumed again. Null while it starts.
+ * shown rather than resumed again. Null while it starts, except for a Code Mode session, whose attach terminal opens in every state.
  */
 export function terminalCommand(item: WorkItemView): Record<string, unknown> | null {
   const latest = item.sessions.at(-1) ?? null;
   const session = activeSession(item);
   const name = ticketKey(item.ticket);
+
+  if (latest?.codeMode === true) {
+    return codeModeTerminal(item.ticket, latest);
+  }
 
   if (isBackground(session)) {
     return session.provider === 'codex'
@@ -237,6 +249,14 @@ export function terminalCommand(item: WorkItemView): Record<string, unknown> | n
   }
 
   return { type: 'terminal', provider: latest.provider, sessionId: latest.nativeSessionId, cwd: latest.cwd, name, shortId: null, active: session !== null };
+}
+
+/**
+ * A Code Mode session's attach terminal (PRD R95), which runs `hub.js attach <Switchboard session ID>` and resumes an ended session; the
+ * Switchboard session ID, unlike the Claude one, survives `/clear`, `/branch` and `/resume`.
+ */
+export function codeModeTerminal(ticket: { source: string; sourceKey: string }, session: Pick<SessionView, 'id' | 'cwd' | 'shortId'>): Record<string, unknown> {
+  return { type: 'terminal', provider: 'claude', sessionId: session.id, cwd: session.cwd, name: ticketKey(ticket), shortId: session.shortId, active: false, codeMode: true };
 }
 
 /**
@@ -308,9 +328,12 @@ function waitsInBackground(session: SessionView | null): session is SessionView 
   return isBackground(session) && session.state === 'waiting' && !waitsInTerminal(session) && session.nativeSessionId !== null && (session.pendingFork ?? null) === null;
 }
 
-/** A wait the operator answers by attaching to the session in a terminal: a prompt before it starts (PRD R41) or a permission prompt (PRD R70). */
+/**
+ * A wait the operator answers by attaching to the session in a terminal: a prompt before it starts (PRD R41), a permission prompt (PRD R70), or
+ * any wait of a Code Mode session, because the Claude view refuses Code Mode (PRD R95).
+ */
 function waitsInTerminal(session: SessionView | null): boolean {
-  return waitsToStart(session) || waitsOnPermission(session);
+  return waitsToStart(session) || waitsOnPermission(session) || (session?.codeMode === true && session.state === 'waiting');
 }
 
 /**
@@ -583,13 +606,17 @@ export function issueOfUrl(target: string): { repo: string; number: string } | n
 /** The prompt a session waits on before it starts (PRD R41), or a background session's permission prompt (PRD R70), for line 3. */
 export function startPromptText(item: WorkItemView): { text: string; title: string }[] {
   const session = activeSession(item);
+  // Tooltips name a Code Mode session, which the row does not show (PRD R22).
+  const codeMode = session?.codeMode === true;
 
   if (waitsToStart(session)) {
-    return [{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }];
+    const before = codeMode ? 'Claude asks before the Code Mode session starts, such as to trust the folder.' : "Claude asks before the session starts, such as to approve the project's MCP servers.";
+
+    return [{ text: 'Waits on a prompt before it starts', title: `${before} Open in terminal to answer it.` }];
   }
 
   return isBackground(session) && waitsOnPermission(session)
-    ? [{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.' }]
+    ? [{ text: 'Waits on a permission prompt', title: `Claude asks to approve a tool call${codeMode ? ' in the Code Mode session' : ''}. Open in terminal to answer it; stopping the session would drop the prompt.` }]
     : [];
 }
 

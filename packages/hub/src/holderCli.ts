@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { HolderClient, parseHolderRecord, recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
-import { findHeld, heldFromHolder } from './held.js';
+import { findHeld, heldFromHolder, heldTexts } from './held.js';
 import type { HeldSession } from './held.js';
 
 const USAGE = 'Usage:\n  holder list\n  holder stop <Switchboard session ID, Claude session ID or its first 8 characters>\n';
@@ -52,12 +52,7 @@ export async function connectHolder(switchboardHome: string): Promise<HolderCont
   return null;
 }
 
-/** `3m`, `2h 5m`. */
-export function idleText(ms: number): string {
-  const minutes = Math.max(0, Math.floor(ms / 60_000));
-
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
+export { idleText } from './held.js';
 
 /** A plain table of the held sessions, one row each. */
 export function heldTable(held: readonly HeldSession[], now: number): string {
@@ -67,16 +62,11 @@ export function heldTable(held: readonly HeldSession[], now: number): string {
 
   const rows = [
     ['Work item', 'Switchboard ID', 'Claude ID', 'Folder', 'State', 'Idle', 'Memory', 'Terminals'],
-    ...held.map((one) => [
-      one.orphan && one.workItemId === null ? 'No work item' : (one.key ?? 'No work item'),
-      one.session,
-      one.nativeSessionId ?? '-',
-      one.cwd,
-      one.state,
-      one.exitedAt === null ? idleText(now - one.idleSince) : '-',
-      one.memoryBytes === null ? '-' : `${Math.round(one.memoryBytes / (1024 * 1024))} MB`,
-      String(one.clients),
-    ]),
+    ...held.map((one) => {
+      const texts = heldTexts(one, now);
+
+      return [texts.item, one.session, texts.nativeSessionId, one.cwd, one.state, texts.idle, texts.memory, String(one.clients)];
+    }),
   ];
   const widths = rows[0]!.map((_, column) => Math.max(...rows.map((row) => row[column]!.length)));
 

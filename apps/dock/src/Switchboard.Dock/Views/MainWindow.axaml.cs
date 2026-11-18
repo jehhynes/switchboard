@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     readonly IConfigHub? config;
     SettingsWindow? settingsWindow;
     VolumeWindow? volumeWindow;
+    HeldSessionsWindow? heldWindow;
     AppBar? appBar;
     // The strip the docked window last took, in physical pixels.
     Native.Rect? placed;
@@ -1594,7 +1595,7 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// New Ad-hoc Session, Refresh Sources, which polls each source that is on now, Open Settings, Ticket Volume Report when a Zoho or Forum source is configured,
-    /// and Show Hub Log, which shows the hub log in the VS Code window used last.
+    /// Held Sessions (PRD R94), and Show Hub Log, which shows the hub log in the VS Code window used last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
@@ -1602,8 +1603,30 @@ public sealed partial class MainWindow : Window
         Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
         Item("Open Settings", OpenSettings, SettingsGlyph),
         .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket Volume Report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
+        Item("Held Sessions", OpenHeld, TerminalGlyph),
         Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
     ];
+
+    /// <summary>Opens the held sessions window (PRD R94), or brings the open one forward.</summary>
+    Task OpenHeld()
+    {
+        if (heldWindow is not null)
+        {
+            heldWindow.Activate();
+            return Task.CompletedTask;
+        }
+
+        heldWindow = new HeldSessionsWindow(model, hub, actions);
+        heldWindow.Closed += (_, _) => heldWindow = null;
+        heldWindow.Show();
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The open held sessions window, or null.</summary>
+    internal HeldSessionsWindow? HeldWindow => heldWindow;
+
+    void OnHeldNoteClicked(object? sender, RoutedEventArgs e) => _ = OpenHeld();
 
     void ApplyTheme()
     {
@@ -1815,6 +1838,8 @@ public sealed partial class MainWindow : Window
     {
         public Task<string?> OpenInTerminal(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
 
+        public Task<string?> Terminal(DockRow? row, DockTerminal terminal, CancellationToken cancel) => Task.FromResult<string?>(null);
+
         public Task<string?> Click(DockRow row, CancellationToken cancel) => Task.FromResult<string?>(null);
 
         public Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel) => Task.FromResult<string?>(null);
@@ -1835,6 +1860,8 @@ public sealed partial class MainWindow : Window
         public Task<string?> Poll() => Task.FromResult<string?>(null);
 
         public Task<string?> Open(string sessionId, string cwd, string workspace) => Task.FromResult<string?>(null);
+
+        public Task<string?> StopHeld(string session) => Task.FromResult<string?>(null);
 
         public Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within) => Task.FromResult<DockView?>(null);
     }

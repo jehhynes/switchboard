@@ -7,7 +7,7 @@ namespace Switchboard.Dock.Hub;
 
 // The hub's dock view (architecture.md § Dock), built by `dockView` in packages/hub/src/dock.ts; the dock adds no rules of its own.
 
-public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceGroup> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null)
+public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGroup> Groups, IReadOnlyList<SnoozeChoice> Snooze, IReadOnlyList<SourceGroup> Sources, IReadOnlyList<string> RepoRoots, IReadOnlyList<ScheduleEntry>? Schedules = null, OpenWindows? Windows = null, string? Theme = null, IReadOnlyList<DockHeld>? Held = null, string? HeldNote = null)
 {
     static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 
@@ -19,6 +19,13 @@ public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGro
 /// The dock follows them where it cannot see other apps' windows (architecture.md § Dock).
 /// </summary>
 public sealed record OpenWindows(IReadOnlyList<string> Open, string? Front, int Count);
+
+/// <summary>
+/// A session the terminal holder holds, as the held sessions window lists it (PRD R94): its work item's key or <c>No work item</c>, the Switchboard and
+/// Claude session IDs, folder, state, idle time, memory and attached terminals; <paramref name="Exited"/> when its process has exited, whatever state the
+/// store holds; <paramref name="Terminal"/> is its attach terminal, null for an orphan.
+/// </summary>
+public sealed record DockHeld(string Session, string Item, string NativeSessionId, string Cwd, string State, string Idle, string Memory, int Clients, bool Orphan, bool Exited = false, DockTerminal? Terminal = null);
 
 /// <summary>A schedule Run now can start, and the playbook it runs (PRD R82).</summary>
 public sealed record ScheduleEntry(string Name, string Playbook);
@@ -179,13 +186,14 @@ public sealed record DockOpen(
     string? Title = null,
     DockHandoff? Handoff = null,
     bool Active = false,
-    string? Executable = null)
+    string? Executable = null,
+    bool CodeMode = false)
 {
     /// <summary>The terminal a <c>terminal</c> open names, or null.</summary>
     [JsonIgnore]
     public DockTerminal? Terminal =>
         Type == "terminal" && Provider is { } provider && SessionId is { } sessionId && Cwd is { } cwd && Args is { } args && Name is { } name && Title is { } title
-            ? new DockTerminal(provider, sessionId, cwd, args, name, title, Handoff, Active, Executable)
+            ? new DockTerminal(provider, sessionId, cwd, args, name, title, Handoff, Active, Executable, CodeMode)
             : null;
 }
 
@@ -193,8 +201,9 @@ public sealed record DockOpen(
 /// A session's terminal window (PRD R28, R71): the agent's CLI <paramref name="Executable"/> with <paramref name="Args"/> in <paramref name="Cwd"/>,
 /// in a window titled <paramref name="Title"/>, which ends with <c>sb:&lt;name&gt;</c>. <paramref name="Handoff"/> is Open in Codex's stop, which
 /// runs first (PRD R70); <paramref name="Active"/> marks a session resumed elsewhere, which only its open terminal or its item window shows.
+/// <paramref name="CodeMode"/> marks a Code Mode session's attach terminal, which runs <c>hub.js attach</c> with Node.js (PRD R95).
 /// </summary>
-public sealed record DockTerminal(string Provider, string SessionId, string Cwd, IReadOnlyList<string> Args, string Name, string Title, DockHandoff? Handoff = null, bool Active = false, string? Executable = null);
+public sealed record DockTerminal(string Provider, string SessionId, string Cwd, IReadOnlyList<string> Args, string Name, string Title, DockHandoff? Handoff = null, bool Active = false, string? Executable = null, bool CodeMode = false);
 
 /// <summary>The work item and session of Open in Codex's stop before a Codex question opens in a terminal (PRD R70).</summary>
 public sealed record DockHandoff(int WorkItemId, string SessionId);

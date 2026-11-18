@@ -86,6 +86,15 @@ sealed class FakeHub : IHub
         return Task.FromResult(OpenReply);
     }
 
+    public string? StopReply { get; set; }
+
+    public Task<string?> StopHeld(string session)
+    {
+        Calls.Add($"stop held {session}");
+
+        return Task.FromResult(StopReply);
+    }
+
     /// <summary>Runs while <see cref="Until"/> waits, as another click would.</summary>
     public Action? OnUntil { get; set; }
 
@@ -298,6 +307,17 @@ sealed class FakeActions : IDockActions
         Urls.Add(url);
 
         return UrlReply;
+    }
+
+    public List<DockTerminal> Terminals { get; } = [];
+
+    public string? TerminalReply { get; set; }
+
+    public Task<string?> Terminal(DockRow? row, DockTerminal terminal, CancellationToken cancel)
+    {
+        Terminals.Add(terminal);
+
+        return Task.FromResult(TerminalReply);
     }
 
     public List<DockRow> InTerminal { get; } = [];

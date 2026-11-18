@@ -126,6 +126,31 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     /// <summary>The schedules the New Ad-hoc Session window can run now (PRD R82).</summary>
     public IReadOnlyList<ScheduleEntry> Schedules { get; private set; } = [];
 
+    IReadOnlyList<DockHeld> held = [];
+    string? heldNote;
+
+    /// <summary>The held sessions, orphans first, for the held sessions window (PRD R94).</summary>
+    public IReadOnlyList<DockHeld> Held
+    {
+        get => held;
+        private set
+        {
+            // Records compare their lists by reference, so the content is compared as JSON.
+            if (!JsonNode.DeepEquals(JsonSerializer.SerializeToNode(held), JsonSerializer.SerializeToNode(value)))
+            {
+                held = value;
+                Changed(nameof(Held));
+            }
+        }
+    }
+
+    /// <summary>How many held sessions have no work item, shown above the groups while there are any (PRD R94).</summary>
+    public string? HeldNote
+    {
+        get => heldNote;
+        private set => Set(ref heldNote, value);
+    }
+
     /// <summary>The search box's text: only rows whose search text holds every word show, and every group with one shows open (PRD R71).</summary>
     public string Filter
     {
@@ -241,6 +266,8 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         Show(Hub.Connection.Connected);
         Snooze = view.Snooze;
         Schedules = view.Schedules ?? [];
+        Held = view.Held ?? [];
+        HeldNote = view.HeldNote;
 
         // Groups are updated in place, so an open source menu, its anchor and its focus survive the snapshot a toggle sends.
         var groups = view.Sources.Select((group) => group.Current).ToList();

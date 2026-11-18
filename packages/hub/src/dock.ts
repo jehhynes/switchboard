@@ -7,6 +7,7 @@ import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switch
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
+import { heldTexts } from './held.js';
 import type { HeldSession } from './held.js';
 import {
   age,
@@ -125,7 +126,28 @@ export interface DockTerminal {
   title: string;
   handoff: { workItemId: number; sessionId: string } | null;
   active: boolean;
+  /** A Code Mode session's attach terminal (PRD R95); the hub runs `hub.js` with `sessions.nodePath`. */
+  codeMode?: true;
   executable?: string;
+}
+
+/**
+ * A row of the held sessions window (PRD R94): the work item's key or `No work item`, the session IDs, folder, state, idle time, memory and
+ * attached terminals; `terminal` opens its attach terminal in the terminal app, null for an orphan, which no session of the store names.
+ */
+export interface DockHeld {
+  session: string;
+  item: string;
+  nativeSessionId: string;
+  cwd: string;
+  state: string;
+  idle: string;
+  memory: string;
+  clients: number;
+  orphan: boolean;
+  /** The process has exited, whatever state the store still holds; Stop is then refused. */
+  exited: boolean;
+  terminal: DockTerminal | null;
 }
 
 /**
@@ -231,7 +253,9 @@ export interface DockView {
   /** The schedules the New Ad-hoc Session window can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
   /** The snapshot's held sessions, orphans first (PRD R94); absent when the holder holds none. */
-  held?: HeldSession[];
+  held?: DockHeld[];
+  /** The note above the groups while a held session has no work item, which opens the held sessions window (PRD R94); absent otherwise. */
+  heldNote?: string;
 }
 
 /** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
@@ -264,8 +288,24 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     sources: sourceGroups(snapshot.sourceStates),
     repoRoots: snapshot.repoRoots,
     schedules: snapshot.schedules,
-    ...(snapshot.held === undefined ? {} : { held: snapshot.held }),
+    ...(snapshot.held === undefined ? {} : { held: snapshot.held.map((one) => heldRow(snapshot, one, now, windows)) }),
+    ...orphanNote(snapshot.held ?? []),
   };
+}
+
+function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: string): DockHeld {
+  const { item, nativeSessionId, idle, memory } = heldTexts(one, now);
+  const owner = one.workItemId === null ? undefined : snapshot.workItems.find((entry) => entry.id === one.workItemId);
+  const session = owner?.sessions.find((entry) => entry.id === one.session);
+  const terminal = owner === undefined || session === undefined || one.orphan ? null : codeModeDockTerminal(owner, session, windows);
+
+  return { session: one.session, item, nativeSessionId, cwd: one.cwd, state: one.state, idle, memory, clients: one.clients, orphan: one.orphan, exited: one.exitedAt !== null, terminal };
+}
+
+function orphanNote(held: HeldSession[]): { heldNote?: string } {
+  const count = held.filter((one) => one.orphan).length;
+
+  return count === 0 ? {} : { heldNote: `${count} held ${count === 1 ? 'session' : 'sessions'} without a work item` };
 }
 
 /**
@@ -528,6 +568,12 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   const latest = item.sessions.at(-1) ?? null;
   const active = activeSession(item);
 
+  // A Code Mode session opens its attach terminal, which the hub sends the item window for this open, except during a turn that does not wait
+  // on the operator (PRD R28, R95).
+  if (latest?.codeMode === true) {
+    return active?.state === 'starting' || active?.state === 'running' ? null : { type: 'session', sessionId: latest.id, cwd: latest.cwd, provider: latest.provider };
+  }
+
   // A session whose release stop has not finished may still be held by its background process (PRD R39).
   if (latest?.nativeSessionId != null && (active === null || (active.released && !active.releasing))) {
     return { type: 'session', sessionId: latest.nativeSessionId, cwd: latest.cwd, provider: latest.provider };
@@ -556,7 +602,8 @@ export function reviewOpenOf(item: WorkItemView, windows: string): DockOpen | nu
     return focus;
   }
 
-  if (session?.releasing === true) {
+  // A Code Mode session whose end waits for its terminal to detach is still held (PRD R95).
+  if (session?.releasing === true && session.codeMode !== true) {
     return { type: 'select' };
   }
 
@@ -584,9 +631,14 @@ export function reviewOpenOf(item: WorkItemView, windows: string): DockOpen | nu
 /** Open in terminal's window for the latest session (PRD R28): `claude attach` in its background process, else a resume; null when none applies. */
 function menuTerminal(item: WorkItemView, windows: string): DockTerminal | null {
   const command = terminalCommand(item);
+  const latest = item.sessions.at(-1);
 
   if (command === null) {
     return null;
+  }
+
+  if (command['codeMode'] === true && latest !== undefined) {
+    return codeModeDockTerminal(item, latest, windows);
   }
 
   const provider = command['provider'] as Provider;
@@ -594,7 +646,15 @@ function menuTerminal(item: WorkItemView, windows: string): DockTerminal | null 
   const shortId = command['shortId'] as string | null;
   const args = shortId !== null ? ['attach', shortId] : provider === 'codex' ? ['resume', sessionId] : ['--resume', sessionId];
 
-  return { provider, sessionId, cwd: String(command['cwd']), args, ...terminalName(item, windows, sessionId), handoff: null, active: command['active'] === true };
+  return { provider, sessionId, cwd: String(command['cwd']), args, ...terminalName(item, windows, sessionId.slice(0, 8)), handoff: null, active: command['active'] === true };
+}
+
+/** A Code Mode session's attach terminal, named by its Switchboard session ID (PRD R95). */
+function codeModeDockTerminal(item: WorkItemView, session: WorkItemView['sessions'][number], windows: string): DockTerminal {
+  // Named from the window of this session's folder, so an older held session keeps its terminal after a newer session starts elsewhere.
+  const own = { ...item, sessions: item.sessions.slice(0, item.sessions.indexOf(session) + 1) };
+
+  return { provider: 'claude', sessionId: session.id, cwd: session.cwd, args: ['attach', session.id], ...terminalName(own, windows, session.id), handoff: null, active: false, codeMode: true };
 }
 
 /** Answer in terminal for a Codex question: the Open in Codex stop first, then `codex resume` once its turn's process has exited (PRD R70). */
@@ -604,19 +664,20 @@ function codexAnswer(item: WorkItemView, windows: string, question: NonNullable<
     sessionId: question.sessionId,
     cwd: question.cwd,
     args: ['resume', question.sessionId],
-    ...terminalName(item, windows, question.sessionId),
+    ...terminalName(item, windows, question.sessionId.slice(0, 8)),
     handoff: { workItemId: question.workItemId, sessionId: question.sessionId },
     active: false,
   };
 }
 
 /**
- * A session's terminal name and title: the item window's name, else the ticket key, with the session's first eight characters, which are its
- * short ID too, so an attach and a later resume of one session share a window name and another session never takes it.
+ * A session's terminal name and title: the item window's name, else the ticket key, with `suffix`: the session's first eight characters, which
+ * are its short ID too, so an attach and a later resume of one session share a window name and another session never takes it, or a Code Mode
+ * session's Switchboard session ID.
  */
-function terminalName(item: WorkItemView, windows: string, sessionId: string): { name: string; title: string } {
+function terminalName(item: WorkItemView, windows: string, suffix: string): { name: string; title: string } {
   const base = windowOf(item, windows)?.name ?? ticketKey(item.ticket).replace(/[^A-Za-z0-9._-]+/g, '-');
-  const name = `${base}-${sessionId.slice(0, 8)}`.replace(/[^A-Za-z0-9._-]+/g, '-');
+  const name = `${base}-${suffix}`.replace(/[^A-Za-z0-9._-]+/g, '-');
 
   return { name, title: `${item.ticket.title} · sb:${name}` };
 }
