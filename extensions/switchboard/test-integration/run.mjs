@@ -11,7 +11,8 @@ const profile = join(portable, 'user-data');
 
 mkdirSync(join(profile, 'User'), { recursive: true });
 // The suite reads settings and playbooks from a config folder outside the Switchboard home, through ~ expansion.
-writeFileSync(join(profile, 'User', 'settings.json'), JSON.stringify({ 'switchboard.configDir': '~/repo/switchboard' }));
+// The side bar timer would run commands under other tests' stand-ins; the side bar tests poll themselves.
+writeFileSync(join(profile, 'User', 'settings.json'), JSON.stringify({ 'switchboard.configDir': '~/repo/switchboard', 'switchboard.rememberSideBarWidths': false }));
 
 /** Read the per-user vscode:// handler without changing it. Status 1 means no registration. */
 function protocolRegistration() {

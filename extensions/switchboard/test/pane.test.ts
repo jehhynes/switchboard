@@ -2,7 +2,7 @@ import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { describe, expect, it, vi } from 'vitest';
 import type { DockRow } from '@switchboard/hub';
 import { mainTerminal, paneModel, windowRows } from '../src/paneModel.js';
-import { startPane } from '../src/webview/paneMain.js';
+import { SIZE_MS, startPane } from '../src/webview/paneMain.js';
 import { clickMessage, renderPane } from '../src/webview/paneRender.js';
 
 const NOW = Date.UTC(2026, 9, 9, 12);
@@ -262,5 +262,28 @@ describe('startPane (PRD R92)', () => {
     postMessage.mockClear();
     div.querySelector('span')!.click();
     expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("posts its width and the window's every quarter second and when it resizes (PRD R91)", () => {
+    const observed: (() => void)[] = [];
+    const postMessage = vi.fn();
+
+    vi.useFakeTimers();
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observed.push(callback); } observe() {} });
+
+    try {
+      startPane(document.createElement('div'), { postMessage });
+      postMessage.mockClear();
+      vi.advanceTimersByTime(SIZE_MS);
+      expect(postMessage).toHaveBeenCalledWith({ type: 'size', inner: window.innerWidth, outer: window.outerWidth, dpr: window.devicePixelRatio });
+
+      postMessage.mockClear();
+      observed[0]!();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(postMessage.mock.calls[0]![0]).toMatchObject({ type: 'size' });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });

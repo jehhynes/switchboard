@@ -1,7 +1,7 @@
 import type { PaneModel } from '../paneModel.js';
 
 /** What a click in the pane asks the extension to do. */
-export type PaneMessage = { type: 'ready' } | { type: 'open'; target: string } | { type: 'main'; key: string } | { type: 'dock' };
+export type PaneMessage = { type: 'ready' } | { type: 'open'; target: string } | { type: 'main'; key: string } | { type: 'dock' } | { type: 'size'; inner: number; outer: number; dpr: number };
 
 function escape(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);

@@ -22,6 +22,8 @@ import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
 import { mainTerminal, paneModel, windowRows } from './paneModel.js';
 import type { PaneModel } from './paneModel.js';
+import { POLL_MS, SIDES, SideBars } from './sideBars.js';
+import type { EditorLayout, Kept, Outcome, Point } from './sideBars.js';
 import { HubState } from './state.js';
 import { ItemTabs } from './tabs.js';
 import type { PaneMessage } from './webview/paneRender.js';
@@ -61,6 +63,12 @@ export interface SwitchboardApi {
   pane(): Record<string, PaneModel>;
   /** Runs a click in the Switchboard pane. */
   paneClick(message: PaneMessage): Promise<unknown>;
+  /** The size the visible pane last reported, or null (PRD R91). */
+  paneSize(): { inner: number; outer: number; dpr: number } | null;
+  /** The kept side bar widths (PRD R91). */
+  sideBarWidths(): Kept;
+  /** Polls the side bars as the timer does. */
+  pollSideBars(): Promise<Outcome>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -234,6 +242,73 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     }
   };
   const pane = new Pane(context.extensionUri, () => paneModel(state.current(), windowFile, windowsDir(home), Date.now()), paneClick);
+  // The kept widths are the profile's, so every window uses them (PRD R91).
+  const KEPT = 'sideBars.';
+  const keptWidths = (): Kept => {
+    const kept: Kept = { points: {} };
+
+    for (const side of SIDES) {
+      const value = context.globalState.get<unknown>(`${KEPT}points.${side}`);
+      const points = Array.isArray(value) ? value.filter((point): point is Point => [point?.room, point?.width, point?.at].every((number) => typeof number === 'number' && number > 0)) : [];
+
+      if (points.length > 0) {
+        kept.points[side] = points;
+      }
+    }
+
+    return kept;
+  };
+  // What the side bars kept and set, in the Output view, and as a status bar message for a moment (PRD R91).
+  const sideBarLog = vscode.window.createOutputChannel('Switchboard Side Bars', { log: true });
+  const sideBars = new SideBars({
+    layout: () => vscode.commands.executeCommand<EditorLayout>('vscode.getEditorLayout'),
+    run: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+    pane: () => pane.size(),
+    load: keptWidths,
+    save: (side, points) => context.globalState.update(`${KEPT}points.${side}`, points),
+    now: Date.now,
+    // `outerWidth` is not zoomed, so a zoomed window's CSS pixels are fewer (mechanics M61); a resize measures the real scale.
+    zoomScale: () => 1.2 ** -vscode.workspace.getConfiguration('window').get<number>('zoomLevel', 0),
+    // The frame's 14 pixels are not zoomed; the activity bar's 44 and the sashes' 16 are CSS pixels (mechanics M61).
+    offset: (scale) => 14 * scale + 16 + (['top', 'bottom', 'hidden'].includes(vscode.workspace.getConfiguration('workbench.activityBar').get<string>('location', 'default')) ? 0 : 44),
+    fixedWidth: () => vscode.workspace.getConfiguration('workbench.editor').get<boolean>('centeredLayoutFixedWidth', false),
+    sleep,
+    minWindow: () => vscode.workspace.getConfiguration('switchboard').get<number>('sideBarWidthsMinWindow', 1200),
+    log: (message) => {
+      sideBarLog.info(message);
+
+      if (!message.includes('nothing to set')) {
+        vscode.window.setStatusBarMessage(`$(switchboard-logo) ${message}`, 5_000);
+      }
+    },
+  });
+  const forgetWidths = async (): Promise<void> => {
+    for (const key of context.globalState.keys().filter((name) => name.startsWith(KEPT))) {
+      await context.globalState.update(key, undefined);
+    }
+  };
+  let sideBarError: string | null = null;
+  const pollSideBars = (): Promise<Outcome> =>
+    sideBars.poll().then(
+      (outcome) => {
+        sideBarError = null;
+        return outcome;
+      },
+      (error: unknown) => {
+        // A failure shows once, not on every poll that meets it again.
+        if (String(error) !== sideBarError) {
+          sideBarError = String(error);
+          void vscode.window.showErrorMessage(`Switchboard: the side bar widths were not set: ${sideBarError}`);
+        }
+
+        return 'idle' as const;
+      },
+    );
+  const sideBarTimer = setInterval(() => {
+    if (vscode.workspace.getConfiguration('switchboard').get<boolean>('rememberSideBarWidths', true)) {
+      void pollSideBars();
+    }
+  }, POLL_MS);
 
   const status = vscode.window.createStatusBarItem('switchboard.needs', vscode.StatusBarAlignment.Left, 100);
   const showStatus = (): void => {
@@ -278,6 +353,12 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     { dispose: () => unwatchFile(hubLogPath(home), readLog) },
     history.register(),
     pane.register(),
+    sideBarLog,
+    vscode.commands.registerCommand('switchboard.forgetSideBarWidths', async () => {
+      await forgetWidths();
+      sideBarLog.info('Forgot the kept widths.');
+    }),
+    { dispose: () => clearInterval(sideBarTimer) },
     vscode.commands.registerCommand('switchboard.showHubLog', showHubLog),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
@@ -387,6 +468,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     windowStateChanged,
     pane: () => pane.shown(),
     paneClick,
+    paneSize: () => pane.size(),
+    sideBarWidths: keptWidths,
+    pollSideBars,
   };
 }
 

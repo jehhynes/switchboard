@@ -1,7 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { PaneModel } from './paneModel.js';
+import type { PaneSize } from './sideBars.js';
 import type { PaneMessage } from './webview/paneRender.js';
+
+/** A size report this old no longer counts, as from a pane whose page stopped. */
+const SIZE_FRESH_MS = 1_000;
 
 /** The pane's views: one in the Explorer, one in Source Control, so it shows in either (PRD R92). */
 export const PANE_VIEWS = ['switchboard.pane', 'switchboard.paneScm'] as const;
@@ -14,6 +18,9 @@ export class Pane implements vscode.WebviewViewProvider {
   private readonly views = new Map<string, vscode.WebviewView>();
   /** The model each view last rendered, by view ID, for the real-host tests. */
   private readonly shownModels = new Map<string, PaneModel>();
+  /** Each view's latest size report and when it came, and when the view last became visible. */
+  private readonly sizes = new Map<string, { size: PaneSize; at: number }>();
+  private readonly visibleSince = new Map<string, number>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -30,6 +37,23 @@ export class Pane implements vscode.WebviewViewProvider {
     for (const view of this.views.values()) {
       this.send(view);
     }
+  }
+
+  /**
+   * The size a visible view reported since it became visible, and within the last second, or null. A hidden view keeps the sizes of when it
+   * was last shown (mechanics M61), so its reports do not count.
+   */
+  size(now = Date.now()): PaneSize | null {
+    for (const [id, view] of this.views) {
+      const report = this.sizes.get(id);
+      const since = this.visibleSince.get(id);
+
+      if (view.visible && report !== undefined && since !== undefined && report.at > since && now - report.at <= SIZE_FRESH_MS) {
+        return report.size;
+      }
+    }
+
+    return null;
   }
 
   /** What each resolved view last rendered, by view ID. */
@@ -51,15 +75,25 @@ export class Pane implements vscode.WebviewViewProvider {
     view.webview.onDidReceiveMessage((message: PaneMessage) => {
       if (message.type === 'ready') {
         this.send(view);
+      } else if (message.type === 'size') {
+        if ([message.inner, message.outer, message.dpr].every((value) => typeof value === 'number' && value > 0)) {
+          this.sizes.set(view.viewType, { size: { inner: message.inner, outer: message.outer, dpr: message.dpr }, at: Date.now() });
+        }
       } else {
         void this.handle(message).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${error instanceof Error ? error.message : String(error)}`));
       }
     });
+    view.onDidChangeVisibility(() => {
+      this.visibleSince.set(view.viewType, Date.now());
+    });
     view.onDidDispose(() => {
       this.views.delete(view.viewType);
       this.shownModels.delete(view.viewType);
+      this.sizes.delete(view.viewType);
+      this.visibleSince.delete(view.viewType);
     });
     this.views.set(view.viewType, view);
+    this.visibleSince.set(view.viewType, Date.now());
   }
 
   private send(view: vscode.WebviewView): void {
