@@ -158,6 +158,19 @@ describe('mainTerminal (PRD R28, R92)', () => {
     expect(mainTerminal(row('app'))).toMatchObject(attach);
   });
 
+  it('attaches to a Code Mode session waiting on a question by its Switchboard session ID, where a background session opens in Claude (PRD R95)', () => {
+    const question = { ...waiting, stateDetail: 'Which branch?' };
+    const held = { ...question, codeMode: true };
+    const rowOf = (session: typeof waiting, openTerminal: Snapshot['openTerminal']): DockRow => windowRows({ ...snapshot([item({ sessions: [session] })]), openTerminal }, FILE, WINDOWS, NOW)[0]!;
+    const expected = { type: 'terminal', provider: 'claude', sessionId: 's7', cwd: WORKTREE, name: 'gh 107', shortId: null, active: false, codeMode: true };
+
+    expect(rowOf(question, 'vscode').main).toBe('Open in Claude');
+    expect(mainTerminal(rowOf(question, 'vscode'))).toBeNull();
+    expect(paneModel(snapshot([item({ sessions: [held] })]), FILE, WINDOWS, NOW).items[0]!.main).toMatchObject({ label: 'Open in terminal', title: 'Open in terminal: attaches to the Code Mode session' });
+    expect(mainTerminal(rowOf(held, 'vscode'))).toMatchObject({ ...expected, shortId: 'ab12' });
+    expect(mainTerminal(rowOf(held, 'app'))).toEqual(expected);
+  });
+
   it('gives no command for another main control, or a row with no terminal', () => {
     expect(mainTerminal(windowRows(snapshot([item(approval)]), FILE, WINDOWS, NOW)[0]!)).toBeNull();
     expect(mainTerminal({ ...row('app'), terminal: null })).toBeNull();

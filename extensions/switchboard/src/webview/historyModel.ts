@@ -148,9 +148,14 @@ const str = (value: unknown): string => (value === null || value === undefined ?
 
 /**
  * What a click on a session opens: the session in Claude, unless it runs in its background process, lives in the operator's window it was
- * registered from (PRD R81), or has no native ID yet; then null.
+ * registered from (PRD R81), or has no native ID yet; then null. A Code Mode session opens in its attach terminal in every state, by its
+ * Switchboard session ID (PRD R95).
  */
 export function sessionOpen(session: Session): Record<string, unknown> | null {
+  if (session.codeMode === true) {
+    return { type: 'open', sessionId: session.id, cwd: session.cwd, provider: 'claude', codeMode: true };
+  }
+
   if (session.state !== 'starting' && session.state !== 'ended' && session.shortId !== null && (!session.released || session.releasing || session.external === true)) {
     return null;
   }
@@ -212,7 +217,13 @@ class Builder {
 
     const name = session?.provider === 'codex' ? 'Codex' : 'Claude';
 
-    return open === null ? [] : [{ label: `Open in ${name}`, icon: 'comment-discussion', title: `Open ${this.sessionName(sessionId)} in ${name}`, open }];
+    if (open === null) {
+      return [];
+    }
+
+    return session?.codeMode === true
+      ? [{ label: 'Open in terminal', icon: 'terminal', title: `Attach to Code Mode ${this.sessionName(sessionId)} in a terminal`, open }]
+      : [{ label: `Open in ${name}`, icon: 'comment-discussion', title: `Open ${this.sessionName(sessionId)} in ${name}`, open }];
   }
 
   /** One line per logged field of a change, in plain words; fields in `skip` are already in the entry's text. */
@@ -578,7 +589,7 @@ class Builder {
       }
       case 'session-started':
         skip.add('state').add('nativeSessionId').add('shortId');
-        return { category: 'session', icon: 'terminal', text: `${capital(session)} started` };
+        return { category: 'session', icon: 'terminal', text: `${capital(session)} started${event.sessionId !== null && this.sessions.get(event.sessionId)?.codeMode === true ? ' in Code Mode' : ''}` };
       case 'session-start-failed':
         skip.add('state').add('outcome').add('outcomeDetail').add('released');
         return { category: 'session', icon: 'error', text: 'The session failed to start', detail: str(detail['message']), tone: 'error' };

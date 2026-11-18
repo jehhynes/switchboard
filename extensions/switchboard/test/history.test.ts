@@ -297,6 +297,33 @@ describe('History model', () => {
     expect(sessionOpen({ ...session, state: 'idle', released: true, releasing: true })).toBeNull();
   });
 
+  it('says a Code Mode session started in Code Mode, and opens it in its attach terminal by its Switchboard session ID in every state (PRD R59, R95)', () => {
+    const run = new Run();
+
+    run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
+    run.send({ type: 'triage-succeeded', triageId: 1, context: 'ctx', playbook: 'dev:question', immediacy: null, severity: null, model: 'claude-sonnet-5' });
+    run.send({ type: 'start', workItemId: 1 });
+    run.store.updateSession('s1', { codeMode: true });
+    run.send({ type: 'session-started', sessionId: 's1', nativeSessionId: 'native-1', shortId: 'abc12345' });
+    run.now += MINUTE;
+    run.send({ type: 'marker', sessionId: 's1', state: 'waiting', detail: 'Which branch?' });
+
+    const history = run.history();
+    const entries = historyView(history, run.now).sections[0]!.entries;
+    const open = { type: 'open', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude', codeMode: true };
+    const link = { label: 'Open in terminal', icon: 'terminal', title: 'Attach to Code Mode session abc12345 in a terminal', open };
+    const session = history.workItems[0]!.sessions[0]!;
+
+    expect(entries.find((entry) => entry.text.startsWith('Session abc12345 started'))).toMatchObject({ text: 'Session abc12345 started in Code Mode', links: [link] });
+    expect(entries.filter((entry) => entry.links.length > 0).map((entry) => entry.links)).toEqual([[link], [link]]);
+    // A background session's start keeps its wording.
+    expect(texts(historyView(approvedRun().history(), run.now).sections[0]!.entries)).toContain('Session abc12345 started');
+
+    for (const state of ['starting', 'running', 'waiting', 'idle', 'ended'] as const) {
+      expect(sessionOpen({ ...session, state, released: false })).toEqual(open);
+    }
+  });
+
   it("opens a Codex session in Codex, and names it by its thread ID's last 8 characters", () => {
     const history = approvedRun().history();
     const codex = { ...history, workItems: history.workItems.map((item) => ({ ...item, sessions: item.sessions.map((session) => ({ ...session, provider: 'codex' as const, shortId: '01a128b1-5384-7b62-a7be-64a4b4c611a9', state: 'ended' as const, released: true })) })) };

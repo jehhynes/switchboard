@@ -69,7 +69,10 @@ export async function openTab(target: string): Promise<void> {
   }
 }
 
-/** Terminals this window opened sessions in, by `attach:` or `resume:` and session ID, so an attach left open is not shown for a resume. */
+/**
+ * Terminals this window opened sessions in, by `attach:` or `resume:` and the Claude or Codex session ID, so an attach left open is not shown for
+ * a resume, or by `code:` and the Switchboard session ID for a Code Mode session's attach terminal.
+ */
 const terminals = new Map<string, vscode.Terminal>();
 
 /** The agents a session can run in; the hub names one with each session (PRD R22). */
@@ -81,17 +84,63 @@ export function providerOf(value: unknown): Provider {
 }
 
 /**
+ * A `terminal` window command (PRD R28). `executable` is the agent's CLI from `sessions.claudePath` or `sessions.codexPath`, or for a Code Mode
+ * session `sessions.nodePath`, which runs `args`, `["<home>/hub.js", "attach", <Switchboard session ID>]` (PRD R95).
+ */
+export interface TerminalCommand {
+  /** The Claude or Codex session ID, or a Code Mode session's Switchboard session ID. */
+  sessionId: string;
+  cwd: string;
+  /** The ticket key. */
+  name: string;
+  shortId: string | null;
+  active: boolean;
+  provider: Provider;
+  executable: string | null;
+  args: string[] | null;
+  codeMode: boolean;
+}
+
+/** The terminal command of a window command the hub sent. */
+export function terminalCommandOf(command: Record<string, unknown>): TerminalCommand {
+  const args = command['args'];
+
+  return {
+    sessionId: String(command['sessionId']),
+    cwd: String(command['cwd']),
+    name: String(command['name']),
+    shortId: typeof command['shortId'] === 'string' ? command['shortId'] : null,
+    active: command['active'] === true,
+    provider: providerOf(command['provider']),
+    executable: typeof command['executable'] === 'string' && command['executable'] !== '' ? command['executable'] : null,
+    args: Array.isArray(args) && args.every((arg) => typeof arg === 'string') ? args : null,
+    codeMode: command['codeMode'] === true,
+  };
+}
+
+/** Whether a terminal still runs: it has not exited and VS Code still lists it. */
+function runs(terminal: vscode.Terminal | undefined): terminal is vscode.Terminal {
+  return terminal !== undefined && terminal.exitStatus === undefined && vscode.window.terminals.includes(terminal);
+}
+
+/**
  * Open in terminal (PRD R28): shows the terminal this window already opened the session in while it runs, else opens `claude attach <short ID>`
  * for a Claude session in its background process, or `claude --resume <session ID>` or `codex resume <thread ID>` in its directory. A session
  * `active` elsewhere, such as in a VS Code tab, opens there instead, because resuming a live session starts a copy (mechanics M18). Closing an
- * attach leaves the session running (M7, M9). `executable` is the agent's CLI from `sessions.claudePath` or `sessions.codexPath`; a hub that sends
- * none leaves the bare name to the window's PATH.
+ * attach leaves the session running (M7, M9). A hub that sends no `executable` leaves the bare name to the window's PATH. A Code Mode session
+ * opens in its attach terminal instead (`openAttachTerminal`).
  */
-export async function openTerminal(record: HubRecord | null, sessionId: string, cwd: string, name: string, shortId: string | null, active: boolean, provider: Provider = 'claude', executable: string = provider): Promise<void> {
+export async function openTerminal(record: HubRecord | null, command: TerminalCommand): Promise<void> {
+  if (command.codeMode) {
+    openAttachTerminal(command);
+    return;
+  }
+
+  const { sessionId, cwd, name, shortId, active, provider } = command;
   const key = `${shortId === null ? 'resume' : 'attach'}:${sessionId}`;
   const existing = terminals.get(key);
 
-  if (existing !== undefined && existing.exitStatus === undefined && vscode.window.terminals.includes(existing)) {
+  if (runs(existing)) {
     existing.show();
     return;
   }
@@ -102,6 +151,35 @@ export async function openTerminal(record: HubRecord | null, sessionId: string, 
   }
 
   const args = provider === 'codex' ? ['resume', sessionId] : shortId === null ? ['--resume', sessionId] : ['attach', shortId];
+
+  show(key, name, command.executable ?? provider, args, cwd);
+}
+
+/**
+ * A Code Mode session's attach terminal (PRD R95), in every state: runs the hub's `executable` with `args` directly, with no shell, keyed by the
+ * Switchboard session ID, which `/clear`, `/branch` and `/resume` leave unchanged. The attach client stays running after its session ends and
+ * offers Enter to resume it, so a terminal this window opened that still runs is shown. Never the Claude view, which refuses Code Mode.
+ */
+function openAttachTerminal(command: TerminalCommand): void {
+  const { sessionId, executable, args } = command;
+
+  if (executable === null || args === null) {
+    throw new Error(`The hub sent no attach command for Code Mode session ${sessionId}.`);
+  }
+
+  const key = `code:${sessionId}`;
+  const existing = terminals.get(key);
+
+  if (runs(existing)) {
+    existing.show();
+    return;
+  }
+
+  show(key, command.name, executable, args, command.cwd);
+}
+
+/** Opens and shows a terminal that runs `executable` with `args`, named by the ticket key, and keeps it under `key`. */
+function show(key: string, name: string, executable: string, args: string[], cwd: string): void {
   // npm's launcher runs `node` from PATH, and nvm installs it beside the agent's CLI.
   const env = executableDirOnPath(executable);
   const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: executable, shellArgs: args, cwd, ...(Object.keys(env).length > 0 ? { env } : {}) });
@@ -163,21 +241,61 @@ export async function newClaudeTab(): Promise<void> {
  * which claims it.
  */
 export async function openSession(record: HubRecord | null, sessionId: string, cwd: string, provider: Provider = 'claude'): Promise<'opened' | 'other-folder'> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-  if (folder !== undefined && samePath(folder, cwd)) {
+  if (here(cwd)) {
     await showSession(sessionId, provider);
     return 'opened';
   }
 
-  if (record === null || (await postToHub(record, '/open', { sessionId, cwd }, ACTION_TIMEOUT_MS))?.status !== 200) {
-    void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
-  } else {
-    // VS Code focuses a window that already has the folder instead of opening another.
-    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(cwd), { forceNewWindow: true });
+  if (await leave(record, sessionId, cwd)) {
+    await openFolder(cwd);
   }
 
   return 'other-folder';
+}
+
+/**
+ * Opens a Code Mode session's attach terminal from a History link (PRD R59, R95). The session is left with the hub as a pending open, which the
+ * hub's `/claim` turns into the attach terminal command with `sessions.nodePath`: this window claims it at once when it has the session's folder,
+ * and runs it with `run`; otherwise the window of that folder claims it when it comes forward.
+ */
+export async function openAttach(record: HubRecord | null, sessionId: string, cwd: string, run: (command: WindowCommand) => Promise<unknown>): Promise<'opened' | 'other-folder' | 'refused'> {
+  if (!(await leave(record, sessionId, cwd)) || record === null) {
+    return 'refused';
+  }
+
+  if (here(cwd)) {
+    if (!(await claim(record, run)).answered) {
+      void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
+      return 'refused';
+    }
+
+    return 'opened';
+  }
+
+  await openFolder(cwd);
+  return 'other-folder';
+}
+
+/** Whether `cwd` is this window's first folder. */
+function here(cwd: string): boolean {
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+  return folder !== undefined && samePath(folder, cwd);
+}
+
+/** Leaves the session with the hub for the window of `cwd`; false, after saying so, when the hub did not answer. */
+async function leave(record: HubRecord | null, sessionId: string, cwd: string): Promise<boolean> {
+  if (record === null || (await postToHub(record, '/open', { sessionId, cwd }, ACTION_TIMEOUT_MS))?.status !== 200) {
+    void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
+    return false;
+  }
+
+  return true;
+}
+
+/** Opens the folder's window; VS Code focuses a window that already has the folder instead of opening another. */
+async function openFolder(cwd: string): Promise<void> {
+  await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(cwd), { forceNewWindow: true });
 }
 
 /** This window's `.code-workspace` file, or null for a folder window. */
@@ -187,6 +305,11 @@ export function workspaceFile(): string | null {
 
 /** Opens a session another window or the dock left for this window, and runs the dock's commands for it. Runs when the window connects or gains focus. */
 export async function claimOpen(record: HubRecord, run: (command: WindowCommand) => Promise<unknown> = async () => {}, workspace: string | null = workspaceFile()): Promise<string | null> {
+  return (await claim(record, run, workspace)).sessionId;
+}
+
+/** `claimOpen`, which also says whether the hub answered the claim. */
+async function claim(record: HubRecord, run: (command: WindowCommand) => Promise<unknown>, workspace: string | null = workspaceFile()): Promise<{ answered: boolean; sessionId: string | null }> {
   // A window with no folder claims only the dock's commands for any window.
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   // Only the focused window takes the dock's commands for any window, so a window reconnecting in the background does not (PRD R71).
@@ -211,7 +334,7 @@ export async function claimOpen(record: HubRecord, run: (command: WindowCommand)
   // Commands the dock left for this window: Open Changes, History and Open report (PRD R71).
   await runEach(commands.filter((command) => command.type !== 'openTabs'));
 
-  return sessionId;
+  return { answered: reply?.status === 200, sessionId };
 }
 
 /** How long Open in Claude or Codex waits for the hub to report the stopped session ended; a stop itself times out at 15 seconds. */

@@ -63,6 +63,8 @@ describe('a row\'s History', () => {
     db.exec(`INSERT INTO tickets (id, source, sourceKey, ref, title, url, assigned, repoRoot) VALUES (${TICKET}, 'github', '77', '#77', 'Inbox badge', 'https://github.com/o/r/issues/77', 0, '')`);
     db.exec(`INSERT INTO workItems (id, ticketId, playbook, status, createdAt, statusAt, doneAt, doneReason) VALUES (${TICKET}, ${TICKET}, 'dev:review-pr', 'done', 1000, 2000, 2000, 'session')`);
     db.exec(`INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, outcome, startedAt, endedAt, released) VALUES ('hist-1', ${TICKET}, 'task', 'claude', 'C:/r', 'ended', 1500, 'done', 1100, 1500, 1)`);
+    // An ended Code Mode session in this window's folder, which its History link opens in its attach terminal (PRD R95).
+    db.prepare(`INSERT INTO sessions (id, workItemId, kind, provider, nativeSessionId, shortId, cwd, state, stateAt, outcome, startedAt, endedAt, released, codeMode) VALUES ('hist-cm', ${TICKET}, 'task', 'claude', 'cm-native', 'cm-short', ?, 'ended', 1900, 'done', 1600, 1900, 1, 1)`).run(vscode.workspace.workspaceFolders[0].uri.fsPath);
     vscode.window.showWarningMessage = (message) => (warned.push(message), Promise.resolve(undefined));
   });
 
@@ -177,6 +179,86 @@ describe('a row\'s History', () => {
     await until(() => warned.length > 0, 'no warning');
     assert.deepStrictEqual(warned, [`Switchboard: Unknown ticket ${TICKET + 1}.`]);
     await until(() => extension.historyTabs().length === 0, 'the tab stayed open');
+  });
+
+  describe("a Code Mode session's link (PRD R59, R95)", () => {
+    const realCreate = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
+    const realExecute = vscode.commands.executeCommand;
+    const realError = vscode.window.showErrorMessage;
+    let created;
+    let ran;
+    let errors;
+
+    beforeEach(() => {
+      created = [];
+      ran = [];
+      errors = [];
+      Object.defineProperty(vscode.window, 'createTerminal', { configurable: true, value: (options) => (created.push(options), { options, exitStatus: undefined, show: () => {} }) });
+      // Claude's commands and folder opens are recorded, so neither a Claude tab nor a window opens.
+      vscode.commands.executeCommand = (command, ...args) =>
+        command.startsWith('claude-vscode.') || command === 'vscode.openFolder' ? (ran.push([command, args[0]?.fsPath ?? args[0]]), Promise.resolve()) : realExecute.call(vscode.commands, command, ...args);
+      vscode.window.showErrorMessage = (message) => (errors.push(message), Promise.resolve(undefined));
+    });
+
+    afterEach(() => {
+      Object.defineProperty(vscode.window, 'createTerminal', realCreate);
+      vscode.commands.executeCommand = realExecute;
+      vscode.window.showErrorMessage = realError;
+    });
+
+    it("opens the session in this window's attach terminal through the hub, which resumes it there, not in the Claude view", async () => {
+      const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+
+      assert.strictEqual(await extension.historyLink({ type: 'open', sessionId: 'hist-cm', cwd: folder, provider: 'claude', codeMode: true }), 'opened');
+
+      assert.deepStrictEqual(errors, []);
+      assert.deepStrictEqual(ran, []);
+      assert.strictEqual(created.length, 1, JSON.stringify(created));
+      assert.deepStrictEqual({ name: created[0].name, shellArgs: created[0].shellArgs, cwd: created[0].cwd }, {
+        name: 'Switchboard · gh 77',
+        shellArgs: [join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'hub.js'), 'attach', 'hist-cm'],
+        cwd: folder,
+      });
+      assert.match(created[0].shellPath, /(^|[\\/])node(\.exe)?$/i);
+    });
+
+    it('says the hub did not answer, and opens nothing, with no hub or when the hub does not answer the claim', async () => {
+      const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      const link = { type: 'open', sessionId: 'hist-cm', cwd: folder, provider: 'claude', codeMode: true };
+      const paths = [];
+      // A stand-in hub that records the open and fails the claim.
+      const stand = require('node:http').createServer((request, response) => {
+        paths.push(request.url);
+        request.resume();
+        request.on('end', () => {
+          response.writeHead(request.url === '/open' ? 200 : 500, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify(request.url === '/open' ? { recorded: true } : { error: 'failed' }));
+        });
+      });
+
+      await new Promise((done) => stand.listen(0, '127.0.0.1', done));
+
+      try {
+        assert.strictEqual(await extension.historyLink(link, null), 'refused');
+        assert.strictEqual(await extension.historyLink(link, { ...extension.hub(), port: stand.address().port, token: 'stub-token' }), 'refused');
+      } finally {
+        stand.close();
+      }
+
+      assert.deepStrictEqual(paths, ['/open', '/claim']);
+      assert.deepStrictEqual(errors, ['Switchboard: the hub did not answer.', 'Switchboard: the hub did not answer.']);
+      assert.deepStrictEqual([created.length, ran.length], [0, 0]);
+    });
+
+    it("leaves a session of another folder with the hub and opens that folder's window, which claims it", async () => {
+      const elsewhere = join(process.env.SWITCHBOARD_TEST_HOME, 'elsewhere');
+
+      await extension.historyLink({ type: 'open', sessionId: 'hist-cm', cwd: elsewhere, provider: 'claude', codeMode: true });
+
+      assert.deepStrictEqual(errors, []);
+      assert.deepStrictEqual(ran, [['vscode.openFolder', vscode.Uri.file(elsewhere).fsPath]]);
+      assert.strictEqual(created.length, 0);
+    });
   });
 
   /** The ticket's history revision as the hub's store holds it. */

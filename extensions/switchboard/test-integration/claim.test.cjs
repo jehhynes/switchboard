@@ -180,6 +180,35 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
     }
   });
 
+  it("opens a claimed Code Mode session in its attach terminal, after the window's tabs and before the other commands, not in the Claude view (PRD R95)", async () => {
+    const node = 'C:/Program Files/nodejs/node.exe';
+    const args = ['C:/Users/me/.switchboard/hub.js', 'attach', 'sb-session-12'];
+    // The hub sends a claimed open of a Code Mode session as this command, with no session to open in Claude.
+    const hub = await claimingHub([
+      { type: 'terminal', provider: 'claude', sessionId: 'sb-session-12', cwd: 'D:/git/widgets-wt/12-fix', name: 'gh 12', shortId: 'abcd0012', active: false, codeMode: true, executable: node, args },
+      { type: 'history', ticketId: 12, key: 'gh 12' },
+      { type: 'openTabs' },
+    ]);
+    const realCreate = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
+    const created = [];
+    const order = [];
+
+    Object.defineProperty(vscode.window, 'createTerminal', { configurable: true, value: (options) => (created.push(options), order.push('terminal'), { options, exitStatus: undefined, show: () => {} }) });
+
+    try {
+      const run = (command) => (command.type === 'terminal' ? extension.run(command) : (order.push(command.type), Promise.resolve()));
+
+      assert.strictEqual(await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' }, run), null);
+      assert.deepStrictEqual(created.map(({ name, shellPath, shellArgs, cwd }) => ({ name, shellPath, shellArgs, cwd })), [{ name: 'Switchboard · gh 12', shellPath: node, shellArgs: args, cwd: 'D:/git/widgets-wt/12-fix' }]);
+      assert.deepStrictEqual(order, ['openTabs', 'terminal', 'history']);
+      // The stand-in Claude command fails, so an attempt to open the Claude view would show here.
+      assert.deepStrictEqual(errors, []);
+    } finally {
+      Object.defineProperty(vscode.window, 'createTerminal', realCreate);
+      hub.server.close();
+    }
+  });
+
   it("opens a claimed Codex session in this window's sidebar (PRD R29)", async () => {
     const calls = [];
     const execute = vscode.commands.executeCommand;

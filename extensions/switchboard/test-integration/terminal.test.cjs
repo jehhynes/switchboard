@@ -105,6 +105,55 @@ describe("a row's Open in terminal", () => {
     assert.deepStrictEqual(created.map((terminal) => terminal.options), [{ name: 'Switchboard · gh 7', shellPath: 'codex', shellArgs: ['resume', 'thread-9'], cwd: 'D:/git/widgets-wt/7-fix' }]);
   });
 
+  describe('for a Code Mode session (PRD R95)', () => {
+    const node = 'C:/Program Files/nodejs/node.exe';
+    const attach = (sessionId, command = {}) => run({ sessionId, shortId: 'abcd0010', codeMode: true, provider: 'claude', executable: node, args: ['C:/Users/me/.switchboard/hub.js', 'attach', sessionId], ...command });
+
+    it('runs the attach command as the executable and its arguments, named by the ticket key, and never opens the Claude view', async () => {
+      const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+
+      await attach('cm-1', { cwd: folder, active: true });
+
+      assert.deepStrictEqual(
+        created.map(({ options }) => ({ name: options.name, shellPath: options.shellPath, shellArgs: options.shellArgs, cwd: options.cwd })),
+        [{ name: 'Switchboard · gh 7', shellPath: node, shellArgs: ['C:/Users/me/.switchboard/hub.js', 'attach', 'cm-1'], cwd: folder }],
+      );
+      assert.deepStrictEqual(shown, [['C:/Users/me/.switchboard/hub.js', 'attach', 'cm-1']]);
+      assert.deepStrictEqual(opened, []);
+    });
+
+    it('shows its retained attach terminal after the Claude ID changes or the session ends, and opens another once the client exits or closes', async () => {
+      await attach('cm-2');
+      // `/clear` gives the session a new short ID; an ended session's client keeps running, offering Enter to resume it.
+      await attach('cm-2', { shortId: 'abcd0011' });
+      await attach('cm-2', { shortId: null });
+      assert.strictEqual(created.length, 1);
+      assert.strictEqual(shown.length, 3);
+
+      created[0].exitStatus = { code: 0 };
+      await attach('cm-2');
+      assert.strictEqual(created.length, 2);
+
+      listed = listed.filter((terminal) => terminal !== created[1]);
+      await attach('cm-2');
+      assert.strictEqual(created.length, 3);
+    });
+
+    it('keeps it apart from a background attach of another session and from its own resume command', async () => {
+      await attach('cm-3');
+      await run({ sessionId: 'cm-3', shortId: 'abcd0012' });
+      await run({ sessionId: 'cm-3', shortId: null });
+
+      assert.deepStrictEqual(created.map((terminal) => terminal.options.shellArgs), [['C:/Users/me/.switchboard/hub.js', 'attach', 'cm-3'], ['attach', 'abcd0012'], ['--resume', 'cm-3']]);
+    });
+
+    it('refuses a command without the attach command, opening nothing', async () => {
+      await assert.rejects(attach('cm-6', { executable: undefined }), /The hub sent no attach command for Code Mode session cm-6\./);
+      await assert.rejects(attach('cm-6', { args: undefined }), /The hub sent no attach command for Code Mode session cm-6\./);
+      assert.deepStrictEqual([created.length, opened.length], [0, 0]);
+    });
+  });
+
   it("runs the agent's CLI the hub names from sessions.claudePath or sessions.codexPath, and the bare name for an empty one", async () => {
     await run({ sessionId: 'g-native', shortId: null, executable: '/opt/claude/bin/claude' });
     await run({ sessionId: 'thread-10', shortId: null, provider: 'codex', executable: '/home/me/.nvm/versions/node/v24/bin/codex' });

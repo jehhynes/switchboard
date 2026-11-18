@@ -82,6 +82,11 @@ export function mainTerminal(row: DockRow): Record<string, unknown> | null {
     return null;
   }
 
+  // A Code Mode session's terminal attaches by its Switchboard session ID, and the hub adds its attach command (PRD R95).
+  if (terminal.codeMode === true) {
+    return { type: 'terminal', provider: 'claude', sessionId: terminal.sessionId, cwd: terminal.cwd, name: row.ticket, shortId: null, active: false, codeMode: true };
+  }
+
   return { type: 'terminal', provider: terminal.provider, sessionId: terminal.sessionId, cwd: terminal.cwd, name: row.ticket, shortId: terminal.args[0] === 'attach' ? (terminal.args[1] ?? null) : null, active: terminal.active };
 }
 

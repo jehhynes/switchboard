@@ -17,7 +17,7 @@ import { startHub } from './hubProcess.js';
 import { needsStatus } from './needs.js';
 import { NeedsYouToasts } from './notify.js';
 import { claimIsFor } from './claims.js';
-import { act, claimOpen, newClaudeTab, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, providerOf, workspaceFile } from './open.js';
+import { act, claimOpen, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
 import { mainTerminal, paneModel, windowRows } from './paneModel.js';
@@ -47,6 +47,8 @@ export interface SwitchboardApi {
   openRow(key: string, options?: { hub?: HubRecord; waitMs?: number }): Promise<OpenResult>;
   /** Claims what the dock left for this window from a hub, as focus or a connection does, and runs it, by default with `run` (PRD R71). */
   claim(hub: HubRecord, run?: (command: WindowCommand) => Promise<unknown>): Promise<string | null>;
+  /** Opens what a History entry links, as a click on it does, through `hub` when given, which may be null for no hub. */
+  historyLink(link: { type: string; [key: string]: unknown }, hub?: HubRecord | null): Promise<unknown>;
   /** Runs a command the dock leaves for a window: Open Changes, History, Open report or Show Hub Log (PRD R71). */
   run(command: WindowCommand): Promise<unknown>;
   /** Opens a URL or file as an item window's tab; the suite's window is not an item window (PRD R72). */
@@ -172,7 +174,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
       case 'history':
         return history.open(command as unknown as HistoryMessage);
       case 'terminal':
-        return openTerminal(keeper.current(), String(command['sessionId']), String(command['cwd']), String(command['name']), typeof command['shortId'] === 'string' ? command['shortId'] : null, command['active'] === true, providerOf(command['provider']), typeof command['executable'] === 'string' && command['executable'] !== '' ? command['executable'] : undefined);
+        return openTerminal(keeper.current(), terminalCommandOf(command));
       case 'openUrl':
         return openLink(String(command['url']));
       case 'openTabs':
@@ -184,10 +186,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     }
   };
   /** Opens what a History entry links (PRD R59). */
-  const openHistoryLink = async (link: { type: string; [key: string]: unknown }): Promise<unknown> => {
+  const openHistoryLink = async (link: { type: string; [key: string]: unknown }, record: HubRecord | null = keeper.current()): Promise<unknown> => {
     switch (link.type) {
       case 'open':
-        return openSession(keeper.current(), String(link['sessionId']), String(link['cwd']), providerOf(link['provider']));
+        // A Code Mode session opens in its attach terminal, never in the Claude view (PRD R95).
+        return link['codeMode'] === true
+          ? openAttach(record, String(link['sessionId']), String(link['cwd']), runCommand)
+          : openSession(record, String(link['sessionId']), String(link['cwd']), providerOf(link['provider']));
       case 'openFolder':
         // VS Code focuses a window that already has the folder.
         return vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(String(link['path'])), { forceNewWindow: true });
@@ -494,6 +499,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     openUri: (uri, waitMs) => openUri(opening(), uri, waitMs),
     openRow: (key, options = {}) => openRow(opening(options.hub ?? keeper.current(), options.waitMs), key),
     claim: (hub, run = runCommand) => claimOpen(hub, run),
+    historyLink: (link, hub) => openHistoryLink(link, hub === undefined ? keeper.current() : hub),
     run: runCommand,
     openTab,
     background: (hub, workItemIds, where) => continueInBackground({ record: hub, workItemIds }, where),
