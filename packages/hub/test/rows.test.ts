@@ -231,6 +231,15 @@ describe('Code Mode sessions (PRD R95)', () => {
     }
   });
 
+  it('offers Delete while it starts, saying that Delete stops it, unlike a starting background session (PRD R76)', () => {
+    const starting = item(7, { sessions: [held({ state: 'starting', shortId: null })] });
+    const remove = controlsOf(starting).find((control) => control.label === 'Delete');
+
+    expect(remove?.message).toEqual({ type: 'action', action: { type: 'delete', workItemId: 7 } });
+    expect(remove?.confirm?.detail).toMatch(/^Its running session is stopped\. /);
+    expect(labels(item(7, { sessions: [session({ state: 'starting', shortId: null })] }))).not.toContain('Delete');
+  });
+
   it('offers Stop while held, after its turn too, and no main control while it runs or after its turn', () => {
     expect(labels(item(7, { sessions: [held({ state: 'idle' })] }))).toContain('Stop');
     expect(mainControl(item(7, { sessions: [held()] }))).toBeNull();

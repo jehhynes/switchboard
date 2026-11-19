@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switc
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { markOf } from '@switchboard/core/group';
-import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, Ticket } from '@switchboard/core';
+import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, StartAction, Ticket } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import type { HolderConnection } from '../src/holder.js';
@@ -2620,6 +2620,30 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(claude.starts).toEqual([]);
     expect(store.session('s9')).toMatchObject({ state: 'running', nativeSessionId: 's9-native', launchId: 's9-launch' });
     runtime.stop();
+  });
+
+  it('starts new Claude sessions with the Code Mode runner while sessions.codeMode is on, with the IDs stored before the start', async () => {
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const claude = fakeRunner();
+    const seen: { action: StartAction; stored: Session | null }[] = [];
+    const codeMode = fakeRunner();
+    const context = setup(config({ codeMode: true }), () => T0, { claude, codeMode });
+
+    codeMode.start = async (action) => {
+      seen.push({ action, stored: context.store.session(action.sessionId) });
+      return { shortId: action.nativeSessionId!.slice(0, 8), nativeSessionId: action.nativeSessionId!, launchId: action.launchId! };
+    };
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+
+    expect(claude.starts).toEqual([]);
+    expect(seen).toHaveLength(1);
+    const [{ action, stored }] = seen as [(typeof seen)[number]];
+    expect(action).toMatchObject({ provider: 'claude', codeMode: true, nativeSessionId: expect.stringMatching(UUID), launchId: expect.stringMatching(UUID) });
+    expect(action.nativeSessionId).not.toBe(action.launchId);
+    expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId });
+    expect(context.store.session(action.sessionId)).toMatchObject({ state: 'running', shortId: action.nativeSessionId!.slice(0, 8) });
+    context.runtime.stop();
   });
 
   it('applies the background runner\'s observation when the holder read fails, and changes no held session', async () => {

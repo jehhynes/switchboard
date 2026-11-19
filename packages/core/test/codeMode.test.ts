@@ -9,7 +9,7 @@ function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Ext
   return actions[0] as Extract<FlowAction, { type: T }>;
 }
 
-/** Starts the action's session as a Code Mode session held in the terminal holder, as step 13's setting will (PRD R93). */
+/** Marks the action's session as a Code Mode session held in the terminal holder, as `sessions.codeMode` does at its start, and starts it (PRD R93). */
 function held(h: Harness, action: FlowAction | undefined, launchId = 'launch-1'): string {
   if (action?.type !== 'start-session') {
     throw new Error(`Expected a start-session action, got ${JSON.stringify(action)}`);
@@ -38,6 +38,67 @@ function heldSetup(h: Harness): string {
 
   return held(h, h.triaged(triage, 'dev:develop')[0]);
 }
+
+describe('sessions.codeMode (PRD R93)', () => {
+  const adhoc = (h: Harness, prompt = 'Write hello.txt') => only(h.act({ type: 'adhoc', prompt, repoRoot: 'D:/scratch', start: true }), 'start-session');
+
+  it('starts a background Claude session while it is off', () => {
+    const h = new Harness();
+    const start = adhoc(h);
+
+    expect(start.codeMode).toBeUndefined();
+    expect(start.nativeSessionId).toBeUndefined();
+    expect(start.launchId).toBeUndefined();
+    expect(h.store.session(start.sessionId)).toMatchObject({ codeMode: false, nativeSessionId: null, launchId: null, state: 'starting' });
+  });
+
+  it('starts a Code Mode session with its Claude session ID and launch stored before the start while it is on', () => {
+    const h = new Harness({ settings: settings({ sessions: { codeMode: true } }) });
+    const start = adhoc(h);
+
+    expect(start).toMatchObject({ provider: 'claude', codeMode: true, nativeSessionId: 'uuid-1', launchId: 'uuid-2' });
+    expect(h.store.session(start.sessionId)).toMatchObject({ codeMode: true, nativeSessionId: 'uuid-1', launchId: 'uuid-2', shortId: null, state: 'starting' });
+  });
+
+  it('starts setup and task sessions of a playbook in Code Mode', () => {
+    const h = new Harness({ settings: settings({ sessions: { codeMode: true } }) });
+    const [triage] = h.poll(issue('15619'));
+    const setup = only(h.triaged(triage, 'dev:develop'), 'start-session');
+
+    expect(setup).toMatchObject({ kind: 'setup', codeMode: true, nativeSessionId: 'uuid-1', launchId: 'uuid-2' });
+  });
+
+  it('drops the IDs of a start that failed, so the session cannot be resumed', () => {
+    const h = new Harness({ settings: settings({ sessions: { codeMode: true } }) });
+    const start = adhoc(h);
+
+    h.act({ type: 'session-start-failed', sessionId: start.sessionId, message: 'Code Mode sessions need sessions.installHooks.' });
+
+    expect(h.store.session(start.sessionId)).toMatchObject({ state: 'ended', outcome: 'failed', codeMode: true, nativeSessionId: null, launchId: null, shortId: null });
+    expect(h.item(1)).toMatchObject({ status: 'failed', error: 'Code Mode sessions need sessions.installHooks.' });
+  });
+
+  it('leaves Codex sessions as they are', () => {
+    const h = new Harness({ settings: settings({ sessions: { codeMode: true, provider: 'codex' } }) });
+    const start = adhoc(h);
+
+    expect(start.provider).toBe('codex');
+    expect(start.codeMode).toBeUndefined();
+    expect(h.store.session(start.sessionId)).toMatchObject({ codeMode: false, nativeSessionId: null, launchId: null });
+  });
+
+  it('changes only later starts, so a session keeps the mode it started in', () => {
+    const h = new Harness({ settings: settings({ sessions: { codeMode: true, concurrency: 2 } }) });
+    const first = held(h, adhoc(h, 'First'), 'uuid-2');
+
+    h.settings = settings({ sessions: { codeMode: false, concurrency: 2 } });
+    const second = adhoc(h, 'Second');
+
+    expect(second.codeMode).toBeUndefined();
+    expect(h.store.session(first)).toMatchObject({ codeMode: true, launchId: 'uuid-2' });
+    expect(h.store.session(second.sessionId)).toMatchObject({ codeMode: false });
+  });
+});
 
 describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
   it('records the launch of a started session', () => {

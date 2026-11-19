@@ -13,7 +13,7 @@ public sealed class SettingsFieldsTests
         Assert.Equal(["Sessions", "Claude sessions", "Codex sessions", "Dock", "Triage"], sections.Select((section) => section.Heading));
         Assert.Equal(
             [
-                "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.nodePath", "sessions.permissionMode", "sessions.model", "sessions.claudePath", "sessions.codex.permissionMode", "sessions.codex.model", "sessions.codexPath",
+                "sessions.concurrency", "sessions.provider", "sessions.installHooks", "sessions.debriefs", "sessions.codeMode", "sessions.nodePath", "sessions.permissionMode", "sessions.model", "sessions.claudePath", "sessions.codex.permissionMode", "sessions.codex.model", "sessions.codexPath",
                 "dock.openVSCode", "dock.openTerminal",
                 "triage.model", "triage.concurrency", "triage.timeoutSeconds",
             ],
@@ -22,6 +22,8 @@ public sealed class SettingsFieldsTests
         Assert.Equal(["Claude", "Codex"], sections[0].Fields[1].Options!.Select((option) => option.Label));
         Assert.True(sections[0].Fields[2].Fallback);
         Assert.False(sections[0].Fields[3].Fallback);
+        Assert.Equal(("Code Mode (experimental)", FieldKind.Boolean, false), (sections[0].Fields[4].Label, sections[0].Fields[4].Kind, sections[0].Fields[4].Fallback));
+        Assert.Contains("skip the gateway in your Claude settings and use your Claude subscription sign-in", sections[0].Fields[4].Help);
         Assert.Equal(["acceptEdits", "auto", "plan"], sections[1].Fields[0].Options!.Select((option) => option.Value));
         Assert.Equal(["auto", "bypassPermissions"], sections[2].Fields[0].Options!.Select((option) => option.Value));
         Assert.Equal("bypassPermissions", sections[2].Fields[0].Placeholder);

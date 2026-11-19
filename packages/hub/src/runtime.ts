@@ -329,7 +329,7 @@ export class Runtime {
   send(event: FlowEvent): FlowResult {
     const { settings, playbooks } = this.config;
     const result = this.deps.store.transaction(() =>
-      handle(this.deps.store, event, { now: this.deps.now(), settings, playbooks, report: this.reportCommand, newSessionId: this.deps.newSessionId }),
+      handle(this.deps.store, event, { now: this.deps.now(), settings, playbooks, report: this.reportCommand, newSessionId: this.deps.newSessionId, newUuid: randomUUID }),
     );
 
     for (const action of result.actions) {

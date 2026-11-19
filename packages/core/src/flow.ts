@@ -303,6 +303,8 @@ export interface FlowContext {
   /** The report command prefix, `<sessions.nodePath> "<home>/hub.js" report`. */
   report: string;
   newSessionId(): string;
+  /** A random UUID, for a Code Mode session's Claude session ID and launch (PRD R93). */
+  newUuid(): string;
 }
 
 export interface FlowResult {
@@ -1455,7 +1457,10 @@ class Flow {
   private sessionStartFailed(sessionId: string, message: string): void {
     const session = this.session(sessionId);
 
-    this.store.updateSession(sessionId, { state: 'ended', stateAt: this.now, endedAt: this.now, outcome: 'failed', outcomeDetail: message, released: true });
+    // A Code Mode start that failed has no session to resume, so its preallocated IDs go (PRD R93); Retry starts a new session.
+    const unused = session.codeMode === true ? { nativeSessionId: null, launchId: null } : {};
+
+    this.store.updateSession(sessionId, { state: 'ended', stateAt: this.now, endedAt: this.now, outcome: 'failed', outcomeDetail: message, released: true, ...unused });
 
     const item = this.latest(session);
 
@@ -2711,6 +2716,9 @@ class Flow {
     // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do.
     const provider = playbook?.provider ?? sessions.provider;
     const reports = sessionReports(kind, approved, playbook, provider);
+    // The setting applies at the start; resumes keep the session's mode (PRD R93). The Claude session ID and launch are stored before the
+    // start, so a hub restarted during it finds the process in the holder.
+    const held = provider === 'claude' && sessions.codeMode ? { codeMode: true as const, nativeSessionId: this.context.newUuid(), launchId: this.context.newUuid() } : null;
     // The guidance waits through a setup session and a failed start for the task session, and an approved prompt does not take it (PRD R77).
     const guided = kind === 'task' && !approved;
     const full = sessionPrompt(prompt, id, guided ? item.guidance : null);
@@ -2725,7 +2733,7 @@ class Flow {
       workItemId: item.id,
       kind,
       provider,
-      nativeSessionId: null,
+      nativeSessionId: held?.nativeSessionId ?? null,
       shortId: null,
       cwd,
       state: 'starting',
@@ -2744,8 +2752,8 @@ class Flow {
       external: false,
       move: null,
       movedAt: null,
-      codeMode: false,
-      launchId: null,
+      codeMode: held !== null,
+      launchId: held?.launchId ?? null,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     // Rows open only the latest session, so an older held one ends (PRD R95).
@@ -2762,6 +2770,7 @@ class Flow {
       contract: sessionContract(id, this.context.report, reports, provider),
       name: sessionName(kind, item, ticket),
       ...launchOptions(this.context.settings, playbook, kind, provider),
+      ...(held ?? {}),
     });
   }
 

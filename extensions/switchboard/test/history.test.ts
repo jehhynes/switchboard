@@ -32,7 +32,7 @@ class Run {
   #sessions = 0;
 
   send(event: FlowEvent): void {
-    this.store.transaction(() => handle(this.store, event, { now: this.now, settings: SETTINGS, playbooks: playbooks(), report: 'report', newSessionId: () => `s${++this.#sessions}` }));
+    this.store.transaction(() => handle(this.store, event, { now: this.now, settings: SETTINGS, playbooks: playbooks(), report: 'report', newSessionId: () => `s${++this.#sessions}`, newUuid: () => 'uuid' }));
   }
 
   history(): TicketHistory {
@@ -103,7 +103,7 @@ describe('History model', () => {
   it('says when a schedule came due and when its open run kept it from making another (PRD R82)', () => {
     const store = Store.open(':memory:');
     const settings: Settings = { ...SETTINGS, schedules: { cleanup: { playbook: 'dev:question', repoRoot: 'D:/git/widgets', every: 'day', day: null, at: 10 * 60 } } };
-    const tick = (now: number) => store.transaction(() => handle(store, { type: 'tick' }, { now, settings, playbooks: playbooks(), report: 'report', newSessionId: () => 's1' }));
+    const tick = (now: number) => store.transaction(() => handle(store, { type: 'tick' }, { now, settings, playbooks: playbooks(), report: 'report', newSessionId: () => 's1', newUuid: () => 'uuid' }));
 
     tick(T0);
     tick(T0 + 61 * MINUTE);

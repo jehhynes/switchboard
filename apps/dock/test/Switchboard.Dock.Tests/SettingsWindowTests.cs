@@ -246,6 +246,20 @@ public sealed class SettingsWindowTests
     }
 
     [AvaloniaFact]
+    public void CodeMode_CheckedAndSaved_WritesSessionsCodeModeTrue()
+    {
+        var (window, _) = Open();
+        var box = Field<CheckBox>(window, "sessions.codeMode");
+
+        Assert.False(box.IsChecked);
+        box.IsChecked = true;
+        Settle();
+        Click(PageButton(window, "save"));
+
+        Assert.StartsWith("save {\"value\":{\"sessions\":{\"concurrency\":2,\"codeMode\":true}", Assert.Single(hub.Saves));
+    }
+
+    [AvaloniaFact]
     public void CtrlS_InATextBox_SavesTheFile()
     {
         var (window, _) = Open();

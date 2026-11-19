@@ -45,6 +45,8 @@ export interface SessionSettings {
   installHooks: boolean;
   /** Ask each finished Claude session what slowed it down, for the friction-review skill (PRD R55). */
   debriefs: boolean;
+  /** Start new Claude sessions in Code Mode in the terminal holder (PRD R93); experimental, off by default. */
+  codeMode: boolean;
 }
 
 export interface TriageSettings {
@@ -116,7 +118,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   // Commands in Codex's sandbox cannot use the operator's credentials, such as gh's, so Codex sessions default to no sandbox (mechanics M31).
-  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false },
+  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false, codeMode: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
@@ -276,7 +278,7 @@ export function parseSettings(text: string): SettingsResult {
 
   const sessionsIn = read.section(root, 'sessions', 'sessions');
   const defaults = DEFAULT_SETTINGS;
-  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'claudePath', 'codexPath', 'nodePath', 'codex', 'installHooks', 'debriefs'], 'sessions');
+  read.unknown(sessionsIn, ['provider', 'concurrency', 'permissionMode', 'model', 'claudePath', 'codexPath', 'nodePath', 'codex', 'installHooks', 'debriefs', 'codeMode'], 'sessions');
   const codexIn = read.section(sessionsIn, 'codex', 'sessions.codex');
   read.unknown(codexIn, ['permissionMode', 'model'], 'sessions.codex');
   const sessions: SessionSettings = {
@@ -293,6 +295,7 @@ export function parseSettings(text: string): SettingsResult {
     },
     installHooks: read.boolean(sessionsIn, 'installHooks', 'sessions', defaults.sessions.installHooks),
     debriefs: read.boolean(sessionsIn, 'debriefs', 'sessions', defaults.sessions.debriefs),
+    codeMode: read.boolean(sessionsIn, 'codeMode', 'sessions', defaults.sessions.codeMode),
   };
 
   const triageIn = read.section(root, 'triage', 'triage');

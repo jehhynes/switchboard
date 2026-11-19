@@ -761,7 +761,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Hook order of one turn:** `SessionStart` (`startup`), `UserPromptSubmit`, `PreToolUse` `REPL`, `PreToolUse` of each tool the code calls under its own name, `PostToolBatch`, `PostToolUse` of each, `PostToolUse` `REPL`, `UserPromptSubmit` with `source: "poll_event"`, `Stop`. A `SubagentStop` with an `agent_id` followed some `Stop`s, and `Notification` `idle_prompt` came 60 seconds after a `Stop`. Async hooks finish out of order: `PostToolBatch` was sometimes logged before the `PreToolUse` it follows, and several events shared one millisecond.
 - **Pass criteria (plan E1):** Code Mode on, shown by a fixed screen line readable by a program; prompt as first turn; transcript with the given session ID; the `-n` name in the roster; the contract's code word known. **Passed.**
 - **Not verified:** Linux; the holder started by a real hub.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work. Re-run M63, M65, M70 and M71 after a Claude Code upgrade, since Code Mode is experimental and may change in any release.
+- **Current use:** `CodeModeRunner`'s start arguments and its start check, which needs the `Code Mode (experimental) is on` line (architecture.md § Code Mode sessions), with `sessions.codeMode` on. Re-run M63, M65, M70 and M71 after a Claude Code upgrade, since Code Mode is experimental and may change in any release.
 
 ## M64. Skipping the gateway for a Code Mode session
 
@@ -785,7 +785,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` from user settings did not stop Code Mode once the base URL was overridden.
 - **Pass criteria (plan E2):** one combination starts Code Mode with `/status` showing the direct API and the subscription sign-in, also when settings set `ANTHROPIC_API_KEY`. **Passed:** `--settings` `env` with the base URL and the three credential variables as empty strings. The process environment needs no override.
 - **Not verified:** `ANTHROPIC_API_KEY` in user settings themselves (local settings stood in); an `Authorization` header; a managed-settings gateway. An `apiKeyHelper` in user settings cannot be overridden by `--settings`, so it keeps Code Mode off.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** `codeModeEnvironment` and the `--settings` `env` override that skip the gateway (architecture.md § Code Mode sessions).
 
 ## M65. Hook events in a Code Mode session
 
@@ -802,7 +802,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **States:** running is `UserPromptSubmit` (either source), `PreToolUse`, `PostToolUse` or `PostToolBatch`; a question or permission wait is `PermissionRequest` and its `Notification`, told apart by the request's tool (M57); idle is `Stop`, or `SessionStart` `compact` after `/compact`; ended is `SessionEnd` (M68). A turn can end without a `poll_event`.
 - **Pass criteria (plan E3):** each state has an identifying marker sequence; background code is visible so idle is not reported while code runs; a `poll_event` turn ends with `Stop`; Switchboard's async `PreToolUse` entry never refuses a call; the contract survives compaction. **Partial.** Passed: running, a question or permission wait, idle and ended each have an identifying sequence; the turn stays open until code ends, so idle is not reported while code runs; each `poll_event` turn ended with `Stop`; the async `PreToolUse` entry never refused a call; the contract survived compaction. Outstanding: the failed state, since no `StopFailure` was produced.
 - **Not verified:** `StopFailure` (an unknown model in `/model` was refused before any request); the auto-mode prompt with a two-minute countdown, which needs tool calls that overlap; `Elicitation`; whether output can arrive after `Stop` by another route, such as `Monitor`.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the marker mapping of held sessions' states (architecture.md § Code Mode sessions, Liveness and state).
 
 ## M66. Reports from a Code Mode session
 
@@ -811,7 +811,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Experiment:** the M63 session ran `node <home>/.switchboard/hub.js report stage …` with the `Bash` tool and `report worktree … /d/git/x` with the `PowerShell` tool, both from code, and printed `CLAUDE_CODE_SESSION_ID` and `SWITCHBOARD_LAUNCH`.
 - **Result:** both commands printed `recorded`; each `POST /report` carried the session's ID as `nativeSessionId`. Both shells saw `CLAUDE_CODE_SESSION_ID` and `SWITCHBOARD_LAUNCH`, and Bash also `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` and the overridden base URL. From PowerShell, `/d/git/x` arrived as `D:\d\git\x`, as for any PowerShell call (M20 concerns Git Bash only).
 - **Pass criteria (plan E4):** the stand-in receives the report with the right session ID. **Passed.**
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** held sessions send reports with the unchanged report command and contract (architecture.md § Code Mode sessions).
 
 ## M67. The roster, `claude stop` and `claude attach` for a held session
 
@@ -819,7 +819,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
 - **Result:** `claude agents --json` and `--all` list a held interactive session as `{pid, cwd, kind: "interactive", startedAt, sessionId, name, status}` with `status` `busy`, `idle` or `waiting` and, when waiting, `waitingFor` `input needed` or `permission prompt`; it has no short `id`. `claude stop` and `claude attach` with the first 8 characters, the full ID or the name print `No session matching '<arg>'. Run 'claude agents' to list running sessions.` and exit 1, and leave the session running. After `/clear`, `/branch` or `/resume` the entry keeps the pid and shows the new session ID and name (M73).
 - **Pass criteria (plan E5):** recorded either way. **Passed.**
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the roster read skips processes the holder holds, so a held session is never classed `interactive` (architecture.md § Code Mode sessions).
 
 ## M68. Resuming a Code Mode session after its process ends
 
@@ -832,7 +832,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - A resume with a prompt ran it as a turn: `SessionStart` `resume`, `UserPromptSubmit`, `Stop`. The model knew both code words and that the killed command's result was lost.
   - Without the variable Claude printed `This session was started in Code Mode (experimental), which is off, so it can't be resumed. To resume it, set the environment variable CLAUDE_CODE_EXPERIMENTAL_CODE_MODE to 1, then run claude --resume <id>.` and exited 1.
 - **Pass criteria (plan E6):** same session ID, conversation and contract; Code Mode on; model and permission mode settable; a promptless resume reads as idle; the stale marker of a killed process distinguishable by its launch ID; the refusal recorded. **Passed**, with the launch ID taken from the hook's environment, which the hook writer does not record yet. The resume passed no `--append-system-prompt`, so the contract seen came from the conversation.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** `CodeModeRunner.resumeHeld` and the launch ID in markers (architecture.md § Code Mode sessions, Resume).
 
 ## M69. Held sessions when the holder dies
 
@@ -842,7 +842,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Result:** every `claude` and the members of its process tree seen before the kill were gone within 5 s. Each session logged `SessionEnd` with `reason: "other"` 1 to 2 s after the kill, so Switchboard's hook writer removed its marker, and the roster no longer listed it. The shell command did not stop: `e7done.txt` was written 15 s after its `claude` had exited. Its `sleep` was not under `claude.exe` in the process table, so neither the tree nor the roster shows it.
 - **Pass criteria (plan E7):** each `claude` exits within 30 s, or a survivor is detectable. **Passed** for `claude`. A tool's shell command can outlive its session unseen.
 - **Not verified:** Linux and `SIGKILL`; whether `taskkill /T` on `claude` (M68) also leaves such a command running.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the holder-loss rule and the resume guard (architecture.md § Code Mode sessions).
 
 ## M70. Prompts before a Code Mode session starts
 
@@ -859,7 +859,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Pass criteria (plan E8):** a start prompt is detectable without a marker; the confirmation keeps the session ID and prompt. **Passed:** a live process with no marker of its launch is waiting on a dialog, and the prompt and session ID survived.
 - **Side effect:** killing a session while its dialogs showed made the next Claude start on the machine print `Claude Code's fullscreen renderer didn't finish starting last time on this machine, so this launch is using the classic renderer.`; that start used the classic renderer once.
 - **Not verified:** the name of the second process; what the operator's terminal shows after an attach mid-dialog.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the start prompt rule of the start check (architecture.md § Code Mode sessions, Start check).
 
 ## M71. Starts that Claude makes without Code Mode
 
@@ -867,7 +867,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
 - **Result:** with the M64 overrides, `--model claude-sonnet-5` started without Code Mode, printing `⚠ Code Mode (experimental) isn't available: for now it only works with Opus 5.5, Sonnet 5.5 and later models. Starting with the ordinary tools.` `DISABLE_TELEMETRY=1` printed `⚠ Code Mode (experimental) isn't available: it needs settings that Claude Code downloads from Anthropic, and this session doesn't download them (DISABLE_TELEMETRY, DO_NOT_TRACK, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC or CLAUDE_CODE_DISABLE_FEATURE_FLAGS turns that off). Starting with the ordinary tools.` In both, `/status` showed `Code Mode: off · <reason>` and the `is on` line was absent. Haiku 5.5 runs Code Mode though the message names only Opus and Sonnet. Every refusal line in M64 and here starts `⚠ Code Mode (experimental) isn't available:` and wraps at the terminal's width.
 - **Pass criteria (plan E9):** both lines recorded. **Passed.**
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the start check fails on the `isn't available` line (architecture.md § Code Mode sessions, Start check).
 
 ## M72. Replaying and attaching to a held session
 
@@ -883,7 +883,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - A serialized replay of 10,040 lines of 106 characters was 1,094,259 bytes, and the raw buffer 2,180,075.
 - **Pass criteria (plan E10):** one replay method shows the screen as Claude drew it in both terminals, and keys reach Claude unchanged. **Partial.** Passed with the headless client and the raw-mode client in a second ConPTY: serialization after a resize to the client's size reproduced the screen, and keys reached Claude. Outstanding: the replay and keys in Windows Terminal and in VS Code's terminal, checked by eye, which the criteria name.
 - **Not verified:** Linux; mouse input; a raw buffer that has dropped its start.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the holder's replay, a serialized screen after a resize to the client's size (architecture.md § Terminal holder).
 
 ## M73. Session ID changes inside a held session
 
@@ -897,7 +897,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 
   Since Switchboard's hook writer removes a marker on `SessionEnd`, each change removes the old ID's marker and writes one for the new ID.
 - **Pass criteria (plan E12):** each ID change is detectable from markers carrying the launch ID. **Passed**, given a hook writer that records `SWITCHBOARD_LAUNCH`; nested `claude -p` markers also carry the launch ID, so the source of the change must be kept (M77).
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the identity rule that follows `/clear`, `/branch` and `/resume` (architecture.md § Code Mode sessions).
 
 ## M74. Debrief forks of a Code Mode session
 
@@ -905,7 +905,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Versions:** Claude Code CLI 2.1.327 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300.
 - **Result:** `claude -p --resume <Code Mode session> --fork-session` with `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` printed `Warning: Code Mode (experimental) isn't available: for now it only works in the interactive terminal.` and, with or without the variable, `Failed to resume session: This session was started in Code Mode (experimental), which isn't available because for now it only works in the interactive terminal, so it can't be resumed here.` and exited 1.
 - **Pass criteria (plan E13):** recorded. **Passed:** refused.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** debriefs skip Code Mode sessions (architecture.md § Code Mode sessions).
 
 ## M75. Memory of held sessions and how to read it
 
@@ -919,7 +919,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Sampled read (2026-11-18, the holder's `MemorySampler`):** one `Get-CimInstance Win32_Process` query in Windows PowerShell returning pid, parent, creation time and working set of 630 processes took 828 to 863 ms over three runs, and summing 20 process trees from it 1.5 to 2.8 ms (`.wip/code-mode-exp/memsample.mjs`). The holder runs that read in the background about every 30 seconds and answers `list` from the last one, so a list does not wait on it.
 - **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit. **Partial** here: `list` answers from the sampled read, under 3 ms for 20 trees, and the memory numbers cover 7 minutes. The hour-long run is M82, which passes E14.
 - **Not verified:** Linux `/proc`. Growth over an hour is M82.
-- **Current use:** the terminal holder's `list` reports each session's tree memory from a background read of the process table (architecture.md § Terminal holder); Code Mode sessions are not implemented yet.
+- **Current use:** the terminal holder's `list` reports each session's tree memory from a background read of the process table (architecture.md § Terminal holder).
 
 ## M76. node-pty from a packaged extension
 
@@ -932,7 +932,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - With `conpty.node` removed, the holder started and listened, and only a spawn failed: `Failed to load native module: conpty.node, checked: build/Release, build/Debug, prebuilds/win32-x64: …`.
   - While a process had `.node` files loaded, Node.js `writeFileSync` and `copyFileSync` over one failed with `EBUSY`, and `rmSync` and `renameSync` over one with `EPERM`. A second copy of the build in another folder ran beside the first.
 - **Pass criteria (plan E11):** spawn, resize and kill from the extracted folder on each platform; a running holder survives a new build installed beside it; a missing binary fails only a Code Mode start. **Partial.** Passed on Windows x64: spawn, resize and kill from the extracted folder under Node.js 24 and Electron 43; a second build in its own folder ran beside a running one, whose loaded `.node` files cannot be replaced; with `conpty.node` missing the holder started and only a spawn failed. Outstanding: Node.js 22, and the hub started with the binary missing. Linux x64 is deferred (plan Q8).
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the holder's artifact with node-pty's helpers and prebuilt binaries in the VSIX, installed per build (architecture.md § Terminal holder).
 
 ## M77. Claude runs nested in a Code Mode session
 
@@ -945,7 +945,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - `claude --bg` started a background session (stopped with `claude stop`) whose hooks had no `SWITCHBOARD_LAUNCH`, no variable and the gateway address, since the background service starts it.
 - **Pass criteria (plan E15):** nested runs work, and their markers cannot be read as the held session's or as its ID change. **Partial.** Nested runs work and their session IDs differ from the held session's. A `claude -p` run's hooks carry the held session's launch ID, and only its first event is `SessionStart` `startup`; the hook writer replaces the marker on each event, so its later markers look like those of a held process whose ID changed (M73). Telling them apart needs evidence that outlives the next event, such as a `SessionStart` source the marker keeps, or the roster listing the held pid with the new ID (M67).
 - **Not verified:** whether the roster lists a nested `claude -p` run.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the identity rule, under which a nested run's markers change nothing (architecture.md § Code Mode sessions).
 
 ## M78. What ends a Code Mode session's shell commands
 
@@ -990,7 +990,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **States:** a failed turn ends in `StopFailure` in place of `Stop`, both before any code and after code has run; with Switchboard's matchers it is the last marker until the next `UserPromptSubmit`, so `markerState` reads it as `failed` with `error` as the detail. For a connection failure `error` is only `server_error`; the readable cause is in `last_assistant_message`.
 - **Pass criteria (plan E3, failed state):** the failed state has an identifying marker sequence. **Passed.** With the M65 entry, every state E3 names now has one.
 - **Not verified:** other error classes (rate limit, authentication, invalid request, output-token limit) and their `error` values; the default retry count and how long it takes before `StopFailure`; a failure while background code is still running or on a `poll_event` delivery.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** `StopFailure` reads as `failed` with `error` as the detail (architecture.md § Code Mode sessions, Liveness and state).
 
 ## M80. The auto-mode permission prompt with a countdown in a Code Mode session (E3)
 
@@ -1020,7 +1020,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Detection:** with Switchboard's matchers the wait is `PermissionRequest` (tool `Bash`) then `Notification` `permission_prompt`, which `markerState` reads as waiting on a permission prompt, as for any permission prompt (M65); the roster's `waitingFor` agrees. Only the screen tells the countdown apart, by the line `Claude Code will automatically block this request in M:SS`, which gives the time left. Expiry fires no hook of its own, so the marker stays waiting until the next `PostToolBatch` or `Stop`; here that was within 2 s, because the refusal ended the script.
 - **Pass criteria (plan E3, countdown prompt):** the prompt is raised, and a held session waiting on it is detectable. **Passed:** raised and detected as a permission wait by markers and roster, with its countdown readable from the screen.
 - **Not verified:** the docs' trigger with no hook, such as an `ask` permission rule or an unavailable classifier; answering Yes or No to the countdown; the docs' "later calls that would show a countdown are refused without a prompt" after an expiry; what the markers show when the refused script goes on making calls instead of ending; the IDE-connected case without a countdown.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the countdown prompt reads as a permission wait, as any permission prompt does (architecture.md § Code Mode sessions).
 
 ## M81. node-pty and the built holder on Node.js 22 (E11)
 
@@ -1034,7 +1034,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - A holder whose test client exited before `shutdown` kept its home's lock, and the next holder on that home exited after its two-second wait for the lock, as `main.ts` intends; ending the old holder cleared it.
 - **Pass criteria (plan E11, Node.js 22 on Windows x64):** spawn, resize and kill work under Node.js 22 from the built holder and from the extracted package. **Passed.** With M76 this covers Node.js 22 and 24 and Electron 43 on Windows x64.
 - **Not verified:** a Code Mode `claude` held by a holder on Node.js 22; the hub started with the native binary missing; Linux x64 (plan Q8).
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+- **Current use:** the holder runs under `sessions.nodePath`, Node.js 22 or 24 (architecture.md § Terminal holder).
 
 ## M82. Memory of idle held Code Mode sessions over an hour
 
@@ -1063,4 +1063,4 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - The holder's `/kill` (`taskkill /T /F`) ended each tree in 1.6 to 1.7 s, and `/shutdown` ended the holder; no process naming the scratch folder or the sessions was left.
 - **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit, from an hour-long run. **Passed** on Windows: `list` answers from the sampled read (under 2 ms here for 3 trees, under 3 ms for 20 in M75), and an idle Code Mode session's tree ended the hour at about 430 to 480 MB working set and 690 to 760 MB private (420 to 610 MB and 660 to 735 MB for the never-used ones over the hour), of which the operator's MCP servers are about 180 MB and 200 MB, with no growth over an hour; the holder costs about 120 MB private with three sessions and 10,000 lines in one.
 - **Not verified:** Linux `/proc`; more than an hour, where the small steps in idle private bytes at the 30-minute writes could add up; a session with 10,000 lines of scrollback in the real holder (`packages/holder`); what the 30-minute write is.
-- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work and sets the numbers for their idle limit.
+- **Current use:** the fixed 4-hour idle limit of held sessions, `CODE_MODE_IDLE_MS` (architecture.md § Code Mode sessions, End rule).
