@@ -40,11 +40,17 @@ export function paneModel(snapshot: Snapshot | null, file: string | null, window
   return { items: file === null ? [] : windowRows(snapshot, file, windows, now).map(paneItem), needs: needsCount(snapshot) };
 }
 
-/** The rows, in list order, whose item window is the one opened from `file`. */
+/**
+ * The rows, in list order, whose item window is the one opened from `file`. Done rows are left out while the window has a row that is not done, because a
+ * later work item of the same ticket, such as a merge after its development, runs in the same worktree and repeats the ticket's pills.
+ */
 export function windowRows(snapshot: Snapshot, file: string, windows: string, now: number): DockRow[] {
-  return dockView(snapshot, now, windows)
-    .groups.flatMap((group) => group.rows)
-    .filter((row) => row.window !== null && normal(row.window.file) === normal(file));
+  const rows = dockView(snapshot, now, windows).groups.flatMap((group) =>
+    group.rows.filter((row) => row.window !== null && normal(row.window.file) === normal(file)).map((row) => ({ row, done: group.key === 'done' })),
+  );
+  const open = rows.filter((entry) => !entry.done);
+
+  return (open.length === 0 ? rows : open).map((entry) => entry.row);
 }
 
 function paneItem(row: DockRow): PaneItem {

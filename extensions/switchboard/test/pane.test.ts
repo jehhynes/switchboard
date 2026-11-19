@@ -124,6 +124,20 @@ describe('paneModel (PRD R92)', () => {
     expect(paneModel(snapshot([other]), FILE, WINDOWS, NOW).items).toEqual([]);
   });
 
+  it('leaves out a done work item of the window while the window has another work item', () => {
+    const done = item({ id: 6, status: 'done', doneAt: NOW - 1000, doneReason: 'session', ...pr });
+    const merge = item({ id: 7, playbook: 'dev:merge', status: 'blocked', ...pr });
+    const model = paneModel(snapshot([done, merge]), FILE, WINDOWS, NOW);
+
+    expect(model.items.map((shown) => shown.key)).toEqual(['item:7']);
+  });
+
+  it('shows a done work item when it is the window only work item', () => {
+    const done = item({ status: 'done', doneAt: NOW - 1000, doneReason: 'session', ...pr });
+
+    expect(paneModel(snapshot([done]), FILE, WINDOWS, NOW).items.map((shown) => shown.links.map((link) => link.text))).toEqual([['gh 107', '19002']]);
+  });
+
   it('matches the window file whatever its case and slashes', () => {
     expect(paneModel(snapshot([item()]), FILE.replaceAll('\\', '/').toUpperCase(), WINDOWS, NOW).items).toHaveLength(1);
   });
