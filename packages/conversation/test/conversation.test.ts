@@ -84,7 +84,108 @@ function setup(rules = true) {
 const screen = (...lines: string[]): ScreenRead => ({ lines: [...lines, '', '> '], bullets: [...lines, '', ''].map((line) => line.startsWith('● ')), cols: 80, rows: 24 });
 
 describe('SessionConversation', () => {
-  it('shows a message and the reply that answers it, with the details apart, and reads each transcript line once', () => {
+  it("confirms a message typed from the view by its transcript entry instead of adding it again, and answers it with the reply", () => {
+    const { store, conversation, path, append, items, changes } = setup();
+    const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, pastedAt: T0 };
+
+    store.addMessage({ ...typed, id: 'm-typed', at: T0, text: '/compact now', delivery: 'open', opId: 'op1' });
+    store.addMessage({ ...typed, id: 'm-failed', at: T0, text: 'Same words', delivery: 'not-sent', opId: 'op2', provisional: false });
+    // Pasted with a backslash, so it is a message and not a command; the same words typed in the terminal earlier are their own message.
+    append(user('u0', T0 - 60_000, 'Same words'), user('u1', T0 + 500, '\\/compact now'), assistant('a1', T0 + 1000, 'Compacting is yours to run.'));
+    conversation.readTranscript(path);
+
+    // The typed message waited after the transcript's items until its line was read, and takes that line's place.
+    expect(items()).toMatchObject([
+      { type: 'message', id: 'm-failed', delivery: 'not-sent', transcriptUuid: null },
+      { type: 'message', text: 'Same words', origin: 'terminal' },
+      { type: 'message', id: 'm-typed', origin: 'typed', delivery: 'sent', transcriptUuid: 'u1', provisional: false },
+      { type: 'reply', answers: 'm-typed', opening: 'Compacting is yours to run.' },
+    ]);
+    expect(items()).toHaveLength(4);
+    expect(changes.map((change) => change.type)).toEqual(['message', 'message', 'reply']);
+  });
+
+  it('confirms a typed message only by an entry near its paste: never one still waiting to paste, nor an uncertain one long after', () => {
+    const { store, conversation, path, append, items } = setup();
+    const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null };
+
+    store.addMessage({ ...typed, id: 'm-waiting', at: T0, text: 'Yes', delivery: 'open', opId: 'op1', pastedAt: null });
+    store.addMessage({ ...typed, id: 'm-old', at: T0, text: 'Yes', delivery: 'uncertain', opId: 'op2', pastedAt: T0, provisional: false });
+    store.addMessage({ ...typed, id: 'm-queued', at: T0, text: 'Later', delivery: 'sent', opId: 'op3', pastedAt: T0 });
+    // An hour later: a "Yes" typed in the terminal, and the queued message Claude took only now.
+    append(user('u1', T0 + 3_600_000, 'Yes'), user('u2', T0 + 3_600_001, 'Later'));
+    conversation.readTranscript(path);
+
+    expect(items().map((item) => [item.id, item.type === 'message' ? item.delivery : null])).toEqual([
+      ['m-old', 'uncertain'],
+      ['m-1', null],
+      ['m-queued', 'sent'],
+      // Still waiting to be pasted, so after everything in the transcript.
+      ['m-waiting', 'open'],
+    ]);
+    expect(store.message('m-queued')?.transcriptUuid).toBe('u2');
+  });
+
+  it('gives an entry to the latest attempt pasted before it, and none to a message typed into an earlier transcript', () => {
+    const { store, conversation, path, append, items } = setup();
+    const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null };
+
+    store.addMessage({ ...typed, id: 'm-first', at: T0, text: 'Yes', delivery: 'uncertain', opId: 'op1', pastedAt: T0 });
+    store.addMessage({ ...typed, id: 'm-second', at: T0 + 30_000, text: 'Yes', delivery: 'sent', opId: 'op2', pastedAt: T0 + 30_000 });
+    append(user('u1', T0 + 30_100, 'Yes'));
+    conversation.readTranscript(path);
+    expect(store.message('m-second')?.transcriptUuid).toBe('u1');
+    expect(store.message('m-first')).toMatchObject({ delivery: 'uncertain', transcriptUuid: null });
+
+    // After /clear the session writes a new transcript; the uncertain "Yes" of the earlier one is never confirmed by it.
+    const cleared = join(dir, 'native-2.jsonl');
+
+    writeFileSync(cleared, `${user('u2', T0 + 40_000, 'Yes')}\n`);
+    conversation.readTranscript(cleared);
+    expect(store.message('m-first')).toMatchObject({ delivery: 'uncertain', transcriptUuid: null });
+    expect(items().filter((item) => item.type === 'message')).toHaveLength(3);
+  });
+
+  it("follows a typed message sent while Claude works as the transcript's queue model does: sent by its queue line, placed where Claude received it, and never withdrawn", () => {
+    const { store, conversation, path, append, items, changes } = setup();
+    const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null };
+
+    append(user('u0', T0 - 1000, 'Start the build'));
+    conversation.readTranscript(path);
+    store.addMessage({ ...typed, id: 'm-typed', at: T0, text: 'Line one\nLine two', delivery: 'open', opId: 'op1', pastedAt: T0 });
+    // A paste of several lines is queued inside its tags; Claude Code's own queue lines also start with "<", and this is not one.
+    append(enqueue(T0 + 100, '<pasted_content id="a1">\nLine one\nLine two\n</pasted_content id="a1">'));
+    conversation.readTranscript(path);
+    expect(store.message('m-typed')).toMatchObject({ delivery: 'sent', provisional: true, transcriptUuid: null });
+    expect(items()).toHaveLength(2);
+
+    append(assistant('a1', T0 + 500, 'Building.'), queued('q1', T0 + 600, '<pasted_content id="a1">\nLine one\nLine two\n</pasted_content id="a1">'), assistant('a2', T0 + 700, 'Two lines read.'));
+    conversation.readTranscript(path);
+    expect(items().map((item) => item.id)).toEqual(['m-1', items()[1]!.id, 'm-typed', items()[3]!.id]);
+    expect(items()[3]).toMatchObject({ type: 'reply', opening: 'Two lines read.' });
+    expect(store.message('m-typed')).toMatchObject({ delivery: 'sent', provisional: false, transcriptUuid: 'q1' });
+
+    // The session's end withdraws terminal messages Claude never received, never a typed one.
+    store.addMessage({ ...typed, id: 'm-late', at: T0 + 800, text: 'Never read', delivery: 'sent', opId: 'op2', pastedAt: T0 + 800 });
+    conversation.end();
+    expect(store.message('m-late')).toMatchObject({ withdrawn: false });
+    expect(changes.filter((change) => change.type === 'message' && change.message.id === 'm-typed')).toHaveLength(2);
+  });
+
+  it('shows a pasted block of several lines without the tags Claude Code records it in, and confirms a typed one by it', () => {
+    const { store, conversation, path, append, items } = setup();
+
+    store.addMessage({ id: 'm-typed', sessionId: 's1', workItemId: 7, at: T0, origin: 'typed', text: 'One\nTwo', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'uncertain', error: 'x', opId: 'op1', pastedAt: T0 });
+    append(user('u1', T0 + 100, '<pasted_content id="914d">\nOne\nTwo\n</pasted_content id="914d">'), user('u2', T0 + 200, 'See <pasted_content id="a1">\nx\ny\n</pasted_content id="a1"> please'));
+    conversation.readTranscript(path);
+
+    expect(items()).toMatchObject([
+      { id: 'm-typed', delivery: 'sent', error: null, transcriptUuid: 'u1' },
+      { origin: 'terminal', text: 'See x\ny please' },
+    ]);
+  });
+
+  it('shows a message and the reply that answers it, and reads each transcript line once', () => {
     const { conversation, path, append, items, changes } = setup();
 
     append(user('u1', T0, 'Why does it fail?'), assistant('a1', T0 + 1000, 'A stale cache.\n\nClear `.cache` and rerun.'));

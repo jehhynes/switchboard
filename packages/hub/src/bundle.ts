@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 
 /**
  * Copy the hub bundle to the Switchboard home, so the running hub does not depend on the extension's install
@@ -29,6 +29,16 @@ export function installBundle(source: string, target: string): boolean {
   renameSync(temporary, target);
 
   return true;
+}
+
+/**
+ * The home a session command (`report`, `register`, `attach`, `holder`) runs for: `<home>/.switchboard/hub.js` names `<home>`. A bundle
+ * anywhere else, such as the extension's own `dist/hub.js`, names no home, so `fallback`, the user's home folder, is used.
+ */
+export function bundleHome(bundle: string | undefined, fallback: string): string {
+  const dir = bundle === undefined ? null : dirname(resolve(bundle));
+
+  return dir !== null && basename(dir) === '.switchboard' ? dirname(dir) : fallback;
 }
 
 /** The hub's build identity: a hash of its bundle, so a rebuilt hub differs even when the version does not. */

@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildOf, installBundle } from '../src/bundle.js';
+import { buildOf, bundleHome, installBundle } from '../src/bundle.js';
 import { tempHome } from './helpers.js';
 
 let dir: string;
@@ -27,6 +27,14 @@ describe('installBundle', () => {
     writeFileSync(source, 'two');
     expect(installBundle(source, target)).toBe(true);
     expect(readFileSync(target, 'utf8')).toBe('two');
+  });
+});
+
+describe('bundleHome', () => {
+  it("names the home of a bundle in its .switchboard folder, and the fallback for any other bundle, such as the extension's", () => {
+    expect(bundleHome(join(dir, '.switchboard', 'hub.js'), 'fallback')).toBe(dir);
+    expect(bundleHome(join(dir, 'extensions', 'switchboard.switchboard-0.0.0', 'dist', 'hub.js'), 'fallback')).toBe('fallback');
+    expect(bundleHome(undefined, 'fallback')).toBe('fallback');
   });
 });
 

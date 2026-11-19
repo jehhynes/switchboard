@@ -308,6 +308,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     windows: scopes,
     ...claudePaths(claudeRoot, homedir(), Boolean(process.env['CLAUDE_CONFIG_DIR'])),
     screen: (session, scrollback) => runtime.heldScreen(session, scrollback),
+    input: { reserve: (sessionId, launch) => runtime.reserveInput(sessionId, launch), write: (session, data) => runtime.writeHeld(session, data), cannotType: () => runtime.heldCannotType() },
     hooks: () => config.settings.sessions.installHooks,
     now: deps.now,
     newId: randomUUID,
@@ -425,7 +426,7 @@ const dockWithRuns = () => {
         return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
       },
       // hub.js holder list and stop (PRD R94).
-      '/holder/list': async () => ({ status: 200, body: { sessions: await runtime.listHeld() } }),
+      '/holder/list': async () => ({ status: 200, body: { sessions: await runtime.listHeld(), holder: runtime.heldHolder() } }),
       '/holder/stop': async (body) => {
         if (!isRecord(body) || typeof body['id'] !== 'string' || body['id'] === '') {
           return { status: 400, body: { error: 'Expected {id}.' } };
@@ -516,6 +517,7 @@ const dockWithRuns = () => {
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
       '/volume': async (body) => volumeReply(store, deps.now(), body),
+      '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text}.' } }),
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/claim': async (body) => {
         if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean') || !optionalString(body['window'])) {

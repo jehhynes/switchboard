@@ -22,14 +22,14 @@ describe('conversation store', () => {
     const store = Store.open(':memory:');
 
     store.addReply(reply('r1', 30));
-    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false });
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
     store.addReply(reply('r2', 20, { withdrawn: true }));
     store.addReply(reply('other', 15, { sessionId: 's2' }));
 
     expect(store.conversation('s1', null, 10)).toEqual({
       items: [
         { type: 'reply', ...reply('r1', 30), ord: 1 },
-        { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, ord: 2 },
+        { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null, ord: 2 },
         { type: 'reply', ...reply('r2', 20, { withdrawn: true }), ord: 3 },
       ],
       more: false,
@@ -49,7 +49,7 @@ describe('conversation store', () => {
 
   it('puts items not in the transcript yet after those in it, in the order first seen, and moves each to the end when its line is read', () => {
     const store = Store.open(':memory:');
-    const message = (id: string, provisional: boolean) => store.addMessage({ id, sessionId: 's1', workItemId: 1, at: 1, origin: 'terminal', text: id, transcriptUuid: null, provisional, withdrawn: false });
+    const message = (id: string, provisional: boolean) => store.addMessage({ id, sessionId: 's1', workItemId: 1, at: 1, origin: 'terminal', text: id, transcriptUuid: null, provisional, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
     const ids = () => store.conversation('s1', null, 10).items.map((item) => item.id);
 
     message('m1', false);
@@ -83,7 +83,7 @@ describe('conversation store', () => {
     const ids = (withdrawn = true) => store.conversation('s1', null, 10, withdrawn).items.map((item) => item.id);
 
     store.addReply(reply('r1', 1));
-    store.addMessage({ id: 'gone', sessionId: 's1', workItemId: 1, at: 2, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: true, withdrawn: true });
+    store.addMessage({ id: 'gone', sessionId: 's1', workItemId: 1, at: 2, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: true, withdrawn: true, delivery: null, error: null, opId: null, pastedAt: null });
     store.addReply(reply('screen', 3, { source: 'screen' }));
     store.addReply(reply('dead', 4, { source: 'screen', withdrawn: true }));
     store.addReply(reply('r2', 5));
@@ -133,12 +133,42 @@ describe('conversation store', () => {
 
     store.insertSession({ id: 's1', workItemId: item.id, kind: 'task', provider: 'claude', nativeSessionId: null, shortId: null, cwd: 'D:/w', state: 'running', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null });
     store.addReply(reply('r1', 1, { workItemId: item.id }));
-    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: item.id, at: 1, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: false, withdrawn: false });
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: item.id, at: 1, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
     store.setCheckpoint({ sessionId: 's1', transcript: 'a', offset: 1, lastUuid: null, lastAt: null });
     store.deleteWorkItem(item.id);
 
     expect(store.conversation('s1', null, 10).items).toEqual([]);
     expect(store.checkpoint('s1')).toBeNull();
+  });
+
+  it('keeps a typed message with its delivery and opId, finds those still awaiting the transcript, and settles open ones after a restart', () => {
+    const store = Store.open(':memory:');
+    const typed = { sessionId: 's1', workItemId: 1, origin: 'typed' as const, transcriptUuid: null, error: null, pastedAt: 1, provisional: true, withdrawn: false };
+
+    store.addMessage({ ...typed, id: 'm1', at: 1, text: 'one', delivery: 'open', opId: 'op1' });
+    store.addMessage({ ...typed, id: 'm2', at: 2, text: 'two', delivery: 'not-sent', opId: 'op2', error: 'The session has ended.' });
+    store.addMessage({ ...typed, id: 'm3', at: 3, text: 'three', delivery: 'uncertain', opId: 'op3' });
+    store.addMessage({ ...typed, id: 'm4', at: 4, text: 'four', delivery: 'sent', opId: 'op4', transcriptUuid: 'u4' });
+    store.addMessage({ ...typed, id: 'm5', at: 5, text: 'five', delivery: 'open', opId: 'op5', sessionId: 's2' });
+    store.addMessage({ ...typed, id: 'm6', at: 6, text: 'six', delivery: 'open', opId: 'op6', pastedAt: null });
+
+    expect(store.messageByOpId('s1', 'op2')).toMatchObject({ id: 'm2', delivery: 'not-sent', error: 'The session has ended.' });
+    expect(store.messageByOpId('s1', 'nope')).toBeNull();
+    // A message that was not sent can be removed.
+    store.deleteMessage('m2');
+    expect(store.message('m2')).toBeNull();
+    store.addMessage({ ...typed, id: 'm2', at: 2, text: 'two', delivery: 'not-sent', opId: 'op2', error: 'The session has ended.' });
+    // An opId is looked up within its session.
+    expect(store.messageByOpId('s1', 'op5')).toBeNull();
+    expect(store.messageByOpId('s2', 'op5')).toMatchObject({ id: 'm5' });
+    // m6 waits to be pasted, so no transcript entry can be its yet.
+    expect(store.typedAwaitingTranscript('s1').map((one) => one.id)).toEqual(['m1', 'm3']);
+    store.updateMessage('m3', { delivery: 'sent', transcriptUuid: 'u3' });
+    expect(store.message('m3')).toMatchObject({ delivery: 'sent', transcriptUuid: 'u3', error: null });
+    expect(store.typedAwaitingTranscript('s1').map((one) => one.id)).toEqual(['m1']);
+    expect(store.settleOpenMessages('Switchboard restarted.').map((one) => [one.id, one.delivery])).toEqual([['m1', 'uncertain'], ['m5', 'uncertain'], ['m6', 'uncertain']]);
+    expect(store.message('m1')).toMatchObject({ delivery: 'uncertain', error: 'Switchboard restarted.', provisional: false });
+    expect(store.settleOpenMessages('again')).toEqual([]);
   });
 
   it('keeps window bindings by file', () => {

@@ -7,12 +7,13 @@ import type { Exec, ExecResult } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
+import { NotWritten } from '@switchboard/conversation';
 import { markOf } from '@switchboard/core/group';
 import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, StartAction, Ticket } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import type { HolderConnection } from '../src/holder.js';
-import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, triageText, WAKE_MS } from '../src/runtime.js';
+import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, SESSION_ENDED, SESSION_RELAUNCHED, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 
@@ -3452,6 +3453,81 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       expect(await attach).toEqual(HOLDER);
       expect(order).toEqual(['stop s1', 'resume s1']);
       expect(context.store.session('s1')).toMatchObject({ state: 'idle', launchId: 'launch-2' });
+      context.runtime.stop();
+    });
+
+    it('defers an end while a message is typed, and refuses a reservation for another launch or an ended session', async () => {
+      const codeMode = resumer({ heldActivity: async () => ({ clients: 0, lastInputAt: null }), observe: idleObservation });
+      const context = await attaching(codeMode);
+
+      expect(await context.runtime.reserveInput('s1', 'launch-0')).toEqual({ refused: SESSION_RELAUNCHED });
+
+      const reservation = await context.runtime.reserveInput('s1', 'launch-1');
+
+      if (!('release' in reservation)) {
+        throw new Error('expected a reservation');
+      }
+
+      context.store.updateSession('s1', { state: 'idle', releasing: true });
+      await context.runtime.readRoster();
+      await context.runtime.settled();
+
+      expect(codeMode.stops).toEqual([]);
+      expect(context.logs).toContain('end of held session s1 deferred: a message is being typed');
+
+      // A second release changes nothing.
+      reservation.release();
+      reservation.release();
+      await context.runtime.readRoster();
+      await context.runtime.settled();
+
+      expect(codeMode.stops).toEqual(['s1']);
+      endIt(context);
+      expect(await context.runtime.reserveInput('s1', 'launch-1')).toEqual({ refused: SESSION_ENDED });
+      context.runtime.stop();
+    });
+
+    it('waits for an end in progress before it reserves, and then refuses the ended session', async () => {
+      let ended = (): void => {};
+      const order: string[] = [];
+      const codeMode = resumer({ heldActivity: async () => ({ clients: 0, lastInputAt: null }), observe: idleObservation });
+      const context = await attaching(codeMode);
+
+      codeMode.stop = (target) =>
+        new Promise((done) => {
+          ended = () => {
+            order.push(`stop ${target.sessionId}`);
+            context.entries.splice(0, 1, held('s1', true));
+            done(null);
+          };
+        });
+      context.store.updateSession('s1', { state: 'idle', releasing: true });
+      await context.runtime.readRoster();
+
+      const reserving = context.runtime.reserveInput('s1', 'launch-1').then((result) => {
+        order.push('reserved');
+        return result;
+      });
+
+      await vi.waitFor(() => expect(order).toEqual([]));
+      ended();
+
+      expect(await reserving).toEqual({ refused: SESSION_ENDED });
+      expect(order).toEqual(['stop s1', 'reserved']);
+      context.runtime.stop();
+    });
+
+    it('types through the connected holder only when it serves write', async () => {
+      const context = await attaching(resumer());
+
+      expect(context.runtime.heldCannotType()).toBeNull();
+      await context.runtime.readRoster();
+
+      const cannotType = context.runtime.heldCannotType();
+
+      expect(cannotType).toMatch(/^The terminal holder is from an older build and cannot type\. To switch to this build, run \S+ "[^"]+\/\.switchboard\/hub\.js" holder stop --all in a terminal: .* again with --yes\. Until then, open the session in the terminal\.$/);
+      expect(context.runtime.heldHolder()).toMatchObject({ protocol: 1 });
+      await expect(context.runtime.writeHeld('s1', 'x')).rejects.toThrow(new NotWritten(cannotType!));
       context.runtime.stop();
     });
     describe('held sessions (PRD R94)', () => {

@@ -4,7 +4,7 @@ import type { AddressInfo, Server } from 'node:net';
 import { join } from 'node:path';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findHeld, heldFromHolder, labelParts } from '../src/held.js';
 import type { HeldSession } from '../src/held.js';
 import { connectHolder, heldTable, idleText, runHolder } from '../src/holderCli.js';
@@ -22,23 +22,54 @@ function hubSession(session: string, fields: Partial<HeldSession> = {}): HeldSes
   return { ...heldFromHolder(entry(session)), ...fields };
 }
 
-/** A hub that answers with `reply`, or none when it is a string, and a holder that lists `entries`, or none when null. */
-function cli(reply: Awaited<ReturnType<HolderCliDeps['post']>>, entries: SessionEntry[] | null, kill: (session: string) => Promise<number | null> = async () => 0) {
-  const state = { out: '', err: '', posts: [] as unknown[], kills: [] as string[], closed: false };
+type Reply = Awaited<ReturnType<HolderCliDeps['post']>>;
+
+const CURRENT = { protocol: 1, build: 'aaaaaaaaaaaaaaaa', pid: 34000, features: ['snapshot', 'write'] };
+const OLDER = { protocol: 1, build: '61663226176fa458', pid: 34000, features: ['snapshot'] };
+
+/** A hub that answers with `reply` (per path when a function), or none when it is a string, and a holder that lists `entries`, or none when null. */
+function cli(reply: Reply | ((path: string, body: unknown) => Reply), entries: SessionEntry[] | null, kill: (session: string) => Promise<number | null> = async () => 0, welcome = CURRENT) {
+  const state = { out: '', err: '', posts: [] as unknown[], kills: [] as string[], closed: false, shutdowns: 0, alive: true, exitsOnShutdown: true, shutdownRefused: false, shutdownHangs: false, killedTrees: [] as number[], treeError: null as string | null };
   const holder: HolderControl = {
+    welcome,
     list: async () => entries ?? [],
     kill: async (session) => {
       state.kills.push(session);
       return kill(session);
+    },
+    shutdown: async () => {
+      state.shutdowns++;
+
+      if (state.shutdownHangs) {
+        return new Promise<void>(() => undefined);
+      }
+
+      if (state.shutdownRefused) {
+        throw new Error('The terminal holder holds 1 live session.');
+      }
+
+      state.alive = !state.exitsOnShutdown;
     },
     close: () => (state.closed = true),
   };
   const deps: HolderCliDeps = {
     post: async (path, body) => {
       state.posts.push({ path, body });
-      return reply;
+      return typeof reply === 'function' ? reply(path, body) : reply;
     },
     holder: async () => (entries === null ? null : holder),
+    alive: () => state.alive,
+    killTree: async (pid) => {
+      state.killedTrees.push(pid);
+
+      if (state.treeError !== null) {
+        return { error: state.treeError };
+      }
+
+      state.alive = false;
+      return null;
+    },
+    sleep: async () => {},
     now: () => NOW,
     out: (text) => (state.out += text),
     err: (text) => (state.err += text),
@@ -170,8 +201,88 @@ describe('hub.js holder (architecture.md § Visibility of held sessions)', () =>
     expect(nothing.state.err).toBe('The Switchboard hub (pid 7) did not answer, and no terminal holder is running.\n');
   });
 
+  it('marks a holder from an older build in the list, from the hub or the holder, and names no current one', async () => {
+    const fromHub = cli({ status: 200, error: null, body: { sessions: [], holder: OLDER } }, null);
+
+    expect(await fromHub.run('list')).toBe(0);
+    expect(fromHub.state.out).toBe(
+      'Terminal holder: pid 34000, build 61663226176fa458, protocol 1; it is from an older build and cannot type into sessions, and `holder stop --all` ends it so the next session starts this build.\nNo held sessions.\n',
+    );
+
+    const current = cli({ status: 200, error: null, body: { sessions: [], holder: CURRENT } }, null);
+
+    expect(await current.run('list')).toBe(0);
+    expect(current.state.out).toBe('No held sessions.\n');
+
+    const down = cli('The Switchboard hub is not running', [entry('s1')], undefined, OLDER);
+
+    expect(await down.run('list')).toBe(0);
+    expect(down.state.out).toMatch(/^The Switchboard hub is not running, so this is the terminal holder's own list\.\nTerminal holder: pid 34000, build 61663226176fa458, protocol 1; it is from an older build .*\nWork item +Switchboard ID/);
+  });
+
+  it('stop --all names the holder and the live sessions that end with it, and ends nothing without --yes', async () => {
+    const sessions = [hubSession('s1', { workItemId: 1 }), hubSession('s2', { workItemId: 2, state: 'exited', exitedAt: NOW })];
+    const { state, run } = cli({ status: 200, error: null, body: { sessions, holder: OLDER } }, [entry('s1')], undefined, OLDER);
+
+    expect(await run('stop', '--all')).toBe(0);
+    expect(state.out).toMatch(/^Terminal holder: pid 34000, build 61663226176fa458, protocol 1; it is from an older build[^\n]*\nThis held session ends with it; each can be resumed afterwards:\nWork item +Switchboard ID[^\n]*\nadhoc 1 +s1 [^\n]*\nRun `holder stop --all --yes` to end them and the terminal holder\.\n$/);
+    expect(state).toMatchObject({ posts: [{ path: '/holder/list', body: {} }], kills: [], shutdowns: 0, killedTrees: [], closed: true });
+  });
+
+  it('stop --all --yes stops each live session through the hub, then asks the holder to exit', async () => {
+    const sessions = [hubSession('s1', { workItemId: 1 }), hubSession('o1', { orphan: true })];
+    const { state, run } = cli((path, body) => (path === '/holder/list' ? { status: 200, error: null, body: { sessions, holder: OLDER } } : { status: 200, error: null, body: { stopped: (body as { id: string }).id } }), [entry('s1')], undefined, OLDER);
+
+    expect(await run('stop', '--all', '--yes')).toBe(0);
+    expect(state.posts).toEqual([
+      { path: '/holder/list', body: {} },
+      { path: '/holder/stop', body: { id: 's1' } },
+      { path: '/holder/stop', body: { id: 'o1' } },
+    ]);
+    expect(state).toMatchObject({ kills: [], shutdowns: 1, killedTrees: [], err: '' });
+    expect(state.out).toContain('Stopped held session s1.\nStopped held session o1.\nEnded the terminal holder (pid 34000). The next Code Mode session starts the installed build.\n');
+  });
+
+  it('stop --all --yes kills through the holder while the hub is down, and ends its process tree when it does not exit', async () => {
+    const { state, run } = cli('The Switchboard hub is not running', [entry('s1'), entry('s2', { exitedAt: NOW })], async () => Promise.reject(new Error('No session s1 is held.')), OLDER);
+
+    state.shutdownRefused = true;
+
+    expect(await run('stop', '--all', '--yes')).toBe(0);
+    expect(state).toMatchObject({ kills: ['s1'], shutdowns: 1, killedTrees: [34000], err: 'Held session s1 did not stop: No session s1 is held.\n' });
+    expect(state.out).toContain('The terminal holder did not exit, so its process tree was ended.\nEnded the terminal holder (pid 34000).');
+
+    const stuck = cli('The Switchboard hub is not running', [], undefined, OLDER);
+
+    stuck.state.exitsOnShutdown = false;
+    stuck.state.treeError = 'Access is denied.';
+    expect(await stuck.run('stop', '--all', '--yes')).toBe(3);
+    expect(stuck.state.err).toBe('The terminal holder (pid 34000) did not exit and could not be ended: Access is denied.\n');
+
+    // A holder that stops answering `shutdown` is ended after 5 seconds rather than hang the command.
+    const silent = cli('The Switchboard hub is not running', [], undefined, OLDER);
+
+    silent.state.shutdownHangs = true;
+    vi.useFakeTimers();
+
+    try {
+      const running = silent.run('stop', '--all', '--yes');
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await running).toBe(0);
+      expect(silent.state.killedTrees).toEqual([34000]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const none = cli('The Switchboard hub is not running', null);
+
+    expect(await none.run('stop', '--all', '--yes')).toBe(0);
+    expect(none.state.out).toBe('No terminal holder is running.\n');
+  });
+
   it('refuses usage errors with exit code 1 before asking anything', async () => {
-    for (const argv of [[], ['list', 'extra'], ['stop'], ['stop', ''], ['stop', 'a', 'b'], ['kill', 's1']]) {
+    for (const argv of [[], ['list', 'extra'], ['stop'], ['stop', ''], ['stop', 'a', 'b'], ['kill', 's1'], ['stop', '--all', '--no'], ['stop', '--yes']]) {
       const { state, run } = cli({ status: 200, error: null, body: {} }, []);
 
       expect(await run(...argv)).toBe(1);

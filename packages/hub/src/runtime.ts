@@ -10,7 +10,8 @@ import { activeSession, ADHOC_SOURCE, awaitsRecheck, CONVERSATION_RULES_VERSION,
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
-import { recordPath } from '@switchboard/holder';
+import { HolderError, recordPath } from '@switchboard/holder';
+import { NotWritten } from '@switchboard/conversation';
 import type { SessionEntry } from '@switchboard/holder';
 import { findHeld, heldFromHolder } from './held.js';
 import type { HeldSession } from './held.js';
@@ -51,6 +52,13 @@ const RESUME_POLL_MS = 2_000;
 const NODE_CHECK_TIMEOUT_MS = 10_000;
 /** How long input to a held session after its turn defers its end, for the prompt's marker to be read. */
 export const INPUT_SETTLE_MS = 60_000;
+/** Why a message cannot be typed into a session (architecture.md § Typing a message). */
+export const SESSION_ENDED = 'The session has ended. Open it in the terminal to resume it.';
+export const SESSION_RELAUNCHED = 'The session was resumed since the view showed it; send the message again.';
+/** Why a held session cannot be typed into: its holder is from an older build; `stopAll` is the command that replaces it (`hub.js holder stop --all`). */
+export function holderCannotType(stopAll: string): string {
+  return `The terminal holder is from an older build and cannot type. To switch to this build, run ${stopAll} in a terminal: it lists the sessions that end with the holder, each of which can be resumed, and ends them when run again with --yes. Until then, open the session in the terminal.`;
+}
 /** How long `POST /attach` defers a held session's end for its client to connect (architecture.md § Code Mode sessions). */
 export const ATTACH_RESERVATION_MS = 15_000;
 
@@ -160,6 +168,8 @@ export class Runtime {
   private readonly ending = new Map<string, Promise<void>>();
   /** Attach reservations: until when each defers its session's end, for the client to connect (PRD R95). */
   private readonly reservations = new Map<string, number>();
+  /** Input reservations: how many messages each session's conversation is typing, which defer its end as a terminal does (architecture.md § Typing a message). */
+  private readonly inputs = new Map<string, number>();
   /** Sessions whose resume spawn runs now; roster reads leave them out (PRD R95). */
   private readonly resuming = new Set<string>();
   /** The attach in flight per session, which concurrent attaches share, so a session is never resumed twice. */
@@ -222,6 +232,16 @@ export class Runtime {
   /** The report command prefix sessions run (architecture.md § Session reports). */
   get reportCommand(): string {
     return `${this.config.settings.sessions.nodePath} "${this.home.replaceAll('\\', '/')}/hub.js" report`;
+  }
+
+  /** The command that ends the terminal holder and its sessions, so the next session starts the installed build. */
+  get holderStopCommand(): string {
+    return `${this.config.settings.sessions.nodePath} "${this.home.replaceAll('\\', '/')}/hub.js" holder stop --all`;
+  }
+
+  /** The connected holder's `welcome`, for `POST /holder/list`; null while none is connected. */
+  heldHolder(): { protocol: number; build: string; pid: number; features?: string[] } | null {
+    return this.holder.connected()?.welcome ?? null;
   }
 
   onChange(listener: () => void): () => void {
@@ -1389,10 +1409,90 @@ export class Runtime {
    * A held session's screen with its attributes, for the conversation layer's screen copy (architecture.md § Conversation), through the
    * connection the roster reads keep; null without one, or from a holder that does not serve snapshots. It never looks for or starts a holder.
    */
-  async heldScreen(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number } | null> {
+  async heldScreen(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number; keyAt?: number | null } | null> {
     const holder = this.holder.connected();
 
     return holder?.snapshot === undefined || !(holder.welcome.features ?? []).includes('snapshot') ? null : holder.snapshot(session, scrollback);
+  }
+
+  /** Why the connected holder cannot type into its sessions, as one from an older build cannot; null when it can or none is connected, which a write then reports. */
+  heldCannotType(): string | null {
+    const holder = this.holder.connected();
+
+    return holder === null || (holder.write !== undefined && (holder.welcome.features ?? []).includes('write')) ? null : holderCannotType(this.holderStopCommand);
+  }
+
+  /** Types into a held session through the connection the roster reads keep (architecture.md § Typing a message). */
+  async writeHeld(session: string, data: string): Promise<{ rev: number }> {
+    const holder = this.holder.connected();
+
+    if (holder === null) {
+      throw new NotWritten('The terminal holder is not connected.');
+    }
+
+    if (holder.write === undefined || !(holder.welcome.features ?? []).includes('write')) {
+      throw new NotWritten(holderCannotType(this.holderStopCommand));
+    }
+
+    try {
+      return await holder.write(session, data);
+    } catch (error) {
+      // A refusal did nothing; a lost connection may have delivered the input.
+      throw error instanceof HolderError && error.refused ? new NotWritten(error.message) : error;
+    }
+  }
+
+  /**
+   * An input reservation for a message typed into a Code Mode session (architecture.md § Typing a message): it waits for an end, stop or resume of
+   * the session in progress, as an attach does, then checks that the session is still live under the launch the view showed, and defers a release
+   * until it is released. Refused with why, when the session ended or was resumed under another launch.
+   */
+  async reserveInput(sessionId: string, launch: string | null): Promise<{ release(): void } | { refused: string }> {
+    for (;;) {
+      while (this.ending.has(sessionId)) {
+        await this.ending.get(sessionId);
+      }
+
+      const resume = this.attaching.get(sessionId);
+
+      if (resume === undefined || !this.resuming.has(sessionId)) {
+        break;
+      }
+
+      await resume.catch(() => undefined);
+    }
+
+    const session = this.deps.store.session(sessionId);
+
+    if (session === null || session.codeMode !== true || session.state === 'ended') {
+      return { refused: SESSION_ENDED };
+    }
+
+    if ((session.launchId ?? null) !== launch) {
+      return { refused: SESSION_RELAUNCHED };
+    }
+
+    this.inputs.set(sessionId, (this.inputs.get(sessionId) ?? 0) + 1);
+
+    let released = false;
+
+    return {
+      release: () => {
+        if (released) {
+          return;
+        }
+
+        released = true;
+
+        const left = (this.inputs.get(sessionId) ?? 1) - 1;
+
+        if (left > 0) {
+          this.inputs.set(sessionId, left);
+        } else {
+          this.inputs.delete(sessionId);
+        }
+      },
+    };
   }
 
   /** What the snapshot shows beyond the store, as one structured-cloneable message for the snapshot worker. */
@@ -1922,17 +2022,18 @@ export class Runtime {
     const turnEnd = compacted ? -Infinity : (reading?.at ?? session.stateAt);
     const recent = (at: number | null | undefined) => at != null && at > turnEnd && this.deps.now() - at < INPUT_SETTLE_MS;
     const typed = !('error' in activity) && (recent(activity.lastInputAt) || (compacted && recent(activity.lastOutputAt)));
-    // An attach reservation counts as a terminal until its client connects (PRD R95).
+    // An attach reservation counts as a terminal until its client connects (PRD R95), and an input reservation while a message is typed.
     const reserved = (this.reservations.get(action.sessionId) ?? -Infinity) > this.deps.now();
+    const typing = this.inputs.has(action.sessionId);
 
-    if (!('error' in activity) && activity.clients === 0 && !typed && !reserved) {
+    if (!('error' in activity) && activity.clients === 0 && !typed && !reserved && !typing) {
       this.deferred.delete(action.sessionId);
       return true;
     }
 
     if (!this.deferred.has(action.sessionId)) {
       this.deferred.add(action.sessionId);
-      const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : reserved ? 'a terminal is attaching' : 'input arrived after its turn';
+      const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : reserved ? 'a terminal is attaching' : typing ? 'a message is being typed' : 'input arrived after its turn';
 
       this.deps.log(`end of held session ${action.sessionId} deferred: ${why}`);
     }

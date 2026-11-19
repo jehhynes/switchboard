@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PERMISSION_PROMPT, Store } from '@switchboard/core';
 import type { Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
@@ -124,8 +124,60 @@ describe('WindowScopes after a restart', () => {
   });
 });
 
+const RULE = '─'.repeat(30);
+
+/** The holder and runtime as typing sees them: a held session's input box, its writes, the transcript an Enter writes to, and reservations. */
+class FakeHeld {
+  clock = NOW;
+  box = '';
+  menu = false;
+  rev = 0;
+  cannotType_: string | null = null;
+  readonly writes: string[] = [];
+  readonly reservations: Array<{ sessionId: string; launch: string | null }> = [];
+  released = 0;
+  refuse: string | null = null;
+  transcript: (session: string) => string | null = () => null;
+
+  async screen(_session: string): Promise<{ data: string; cols: number; rows: number; rev: number; keyAt: number | null }> {
+    return { data: [this.menu ? '❯ 1. Yes' : '', RULE, `❯ ${this.box === '' ? '\u001b[2mTry "fix it"\u001b[22m' : this.box}`, RULE].join('\r\n'), cols: 40, rows: 5, rev: this.rev, keyAt: null };
+  }
+
+  async reserve(sessionId: string, launch: string | null): Promise<{ release(): void } | { refused: string }> {
+    this.reservations.push({ sessionId, launch });
+
+    return this.refuse !== null ? { refused: this.refuse } : { release: () => void this.released++ };
+  }
+
+  async write(session: string, data: string): Promise<{ rev: number }> {
+    this.writes.push(data);
+    this.rev++;
+
+    const paste = /^\u001b\[200~([\s\S]*)\u001b\[201~$/.exec(data);
+
+    if (paste !== null) {
+      this.box += paste[1]!;
+    } else if (data === '\r' && this.box !== '') {
+      const path = this.transcript(session);
+
+      if (path !== null) {
+        appendFileSync(path, `${JSON.stringify({ type: 'user', uuid: `typed-${this.rev}`, timestamp: new Date(this.clock).toISOString(), message: { role: 'user', content: this.box } })}\n`);
+      }
+
+      this.box = '';
+      this.rev++;
+    }
+
+    return { rev: this.rev };
+  }
+
+  cannotType(): string | null {
+    return this.cannotType_;
+  }
+}
+
 describe('ConversationService', () => {
-  function setup() {
+  function setup(held = new FakeHeld()) {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
@@ -138,12 +190,19 @@ describe('ConversationService', () => {
       windows: scopes,
       projectsDir: projects,
       claudeConfig: join(dir, '.claude.json'),
-      screen: async () => null,
+      screen: async (session) => held.screen(session),
+      input: held,
       hooks: () => true,
-      now: () => NOW,
+      now: () => held.clock,
+      sleep: async (ms) => {
+        held.clock += ms;
+        await new Promise((resolve) => setImmediate(resolve));
+      },
       newId: () => String(++id),
       log: (line) => logs.push(line),
     });
+
+    held.transcript = (session) => (session === 's2' ? join(projects, projectSlug('D:/w12'), 'n2.jsonl') : null);
 
     stored(store, view);
 
@@ -160,7 +219,7 @@ describe('ConversationService', () => {
       return { key, frames, stream };
     };
 
-    return { store, view, scopes, service, transcript, reply, open, logs };
+    return { store, view, scopes, service, transcript, reply, open, logs, held };
   }
 
   it("says hello with the window's scope, its current session and its items, and sends each window only its own session's replies", async () => {
@@ -222,6 +281,213 @@ describe('ConversationService', () => {
 
     service.scopesChanged(scopes.update(snapshot([...view.view.workItems, next])));
     expect(frames.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 4, scopeGen: 2, sessionId: null } }, { type: 'hello', scope: { key, workItemId: 4 }, sessions: [], items: [] }]);
+  });
+});
+
+describe('ConversationService send', () => {
+  function setupSend(held = new FakeHeld(), holderAnswerMs?: number) {
+    const store = Store.open(':memory:');
+    const view = world();
+    let keys = 0;
+    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const projects = join(dir, 'projects');
+    const logs: string[] = [];
+    let id = 0;
+    let hooks = true;
+    const make = () =>
+      new ConversationService({
+        store,
+        windows: scopes,
+        projectsDir: projects,
+        claudeConfig: join(dir, '.claude.json'),
+        screen: async (session) => held.screen(session),
+        input: held,
+        hooks: () => hooks,
+        ...(holderAnswerMs === undefined ? {} : { holderAnswerMs }),
+        now: () => held.clock,
+        sleep: async (ms) => {
+          held.clock += ms;
+          await new Promise((resolve) => setImmediate(resolve));
+        },
+        newId: () => String(++id),
+        log: (line) => logs.push(line),
+      });
+    const service = make();
+
+    stored(store, view);
+    store.updateSession('s2', { launchId: 'launch-1' });
+    store.updateSession('s3', { launchId: 'launch-3' });
+    mkdirSync(join(projects, projectSlug('D:/w12')), { recursive: true });
+    writeFileSync(join(projects, projectSlug('D:/w12'), 'n2.jsonl'), '');
+    held.transcript = (session) => (session === 's2' ? join(projects, projectSlug('D:/w12'), 'n2.jsonl') : null);
+
+    const open = (file: string) => {
+      const key = scopes.open(file, view.view);
+      const frames: Array<{ type: string; [field: string]: unknown }> = [];
+
+      service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+
+      return { key, frames };
+    };
+    const body = (key: string, patch: Record<string, unknown> = {}) => ({ window: key, scopeGen: 1, opId: 'op-1', sessionId: 's2', launch: 'launch-1', text: 'Fix the build', ...patch });
+
+    return { store, view, service, held, logs, open, body, make, scopes, setHooks: (on: boolean) => (hooks = on) };
+  }
+
+  it("types a message into the window's session, answers at once with it open, and shows it sent once the transcript has it, in its own window only", async () => {
+    const { service, held, open, body, view, store } = setupSend();
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+    const answer = service.send(body(mine.key));
+
+    expect(answer).toMatchObject({ status: 200, body: { message: { type: 'message', id: 'm-1', origin: 'typed', text: 'Fix the build', delivery: 'open', error: null } } });
+    expect((answer.body as { message: object }).message).not.toHaveProperty('opId');
+    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+
+    expect(held.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r']);
+    expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
+    expect(held.released).toBe(1);
+    expect(mine.frames.filter((frame) => frame.type === 'message')).toMatchObject([{ message: { id: 'm-1', delivery: 'open' } }, { message: { id: 'm-1', delivery: 'sent' } }]);
+    expect(theirs.frames.filter((frame) => frame.type === 'message')).toEqual([]);
+
+    // The transcript's entry confirms the message in place, with no second copy.
+    await service.poll();
+    expect(store.conversation('s2', null, 10).items).toMatchObject([{ id: 'm-1', delivery: 'sent', transcriptUuid: 'typed-2' }]);
+
+    // A retried command returns the first message and types nothing again; the stored message keeps when it was pasted, which the view never gets.
+    expect(service.send(body(mine.key, { text: 'other words' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: 'Fix the build' } } });
+    expect(held.writes).toHaveLength(2);
+    expect(store.message('m-1')?.pastedAt).toEqual(expect.any(Number));
+    expect(JSON.stringify(mine.frames)).not.toContain('pastedAt');
+  });
+
+  it('refuses a malformed command, another window, a forged session, a stale scope, an empty or long text, and a session that cannot take it', async () => {
+    const { service, held, open, body, view, store, setHooks } = setupSend();
+    const { key } = open(view.file);
+    const other = open(view.otherFile).key;
+    const refused = (patch: Record<string, unknown>, window = key) => service.send(body(window, patch));
+
+    expect(service.send({ window: key, scopeGen: 1, sessionId: 's2', text: 'x' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text}.' } });
+    expect(refused({}, 'forged')).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(refused({ sessionId: 's3', launch: 'launch-3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(refused({}, other)).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(refused({ scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(refused({ text: '  \n ' })).toEqual({ status: 400, body: { error: 'The message is empty.' } });
+    expect(refused({ text: 'x'.repeat(10_001) })).toEqual({ status: 400, body: { error: 'The message is longer than 10,000 characters.' } });
+    expect(refused({ launch: 'launch-0' })).toEqual({ status: 409, body: { error: 'The session was resumed since the view showed it; send the message again.' } });
+    held.cannotType_ = 'The terminal holder is from an older build and cannot type. To switch to this build, run hub.js holder stop --all.';
+    expect(refused({})).toEqual({ status: 409, body: { error: held.cannotType_ } });
+    held.cannotType_ = null;
+    setHooks(false);
+    expect(refused({})).toEqual({ status: 409, body: { error: 'Switchboard cannot follow this session while sessions.installHooks is off.' } });
+    setHooks(true);
+    store.updateSession('s2', { state: 'ended' });
+    expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Open it in the terminal to resume it.' } });
+
+    expect(store.conversation('s2', null, 10).items).toEqual([]);
+    expect(held.writes).toEqual([]);
+  });
+
+  it('types nothing when the session ends while the message waits on a menu, and says why', async () => {
+    const { service, held, open, body, view, store, logs } = setupSend();
+    const { key, frames } = open(view.file);
+
+    held.menu = true;
+    service.send(body(key));
+    await vi.waitFor(() => expect(logs).toContain('session s2: a message waits, a menu is open'));
+    store.updateSession('s2', { state: 'ended' });
+    await vi.waitFor(() => expect(store.message('m-1')).toBeNull());
+
+    // It leaves the conversation; its last event tells the window why, with its text, so the composer can take it back.
+    expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-1', text: 'Fix the build', delivery: 'not-sent', error: 'The session has ended. Open it in the terminal to resume it.' } });
+    expect(store.conversation('s2', null, 10).items).toEqual([]);
+    // The same command again is refused with why, and types nothing.
+    store.updateSession('s2', { state: 'idle' });
+    expect(service.send(body(key))).toEqual({ status: 409, body: { error: 'The session has ended. Open it in the terminal to resume it.' } });
+    expect(held.writes).toEqual([]);
+    expect(held.reservations).toEqual([]);
+    expect(logs).toContain('session s2: message m-1 not-sent: The session has ended. Open it in the terminal to resume it.');
+  });
+
+  it('types nothing into a session a newer one replaced, or one the reservation refuses', async () => {
+    const { service, held, open, body, view, store, logs, scopes } = setupSend();
+    const { key, frames } = open(view.file);
+
+    held.refuse = 'The session has ended. Open it in the terminal to resume it.';
+    service.send(body(key));
+    await vi.waitFor(() => expect(store.message('m-1')).toBeNull());
+    held.refuse = null;
+
+    held.menu = true;
+    service.send(body(key, { opId: 'op-2' }));
+    store.insertSession({ ...(store.session('s2') as StoredSession), id: 's2b', nativeSessionId: 'n2b', startedAt: NOW + 1 });
+    // The window has moved on to the newer session, yet it still hears that its message was not sent.
+    vi.spyOn(scopes, 'showing').mockReturnValue([]);
+    held.menu = false;
+    await vi.waitFor(() => expect(store.message('m-2')).toBeNull());
+    expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-2', delivery: 'not-sent', text: 'Fix the build' } });
+    expect(logs).toContain('session s2: message m-2 not-sent: A newer session of this work item started; the message was not sent.');
+    expect(held.writes).toEqual([]);
+  });
+
+  it("replays an opId only within the window's current session and scope generation", () => {
+    const { service, open, body, view, store } = setupSend();
+    const { key } = open(view.file);
+
+    // A message an earlier session of the work item got with this opId.
+    store.addMessage({ id: 'm-earlier', sessionId: 's1', workItemId: 2, at: NOW, origin: 'typed', text: 'old', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'sent', error: null, opId: 'op-1', pastedAt: NOW });
+    expect(service.send(body(key, { scopeGen: 0 }))).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.send(body(key))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: 'Fix the build' } } });
+    // The same command again answers the current session's message, not the earlier session's, and adds none.
+    expect(service.send(body(key))).toMatchObject({ status: 200, body: { message: { id: 'm-1' } } });
+    expect(store.conversation('s2', null, 10).items).toHaveLength(1);
+  });
+
+  it('fails a message whose screen read or write the holder does not answer, releasing its reservation', async () => {
+    const held = new FakeHeld();
+    const { service, open, body, view, store, logs } = setupSend(held, 50);
+    const { key } = open(view.file);
+    const write = held.write.bind(held);
+
+    // The paste is never answered: it may have reached the session.
+    held.write = () => new Promise(() => undefined);
+    service.send(body(key));
+    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('uncertain'));
+    expect(store.message('m-1')?.error).toBe('The terminal holder did not answer.');
+    expect(held.released).toBe(1);
+
+    // A screen read that is never answered: nothing was typed.
+    held.write = write;
+    held.screen = () => new Promise(() => undefined);
+    service.send(body(key, { opId: 'op-2' }));
+    await vi.waitFor(() => expect(store.message('m-2')).toBeNull());
+    expect(logs).toContain('session s2: message m-2 not-sent: The terminal holder did not answer.');
+  });
+
+  it('keeps a queue that holds a message after its session leaves the live list, so a second message waits behind the first', async () => {
+    const { service, held, open, body, view, store } = setupSend();
+    const { key } = open(view.file);
+
+    held.menu = true;
+    service.send(body(key));
+    // The session is still starting, which the transcript poll leaves out.
+    store.updateSession('s2', { state: 'starting' });
+    await service.poll();
+    service.send(body(key, { opId: 'op-2', text: 'Second' }));
+    store.updateSession('s2', { state: 'running' });
+    held.menu = false;
+    await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
+    expect(held.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r', '\u001b[200~Second\u001b[201~', '\r']);
+  });
+
+  it('settles a message a stopped hub left open as uncertain, and never types it again', () => {
+    const { store, make, held, logs } = setupSend();
+
+    store.addMessage({ id: 'm-left', sessionId: 's2', workItemId: 2, at: NOW, origin: 'typed', text: 'half typed', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'open', error: null, opId: 'op-left', pastedAt: NOW });
+    make();
+    expect(store.message('m-left')).toMatchObject({ delivery: 'uncertain', error: 'Switchboard restarted while the message was being typed; check the terminal.' });
+    expect(held.writes).toEqual([]);
+    expect(logs).toEqual(['session s2: message m-left left open by a stopped hub is uncertain']);
   });
 });
 

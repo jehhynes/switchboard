@@ -3,6 +3,7 @@ import type { ConversationMessage, ConversationReply, TranscriptCheckpoint } fro
 import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
+import { pasteText } from './input.js';
 import { keyOf, parseReply, stripAside } from './tags.js';
 import { parseLine, readLines } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
@@ -11,7 +12,7 @@ import type { ScreenRead } from './screen.js';
 /** The store calls the conversation layer makes; the hub's store provides them. */
 export interface ConversationStore {
   addMessage(message: Omit<ConversationMessage, 'ord'>): void;
-  updateMessage(id: string, patch: Partial<Pick<ConversationMessage, 'at' | 'transcriptUuid' | 'provisional' | 'withdrawn'>>): void;
+  updateMessage(id: string, patch: Partial<Pick<ConversationMessage, 'at' | 'transcriptUuid' | 'provisional' | 'withdrawn' | 'delivery' | 'error' | 'pastedAt'>>): void;
   message(id: string): ConversationMessage | null;
   replyOfApiMessage(sessionId: string, apiMessageId: string): { replyId: string; blocks: Array<{ uuid: string | null; text: string }> } | null;
   setApiMessage(replyId: string, apiMessageId: string, blocks: Array<{ uuid: string | null; text: string }>): void;
@@ -20,6 +21,8 @@ export interface ConversationStore {
   /** The message a transcript line added, by the line's UUID. */
   messageByTranscriptUuid(sessionId: string, uuid: string): ConversationMessage | null;
   provisionalMessages(sessionId: string): ConversationMessage[];
+  /** A session's typed messages that were pasted and that no transcript line has confirmed yet. */
+  typedAwaitingTranscript(sessionId: string): ConversationMessage[];
   placeLast(id: string): void;
   addReply(reply: Omit<ConversationReply, 'ord'>): void;
   updateReply(id: string, patch: Partial<Omit<ConversationReply, 'id' | 'sessionId' | 'workItemId' | 'ord'>>): void;
@@ -46,6 +49,19 @@ export interface ConversationDeps {
 
 /** After a resize, the screen is read again only after this long, and then whatever it shows counts as read (claude-collab findings). */
 export const RESIZE_SETTLE_MS = 1_000;
+/** A typed message's transcript entry may carry a time a little before the hub's record of its paste. */
+const TYPED_SLACK_MS = 2_000;
+/**
+ * How long after its paste an entry still confirms a message the transcript did not confirm in time. A sent one has no limit: the transcript
+ * already showed it, as a queued message Claude takes later.
+ */
+export const TYPED_LATE_MS = 120_000;
+
+/** Whether a transcript entry written at `at` can be this typed message's. */
+function confirms(at: number, message: ConversationMessage): boolean {
+  return message.pastedAt !== null && at >= message.pastedAt - TYPED_SLACK_MS && (message.delivery === 'sent' || at <= message.pastedAt + TYPED_LATE_MS);
+}
+
 /** How many stored replies seed the screen reader, so the screen's old replies, redrawn, are never published again. */
 const SEED_REPLIES = 200;
 
@@ -168,6 +184,11 @@ export class SessionConversation {
         return at !== null && previous.lastAt !== null && at < previous.lastAt;
       });
 
+      // A message typed into the earlier transcript is never confirmed by an entry of this one, so it keeps its place.
+      for (const message of this.deps.store.typedAwaitingTranscript(this.sessionId)) {
+        this.deps.store.updateMessage(message.id, { pastedAt: null, provisional: false });
+      }
+
       if (copied) {
         offset = read.offset;
         this.#note('Conversation continued from another session.');
@@ -289,9 +310,17 @@ export class SessionConversation {
   #indexed = false;
   #answers: string | null = null;
 
-  /** The oldest sent message with `text` that Claude has not received yet. */
+  /** The oldest sent message with `text` that Claude has not received yet, typed in a terminal; a typed message is matched by `#typed`. */
   #sent(text: string): ConversationMessage | undefined {
-    return this.deps.store.provisionalMessages(this.sessionId).find((message) => message.text === text);
+    return this.deps.store.provisionalMessages(this.sessionId).find((message) => message.origin === 'terminal' && message.text === text);
+  }
+
+  /** The typed message a transcript line written at `at` with `text` records: the latest attempt pasted before it, never an older one with the same words. */
+  #typed(text: string, at: number): ConversationMessage | undefined {
+    return this.deps.store
+      .typedAwaitingTranscript(this.sessionId)
+      .filter((message) => pasteText(message.text) === text.trim() && confirms(at, message))
+      .sort((a, b) => b.pastedAt! - a.pastedAt!)[0];
   }
 
   /** A sent message Claude received as something other than a message from the operator, or never received. */
@@ -306,6 +335,18 @@ export class SessionConversation {
 
   #entry(entry: TranscriptEntry): void {
     if (entry.kind === 'sent') {
+      // The queue line of a message typed from the view: Claude has it and receives it later, where it then takes its place.
+      const typed = this.#typed(entry.text, entry.at);
+
+      if (typed !== undefined) {
+        if (typed.delivery !== 'sent') {
+          this.deps.store.updateMessage(typed.id, { delivery: 'sent', error: null });
+          this.deps.onChange({ type: 'message', message: this.deps.store.message(typed.id)! });
+        }
+
+        return;
+      }
+
       // A queue line has no UUID; its session, time and text name it, so a transcript read again from its start never adds it twice.
       const id = `m-q-${createHash('sha256').update(`${this.sessionId}\n${entry.at}\n${entry.text}`).digest('hex').slice(0, 24)}`;
       const stored = this.deps.store.message(id);
@@ -314,18 +355,34 @@ export class SessionConversation {
         return;
       }
 
-      this.deps.store.addMessage({ id, sessionId: this.sessionId, workItemId: this.workItemId, at: entry.at, origin: 'terminal', text: entry.text, transcriptUuid: null, provisional: true, withdrawn: false });
+      this.deps.store.addMessage({ id, sessionId: this.sessionId, workItemId: this.workItemId, at: entry.at, origin: 'terminal', text: entry.text, transcriptUuid: null, provisional: true, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
       this.deps.onChange({ type: 'message', message: this.deps.store.message(id)! });
       return;
     }
 
     if (entry.kind === 'message') {
+      // A message typed from the view is already in the conversation: the line where Claude received it confirms it and gives it its place.
+      const typed = this.#typed(entry.text, entry.at);
+
+      if (typed !== undefined) {
+        this.deps.store.updateMessage(typed.id, { at: entry.at, transcriptUuid: entry.uuid, provisional: false, delivery: 'sent', error: null });
+        this.deps.store.placeLast(typed.id);
+        this.#lastMessage = typed.id;
+
+        if (entry.uuid !== null) {
+          this.#messageLines.set(entry.uuid, typed.id);
+        }
+
+        this.deps.onChange({ type: 'message', message: this.deps.store.message(typed.id)! });
+        return;
+      }
+
       // A message sent while Claude was busy moves to where Claude received it.
       const sent = this.#sent(entry.text);
       const id = sent?.id ?? `m-${this.deps.newId()}`;
 
       if (sent === undefined) {
-        this.deps.store.addMessage({ id, sessionId: this.sessionId, workItemId: this.workItemId, at: entry.at, origin: 'terminal', text: entry.text, transcriptUuid: entry.uuid, provisional: false, withdrawn: false });
+        this.deps.store.addMessage({ id, sessionId: this.sessionId, workItemId: this.workItemId, at: entry.at, origin: 'terminal', text: entry.text, transcriptUuid: entry.uuid, provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
       } else {
         this.deps.store.updateMessage(id, { at: entry.at, transcriptUuid: entry.uuid, provisional: false });
         this.deps.store.placeLast(id);

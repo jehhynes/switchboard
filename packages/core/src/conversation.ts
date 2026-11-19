@@ -4,15 +4,21 @@
  */
 export const CONVERSATION_RULES_VERSION = 2;
 
-/** A message to a session, as the transcript recorded it (architecture.md § Conversation). */
+/**
+ * What became of a message typed from the view (architecture.md § Typing a message): `open` while it waits or is being typed, `sent` once the
+ * transcript has it, `uncertain` when it was typed but the transcript does not show it, and `not-sent` when nothing was typed.
+ */
+export type MessageDelivery = 'open' | 'sent' | 'not-sent' | 'uncertain';
+
+/** A message to a session: typed in its terminal and read from the transcript, or typed from the view (architecture.md § Conversation). */
 export interface ConversationMessage {
   id: string;
   sessionId: string;
   /** Null only for a session with no work item. */
   workItemId: number | null;
   at: number;
-  /** `terminal`: typed into the session's terminal and read from its transcript. */
-  origin: 'terminal';
+  /** `terminal`: typed into the session's terminal and read from its transcript; `typed`: sent from the view's composer. */
+  origin: 'terminal' | 'typed';
   text: string;
   /** The transcript entry it came from, so a hub restart never imports it twice. */
   transcriptUuid: string | null;
@@ -22,6 +28,14 @@ export interface ConversationMessage {
   withdrawn: boolean;
   /** Its place in the conversation, which the store sets (`inTranscript`). */
   ord: number;
+  /** A typed message's delivery; null for a terminal one. */
+  delivery: MessageDelivery | null;
+  /** Why a typed message was not sent or is uncertain. */
+  error: string | null;
+  /** The `send` command's `opId`, so a repeated command returns this message and types nothing again. */
+  opId: string | null;
+  /** When a typed message's paste was written; only a transcript entry near it confirms the message. */
+  pastedAt: number | null;
 }
 
 /** A reply of a session: its text, and how a later copy or a rewrite changed it. */

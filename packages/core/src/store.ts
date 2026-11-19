@@ -396,6 +396,12 @@ export const MIGRATIONS = [
   -- The API message a reply was read from, and its text lines, which Claude Code writes one per content block, so a later line joins it.
   ALTER TABLE replies ADD COLUMN apiMessageId TEXT;
   ALTER TABLE replies ADD COLUMN blocks TEXT;`,
+  // Messages typed from the view (architecture.md § Typing a message): their delivery, why one failed, and the command that sent it.
+  `ALTER TABLE messages ADD COLUMN delivery TEXT;
+  ALTER TABLE messages ADD COLUMN error TEXT;
+  ALTER TABLE messages ADD COLUMN opId TEXT;
+  ALTER TABLE messages ADD COLUMN pastedAt INTEGER;
+  CREATE INDEX messagesByOpId ON messages (opId);`,
 ];
 
 /**
@@ -1258,12 +1264,12 @@ export class Store {
   /** Adds a message to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
   addMessage(message: Omit<ConversationMessage, 'ord'>): void {
     this.#db
-      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0);
+      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0, message.delivery, message.error, message.opId, message.pastedAt);
     this.#prune(message.sessionId);
   }
 
-  updateMessage(id: string, patch: Partial<Pick<ConversationMessage, 'at' | 'transcriptUuid' | 'provisional' | 'withdrawn'>>): void {
+  updateMessage(id: string, patch: Partial<Pick<ConversationMessage, 'at' | 'transcriptUuid' | 'provisional' | 'withdrawn' | 'delivery' | 'error' | 'pastedAt'>>): void {
     const entries = Object.entries(patch).filter(([, value]) => value !== undefined);
 
     if (entries.length > 0) {
@@ -1271,6 +1277,11 @@ export class Store {
         .prepare(`UPDATE messages SET ${entries.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`)
         .run(...entries.map(([, value]) => (typeof value === 'boolean' ? (value ? 1 : 0) : (value as SQLInputValue))), id);
     }
+  }
+
+  /** Removes a message, as a typed message that was not sent leaves the conversation. */
+  deleteMessage(id: string): void {
+    this.#db.prepare('DELETE FROM messages WHERE id = ?').run(id);
   }
 
   message(id: string): ConversationMessage | null {
@@ -1309,6 +1320,26 @@ export class Store {
 
     this.#db.prepare('UPDATE messages SET ord = ? WHERE id = ?').run(ord, id);
     this.#db.prepare('UPDATE replies SET ord = ? WHERE id = ?').run(ord, id);
+  }
+
+  /** The message a `send` command with this `opId` added to the session. */
+  messageByOpId(sessionId: string, opId: string): ConversationMessage | null {
+    return this.#messageRows('SELECT * FROM messages WHERE sessionId = ? AND opId = ? ORDER BY ord LIMIT 1', sessionId, opId)[0] ?? null;
+  }
+
+  /** A session's typed messages that may still reach its transcript, oldest first: pasted, not `not-sent`, and not yet matched to an entry. */
+  typedAwaitingTranscript(sessionId: string): ConversationMessage[] {
+    return this.#messageRows("SELECT * FROM messages WHERE sessionId = ? AND origin = 'typed' AND transcriptUuid IS NULL AND pastedAt IS NOT NULL AND delivery <> 'not-sent' ORDER BY at, ord", sessionId);
+  }
+
+  /** Typed messages a stopped hub left `open`, now `uncertain` with `error`; returns them. */
+  settleOpenMessages(error: string): ConversationMessage[] {
+    const open = this.#messageRows("SELECT * FROM messages WHERE delivery = 'open' ORDER BY ord");
+
+    // Settled, so it keeps its place rather than wait at the end for a transcript line (`inTranscript`).
+    this.#db.prepare("UPDATE messages SET delivery = 'uncertain', error = ?, provisional = 0 WHERE delivery = 'open'").run(error);
+
+    return open.map((message) => ({ ...message, delivery: 'uncertain', error, provisional: false }));
   }
 
   /** Adds a reply to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */

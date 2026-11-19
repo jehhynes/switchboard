@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { ATTACH_TIMEOUT_MS, buildOf, connectHolder, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, bundleHome, killProcessTree, connectHolder, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -199,6 +199,17 @@ function holder(home: string, argv: readonly string[]): Promise<number> {
     },
     holder: () => connectHolder(switchboardHome(home)),
     now: () => Date.now(),
+    alive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        // EPERM: it runs, under another user.
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
+      }
+    },
+    killTree: (pid) => killProcessTree(pid),
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     out: (text) => process.stdout.write(text),
     err: (text) => process.stderr.write(text),
   });
@@ -209,8 +220,8 @@ async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
   if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder') {
-    // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home.
-    const home = flag(argv, 'home') || (bundle === undefined ? homedir() : dirname(dirname(resolve(bundle))));
+    // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
+    const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
     const commands = { report, register, attach, holder };
