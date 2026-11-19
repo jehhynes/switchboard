@@ -881,7 +881,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - Attaching mid-turn showed the spinner and `esc to interrupt`; detaching left the turn running, and attaching after it showed the result.
   - With two clients of 120 and 80 columns, the later one set the size and the wider client showed lines drawn for 80 columns until it resized.
   - A serialized replay of 10,040 lines of 106 characters was 1,094,259 bytes, and the raw buffer 2,180,075.
-- **Pass criteria (plan E10):** one replay method shows the screen as Claude drew it in both terminals, and keys reach Claude unchanged. **Partial.** Passed with the headless client and the raw-mode client in a second ConPTY: serialization after a resize to the client's size reproduced the screen, and keys reached Claude. Outstanding: the replay and keys in Windows Terminal and in VS Code's terminal, checked by eye, which the criteria name.
+- **Pass criteria (plan E10):** one replay method shows the screen as Claude drew it in both terminals, and keys reach Claude unchanged. **Passed.** With the headless client and the raw-mode client in a second ConPTY, serialization after a resize to the client's size reproduced the screen, and keys reached Claude. The replay, typing, Shift+Tab and Esc in Windows Terminal and in VS Code's terminal passed an eye check in live acceptance on 2026-11-19 (M84); paste and Ctrl+O were checked only through the raw-mode client.
 - **Not verified:** Linux; mouse input; a raw buffer that has dropped its start.
 - **Current use:** the holder's replay, a serialized screen after a resize to the client's size (architecture.md § Terminal holder).
 
@@ -1073,3 +1073,21 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Result:** both terminals rendered a link as its text followed by its target in parentheses, as `README.md (src/README.md)`. VS Code's terminal made the path clickable (Ctrl+click) only when it started with `./` or was a `file://` URI; `src/README.md` was not.
 - **Not verified:** Windows Terminal with a `./` target; a Linux terminal; whether a session follows the `./` instruction in every reply.
 - **Current use:** `LINK_PROMPT`, appended after the panel's sections to every Code Mode start and resume, tells the session to start each relative file link target with `./` (architecture.md § Code Mode sessions).
+
+## M84. Live acceptance of Code Mode sessions, 2026-11-19
+
+- **Versions:** Claude Code CLI 2.1.328, on Windows 11 Pro 10.0.26300; VS Code 1.146.0 with the Claude Code extension 2.1.328, which Code Mode sessions do not use; Windows Terminal 1.24.12741.0; Node.js 24.14.0.
+- **Setup:** the operator ran it by hand on their own installed extension and dock, not an isolated acceptance home: the VSIX from delivery step 13 installed (hub restarted at 10:27 local), the dock published at 10:47, and `sessions.codeMode` on in their Switchboard `settings.json`, with `sessions.installHooks` on and the hub's default 4-hour idle limit. Each result below is what the operator saw.
+- **Start: pass.** An ad-hoc Claude session started in Code Mode in the terminal holder; Open in terminal showed Code Mode's `is on` line (M63).
+- **Gateway: pass.** The session's `/status` showed the direct Anthropic API and the subscription sign-in, not the operator's local gateway (M64).
+- **Attach in Windows Terminal: pass.** Closing the terminal tab and opening it again replayed the screen as Claude drew it; typing, Shift+Tab and Esc reached Claude.
+- **Attach in VS Code's terminal: pass.** Open in terminal from VS Code replayed the screen, and keys reached Claude.
+- **Question: pass.** A session's `AskUserQuestion` was answered in its attached terminal; the dock row showed it waiting, then working.
+- **Stop: pass.** Stop on an idle session ended it; its terminal offered to resume, and Enter resumed the same conversation.
+- **Held sessions: pass.** The dock's Held Sessions window and `hub.js holder list` listed the session and could stop it.
+- **Hub restart: pass.** A VS Code window reload, which restarted the hub, during a turn running `sleep 60` left the session running, and it reported done.
+- **Holder loss: pass.** Killing the holder process with `Stop-Process -Force` during a turn made the work item blocked with "The terminal holder stopped."; Open in terminal resumed the session in a new holder.
+- **Delete: pass.** Deleting the work item while its terminal was attached ended the session.
+- **File links:** how the attached terminals show a session's Markdown file links is recorded in M83.
+- **Pass criteria (plan E10, eye check):** the replay shows the screen as Claude drew it, and keys reach Claude, in Windows Terminal and in VS Code's terminal. **Passed** for the replay, typing, Shift+Tab and Esc; paste and Ctrl+O rest on M72's raw-mode client.
+- **Not covered:** the idle limit, tested only in Vitest, which needs a hub started by hand with `--code-mode-idle-ms`; an orphan in the Held Sessions window and `hub.js holder list`; answering a question once in the item window and once in the terminal app; paste and Ctrl+O in either terminal; Claude runs nested in a session Switchboard started (M77); Linux. Steps 1–4 were not run step by step: ordinary background Claude and Codex sessions kept running unchanged during the run. M63, M65, M70 and M71 were not re-run as experiments on 2.1.328.
