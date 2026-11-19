@@ -1,6 +1,8 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 import { ownPrompt } from './group.js';
+import { CONVERSATION_RETENTION } from './conversation.js';
+import type { ConversationMessage, ConversationReply, TranscriptCheckpoint, WindowBinding } from './conversation.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -342,7 +344,66 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN lastTree TEXT;`,
   // The conversation rules version a Code Mode session's prompt carries (architecture.md § Conversation).
   `ALTER TABLE sessions ADD COLUMN rulesVersion INTEGER;`,
+  // A Code Mode session's conversation, its transcript readers' checkpoints and the windows' work items (architecture.md § Conversation).
+  `CREATE TABLE messages (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Shared with replies, so items written at the same time keep the order they were added in.
+    ord INTEGER NOT NULL,
+    id TEXT NOT NULL UNIQUE,
+    sessionId TEXT NOT NULL,
+    workItemId INTEGER,
+    at INTEGER NOT NULL,
+    origin TEXT NOT NULL,
+    text TEXT NOT NULL,
+    transcriptUuid TEXT
+  );
+  CREATE INDEX messagesBySession ON messages (sessionId, at);
+  CREATE INDEX messagesByOrd ON messages (ord);
+  CREATE TABLE replies (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    ord INTEGER NOT NULL,
+    id TEXT NOT NULL UNIQUE,
+    sessionId TEXT NOT NULL,
+    workItemId INTEGER,
+    at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    answers TEXT,
+    opening TEXT NOT NULL,
+    source TEXT NOT NULL,
+    replaces TEXT,
+    rewrittenBy TEXT,
+    withdrawn INTEGER NOT NULL DEFAULT 0,
+    transcriptUuid TEXT
+  );
+  CREATE INDEX repliesBySession ON replies (sessionId, at);
+  CREATE INDEX repliesByOrd ON replies (ord);
+  CREATE TABLE checkpoints (
+    sessionId TEXT PRIMARY KEY,
+    transcript TEXT NOT NULL,
+    offset INTEGER NOT NULL,
+    lastUuid TEXT,
+    lastAt INTEGER
+  );
+  CREATE TABLE windowBindings (
+    file TEXT PRIMARY KEY,
+    workItemId INTEGER,
+    since INTEGER NOT NULL,
+    scopeGen INTEGER NOT NULL
+  );`,
+  // A message sent while the session was busy, until the transcript line where Claude received it is read, and one it never received as one.
+  `ALTER TABLE messages ADD COLUMN provisional INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE messages ADD COLUMN withdrawn INTEGER NOT NULL DEFAULT 0;
+  -- The API message a reply was read from, and its text lines, which Claude Code writes one per content block, so a later line joins it.
+  ALTER TABLE replies ADD COLUMN apiMessageId TEXT;
+  ALTER TABLE replies ADD COLUMN blocks TEXT;`,
 ];
+
+/**
+ * An item's place in a session's conversation (`inTranscript`): 0 once its transcript line was read, then `ord`. A withdrawn item, which no
+ * view shows, counts as read, so it is pruned in turn and never holds the items after it.
+ */
+const MESSAGE_PLACE = '(provisional = 1 AND withdrawn = 0)';
+const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode']);
 /** Stored as comma-separated text. */
@@ -565,6 +626,26 @@ export class Store {
     }
 
     db.exec('PRAGMA foreign_keys = ON');
+
+    return new Store(db);
+  }
+
+  /**
+   * Opens the database for reading only, as the hub's snapshot worker does (architecture.md § Hub lifecycle); the hub's own connection has
+   * migrated it, so a schema of another version is refused.
+   */
+  static openReadOnly(path: string): Store {
+    const { DatabaseSync: Database } = process.getBuiltinModule('node:sqlite');
+    const db = new Database(path, { readOnly: true });
+
+    db.exec('PRAGMA busy_timeout = 5000;');
+
+    const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+
+    if (version !== MIGRATIONS.length) {
+      db.close();
+      throw new Error(`The database is schema version ${version}, not ${MIGRATIONS.length}.`);
+    }
 
     return new Store(db);
   }
@@ -910,6 +991,9 @@ export class Store {
     }
 
     this.#db.prepare('DELETE FROM triages WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM checkpoints WHERE sessionId IN (SELECT id FROM sessions WHERE workItemId = ?)').run(id);
+    this.#db.prepare('DELETE FROM messages WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM replies WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM sessions WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
@@ -1160,6 +1244,198 @@ export class Store {
   }
 
   /** The ticket's rows and its activity log; null for an unknown ticket. */
+  /** Adds a message to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
+  addMessage(message: Omit<ConversationMessage, 'ord'>): void {
+    this.#db
+      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0);
+    this.#prune(message.sessionId);
+  }
+
+  updateMessage(id: string, patch: Partial<Pick<ConversationMessage, 'at' | 'transcriptUuid' | 'provisional' | 'withdrawn'>>): void {
+    const entries = Object.entries(patch).filter(([, value]) => value !== undefined);
+
+    if (entries.length > 0) {
+      this.#db
+        .prepare(`UPDATE messages SET ${entries.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`)
+        .run(...entries.map(([, value]) => (typeof value === 'boolean' ? (value ? 1 : 0) : (value as SQLInputValue))), id);
+    }
+  }
+
+  message(id: string): ConversationMessage | null {
+    return this.#messageRows('SELECT * FROM messages WHERE id = ?', id)[0] ?? null;
+  }
+
+  messageByTranscriptUuid(sessionId: string, uuid: string): ConversationMessage | null {
+    return this.#messageRows('SELECT * FROM messages WHERE sessionId = ? AND transcriptUuid = ?', sessionId, uuid)[0] ?? null;
+  }
+
+  /** The reply read from an API message, with the UUIDs and texts of its lines, in order. */
+  replyOfApiMessage(sessionId: string, apiMessageId: string): { replyId: string; blocks: Array<{ uuid: string | null; text: string }> } | null {
+    const row = this.#db.prepare('SELECT id, blocks FROM replies WHERE sessionId = ? AND apiMessageId = ? ORDER BY ord DESC LIMIT 1').get(sessionId, apiMessageId) as { id: string; blocks: string | null } | undefined;
+
+    return row === undefined ? null : { replyId: row.id, blocks: row.blocks === null ? [] : (JSON.parse(row.blocks) as Array<{ uuid: string | null; text: string }>) };
+  }
+
+  replyBlocks(sessionId: string, limit: number): string[] {
+    const rows = this.#db.prepare('SELECT blocks FROM replies WHERE sessionId = ? AND blocks IS NOT NULL ORDER BY ord DESC LIMIT ?').all(sessionId, limit) as Array<{ blocks: string }>;
+
+    return rows.flatMap((row) => (JSON.parse(row.blocks) as Array<{ text: string }>).map((block) => block.text));
+  }
+
+  setApiMessage(replyId: string, apiMessageId: string, blocks: Array<{ uuid: string | null; text: string }>): void {
+    this.#db.prepare('UPDATE replies SET apiMessageId = ?, blocks = ? WHERE id = ?').run(apiMessageId, JSON.stringify(blocks), replyId);
+  }
+
+  /** A session's sent messages not yet received, oldest first. */
+  provisionalMessages(sessionId: string): ConversationMessage[] {
+    return this.#messageRows('SELECT * FROM messages WHERE sessionId = ? AND provisional = 1 AND withdrawn = 0 ORDER BY ord', sessionId);
+  }
+
+  /** Moves a message or reply after every item before it, because its transcript line was just read (`inTranscript`). */
+  placeLast(id: string): void {
+    const ord = this.#nextOrd();
+
+    this.#db.prepare('UPDATE messages SET ord = ? WHERE id = ?').run(ord, id);
+    this.#db.prepare('UPDATE replies SET ord = ? WHERE id = ?').run(ord, id);
+  }
+
+  /** Adds a reply to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
+  addReply(reply: Omit<ConversationReply, 'ord'>): void {
+    this.#db
+      .prepare('INSERT INTO replies (ord, id, sessionId, workItemId, at, kind, answers, opening, source, replaces, rewrittenBy, withdrawn, transcriptUuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(this.#nextOrd(), reply.id, reply.sessionId, reply.workItemId, reply.at, reply.kind, reply.answers, reply.opening, reply.source, reply.replaces, reply.rewrittenBy, reply.withdrawn ? 1 : 0, reply.transcriptUuid);
+    this.#prune(reply.sessionId);
+  }
+
+  updateReply(id: string, patch: Partial<Omit<ConversationReply, 'id' | 'sessionId' | 'workItemId' | 'ord'>>): void {
+    const entries = Object.entries(patch).filter(([, value]) => value !== undefined);
+
+    if (entries.length > 0) {
+      this.#db
+        .prepare(`UPDATE replies SET ${entries.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`)
+        .run(...entries.map(([key, value]) => (key === 'withdrawn' ? (value ? 1 : 0) : (value as SQLInputValue))), id);
+    }
+  }
+
+  /** The newest message of a session that Claude received, which a reply read after a restart answers. */
+  latestMessageId(sessionId: string): string | null {
+    return (this.#db.prepare('SELECT id FROM messages WHERE sessionId = ? AND provisional = 0 AND withdrawn = 0 ORDER BY ord DESC LIMIT 1').get(sessionId) as { id: string } | undefined)?.id ?? null;
+  }
+
+  /** Whether a transcript entry is already in the session's conversation. */
+  hasTranscriptEntry(sessionId: string, uuid: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM messages WHERE sessionId = :id AND transcriptUuid = :uuid UNION ALL SELECT 1 FROM replies WHERE sessionId = :id AND transcriptUuid = :uuid').get({ id: sessionId, uuid }) !== undefined;
+  }
+
+  reply(id: string): ConversationReply | null {
+    return this.#replyRows('SELECT * FROM replies WHERE id = ?', id)[0] ?? null;
+  }
+
+  /** A session's newest replies, newest first; with `before`, only those before that reply in the conversation's order. */
+  latestReplies(sessionId: string, limit: number, before?: string): ConversationReply[] {
+    const cursor = before === undefined ? null : (this.#db.prepare(`SELECT ${REPLY_PLACE} AS place, ord FROM replies WHERE id = ?`).get(before) as { place: number; ord: number } | undefined);
+
+    if (cursor === undefined) {
+      return [];
+    }
+
+    const older = cursor === null ? '' : `AND (${REPLY_PLACE} < :place OR (${REPLY_PLACE} = :place AND ord < :ord))`;
+
+    return this.#replyRows(`SELECT * FROM replies WHERE sessionId = :id ${older} ORDER BY ${REPLY_PLACE} DESC, ord DESC LIMIT :limit`, { id: sessionId, limit, ...(cursor === null ? {} : cursor) });
+  }
+
+  /**
+   * A session's messages and replies in order (`inTranscript`), at most `limit` of the newest before the item `before`, and whether there are
+   * older ones.
+   */
+  conversation(sessionId: string, before: string | null, limit: number, withdrawn = true): { items: Array<({ type: 'message' } & ConversationMessage) | ({ type: 'reply' } & ConversationReply)>; more: boolean } {
+    // The cursor is the oldest item the reader has, by its place.
+    const found =
+      before === null
+        ? null
+        : (this.#db.prepare(`SELECT ${MESSAGE_PLACE} AS place, ord FROM messages WHERE id = :item AND sessionId = :id UNION ALL SELECT ${REPLY_PLACE} AS place, ord FROM replies WHERE id = :item AND sessionId = :id`).get({ item: before, id: sessionId }) as
+            | { place: number; ord: number }
+            | undefined);
+
+    // A cursor of another session, or one retention deleted, has nothing before it.
+    if (found === undefined) {
+      return { items: [], more: false };
+    }
+
+    const cursor = found ?? { place: 2, ord: Number.MAX_SAFE_INTEGER };
+    // A view leaves withdrawn items out before the limit, so a page of them never stops it paging back.
+    const shown = withdrawn ? '' : 'AND withdrawn = 0';
+    const older = (place: string) => `sessionId = :id ${shown} AND (${place} < :place OR (${place} = :place AND ord < :ord)) ORDER BY ${place} DESC, ord DESC LIMIT :limit`;
+    const bind = { id: sessionId, place: cursor.place, ord: cursor.ord, limit: limit + 1 };
+    const messages = this.#messageRows(`SELECT * FROM messages WHERE ${older(MESSAGE_PLACE)}`, bind);
+    const replies = this.#replyRows(`SELECT * FROM replies WHERE ${older(REPLY_PLACE)}`, bind);
+    const place = (item: ({ type: 'message'; provisional: boolean } | { type: 'reply'; source: string }) & { withdrawn: boolean }) =>
+      item.withdrawn ? 0 : item.type === 'message' ? (item.provisional ? 1 : 0) : item.source === 'screen' ? 1 : 0;
+    const merged = [...messages.map((message) => ({ type: 'message' as const, ...message })), ...replies.map((reply) => ({ type: 'reply' as const, ...reply }))].sort(
+      (a, b) => place(b) - place(a) || b.ord - a.ord,
+    );
+
+    return { items: merged.slice(0, limit).reverse(), more: merged.length > limit };
+  }
+
+  checkpoint(sessionId: string): TranscriptCheckpoint | null {
+    return (this.#db.prepare('SELECT * FROM checkpoints WHERE sessionId = ?').get(sessionId) as TranscriptCheckpoint | undefined) ?? null;
+  }
+
+  setCheckpoint(checkpoint: TranscriptCheckpoint): void {
+    this.#db
+      .prepare('INSERT INTO checkpoints (sessionId, transcript, offset, lastUuid, lastAt) VALUES (?, ?, ?, ?, ?) ON CONFLICT (sessionId) DO UPDATE SET transcript = excluded.transcript, offset = excluded.offset, lastUuid = excluded.lastUuid, lastAt = excluded.lastAt')
+      .run(checkpoint.sessionId, checkpoint.transcript, checkpoint.offset, checkpoint.lastUuid, checkpoint.lastAt);
+  }
+
+  windowBinding(file: string): WindowBinding | null {
+    return (this.#db.prepare('SELECT * FROM windowBindings WHERE file = ?').get(file) as WindowBinding | undefined) ?? null;
+  }
+
+  setWindowBinding(binding: WindowBinding): void {
+    this.#db
+      .prepare('INSERT INTO windowBindings (file, workItemId, since, scopeGen) VALUES (?, ?, ?, ?) ON CONFLICT (file) DO UPDATE SET workItemId = excluded.workItemId, since = excluded.since, scopeGen = excluded.scopeGen')
+      .run(binding.file, binding.workItemId, binding.since, binding.scopeGen);
+  }
+
+  #replyRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationReply[] {
+    return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<Omit<ConversationReply, 'withdrawn'> & { seq: number; withdrawn: number | boolean; apiMessageId?: unknown; blocks?: unknown }>).map(({ seq: _seq, apiMessageId: _api, blocks: _blocks, ...reply }) => ({
+      ...reply,
+      withdrawn: reply.withdrawn === 1 || reply.withdrawn === true,
+    }));
+  }
+
+  #messageRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationMessage[] {
+    return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<Omit<ConversationMessage, 'provisional' | 'withdrawn'> & { seq: number; provisional: number; withdrawn: number }>).map(({ seq: _seq, ...message }) => ({
+      ...message,
+      provisional: message.provisional === 1,
+      withdrawn: message.withdrawn === 1,
+    }));
+  }
+
+  #nextOrd(): number {
+    const row = this.#db.prepare('SELECT MAX(COALESCE((SELECT MAX(ord) FROM messages), 0), COALESCE((SELECT MAX(ord) FROM replies), 0)) AS ord').get() as { ord: number };
+
+    return row.ord + 1;
+  }
+
+  /** Deletes a session's items beyond the newest `CONVERSATION_RETENTION`, counting messages and replies together. */
+  #prune(sessionId: string): void {
+    // The oldest item kept; everything before it, by place, goes.
+    const kept = this.#db
+      .prepare(
+        `SELECT place, ord FROM (SELECT ${MESSAGE_PLACE} AS place, ord FROM messages WHERE sessionId = :id UNION ALL SELECT ${REPLY_PLACE} AS place, ord FROM replies WHERE sessionId = :id) ORDER BY place DESC, ord DESC LIMIT 1 OFFSET :offset`,
+      )
+      .get({ id: sessionId, offset: CONVERSATION_RETENTION - 1 }) as { place: number; ord: number } | undefined;
+
+    if (kept !== undefined) {
+      for (const [table, place] of [['messages', MESSAGE_PLACE], ['replies', REPLY_PLACE]] as const) {
+        this.#db.prepare(`DELETE FROM ${table} WHERE sessionId = :id AND (${place} < :place OR (${place} = :place AND ord < :ord))`).run({ id: sessionId, place: kept.place, ord: kept.ord });
+      }
+    }
+  }
+
   ticketHistory(ticketId: number): TicketHistory | null {
     const ticket = this.ticket(ticketId);
 

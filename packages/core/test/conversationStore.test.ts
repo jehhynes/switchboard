@@ -1,0 +1,177 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { CONVERSATION_RETENTION, MIGRATIONS, Store } from '../src/index.js';
+import type { ConversationReply } from '../src/index.js';
+
+const dirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of dirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const reply = (id: string, at: number, patch: Partial<ConversationReply> = {}): Omit<ConversationReply, 'ord'> => ({
+  id, sessionId: 's1', workItemId: 1, at, kind: 'reply', answers: null, opening: id, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: null, ...patch,
+});
+
+describe('conversation store', () => {
+  it('lists messages and replies in the order they were added, whatever their times, and pages older ones', () => {
+    const store = Store.open(':memory:');
+
+    store.addReply(reply('r1', 30));
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false });
+    store.addReply(reply('r2', 20, { withdrawn: true }));
+    store.addReply(reply('other', 15, { sessionId: 's2' }));
+
+    expect(store.conversation('s1', null, 10)).toEqual({
+      items: [
+        { type: 'reply', ...reply('r1', 30), ord: 1 },
+        { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, ord: 2 },
+        { type: 'reply', ...reply('r2', 20, { withdrawn: true }), ord: 3 },
+      ],
+      more: false,
+    });
+    expect(store.conversation('s1', 'r2', 1)).toMatchObject({ items: [{ id: 'm1' }], more: true });
+    expect(store.conversation('s1', 'm1', 5)).toMatchObject({ items: [{ id: 'r1' }], more: false });
+    // A cursor that is gone, or another session's, has nothing before it.
+    expect(store.conversation('s1', 'deleted', 5)).toEqual({ items: [], more: false });
+    expect(store.conversation('s2', 'r2', 5)).toEqual({ items: [], more: false });
+    store.updateReply('r1', { rewrittenBy: 'r2', withdrawn: true });
+    expect(store.reply('r1')).toMatchObject({ rewrittenBy: 'r2', withdrawn: true });
+    expect(store.latestReplies('s1', 1).map((one) => one.id)).toEqual(['r2']);
+    expect(store.latestMessageId('s1')).toBe('m1');
+    expect(store.hasTranscriptEntry('s1', 'u')).toBe(true);
+    expect(store.hasTranscriptEntry('s2', 'u')).toBe(false);
+  });
+
+  it('puts items not in the transcript yet after those in it, in the order first seen, and moves each to the end when its line is read', () => {
+    const store = Store.open(':memory:');
+    const message = (id: string, provisional: boolean) => store.addMessage({ id, sessionId: 's1', workItemId: 1, at: 1, origin: 'terminal', text: id, transcriptUuid: null, provisional, withdrawn: false });
+    const ids = () => store.conversation('s1', null, 10).items.map((item) => item.id);
+
+    message('m1', false);
+    message('sent', true);
+    store.addReply(reply('screen', 2, { source: 'screen' }));
+    store.addReply(reply('r1', 3));
+    expect(ids()).toEqual(['m1', 'r1', 'sent', 'screen']);
+    expect(store.provisionalMessages('s1').map((one) => one.id)).toEqual(['sent']);
+    expect(store.latestMessageId('s1')).toBe('m1');
+
+    // Paging crosses from the items not in the transcript to those in it.
+    expect(store.conversation('s1', 'sent', 1)).toMatchObject({ items: [{ id: 'r1' }], more: true });
+    expect(store.conversation('s1', 'screen', 5).items.map((item) => item.id)).toEqual(['m1', 'r1', 'sent']);
+
+    // The reply's line is read first, then the message's.
+    store.updateReply('screen', { source: 'transcript' });
+    store.placeLast('screen');
+    store.updateMessage('sent', { provisional: false, transcriptUuid: 'q1', at: 9 });
+    store.placeLast('sent');
+    expect(ids()).toEqual(['m1', 'r1', 'screen', 'sent']);
+    expect(store.message('sent')).toMatchObject({ provisional: false, withdrawn: false, transcriptUuid: 'q1', at: 9 });
+    expect(store.latestMessageId('s1')).toBe('sent');
+
+    store.updateMessage('m1', { withdrawn: true });
+    expect(store.message('m1')?.withdrawn).toBe(true);
+    expect(store.message('gone')).toBeNull();
+  });
+
+  it('counts a withdrawn item as in the transcript, leaves withdrawn items out of a page before its limit, and finds the replies before one', () => {
+    const store = Store.open(':memory:');
+    const ids = (withdrawn = true) => store.conversation('s1', null, 10, withdrawn).items.map((item) => item.id);
+
+    store.addReply(reply('r1', 1));
+    store.addMessage({ id: 'gone', sessionId: 's1', workItemId: 1, at: 2, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: true, withdrawn: true });
+    store.addReply(reply('screen', 3, { source: 'screen' }));
+    store.addReply(reply('dead', 4, { source: 'screen', withdrawn: true }));
+    store.addReply(reply('r2', 5));
+    expect(ids()).toEqual(['r1', 'gone', 'dead', 'r2', 'screen']);
+    expect(ids(false)).toEqual(['r1', 'r2', 'screen']);
+    expect(store.conversation('s1', 'screen', 1, false)).toMatchObject({ items: [{ id: 'r2' }], more: true });
+
+    // A rewrite's target is a reply before it; a screen copy still waiting comes after every transcript reply.
+    expect(store.latestReplies('s1', 10, 'r2').map((one) => one.id)).toEqual(['dead', 'r1']);
+    expect(store.latestReplies('s1', 10, 'screen').map((one) => one.id)).toEqual(['r2', 'dead', 'r1']);
+    expect(store.latestReplies('s1', 10).map((one) => one.id)).toEqual(['screen', 'r2', 'dead', 'r1']);
+    expect(store.latestReplies('s1', 10, 'unknown')).toEqual([]);
+  });
+
+  it(`keeps a session's newest ${CONVERSATION_RETENTION} items, and deletes a work item's conversation with it`, () => {
+    const store = Store.open(':memory:');
+
+    for (let at = 1; at <= CONVERSATION_RETENTION + 2; at++) {
+      store.addReply(reply(`r${at}`, at));
+    }
+
+    const kept = store.conversation('s1', null, CONVERSATION_RETENTION + 10);
+
+    expect(kept.items).toHaveLength(CONVERSATION_RETENTION);
+    expect(kept.items[0]).toMatchObject({ id: 'r3' });
+
+    // Items of one time are pruned to the exact count, oldest added first.
+    for (let index = 0; index < CONVERSATION_RETENTION + 1; index++) {
+      store.addReply(reply(`same${index}`, 1, { sessionId: 's9' }));
+    }
+
+    const same = store.conversation('s9', null, CONVERSATION_RETENTION + 10).items;
+
+    expect(same).toHaveLength(CONVERSATION_RETENTION);
+    expect(same[0]).toMatchObject({ id: 'same1' });
+    expect(store.latestMessageId('s1')).toBeNull();
+    store.setCheckpoint({ sessionId: 's1', transcript: 'a.jsonl', offset: 5, lastUuid: 'u', lastAt: 3 });
+    expect(store.checkpoint('s1')).toEqual({ sessionId: 's1', transcript: 'a.jsonl', offset: 5, lastUuid: 'u', lastAt: 3 });
+    store.setCheckpoint({ sessionId: 's1', transcript: 'b.jsonl', offset: 0, lastUuid: null, lastAt: 3 });
+    expect(store.checkpoint('s1')).toMatchObject({ transcript: 'b.jsonl', offset: 0 });
+  });
+
+  it("drops a deleted work item's messages, replies and checkpoints", () => {
+    const store = Store.open(':memory:');
+    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 't', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' } as never);
+    const item = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: 0 } as never);
+
+    store.insertSession({ id: 's1', workItemId: item.id, kind: 'task', provider: 'claude', nativeSessionId: null, shortId: null, cwd: 'D:/w', state: 'running', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null });
+    store.addReply(reply('r1', 1, { workItemId: item.id }));
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: item.id, at: 1, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: false, withdrawn: false });
+    store.setCheckpoint({ sessionId: 's1', transcript: 'a', offset: 1, lastUuid: null, lastAt: null });
+    store.deleteWorkItem(item.id);
+
+    expect(store.conversation('s1', null, 10).items).toEqual([]);
+    expect(store.checkpoint('s1')).toBeNull();
+  });
+
+  it('keeps window bindings by file', () => {
+    const store = Store.open(':memory:');
+
+    store.setWindowBinding({ file: 'w.code-workspace', workItemId: 3, since: 1, scopeGen: 1 });
+    store.setWindowBinding({ file: 'w.code-workspace', workItemId: 4, since: 2, scopeGen: 2 });
+    expect(store.windowBinding('w.code-workspace')).toEqual({ file: 'w.code-workspace', workItemId: 4, since: 2, scopeGen: 2 });
+    expect(store.windowBinding('other')).toBeNull();
+  });
+
+  it('opens a migrated database read-only, refuses writes, and refuses one of another schema version', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'store-ro-'));
+
+    dirs.push(dir);
+
+    const path = join(dir, 'switchboard.db');
+    const writer = Store.open(path);
+
+    writer.addReply(reply('r1', 1));
+
+    const reader = Store.openReadOnly(path);
+
+    expect(reader.conversation('s1', null, 5).items).toHaveLength(1);
+    expect(() => reader.addReply(reply('r2', 2))).toThrow(/readonly/i);
+    reader.close();
+    writer.close();
+
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const old = new DatabaseSync(path);
+
+    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    old.close();
+    expect(() => Store.openReadOnly(path)).toThrow(`The database is schema version ${MIGRATIONS.length - 1}, not ${MIGRATIONS.length}.`);
+  });
+});

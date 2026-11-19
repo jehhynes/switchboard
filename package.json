@@ -12,6 +12,7 @@
     "packages/zoho",
     "packages/forum",
     "packages/holder",
+    "packages/conversation",
     "packages/claude",
     "packages/codex",
     "packages/hub",

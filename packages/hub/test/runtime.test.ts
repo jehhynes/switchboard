@@ -2641,7 +2641,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     const [{ action, stored }] = seen as [(typeof seen)[number]];
     expect(action).toMatchObject({ provider: 'claude', codeMode: true, nativeSessionId: expect.stringMatching(UUID), launchId: expect.stringMatching(UUID) });
     expect(action.nativeSessionId).not.toBe(action.launchId);
-    expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId, rulesVersion: 1 });
+    expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId, rulesVersion: 2 });
     expect(context.store.session(action.sessionId)).toMatchObject({ state: 'running', shortId: action.nativeSessionId!.slice(0, 8) });
     context.runtime.stop();
   });
@@ -2659,7 +2659,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     // A session started before the rules existed.
     context.store.updateSession(session.id, { rulesVersion: null });
     expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(CONVERSATION_RULES);
-    expect(context.store.session(session.id)?.rulesVersion).toBe(1);
+    expect(context.store.session(session.id)?.rulesVersion).toBe(2);
     expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toMatch(/^Report to Switchboard with these commands:\n[\s\S]*\n\n## Conversation view\n/);
     context.runtime.stop();
   });
