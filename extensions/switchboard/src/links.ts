@@ -1,4 +1,5 @@
 import { isAbsolute, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** Whether this VS Code accepts views in the secondary side bar: 1.106 and later, as Claude Code's extension decides. */
 export function supportsSecondarySidebar(version: string): boolean {
@@ -49,4 +50,45 @@ export function linkTarget(href: string, cwd: string | null): { url: string } | 
   }
 
   return { file: isAbsolute(path) ? path : join(cwd!, path), line: match?.[2] === undefined ? null : Number(match[2]) };
+}
+
+/**
+ * A status's Markdown for the Markdown preview, which reads it from a `switchboard-status:` document and would resolve a relative link against
+ * that URI: each inline link to a path with no scheme, relative to the session's folder or absolute, becomes a `file:` URL, keeping its line
+ * fragment. Links inside fenced code, web links and links with no folder to resolve against are left as written.
+ */
+export function previewLinks(markdown: string, cwd: string | null): string {
+  let fence: string | null = null;
+
+  return markdown
+    .split('\n')
+    .map((line) => {
+      const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+
+      if (open !== null) {
+        fence = fence === null ? open[1]! : open[1]![0] === fence[0] && open[1]!.length >= fence.length ? null : fence;
+        return line;
+      }
+
+      if (fence !== null) {
+        return line;
+      }
+
+      return line.replace(/\]\((<[^>]*>|[^)\s]+)\)/g, (whole, raw: string) => {
+        const href = raw.startsWith('<') ? raw.slice(1, -1) : raw;
+
+        if (href === '' || href.startsWith('#') || /^[a-z][a-z0-9+.-]*:(?![\\/])/i.test(href)) {
+          return whole;
+        }
+
+        const target = linkTarget(href, cwd);
+
+        if (target === null || !('file' in target)) {
+          return whole;
+        }
+
+        return `](${pathToFileURL(target.file).href}${target.line === null ? '' : `#L${target.line}`})`;
+      });
+    })
+    .join('\n');
 }

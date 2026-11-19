@@ -35,7 +35,20 @@ describe('the Conversation view', () => {
     await vscode.commands.executeCommand('switchboard.conversation.focus');
     // The suite's window is a folder window, which has no work item, so the hub's hello gives it no scope.
     await until(() => extension.conversation().connected, 'the view never received its hello');
-    assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true });
+    assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true, status: null });
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+  });
+
+  it('serves a status as a Markdown document under switchboard-status:, which the Markdown preview opens', async () => {
+    await vscode.extensions.getExtension('switchboard.switchboard').activate();
+
+    // This window was sent no status, so the document says so rather than show another window's.
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.from({ scheme: 'switchboard-status', path: '/st-r-1/Status 2026-11-19 13.46.md' }));
+
+    assert.strictEqual(document.languageId, 'markdown');
+    assert.match(document.getText(), /no longer available in this window/);
+    await vscode.commands.executeCommand('markdown.showPreview', document.uri);
+    await until(() => vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => tab.label.includes('Status 2026-11-19 13.46'))), 'the Markdown preview never opened the status');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
 });

@@ -1,10 +1,12 @@
-import type { ItemView, MessageView, ReplyView, SessionView, WindowScope } from '@switchboard/hub';
+import type { ItemView, MessageView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, stateIcon, timeline, withEarlier } from '../src/conversationModel.js';
+import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, stateIcon, statusLine, timeline, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState } from '../src/conversationModel.js';
-import { linkTarget, supportsSecondarySidebar } from '../src/links.js';
-import { shortTitle, startConversation } from '../src/webview/conversationMain.js';
-import { linkAllowed, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
+import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
+import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
+import { ago, linkAllowed, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2' };
@@ -15,7 +17,7 @@ const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyVie
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent' | 'uncertain', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
-const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, ...patch });
+const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean; status: StatusView | null }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, ...patch });
 
 describe('the conversation state', () => {
   it('starts from each hello, adds and replaces items in time order, and takes only its current session\'s state', () => {
@@ -35,7 +37,7 @@ describe('the conversation state', () => {
 
     const moved = applyEvent(applyEvent(state, { type: 'scope', scope: { ...SCOPE, workItemId: 3, sessionId: null } }), hello([], { scope: { ...SCOPE, workItemId: 3, sessionId: null }, sessions: [] }));
 
-    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true });
+    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null });
   });
 
   it("keeps items in the transcript's order, by ord and not by time, with a sent message and a screen copy after them until their lines are read", () => {
@@ -132,7 +134,7 @@ describe('the conversation state', () => {
 });
 
 describe('the Conversation view page', () => {
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, ...patch });
 
   it('draws the header, messages as boxes, replies whole, asides, notes and rewrites, escaping every text', () => {
     const html = renderConversation(
@@ -362,7 +364,7 @@ describe('the Conversation view page', () => {
 });
 
 describe('the composer', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, ...patch });
 
   function page() {
     // Pages of earlier tests still listen on the window, and jsdom has no CSS.escape for the one that kept a focused item.
@@ -613,5 +615,139 @@ describe('reply links and the secondary side bar', () => {
     expect(supportsSecondarySidebar('1.106.0')).toBe(true);
     expect(supportsSecondarySidebar('1.105.1')).toBe(false);
     expect(supportsSecondarySidebar('2.0.0')).toBe(true);
+  });
+});
+
+describe('the status row', () => {
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, ...patch });
+  const status = (id: string, markdown: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown, fallback: false, ...patch });
+
+  it("takes the hello's status and each status of the window's session or work item, and drops another session's", () => {
+    let current = applyEvent(EMPTY_CONVERSATION, hello([], { status: status('stage-2', 'Reading', { fallback: true }) }));
+
+    expect(current.status?.markdown).toBe('Reading');
+    current = applyEvent(current, { type: 'status', status: status('st-1', 'Done.') });
+    expect(current.status?.id).toBe('st-1');
+    expect(applyEvent(current, { type: 'status', status: status('st-9', 'Theirs.', { sessionId: 's3' }) }).status?.id).toBe('st-1');
+    expect(applyEvent(current, { type: 'status', status: status('stage-3', 'Theirs.', { sessionId: null, fallback: true }) }).status?.id).toBe('st-1');
+    expect(applyEvent(current, { type: 'status', status: status('stage-2', 'Stage.', { sessionId: null, fallback: true }) }).status?.id).toBe('stage-2');
+    expect(applyEvent(current, { type: 'status', status: null }).status).toBeNull();
+    expect(applyEvent(current, hello()).status).toBeNull();
+    // A scope event that moves the window drops the row until the next hello; one that keeps it keeps the row.
+    expect(applyEvent(current, { type: 'scope', scope: { ...SCOPE, workItemId: 3, sessionId: 's3' } }).status).toBeNull();
+    expect(applyEvent(current, { type: 'scope', scope: { ...SCOPE, sessionId: 's9' } }).status).toBeNull();
+    expect(applyEvent(current, { type: 'scope', scope: { ...SCOPE, title: 'Renamed' } }).status?.id).toBe('st-1');
+  });
+
+  it("points a status's relative and absolute file links at files for the Markdown preview, and leaves web links, anchors and code alone", () => {
+    const cwd = process.platform === 'win32' ? 'D:\\w' : '/w';
+    const url = (path: string) => pathToFileURL(join(cwd, path)).href;
+    const out = previewLinks('See [a](./src/a.ts#L42), [b](<src/b c.ts>), [web](https://x.test/a) and [top](#x).\n```\n[c](c.ts)\n```\n[d](d.ts)', cwd);
+
+    expect(out.split('\n')[0]).toBe(`See [a](${url('src/a.ts')}#L42), [b](${url('src/b c.ts')}), [web](https://x.test/a) and [top](#x).`);
+    expect(out.split('\n')[4]).toBe(`[d](${url('d.ts')})`);
+    expect(out.split('\n').slice(1, 4)).toEqual(['```', '[c](c.ts)', '```']);
+    // With no folder, a relative link stays as written.
+    expect(previewLinks('[a](a.ts)', null)).toBe('[a](a.ts)');
+  });
+
+  it('says what the view reads of a session with older rules or none', () => {
+    const notice = (rules: SessionView['rules']) => renderConversation(state({ session: { ...SESSION, rules } }), new Set(), T0);
+
+    expect(notice('older')).toContain('This session started with older conversation rules, so the view reads only the tags they explained. Resume it to give it the current ones.');
+    expect(notice('none')).toContain('This session started without the conversation rules, so its replies show whole.');
+    expect(notice('current')).not.toContain('class="notice"');
+  });
+
+  it('leaves a reply that is only a status out of the timeline', () => {
+    expect(timeline([reply('r1', T0, { opening: '' }), reply('r2', T0 + 1)]).map((entry) => entry.item.id)).toEqual(['r2']);
+  });
+
+  it('says how long ago a status came, and gives its first line without Markdown marks', () => {
+    expect(ago(T0, T0 + 59_000)).toBe('just now');
+    expect(ago(T0, T0 + 4 * 60_000)).toBe('4 min ago');
+    expect(ago(T0, T0 + 3 * 3_600_000)).toBe('3 h ago');
+    expect(ago(T0, T0 + 50 * 3_600_000)).toBe('2 d ago');
+    expect(statusLine('\n## **Where** it stands\n- x')).toBe('Where it stands');
+    expect(statusLine('- 1. `a.ts` fixed')).toBe('a.ts fixed');
+  });
+
+  it('pins the status under the header, folded to its first line, with the whole status escaped when open and the tools to open it', () => {
+    const html = renderConversation(state({ status: status('st-1', '## Done <img src=x onerror=alert(1)>\n\n| a |\n|---|\n| 1 |') }), new Set(), T0 + 4 * 60_000);
+    const root = document.createElement('div');
+
+    root.innerHTML = html;
+
+    const row = root.querySelector<HTMLDetailsElement>('.status > details.status-row')!;
+
+    expect(root.firstElementChild?.className).toBe('header');
+    expect(root.children[1]?.className).toBe('status');
+    expect(row.open).toBe(false);
+    expect(row.querySelector('summary .codicon-pulse')).not.toBeNull();
+    expect(row.querySelector('summary')!.textContent).toBe('Status·4 min agoDone <img src=x onerror=alert(1)>');
+    expect(root.querySelector('img')).toBeNull();
+    expect(row.querySelector('.status-body table')).not.toBeNull();
+    expect(root.querySelector('[data-action="status-open"]')).not.toBeNull();
+    expect(root.querySelector('[data-action="statuses"]')).not.toBeNull();
+    expect(root.querySelector('.status-new')).toBeNull();
+
+    root.innerHTML = renderConversation(state({ status: status('st-1', 'x') }), new Set(['status']), T0, true);
+    expect(root.querySelector<HTMLDetailsElement>('details.status-row')!.open).toBe(true);
+    expect(root.querySelector('.status-new')?.textContent).toBe('New');
+
+    // The stage stands in, dimmed, with nothing to open; no status and no stage, no row.
+    root.innerHTML = renderConversation(state({ status: status('stage-2', 'Reading the inbox code', { fallback: true }) }), new Set(), T0);
+    expect(root.querySelector('details.status-row.fallback .status-first')?.textContent).toBe('Reading the inbox code');
+    expect(root.querySelector('[data-action="status-open"]')).toBeNull();
+    expect(renderConversation(state(), new Set(), T0)).not.toContain('status-row');
+  });
+
+  it('marks a status that replaced the one shown as New until it is opened or a minute passes, redraws its age, and posts its tools', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const posted: Array<{ type: string }> = [];
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    const show = (patch: Partial<ConversationState>) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state(patch) } }));
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    show({ status: status('stage-2', 'Reading', { fallback: true }) });
+    expect(root.querySelector('.status-new')).toBeNull();
+
+    // The first status after the stage, and each that replaces it, is New.
+    show({ status: status('st-1', 'First.') });
+    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(live.textContent).toBe('New status: First.');
+    expect(root.querySelector('.status-age')?.textContent).toBe('just now');
+    vi.advanceTimersByTime(STATUS_NEW_MS);
+    expect(root.querySelector('.status-new')).toBeNull();
+    vi.advanceTimersByTime(3 * 60_000);
+    expect(root.querySelector('.status-age')?.textContent).toBe('4 min ago');
+
+    show({ status: status('st-2', '## Second') });
+    expect(root.querySelector('.status-new')).not.toBeNull();
+    // A redraw with the same status keeps the mark; opening the row clears it.
+    show({ status: status('st-2', '## Second') });
+    expect(root.querySelector('.status-new')).not.toBeNull();
+
+    const row = root.querySelector<HTMLDetailsElement>('details.status-row')!;
+
+    row.open = true;
+    row.dispatchEvent(new Event('toggle'));
+    expect(root.querySelector('.status-new')).toBeNull();
+
+    show({ status: status('st-3', 'Third.') });
+    root.querySelector<HTMLElement>('[data-action="status-open"]')!.click();
+    expect(root.querySelector('.status-new')).toBeNull();
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
+    expect(posted.filter((message) => message.type.startsWith('status'))).toEqual([{ type: 'status-open' }, { type: 'statuses' }]);
+
+    // Another session's first status is not New.
+    show({ scope: { ...SCOPE, sessionId: 's5' }, session: { ...SESSION, id: 's5' }, status: status('st-5', 'Other.', { sessionId: 's5' }) });
+    expect(root.querySelector('.status-new')).toBeNull();
+    vi.useRealTimers();
   });
 });

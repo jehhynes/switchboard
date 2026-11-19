@@ -3,11 +3,11 @@ import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import { openConversation, postToHub } from '@switchboard/hub';
-import type { EventStream, ItemView } from '@switchboard/hub';
-import { applyEvent, EMPTY_CONVERSATION, withEarlier } from './conversationModel.js';
+import type { EventStream, ItemView, StatusView } from '@switchboard/hub';
+import { applyEvent, EMPTY_CONVERSATION, statusLine, withEarlier } from './conversationModel.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
 import type { ConversationMessage, SendTarget } from './webview/conversationRender.js';
-import { linkTarget, supportsSecondarySidebar } from './links.js';
+import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
 
 /**
  * The Conversation view's two contributions (architecture.md § Conversation view): in the secondary side bar, as Claude Code's own panel, and
@@ -15,6 +15,30 @@ import { linkTarget, supportsSecondarySidebar } from './links.js';
  */
 export const CONVERSATION_VIEWS = ['switchboard.conversation', 'switchboard.conversationActivity'] as const;
 export const NO_SECONDARY_SIDEBAR = 'switchboard.noSecondarySidebar';
+/** The scheme of a status opened in the Markdown preview (architecture.md § Statuses). */
+export const STATUS_SCHEME = 'switchboard-status';
+/** What a status document says once this window no longer has the status, as after a reload. */
+export const STATUS_GONE = 'This status is no longer available in this window. Open it again from the Conversation view.';
+
+/** A status's document: `switchboard-status:/<id>/Status <local time>.md`, so the preview's tab names its time and the `.md` makes it Markdown. */
+export function statusUri(status: Pick<StatusView, 'id' | 'at'>): vscode.Uri {
+  const at = new Date(status.at);
+  const two = (value: number): string => String(value).padStart(2, '0');
+  const name = `Status ${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}.${two(at.getMinutes())}.md`;
+
+  return vscode.Uri.from({ scheme: STATUS_SCHEME, path: `/${encodeURIComponent(status.id)}/${name}` });
+}
+
+/** The status ID a status document's URI names; empty for a path that is not `/<id>/<name>.md`. */
+export function statusIdOf(uri: vscode.Uri): string {
+  const match = /^\/([^/]+)\/[^/]+\.md$/.exec(uri.path);
+
+  try {
+    return match === null ? '' : decodeURIComponent(match[1]!);
+  } catch {
+    return '';
+  }
+}
 
 export interface ConversationViewDeps {
   /** Opens this window's session in its attach terminal, as the pane's Open in terminal does. */
@@ -22,9 +46,14 @@ export interface ConversationViewDeps {
   log(line: string): void;
 }
 
+/** A status's time in the earlier statuses list: "Thu, Nov 19, 1:46 PM". */
+const STATUS_TIME = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
 /** How long a stream that ended waits before it opens again. */
 const RECONNECT_MS = 1_000;
 const HISTORY_TIMEOUT_MS = 10_000;
+/** Statuses the extension keeps for documents already open, beyond the ones a window shows. */
+const STATUSES_KEPT = 200;
 /** The hub answers `send` once the message is stored, before it is typed. */
 const SEND_TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 5;
@@ -35,8 +64,12 @@ const NOT_SENT_KEPT = 20;
  * The Conversation view (architecture.md § Conversation view): follows this window's conversation stream, keeps its state and draws it in a
  * webview view. The view is not retained when hidden; its page asks for the state again when it loads.
  */
-export class ConversationView implements vscode.WebviewViewProvider {
+export class ConversationView implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider {
   #state: ConversationState = EMPTY_CONVERSATION;
+  /** Statuses this window was sent, by ID, with the session's folder for their links, which a status document reads; cleared when the scope moves. */
+  readonly #statuses = new Map<string, { markdown: string; cwd: string | null }>();
+  readonly #statusChanged = new vscode.EventEmitter<vscode.Uri>();
+  readonly onDidChange = this.#statusChanged.event;
   readonly #views = new Map<string, vscode.WebviewView>();
   #stream: EventStream | null = null;
   #target: { record: HubRecord; key: string } | null = null;
@@ -60,7 +93,12 @@ export class ConversationView implements vscode.WebviewViewProvider {
   register(): vscode.Disposable {
     void vscode.commands.executeCommand('setContext', NO_SECONDARY_SIDEBAR, !supportsSecondarySidebar(vscode.version));
 
-    return vscode.Disposable.from(...CONVERSATION_VIEWS.map((id) => vscode.window.registerWebviewViewProvider(id, this)), { dispose: () => this.disconnect() });
+    return vscode.Disposable.from(
+      ...CONVERSATION_VIEWS.map((id) => vscode.window.registerWebviewViewProvider(id, this)),
+      vscode.workspace.registerTextDocumentContentProvider(STATUS_SCHEME, this),
+      this.#statusChanged,
+      { dispose: () => this.disconnect() },
+    );
   }
 
   /** What the view shows now, for the integration suite. */
@@ -155,7 +193,121 @@ export class ConversationView implements vscode.WebviewViewProvider {
       this.#mine.delete(message.id);
     }
 
+    const before = this.#state.scope;
+
     this.#set(applyEvent(this.#state, event));
+
+    // A status document shows only statuses of the window's current work item and session; open ones say so once the scope moved.
+    if (this.#state.scope?.workItemId !== before?.workItemId || this.#state.scope?.sessionId !== before?.sessionId) {
+      this.#statuses.clear();
+
+      for (const document of vscode.workspace.textDocuments.filter((one) => one.uri.scheme === STATUS_SCHEME)) {
+        this.#statusChanged.fire(document.uri);
+      }
+    }
+
+    if (this.#state.status !== null) {
+      this.#keep(this.#state.status);
+    }
+  }
+
+  /** Keeps a status for its documents, and redraws an open one whose text changed. */
+  #keep(status: Pick<StatusView, 'id' | 'markdown'>): void {
+    const known = this.#statuses.get(status.id)?.markdown;
+
+    this.#statuses.delete(status.id);
+    this.#statuses.set(status.id, { markdown: status.markdown, cwd: this.#state.scope?.cwd ?? null });
+
+    for (const id of [...this.#statuses.keys()].slice(0, -STATUSES_KEPT)) {
+      this.#statuses.delete(id);
+    }
+
+    if (known !== undefined && known !== status.markdown) {
+      for (const document of vscode.workspace.textDocuments.filter((one) => one.uri.scheme === STATUS_SCHEME && statusIdOf(one.uri) === status.id)) {
+        this.#statusChanged.fire(document.uri);
+      }
+    }
+  }
+
+  provideTextDocumentContent(uri: vscode.Uri): string {
+    const status = this.#statuses.get(statusIdOf(uri));
+
+    return status === undefined ? STATUS_GONE : previewLinks(status.markdown, status.cwd);
+  }
+
+  /** Opens a status in the Markdown preview: the one the status row shows, or one the earlier statuses list gave. */
+  async openStatus(status: StatusView): Promise<void> {
+    this.#keep(status);
+    await vscode.commands.executeCommand('markdown.showPreview', statusUri(status));
+  }
+
+  /**
+   * Lists the current session's statuses before the one the status row shows, newest first, from the hub's `statuses` command, and opens the one
+   * picked in the Markdown preview; each page's last pick loads the next.
+   */
+  async earlierStatuses(): Promise<void> {
+    const target = this.#target;
+    const scope = this.#state.scope;
+    const shown = this.#state.status;
+
+    if (target === null || scope === null || scope.sessionId === null) {
+      return;
+    }
+
+    const unmoved = (): boolean => {
+      const now = this.#state.scope;
+
+      return this.#target === target && now?.workItemId === scope.workItemId && now.sessionId === scope.sessionId && now.scopeGen === scope.scopeGen;
+    };
+    type StatusPick = vscode.QuickPickItem & { status?: StatusView; more?: string };
+    const picks: StatusPick[] = [];
+    let before = shown === null || shown.fallback ? null : shown.id;
+
+    for (;;) {
+      const reply = await postToHub(target.record, '/v1/conversation/statuses', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), sessionId: scope.sessionId, before }, HISTORY_TIMEOUT_MS);
+
+      if (reply?.status !== 200) {
+        void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+        return;
+      }
+
+      // The scope may have moved while the request ran.
+      if (!unmoved()) {
+        return;
+      }
+
+      const { statuses, more } = reply.body as { statuses: StatusView[]; more: boolean };
+
+      picks.push(...statuses.map((status) => ({ label: statusLine(status.markdown) || 'Status', description: STATUS_TIME.format(status.at), status })));
+
+      if (picks.length === 0) {
+        void vscode.window.showInformationMessage('Switchboard: this session has no earlier statuses.');
+        return;
+      }
+
+      const last = statuses.at(-1);
+      const chosen = await vscode.window.showQuickPick<StatusPick>(more && last !== undefined ? [...picks, { label: '$(history) Older statuses…', more: last.id }] : picks, {
+        title: 'Earlier statuses',
+        placeHolder: 'Open a status in the Markdown preview',
+        matchOnDescription: true,
+      });
+
+      // Or while the list was open: a status of a session the window no longer shows is not opened.
+      if (!unmoved()) {
+        return;
+      }
+
+      if (chosen?.status !== undefined) {
+        await this.openStatus(chosen.status);
+        return;
+      }
+
+      if (chosen?.more === undefined) {
+        return;
+      }
+
+      before = chosen.more;
+    }
   }
 
   /** Hands the texts of messages that were not sent to a visible page, keeping them when none took them; a call during a hand-off tries again after it. */
@@ -312,6 +464,10 @@ export class ConversationView implements vscode.WebviewViewProvider {
             return this.open(String(message.href));
           case 'terminal':
             return this.deps.openTerminal();
+          case 'status-open':
+            return this.#state.status === null ? Promise.resolve() : this.openStatus(this.#state.status);
+          case 'statuses':
+            return this.earlierStatuses();
           case 'copy':
             return Promise.resolve(vscode.env.clipboard.writeText(String(message.text))).then(
               () => view.webview.postMessage({ type: 'copied', id: message.id, ok: true }),

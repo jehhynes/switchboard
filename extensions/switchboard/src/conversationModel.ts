@@ -1,4 +1,4 @@
-import type { ItemView, ReplyView, SessionView, WindowScope } from '@switchboard/hub';
+import type { ItemView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
 
 /** What a window's Conversation view shows, kept from its conversation stream (architecture.md § Conversation view). */
 export interface ConversationState {
@@ -11,17 +11,20 @@ export interface ConversationState {
   more: boolean;
   /** Whether the stream is open. */
   connected: boolean;
+  /** The status row's status: the current session's latest, or the work item's stage before it; null for neither. */
+  status: StatusView | null;
 }
 
-export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false };
+export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null };
 
 /** An event of the conversation stream, as parsed from its data line. */
 export type ConversationEvent =
-  | { type: 'hello'; scope: WindowScope | null; sessions: SessionView[]; items: ItemView[]; more: boolean }
+  | { type: 'hello'; scope: WindowScope | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null }
   | { type: 'scope'; scope: WindowScope | null }
   | { type: 'session'; session: SessionView }
   | { type: 'message'; message: ItemView }
   | { type: 'reply'; reply: ItemView }
+  | { type: 'status'; status: StatusView | null }
   | { type: string };
 
 /**
@@ -56,10 +59,22 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
     case 'hello': {
       const hello = event as Extract<ConversationEvent, { type: 'hello' }>;
 
-      return { scope: hello.scope, session: hello.sessions.find((session) => session.current) ?? null, items: hello.items.filter((item) => !notSent(item)), more: hello.more, connected: true };
+      return {
+        scope: hello.scope,
+        session: hello.sessions.find((session) => session.current) ?? null,
+        items: hello.items.filter((item) => !notSent(item)),
+        more: hello.more,
+        connected: true,
+        status: hello.status ?? null,
+      };
     }
-    case 'scope':
-      return { ...state, scope: (event as Extract<ConversationEvent, { type: 'scope' }>).scope };
+    case 'scope': {
+      const { scope } = event as Extract<ConversationEvent, { type: 'scope' }>;
+      const moved = scope?.workItemId !== state.scope?.workItemId || scope?.sessionId !== state.scope?.sessionId;
+
+      // The row of a work item or session the window no longer shows goes; the next hello brings the new one.
+      return { ...state, scope, status: moved ? null : state.status };
+    }
     case 'session': {
       const { session } = event as Extract<ConversationEvent, { type: 'session' }>;
 
@@ -73,6 +88,12 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
     }
     case 'reply':
       return { ...state, items: upsert(state.items, (event as { reply: ItemView }).reply) };
+    case 'status': {
+      const { status } = event as Extract<ConversationEvent, { type: 'status' }>;
+
+      // A status of a session the window no longer shows, sent before its scope moved, is dropped.
+      return status === null || status.sessionId === state.scope?.sessionId || (status.fallback && status.id === `stage-${state.scope?.workItemId}`) ? { ...state, status } : state;
+    }
     default:
       return state;
   }
@@ -106,7 +127,8 @@ export function timeline(items: ItemView[]): Entry[] {
       continue;
     }
 
-    if (item.withdrawn || placed.has(item.id)) {
+    // A reply that is only a status shows in the status row, not in the timeline.
+    if (item.withdrawn || placed.has(item.id) || (item.kind === 'reply' && item.opening === '' && item.rewrittenBy === null)) {
       continue;
     }
 
@@ -124,6 +146,13 @@ export function timeline(items: ItemView[]): Entry[] {
   }
 
   return entries;
+}
+
+/** A status's first line, without Markdown's heading, list and emphasis marks, for a one-line label. */
+export function statusLine(markdown: string): string {
+  const line = markdown.split('\n').find((one) => one.trim() !== '') ?? '';
+
+  return line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)*/, '').replace(/[*_`]/g, '').trim();
 }
 
 /** Whether the session is working, which the header's spinning codicon and the timeline's spinner show. */

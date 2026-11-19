@@ -1,6 +1,7 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { renderConversation, replyText } from './conversationRender.js';
+import { ago, renderConversation, replyText } from './conversationRender.js';
+import { statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget } from './conversationRender.js';
 
 interface VsCodeApi {
@@ -19,6 +20,10 @@ interface PageState {
 
 /** How long a copy button shows its check. */
 const COPIED_MS = 2_000;
+/** How long a status that replaced the one before is marked New, unless the operator opens it first. */
+export const STATUS_NEW_MS = 60_000;
+/** How often the status row's age is redrawn. */
+const STATUS_AGE_MS = 30_000;
 /** The tallest the composer grows before it scrolls, as Claude Code's. */
 const COMPOSER_MAX_PX = 200;
 /** The longest title the placeholder names before it is cut. */
@@ -169,6 +174,55 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   // Copy buttons waiting for the extension to say it wrote the clipboard.
   const copies = new Map<number, HTMLElement>();
   let nextCopy = 1;
+  // The status the row last showed, and until when a status that replaced it is marked New.
+  let shownStatus: { sessionId: string | null; id: string; markdown: string } | null = null;
+  let freshUntil = 0;
+  let freshTimer: ReturnType<typeof setTimeout> | undefined;
+  const seenStatus = (): void => {
+    if (freshUntil !== 0) {
+      freshUntil = 0;
+      clearTimeout(freshTimer);
+      root.querySelector('.status-row')?.classList.remove('fresh');
+      root.querySelector('.status-new')?.remove();
+    }
+  };
+  // A status that replaces the one the row showed for the same session is New for a while; a first status after the stage is too.
+  const noteStatus = (): void => {
+    const status = state.status;
+    const sessionId = state.scope?.sessionId ?? null;
+
+    if (status !== null && !status.fallback && shownStatus !== null && shownStatus.sessionId === sessionId && (shownStatus.id !== status.id || shownStatus.markdown !== status.markdown)) {
+      freshUntil = Date.now() + STATUS_NEW_MS;
+      clearTimeout(freshTimer);
+      freshTimer = setTimeout(() => {
+        freshUntil = 0;
+
+        if (root.isConnected) {
+          draw();
+        }
+      }, STATUS_NEW_MS);
+      live.textContent = `New status: ${statusLine(status.markdown)}`;
+    } else if (status === null || shownStatus?.sessionId !== sessionId) {
+      seenStatus();
+    }
+
+    shownStatus = status === null ? null : { sessionId, id: status.id, markdown: status.markdown };
+  };
+
+  // The row's age, redrawn while the page is shown; a page taken off the document stops.
+  const tickAges = (): void => {
+    if (!root.isConnected) {
+      return;
+    }
+
+    for (const age of root.querySelectorAll<HTMLElement>('.status-age')) {
+      age.textContent = ago(Number(age.dataset['at']), Date.now());
+    }
+
+    setTimeout(tickAges, STATUS_AGE_MS);
+  };
+
+  setTimeout(tickAges, STATUS_AGE_MS);
 
   const save = (): void => {
     const scroller = root.querySelector<HTMLElement>('.scroll');
@@ -186,7 +240,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const ids = new Set(state.items.map((item) => item.id));
     const added = state.items.filter((item) => !shownIds.has(item.id));
 
-    root.innerHTML = renderConversation(state, open);
+    root.innerHTML = renderConversation(state, open, Date.now(), freshUntil > Date.now());
 
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
@@ -254,8 +308,11 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const button = target.closest<HTMLElement>('[data-action]');
     const action = button?.dataset['action'];
 
-    if (action === 'terminal' || action === 'earlier') {
+    if (action === 'terminal' || action === 'earlier' || action === 'statuses') {
       vscode.postMessage({ type: action });
+    } else if (action === 'status-open') {
+      seenStatus();
+      vscode.postMessage({ type: 'status-open' });
     } else if (action === 'copy-code' || action === 'copy-reply') {
       // A code block's text as written, without the newline that ends every block; a reply's Markdown from the state, not from the page.
       const id = button!.closest<HTMLElement>('li[data-id]')?.dataset['id'];
@@ -278,6 +335,10 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       const id = fold.dataset['fold'];
 
       if (id !== undefined) {
+        if (id === 'status' && fold.open) {
+          seenStatus();
+        }
+
         if (fold.open) {
           open.add(id);
         } else {
@@ -326,6 +387,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> }>) => {
     if (event.data.type === 'state') {
       state = event.data.state;
+      noteStatus();
       draw();
       composer?.update(state);
     } else if (event.data.type === 'sent') {

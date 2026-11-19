@@ -1,10 +1,18 @@
 import MarkdownIt from 'markdown-it';
-import type { MessageView, ReplyView } from '@switchboard/hub';
-import { awaitingReply, stateIcon, timeline } from '../conversationModel.js';
+import type { MessageView, ReplyView, StatusView } from '@switchboard/hub';
+import { awaitingReply, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 
 /** What the page posts to the extension. */
-export type ConversationMessage = { type: 'ready' } | { type: 'earlier' } | { type: 'open'; href: string } | { type: 'terminal' } | { type: 'send'; id: number; text: string; target: SendTarget } | { type: 'copy'; id: number; text: string };
+export type ConversationMessage =
+  | { type: 'ready' }
+  | { type: 'earlier' }
+  | { type: 'open'; href: string }
+  | { type: 'terminal' }
+  | { type: 'send'; id: number; text: string; target: SendTarget }
+  | { type: 'copy'; id: number; text: string }
+  | { type: 'status-open' }
+  | { type: 'statuses' };
 
 /** The session the page showed when Enter was pressed; the message goes there or is refused. */
 export interface SendTarget {
@@ -119,8 +127,37 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   return `<li class="reply ${item.kind}" data-id="${escape(item.id)}" tabindex="-1">${stamp(item.at)}<span class="dot"></span><div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
 }
 
-/** The view's HTML: the header with the session's state, a note when the view cannot talk to the session, and the timeline. */
-export function renderConversation(state: ConversationState, open: ReadonlySet<string> = new Set(), now: number = Date.now()): string {
+/** How long ago a status was posted, as the status row says it: "just now", "4 min ago", "2 h ago", "3 d ago". */
+export function ago(at: number, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - at) / 60_000);
+
+  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 24 * 60 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / (24 * 60))} d ago`;
+}
+
+/**
+ * The status row (architecture.md § Statuses), pinned under the header and folded like a fold row: "Status · 4 min ago" and the first line;
+ * open, the whole status as Markdown. A status that replaced the one before shows a New mark while `fresh`. The work item's stage stands in
+ * before the session's first status, dimmed, with nothing to open.
+ */
+export function renderStatus(status: StatusView | null, open: ReadonlySet<string>, fresh: boolean, now: number): string {
+  if (status === null) {
+    return '';
+  }
+
+  const title = status.fallback ? "The work item's stage; the session has posted no status yet" : 'Status';
+  const age = `<time class="status-age" data-at="${status.at}" datetime="${new Date(status.at).toISOString()}">${ago(status.at, now)}</time>`;
+  const mark = fresh ? '<span class="status-new">New</span>' : '';
+  const actions = status.fallback
+    ? ''
+    : '<span class="status-actions"><button class="icon" type="button" data-action="status-open" title="Open in the Markdown preview" aria-label="Open the status in the Markdown preview"><span class="codicon codicon-open-preview" aria-hidden="true"></span></button>' +
+      '<button class="icon" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>';
+  const summary = `<summary title="${escape(title)}"><span class="codicon codicon-chevron-right status-chevron" aria-hidden="true"></span><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">Status</span><span class="status-dot" aria-hidden="true">·</span>${age}${mark}<span class="status-first">${escape(statusLine(status.markdown))}</span></summary>`;
+
+  return `<details class="status-row${status.fallback ? ' fallback' : ''}${fresh ? ' fresh' : ''}" data-fold="status" aria-label="Status"${open.has('status') ? ' open' : ''}>${summary}<div class="status-body body">${renderMarkdown(status.markdown)}</div></details>${actions === '' ? '' : `<div class="status-tools">${actions}</div>`}`;
+}
+
+/** The view's HTML: the header with the session's state, the status row, a note when the view cannot talk to the session, and the timeline. */
+export function renderConversation(state: ConversationState, open: ReadonlySet<string> = new Set(), now: number = Date.now(), fresh = false): string {
   if (state.scope === null) {
     return `<p class="empty">${state.connected ? 'This window has no Switchboard session.' : 'Connecting to Switchboard…'}</p>`;
   }
@@ -130,7 +167,9 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const header = `<header class="header"><span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}" title="${escape(text)}" aria-label="${escape(text)}"></span><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   const notes = [
     ...(state.session?.reason == null ? [] : [state.session.reason]),
-    ...(state.session !== null && state.session.conversation !== 'none' && state.session.rules !== 'current' ? ['This session started without the current conversation rules, so its replies show whole.'] : []),
+    ...(state.session === null || state.session.conversation === 'none' || state.session.rules === 'current'
+      ? []
+      : [state.session.rules === 'none' ? 'This session started without the conversation rules, so its replies show whole.' : 'This session started with older conversation rules, so the view reads only the tags they explained. Resume it to give it the current ones.']),
   ];
   const shown = timeline(state.items);
   const waiting = awaitingReply(state.items, shown, state.session);
@@ -155,5 +194,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
   const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}</ol>`;
 
-  return `${header}${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll">${earlier}${body}</div>`;
+  const status = renderStatus(state.status, open, fresh, now);
+
+  return `${header}${status === '' ? '' : `<div class="status">${status}</div>`}${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll">${earlier}${body}</div>`;
 }
