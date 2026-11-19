@@ -1,6 +1,6 @@
-import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { describe, expect, it } from 'vitest';
-import { NeedsYouTracker, newlyNeeding, toastOf } from '../src/toast.js';
+import { needsMessage, newlyNeeding } from '../src/needs.js';
+import type { Snapshot, WorkItemView } from '../src/snapshot.js';
 
 const NOW = Date.UTC(2026, 9, 7, 12);
 
@@ -154,35 +154,12 @@ describe('newlyNeeding', () => {
   });
 });
 
-describe('NeedsYouTracker', () => {
-  it('returns nothing for each connection\'s first snapshot, including an item that started needing the operator while disconnected', () => {
-    const tracker = new NeedsYouTracker();
-
-    tracker.connected();
-    expect(ids(tracker.update(snapshot([item(1, 'blocked')])))).toEqual([]);
-    expect(ids(tracker.update(snapshot([item(1, 'blocked'), item(2, 'failed')])))).toEqual([2]);
-
-    tracker.connected();
-    expect(ids(tracker.update(snapshot([item(1, 'blocked'), item(2, 'failed'), item(3, 'awaiting-approval')])))).toEqual([]);
-    expect(ids(tracker.update(snapshot([item(1, 'blocked'), item(2, 'failed'), item(3, 'awaiting-approval'), item(4, 'failed')])))).toEqual([4]);
-  });
-});
-
-describe('toastOf', () => {
-  it('names the ticket and what the operator must do, and offers Open when the row has an item window', () => {
+describe('needsMessage', () => {
+  it('names the ticket and what the operator must do', () => {
     const ended = session({ state: 'ended', endedAt: NOW, released: true });
 
-    expect(toastOf(item(1, 'awaiting-approval', { sessions: [ended] }))).toEqual({ message: 'Switchboard: Issue 1 — Review, then approve', open: true });
-    expect(toastOf(item(2, 'running', { sessions: [session({ state: 'waiting' })] }))).toEqual({ message: 'Switchboard: Issue 2 — Answer a question', open: true });
-    expect(toastOf(item(3, 'blocked', { sessions: [ended] }))).toEqual({ message: 'Switchboard: Issue 3 — Blocked', open: true });
-  });
-
-  it('offers no Open when the row has no item window and no ticket URL, and Open for a failed ad-hoc start, whose window is its repo', () => {
-    const adhoc = item(4, 'failed', { sessions: [] });
-
-    adhoc.ticket = { ...adhoc.ticket, source: 'adhoc', url: '', title: 'Tidy the logs' };
-
-    expect(toastOf(adhoc)).toEqual({ message: 'Switchboard: Tidy the logs — Failed', open: false });
-    expect(toastOf({ ...adhoc, sessions: [session({ nativeSessionId: null, shortId: null, state: 'ended', released: true })] }).open).toBe(true);
+    expect(needsMessage(item(1, 'awaiting-approval', { sessions: [ended] }))).toBe('Switchboard: Issue 1 — Review, then approve');
+    expect(needsMessage(item(2, 'running', { sessions: [session({ state: 'waiting' })] }))).toBe('Switchboard: Issue 2 — Answer a question');
+    expect(needsMessage(item(3, 'blocked', { sessions: [ended] }))).toBe('Switchboard: Issue 3 — Blocked');
   });
 });

@@ -52,6 +52,12 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
     /// <summary>Raised on the stream's thread with a row's key when VS Code forwards that row's click, which only the dock runs (PRD R65, R69, R71).</summary>
     public event Action<string>? ClickRequested;
 
+    /// <summary>
+    /// Raised on the stream's thread with a row's key and the message for each work item that starts needing the operator, which the dock shows
+    /// in place of a VS Code window's notification, since a window sees only its own work item (PRD R65).
+    /// </summary>
+    public event Action<string, string>? NeedsYou;
+
     /// <summary>Raised on the stream's thread with the first view of each connection, such as to a hub started on another config folder.</summary>
     public event Action? Connected;
 
@@ -149,6 +155,16 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
             else if (read is { Name: "click" } && JsonNode.Parse(read.Data)?["rowKey"]?.GetValue<string>() is { } rowKey)
             {
                 ClickRequested?.Invoke(rowKey);
+            }
+            else if (read is { Name: "needs" } && JsonNode.Parse(read.Data)?["items"] is JsonArray items)
+            {
+                foreach (var item in items)
+                {
+                    if (item?["rowKey"]?.GetValue<string>() is { } key && item["message"]?.GetValue<string>() is { } message)
+                    {
+                        NeedsYou?.Invoke(key, message);
+                    }
+                }
             }
         }
 

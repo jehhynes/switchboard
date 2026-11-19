@@ -374,7 +374,7 @@
       </StackPanel>
       <Border Name="StatusToast" DockPanel.Dock="Bottom" Classes="toast" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Name="StatusLine" Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" Classes="warning" />
+          <TextBlock Name="StatusLine" Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" Classes="warning" Tapped="OnStatusTapped" />
           <Button Name="DismissStatusButton" Grid.Column="1" Classes="dismiss" VerticalAlignment="Top" Click="OnDismissStatusClicked"
                   ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
             <TextBlock Classes="icon" Text="&#xEA76;" />

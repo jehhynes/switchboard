@@ -3,9 +3,8 @@ import type { HubRecord } from '@switchboard/core';
 import { executableDirOnPath } from '@switchboard/core';
 import type { DockRow, Snapshot } from '@switchboard/hub';
 import { dockView, postToHub, windowsDir, writeWorkspaceFile } from '@switchboard/hub';
-import { openUrlOf, rowFor, targetForUrl } from './search.js';
+import { openUrlOf } from './search.js';
 import { reuseFilter } from './tabs.js';
-import type { RowTarget } from './search.js';
 import type { HubState } from './state.js';
 
 const ACTION_TIMEOUT_MS = 10_000;
@@ -309,11 +308,18 @@ export async function claimOpen(record: HubRecord, run: (command: WindowCommand)
 }
 
 /** `claimOpen`, which also says whether the hub answered the claim. */
+/** The key the hub gave this window in its stream's hello, which a claim names so the hub lets this window alone read what it claimed. */
+let windowKey: string | null = null;
+
+export function setWindowKey(key: string | null): void {
+  windowKey = key;
+}
+
 async function claim(record: HubRecord, run: (command: WindowCommand) => Promise<unknown>, workspace: string | null = workspaceFile()): Promise<{ answered: boolean; sessionId: string | null }> {
   // A window with no folder claims only the dock's commands for any window.
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   // Only the focused window takes the dock's commands for any window, so a window reconnecting in the background does not (PRD R71).
-  const reply = await postToHub(record, '/claim', { folder, workspace, focused: vscode.window.state.focused }, ACTION_TIMEOUT_MS);
+  const reply = await postToHub(record, '/claim', { folder, workspace, focused: vscode.window.state.focused, ...(windowKey === null ? {} : { window: windowKey }) }, ACTION_TIMEOUT_MS);
   const body = reply?.body as { sessionId?: unknown; provider?: unknown; commands?: unknown } | null | undefined;
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : null;
   const commands = Array.isArray(body?.commands) ? (body.commands as WindowCommand[]) : [];
@@ -349,6 +355,8 @@ export interface OpenContext {
   run: (command: WindowCommand) => Promise<unknown>;
   /** How long Open in Claude or Codex waits for the session to stop. */
   waitMs?: number;
+  /** The hub the window is connected to now, read after a wait. */
+  current?: () => HubRecord | null;
 }
 
 /**
@@ -370,7 +378,7 @@ function rowOf(snapshot: Snapshot, key: string, home: string): DockRow | null {
  * stop first, then the session left for the item window, which VS Code brings to the front or opens. VS Code may bring its own window forward,
  * because it holds the foreground, where Windows would refuse the dock (mechanics M26). A row with no item window opens its ticket.
  */
-export async function openRow(context: OpenContext, key: string): Promise<OpenResult> {
+export async function openRow(context: OpenContext, key: string, given?: DockRow): Promise<OpenResult> {
   // As in the dock, a click on another row replaces the one under way, and a second click on the same row is ignored.
   if (running?.key === key) {
     return 'ignored';
@@ -381,7 +389,7 @@ export async function openRow(context: OpenContext, key: string): Promise<OpenRe
   running = mine;
 
   try {
-    return await click(context, key, () => running !== mine);
+    return await click(context, key, () => running !== mine, given);
   } finally {
     if (running === mine) {
       running = null;
@@ -409,9 +417,9 @@ async function stop(context: OpenContext, workItemId: number, sessionId: string)
 }
 
 /** The click itself; `replaced` says when a later click took over, so this one makes no further request or switch. */
-async function click(context: OpenContext, key: string, replaced: () => boolean): Promise<OpenResult> {
+async function click(context: OpenContext, key: string, replaced: () => boolean, given?: DockRow): Promise<OpenResult> {
   const snapshot = context.state.current();
-  const row = snapshot === null ? null : rowOf(snapshot, key, context.home);
+  const row = given ?? (snapshot === null ? null : rowOf(snapshot, key, context.home));
 
   if (row === null) {
     return 'nothing';
@@ -508,22 +516,16 @@ async function click(context: OpenContext, key: string, replaced: () => boolean)
   return 'window';
 }
 
-/** Runs the click of the row that shows a work item, or its ticket's row when it is snoozed (PRD R49, R65). */
-export async function openTarget(context: OpenContext, target: RowTarget): Promise<OpenResult> {
-  const snapshot = context.state.current();
-  const key = snapshot === null ? null : rowFor(snapshot, target);
-
-  return key === null ? 'nothing' : openRow(context, key);
-}
-
-/** How long a URI that arrives before the hub's first state, such as one that started VS Code, waits for it. */
-const URI_STATE_WAIT_MS = 15_000;
-
 /**
  * Open in Switchboard (PRD R69): `vscode://switchboard.switchboard/open?url=<ticket url>` runs the click of the row of the work item or pool ticket
- * with that URL, or a link to it. Resolves to the row's key, or null.
+ * with that URL, or a link to it. This window sees only its own work item, so it asks the hub for that one row, then runs its click itself,
+ * because the dock today only calls SetForegroundWindow on an open item window, which Windows refuses a process without the latest input
+ * (mechanics M26). A question's stop waits for a snapshot this window cannot see, so that row's click runs in the dock. Resolves to the row's key, or null.
  */
-export async function openUri(context: OpenContext, uri: vscode.Uri, waitMs = URI_STATE_WAIT_MS): Promise<string | null> {
+/** How long a URI that arrives before the window's first state waits for it. */
+const URI_STATE_WAIT_MS = 15_000;
+
+export async function openUri(context: OpenContext, uri: vscode.Uri): Promise<string | null> {
   const url = openUrlOf(uri.path, uri.query);
 
   if (url === null) {
@@ -531,21 +533,35 @@ export async function openUri(context: OpenContext, uri: vscode.Uri, waitMs = UR
     return null;
   }
 
-  const snapshot = await context.state.first(waitMs);
+  // A URI can arrive before the window connects, such as one that started VS Code: it waits for the hub's first state, then asks the hub it has.
+  await context.state.first(URI_STATE_WAIT_MS);
 
-  if (snapshot === null) {
-    void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
-    return null;
-  }
+  const record = context.current?.() ?? context.record;
+  const found = record === null ? null : await postToHub(record, '/open-url', { url }, ACTION_TIMEOUT_MS);
 
-  const target = targetForUrl(snapshot, url);
-  const key = target === null ? null : rowFor(snapshot, target);
-
-  if (key === null) {
+  if (found?.status === 404) {
     void vscode.window.showInformationMessage(`Switchboard has no work item for ${url}`);
     return null;
   }
 
-  void openRow(context, key);
-  return key;
+  const row = found?.status === 200 ? (found.body as { row?: DockRow }).row : undefined;
+
+  if (row === undefined) {
+    void vscode.window.showErrorMessage(`Switchboard: ${found?.error ?? 'the hub did not answer.'}`);
+    return null;
+  }
+
+  if (row.open?.type === 'question') {
+    const sent = await postToHub(record!, '/dock/click', { rowKey: row.key }, ACTION_TIMEOUT_MS);
+
+    if (sent?.status !== 202) {
+      void vscode.window.showErrorMessage(`Switchboard: ${sent?.error ?? 'the hub did not answer.'}`);
+    }
+
+    return row.key;
+  }
+
+  // The click runs against the hub the row came from, which may have replaced the one the context named.
+  void openRow({ ...context, record }, row.key, row);
+  return row.key;
 }

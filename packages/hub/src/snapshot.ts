@@ -103,6 +103,8 @@ export interface Snapshot {
   repoKeys?: RepoKeys;
   /** The terminal holder's sessions joined with the store, orphans first (PRD R94); absent when it holds none. */
   held?: HeldSession[];
+  /** In a window's scoped snapshot only: how many work items need the operator, without naming them (architecture.md § Window scope). */
+  needsCount?: number;
 }
 
 

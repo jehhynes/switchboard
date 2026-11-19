@@ -553,6 +553,63 @@ describe('createHubApp', () => {
     expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } });
   });
 
+  it('leaves a History command a claim with no window key cannot take queued as it was, so the dock can withdraw it, it expires on time and it goes to its own window (PRD R71)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+
+    let now = Date.UTC(2026, 9, 3, 12);
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, now: () => now } });
+    closers.push(() => app.close());
+
+    const leave = async (workspace: string | null) => {
+      const reply = await app.post['/window']!({ workspace, command: { type: 'history', ticketId: 1, key: '#7' } });
+
+      expect(reply).toMatchObject({ status: 200 });
+      return (reply.body as { id: number }).id;
+    };
+    const elsewhere = join(temp.home, 'elsewhere.code-workspace');
+    const other = join(temp.home, 'other.code-workspace');
+
+    // The dock withdraws the command by the ID it was given after a claim with no key passed it over.
+    const id = await leave(null);
+
+    expect(await app.post['/claim']!({ folder: '', focused: true, window: 'stale' })).toMatchObject({ body: { commands: [] } });
+    expect(await app.post['/window/withdraw']!({ id })).toEqual({ status: 200, body: { withdrawn: true } });
+    expect(await app.post['/claim']!({ folder: '', focused: true, window: app.windowOpened!(null) })).toMatchObject({ body: { commands: [] } });
+
+    // The command expires two minutes after the dock left it, not after the claim that passed it over.
+    await leave(null);
+    now += 2 * 60_000 - 1;
+    expect(await app.post['/claim']!({ folder: '', focused: true, window: 'stale' })).toMatchObject({ body: { commands: [] } });
+    now += 2;
+    expect(await app.post['/claim']!({ folder: '', focused: true, window: app.windowOpened!(null) })).toMatchObject({ body: { commands: [] } });
+
+    // A command left for any focused window still goes to one after an item window with no key passed it over.
+    await leave(null);
+    expect(await app.post['/claim']!({ folder: '', workspace: elsewhere, focused: true })).toMatchObject({ body: { commands: [] } });
+    expect(await app.post['/claim']!({ folder: '', workspace: other, focused: true, window: app.windowOpened!(other) })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }] } });
+
+    // A command left for one item window does not go to another after a claim with no key passed it over.
+    await leave(elsewhere);
+    expect(await app.post['/claim']!({ folder: '', workspace: elsewhere, focused: true })).toMatchObject({ body: { commands: [] } });
+    expect(await app.post['/claim']!({ folder: '', workspace: other, focused: true, window: app.windowOpened!(other) })).toMatchObject({ body: { commands: [] } });
+    expect(await app.post['/claim']!({ folder: '', workspace: elsewhere, focused: true, window: app.windowOpened!(elsewhere) })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }] } });
+  });
+
+  it("answers the row of an Open in Switchboard URL, which the window that got it cannot see, and refuses a URL no row has (PRD R69)", async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: '7', ref: '#7', repo: '', sourceId: null, title: 'Seven', url: 'https://github.com/o/r/issues/7', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+
+    store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'blocked', createdAt: 1 } as never);
+    store.close();
+
+    const app = await start();
+
+    expect(await app.post['/open-url']!({ url: 'https://github.com/O/r/issues/7/' })).toMatchObject({ status: 200, body: { row: { key: 'item:1', title: 'Seven' } } });
+    expect(await app.post['/open-url']!({ url: 'https://github.com/o/r/issues/8' })).toEqual({ status: 404, body: { error: 'Switchboard has no work item for https://github.com/o/r/issues/8' } });
+    expect(await app.post['/open-url']!({ url: '' })).toEqual({ status: 400, body: { error: 'Expected {url}.' } });
+  });
+
   it('shows the dock only while a dock stream is connected, and tells it when the config files change', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();

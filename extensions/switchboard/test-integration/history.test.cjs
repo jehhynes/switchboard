@@ -16,7 +16,16 @@ describe('a row\'s History', () => {
   let warned = [];
   const original = vscode.window.showWarningMessage;
 
-  const history = (ticketId) => extension.run({ type: 'history', ticketId, key: 'gh 77' });
+  /** Leaves the History command with the hub, as the dock does, and claims it, which lets this window read that ticket's History (architecture.md § Window scope). */
+  const grant = async (ticketId) => {
+    await post('/window', { workspace: null, command: { type: 'history', ticketId, key: 'gh 77' } });
+    await extension.claim(extension.hub(), () => Promise.resolve());
+  };
+  const history = async (ticketId) => {
+    await grant(ticketId);
+
+    return extension.run({ type: 'history', ticketId, key: 'gh 77' });
+  };
   const tabs = () => extension.historyTabs().filter((tab) => tab.ticketId === TICKET);
   const editorTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => tab.label === 'gh 77 History');
 
@@ -152,9 +161,11 @@ describe('a row\'s History', () => {
       });
 
     await until(refused, 'the hub kept listening after its shutdown');
-    await history(TICKET);
+    await extension.run({ type: 'history', ticketId: TICKET, key: 'gh 77' });
     await until(() => tabs()[0]?.error?.startsWith('Switchboard: '), `the tab did not report the missing hub: ${JSON.stringify(tabs())}`);
     await until(() => extension.hub() !== null && extension.hub().pid !== before.pid, 'the window did not reconnect to a new hub', 60_000);
+    // The new hub gave the window a new key, which the dock's command lets read the ticket.
+    await history(TICKET);
     await until(() => tabs()[0]?.shown === revision() && tabs()[0].error === null, `the tab was not read again: ${JSON.stringify(tabs())}`);
   });
 
@@ -162,6 +173,7 @@ describe('a row\'s History', () => {
     this.timeout(30_000);
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await until(() => extension.historyTabs().length === 0, 'a tab stayed open');
+    await grant(TICKET);
 
     await extension.restoreHistory({ ticketId: TICKET, key: 'gh 77', ui: { hidden: ['you'], query: '', sections: {}, runs: [] } });
     await until(() => tabs()[0]?.shown === revision(), `the restored page never showed the history: ${JSON.stringify(tabs())}`);

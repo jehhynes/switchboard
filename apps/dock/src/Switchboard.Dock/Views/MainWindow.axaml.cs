@@ -234,8 +234,10 @@ public sealed partial class MainWindow : Window
                 Activate();
                 TakeFocus();
             });
-            // A notification's Open or Open in Switchboard on a row that opens a terminal (PRD R65, R69, R71).
+            // Open in Switchboard, or a VS Code click on a row that opens a terminal (PRD R65, R69, R71).
             stream.ClickRequested += (key) => Dispatcher.UIThread.Post(() => ClickForwarded(key));
+            // A work item that starts needing the operator, which the VS Code windows no longer toast (PRD R65).
+            stream.NeedsYou += (key, message) => Dispatcher.UIThread.Post(() => ShowNeedsYou(key, message));
         }
 
         // Hidden until it is in its strip, so it does not show at Avalonia's first size and position and then jump (the window exists before it is shown).
@@ -243,6 +245,26 @@ public sealed partial class MainWindow : Window
         {
             Native.NoTransitions(handle.Handle);
             Native.Cloak(handle.Handle, true);
+        }
+    }
+
+    // The row whose needs-you message the status toast shows, which a click on the message opens.
+    (string Key, string Message)? needsRow;
+
+    /// <summary>Shows that a work item started needing the operator in the status toast; a click on the message runs its row's click.</summary>
+    internal void ShowNeedsYou(string key, string message)
+    {
+        model.Status = message;
+        needsRow = (key, message);
+    }
+
+    void OnStatusTapped(object? sender, TappedEventArgs e)
+    {
+        if (needsRow is { } needs && model.Status == needs.Message)
+        {
+            needsRow = null;
+            model.Status = null;
+            ClickForwarded(needs.Key);
         }
     }
 

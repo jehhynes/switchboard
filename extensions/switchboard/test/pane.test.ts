@@ -142,8 +142,9 @@ describe('paneModel (PRD R92)', () => {
     expect(paneModel(snapshot([item()]), FILE.replaceAll('\\', '/').toUpperCase(), WINDOWS, NOW).items).toHaveLength(1);
   });
 
-  it('counts what needs the operator in a window that is not an item window', () => {
-    expect(paneModel(snapshot([item({ ...approval })]), null, WINDOWS, NOW)).toEqual({ items: [], needs: 1 });
+  it("shows the hub's count of what needs the operator in a window that is not an item window, which names no work item", () => {
+    expect(paneModel({ ...snapshot([]), needsCount: 3 }, null, WINDOWS, NOW)).toEqual({ items: [], needs: 3 });
+    expect(paneModel(snapshot([item({ ...approval })]), null, WINDOWS, NOW)).toEqual({ items: [], needs: 0 });
   });
 
   it('shows nothing before the first snapshot', () => {

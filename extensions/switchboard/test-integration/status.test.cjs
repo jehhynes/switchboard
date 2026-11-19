@@ -51,20 +51,13 @@ function item(id, status, snoozed = false) {
 }
 
 describe('the status bar item (PRD R64, R71)', () => {
-  it("counts the work items on the operator's turn, leaving out snoozed ones, and shows no count at 0", async () => {
+  it("shows the logo with no count, which the dock shows, whatever needs the operator", async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const hubState = await until(() => extension.state(), 'the window never received the hub state');
-    const show = (workItems) => extension.show(JSON.stringify({ ...hubState, workItems }));
 
     try {
-      show([item(1, 'failed'), item(2, 'blocked', true), item(3, 'unstarted')]);
-      assert.deepStrictEqual(extension.status(), { text: '$(switchboard-logo) 1', tooltip: 'Switchboard: 1 needs you. Click to show the dock.' });
-
-      show([item(1, 'failed'), item(4, 'awaiting-approval')]);
-      assert.strictEqual(extension.status().text, '$(switchboard-logo) 2');
-
-      show([item(3, 'unstarted')]);
-      assert.strictEqual(extension.status().text, '$(switchboard-logo)');
+      extension.show(JSON.stringify({ ...hubState, workItems: [item(1, 'failed'), item(4, 'awaiting-approval')], needsCount: 2 }));
+      assert.deepStrictEqual(extension.status(), { text: '$(switchboard-logo)', tooltip: 'Switchboard: click to show the dock.' });
     } finally {
       // The hub sends state only on a change, so later tests see its state again only through this.
       extension.show(JSON.stringify(hubState));

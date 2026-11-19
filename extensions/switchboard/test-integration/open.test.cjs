@@ -1,4 +1,5 @@
 const assert = require('node:assert');
+const { join } = require('node:path');
 const vscode = require('vscode');
 
 async function until(what, why, within = 30_000) {
@@ -68,6 +69,7 @@ describe('Open in Switchboard (PRD R69)', () => {
   const realExecute = vscode.commands.executeCommand;
   const realInformation = vscode.window.showInformationMessage;
   const realWarning = vscode.window.showWarningMessage;
+  const realError = vscode.window.showErrorMessage;
   let extension;
   let hubState;
   let opened;
@@ -80,12 +82,14 @@ describe('Open in Switchboard (PRD R69)', () => {
     vscode.commands.executeCommand = (command, ...args) => (command === 'vscode.openFolder' ? (opened.push(args[0].fsPath), Promise.resolve()) : realExecute.call(vscode.commands, command, ...args));
     vscode.window.showInformationMessage = (...args) => (messages.push(args[0]), Promise.resolve(undefined));
     vscode.window.showWarningMessage = (...args) => (messages.push(args[0]), Promise.resolve(undefined));
+    vscode.window.showErrorMessage = (...args) => (messages.push(args[0]), Promise.resolve(undefined));
   });
 
   after(() => {
     vscode.commands.executeCommand = realExecute;
     vscode.window.showInformationMessage = realInformation;
     vscode.window.showWarningMessage = realWarning;
+    vscode.window.showErrorMessage = realError;
     // The hub sends state only on a change, so later tests see its state again only through this.
     extension.show(JSON.stringify(hubState));
   });
@@ -101,26 +105,28 @@ describe('Open in Switchboard (PRD R69)', () => {
     assert.ok(events.includes('onUri'), `activationEvents ${JSON.stringify(events)} lack onUri`);
   });
 
-  it("runs the click of the work item with the URI's ticket URL, bringing its item window forward", async () => {
+  it("asks the hub for the URI's row, which this window cannot see, and runs its click, bringing its item window forward", async () => {
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const db = new DatabaseSync(join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'switchboard.db'));
     const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    const desk = 'https://desk.example.test/t?id=5&x=1';
 
-    extension.show(JSON.stringify({ ...hubState, workItems: [item(7, 'https://github.com/o/r/issues/7', folder), item(8, desk, folder)] }));
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec("INSERT INTO tickets (id, source, sourceKey, ref, title, url, assigned, repoRoot) VALUES (9101, 'github', '7', '#7', 'Seven', 'https://github.com/o/r/issues/7', 1, '')");
+    db.exec("INSERT INTO workItems (id, ticketId, playbook, status, createdAt, statusAt, error) VALUES (9101, 9101, 'dev:develop', 'blocked', 1000, 2000, 'The session finished its turn.')");
+    db.prepare("INSERT INTO sessions (id, workItemId, kind, provider, nativeSessionId, cwd, state, stateAt, startedAt, endedAt, released) VALUES ('open-1', 9101, 'task', 'claude', 'open-native', ?, 'ended', 1500, 1100, 1500, 1)").run(folder);
 
-    assert.strictEqual(await extension.openUri(uri('https://github.com/O/R/issues/7/files')), 'item:7');
-    await until(() => opened.length === 1, 'the click never ran');
-    assert.match(opened[0], /gh-7-workspace-[0-9a-f]{6}\.code-workspace$/);
-
-    // A ticket URL with its own query survives VS Code's decoding of the URI.
-    assert.strictEqual(await extension.openUri(uri(desk)), 'item:8');
-    await until(() => opened.length === 2, 'the second click never ran');
-    assert.match(opened[1], /gh-8-workspace-[0-9a-f]{6}\.code-workspace$/);
-    assert.deepStrictEqual(messages, []);
+    try {
+      // The hub reads the row from a view it builds after the change, so the first answers may still come from the earlier view.
+      await until(async () => (await extension.openUri(uri('https://github.com/O/R/issues/7/files'))) === 'item:9101', 'the hub never found the row');
+      await until(() => opened.length === 1, 'the click never ran');
+      assert.match(opened[0], /gh-7-workspace-[0-9a-f]{6}\.code-workspace$/);
+    } finally {
+      db.exec("DELETE FROM sessions WHERE id = 'open-1'; DELETE FROM workItems WHERE id = 9101; DELETE FROM tickets WHERE id = 9101");
+      db.close();
+    }
   });
 
   it('says when no row has the URL, and refuses another URI', async () => {
-    extension.show(JSON.stringify({ ...hubState, workItems: [] }));
-
     assert.strictEqual(await extension.openUri(uri('https://github.com/o/r/issues/999')), null);
     assert.strictEqual(await extension.openUri(vscode.Uri.parse('vscode://switchboard.switchboard/close?url=x')), null);
     assert.deepStrictEqual(messages, ['Switchboard has no work item for https://github.com/o/r/issues/999', 'Switchboard cannot open vscode://switchboard.switchboard/close?url=x.']);

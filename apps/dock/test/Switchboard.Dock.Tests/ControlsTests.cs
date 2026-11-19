@@ -722,6 +722,28 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public async Task ShowNeedsYou_MessageClicked_RunsTheRowsClickOnce()
+    {
+        var (window, model) = Open();
+
+        window.ShowNeedsYou("item:8", "Switchboard: Fix it — Answer a question");
+        Assert.Equal("Switchboard: Fix it — Answer a question", model.Status);
+
+        var line = Named<TextBlock>(window, "StatusLine");
+
+        line.RaiseEvent(new TappedEventArgs(InputElement.TappedEvent, null!));
+        await Task.Yield();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["item:8"], actions.Clicked.Select((clicked) => clicked.Key));
+
+        // Another message in the toast opens nothing.
+        model.Status = "The click failed.";
+        line.RaiseEvent(new TappedEventArgs(InputElement.TappedEvent, null!));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Single(actions.Clicked);
+    }
+
+    [AvaloniaFact]
     public async Task ClickForwarded_UnknownRow_ReplacesTheClickStillRunning()
     {
         var (window, model) = Open();

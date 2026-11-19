@@ -44,6 +44,8 @@ export class HistoryPanels implements vscode.WebviewPanelSerializer {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly hub: () => HubRecord | null,
+    /** The window key the hub gave this window, which a History read names, since a window reads only its own tickets' History. */
+    private readonly windowKey: () => string | null,
     /** Opens what an entry links: a session, a worktree, a URL or a file. */
     private readonly openLink: (action: { type: string; [key: string]: unknown }) => Promise<unknown>,
   ) {}
@@ -171,7 +173,8 @@ export class HistoryPanels implements vscode.WebviewPanelSerializer {
     tab.stale = false;
 
     const record = this.hub() ?? this.greeted;
-    const reply = record === null ? null : await postToHub(record, '/history', { ticketId: tab.ticketId, ...(tab.revision === null ? {} : { revision: tab.revision }) }, TIMEOUT_MS);
+    const window = this.windowKey();
+    const reply = record === null || window === null ? null : await postToHub(record, '/history', { window, ticketId: tab.ticketId, ...(tab.revision === null ? {} : { revision: tab.revision }) }, TIMEOUT_MS);
 
     if (!this.tabs.has(tab.ticketId)) {
       return;

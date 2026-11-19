@@ -26,3 +26,4 @@ export * from './conversation.js';
 export * from './snapshotBuilder.js';
 export * from './snapshotWorker.js';
 export * from './windows.js';
+export * from './needs.js';

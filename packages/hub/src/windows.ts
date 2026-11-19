@@ -147,7 +147,7 @@ export class WindowScopes {
    * What the window's `/events` stream gets in place of the whole snapshot: its work item alone, the controls its pane needs, and how many work
    * items need the operator, without naming them. A window that is not an item window gets no work item.
    */
-  scoped(key: string, snapshot: Snapshot): Snapshot & { needsCount: number } {
+  scoped(key: string, snapshot: Snapshot): Snapshot {
     const window = this.#windows.get(key);
     const item = window?.workItemId == null ? undefined : snapshot.workItems.find((one) => one.id === window.workItemId);
     const { held: _held, notes: _notes, ...rest } = snapshot;

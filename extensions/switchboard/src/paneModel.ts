@@ -1,6 +1,5 @@
 import type { DockRow, Snapshot } from '@switchboard/hub';
 import { dockView } from '@switchboard/hub';
-import { needsCount } from './needs.js';
 
 /** A link pill: the ticket's key or one of its links (PRD R52), opened in VS Code. */
 export interface PaneLink {
@@ -37,7 +36,8 @@ export function paneModel(snapshot: Snapshot | null, file: string | null, window
     return { items: [], needs: 0 };
   }
 
-  return { items: file === null ? [] : windowRows(snapshot, file, windows, now).map(paneItem), needs: needsCount(snapshot) };
+  // The hub counts the work items that need the operator without naming them, since the window's snapshot holds its own work item only.
+  return { items: file === null ? [] : windowRows(snapshot, file, windows, now).map(paneItem), needs: snapshot.needsCount ?? 0 };
 }
 
 /**

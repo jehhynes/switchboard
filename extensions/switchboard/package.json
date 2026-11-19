@@ -37,11 +37,6 @@
           "scope": "machine",
           "markdownDescription": "Folder holding `settings.json`, with the settings and playbooks, such as a folder in a git repository. An absolute path or one starting with `~`. Empty uses `~/.switchboard`. A change restarts the hub on the new folder."
         },
-        "switchboard.notifyNeedsYou": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Show a notification in the focused window when a work item starts needing you, such as an approval or a question."
-        },
         "switchboard.closeDoneWindows": {
           "type": "boolean",
           "default": true,

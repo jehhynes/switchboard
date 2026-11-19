@@ -363,6 +363,27 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task Start_HubSendsNeeds_RaisesEachItemWithItsRowKeyAndMessage()
+    {
+        using var server = new LoopbackHub(async (_, _, stream) =>
+        {
+            var json = Fixtures.DockJson.ReplaceLineEndings(" ");
+
+            await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"));
+            await stream.WriteAsync(Encoding.UTF8.GetBytes($"event: needs\ndata: {{\"items\":[{{\"rowKey\":\"item:8\",\"message\":\"Switchboard: Fix it — Answer a question\"}},{{\"rowKey\":\"item:9\"}}]}}\n\nevent: dock\ndata: {json}\n\n"));
+            await Task.Delay(5000);
+        });
+        using var client = new HubClient(HomeFor(server));
+        var needs = new System.Collections.Concurrent.ConcurrentQueue<(string, string)>();
+
+        client.NeedsYou += (key, message) => needs.Enqueue((key, message));
+        client.Start();
+
+        await Until(() => client.View);
+        Assert.Equal([("item:8", "Switchboard: Fix it — Answer a question")], needs);
+    }
+
+    [Fact]
     public async Task Start_HubSendsShowConfigAndUnknownEvents_RaisesEachAndKeepsReading()
     {
         using var server = new LoopbackHub(async (_, _, stream) =>

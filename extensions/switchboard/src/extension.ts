@@ -14,10 +14,8 @@ import { HistoryPanels } from './historyPanel.js';
 import type { HistoryMessage } from './historyPanel.js';
 import { LogTail } from './hubLog.js';
 import { startHub } from './hubProcess.js';
-import { needsStatus } from './needs.js';
-import { NeedsYouToasts } from './notify.js';
 import { claimIsFor } from './claims.js';
-import { act, claimOpen, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTarget, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
+import { act, claimOpen, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
 import { mainTerminal, paneModel, windowRows } from './paneModel.js';
@@ -42,7 +40,7 @@ export interface SwitchboardApi {
   /** Restores a History tab from a page's saved state, as VS Code does after a reload. */
   restoreHistory(state: unknown): Promise<void>;
   /** Runs the URI handler, which the integration suite cannot reach through the OS (PRD R69); resolves to the row's key. */
-  openUri(uri: vscode.Uri, waitMs?: number): Promise<string | null>;
+  openUri(uri: vscode.Uri): Promise<string | null>;
   /** Runs a row's click against `hub`, by default the connected one, as a notification's Open does (PRD R65, R71). */
   openRow(key: string, options?: { hub?: HubRecord; waitMs?: number }): Promise<OpenResult>;
   /** Claims what the dock left for this window from a hub, as focus or a connection does, and runs it, by default with `run` (PRD R71). */
@@ -165,7 +163,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
     return closed;
   };
-  const history = new HistoryPanels(context.extensionUri, () => keeper.current(), (link) => openHistoryLink(link));
+  // The key the hub gave this window in its stream's hello, which every read of the window's own data names (architecture.md § Window scope).
+  let windowKey: string | null = null;
+  const history = new HistoryPanels(context.extensionUri, () => keeper.current(), () => windowKey, (link) => openHistoryLink(link));
   /** Runs a command the dock left for this window (PRD R71). */
   const runCommand = async (command: WindowCommand): Promise<unknown> => {
     switch (command.type) {
@@ -351,12 +351,11 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   };
   const expandTimer = setTimeout(() => void expandPaneOnce(), EXPAND_MS);
 
+  // How many work items need the operator is the dock's to show, since a window sees only its own work item (architecture.md § Window scope).
   const status = vscode.window.createStatusBarItem('switchboard.needs', vscode.StatusBarAlignment.Left, 100);
   const showStatus = (): void => {
-    const shown = needsStatus(state.current());
-
-    status.text = shown.text;
-    status.tooltip = shown.tooltip;
+    status.text = '$(switchboard-logo)';
+    status.tooltip = 'Switchboard: click to show the dock.';
   };
 
   const windowStateChanged = (focused: boolean): Promise<unknown> => {
@@ -444,7 +443,6 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     }),
   );
 
-  const toasts = new NeedsYouToasts((workItemId) => openTarget(opening(), { workItemId }));
   const stateReceived = (data: string): Promise<boolean> => {
     const snapshot = JSON.parse(data);
 
@@ -452,7 +450,6 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     showStatus();
     pane.changed();
     history.changed();
-    toasts.update(snapshot);
     void tabs.update(snapshot).catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${String(error)}`));
     done.update(snapshot, Date.now());
 
@@ -470,10 +467,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
             void claimOpen(record, runCommand).catch(() => {});
           }
         } else if (event === 'hello') {
+          const window = (JSON.parse(data) as { window?: unknown }).window;
+
+          windowKey = typeof window === 'string' ? window : null;
+
           if (vscode.window.state.focused) {
             reportTheme(record);
           }
-          toasts.connected();
           void claimOpen(record, runCommand).catch(() => {});
           history.connected(record);
         }
@@ -496,7 +496,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     status: () => ({ text: status.text, tooltip: typeof status.tooltip === 'string' ? status.tooltip : undefined }),
     historyTabs: () => history.shown(),
     restoreHistory: (saved) => history.restore(saved),
-    openUri: (uri, waitMs) => openUri(opening(), uri, waitMs),
+    openUri: (uri) => openUri(opening(), uri),
     openRow: (key, options = {}) => openRow(opening(options.hub ?? keeper.current(), options.waitMs), key),
     claim: (hub, run = runCommand) => claimOpen(hub, run),
     historyLink: (link, hub) => openHistoryLink(link, hub === undefined ? keeper.current() : hub),

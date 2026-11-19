@@ -28,6 +28,7 @@ import type { Snapshot } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
+import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
@@ -313,9 +314,23 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     log: deps.log,
   });
   /** A finished build: windows bound to a new work item start from empty, and every stream gets the new views. */
+  let announced: Snapshot | null = null;
   const published = (built: Built): void => {
     conversation.scopesChanged(scopes.update(built.snapshot));
     conversation.sessionsChanged();
+
+    // The dock says when a work item starts needing the operator, which the windows no longer see (PRD R65).
+    const needing = newlyNeeding(announced, built.snapshot).flatMap((item) => {
+      const rowKey = rowFor(built.snapshot, { workItemId: item.id });
+
+      return rowKey === null ? [] : [{ rowKey, message: needsMessage(item) }];
+    });
+
+    announced = built.snapshot;
+
+    if (needing.length > 0) {
+      sendDock('needs', { items: needing });
+    }
 
     for (const listener of builtListeners) {
       listener();
@@ -323,6 +338,32 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   };
   /** The latest views; on the main thread, built again when a change came since, so a reader sees it at once. */
   const views = (): Built => (builder.inThread && builder.dirty ? builder.buildNow() : (builder.latest() ?? builder.buildNow()));
+
+  /** The dock view with each terminal's command, from the settings as they are now; each row's workspace file is written first. */
+const dockWithRuns = () => {
+    const view = views().dock;
+
+    // The dock opens a row's item window from its file, so the file is there before the view is.
+    for (const window of view.groups.flatMap((group) => group.rows.flatMap((row) => (row.window === null ? [] : [row.window])))) {
+      try {
+        writeWorkspaceFile(window, written);
+      } catch (error) {
+        deps.log(`workspace file ${window.file} not written: ${String(error)}`);
+      }
+    }
+
+    const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, ...terminalRun(terminal) });
+
+    return {
+      ...view,
+      ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
+      groups: view.groups.map((group) => ({
+        ...group,
+        rows: group.rows.map((row) => ({ ...row, open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open, terminal: row.terminal === null ? null : executable(row.terminal) })),
+      })),
+    };
+  };
+  const dockRows = () => dockWithRuns().groups.flatMap((group) => group.rows);
 
   runtime.onChange(() => builder.schedule());
 
@@ -563,6 +604,23 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },
+      /**
+       * Open in Switchboard (PRD R69): the row of a ticket URL, for the window VS Code gave the link, which runs its click itself because the dock
+       * today only calls SetForegroundWindow on an open item window, which Windows refuses a process without the latest input (mechanics M26). The
+       * one exception to the window scope rule: the operator asked for that row.
+       */
+      '/open-url': async (body) => {
+        if (!isRecord(body) || typeof body['url'] !== 'string' || body['url'] === '') {
+          return { status: 400, body: { error: 'Expected {url}.' } };
+        }
+
+        const snapshot = views().snapshot;
+        const target = targetForUrl(snapshot, body['url']);
+        const rowKey = target === null ? null : rowFor(snapshot, target);
+        const row = rowKey === null ? undefined : dockRows().find((one) => one.key === rowKey);
+
+        return row === undefined ? { status: 404, body: { error: `Switchboard has no work item for ${body['url']}` } } : { status: 200, body: { row } };
+      },
       // VS Code forwards the click of a row that opens a terminal or nothing, which only the dock runs (PRD R65, R69, R71).
       '/dock/click': async (body) => {
         if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
@@ -624,29 +682,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     windowClosed: (key) => scopes.close(key),
     windowState: (key) => scopes.scoped(key, views().snapshot),
     conversation: (key, write) => conversation.open(key, write),
-    dock: () => {
-      const view = views().dock;
-
-      // The dock opens a row's item window from its file, so the file is there before the view is.
-      for (const window of view.groups.flatMap((group) => group.rows.flatMap((row) => (row.window === null ? [] : [row.window])))) {
-        try {
-          writeWorkspaceFile(window, written);
-        } catch (error) {
-          deps.log(`workspace file ${window.file} not written: ${String(error)}`);
-        }
-      }
-
-      const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, ...terminalRun(terminal) });
-
-      return {
-        ...view,
-        ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
-        groups: view.groups.map((group) => ({
-          ...group,
-          rows: group.rows.map((row) => ({ ...row, open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open, terminal: row.terminal === null ? null : executable(row.terminal) })),
-        })),
-      };
-    },
+    dock: () => dockWithRuns(),
     attachDock: (send) => {
       sendDock = send;
     },
