@@ -41,12 +41,20 @@ function contentText(content: unknown): string | null {
   return null;
 }
 
+/**
+ * The text of a user entry without the tags Claude Code wraps a pasted block in, `<pasted_content id="…">` and its closing tag on lines of their
+ * own, as it records a paste of several lines (mechanics M86).
+ */
+export function unwrapPasted(text: string): string {
+  return text.replace(/<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<\/pasted_content id="\1">/g, '$2');
+}
+
 /** A slash command as the operator typed it, `/name args`, from the tags Claude Code records it with; the text itself otherwise. */
 function typed(text: string): string {
   const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1];
 
   if (name === undefined) {
-    return text.trim();
+    return unwrapPasted(text).trim();
   }
 
   const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? '';
@@ -112,7 +120,8 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
   if (raw['type'] === 'queue-operation') {
     const content = raw['content'];
 
-    if (raw['operation'] === 'enqueue' && typeof content === 'string' && content.trim() !== '' && !NOT_TYPED.test(content) && !NOT_SENT.test(content)) {
+    // A paste of several lines starts with its `pasted_content` tag, which is the operator's text, not Claude Code's.
+    if (raw['operation'] === 'enqueue' && typeof content === 'string' && content.trim() !== '' && !NOT_TYPED.test(unwrapPasted(content)) && !NOT_SENT.test(unwrapPasted(content))) {
       return { entry: { kind: 'sent', uuid: null, at: at ?? 0, text: typed(content) }, assistantAt: null, uuid: null, parent: null, at, received: null };
     }
 

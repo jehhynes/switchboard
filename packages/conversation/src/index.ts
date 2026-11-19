@@ -1,4 +1,5 @@
 export * from './conversation.js';
+export * from './input.js';
 export * from './screen.js';
 export * from './screenHold.js';
 export * from './screenReader.js';
