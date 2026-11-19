@@ -1,13 +1,85 @@
 import MarkdownIt from 'markdown-it';
-import type { ReplyView } from '@switchboard/hub';
+import type { MessageView, ReplyView } from '@switchboard/hub';
 import { awaitingReply, stateIcon, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 
 /** What the page posts to the extension. */
-export type ConversationMessage = { type: 'ready' } | { type: 'earlier' } | { type: 'open'; href: string } | { type: 'terminal' };
+export type ConversationMessage = { type: 'ready' } | { type: 'earlier' } | { type: 'open'; href: string } | { type: 'terminal' } | { type: 'send'; id: number; text: string; target: SendTarget } | { type: 'copy'; id: number; text: string };
+
+/** The session the page showed when Enter was pressed; the message goes there or is refused. */
+export interface SendTarget {
+  scopeGen: number;
+  sessionId: string;
+  launch: string | null;
+}
+
+/** What a typed message's line under its box says (architecture.md § Conversation view). */
+const DELIVERY = { open: 'sending', sent: 'sent', 'not-sent': 'not sent', uncertain: 'uncertain' } as const;
+
+/** A stamp's time, as Claude Code's panel shows it: "1:46 PM". */
+const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
+/** A stamp's tooltip: "2026-11-19 13:46:05 EST". */
+const STAMP_FULL = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
+const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+
+/** The small time over a message or a reply. */
+function stamp(at: number): string {
+  const parts = Object.fromEntries(STAMP_FULL.formatToParts(at).map((part) => [part.type, part.value]));
+  const full = `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}:${parts['second']} ${parts['timeZoneName']}`;
+
+  return `<div class="stamp-line"><time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(full)}">${STAMP.format(at)}</time></div>`;
+}
+
+/** The local calendar day of a time, to tell when a turn starts on another day. */
+function dayOf(at: number): string {
+  const date = new Date(at);
+
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/** The divider before a turn that starts on another day than the turn before it, with the year only when it is not this year's. */
+function dayDivider(at: number, now: number): string {
+  const label = (new Date(at).getFullYear() === new Date(now).getFullYear() ? DAY : DAY_WITH_YEAR).format(at);
+
+  return `<li class="day" role="separator">${escape(label)}</li>`;
+}
+
+/** A message that is a slash command, which shows in the editor font. */
+const COMMAND = /^\/[\w:.-]+(\s|$)/;
 
 /** Raw HTML off, so a reply's text can never inject markup; tables, code spans and fences as GitHub draws them. */
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: false });
+
+/**
+ * Which link targets render as links: a web page, a `file:` URL, and a path with no scheme (relative, rooted or a drive letter), which the extension
+ * opens; any other scheme, such as `javascript:`, `data:` or `vbscript:`, shows as text. markdown-it's own check rejects `file:`.
+ */
+export function linkAllowed(url: string): boolean {
+  const target = url.trim();
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(target)?.[1]?.toLowerCase();
+
+  return scheme === undefined || /^[a-z]$/.test(scheme) || ['http', 'https', 'file'].includes(scheme);
+}
+
+markdown.validateLink = linkAllowed;
+
+/** A copy button: in a code block's corner, or under a reply; it shows a check for a moment once the extension wrote the clipboard. */
+function copyButton(action: 'copy-code' | 'copy-reply', label: string): string {
+  return `<button class="copy" type="button" data-action="${action}" title="${label}" aria-label="${label} to clipboard"><span class="codicon codicon-copy" aria-hidden="true"></span></button>`;
+}
+
+// Each code block sits in a frame with its copy button, as in Claude Code's panel.
+for (const rule of ['fence', 'code_block'] as const) {
+  const draw = markdown.renderer.rules[rule]!;
+
+  markdown.renderer.rules[rule] = (...args) => `<div class="code-block">${copyButton('copy-code', 'Copy code')}${draw(...args)}</div>`;
+}
+
+/** What a reply's copy button copies: its Markdown as the session wrote it, without its tags. */
+export function replyText(item: ReplyView): string {
+  return item.opening;
+}
 
 export function escape(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
@@ -16,6 +88,19 @@ export function escape(text: string): string {
 /** A reply's Markdown as HTML; links keep their target in `data-href`, which the page posts, so the webview itself never navigates. */
 export function renderMarkdown(text: string): string {
   return markdown.render(text).replace(/<a href="([^"]*)"/g, (_match, href: string) => `<a href="#" data-href="${href}"`);
+}
+
+/** One of our messages: its box, and for one typed in the composer, whether it went and why not. */
+function message(item: MessageView): string {
+  const delivery =
+    item.origin !== 'typed' || item.delivery === null
+      ? ''
+      : `<div class="delivery ${item.delivery}">${DELIVERY[item.delivery]}${item.error === null || item.delivery === 'sent' ? '' : ` · ${escape(item.error)}`}</div>`;
+
+  // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it; a typed message's line says where it is.
+  const queued = item.provisional && item.origin === 'terminal';
+
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${stamp(item.at)}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${delivery}</li>`;
 }
 
 function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>): string {
@@ -28,11 +113,14 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
       ? ''
       : `<details class="fold earlier" data-fold="earlier:${escape(item.id)}"${open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;
 
-  return `<li class="reply ${item.kind}" data-id="${escape(item.id)}" tabindex="-1"><span class="dot"></span><div class="body">${renderMarkdown(item.opening)}${rewritten}</div></li>`;
+  // A reply read off the screen has no copy button until its transcript copy replaces it, as Claude Code's has none while it streams.
+  const actions = item.provisional ? '' : `<div class="actions">${copyButton('copy-reply', 'Copy response')}</div>`;
+
+  return `<li class="reply ${item.kind}" data-id="${escape(item.id)}" tabindex="-1">${stamp(item.at)}<span class="dot"></span><div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
 }
 
 /** The view's HTML: the header with the session's state, a note when the view cannot talk to the session, and the timeline. */
-export function renderConversation(state: ConversationState, open: ReadonlySet<string> = new Set()): string {
+export function renderConversation(state: ConversationState, open: ReadonlySet<string> = new Set(), now: number = Date.now()): string {
   if (state.scope === null) {
     return `<p class="empty">${state.connected ? 'This window has no Switchboard session.' : 'Connecting to Switchboard…'}</p>`;
   }
@@ -50,12 +138,20 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   // While the session waits on a question or a permission, it stands still.
   const spin = state.session?.state === 'waiting' ? '' : ' codicon-modifier-spin';
   const spinner = `<li class="working" title="Working on a reply"><span role="status">Working on a reply</span><span class="codicon codicon-loading${spin}" aria-hidden="true"></span></li>`;
-  const entries = shown.map(
-    (entry, index) =>
-      (entry.type === 'message'
-        ? `<li class="message${entry.item.provisional ? ' provisional' : ''}" data-id="${escape(entry.item.id)}" tabindex="-1"${entry.item.provisional ? ' title="Sent; Claude has not read it yet"' : ''}><div class="box">${escape(entry.item.text)}</div></li>`
-        : reply(entry.item, entry.earlier, open)) + (index === waiting ? spinner : ''),
-  );
+  // A turn starts at each message; one that starts on another day than the turn before it has a divider, as in Claude Code's panel.
+  let turnDay: string | null = null;
+  const entries = shown.map((entry, index) => {
+    let divider = '';
+
+    if (index === 0 || entry.type === 'message') {
+      const day = dayOf(entry.item.at);
+
+      divider = turnDay !== null && day !== turnDay ? dayDivider(entry.item.at, now) : '';
+      turnDay = day;
+    }
+
+    return divider + (entry.type === 'message' ? message(entry.item) : reply(entry.item, entry.earlier, open)) + (index === waiting ? spinner : '');
+  });
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
   const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}</ol>`;
 

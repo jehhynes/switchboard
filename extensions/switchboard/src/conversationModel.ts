@@ -32,6 +32,11 @@ function place(item: ItemView): [number, number] {
   return [item.provisional ? 1 : 0, item.ord];
 }
 
+/** A typed message that was not sent, which the conversation never keeps (architecture.md § Typing a message). */
+function notSent(item: ItemView): boolean {
+  return item.type === 'message' && item.delivery === 'not-sent';
+}
+
 /** Inserts or replaces an item by ID, keeping the items in their places. */
 function upsert(items: ItemView[], item: ItemView): ItemView[] {
   const rest = items.filter((other) => other.id !== item.id);
@@ -51,7 +56,7 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
     case 'hello': {
       const hello = event as Extract<ConversationEvent, { type: 'hello' }>;
 
-      return { scope: hello.scope, session: hello.sessions.find((session) => session.current) ?? null, items: hello.items, more: hello.more, connected: true };
+      return { scope: hello.scope, session: hello.sessions.find((session) => session.current) ?? null, items: hello.items.filter((item) => !notSent(item)), more: hello.more, connected: true };
     }
     case 'scope':
       return { ...state, scope: (event as Extract<ConversationEvent, { type: 'scope' }>).scope };
@@ -60,8 +65,12 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
 
       return session.id === state.scope?.sessionId ? { ...state, session } : state;
     }
-    case 'message':
-      return { ...state, items: upsert(state.items, (event as { message: ItemView }).message) };
+    case 'message': {
+      const { message } = event as { message: ItemView };
+
+      // A typed message that was not sent leaves the conversation.
+      return { ...state, items: notSent(message) ? state.items.filter((item) => item.id !== message.id) : upsert(state.items, message) };
+    }
     case 'reply':
       return { ...state, items: upsert(state.items, (event as { reply: ItemView }).reply) };
     default:
@@ -73,7 +82,7 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
 export function withEarlier(state: ConversationState, items: ItemView[], more: boolean): ConversationState {
   const known = new Set(state.items.map((item) => item.id));
 
-  return { ...state, items: [...items.filter((item) => !known.has(item.id)), ...state.items], more };
+  return { ...state, items: [...items.filter((item) => !known.has(item.id) && !notSent(item)), ...state.items], more };
 }
 
 /** One row of the timeline: a message, or a reply with the earlier reply it rewrote. */

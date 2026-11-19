@@ -6,7 +6,7 @@ import { openConversation, postToHub } from '@switchboard/hub';
 import type { EventStream, ItemView } from '@switchboard/hub';
 import { applyEvent, EMPTY_CONVERSATION, withEarlier } from './conversationModel.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
-import type { ConversationMessage } from './webview/conversationRender.js';
+import type { ConversationMessage, SendTarget } from './webview/conversationRender.js';
 import { linkTarget, supportsSecondarySidebar } from './links.js';
 
 /**
@@ -25,7 +25,11 @@ export interface ConversationViewDeps {
 /** How long a stream that ended waits before it opens again. */
 const RECONNECT_MS = 1_000;
 const HISTORY_TIMEOUT_MS = 10_000;
+/** The hub answers `send` once the message is stored, before it is typed. */
+const SEND_TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 5;
+/** How many not-sent messages of other windows, or not yet answered, the view remembers. */
+const NOT_SENT_KEPT = 20;
 
 /**
  * The Conversation view (architecture.md § Conversation view): follows this window's conversation stream, keeps its state and draws it in a
@@ -39,6 +43,14 @@ export class ConversationView implements vscode.WebviewViewProvider {
   #retry: NodeJS.Timeout | undefined;
   /** Attempts since the stream last opened; a refused key and a failed connection look alike, so a few retries cover both. */
   #attempts = 0;
+  /** Messages this window sent that the hub took, until they go or are not sent. */
+  readonly #mine = new Set<string>();
+  /** Messages the stream said were not sent before the `send` that added them was answered, with why. */
+  readonly #notSentEarly = new Map<string, string>();
+  /** Texts of messages that were not sent, kept until a loaded page took them, since a hidden view's page is not kept. */
+  #returned: Array<{ text: string; error: string }> = [];
+  #giving: Promise<void> | null = null;
+  #giveAgain = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -119,17 +131,75 @@ export class ConversationView implements vscode.WebviewViewProvider {
     this.#stream = stream;
   }
 
-  /** Applies a stream event and redraws. */
+  /**
+   * Applies a stream event and redraws. A typed message that was not sent leaves the timeline (architecture.md § Typing a message); one this window
+   * sent goes back into the composer with why.
+   */
   receive(event: ConversationEvent): void {
+    const message = event.type === 'message' ? (event as { message: ItemView }).message : null;
+
+    if (message?.type === 'message' && message.delivery === 'not-sent') {
+      const error = message.error ?? 'The message was not sent.';
+
+      if (this.#mine.delete(message.id)) {
+        this.#returned.push({ text: message.text, error });
+        void this.#giveBack();
+      } else {
+        this.#notSentEarly.set(message.id, error);
+
+        for (const id of [...this.#notSentEarly.keys()].slice(0, -NOT_SENT_KEPT)) {
+          this.#notSentEarly.delete(id);
+        }
+      }
+    } else if (message?.type === 'message' && message.delivery !== 'open') {
+      this.#mine.delete(message.id);
+    }
+
     this.#set(applyEvent(this.#state, event));
+  }
+
+  /** Hands the texts of messages that were not sent to a visible page, keeping them when none took them; a call during a hand-off tries again after it. */
+  #giveBack(): Promise<void> {
+    if (this.#giving !== null) {
+      this.#giveAgain = true;
+      return this.#giving;
+    }
+
+    this.#giving = (async () => {
+      do {
+        this.#giveAgain = false;
+
+        const views = [...this.#views.values()].filter((view) => view.visible);
+
+        if (views.length === 0 || this.#returned.length === 0) {
+          continue;
+        }
+
+        const returned = this.#returned;
+
+        this.#returned = [];
+
+        // postMessage answers false for a page that is not loaded.
+        if (!(await Promise.all(views.map((view) => view.webview.postMessage({ type: 'unsent', returned })))).some(Boolean)) {
+          this.#returned = [...returned, ...this.#returned];
+        }
+      } while (this.#giveAgain);
+    })().finally(() => {
+      this.#giving = null;
+    });
+
+    return this.#giving;
+  }
+
+  #post(message: unknown): void {
+    for (const view of this.#views.values()) {
+      void view.webview.postMessage(message);
+    }
   }
 
   #set(state: ConversationState): void {
     this.#state = state;
-
-    for (const view of this.#views.values()) {
-      void view.webview.postMessage({ type: 'state', state });
-    }
+    this.#post({ type: 'state', state });
   }
 
   /** Loads the items before the oldest the view shows. */
@@ -155,6 +225,51 @@ export class ConversationView implements vscode.WebviewViewProvider {
 
       this.#set(withEarlier(this.#state, items, more));
     }
+  }
+
+  /**
+   * Sends the composer's text to this window's current session (architecture.md § Typing a message). A command that got no answer is posted once
+   * more with the same `opId`, which the hub answers with the message it already added. Resolves the refusal, or null once the hub took it.
+   */
+  async send(text: string, shown: SendTarget): Promise<string | null> {
+    const target = this.#target;
+
+    if (target === null) {
+      return 'This window has no session to send to.';
+    }
+
+    // The session, launch and scope generation the page showed, so the hub refuses the message rather than send it elsewhere.
+    const body = { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, launch: shown.launch, text };
+    const reply = (await postToHub(target.record, '/v1/conversation/send', body, SEND_TIMEOUT_MS)) ?? (await postToHub(target.record, '/v1/conversation/send', body, SEND_TIMEOUT_MS));
+
+    if (reply === null) {
+      return 'The hub did not answer; the message may not have been sent.';
+    }
+
+    if (reply.status !== 200) {
+      return reply.error ?? `The hub refused the message (${reply.status}).`;
+    }
+
+    // The stream brings the message too; shown now, so the composer never empties before its message appears, unless the stream already brought
+    // it, maybe with a later delivery.
+    const message = (reply.body as { message: ItemView }).message;
+    const notSent = this.#notSentEarly.get(message.id);
+
+    // The stream already said it was not sent: its text comes back as for one that ends later, so a page loaded meanwhile still gets it.
+    if (notSent !== undefined) {
+      this.#notSentEarly.delete(message.id);
+      this.#returned.push({ text: message.type === 'message' ? message.text : '', error: notSent });
+      void this.#giveBack();
+      return null;
+    }
+
+    this.#mine.add(message.id);
+
+    if (this.#state.scope?.sessionId === shown.sessionId && !this.#state.items.some((item) => item.id === message.id)) {
+      this.receive({ type: 'message', message });
+    }
+
+    return null;
   }
 
   /** Opens a reply's link: a web page in the browser, a file at its line in an editor; anything else is dropped. */
@@ -185,18 +300,25 @@ export class ConversationView implements vscode.WebviewViewProvider {
     view.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="${uri('codicons/codicon.css')}"><link rel="stylesheet" href="${uri('conversation.css')}">
-</head><body><div id="root"></div><div id="live" class="live" aria-live="polite"></div><script nonce="${nonce}" src="${uri('conversation.js')}"></script></body></html>`;
+</head><body><div id="root"></div><div id="composer"></div><div id="live" class="live" aria-live="polite"></div><script nonce="${nonce}" src="${uri('conversation.js')}"></script></body></html>`;
     view.webview.onDidReceiveMessage((message: ConversationMessage) => {
       const run = (): Promise<unknown> => {
         switch (message.type) {
           case 'ready':
-            return Promise.resolve(view.webview.postMessage({ type: 'state', state: this.#state }));
+            return Promise.resolve(view.webview.postMessage({ type: 'state', state: this.#state })).then(() => this.#giveBack());
           case 'earlier':
             return this.earlier();
           case 'open':
             return this.open(String(message.href));
           case 'terminal':
             return this.deps.openTerminal();
+          case 'copy':
+            return Promise.resolve(vscode.env.clipboard.writeText(String(message.text))).then(
+              () => view.webview.postMessage({ type: 'copied', id: message.id, ok: true }),
+              () => view.webview.postMessage({ type: 'copied', id: message.id, ok: false }),
+            );
+          case 'send':
+            return this.send(String(message.text), message.target).then((error) => view.webview.postMessage({ type: 'sent', id: message.id, error }));
           default:
             return Promise.resolve();
         }

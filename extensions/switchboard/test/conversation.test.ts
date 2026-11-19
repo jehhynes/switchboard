@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, stateIcon, timeline, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState } from '../src/conversationModel.js';
 import { linkTarget, supportsSecondarySidebar } from '../src/links.js';
-import { startConversation } from '../src/webview/conversationMain.js';
-import { renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
+import { shortTitle, startConversation } from '../src/webview/conversationMain.js';
+import { linkAllowed, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2' };
@@ -13,6 +13,7 @@ const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa
 // Each item's ord is its time unless a test gives it another.
 const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, ...patch });
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
+const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent' | 'uncertain', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
 const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, ...patch });
 
@@ -54,6 +55,17 @@ describe('the conversation state', () => {
     // A sent message Claude never received leaves the timeline.
     state = applyEvent(state, { type: 'message', message: message('m3', T0 + 4, 'Never', { ord: 8, withdrawn: true }) });
     expect(timeline(state.items).map((entry) => entry.item.id)).toEqual(['m1', 'r1', 'r3', 'r2', 'm2']);
+  });
+
+  it('drops a typed message that was not sent, from an event, a hello or a page of earlier items', () => {
+    const empty = applyEvent(EMPTY_CONVERSATION, hello());
+    const shown = applyEvent(empty, { type: 'message', message: typed('m1', 'open') });
+
+    expect(shown.items.map((item) => item.id)).toEqual(['m1']);
+    expect(applyEvent(shown, { type: 'message', message: typed('m1', 'not-sent', 'The session has ended.') }).items).toEqual([]);
+    expect(applyEvent(empty, { type: 'message', message: typed('m2', 'not-sent', 'x') }).items).toEqual([]);
+    expect(applyEvent(EMPTY_CONVERSATION, hello([typed('m1', 'not-sent', 'x'), typed('m2', 'uncertain', 'y')])).items.map((item) => item.id)).toEqual(['m2']);
+    expect(withEarlier(empty, [typed('m1', 'not-sent', 'x'), typed('m2', 'sent')], false).items.map((item) => item.id)).toEqual(['m2']);
   });
 
   it('puts earlier items before the shown ones once each', () => {
@@ -164,6 +176,43 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
 
+  it('stamps each message and reply with its time, not a note, and puts a divider before a turn that starts on another day', () => {
+    const at = (day: number, hour: number, minute: number) => new Date(2026, 10, day, hour, minute).getTime();
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(
+      state([
+        message('m1', at(19, 13, 46), '/support-process #453532'),
+        reply('r1', at(19, 13, 47)),
+        reply('n1', at(19, 13, 48), { kind: 'note', opening: 'Conversation continued from another session.' }),
+        reply('a1', at(19, 14, 5), { kind: 'aside', opening: 'Reading' }),
+        message('m2', at(20, 9, 0), 'Next day'),
+        reply('r2', at(20, 21, 30)),
+      ]),
+      new Set(),
+      at(20, 22, 0),
+    );
+
+    const stamps = (id: string) => root.querySelector(`li[data-id="${id}"] > .stamp-line .stamp`)?.textContent ?? null;
+
+    expect(['m1', 'r1', 'n1', 'a1', 'm2', 'r2'].map(stamps)).toEqual(['1:46 PM', '1:47 PM', null, '2:05 PM', '9:00 AM', '9:30 PM']);
+    expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('datetime')).toBe(new Date(at(19, 13, 46)).toISOString());
+    expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('title')).toMatch(/^2026-11-19 13:46:00 \S+$/);
+    // The stamp sits above a message's box, and a slash command shows in the editor font.
+    expect([...root.querySelector('li[data-id="m1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box command']);
+    expect(root.querySelector('li[data-id="m2"] .box')?.className).toBe('box');
+    // No divider before the first turn; one, without the year, before the turn on the next day, which the keys skip.
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['m1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2']);
+    expect(root.querySelector('.day')?.textContent).toBe('Fri, Nov 20');
+    expect(root.querySelector('.day')?.getAttribute('role')).toBe('separator');
+
+    // A reply after midnight in the same turn gets no divider, the next turn does; a turn in an earlier year shows its year.
+    root.innerHTML = renderConversation(state([message('m1', at(19, 23, 50), 'Late'), reply('r1', at(20, 0, 10)), message('m2', at(20, 0, 20), 'Still')], { session: { ...SESSION, state: 'idle' } }), new Set(), at(20, 1, 0));
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['m1', 'r1', 'day', 'm2']);
+    root.innerHTML = renderConversation(state([message('m1', new Date(2026, 11, 30, 9).getTime(), 'Old'), message('m2', new Date(2026, 11, 31, 9).getTime(), 'New')]), new Set(), new Date(2027, 2, 1).getTime());
+    expect(root.querySelector('.day')?.textContent).toBe('Thu, Dec 31, 2026');
+  });
+
   it("shows a spinner under the operator's latest message while the session works on a reply, gone when the reply arrives or the turn ends", () => {
     const root = document.createElement('div');
     const asked = [reply('r1', T0, { opening: 'Hi' }), message('m1', T0 + 1, 'Why?'), reply('a1', T0 + 2, { kind: 'aside', opening: 'Reading' })];
@@ -186,9 +235,80 @@ describe('the Conversation view page', () => {
     expect(root.querySelector('.working .codicon')?.className).toBe('codicon codicon-loading');
   });
 
+  it('draws file:, drive-letter, relative and spaced links as links, and unsafe schemes as text', () => {
+    const href = (text: string) => /data-href="([^"]*)"/.exec(renderMarkdown(text))?.[1] ?? null;
+
+    expect(href('[Index.cshtml](file:///D:/git/widgets/Widgets.Web/Views/Home/Index.cshtml)')).toBe('file:///D:/git/widgets/Widgets.Web/Views/Home/Index.cshtml');
+    expect(href('[c.ts:3](file:///D:/a%20b/c.ts#L3)')).toBe('file:///D:/a%20b/c.ts#L3');
+    expect(href('[c.ts](<D:/a b/c.ts#L4>)')).toBe('D:/a%20b/c.ts#L4');
+    expect(href('[a](../src/a.ts#L42)')).toBe('../src/a.ts#L42');
+    expect(href('[a](#L9)')).toBe('#L9');
+    for (const unsafe of ['javascript:alert(1)', 'JavaScript:alert(1)', 'vbscript:msgbox(1)', 'data:text/html,x', 'mailto:x@y.z', 'command:workbench.action.quit', 'vscode://file/D:/a.ts']) {
+      expect(href(`[x](${unsafe})`)).toBeNull();
+    }
+    expect(linkAllowed(' javascript:x')).toBe(false);
+  });
+
   it("keeps a link's target for the extension and never lets the page follow it", () => {
     expect(renderMarkdown('See [a.ts:4](./src/a.ts#L4) and https://x.test')).toBe('<p>See <a href="#" data-href="./src/a.ts#L4">a.ts:4</a> and <a href="#" data-href="https://x.test">https://x.test</a></p>\n');
     expect(renderMarkdown('[x](javascript:alert(1))')).not.toContain('<a');
+  });
+
+  it('copies a code block as written and a reply as its Markdown, and shows a check for 2 seconds once copied', () => {
+    vi.useFakeTimers();
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    const show = (items: ItemView[]) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state(items, { session: { ...SESSION, state: 'idle' } }) } }));
+    const copied = (id: number, ok: boolean) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'copied', id, ok } }));
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    show([
+      reply('r1', T0, { opening: 'Run:\n\n```sh\nnpm run build && echo "<done>"\n```\n\nThen **check** it.' }),
+      reply('r2', T0 + 1, { source: 'screen', provisional: true }),
+      reply('n1', T0 + 2, { kind: 'note', opening: 'Conversation continued from another session.' }),
+    ]);
+
+    // A copy button in each code block's frame, and one under each reply read from the transcript.
+    const code = root.querySelector<HTMLButtonElement>('li[data-id="r1"] .body > .code-block > button.copy[data-action="copy-code"]')!;
+    const response = root.querySelector<HTMLButtonElement>('li[data-id="r1"] > .actions > button.copy[data-action="copy-reply"]')!;
+
+    expect(code.nextElementSibling?.tagName).toBe('PRE');
+    expect(code.querySelector('.codicon')?.className).toBe('codicon codicon-copy');
+    expect(response.getAttribute('aria-label')).toBe('Copy response to clipboard');
+    expect(root.querySelector('li[data-id="r2"] .actions')).toBeNull();
+    expect(root.querySelector('li[data-id="n1"] .actions')).toBeNull();
+
+    code.click();
+    response.click();
+    expect(posted.filter((message) => message.type === 'copy')).toEqual([
+      { type: 'copy', id: 1, text: 'npm run build && echo "<done>"' },
+      { type: 'copy', id: 2, text: 'Run:\n\n```sh\nnpm run build && echo "<done>"\n```\n\nThen **check** it.' },
+    ]);
+
+    // A failed write shows nothing; a written one shows the check until 2 seconds pass.
+    copied(1, false);
+    expect(code.querySelector('.codicon')?.className).toBe('codicon codicon-copy');
+    copied(2, true);
+    expect(response.querySelector('.codicon')?.className).toBe('codicon codicon-check');
+    expect(response.title).toBe('Copied');
+    expect(live.textContent).toBe('Copied');
+    vi.advanceTimersByTime(1_999);
+    expect(response.querySelector('.codicon')?.className).toBe('codicon codicon-check');
+    vi.advanceTimersByTime(1);
+    expect(response.querySelector('.codicon')?.className).toBe('codicon codicon-copy');
+    expect(response.title).toBe('Copy response');
+
+    // Enter on a copy button presses it rather than toggling the reply's fold.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+
+    response.focus();
+    response.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    vi.useRealTimers();
   });
 
   it('posts ready, draws each state, posts a link, a fold and Open in terminal, and moves between items with the keys', () => {
@@ -241,6 +361,229 @@ describe('the Conversation view page', () => {
   });
 });
 
+describe('the composer', () => {
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, ...patch });
+
+  function page() {
+    // Pages of earlier tests still listen on the window, and jsdom has no CSS.escape for the one that kept a focused item.
+    if (typeof CSS === 'undefined') {
+      vi.stubGlobal('CSS', { escape: (value: string) => value });
+    }
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const host = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+
+    document.body.replaceChildren(root, host, live);
+    startConversation(root, live, vscode, host);
+
+    const input = host.querySelector('textarea')!;
+    const show = (next: ConversationState) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: next } }));
+    const press = (key: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+
+      input.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const sent = (id: number, error: string | null) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'sent', id, error } }));
+
+    return { host, input, posted, show, press, sent };
+  }
+
+  it('sends the text on Enter, keeps it read-only until the hub took it, and empties the box then', () => {
+    const { input, posted, show, press, sent, host } = page();
+
+    show(state());
+    expect(input.disabled).toBe(false);
+    expect(input.placeholder).toBe('Message Fix the <inbox> badge…');
+
+    input.value = 'Fix it\nplease';
+    // Shift+Enter is a new line, left to the box.
+    expect(press('Enter', { shiftKey: true })).toBe(false);
+    expect(press('Enter', { isComposing: true })).toBe(false);
+    expect(posted.filter((message) => message.type === 'send')).toEqual([]);
+    expect(press('Enter')).toBe(true);
+    expect(posted.filter((message) => message.type === 'send')).toEqual([{ type: 'send', id: 1, text: 'Fix it\nplease', target: { scopeGen: 1, sessionId: 's2', launch: 'l' } }]);
+    expect(input.readOnly).toBe(true);
+    expect(host.classList.contains('sending')).toBe(true);
+
+    // A second Enter while the first is sent posts nothing.
+    press('Enter');
+    expect(posted.filter((message) => message.type === 'send')).toHaveLength(1);
+
+    // An answer for another send changes nothing.
+    sent(7, null);
+    expect(input.value).toBe('Fix it\nplease');
+    sent(1, null);
+    expect(input.value).toBe('');
+    expect(input.readOnly).toBe(false);
+    expect(host.classList.contains('sending')).toBe(false);
+
+    // An empty box sends nothing.
+    input.value = '   ';
+    press('Enter');
+    expect(posted.filter((message) => message.type === 'send')).toHaveLength(1);
+  });
+
+  it('draws the footer with a send button, enabled only while there is text the session can take, which sends as Enter does', () => {
+    const { input, posted, show, sent, host } = page();
+    const send = host.querySelector<HTMLButtonElement>('.composer > .composer-footer > button.send')!;
+    const type = (text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+    };
+
+    expect(host.querySelector('.composer > textarea + .composer-footer > .composer-controls')?.childElementCount).toBe(0);
+    expect(send.querySelector('.codicon')?.className).toBe('codicon codicon-arrow-up');
+    expect(send.getAttribute('aria-label')).toBe('Send');
+    show(state());
+    expect(send.disabled).toBe(true);
+    type('  ');
+    expect(send.disabled).toBe(true);
+    type('Ship it');
+    expect(send.disabled).toBe(false);
+    send.click();
+    expect(posted.filter((message) => message.type === 'send')).toEqual([{ type: 'send', id: 1, text: 'Ship it', target: { scopeGen: 1, sessionId: 's2', launch: 'l' } }]);
+    // Disabled while the hub has the message, and again once the box empties.
+    expect(send.disabled).toBe(true);
+    send.click();
+    expect(posted.filter((message) => message.type === 'send')).toHaveLength(1);
+    sent(1, null);
+    expect(send.disabled).toBe(true);
+
+    // A session that cannot take messages disables it whatever the box holds.
+    type('More');
+    expect(send.disabled).toBe(false);
+    show(state({ session: { ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended.' } }));
+    expect(send.disabled).toBe(true);
+    send.click();
+    expect(posted.filter((message) => message.type === 'send')).toHaveLength(1);
+  });
+
+  it('names the work item in the placeholder without its leading tags, cut at a word', () => {
+    expect(shortTitle('[Feedback] Event Time-slot no longer a Choice to select for UI')).toBe('Event Time-slot no longer a Choice to');
+    expect(shortTitle('[Support][Bug]  Fix the badge')).toBe('Fix the badge');
+    expect(shortTitle('[Only a tag]')).toBe('[Only a tag]');
+    expect(shortTitle('A'.repeat(60))).toBe('A'.repeat(40));
+  });
+
+  it("keeps the text and shows the hub's refusal above the box until it is dismissed", () => {
+    const { input, posted, show, press, sent, host } = page();
+
+    show(state());
+    input.value = 'Hello';
+    press('Enter');
+    sent(1, 'The session has ended. Open it in the terminal to resume it.');
+
+    const error = host.querySelector<HTMLElement>('.composer-error')!;
+
+    expect(error.nextElementSibling?.className).toBe('composer');
+    expect(input.value).toBe('Hello');
+    expect(input.readOnly).toBe(false);
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toBe('The session has ended. Open it in the terminal to resume it.');
+    input.dispatchEvent(new Event('input'));
+    expect(error.hidden).toBe(false);
+    error.querySelector<HTMLButtonElement>('button.dismiss')!.click();
+    expect(error.hidden).toBe(true);
+    expect(posted.filter((message) => message.type === 'send')).toHaveLength(1);
+  });
+
+  it('puts the text of a message that was not sent back in the box, below a draft after a blank line, with why above it', () => {
+    const { input, show, press, sent, host } = page();
+    const unsent = (text: string, error: string) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'unsent', returned: [{ text, error }] } }));
+    const error = host.querySelector<HTMLElement>('.composer-error')!;
+
+    show(state());
+    unsent('First', 'The terminal holder did not answer.');
+    expect(input.value).toBe('First');
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toBe('The terminal holder did not answer.');
+
+    input.value = 'A draft\n';
+    unsent('Second', 'The session has ended. Open it in the terminal to resume it.');
+    expect(input.value).toBe('A draft\n\nSecond');
+    expect(error.textContent).toBe('The session has ended. Open it in the terminal to resume it.');
+
+    // While another message is being sent, the text comes back once the hub answered it.
+    input.value = 'Third';
+    press('Enter');
+    unsent('Fourth', 'A newer session of this work item started; the message was not sent.');
+    expect(input.value).toBe('Third');
+    sent(1, null);
+    expect(input.value).toBe('Fourth');
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toBe('A newer session of this work item started; the message was not sent.');
+  });
+
+  it('is disabled with the reason for a session the view cannot talk to, and hidden in a window with no work item', () => {
+    const { input, posted, show, press, host } = page();
+
+    show(state({ session: { ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' } }));
+    expect(input.disabled).toBe(true);
+    expect(input.placeholder).toBe('The session has ended. Open it in the terminal to resume it.');
+    input.value = 'Hello';
+    press('Enter');
+    expect(posted.filter((message) => message.type === 'send')).toEqual([]);
+
+    show(state({ session: null }));
+    expect(input.disabled).toBe(true);
+    expect(input.placeholder).toBe('No session has started yet.');
+
+    show(state({ connected: false }));
+    expect(input.disabled).toBe(true);
+
+    show({ ...EMPTY_CONVERSATION, connected: true });
+    expect(host.hidden).toBe(true);
+  });
+
+  it('keeps a draft when the window moves to a newer session, and sends it to the session the page then shows', () => {
+    const { input, posted, show, press } = page();
+
+    show(state());
+    input.value = 'Half written';
+    show(state({ scope: { ...SCOPE, scopeGen: 2, sessionId: 's9' }, session: { ...SESSION, id: 's9', launch: 'l9' } }));
+    expect(input.value).toBe('Half written');
+    press('Enter');
+    expect(posted.filter((message) => message.type === 'send')).toEqual([{ type: 'send', id: 1, text: 'Half written', target: { scopeGen: 2, sessionId: 's9', launch: 'l9' } }]);
+  });
+
+  it('never takes the focus from the composer when a redraw puts it back on the timeline item it was on', () => {
+    const { input, show } = page();
+    const items = [reply('r1', T0), reply('r2', T0 + 1)];
+
+    show(state({ items }));
+
+    const list = document.querySelector<HTMLElement>('.timeline')!;
+
+    list.focus();
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement?.getAttribute('data-id')).toBe('r1');
+    show(state({ items }));
+    expect(document.activeElement?.getAttribute('data-id')).toBe('r1');
+    input.focus();
+    show(state({ items: [...items, reply('r3', T0 + 2)] }));
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("draws a typed message's delivery under its box, with why it did not go, and none under a terminal message", () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state({ items: [message('m0', T0, 'from the terminal'), typed('m1', 'open'), typed('m2', 'sent'), typed('m3', 'not-sent', 'The session has <ended>.'), typed('m4', 'uncertain', 'The transcript does not show the message.')] }));
+
+    expect([...root.querySelectorAll('.message')].map((li) => li.querySelector('.delivery')?.textContent ?? null)).toEqual([
+      null,
+      'sending',
+      'sent',
+      'not sent · The session has <ended>.',
+      'uncertain · The transcript does not show the message.',
+    ]);
+    expect(root.querySelector('.delivery.not-sent')).not.toBeNull();
+  });
+});
+
 describe('reply links and the secondary side bar', () => {
   it('opens web pages, and files at their line relative to the session folder, and drops other schemes', () => {
     expect(linkTarget('https://github.com/o/r/pull/1', 'D:/w')).toEqual({ url: 'https://github.com/o/r/pull/1' });
@@ -251,6 +594,18 @@ describe('reply links and the secondary side bar', () => {
     expect(linkTarget('src/d.ts', null)).toBeNull();
     expect(linkTarget('javascript:alert(1)', 'D:/w')).toBeNull();
     expect(linkTarget('mailto:x@y.z', 'D:/w')).toBeNull();
+  });
+
+  it('opens a file: URL, a drive-letter path and a path with spaces at their line', () => {
+    expect(linkTarget('file:///D:/git/widgets/Views/Index.cshtml', 'D:/w')).toEqual({ file: 'D:/git/widgets/Views/Index.cshtml', line: null });
+    expect(linkTarget('file:///D:/a%20b/c.ts#L3', null)).toEqual({ file: 'D:/a b/c.ts', line: 3 });
+    expect(linkTarget('file://localhost/D:/c.ts#L7-L9', null)).toEqual({ file: 'D:/c.ts', line: 7 });
+    expect(linkTarget('file:///D%3A/c.ts', null)).toEqual({ file: 'D:/c.ts', line: null });
+    expect(linkTarget('D:/a%20b/c.ts#L5', null)).toEqual({ file: 'D:/a b/c.ts', line: 5 });
+    expect((linkTarget('./my%20dir/a.ts#L2', 'D:/w') as { file: string }).file.replaceAll('\\', '/')).toBe('D:/w/my dir/a.ts');
+    expect(linkTarget('D:/x/100%25%23.ts#L1', null)).toEqual({ file: 'D:/x/100%#.ts', line: 1 });
+    expect(linkTarget('D:/x/50%.ts', null)).toEqual({ file: 'D:/x/50%.ts', line: null });
+    expect(linkTarget('file:javascript:alert(1)', 'D:/w')).toBeNull();
   });
 
   it('puts the view in the secondary side bar from VS Code 1.106', () => {

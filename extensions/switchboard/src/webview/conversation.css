@@ -1,21 +1,37 @@
 /* The Conversation view: drawn like Claude Code's panel in Focus view with VS Code's theme variables (architecture.md § Conversation view). */
 html, body { height: 100%; }
-body { margin: 0; padding: 0; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-#root { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+body { display: flex; flex-direction: column; margin: 0; padding: 0; color: var(--vscode-foreground); background: var(--vscode-sideBar-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; }
+#root { display: flex; flex-direction: column; flex: 1; min-height: 0; box-sizing: border-box; }
 .codicon { font: normal normal normal 14px/1 codicon; }
-.header { display: flex; align-items: center; gap: 6px; padding: 6px 12px 6px 20px; border-bottom: 1px solid var(--vscode-widget-border, transparent); }
-.header .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* Claude Code's header: 6 px around, the title in the chat font with 6 px of its own, a hairline in the side bar's top border colour. */
+.header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-sideBarActivityBarTop-border, var(--vscode-panel-border, transparent)); user-select: none; }
+.header .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px; font-size: var(--vscode-chat-font-size, 13px); font-weight: 500; }
 button.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 2px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; }
 button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .notice, .empty { margin: 8px 20px; color: var(--vscode-descriptionForeground); }
-.scroll { flex: 1; overflow-y: auto; padding: 8px 20px 16px; }
+.scroll { flex: 1; overflow-y: auto; padding: 20px 20px 16px; }
+/* Items are spaced as Claude Code's messages: 8 px above and below, 24 px above a reply with a time, none above the first. */
 .timeline { list-style: none; margin: 0; padding: 0; }
-.timeline > li { margin: 10px 0; }
-.message .box { border: 1px solid var(--vscode-input-border, var(--vscode-inlineChatInput-border, transparent)); border-radius: 6px; background: var(--vscode-input-background); padding: 4px 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.timeline > li { --pad-top: 8px; position: relative; margin: 0; padding-top: var(--pad-top); padding-bottom: 8px; }
+.timeline > li:first-child { --pad-top: 0px; }
+.timeline > li.reply:has(> .stamp-line) { --pad-top: 24px; }
+.stamp-line { display: flex; justify-content: flex-end; padding-bottom: 2px; }
+.reply > .stamp-line { position: absolute; top: 6px; right: 0; padding-bottom: 0; }
+.stamp { color: var(--vscode-descriptionForeground); white-space: nowrap; cursor: default; font-size: 0.85em; line-height: 16px; }
+.day { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); font-size: 0.9em; white-space: nowrap; }
+.day::before, .day::after { content: ""; flex: 1; min-width: 32px; height: 1px; background: currentColor; opacity: 0.5; }
+.message .box { margin: 4px 0; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); border-radius: 6px; background: var(--vscode-input-background); padding: 4px 6px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+.message .box:first-child, .message .stamp-line + .box { margin-top: 0; }
+.message .box.command { font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; }
 .message.provisional .box { opacity: 0.7; }
-.reply { position: relative; padding-left: 30px; }
-.reply .dot { position: absolute; left: 10px; top: 0.55em; width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
+/* A reply's dot, and the line that joins the dots of replies in a row, as in Claude Code's timeline. */
+.reply { padding-left: 30px; }
+.reply .dot { position: absolute; z-index: 1; left: 9px; top: calc(var(--pad-top) + 7px); width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
+.reply::after { content: ""; position: absolute; left: 12px; top: 0; bottom: 0; width: 1px; background: var(--vscode-sideBarActivityBarTop-border, var(--vscode-panel-border, transparent)); }
+.reply:not(.reply + .reply)::after { top: calc(var(--pad-top) + 10px); }
+.reply:not(:has(+ .reply))::after { bottom: auto; height: calc(var(--pad-top) + 10px); }
+.reply:not(.reply + .reply):not(:has(+ .reply))::after { display: none; }
 .reply .body > :first-child { margin-top: 0; }
 .reply .body > :last-child { margin-bottom: 0; }
 .reply.aside { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
@@ -27,13 +43,60 @@ button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-v
 .fold .was { color: var(--vscode-descriptionForeground); }
 .body a { color: var(--vscode-textLink-foreground); text-decoration: none; }
 .body a:hover { text-decoration: underline; }
-.body code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; background: var(--vscode-textCodeBlock-background); border-radius: 3px; padding: 0 3px; }
-.body pre { background: var(--vscode-textCodeBlock-background); padding: 6px 8px; border-radius: 4px; overflow-x: auto; }
-.body pre code { background: none; padding: 0; }
-.body table { border-collapse: collapse; }
-.body th, .body td { border: 1px solid var(--vscode-widget-border, var(--vscode-editorGroup-border)); padding: 2px 6px; }
+/* Markdown spaced as Claude Code's: tight paragraphs, lists 2em in with discs at the first level (an ol's li would otherwise make them circles). */
+.body p { margin: 0.1em 0 0.2em; }
+.body ul, .body ol { margin: 1em 0; padding-inline-start: 2em; }
+.body li > ul, .body li > ol { margin: 0; }
+.body ul { list-style-type: disc; }
+.body ul ul { list-style-type: circle; }
+.body ul ul ul { list-style-type: square; }
+.body :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.body code { font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; color: var(--vscode-textPreformat-foreground, inherit); background: var(--vscode-textPreformat-background, rgba(127, 127, 127, 0.15)); border-radius: 3px; padding: 2px 4px; word-break: break-word; }
+.body a code { color: inherit; background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15)); }
+/* Copy buttons, as Claude Code's: in a code block's top right corner, and under a reply; both show on hover or focus. */
+.copy { display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; border-radius: 4px; color: var(--vscode-descriptionForeground); transition: opacity 0.15s, background 0.15s; }
+.copy .codicon { font-size: 14px; }
+.copy:focus-visible { opacity: 1; }
+.copy:active { opacity: 0.7; }
+.body .code-block { position: relative; margin: 8px 0; }
+.body .code-block > pre { margin: 0; }
+.code-block > .copy { position: absolute; z-index: 1; top: 4px; right: 4px; padding: 4px; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); background: var(--vscode-editor-background); }
+.code-block:hover > .copy { opacity: 1; }
+.code-block > .copy:hover { background: var(--vscode-toolbar-hoverBackground); }
+.timeline > li.reply:has(> .actions) { padding-bottom: 0; }
+.actions { display: flex; align-items: center; gap: 2px; height: 16px; }
+.actions .copy { box-sizing: border-box; width: 20px; height: 20px; padding: 2px; border: none; background: transparent; transition: none; }
+.reply:hover > .actions .copy, .actions .copy:focus { opacity: 1; }
+.actions .copy:hover { color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+.body pre { box-sizing: border-box; max-width: 100%; margin: 8px 0; padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre; color: var(--vscode-foreground); background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15)); }
+.body pre code { color: inherit; background: none; padding: 0; }
+.body table { border-collapse: collapse; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); }
+.body th, .body td { border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); padding: 2px; }
 .earlier-items, .pill { font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: 10px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 1px 10px; }
 .earlier-items { display: block; margin: 0 auto 8px; }
 .pill { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); }
+.message .delivery { margin-top: 2px; font-size: 0.85em; color: var(--vscode-descriptionForeground); text-align: right; }
+.message .delivery.not-sent, .message .delivery.uncertain { color: var(--vscode-editorWarning-foreground); }
+/* The composer, measured from Claude Code's input: at most 680 px wide and centred, 16 px from the view's edges, an 8 px radius, a hairline
+   over the footer, and a ring in the focus colour where Claude Code's is orange. */
+#composer { box-sizing: border-box; width: 100%; max-width: calc(680px + 32px); margin: 0 auto; padding: 0 16px 16px; }
+#composer[hidden] { display: none; }
+.composer { --composer-border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--composer-border); border-radius: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+.composer:focus-within { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--vscode-focusBorder), transparent 80%); }
+.composer textarea { display: block; width: 100%; box-sizing: border-box; min-height: calc(1.5em + 20px); max-height: 200px; resize: none; border: none; outline: none; background: transparent; color: var(--vscode-input-foreground); font: inherit; line-height: 1.5; padding: 10px 14px; overflow-y: auto; scrollbar-gutter: stable; overflow-wrap: break-word; }
+.composer textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
+.composer textarea:disabled { cursor: not-allowed; }
+.composer-footer { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px; border-top: 0.5px solid var(--composer-border); color: var(--vscode-descriptionForeground); }
+.composer-controls { display: flex; flex: 1; align-items: center; gap: 2px; min-width: 0; min-height: 26px; }
+.composer .send { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; margin-left: 2px; padding: 0; border: none; border-radius: 5px; cursor: pointer; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.composer .send:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.composer .send:disabled { cursor: not-allowed; opacity: 0.4; }
+.composer .send .codicon { font-size: 16px; }
+.sending .composer { opacity: 0.7; }
+.composer-error { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 6px; padding: 6px 4px 6px 10px; border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); border-radius: 6px; background: var(--vscode-inputValidation-errorBackground, transparent); color: var(--vscode-foreground); }
+.composer-error[hidden] { display: none; }
+.composer-error-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.composer-error .dismiss { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; cursor: pointer; color: inherit; background: transparent; }
+.composer-error .dismiss:hover { background: var(--vscode-toolbar-hoverBackground); }
 .live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
