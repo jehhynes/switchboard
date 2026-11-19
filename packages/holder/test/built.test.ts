@@ -141,6 +141,24 @@ describe('built holder', () => {
     expect(existsSync(recordPath(home))).toBe(false);
   }, 60_000);
 
+  it('ends a program by closing its terminal, so its hang-up handler runs, before any tree kill', async () => {
+    const home = newHome();
+    const holder = startHolder(home);
+    const found = await record(home);
+    const client = await HolderClient.connect({ port: found.port, token: found.token });
+    const marker = join(home, 'hangup.txt');
+    // Node.js reports a closed console on Windows, and a hang-up elsewhere, as SIGHUP.
+    const program = `process.on('SIGHUP', () => { require('fs').writeFileSync(${JSON.stringify(marker)}, 'hangup'); process.exit(7); }); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);`;
+    const { pid } = await client.spawn({ session: 's1', label: 'item 1', ...nodeProgram(program) });
+
+    pids.push(pid);
+    await until(async () => (await client.screen('s1')).head.includes('ready'), 'the program output');
+    expect(await client.kill('s1')).toBe(7);
+    expect(readFileSync(marker, 'utf8')).toBe('hangup');
+    client.close();
+    forceKill(holder.pid);
+  }, 30_000);
+
   it('exits by itself after the idle time with no live session, whatever clients are connected', async () => {
     const home = newHome();
     const holder = startHolder(home, ['--idle-exit-ms=1500']);

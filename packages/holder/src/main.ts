@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { Host } from './host.js';
+import { closePseudoTerminal } from './close.js';
 import { loadNodePty } from './nodePty.js';
 import { MemorySampler, killTree } from './processes.js';
 import { PROTOCOL } from './protocol.js';
@@ -133,9 +134,16 @@ async function main(): Promise<void> {
   let host: Host | null = null;
   const sampler = new MemorySampler(() => host?.list().filter((entry) => entry.exitedAt === null).map((entry) => entry.pid) ?? [], undefined, 30_000, (error) => log(`Process memory could not be read: ${error}`));
 
+  let exiting = false;
   const exit = async (reason: string): Promise<void> => {
+    if (exiting) {
+      return;
+    }
+
+    exiting = true;
     log(`Exiting: ${reason}`);
     sampler.stop();
+    await host?.endAll();
     removeRecord(home);
     await host?.close();
     lock.close();
@@ -163,6 +171,8 @@ async function main(): Promise<void> {
     build,
     spawnPty: await loadNodePty(),
     killTree: (pid) => killTree(pid),
+    closePty: (pty) => closePseudoTerminal(pty),
+    log,
     memory: (pids) => sampler.memory(pids),
     tree: (pid) => sampler.tree(pid),
     onShutdown: () => void exit('shutdown was requested'),
@@ -174,6 +184,11 @@ async function main(): Promise<void> {
   writeRecord(home, { protocol: PROTOCOL, build, port, token, pid: process.pid, startedAt: new Date().toISOString() });
   sampler.start();
   idle(0);
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => void exit(`it received ${signal}`));
+  }
+
   log(`Listening on 127.0.0.1:${port} for ${home} (protocol ${PROTOCOL}, Node.js ${process.version}).`);
 }
 

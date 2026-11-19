@@ -8,6 +8,7 @@ import {
   EXIT_RETENTION_MS,
   HEAD_CHARS,
   HELLO_DEADLINE_MS,
+  CLOSE_GRACE_MS,
   KILL_DEADLINE_MS,
   LineReader,
   PROTOCOL,
@@ -38,6 +39,14 @@ export interface HostOptions {
   spawnPty: PtyFactory;
   /** Ends a process and its descendants. */
   killTree: (pid: number) => Promise<{ error: string } | null>;
+  /**
+   * Closes a session's pseudo-terminal without killing its program, so the program runs its own cleanup (mechanics M78); false when it cannot.
+   * Without it, or when it fails, an end kills the process tree at once.
+   */
+  closePty?: (pty: Pty) => boolean;
+  /** How long a program has to exit after its pseudo-terminal closed before its process tree is killed. */
+  closeGraceMs?: number;
+  log?: (message: string) => void;
   /** The memory of each live session's process tree, by pid; called by `list`. */
   memory?: (pids: number[]) => Map<number, number>;
   /** The members of a live session's process tree as last read, with their creation times; called by `list`. */
@@ -63,6 +72,8 @@ interface Held {
   lastOutputAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
+  /** When the holder closed the pseudo-terminal to end the program (`performance.now()`); input and resizes stop then. */
+  closedAt: number | null;
   pty: Pty;
   term: InstanceType<typeof headless.Terminal>;
   serializer: InstanceType<typeof serializeAddon.SerializeAddon>;
@@ -95,6 +106,8 @@ export class Host {
   readonly #sessions = new Map<string, Held>();
   readonly #connections = new Set<Connection>();
   #server: Server | null = null;
+  /** Set once the holder ends its sessions to exit; spawns are refused from then on. */
+  #exiting = false;
 
   constructor(options: HostOptions) {
     this.#options = options;
@@ -305,6 +318,11 @@ export class Host {
   }
 
   #spawn(connection: Connection, id: number, request: SpawnRequest): void {
+    if (this.#exiting) {
+      this.#send(connection, { type: 'error', re: id, message: 'The terminal holder is exiting.' });
+      return;
+    }
+
     const existing = this.#sessions.get(request.session);
 
     if (existing !== undefined && existing.exitedAt === null) {
@@ -340,6 +358,7 @@ export class Host {
       lastOutputAt: null,
       exitedAt: null,
       exitCode: null,
+      closedAt: null,
       pty,
       term,
       serializer,
@@ -427,20 +446,7 @@ export class Host {
 
     if (held.exitedAt === null) {
       const deadlineMs = this.#options.killDeadlineMs ?? KILL_DEADLINE_MS;
-      let timer: NodeJS.Timeout | undefined;
-      let waiter: (() => void) | undefined;
-      // One deadline covers the tree kill and the exit, so a kill that hangs is answered too.
-      const outcome = await Promise.race([
-        new Promise<'late'>((resolve) => (timer = setTimeout(() => resolve('late'), deadlineMs))),
-        new Promise<'exited'>((resolve) => {
-          waiter = () => resolve('exited');
-          held.exitWaiters.add(waiter);
-        }),
-        this.#options.killTree(held.pid).then((failed) => (failed === null ? new Promise<never>(() => undefined) : failed)),
-      ]);
-
-      clearTimeout(timer);
-      held.exitWaiters.delete(waiter!);
+      const outcome = await this.#endProgram(held, deadlineMs);
 
       if (outcome === 'late') {
         this.#send(connection, { type: 'error', re: id, message: `Session ${session} did not exit within ${deadlineMs / 1000} seconds.` });
@@ -454,6 +460,84 @@ export class Host {
     }
 
     this.#send(connection, { type: 'killed', re: id, session, exitCode: held.exitCode });
+  }
+
+  /** Refuses spawns from now on and ends every live session as `kill` does, before the holder exits. */
+  async endAll(): Promise<void> {
+    this.#exiting = true;
+
+    const deadlineMs = this.#options.killDeadlineMs ?? KILL_DEADLINE_MS;
+
+    await Promise.all(
+      [...this.#sessions.values()]
+        .filter((held) => held.exitedAt === null)
+        .map(async (held) => {
+          const outcome = await this.#endProgram(held, deadlineMs);
+
+          if (outcome !== 'exited' && held.exitedAt === null) {
+            this.#options.log?.(`Session ${held.session} could not be ended: ${outcome === 'late' ? `it did not exit within ${deadlineMs / 1000} seconds` : outcome.error}`);
+          }
+        }),
+    );
+  }
+
+  /**
+   * Closes the pseudo-terminal, so the program can end its own children, and kills the process tree if the program has not exited within the
+   * grace time, or at once when the pseudo-terminal cannot be closed. One deadline covers both, so an end that hangs is answered too.
+   */
+  async #endProgram(held: Held, deadlineMs: number): Promise<'exited' | 'late' | { error: string }> {
+    const timers: NodeJS.Timeout[] = [];
+    const after = <T>(ms: number, value: T): Promise<T> => new Promise((resolve) => timers.push(setTimeout(() => resolve(value), Math.max(0, ms))));
+    let waiter: (() => void) | undefined;
+    const exited = new Promise<'exited'>((resolve) => {
+      waiter = () => resolve('exited');
+      held.exitWaiters.add(waiter);
+    });
+    const deadline = after(deadlineMs, 'late' as const);
+
+    try {
+      if (this.#close(held)) {
+        const graceMs = this.#options.closeGraceMs ?? CLOSE_GRACE_MS;
+        const first = await Promise.race([exited, deadline, after(graceMs - (performance.now() - held.closedAt!), 'grace' as const)]);
+
+        if (first !== 'grace') {
+          return first;
+        }
+
+        this.#options.log?.(`Session ${held.session} did not exit within ${graceMs / 1000} seconds of its terminal closing; ending its process tree.`);
+      }
+
+      return await Promise.race([exited, deadline, this.#options.killTree(held.pid).then((failed) => (failed === null ? new Promise<never>(() => undefined) : failed))]);
+    } finally {
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+
+      held.exitWaiters.delete(waiter!);
+    }
+  }
+
+  /** Closes the session's pseudo-terminal once; true when it is closed. */
+  #close(held: Held): boolean {
+    if (held.closedAt !== null) {
+      return true;
+    }
+
+    let closed = false;
+
+    try {
+      closed = this.#options.closePty?.(held.pty) ?? false;
+    } catch (error) {
+      this.#options.log?.(`The terminal of session ${held.session} could not be closed: ${(error as Error).message}`);
+    }
+
+    if (closed) {
+      held.closedAt = performance.now();
+    } else if (this.#options.closePty !== undefined) {
+      this.#options.log?.(`The terminal of session ${held.session} cannot be closed; ending its process tree.`);
+    }
+
+    return closed;
   }
 
   #screen(connection: Connection, id: number, session: string): void {
@@ -556,7 +640,7 @@ export class Host {
   #input(connection: Connection, data: string): void {
     const held = connection.held!;
 
-    if (held.exitedAt !== null) {
+    if (held.exitedAt !== null || held.closedAt !== null) {
       return;
     }
 
@@ -570,7 +654,7 @@ export class Host {
   }
 
   #resize(held: Held, cols: number, rows: number): void {
-    if (held.exitedAt !== null || (held.cols === cols && held.rows === rows)) {
+    if (held.exitedAt !== null || held.closedAt !== null || (held.cols === cols && held.rows === rows)) {
       return;
     }
 

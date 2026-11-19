@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Attachment, HolderClient, HolderError } from '../src/client.js';
 import { Raw, TOKEN, startHost, tick } from './fakes.js';
 import type { TestHost } from './fakes.js';
+import type { Pty } from '../src/host.js';
 
 let current: TestHost | null = null;
 
@@ -576,5 +577,170 @@ describe('attach', () => {
     fast.attachment.close();
     slow.socket.destroy();
     client.close();
+  });
+});
+
+describe('ending a session by closing its terminal', () => {
+  /** A close that the program answers by exiting with 129 after `exitAfterMs`, or never when null. */
+  function closer(state: { current: TestHost | null }, exitAfterMs: number | null, closes: number[]): (pty: Pty) => boolean {
+    return (pty) => {
+      closes.push(pty.pid);
+
+      if (exitAfterMs !== null) {
+        setTimeout(() => state.current!.ptys.find((one) => one.pid === pty.pid)!.exit(129), exitAfterMs);
+      }
+
+      return true;
+    };
+  }
+
+  it('answers with the exit code of a program that exits after its terminal closed, without a tree kill', async () => {
+    const ref: { current: TestHost | null } = { current: null };
+    const closes: number[] = [];
+    const logs: string[] = [];
+
+    ref.current = await started({ closePty: closer(ref, 50, closes), closeGraceMs: 2_000, log: (message) => logs.push(message) });
+
+    const client = await HolderClient.connect({ port: ref.current.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    expect(await client.kill('s1')).toBe(129);
+    expect(closes).toEqual([1000]);
+    expect(ref.current.killed).toEqual([]);
+    expect(logs).toEqual([]);
+    client.close();
+  });
+
+  it('stops passing input and sizes once the terminal is closed', async () => {
+    const ref: { current: TestHost | null } = { current: null };
+    const closes: number[] = [];
+
+    ref.current = await started({ closePty: closer(ref, 300, closes), closeGraceMs: 2_000 });
+
+    const client = await HolderClient.connect({ port: ref.current.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+
+    const raw = await Raw.ready(ref.current.port);
+
+    raw.send({ type: 'attach', session: 's1', cols: 100, rows: 30 });
+    await raw.until((m) => m.type === 'replayed');
+
+    const killed = client.kill('s1');
+
+    await tick(50);
+    raw.send({ type: 'resize', cols: 90, rows: 20 });
+    raw.send({ type: 'input', data: 'typed' });
+    expect(await killed).toBe(129);
+    expect(ref.current.ptys[0]!.writes).toEqual([]);
+    expect(ref.current.ptys[0]!.sizes).toEqual([]);
+    raw.socket.destroy();
+    client.close();
+  });
+
+  it('kills the process tree of a program that does not exit within the grace time after its terminal closed', async () => {
+    const ref: { current: TestHost | null } = { current: null };
+    const closes: number[] = [];
+    const logs: string[] = [];
+
+    ref.current = await started({ closePty: closer(ref, null, closes), closeGraceMs: 100, log: (message) => logs.push(message) });
+
+    const client = await HolderClient.connect({ port: ref.current.port, token: TOKEN });
+    const startedAt = Date.now();
+
+    await client.spawn(spawnRequest('s1'));
+    expect(await client.kill('s1')).toBe(1);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(90);
+    expect(closes).toEqual([1000]);
+    expect(ref.current.killed).toEqual([1000]);
+    expect(logs).toEqual(['Session s1 did not exit within 0.1 seconds of its terminal closing; ending its process tree.']);
+    client.close();
+  });
+
+  it('kills the process tree at once when the terminal cannot be closed, or its close throws', async () => {
+    const logs: string[] = [];
+    const state = await started({ closePty: () => false, closeGraceMs: 10_000, log: (message) => logs.push(message) });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    expect(await client.kill('s1')).toBe(1);
+    expect(state.killed).toEqual([1000]);
+    expect(logs).toEqual(['The terminal of session s1 cannot be closed; ending its process tree.']);
+    client.close();
+
+    const throwing = await startHost({
+      closePty: () => {
+        throw new Error('Usage: pty.kill(id, useConptyDll)');
+      },
+      closeGraceMs: 10_000,
+      log: (message) => logs.push(message),
+    });
+    const other = await HolderClient.connect({ port: throwing.port, token: TOKEN });
+
+    await other.spawn(spawnRequest('s1'));
+    expect(await other.kill('s1')).toBe(1);
+    expect(throwing.killed).toEqual([1000]);
+    expect(logs.slice(1)).toEqual(['The terminal of session s1 could not be closed: Usage: pty.kill(id, useConptyDll)', 'The terminal of session s1 cannot be closed; ending its process tree.']);
+    other.close();
+    await throwing.host.close();
+  });
+
+  it('closes the terminal once when two kills overlap, and the second waits for the same exit', async () => {
+    const ref: { current: TestHost | null } = { current: null };
+    const closes: number[] = [];
+
+    ref.current = await started({ closePty: closer(ref, 100, closes), closeGraceMs: 2_000 });
+
+    const client = await HolderClient.connect({ port: ref.current.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    expect(await Promise.all([client.kill('s1'), client.kill('s1')])).toEqual([129, 129]);
+    expect(closes).toEqual([1000]);
+    expect(ref.current.killed).toEqual([]);
+    client.close();
+  });
+
+  it('answers late when the deadline passes during the grace time', async () => {
+    const ref: { current: TestHost | null } = { current: null };
+
+    ref.current = await started({ closePty: closer(ref, null, []), closeGraceMs: 5_000, killDeadlineMs: 100 });
+
+    const client = await HolderClient.connect({ port: ref.current.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await expect(client.kill('s1')).rejects.toThrow('Session s1 did not exit within 0.1 seconds.');
+    expect(ref.current.killed).toEqual([]);
+    client.close();
+  });
+
+  it('ends every live session on endAll, and logs one that does not end', async () => {
+    const ref: { current: TestHost | null } = { current: null };
+    const closes: number[] = [];
+    const logs: string[] = [];
+
+    ref.current = await started({ closePty: closer(ref, 20, closes), closeGraceMs: 2_000, log: (message) => logs.push(message) });
+
+    const client = await HolderClient.connect({ port: ref.current.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await client.spawn(spawnRequest('s2'));
+    await client.spawn(spawnRequest('s3'));
+    ref.current.ptys[2]!.exit(0);
+    await ref.current.host.endAll();
+    expect(closes).toEqual([1000, 1001]);
+    expect(ref.current.host.live()).toBe(0);
+    expect(logs).toEqual([]);
+    client.close();
+
+    const failing = await startHost({ closePty: () => false, killTree: () => Promise.resolve({ error: 'Access is denied.' }), log: (message) => logs.push(message) });
+    const other = await HolderClient.connect({ port: failing.port, token: TOKEN });
+
+    await other.spawn(spawnRequest('s1'));
+    await failing.host.endAll();
+    await expect(other.spawn(spawnRequest('s2'))).rejects.toThrow('The terminal holder is exiting.');
+    expect(failing.ptys).toHaveLength(1);
+    expect(logs).toEqual(['The terminal of session s1 cannot be closed; ending its process tree.', 'Session s1 could not be ended: Access is denied.']);
+    other.close();
+    await failing.host.close();
   });
 });

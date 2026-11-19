@@ -12,6 +12,8 @@ export const DATA_CHUNK_BYTES = 512 * 1024;
 export const CLIENT_QUEUE_BYTES = 8 * 1024 * 1024;
 export const HELLO_DEADLINE_MS = 5_000;
 export const KILL_DEADLINE_MS = 15_000;
+/** How long a program has to exit after its pseudo-terminal closed before `kill` ends its process tree. */
+export const CLOSE_GRACE_MS = 5_000;
 /** How long an exited session's last screen and exit code stay attachable. */
 export const EXIT_RETENTION_MS = 10 * 60_000;
 export const SCROLLBACK_LINES = 10_000;
