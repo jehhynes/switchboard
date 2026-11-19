@@ -90,7 +90,8 @@ describe('Commands the dock leaves for a window (PRD R71)', () => {
     try {
       await extension.claim({ ...extension.hub(), port: hub.port, token: 'stub-token' });
 
-      assert.deepStrictEqual(hub.claims, [{ path: '/claim', body: { folder: vscode.workspace.workspaceFolders[0].uri.fsPath, workspace: null, focused: vscode.window.state.focused } }]);
+      // The claim names the window key of the window's stream, so only this window may read the History it claims.
+      assert.deepStrictEqual(hub.claims, [{ path: '/claim', body: { folder: vscode.workspace.workspaceFolders[0].uri.fsPath, workspace: null, focused: vscode.window.state.focused, window: extension.windowKey() } }]);
       // A Markdown report opens in the Markdown preview, not as text.
       await until(() => markdownPreview('reply.md'), `no Markdown preview of reply.md: ${JSON.stringify(tabLabels())}`);
       assert.strictEqual(vscode.window.activeTextEditor, undefined);

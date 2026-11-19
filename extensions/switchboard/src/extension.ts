@@ -15,10 +15,12 @@ import type { HistoryMessage } from './historyPanel.js';
 import { LogTail } from './hubLog.js';
 import { startHub } from './hubProcess.js';
 import { claimIsFor } from './claims.js';
-import { act, claimOpen, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
+import { act, claimOpen, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
-import { mainTerminal, paneModel, windowRows } from './paneModel.js';
+import { ConversationView } from './conversation.js';
+import type { ConversationState } from './conversationModel.js';
+import { mainTerminal, paneModel, terminalCommand, windowRows } from './paneModel.js';
 import type { PaneModel } from './paneModel.js';
 import { POLL_MS, SIDES, SideBars } from './sideBars.js';
 import type { EditorLayout, Kept, Outcome, Point } from './sideBars.js';
@@ -63,6 +65,10 @@ export interface SwitchboardApi {
   pane(): Record<string, PaneModel>;
   /** Runs a click in the Switchboard pane. */
   paneClick(message: PaneMessage): Promise<unknown>;
+  /** What the Conversation view shows (architecture.md § Conversation view). */
+  conversation(): ConversationState;
+  /** The window key of this window's hub stream, or null. */
+  windowKey(): string | null;
   /** The size the visible pane last reported, or null (PRD R91). */
   paneSize(): { inner: number; outer: number; dpr: number } | null;
   /** The kept side bar widths (PRD R91). */
@@ -202,7 +208,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         return undefined;
     }
   };
-  const opening = (record: HubRecord | null = keeper.current(), waitMs?: number): OpenContext => ({ record, state, home, run: runCommand, ...(waitMs === undefined ? {} : { waitMs }) });
+  const opening = (record: HubRecord | null = keeper.current(), waitMs?: number): OpenContext => ({ record, state, home, run: runCommand, current: () => keeper.current(), ...(waitMs === undefined ? {} : { waitMs }) });
   /** Runs a row's main control from the pane as the dock does: a hub action, after its question or text, a VS Code command, or else the row's click (PRD R92). */
   const runMain = async (key: string): Promise<unknown> => {
     const snapshot = state.current();
@@ -232,23 +238,40 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     }
 
     const terminal = mainTerminal(row);
-    const record = keeper.current();
 
-    // Open in terminal goes through the hub, which adds the agent's CLI from `sessions.claudePath` or `sessions.codexPath` (PRD R28).
-    if (terminal !== null && record !== null) {
-      const left = await postToHub(record, '/window', { workspace: windowFile, command: terminal }, 10_000);
-
-      if (left?.status !== 200) {
-        void vscode.window.showErrorMessage(`Switchboard: ${left?.error ?? 'the hub did not answer.'}`);
-        return undefined;
-      }
-
-      return claimOpen(record, runCommand, windowFile);
+    if (terminal !== null && keeper.current() !== null) {
+      return leaveTerminal(terminal);
     }
 
     // Open in Claude or Codex, and Answer in terminal, are the row's click.
     return openRow(opening(), key);
   };
+  /** Open in terminal goes through the hub, which adds the agent's CLI from `sessions.claudePath` or `sessions.codexPath` (PRD R28). */
+  const leaveTerminal = async (terminal: Record<string, unknown>): Promise<unknown> => {
+    const record = keeper.current();
+    const left = record === null ? null : await postToHub(record, '/window', { workspace: windowFile, command: terminal }, 10_000);
+
+    if (record === null || left?.status !== 200) {
+      void vscode.window.showErrorMessage(`Switchboard: ${left?.error ?? 'the hub did not answer.'}`);
+      return undefined;
+    }
+
+    return claimOpen(record, runCommand, windowFile);
+  };
+  /** The Conversation view's Open in terminal: this window's work item's session, in its attach terminal. */
+  const openWindowTerminal = (): Promise<unknown> => {
+    const snapshot = state.current();
+    const row = snapshot === null || windowFile === null ? undefined : windowRows(snapshot, windowFile, windowsDir(home), Date.now())[0];
+    const terminal = row === undefined ? null : terminalCommand(row);
+
+    if (terminal === null) {
+      void vscode.window.showWarningMessage('Switchboard: this window has no session to open in a terminal.');
+      return Promise.resolve(undefined);
+    }
+
+    return leaveTerminal(terminal);
+  };
+  const conversation = new ConversationView(context.extensionUri, { openTerminal: openWindowTerminal, log: (line) => hubLog.appendLine(`[conversation] ${line}`) });
   const paneClick = (message: PaneMessage): Promise<unknown> => {
     switch (message.type) {
       case 'open':
@@ -393,6 +416,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     { dispose: () => unwatchFile(hubLogPath(home), readLog) },
     history.register(),
     pane.register(),
+    conversation.register(),
     sideBarLog,
     vscode.commands.registerCommand('switchboard.forgetSideBarWidths', async () => {
       await forgetWidths();
@@ -470,6 +494,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
           const window = (JSON.parse(data) as { window?: unknown }).window;
 
           windowKey = typeof window === 'string' ? window : null;
+          setWindowKey(windowKey);
+
+          if (windowKey === null) {
+            conversation.disconnect();
+          } else {
+            conversation.connect(record, windowKey);
+          }
 
           if (vscode.window.state.focused) {
             reportTheme(record);
@@ -511,6 +542,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     receive: stateReceived,
     windowStateChanged,
     pane: () => pane.shown(),
+    conversation: () => conversation.state(),
+    windowKey: () => windowKey,
     paneClick,
     paneSize: () => pane.size(),
     sideBarWidths: keptWidths,

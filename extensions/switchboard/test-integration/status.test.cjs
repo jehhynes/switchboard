@@ -80,7 +80,13 @@ describe('the status bar item (PRD R64, R71)', () => {
     const contributes = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
 
     assert.deepStrictEqual(contributes.commands.map((entry) => entry.command), ['switchboard.showDock', 'switchboard.showHubLog', 'switchboard.newClaudeTab', 'switchboard.forgetSideBarWidths', 'switchboard.continueInBackground', 'switchboard.continueSidebarInBackground']);
-    // The only views are the Switchboard pane's, in the Explorer and Source Control (PRD R92); the list is in the dock (PRD R71).
-    assert.deepStrictEqual(Object.fromEntries(Object.entries(contributes.views).map(([container, views]) => [container, views.map((view) => view.id)])), { explorer: ['switchboard.pane'], scm: ['switchboard.paneScm'] });
+    // The views are the Switchboard pane's, in the Explorer and Source Control (PRD R92), and the Conversation view's, in the secondary side bar or,
+    // before VS Code 1.106, its own activity bar container (PRD R96); the list is in the dock (PRD R71).
+    assert.deepStrictEqual(Object.fromEntries(Object.entries(contributes.views).map(([container, views]) => [container, views.map((view) => view.id)])), {
+      explorer: ['switchboard.pane'],
+      scm: ['switchboard.paneScm'],
+      'switchboard-conversation': ['switchboard.conversation'],
+      'switchboard-conversation-activity': ['switchboard.conversationActivity'],
+    });
   });
 });

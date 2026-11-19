@@ -40,6 +40,18 @@ export const OPEN_TIMEOUT_MS = 5000;
  * `workspace` and `focused`.
  */
 export function openEvents(record: HubRecord, onEnd: () => void, timeoutMs = OPEN_TIMEOUT_MS, onEvent?: (event: string, data: string) => void, query?: Record<string, string>): Promise<EventStream | null> {
+  return openStream(record, query === undefined ? '/events' : `/events?${new URLSearchParams(query).toString()}`, onEnd, timeoutMs, onEvent);
+}
+
+/**
+ * Opens a window's conversation stream (architecture.md § Conversation API) for the window key its `/events` hello carried. Null when the hub
+ * refuses the key or does not answer in time; `onEnd` runs once when the stream ends for any reason other than `close()`.
+ */
+export function openConversation(record: HubRecord, key: string, onEnd: () => void, onEvent: (event: string, data: string) => void, timeoutMs = OPEN_TIMEOUT_MS): Promise<EventStream | null> {
+  return openStream(record, `/v1/conversation/events?${new URLSearchParams({ window: key }).toString()}`, onEnd, timeoutMs, onEvent);
+}
+
+function openStream(record: HubRecord, path: string, onEnd: () => void, timeoutMs: number, onEvent?: (event: string, data: string) => void): Promise<EventStream | null> {
   return new Promise((resolve) => {
     let opened = false;
     let ended = false;
@@ -59,7 +71,7 @@ export function openEvents(record: HubRecord, onEnd: () => void, timeoutMs = OPE
     };
 
     const outbound = request(
-      { host: '127.0.0.1', port: record.port, method: 'GET', path: query === undefined ? '/events' : `/events?${new URLSearchParams(query).toString()}`, headers: { Authorization: `Bearer ${record.token}` } },
+      { host: '127.0.0.1', port: record.port, method: 'GET', path, headers: { Authorization: `Bearer ${record.token}` } },
       (response) => {
         clearTimeout(deadline);
 

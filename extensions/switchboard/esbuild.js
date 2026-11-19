@@ -39,7 +39,7 @@ const holder = {
 
 // The History and pane scripts run in webviews, browsers.
 const webview = {
-  entryPoints: { history: 'src/webview/historyMain.ts', pane: 'src/webview/paneMain.ts' },
+  entryPoints: { history: 'src/webview/historyMain.ts', pane: 'src/webview/paneMain.ts', conversation: 'src/webview/conversationMain.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -60,6 +60,7 @@ function copyAssets() {
 
   fs.copyFileSync('src/webview/history.css', 'dist/history.css');
   fs.copyFileSync('src/webview/pane.css', 'dist/pane.css');
+  fs.copyFileSync('src/webview/conversation.css', 'dist/conversation.css');
 }
 
 /** Every file under a folder, relative with forward slashes, sorted. */

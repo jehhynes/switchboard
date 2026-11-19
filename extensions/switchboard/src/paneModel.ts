@@ -72,10 +72,11 @@ function paneItem(row: DockRow): PaneItem {
  * `dock.openTerminal` set to the terminal app, where the row has none, the same command built from the row's terminal. Null otherwise.
  */
 export function mainTerminal(row: DockRow): Record<string, unknown> | null {
-  if (row.main !== 'Open in terminal') {
-    return null;
-  }
+  return row.main === 'Open in terminal' ? terminalCommand(row) : null;
+}
 
+/** The terminal command of a row's session: the window command the row has, or the same command built from its terminal; null without one. */
+export function terminalCommand(row: DockRow): Record<string, unknown> | null {
   const command = row.commands.find((shown) => shown.command['type'] === 'terminal')?.command;
 
   if (command !== undefined) {
