@@ -70,6 +70,8 @@ interface Held {
   cwd: string;
   startedAt: number;
   lastInputAt: number | null;
+  /** When an attached client last typed; a `write` changes `lastInputAt` only. */
+  keyAt: number | null;
   lastOutputAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
@@ -301,6 +303,9 @@ export class Host {
       case 'snapshot':
         this.#snapshot(connection, message.id, message.session, message.scrollback);
         return;
+      case 'write':
+        this.#write(connection, message.id, message.session, message.data);
+        return;
       case 'watch':
         connection.watching = true;
         this.#send(connection, { type: 'watching', re: message.id });
@@ -361,6 +366,7 @@ export class Host {
       cwd: request.cwd,
       startedAt: this.#now(),
       lastInputAt: null,
+      keyAt: null,
       lastOutputAt: null,
       exitedAt: null,
       exitCode: null,
@@ -580,8 +586,31 @@ export class Host {
     const rev = held.rev;
 
     held.term.write('', () =>
-      this.#send(connection, { type: 'snapshot', re: id, session, data: held.serializer.serialize({ scrollback }), cols: held.term.cols, rows: held.term.rows, rev }),
+      this.#send(connection, { type: 'snapshot', re: id, session, data: held.serializer.serialize({ scrollback }), cols: held.term.cols, rows: held.term.rows, rev, keyAt: held.keyAt }),
     );
+  }
+
+  /**
+   * Input from a client that is not attached, such as the hub typing a message: no resize and no `clients` count. It counts as input for
+   * `lastInputAt` and the revision, not as a key typed in a terminal (`keyAt`).
+   */
+  #write(connection: Connection, id: number, session: string, data: string): void {
+    const held = this.#sessions.get(session);
+
+    if (held === undefined) {
+      this.#send(connection, { type: 'error', re: id, message: `No session ${session} is held.` });
+      return;
+    }
+
+    if (held.exitedAt !== null || held.closedAt !== null) {
+      this.#send(connection, { type: 'error', re: id, message: `Session ${session} has ended.` });
+      return;
+    }
+
+    held.lastInputAt = this.#now();
+    held.rev++;
+    held.pty.write(data);
+    this.#send(connection, { type: 'written', re: id, session, rev: held.rev });
   }
 
   #shutdown(connection: Connection, id: number): void {
@@ -674,6 +703,7 @@ export class Host {
     }
 
     held.lastInputAt = this.#now();
+    held.keyAt = held.lastInputAt;
     held.rev++;
     held.pty.write(data);
   }

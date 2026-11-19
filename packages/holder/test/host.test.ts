@@ -24,7 +24,7 @@ describe('handshake', () => {
     const { port } = await started();
     const client = await HolderClient.connect({ port, token: TOKEN });
 
-    expect(client.welcome).toEqual({ protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot'] });
+    expect(client.welcome).toEqual({ protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot', 'write'] });
     client.close();
   });
 
@@ -315,7 +315,7 @@ describe('watch', () => {
       { type: 'detached', session: 's1', clients: 0 },
       { type: 'exited', session: 's1', exitCode: 7 },
     ]);
-    expect(unwatched.messages).toEqual([{ type: 'welcome', protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot'] }]);
+    expect(unwatched.messages).toEqual([{ type: 'welcome', protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot', 'write'] }]);
     unwatched.socket.destroy();
     watcher.close();
     other.close();
@@ -798,6 +798,69 @@ describe('snapshot', () => {
     client.welcome = { ...client.welcome, features: [] };
     await expect(client.snapshot('s1', 0)).rejects.toThrow('The terminal holder does not serve snapshots; it is from an older build.');
     expect(await client.list()).toEqual([]);
+    client.close();
+  });
+});
+
+describe('write', () => {
+  it('types into a session without attaching: no resize, no client, a new revision and lastInputAt, but no keyAt', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 20, rows: 3 }));
+    expect(await client.write('s1', '\u001b[200~hello\u001b[201~')).toEqual({ rev: 1 });
+    expect(await client.write('s1', '\r')).toEqual({ rev: 2 });
+    expect(state.ptys[0]!.writes).toEqual(['\u001b[200~hello\u001b[201~', '\r']);
+    expect(state.ptys[0]!.sizes).toEqual([]);
+
+    const [entry] = await client.list();
+
+    expect(entry).toMatchObject({ clients: 0, lastInputAt: expect.any(Number) });
+    expect(await client.snapshot('s1', 0)).toMatchObject({ rev: 2, keyAt: null, cols: 20, rows: 3 });
+
+    // A key typed in an attached terminal sets keyAt.
+    const raw = await Raw.ready(state.port);
+
+    raw.send({ type: 'attach', session: 's1', cols: 20, rows: 3 });
+    await raw.until((m) => m.type === 'replayed');
+    raw.send({ type: 'input', data: 'x' });
+    await tick();
+    expect((await client.snapshot('s1', 0)).keyAt).toEqual(expect.any(Number));
+    raw.socket.destroy();
+    client.close();
+  });
+
+  it('refuses an unknown or ended session and keeps the connection', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await expect(client.write('nope', 'x')).rejects.toMatchObject({ message: 'No session nope is held.', refused: true });
+    await client.spawn(spawnRequest('s1'));
+    state.ptys[0]!.exit(0);
+    await tick();
+    await expect(client.write('s1', 'x')).rejects.toThrow('Session s1 has ended.');
+    expect(state.ptys[0]!.writes).toEqual([]);
+    expect((await client.list()).map((entry) => entry.session)).toEqual(['s1']);
+    client.close();
+  });
+
+  it('closes the connection on empty data', async () => {
+    const { port } = await started();
+    const raw = await Raw.ready(port);
+
+    raw.send({ type: 'write', id: 1, session: 's1', data: '' });
+    await raw.untilClosed();
+    expect(raw.messages.at(-1)).toEqual({ type: 'error', message: 'Invalid write message.' });
+  });
+
+  it('is refused by the client, without a request, to a holder that does not name it', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    client.welcome = { ...client.welcome, features: ['snapshot'] };
+    await expect(client.write('s1', 'x')).rejects.toThrow('The terminal holder cannot type into sessions; it is from an older build.');
+    expect(state.ptys[0]!.writes).toEqual([]);
     client.close();
   });
 });

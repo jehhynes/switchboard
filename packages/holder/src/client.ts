@@ -3,7 +3,15 @@ import type { Socket } from 'node:net';
 import { LineReader, MAX_HOST_LINE_BYTES, PROTOCOL, encode, parseHostMessage } from './protocol.js';
 import type { ClientMessage, HostMessage, SessionEntry, SpawnRequest } from './protocol.js';
 
-export class HolderError extends Error {}
+export class HolderError extends Error {
+  /** The holder answered the request with an error, so it did nothing; false when the connection failed and the request may have run. */
+  constructor(
+    message: string,
+    readonly refused = false,
+  ) {
+    super(message);
+  }
+}
 
 function otherProtocol(protocol: number): string {
   return `The terminal holder speaks protocol ${protocol}, not ${PROTOCOL}.`;
@@ -146,14 +154,26 @@ export class HolderClient {
    * The screen and `scrollback` lines above it serialized with their attributes, its size and its revision. A holder that does not name
    * `snapshot` in its features would close the connection on the request, so it is refused here.
    */
-  async snapshot(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number }> {
+  async snapshot(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number; keyAt: number | null }> {
     if (!this.welcome.features.includes('snapshot')) {
       throw new HolderError('The terminal holder does not serve snapshots; it is from an older build.');
     }
 
     const reply = await this.#request({ type: 'snapshot', session, scrollback }, 'snapshot');
 
-    return { data: reply.data, cols: reply.cols, rows: reply.rows, rev: reply.rev };
+    return { data: reply.data, cols: reply.cols, rows: reply.rows, rev: reply.rev, keyAt: reply.keyAt ?? null };
+  }
+
+  /**
+   * Types into the session without attaching, so its size and `clients` stay as they are; resolves the revision after the input. Refused here,
+   * without a request, by a holder that does not name `write` in its features.
+   */
+  async write(session: string, data: string): Promise<{ rev: number }> {
+    if (!this.welcome.features.includes('write')) {
+      throw new HolderError('The terminal holder cannot type into sessions; it is from an older build.');
+    }
+
+    return { rev: (await this.#request({ type: 'write', session, data }, 'written')).rev };
   }
 
   /** Delivers exits, attaches and detaches on this connection from now on. */
@@ -203,7 +223,7 @@ export class HolderClient {
       this.#pending.delete(message.re);
 
       if (message.type === 'error') {
-        pending?.reject(new HolderError(message.message));
+        pending?.reject(new HolderError(message.message, true));
       } else {
         pending?.resolve(message);
       }

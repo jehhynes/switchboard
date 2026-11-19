@@ -20,7 +20,7 @@ export const SCROLLBACK_LINES = 10_000;
 /** The start of a session's output kept for start checks after it has scrolled away, in characters. */
 export const HEAD_CHARS = 64 * 1024;
 /** Requests added within this protocol, announced in `welcome.features`; a client sends one only to a holder that names it. */
-export const FEATURES = ['snapshot'] as const;
+export const FEATURES = ['snapshot', 'write'] as const;
 export type Feature = (typeof FEATURES)[number];
 
 /** One session in a `list` reply. Times are milliseconds since the epoch. */
@@ -60,6 +60,7 @@ export type ClientMessage =
   | { type: 'kill'; id: number; session: string }
   | { type: 'screen'; id: number; session: string }
   | { type: 'snapshot'; id: number; session: string; scrollback: number }
+  | { type: 'write'; id: number; session: string; data: string }
   | { type: 'watch'; id: number }
   | { type: 'shutdown'; id: number }
   | { type: 'attach'; session: string; cols: number; rows: number }
@@ -73,8 +74,13 @@ export type HostMessage =
   | { type: 'sessions'; re: number; sessions: SessionEntry[] }
   | { type: 'killed'; re: number; session: string; exitCode: number | null }
   | { type: 'screen'; re: number; session: string; head: string; text: string }
-  /** The screen and `scrollback` lines above it serialized with their attributes; `rev` rises on every output, resize and input. */
-  | { type: 'snapshot'; re: number; session: string; data: string; cols: number; rows: number; rev: number }
+  /**
+   * The screen and `scrollback` lines above it serialized with their attributes; `rev` rises on every output, resize and input. `keyAt` is when
+   * an attached client last typed, which a `write` does not change; absent from a holder from before it.
+   */
+  | { type: 'snapshot'; re: number; session: string; data: string; cols: number; rows: number; rev: number; keyAt?: number | null }
+  /** The input of a `write` reached the program; `rev` is the revision after it. */
+  | { type: 'written'; re: number; session: string; rev: number }
   | { type: 'watching'; re: number }
   | { type: 'bye'; re: number }
   | { type: 'exited'; session?: string; exitCode: number | null }
@@ -218,6 +224,8 @@ export function parseClientMessage(line: string): ClientMessage | { error: strin
       return isId(m.id) && isName(m.session) && Number.isInteger(m.scrollback) && (m.scrollback as number) >= 0 && (m.scrollback as number) <= SCROLLBACK_LINES
         ? { type: 'snapshot', id: m.id, session: m.session, scrollback: m.scrollback as number }
         : invalid;
+    case 'write':
+      return isId(m.id) && isName(m.session) && isText(m.data) && m.data !== '' ? { type: 'write', id: m.id, session: m.session, data: m.data } : invalid;
     case 'attach':
       return isName(m.session) && isSize(m.cols) && isSize(m.rows) ? { type: 'attach', session: m.session, cols: m.cols, rows: m.rows } : invalid;
     case 'input':

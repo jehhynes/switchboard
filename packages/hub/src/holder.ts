@@ -19,7 +19,9 @@ export interface HolderConnection {
   kill(session: string): Promise<number | null>;
   screen(session: string): Promise<{ head: string; text: string }>;
   /** Present on a holder client; call it only when `welcome.features` names `snapshot`. */
-  snapshot?(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number }>;
+  snapshot?(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number; keyAt?: number | null }>;
+  /** Present on a holder client; call it only when `welcome.features` names `write`. */
+  write?(session: string, data: string): Promise<{ rev: number }>;
   shutdown(): Promise<void>;
   onClose(listener: () => void): void;
   close(): void;
