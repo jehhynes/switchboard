@@ -19,6 +19,9 @@ export const EXIT_RETENTION_MS = 10 * 60_000;
 export const SCROLLBACK_LINES = 10_000;
 /** The start of a session's output kept for start checks after it has scrolled away, in characters. */
 export const HEAD_CHARS = 64 * 1024;
+/** Requests added within this protocol, announced in `welcome.features`; a client sends one only to a holder that names it. */
+export const FEATURES = ['snapshot'] as const;
+export type Feature = (typeof FEATURES)[number];
 
 /** One session in a `list` reply. Times are milliseconds since the epoch. */
 export interface SessionEntry {
@@ -56,6 +59,7 @@ export type ClientMessage =
   | { type: 'list'; id: number }
   | { type: 'kill'; id: number; session: string }
   | { type: 'screen'; id: number; session: string }
+  | { type: 'snapshot'; id: number; session: string; scrollback: number }
   | { type: 'watch'; id: number }
   | { type: 'shutdown'; id: number }
   | { type: 'attach'; session: string; cols: number; rows: number }
@@ -63,12 +67,14 @@ export type ClientMessage =
   | { type: 'resize'; cols: number; rows: number };
 
 export type HostMessage =
-  | { type: 'welcome'; protocol: number; build: string; pid: number }
+  | { type: 'welcome'; protocol: number; build: string; pid: number; features?: string[] }
   | { type: 'error'; message: string; re?: number }
   | { type: 'spawned'; re: number; session: string; pid: number }
   | { type: 'sessions'; re: number; sessions: SessionEntry[] }
   | { type: 'killed'; re: number; session: string; exitCode: number | null }
   | { type: 'screen'; re: number; session: string; head: string; text: string }
+  /** The screen and `scrollback` lines above it serialized with their attributes; `rev` rises on every output, resize and input. */
+  | { type: 'snapshot'; re: number; session: string; data: string; cols: number; rows: number; rev: number }
   | { type: 'watching'; re: number }
   | { type: 'bye'; re: number }
   | { type: 'exited'; session?: string; exitCode: number | null }
@@ -208,6 +214,10 @@ export function parseClientMessage(line: string): ClientMessage | { error: strin
     case 'kill':
     case 'screen':
       return isId(m.id) && isName(m.session) ? { type: m.type, id: m.id, session: m.session } : invalid;
+    case 'snapshot':
+      return isId(m.id) && isName(m.session) && Number.isInteger(m.scrollback) && (m.scrollback as number) >= 0 && (m.scrollback as number) <= SCROLLBACK_LINES
+        ? { type: 'snapshot', id: m.id, session: m.session, scrollback: m.scrollback as number }
+        : invalid;
     case 'attach':
       return isName(m.session) && isSize(m.cols) && isSize(m.rows) ? { type: 'attach', session: m.session, cols: m.cols, rows: m.rows } : invalid;
     case 'input':

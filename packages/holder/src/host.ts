@@ -6,6 +6,7 @@ import serializeAddon from '@xterm/addon-serialize';
 import {
   CLIENT_QUEUE_BYTES,
   EXIT_RETENTION_MS,
+  FEATURES,
   HEAD_CHARS,
   HELLO_DEADLINE_MS,
   CLOSE_GRACE_MS,
@@ -82,6 +83,8 @@ interface Held {
   cols: number;
   rows: number;
   clients: Set<Connection>;
+  /** Rises on every output, resize and input, so a snapshot reader can tell a screen it has already read. */
+  rev: number;
   exitWaiters: Set<() => void>;
   removal: NodeJS.Timeout | null;
 }
@@ -264,7 +267,7 @@ export class Host {
       }
 
       connection.state = 'ready';
-      this.#send(connection, { type: 'welcome', protocol: this.#options.protocol ?? PROTOCOL, build: this.#options.build, pid: this.#options.pid ?? process.pid });
+      this.#send(connection, { type: 'welcome', protocol: this.#options.protocol ?? PROTOCOL, build: this.#options.build, pid: this.#options.pid ?? process.pid, features: [...FEATURES] });
       return;
     }
 
@@ -294,6 +297,9 @@ export class Host {
         return;
       case 'screen':
         this.#screen(connection, message.id, message.session);
+        return;
+      case 'snapshot':
+        this.#snapshot(connection, message.id, message.session, message.scrollback);
         return;
       case 'watch':
         connection.watching = true;
@@ -366,6 +372,7 @@ export class Host {
       cols: request.cols,
       rows: request.rows,
       clients: new Set(),
+      rev: 0,
       exitWaiters: new Set(),
       removal: null,
     };
@@ -380,6 +387,7 @@ export class Host {
   #output(held: Held, data: string): void {
     held.term.write(data);
     held.lastOutputAt = this.#now();
+    held.rev++;
 
     if (held.head.length < HEAD_CHARS) {
       held.head += data.slice(0, HEAD_CHARS - held.head.length);
@@ -560,6 +568,22 @@ export class Host {
     });
   }
 
+  /** The screen and `scrollback` lines above it with their attributes, once the output already received is parsed. */
+  #snapshot(connection: Connection, id: number, session: string, scrollback: number): void {
+    const held = this.#sessions.get(session);
+
+    if (held === undefined) {
+      this.#send(connection, { type: 'error', re: id, message: `No session ${session} is held.` });
+      return;
+    }
+
+    const rev = held.rev;
+
+    held.term.write('', () =>
+      this.#send(connection, { type: 'snapshot', re: id, session, data: held.serializer.serialize({ scrollback }), cols: held.term.cols, rows: held.term.rows, rev }),
+    );
+  }
+
   #shutdown(connection: Connection, id: number): void {
     const live = this.live();
 
@@ -650,6 +674,7 @@ export class Host {
     }
 
     held.lastInputAt = this.#now();
+    held.rev++;
     held.pty.write(data);
   }
 
@@ -660,6 +685,7 @@ export class Host {
 
     held.cols = cols;
     held.rows = rows;
+    held.rev++;
     held.pty.resize(cols, rows);
     // Output already queued was drawn at the old size, so the screen resizes after it is parsed.
     held.term.write('', () => held.term.resize(cols, rows));

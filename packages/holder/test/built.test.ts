@@ -111,7 +111,7 @@ describe('built holder', () => {
 
     const client = await HolderClient.connect({ port: found.port, token: found.token });
 
-    expect(client.welcome).toEqual({ protocol: 1, build: 'test-build', pid: first.pid });
+    expect(client.welcome).toEqual({ protocol: 1, build: 'test-build', pid: first.pid, features: ['snapshot'] });
     client.close();
   }, 30_000);
 

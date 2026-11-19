@@ -24,7 +24,7 @@ describe('handshake', () => {
     const { port } = await started();
     const client = await HolderClient.connect({ port, token: TOKEN });
 
-    expect(client.welcome).toEqual({ protocol: 1, build: 'build-1', pid: 4242 });
+    expect(client.welcome).toEqual({ protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot'] });
     client.close();
   });
 
@@ -315,7 +315,7 @@ describe('watch', () => {
       { type: 'detached', session: 's1', clients: 0 },
       { type: 'exited', session: 's1', exitCode: 7 },
     ]);
-    expect(unwatched.messages).toEqual([{ type: 'welcome', protocol: 1, build: 'build-1', pid: 4242 }]);
+    expect(unwatched.messages).toEqual([{ type: 'welcome', protocol: 1, build: 'build-1', pid: 4242, features: ['snapshot'] }]);
     unwatched.socket.destroy();
     watcher.close();
     other.close();
@@ -742,5 +742,62 @@ describe('ending a session by closing its terminal', () => {
     expect(logs).toEqual(['The terminal of session s1 cannot be closed; ending its process tree.', 'Session s1 could not be ended: Access is denied.']);
     other.close();
     await failing.host.close();
+  });
+});
+
+describe('snapshot', () => {
+  it('serializes the screen with its colours and the asked scrollback, with a revision that rises on output, input and resize', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1', { cols: 20, rows: 3 }));
+    state.ptys[0]!.emit('alpha\r\nbeta\r\ngamma\r\n\u001b[32m● done\u001b[0m');
+
+    const first = await client.snapshot('s1', 0);
+
+    expect(first).toMatchObject({ cols: 20, rows: 3, rev: 1 });
+    // The green colour is kept, and the line scrolled off the screen is left out without scrollback.
+    expect(first.data).toContain('\u001b[32m● done');
+    expect(first.data).not.toContain('alpha');
+    expect((await client.snapshot('s1', 10)).data).toContain('alpha');
+
+    const raw = await Raw.ready(state.port);
+
+    raw.send({ type: 'attach', session: 's1', cols: 30, rows: 3 });
+    await raw.until((m) => m.type === 'replayed');
+    raw.send({ type: 'input', data: 'x' });
+    await tick();
+    // The attach resized the terminal and the client typed.
+    expect((await client.snapshot('s1', 0)).rev).toBe(3);
+    raw.socket.destroy();
+    client.close();
+  });
+
+  it('answers an unknown session with an error and keeps the connection', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await expect(client.snapshot('nope', 0)).rejects.toThrow('No session nope is held.');
+    expect(await client.list()).toEqual([]);
+    client.close();
+  });
+
+  it('closes the connection on a scrollback out of range', async () => {
+    const { port } = await started();
+    const raw = await Raw.ready(port);
+
+    raw.send({ type: 'snapshot', id: 1, session: 's1', scrollback: 10_001 });
+    await raw.untilClosed();
+    expect(raw.messages.at(-1)).toEqual({ type: 'error', message: 'Invalid snapshot message.' });
+  });
+
+  it('is refused by the client, without a request, to a holder that does not name it', async () => {
+    const state = await started();
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    client.welcome = { ...client.welcome, features: [] };
+    await expect(client.snapshot('s1', 0)).rejects.toThrow('The terminal holder does not serve snapshots; it is from an older build.');
+    expect(await client.list()).toEqual([]);
+    client.close();
   });
 });

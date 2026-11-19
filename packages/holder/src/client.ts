@@ -13,6 +13,8 @@ export interface Welcome {
   protocol: number;
   build: string;
   pid: number;
+  /** Requests added within the protocol that this holder serves, such as `snapshot`; empty for a holder from before them. */
+  features: string[];
 }
 
 export interface ConnectOptions {
@@ -78,7 +80,7 @@ function open(options: ConnectOptions, onMessage: (message: HostMessage) => void
           }
 
           clearTimeout(timer);
-          welcome = { protocol: message.protocol, build: message.build, pid: message.pid };
+          welcome = { protocol: message.protocol, build: message.build, pid: message.pid, features: Array.isArray(message.features) ? message.features.filter((feature) => typeof feature === 'string') : [] };
           resolve({ socket, welcome });
         } else if (message.type === 'error' && message.re === undefined) {
           fail(new HolderError(message.message));
@@ -138,6 +140,20 @@ export class HolderClient {
     const reply = await this.#request({ type: 'screen', session }, 'screen');
 
     return { head: reply.head, text: reply.text };
+  }
+
+  /**
+   * The screen and `scrollback` lines above it serialized with their attributes, its size and its revision. A holder that does not name
+   * `snapshot` in its features would close the connection on the request, so it is refused here.
+   */
+  async snapshot(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number }> {
+    if (!this.welcome.features.includes('snapshot')) {
+      throw new HolderError('The terminal holder does not serve snapshots; it is from an older build.');
+    }
+
+    const reply = await this.#request({ type: 'snapshot', session, scrollback }, 'snapshot');
+
+    return { data: reply.data, cols: reply.cols, rows: reply.rows, rev: reply.rev };
   }
 
   /** Delivers exits, attaches and detaches on this connection from now on. */
