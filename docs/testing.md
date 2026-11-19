@@ -6,13 +6,18 @@ Use automated checks for behavior and integration, and visual inspection for pre
 
 | Change | Verification |
 |---|---|
-| Executable code | `npm run verify` |
+| Executable code, while working | The pre-commit hook, or `npm run verify:staged` |
+| Executable code, before merging into `main` | `npm run verify` |
 | VS Code host wiring or UI-visible behavior | Also `npm run test:integration` in a real VS Code |
 | Extension packaging | `vsce package --no-dependencies` succeeds |
 | Runner, source fetch or report path | Also [live acceptance](#live-acceptance) from step 7 on |
 | Markdown only | Accuracy, links, and consistency across documents |
 
 `npm run verify` builds, typechecks, and runs workspace tests with coverage thresholds. Build first: spawn tests run built bundles.
+
+While working, run only the tests the change affects; run `npm run verify` before merging a branch into `main`. No git hook runs it at merge, because merges into `main` fast-forward, so the merging session runs it.
+
+The pre-commit hook (`.githooks/pre-commit`, installed by `npm install` through `core.hooksPath`) runs [tools/precommit.mjs](../tools/precommit.mjs), which `npm run verify:staged` also runs. It maps the staged files to workspaces, takes those workspaces and every workspace that depends on them, builds them and their dependencies, then typechecks and tests them with each workspace's own scripts and coverage thresholds. It also counts dependencies the manifests do not declare and files another workspace's tests read; both are listed in the script and need updating when such a dependency is added. A staged file outside every workspace, such as `package.json`, `package-lock.json`, `tsconfig.base.json` or a file in `tools/`, runs the full `npm run verify`, as does `SWITCHBOARD_VERIFY=full`; otherwise the dock's `dotnet build` and `dotnet test` run only when `apps/dock` files are staged. Markdown and text files, and the hook's own files, run no checks.
 
 The dock's build and tests need the .NET 10 SDK, on Linux as on Windows. node-pty, the terminal holder's optional native dependency, has prebuilt binaries for Windows; on Linux npm builds it from source, which needs Python and a C++ toolchain, and without them the holder builds with no pseudo-terminals and its spawn tests fail.
 

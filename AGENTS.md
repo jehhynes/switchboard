@@ -53,7 +53,7 @@ Replace superseded text in place. Record the decision and its constraint; omit d
 
 [testing.md](docs/testing.md) is the full contract.
 
-- Run `npm run verify` for executable changes: build, typecheck, tests, and coverage thresholds.
+- For executable changes, run only the checks the change affects while working: the pre-commit hook does, through `npm run verify:staged`, so commit without `--no-verify`. Run `npm run verify` (build, typecheck, tests, and coverage thresholds) before merging a branch into `main`.
 - Run `npm run test:integration` for VS Code host wiring or UI-visible behavior. It uses a real extension host with isolated settings and home. Verify behavior directly instead of asking the developer to click through it.
 - Choose the test layer by API dependencies. Package logic and webview DOM belong in Vitest; `vscode` wiring belongs in the real-host suite.
 - Use recorded, scrubbed fixtures and injected homes. No external network traffic, real Claude sessions, or developer services in tests; test-owned loopback listeners are allowed.
@@ -64,7 +64,8 @@ Run commands from the repository root:
 
 | Command | Purpose |
 |---|---|
-| `npm run verify` | Build, typecheck, tests, coverage, and the dock's `dotnet build` and `dotnet test` |
+| `npm run verify:staged` | Build, typecheck and test the workspaces the staged files touch and their dependents; the pre-commit hook runs it |
+| `npm run verify` | Build, typecheck, tests, coverage, and the dock's `dotnet build` and `dotnet test`; run before merging into `main` |
 | `npm run verify:full` | Verify plus VS Code integration tests |
 | `npm run test:integration` | Build and run VS Code integration tests |
 
