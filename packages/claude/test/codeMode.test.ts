@@ -7,8 +7,10 @@ import type { Session, StartAction } from '@switchboard/core';
 import type { SessionEntry, SpawnRequest } from '@switchboard/holder';
 import {
   CODE_MODE_IDLE_MS,
+  CODE_MODE_PROMPT,
   CodeModeRunner,
   HOOKS_REQUIRED,
+  LINK_PROMPT,
   PANEL_PROMPT,
   claudeFile,
   codeModeEnvironment,
@@ -81,16 +83,21 @@ describe('Code Mode command', () => {
     expect(PANEL_PROMPT).toMatch(/^## Code References in Text\n[\s\S]*the user's workspace\.\n\n## Focus view in this editor\nThis section applies only while a section titled "Focus mode"[\s\S]*so put everything it needs there\.$/);
   });
 
+  it('adds a link section after the panel\'s, so relative link targets start with ./ and the terminal makes them clickable (mechanics M83)', () => {
+    expect(CODE_MODE_PROMPT).toBe(`${PANEL_PROMPT}\n\n${LINK_PROMPT}`);
+    expect(LINK_PROMPT).toMatch(/^## Links in this terminal\nStart each relative file link target with "\.\/", as in \[filename\.ts:42\]\(\.\/src\/filename\.ts#L42\), so VS Code's terminal makes it clickable\.$/);
+  });
+
   it('starts with the session ID, permission mode, name, model, contract and settings, and the prompt as one last argument', () => {
     const action = { permissionMode: 'auto', name: 'Switchboard · #12', model: 'haiku', contract: 'Report with …', prompt: '/fix the bug\nnow' } as const;
 
-    expect(codeModeStartArgs(action, NATIVE)).toEqual(['--session-id', NATIVE, '--permission-mode', 'auto', '-n', 'Switchboard · #12', '--model', 'haiku', '--append-system-prompt', `Report with …\n\n${PANEL_PROMPT}`, '--settings', SETTINGS, '/fix the bug\nnow']);
+    expect(codeModeStartArgs(action, NATIVE)).toEqual(['--session-id', NATIVE, '--permission-mode', 'auto', '-n', 'Switchboard · #12', '--model', 'haiku', '--append-system-prompt', `Report with …\n\n${CODE_MODE_PROMPT}`, '--settings', SETTINGS, '/fix the bug\nnow']);
     expect(codeModeStartArgs({ ...action, model: null }, NATIVE)).not.toContain('--model');
   });
 
   it("resumes with no prompt, keeping the permission mode, model and settings, and appends the panel's sections for after a compaction", () => {
-    expect(codeModeResumeArgs(NATIVE, 'manual', 'opus')).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--append-system-prompt', PANEL_PROMPT, '--settings', SETTINGS]);
-    expect(codeModeResumeArgs(NATIVE, 'auto', null)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', PANEL_PROMPT, '--settings', SETTINGS]);
+    expect(codeModeResumeArgs(NATIVE, 'manual', 'opus')).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--append-system-prompt', CODE_MODE_PROMPT, '--settings', SETTINGS]);
+    expect(codeModeResumeArgs(NATIVE, 'auto', null)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', CODE_MODE_PROMPT, '--settings', SETTINGS]);
   });
 
   it('runs claude.exe on Windows when the path names no extension', () => {

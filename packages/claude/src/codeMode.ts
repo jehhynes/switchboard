@@ -67,6 +67,16 @@ The URL links should be relative paths from the root of  the user's workspace.
 This section applies only while a section titled "Focus mode" appears earlier in this prompt; if there is none, ignore this section. That section describes the terminal's Focus view and does not apply here, and neither does guidance above that text between tool calls may not be shown to the user, or that you should close with a recap that stands on its own. In this editor's Focus view, tool calls, tool results, and thinking are collapsed into expandable summary rows, and every text message you write stays visible in order, including text between tool calls, so the user can see it. Brief updates between tool calls are fine. Do not repeat what you already said in your final message; if the tool calls since your last text message did not change what you said, a brief closing note is enough. Still end each turn with a text message, even a short one, rather than ending on a tool call. If you are running as a subagent, ignore this section. Only your final message is returned to your caller, so put everything it needs there.`;
 
 /**
+ * Switchboard's own section after the panel's: VS Code's terminal makes a relative path clickable only when it starts with "./" (mechanics
+ * M83). Its own heading keeps it out of the Focus view section, which tells the session to ignore that section outside Focus view.
+ */
+export const LINK_PROMPT = `## Links in this terminal
+Start each relative file link target with "./", as in [filename.ts:42](./src/filename.ts#L42), so VS Code's terminal makes it clickable.`;
+
+/** The panel's sections, then Switchboard's link section, appended to every Code Mode start and resume. */
+export const CODE_MODE_PROMPT = `${PANEL_PROMPT}\n\n${LINK_PROMPT}`;
+
+/**
  * `--settings` overrides user settings, so a gateway or credential there cannot apply; empty strings remove the credential variables, so the
  * session uses the subscription sign-in (mechanics M64). `viewMode: "focus"` starts the terminal in Focus view and adds the CLI's "Focus mode"
  * prompt section, which the panel's Focus view section requires.
@@ -86,7 +96,7 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
     action.name,
     ...(action.model === null ? [] : ['--model', action.model]),
     '--append-system-prompt',
-    `${action.contract}\n\n${PANEL_PROMPT}`,
+    `${action.contract}\n\n${CODE_MODE_PROMPT}`,
     '--settings',
     codeModeSettings(),
     action.prompt,
@@ -95,11 +105,11 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
 
 /**
  * A promptless resume, which reads as idle until the operator types (mechanics M68). Claude resends the start's system prompt until a
- * compaction, which renders it again from this process's flags (mechanics M30), so the resume appends the panel's sections; the contract hook
+ * compaction, which renders it again from this process's flags (mechanics M30), so the resume appends `CODE_MODE_PROMPT`; the contract hook
  * restores the contract after a compaction.
  */
 export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null): string[] {
-  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', PANEL_PROMPT, '--settings', codeModeSettings()];
+  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', CODE_MODE_PROMPT, '--settings', codeModeSettings()];
 }
 
 /** The file the pseudo-terminal runs: Windows looks for `claude.exe` when the path names no extension. */

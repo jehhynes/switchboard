@@ -1064,3 +1064,12 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit, from an hour-long run. **Passed** on Windows: `list` answers from the sampled read (under 2 ms here for 3 trees, under 3 ms for 20 in M75), and an idle Code Mode session's tree ended the hour at about 430 to 480 MB working set and 690 to 760 MB private (420 to 610 MB and 660 to 735 MB for the never-used ones over the hour), of which the operator's MCP servers are about 180 MB and 200 MB, with no growth over an hour; the holder costs about 120 MB private with three sessions and 10,000 lines in one.
 - **Not verified:** Linux `/proc`; more than an hour, where the small steps in idle private bytes at the 30-minute writes could add up; a session with 10,000 lines of scrollback in the real holder (`packages/holder`); what the 30-minute write is.
 - **Current use:** the fixed 4-hour idle limit of held sessions, `CODE_MODE_IDLE_MS` (architecture.md § Code Mode sessions, End rule).
+
+## M83. File links in a Code Mode session's terminal
+
+- **Date:** 2026-11-19.
+- **Versions:** Claude Code CLI 2.1.328 in Code Mode, with `PANEL_PROMPT` copied from the VS Code extension 2.1.327; VS Code's integrated terminal and Windows Terminal on Windows 11.
+- **Experiment:** operator-observed in live use: a Code Mode session following the panel's "Code References in Text" section, which gives workspace-relative targets such as `src/filename.ts`, wrote Markdown file links, and the operator tried to open them from each terminal.
+- **Result:** both terminals rendered a link as its text followed by its target in parentheses, as `README.md (src/README.md)`. VS Code's terminal made the path clickable (Ctrl+click) only when it started with `./` or was a `file://` URI; `src/README.md` was not.
+- **Not verified:** Windows Terminal with a `./` target; a Linux terminal; whether a session follows the `./` instruction in every reply.
+- **Current use:** `LINK_PROMPT`, appended after the panel's sections to every Code Mode start and resume, tells the session to start each relative file link target with `./` (architecture.md § Code Mode sessions).
