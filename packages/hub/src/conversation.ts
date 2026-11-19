@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inTranscript } from '@switchboard/core';
-import type { ConversationMessage, ConversationReply, Session, Store } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
 import { CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
 import { MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
@@ -17,6 +17,8 @@ export const CONVERSATION_POLL_MS = 300;
 const SCREEN_AFTER_MS = 5_000;
 /** Items a window's `hello` and each `history` page carry. */
 export const PAGE_ITEMS = 100;
+/** Statuses each `statuses` page carries. */
+export const PAGE_STATUSES = 50;
 
 /** How a session shows in a window's Conversation view. */
 export interface SessionView {
@@ -38,6 +40,22 @@ export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'workI
 /** `provisional`: not in the transcript yet, so placed by when it was first seen (`inTranscript`). */
 export type ReplyView = { type: 'reply'; provisional: boolean } & Omit<ConversationReply, 'workItemId' | 'transcriptUuid'>;
 export type ItemView = MessageView | ReplyView;
+
+/**
+ * The status row's status (architecture.md § Statuses): the session's latest `[status]`, or, before its first, the work item's stage as a
+ * `fallback`, whose ID names the work item and whose `at` is when the stage was reported.
+ */
+export interface StatusView {
+  id: string;
+  sessionId: string | null;
+  at: number;
+  markdown: string;
+  fallback: boolean;
+}
+
+export function statusView(status: ConversationStatus): StatusView {
+  return { id: status.id, sessionId: status.sessionId, at: status.at, markdown: status.markdown, fallback: false };
+}
 
 export function sessionView(session: Session, current: boolean, hooks: boolean): SessionView {
   const state = session.state === 'failed' ? 'idle' : session.state;
@@ -261,8 +279,8 @@ export class ConversationService {
 
   /** Sends a change to the windows showing its session, and to `also`, a window that must hear it wherever its scope moved. */
   #changed(sessionId: string, change: ConversationChange, also?: string): void {
-    // Statuses reach the windows with the status row.
     if (change.type === 'status') {
+      this.#statusChanged(this.deps.windows.showing(sessionId));
       return;
     }
 
@@ -311,6 +329,7 @@ export class ConversationService {
 
         if (streams.size === 0) {
           this.#streams.delete(key);
+          this.#statusShown.delete(key);
         }
       },
     };
@@ -321,7 +340,8 @@ export class ConversationService {
     const scope = this.deps.windows.scope(key);
 
     if (scope === null) {
-      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false };
+      this.#statusShown.delete(key);
+      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null };
     }
 
     const current = scope.sessionId === null ? null : this.deps.store.session(scope.sessionId);
@@ -336,6 +356,9 @@ export class ConversationService {
     }
 
     const page = scope.sessionId === null ? { items: [], more: false } : this.deps.store.conversation(scope.sessionId, null, PAGE_ITEMS, false);
+    const status = this.status(scope);
+
+    this.#statusShown.set(key, JSON.stringify(status));
 
     return {
       protocol: CONVERSATION_PROTOCOL,
@@ -343,7 +366,50 @@ export class ConversationService {
       sessions: current === null ? [] : [sessionView(current, true, this.deps.hooks())],
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
+      status,
     };
+  }
+
+  /**
+   * The status row of a window's scope: its current session's latest status, else its work item's stage as a fallback, else null. Only a work
+   * item has a stage.
+   */
+  status(scope: WindowScope): StatusView | null {
+    const latest = scope.sessionId === null ? null : this.deps.store.latestStatus(scope.sessionId);
+
+    if (latest !== null) {
+      return statusView(latest);
+    }
+
+    const item = this.deps.store.workItem(scope.workItemId);
+
+    if (item?.stage == null || item.stage.trim() === '') {
+      return null;
+    }
+
+    return { id: `stage-${scope.workItemId}`, sessionId: scope.sessionId, at: item.stageAt ?? item.statusAt ?? this.deps.now(), markdown: item.stage, fallback: true };
+  }
+
+  /** The status each window was last sent, so a `status` event goes only when its row changes. */
+  readonly #statusShown = new Map<string, string>();
+
+  /** Sends each of the windows its status row again when it changed: a new or updated status, or the stage that stands in before the first. */
+  #statusChanged(keys: Iterable<string>): void {
+    for (const key of keys) {
+      const scope = this.deps.windows.scope(key);
+
+      if (scope === null || !this.#streams.has(key)) {
+        continue;
+      }
+
+      const status = this.status(scope);
+      const text = JSON.stringify(status);
+
+      if (this.#statusShown.get(key) !== text) {
+        this.#statusShown.set(key, text);
+        this.#send(key, 'status', { status });
+      }
+    }
   }
 
   /** Tells each window whose work item or current session changed, which then starts from empty with a fresh `hello`. */
@@ -378,6 +444,9 @@ export class ConversationService {
         this.#send(key, 'session', { session: view });
       }
     }
+
+    // A stage reported before the session's first status.
+    this.#statusChanged(this.#streams.keys());
   }
 
   /**
@@ -566,6 +635,28 @@ export class ConversationService {
     const page = this.deps.store.conversation(sessionId, before, Math.min((limit as number | undefined) ?? PAGE_ITEMS, PAGE_ITEMS), false);
 
     return { status: 200, body: { items: page.items.filter((item) => !item.withdrawn).map(itemView), more: page.more } };
+  }
+
+  /**
+   * `statuses` (architecture.md § Statuses): the statuses of the window's current session, newest first, before the status `before` names, or
+   * from the latest with null, for the Markdown preview. Refused as `history` is: 403 outside the scope, 409 for a stale `scopeGen`.
+   */
+  statuses(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, sessionId, before, limit } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof sessionId !== 'string' || !(before === null || typeof before === 'string') || !(limit === undefined || (Number.isInteger(limit) && (limit as number) > 0))) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } };
+    }
+
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const page = this.deps.store.statuses(sessionId, before, Math.min((limit as number | undefined) ?? PAGE_STATUSES, PAGE_STATUSES));
+
+    return { status: 200, body: { statuses: page.statuses.map(statusView), more: page.more } };
   }
 }
 

@@ -267,6 +267,70 @@ describe('ConversationService', () => {
     expect(store.conversation('s2', null, 10).items).toHaveLength(2);
   });
 
+  it("says hello with the stage before the session's first status, then each window its own session's latest status, once", async () => {
+    const { view, service, transcript, reply, open, store } = setup();
+
+    store.updateWorkItem(2, { stage: 'Reading the inbox code', stageAt: NOW - 60_000 });
+
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', status: { id: 'stage-2', sessionId: 's2', at: NOW - 60_000, markdown: 'Reading the inbox code', fallback: true } });
+    // Item 3 has no stage, so its row is empty.
+    expect(theirs.frames[0]).toMatchObject({ type: 'hello', status: null });
+
+    // A changed stage reaches the window with the next snapshot, once.
+    store.updateWorkItem(2, { stage: 'Writing the fix', stageAt: NOW });
+    service.sessionsChanged();
+    service.sessionsChanged();
+    expect(mine.frames.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { markdown: 'Writing the fix', fallback: true } }]);
+
+    transcript('D:/w12', 'n2', [reply('a1', 'Fixed.\n[status]\n## Done\n- the badge')]);
+    transcript('D:/w3', 'n3', [reply('b1', 'Theirs.\n[status]\nNot yours.')]);
+    await service.poll();
+    service.sessionsChanged();
+
+    expect(mine.frames.filter((frame) => frame.type === 'status').at(-1)).toMatchObject({ status: { sessionId: 's2', markdown: '## Done\n- the badge', fallback: false } });
+    expect(mine.frames.filter((frame) => frame.type === 'status')).toHaveLength(2);
+    expect(mine.frames.find((frame) => frame.type === 'reply')).toMatchObject({ reply: { opening: 'Fixed.' } });
+    expect(JSON.stringify(mine.frames)).not.toContain('Not yours.');
+    expect(theirs.frames.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { sessionId: 's3', markdown: 'Not yours.' } }]);
+    // The store's work item and reply fields stay in the hub.
+    const shown = mine.frames.filter((frame) => frame.type === 'status').at(-1)!['status'];
+
+    expect(shown).not.toHaveProperty('workItemId');
+    expect(shown).not.toHaveProperty('replyId');
+
+    // A reconnect gets the latest status in its hello.
+    mine.stream.close();
+    expect(open(view.file).frames[0]).toMatchObject({ status: { markdown: '## Done\n- the badge', fallback: false } });
+  });
+
+  it("serves a window's earlier statuses newest first, and refuses another window's session, a forged key or a stale scope generation", async () => {
+    const { view, service, transcript, reply, open } = setup();
+
+    transcript('D:/w12', 'n2', [reply('a1', '[status]\nOne.'), reply('a2', '[status]\nTwo.'), reply('a3', '[status]\nThree.')]);
+    transcript('D:/w3', 'n3', [reply('b1', '[status]\nTheirs.')]);
+    await service.poll();
+
+    const { key, frames } = open(view.file);
+    const other = open(view.otherFile).key;
+    const latest = (frames[0]!['status'] as { id: string; markdown: string });
+
+    expect(latest.markdown).toBe('Three.');
+    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's2', before: latest.id, limit: 1 })).toMatchObject({ status: 200, body: { statuses: [{ markdown: 'Two.', fallback: false }], more: true } });
+    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null })).toMatchObject({ status: 200, body: { statuses: [{ markdown: 'Three.' }, { markdown: 'Two.' }, { markdown: 'One.' }], more: false } });
+    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o3', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.statuses({ window: other, scopeGen: 1, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.statuses({ window: 'forged', scopeGen: 1, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.statuses({ window: key, scopeGen: 0, opId: 'o6', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.statuses({ window: key, scopeGen: 1, sessionId: 's2', before: 3 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } });
+    // Another session's status as the cursor has nothing before it.
+    const theirs = service.statuses({ window: other, scopeGen: 1, opId: 'o7', sessionId: 's3', before: null }) as { body: { statuses: Array<{ id: string }> } };
+
+    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o8', sessionId: 's2', before: theirs.body.statuses[0]!.id })).toEqual({ status: 200, body: { statuses: [], more: false } });
+  });
+
   it("tells a window its session's new state once, and starts a moved window from a fresh hello", () => {
     const { view, service, open, store, scopes } = setup();
     const { frames, key } = open(view.file);
