@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ConversationMessage, ConversationReply, TranscriptCheckpoint } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, ConversationStatus, TranscriptCheckpoint } from '@switchboard/core';
 import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
@@ -33,10 +33,13 @@ export interface ConversationStore {
   hasTranscriptEntry(sessionId: string, uuid: string): boolean;
   checkpoint(sessionId: string): TranscriptCheckpoint | null;
   setCheckpoint(checkpoint: TranscriptCheckpoint): void;
+  /** Adds a status, or updates the one with its ID in place. */
+  setStatus(status: ConversationStatus): void;
+  status(id: string): ConversationStatus | null;
 }
 
 /** What changed in a session's conversation, for the windows that show it. */
-export type ConversationChange = { type: 'message'; message: ConversationMessage } | { type: 'reply'; reply: ConversationReply };
+export type ConversationChange = { type: 'message'; message: ConversationMessage } | { type: 'reply'; reply: ConversationReply } | { type: 'status'; status: ConversationStatus };
 
 export interface ConversationDeps {
   store: ConversationStore;
@@ -86,8 +89,8 @@ export class SessionConversation {
   constructor(
     readonly sessionId: string,
     readonly workItemId: number | null,
-    /** Whether the session's prompt carries the current conversation rules, read at each reply. */
-    private readonly rules: () => boolean,
+    /** The conversation rules version the session's prompt carries, or null for none, read at each reply (`parseReply`). */
+    private readonly rules: () => number | null,
     private readonly deps: ConversationDeps,
   ) {
     this.#hold = new ScreenHold((text, at, aside, via, replaces) => this.#publish(text, at, aside, via, replaces), deps.hold);
@@ -447,6 +450,9 @@ export class SessionConversation {
   /** Publishes a copy: a new reply, or a later copy of one in place (`replaces`). */
   #publish(text: string, at: number, _aside: boolean, via: Via, replaces: string | undefined, move = true): string {
     const parsed = parseReply(text, this.rules());
+
+    // A reply that is only a status rewrites nothing: the view shows it in the status row, not in the timeline.
+    parsed.rewrite &&= parsed.opening !== '';
     const existing = replaces === undefined ? null : this.deps.store.reply(replaces);
 
     if (existing !== null) {
@@ -461,6 +467,7 @@ export class SessionConversation {
       };
 
       this.deps.store.updateReply(existing.id, patch);
+      this.#status(existing.id, via, parsed.status, patch.at);
 
       // A screen copy takes its transcript line's place once that is read.
       if (via === 'transcript' && move) {
@@ -499,6 +506,7 @@ export class SessionConversation {
     };
 
     this.deps.store.addReply(reply);
+    this.#status(reply.id, via, parsed.status, at);
 
     if (parsed.rewrite) {
       this.#rewrite(reply.id);
@@ -508,11 +516,31 @@ export class SessionConversation {
     return reply.id;
   }
 
-  /** A rewrite: it replaces the newest earlier reply that is not an aside, withdrawn, rewritten already or itself. */
+  /**
+   * The status a reply's transcript copy carries, stored as the reply's own, so a later line of the same reply updates it in place. A screen copy's
+   * status is never published: it may be withdrawn, and is still being drawn.
+   */
+  #status(replyId: string, via: Via, markdown: string | null, at: number): void {
+    if (via !== 'transcript' || markdown === null) {
+      return;
+    }
+
+    const id = `st-${replyId}`;
+    const stored = this.deps.store.status(id);
+
+    if (stored?.markdown === markdown) {
+      return;
+    }
+
+    this.deps.store.setStatus({ id, sessionId: this.sessionId, workItemId: this.workItemId, replyId, at: stored?.at ?? at, markdown });
+    this.deps.onChange({ type: 'status', status: this.deps.store.status(id)! });
+  }
+
+  /** A rewrite: it replaces the newest earlier reply that is not an aside, only a status, withdrawn, rewritten already or itself. */
   #rewrite(id: string): void {
     const target = this.deps.store
       .latestReplies(this.sessionId, SEED_REPLIES, id)
-      .find((reply) => reply.id !== id && reply.kind === 'reply' && !reply.withdrawn && reply.rewrittenBy === null && reply.replaces !== id);
+      .find((reply) => reply.id !== id && reply.kind === 'reply' && reply.opening !== '' && !reply.withdrawn && reply.rewrittenBy === null && reply.replaces !== id);
 
     if (target === undefined) {
       return;

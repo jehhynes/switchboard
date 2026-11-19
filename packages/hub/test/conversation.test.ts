@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PERMISSION_PROMPT, Store } from '@switchboard/core';
+import { CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, Store } from '@switchboard/core';
 import type { Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView } from '../src/conversation.js';
@@ -26,8 +26,8 @@ const worktree = (path: string) => ({ id: 1, ticketId: 1, path, branch: null, li
 /** Work items 1 (done) and 2 share a worktree, so one item window; 3 has its own. */
 function world() {
   const done = item(1, { status: 'done', worktree: worktree('D:/w12'), sessions: [session({ id: 's1', workItemId: 1, cwd: 'D:/w12', state: 'ended' })] });
-  const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree('D:/w12'), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: 'D:/w12', codeMode: true, nativeSessionId: 'n2', rulesVersion: 2 })] });
-  const other = item(3, { worktree: worktree('D:/w3'), sessions: [session({ id: 's3', workItemId: 3, cwd: 'D:/w3', codeMode: true, nativeSessionId: 'n3', rulesVersion: 2 })] });
+  const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree('D:/w12'), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: 'D:/w12', codeMode: true, nativeSessionId: 'n2', rulesVersion: CONVERSATION_RULES_VERSION })] });
+  const other = item(3, { worktree: worktree('D:/w3'), sessions: [session({ id: 's3', workItemId: 3, cwd: 'D:/w3', codeMode: true, nativeSessionId: 'n3', rulesVersion: CONVERSATION_RULES_VERSION })] });
   const file = windowOf(current, WINDOWS)!.file;
   const otherFile = windowOf(other, WINDOWS)!.file;
 

@@ -202,7 +202,7 @@ export class ConversationService {
 
     if (reader === undefined) {
       reader = {
-        conversation: new SessionConversation(session.id, session.workItemId, () => this.deps.store.session(session.id)?.rulesVersion === CONVERSATION_RULES_VERSION, {
+        conversation: new SessionConversation(session.id, session.workItemId, () => this.deps.store.session(session.id)?.rulesVersion ?? null, {
           store: this.deps.store,
           now: this.deps.now,
           newId: this.deps.newId,
@@ -261,6 +261,11 @@ export class ConversationService {
 
   /** Sends a change to the windows showing its session, and to `also`, a window that must hear it wherever its scope moved. */
   #changed(sessionId: string, change: ConversationChange, also?: string): void {
+    // Statuses reach the windows with the status row.
+    if (change.type === 'status') {
+      return;
+    }
+
     const item = change.type === 'message' ? itemView({ type: 'message', ...change.message }) : itemView({ type: 'reply', ...change.reply });
     const keys = new Set(this.deps.windows.showing(sessionId));
 

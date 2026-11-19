@@ -2,7 +2,7 @@
  * The version of the conversation rules a Code Mode session's prompt carries (architecture.md § Conversation). Raised whenever the rules change,
  * so the view can tell a session that started with older rules, or none, and show its replies whole.
  */
-export const CONVERSATION_RULES_VERSION = 2;
+export const CONVERSATION_RULES_VERSION = 3;
 
 /**
  * What became of a message typed from the view (architecture.md § Typing a message): `open` while it waits or is being typed, `sent` once the
@@ -73,6 +73,20 @@ export function inTranscript(item: ({ type: 'message'; provisional: boolean } | 
   return item.withdrawn || (item.type === 'message' ? !item.provisional : item.source === 'transcript');
 }
 
+/**
+ * A status a session posted (architecture.md § Statuses): the part of a reply after its `[status]` line, read from the transcript only. One per
+ * reply, so a later line of the same reply updates it in place; the newest is the session's status.
+ */
+export interface ConversationStatus {
+  id: string;
+  sessionId: string;
+  workItemId: number | null;
+  /** The reply it was written in. */
+  replyId: string;
+  at: number;
+  markdown: string;
+}
+
 /** Where the transcript reader of a session stopped, so a hub restart resumes there. */
 export interface TranscriptCheckpoint {
   sessionId: string;
@@ -91,5 +105,5 @@ export interface WindowBinding {
   scopeGen: number;
 }
 
-/** Messages and replies kept per session; older ones are deleted. */
+/** Messages and replies kept per session, and statuses, counted apart; older ones are deleted. */
 export const CONVERSATION_RETENTION = 500;

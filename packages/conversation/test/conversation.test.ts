@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Store } from '@switchboard/core';
+import { CONVERSATION_RULES_VERSION, Store } from '@switchboard/core';
 import { SessionConversation } from '../src/conversation.js';
 import type { ConversationDeps } from '../src/conversation.js';
 import type { ConversationChange } from '../src/conversation.js';
@@ -41,7 +41,7 @@ const queued = (uuid: string, at: number, prompt: string, commandMode = 'prompt'
   });
 
 /** A fake clock and timers for the screen hold. */
-function setup(rules = true) {
+function setup(rules: number | null = CONVERSATION_RULES_VERSION) {
   const store = Store.open(':memory:');
   const clock = { t: T0 };
   const timers: Array<{ run: () => void; at: number; cleared: boolean }> = [];
@@ -390,7 +390,7 @@ describe('SessionConversation', () => {
     append(lines[0]!, lines[1]!);
     conversation.readTranscript(path);
 
-    const restarted = new SessionConversation('s1', 7, () => true, { store, now: () => T0, newId: (() => { let n = 0; return () => `x${++n}`; })(), onChange: () => {}, log: () => {} });
+    const restarted = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, { store, now: () => T0, newId: (() => { let n = 0; return () => `x${++n}`; })(), onChange: () => {}, log: () => {} });
 
     append(lines[2]!);
     restarted.readTranscript(path);
@@ -408,7 +408,7 @@ describe('SessionConversation', () => {
     // A reader after another restart does not take the screen's drawing of either line for a new reply.
     let clock = T0;
     const timers: Array<() => void> = [];
-    const again = new SessionConversation('s1', 7, () => true, {
+    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, {
       store,
       now: () => clock,
       newId: (() => { let n = 0; return () => `y${++n}`; })(),
@@ -459,7 +459,7 @@ describe('SessionConversation', () => {
     conversation.readTranscript(path);
 
     const deps = (prefix: string): ConversationDeps => ({ store, now: () => T0, newId: (() => { let n = 0; return () => `${prefix}${++n}`; })(), onChange: () => {}, log: () => {} });
-    const other = new SessionConversation('s2', 8, () => true, deps('o'));
+    const other = new SessionConversation('s2', 8, () => CONVERSATION_RULES_VERSION, deps('o'));
     const otherPath = join(dir, 'native-2.jsonl');
 
     writeFileSync(otherPath, `${enqueue(T0 + 1, 'Second?')}\n`);
@@ -467,7 +467,7 @@ describe('SessionConversation', () => {
     expect(store.provisionalMessages('s2')).toHaveLength(1);
 
     // A new reader after a restart: m1 was read before it, and its reply's chain reaches it.
-    const restarted = new SessionConversation('s1', 7, () => true, deps('x'));
+    const restarted = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, deps('x'));
 
     append(chained(queued('m2', T0 + 2, 'Second?'), 'm1'), chained(assistant('t1', T0 + 3, 'Tool step.'), 'm2'), chained(assistant('r1', T0 + 4, 'About both.'), 't1'));
     restarted.readTranscript(path);
@@ -478,7 +478,7 @@ describe('SessionConversation', () => {
     expect(r1).toMatchObject({ opening: 'About both.', answers: m2!.id });
 
     // A reply whose chain reaches only a message read before the restart answers that message, not the latest.
-    const again = new SessionConversation('s1', 7, () => true, deps('y'));
+    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, deps('y'));
 
     append(chained(assistant('r2', T0 + 5, 'Back to the first.'), 'm1'));
     again.readTranscript(path);
@@ -530,8 +530,59 @@ describe('SessionConversation', () => {
     expect(items()).toMatchObject([{ id: 'r-1', rewrittenBy: null }, { id: 'r-2', withdrawn: true, replaces: null }]);
   });
 
+  it("takes a status from a reply's transcript copy, never its screen copy, and keeps one per reply, the reply's text before the tag", () => {
+    const { store, conversation, path, append, items, advance, changes } = setup();
+
+    conversation.readScreen(screen('● Fixed.', '', '[status]', '', 'All green.'));
+    advance(300);
+    // The screen copy shows the reply's text alone.
+    expect(items()).toMatchObject([{ opening: 'Fixed.', source: 'screen' }]);
+    expect(store.latestStatus('s1')).toBeNull();
+
+    append(user('u1', T0, 'Status?'), assistant('a1', T0 + 100, 'Fixed.\n\n[status]\n## Where it stands\n- All green.'));
+    conversation.readTranscript(path);
+
+    const [, reply] = items() as Array<{ id: string; opening: string }>;
+
+    expect(reply).toMatchObject({ opening: 'Fixed.', source: 'transcript' });
+    expect(store.latestStatus('s1')).toEqual({ id: `st-${reply!.id}`, sessionId: 's1', workItemId: 7, replyId: reply!.id, at: T0 + 100, markdown: '## Where it stands\n- All green.' });
+    expect(changes.filter((change) => change.type === 'status')).toHaveLength(1);
+
+    // A reply that is only a status has no text, and as a rewrite replaces nothing.
+    append(assistant('a2', T0 + 200, '[rewrite]\n[status]\nNext: ship it.'));
+    conversation.readTranscript(path);
+    expect(items().at(-1)).toMatchObject({ opening: '', replaces: null });
+    expect(items()[1]).toMatchObject({ rewrittenBy: null });
+    expect(store.latestStatus('s1')?.markdown).toBe('Next: ship it.');
+  });
+
+  it('updates a status in place when a later line of its reply adds to it', () => {
+    const { store, conversation, path, append, changes } = setup();
+    const block = (uuid: string, text: string) => JSON.stringify({ type: 'assistant', uuid, timestamp: iso(T0), madeBy: 'model', requestRef: 'q', message: { id: 'msg_1', role: 'assistant', model: 'claude', content: [{ type: 'text', text }] } });
+
+    append(block('a1', 'Done.\n[status]\nFirst part.'));
+    conversation.readTranscript(path);
+    append(block('a2', 'Second part.'));
+    conversation.readTranscript(path);
+
+    const statuses = changes.filter((change) => change.type === 'status').map((change) => (change.type === 'status' ? change.status : null));
+
+    expect(statuses.map((status) => status!.markdown)).toEqual(['First part.', 'First part.\n\nSecond part.']);
+    expect(new Set(statuses.map((status) => status!.id)).size).toBe(1);
+    expect(store.statuses('s1', null, 10).statuses).toHaveLength(1);
+  });
+
+  it('reads no status from a session whose rules predate the status tag, and still reads its asides', () => {
+    const { store, conversation, path, append, items } = setup(2);
+
+    append(assistant('b1', T0, '[aside] Checking.\n[status]\nx'));
+    conversation.readTranscript(path);
+    expect(items()).toMatchObject([{ kind: 'aside', opening: 'Checking.\n[status]\nx' }]);
+    expect(store.latestStatus('s1')).toBeNull();
+  });
+
   it("shows a reply whole for a session whose prompt lacks the current rules", () => {
-    const { conversation, path, append, items } = setup(false);
+    const { conversation, path, append, items } = setup(null);
 
     append(assistant('a1', T0, '[aside] Done.'));
     conversation.readTranscript(path);
@@ -545,7 +596,7 @@ describe('SessionConversation', () => {
     first.conversation.readTranscript(first.path);
 
     let id = 100;
-    const again = new SessionConversation('s1', 7, () => true, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
+    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
 
     first.append(assistant('a2', T0 + 1, 'Two.'));
     again.readTranscript(first.path);
@@ -561,7 +612,7 @@ describe('SessionConversation', () => {
     first.conversation.readTranscript(first.path);
 
     let id = 100;
-    const again = new SessionConversation('s1', 7, () => true, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
+    const again = new SessionConversation('s1', 7, () => CONVERSATION_RULES_VERSION, { store: first.store, now: () => T0, newId: () => String(++id), onChange: () => undefined, log: () => undefined });
 
     writeFileSync(first.path, `${assistant('a1', T0 + 1, 'One.')}\n${assistant('a2', T0 + 2, 'Two.')}\n`);
     again.readTranscript(first.path);

@@ -42,6 +42,8 @@ describe('screen blocks', () => {
 
   it("keeps a code fence's lines as they are and joins none into it", () => {
     expect(unwrap(['Run:', '```', 'npm test', '  --watch', '```', 'then check.'])).toBe('Run:\n```\nnpm test\n  --watch\n```\nthen check.');
+    // A status tag's line stands alone, so the status still splits off.
+    expect(unwrap(['Done. And', 'more', '[status]', 'next line', 'joined'])).toBe('Done. And more\n[status]\nnext line joined');
   });
 
   it("tells a reply's bullet from a tool call's by its colour", () => {

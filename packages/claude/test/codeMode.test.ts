@@ -75,8 +75,8 @@ describe('Code Mode command', () => {
     expect(env['PATH']).toBeUndefined();
   });
 
-  it('appends conversation rules that name only the tags the view reads, aside and rewrite, and set no reply length or shape', () => {
-    expect(CONVERSATION_RULES.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]']);
+  it('appends conversation rules that name only the tags the view reads, aside, rewrite and status, and set no reply length or shape', () => {
+    expect(CONVERSATION_RULES.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]', '[status]']);
     expect(CONVERSATION_RULES).toContain('they do not change how you write');
     expect(CONVERSATION_RULES).not.toMatch(/\bwords\b|\bsentences\b|short answer/);
     expect(CODE_MODE_PROMPT.endsWith(CONVERSATION_RULES)).toBe(true);

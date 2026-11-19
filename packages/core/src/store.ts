@@ -2,7 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 import { ownPrompt } from './group.js';
 import { CONVERSATION_RETENTION } from './conversation.js';
-import type { ConversationMessage, ConversationReply, TranscriptCheckpoint, WindowBinding } from './conversation.js';
+import type { ConversationMessage, ConversationReply, ConversationStatus, TranscriptCheckpoint, WindowBinding } from './conversation.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -402,6 +402,17 @@ export const MIGRATIONS = [
   ALTER TABLE messages ADD COLUMN opId TEXT;
   ALTER TABLE messages ADD COLUMN pastedAt INTEGER;
   CREATE INDEX messagesByOpId ON messages (opId);`,
+  // Statuses a Code Mode session posted (architecture.md § Statuses), in the order they were read.
+  `CREATE TABLE statuses (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    sessionId TEXT NOT NULL,
+    workItemId INTEGER,
+    replyId TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    markdown TEXT NOT NULL
+  );
+  CREATE INDEX statusesBySession ON statuses (sessionId, seq);`,
 ];
 
 /**
@@ -1011,6 +1022,7 @@ export class Store {
     this.#db.prepare('DELETE FROM checkpoints WHERE sessionId IN (SELECT id FROM sessions WHERE workItemId = ?)').run(id);
     this.#db.prepare('DELETE FROM messages WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM replies WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM statuses WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM sessions WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
@@ -1429,6 +1441,48 @@ export class Store {
     this.#db
       .prepare('INSERT INTO checkpoints (sessionId, transcript, offset, lastUuid, lastAt) VALUES (?, ?, ?, ?, ?) ON CONFLICT (sessionId) DO UPDATE SET transcript = excluded.transcript, offset = excluded.offset, lastUuid = excluded.lastUuid, lastAt = excluded.lastAt')
       .run(checkpoint.sessionId, checkpoint.transcript, checkpoint.offset, checkpoint.lastUuid, checkpoint.lastAt);
+  }
+
+  /**
+   * Adds a session's status, or updates the one with its ID in place, keeping its place; keeps the newest `CONVERSATION_RETENTION` statuses of
+   * the session.
+   */
+  setStatus(status: ConversationStatus): void {
+    this.#db
+      .prepare('INSERT INTO statuses (id, sessionId, workItemId, replyId, at, markdown) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET at = excluded.at, markdown = excluded.markdown')
+      .run(status.id, status.sessionId, status.workItemId, status.replyId, status.at, status.markdown);
+    this.#db
+      .prepare('DELETE FROM statuses WHERE sessionId = :id AND seq < (SELECT MIN(seq) FROM (SELECT seq FROM statuses WHERE sessionId = :id ORDER BY seq DESC LIMIT :keep))')
+      .run({ id: status.sessionId, keep: CONVERSATION_RETENTION });
+  }
+
+  status(id: string): ConversationStatus | null {
+    return this.#statusRows('SELECT * FROM statuses WHERE id = ?', id)[0] ?? null;
+  }
+
+  /** A session's newest status; null before its first. */
+  latestStatus(sessionId: string): ConversationStatus | null {
+    return this.#statusRows('SELECT * FROM statuses WHERE sessionId = ? ORDER BY seq DESC LIMIT 1', sessionId)[0] ?? null;
+  }
+
+  /**
+   * A session's statuses, newest first, at most `limit` of those before the status `before` (its ID, or null for the newest), and whether there are
+   * older ones; a status that is gone, or another session's, has none before it.
+   */
+  statuses(sessionId: string, before: string | null, limit: number): { statuses: ConversationStatus[]; more: boolean } {
+    const cursor = before === null ? Number.MAX_SAFE_INTEGER : (this.#db.prepare('SELECT seq FROM statuses WHERE id = ? AND sessionId = ?').get(before, sessionId) as { seq: number } | undefined)?.seq;
+
+    if (cursor === undefined) {
+      return { statuses: [], more: false };
+    }
+
+    const rows = this.#statusRows('SELECT * FROM statuses WHERE sessionId = ? AND seq < ? ORDER BY seq DESC LIMIT ?', sessionId, cursor, limit + 1);
+
+    return { statuses: rows.slice(0, limit), more: rows.length > limit };
+  }
+
+  #statusRows(sql: string, ...params: SQLInputValue[]): ConversationStatus[] {
+    return (this.#db.prepare(sql).all(...params) as unknown as Array<ConversationStatus & { seq: number }>).map(({ seq: _seq, ...status }) => status);
   }
 
   windowBinding(file: string): WindowBinding | null {

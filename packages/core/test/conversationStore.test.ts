@@ -18,6 +18,36 @@ const reply = (id: string, at: number, patch: Partial<ConversationReply> = {}): 
 });
 
 describe('conversation store', () => {
+  it("keeps a session's statuses in the order read, updates one in place, pages them newest first and keeps the newest CONVERSATION_RETENTION", () => {
+    const store = Store.open(':memory:');
+    const status = (id: string, sessionId = 's1', markdown = id) => store.setStatus({ id, sessionId, workItemId: 1, replyId: `r-${id}`, at: 10, markdown });
+
+    expect(store.latestStatus('s1')).toBeNull();
+    status('a');
+    status('b');
+    status('other', 's2');
+    status('c');
+    // A later line of the same reply updates its status and keeps its place.
+    status('a', 's1', 'a, longer');
+
+    expect(store.status('a')).toEqual({ id: 'a', sessionId: 's1', workItemId: 1, replyId: 'r-a', at: 10, markdown: 'a, longer' });
+    expect(store.latestStatus('s1')?.id).toBe('c');
+    expect(store.statuses('s1', null, 2)).toMatchObject({ statuses: [{ id: 'c' }, { id: 'b' }], more: true });
+    expect(store.statuses('s1', 'b', 5)).toMatchObject({ statuses: [{ id: 'a' }], more: false });
+    // A cursor that is gone, or another session's, has nothing before it.
+    expect(store.statuses('s1', 'gone', 5)).toEqual({ statuses: [], more: false });
+    expect(store.statuses('s1', 'other', 5)).toEqual({ statuses: [], more: false });
+
+    for (let index = 0; index < CONVERSATION_RETENTION; index++) {
+      status(`n${index}`);
+    }
+
+    expect(store.status('c')).toBeNull();
+    expect(store.status('n0')).not.toBeNull();
+    expect(store.status('other')).not.toBeNull();
+    expect(store.statuses('s1', null, CONVERSATION_RETENTION + 5).statuses).toHaveLength(CONVERSATION_RETENTION);
+  });
+
   it('lists messages and replies in the order they were added, whatever their times, and pages older ones', () => {
     const store = Store.open(':memory:');
 
@@ -126,7 +156,7 @@ describe('conversation store', () => {
     expect(store.checkpoint('s1')).toMatchObject({ transcript: 'b.jsonl', offset: 0 });
   });
 
-  it("drops a deleted work item's messages, replies and checkpoints", () => {
+  it("drops a deleted work item's messages, replies, statuses and checkpoints", () => {
     const store = Store.open(':memory:');
     const ticket = store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 't', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' } as never);
     const item = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: 0 } as never);
@@ -135,10 +165,14 @@ describe('conversation store', () => {
     store.addReply(reply('r1', 1, { workItemId: item.id }));
     store.addMessage({ id: 'm1', sessionId: 's1', workItemId: item.id, at: 1, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
     store.setCheckpoint({ sessionId: 's1', transcript: 'a', offset: 1, lastUuid: null, lastAt: null });
+    store.setStatus({ id: 'st1', sessionId: 's1', workItemId: item.id, replyId: 'r1', at: 1, markdown: 'x' });
+    store.setStatus({ id: 'st2', sessionId: 's9', workItemId: item.id + 1, replyId: 'r9', at: 1, markdown: 'y' });
     store.deleteWorkItem(item.id);
 
     expect(store.conversation('s1', null, 10).items).toEqual([]);
     expect(store.checkpoint('s1')).toBeNull();
+    expect(store.latestStatus('s1')).toBeNull();
+    expect(store.latestStatus('s9')?.id).toBe('st2');
   });
 
   it('keeps a typed message with its delivery and opId, finds those still awaiting the transcript, and settles open ones after a restart', () => {
