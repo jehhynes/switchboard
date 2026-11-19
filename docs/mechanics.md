@@ -917,8 +917,8 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - An idle session wrote nothing to its pseudo-terminal for 450 s.
   - Reading memory: `tasklist /FO CSV` 1.3 s; `pwsh -NoProfile -Command` with `Get-CimInstance Win32_Process` 1.4 s (0.5 s in a running PowerShell); `Get-Process` with `.Parent` 22.6 s; `wmic` absent. In a running PowerShell, `Get-Process` of every process took 16 ms and `Get-Process -Id` of 20 pids 190 ms. PowerShell started in 450 ms.
 - **Sampled read (2026-11-18, the holder's `MemorySampler`):** one `Get-CimInstance Win32_Process` query in Windows PowerShell returning pid, parent, creation time and working set of 630 processes took 828 to 863 ms over three runs, and summing 20 process trees from it 1.5 to 2.8 ms (`.wip/code-mode-exp/memsample.mjs`). The holder runs that read in the background about every 30 seconds and answers `list` from the last one, so a list does not wait on it.
-- **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit. **Partial.** Passed: `list` answers from the sampled read, under 3 ms for 20 trees. Outstanding: an hour-long run; the memory numbers cover 7 minutes.
-- **Not verified:** Linux `/proc`; growth over an hour.
+- **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit. **Partial** here: `list` answers from the sampled read, under 3 ms for 20 trees, and the memory numbers cover 7 minutes. The hour-long run is M82, which passes E14.
+- **Not verified:** Linux `/proc`. Growth over an hour is M82.
 - **Current use:** the terminal holder's `list` reports each session's tree memory from a background read of the process table (architecture.md § Terminal holder); Code Mode sessions are not implemented yet.
 
 ## M76. node-pty from a packaged extension
@@ -1035,3 +1035,32 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Pass criteria (plan E11, Node.js 22 on Windows x64):** spawn, resize and kill work under Node.js 22 from the built holder and from the extracted package. **Passed.** With M76 this covers Node.js 22 and 24 and Electron 43 on Windows x64.
 - **Not verified:** a Code Mode `claude` held by a holder on Node.js 22; the hub started with the native binary missing; Linux x64 (plan Q8).
 - **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work.
+
+## M82. Memory of idle held Code Mode sessions over an hour
+
+- **Date:** 2026-11-19.
+- **Versions:** Claude Code CLI 2.1.328 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; Node.js 24.14.0, node-pty 1.1.0, @xterm/headless 6.0.0, @xterm/addon-serialize 0.14.0; 617 to 717 processes on the machine during the hour.
+- **Experiment:** the prototype holder (`.wip/code-mode-exp/holder.mjs`, 10,000 lines of scrollback per session) held three Code Mode sessions started as in M63 (`--permission-mode auto --model haiku`, `--settings` `env` with `ANTHROPIC_BASE_URL=https://api.anthropic.com` and the three credential variables empty) on a scratch `CLAUDE_CONFIG_DIR` copied from the M70 one, whose `.claude.json` lists the operator's five user MCP servers, in a scratch git repository. Session 1 was given one turn that replied with the numbers 1 to 10,000, one per line, filling its headless buffer to 10,040 lines (10,000 of scrollback); sessions 2 and 3 got no turn. Neither `!cat` of a 9,800-line file (the shown output is cut to about 20 lines) nor a redirect to `/dev/tty` (the tool's shell has no terminal) put long output on the screen. Then a sampler ran every 60 s for 60 minutes (61 samples), each one `Get-CimInstance Win32_Process` read in Windows PowerShell (M75's method, plus `PrivatePageCount` and the name), summing each session's tree with the holder's `treeOf` and reading the holder's own process; three more samples followed over the next 3 minutes. Nothing was attached and no input was sent during the hour. Raw samples: `.wip/code-mode-exp/e14-hour/samples.jsonl` (the hour) and `samples-after.jsonl` (the three after it); the screen, the kill times and the leftover-process check were read live and not saved.
+- **Result:**
+
+  MB, working set / private bytes, at the first and last of the 61 samples:
+
+  | Process | Start | End (60 min) | Peak | Lowest | End − start |
+  |---|---|---|---|---|---|
+  | Holder (node.exe alone, 3 sessions, one with 10,000 lines) | 137.7 / 120.1 | 67.2 / 120.1 | 138 / 120.2 | 66.9 / 120.1 | -70.5 / 0 |
+  | Session 1 `claude.exe` (10,000-line turn) | 647 / 629.2 | 302.5 / 564.1 | 723.8 / 715.1 | 300.1 / 544 | -344.4 / -65.1 |
+  | Session 1 tree (8 processes) | 951.8 / 823.4 | 479.1 / 758.5 | 1029.5 / 913.8 | 479.1 / 738.4 | -472.7 / -65.0 |
+  | Session 2 `claude.exe` (idle) | 306.9 / 529.8 | 250.4 / 524.8 | 306.9 / 529.8 | 242.7 / 469.5 | -56.6 / -5 |
+  | Session 2 tree (8 processes) | 612 / 730 | 429.5 / 719.6 | 612 / 730 | 422.2 / 664.3 | -182.5 / -10.4 |
+  | Session 3 `claude.exe` (idle) | 304.5 / 533.9 | 247.8 / 502.7 | 304.5 / 533.9 | 240.2 / 467 | -56.7 / -31.2 |
+  | Session 3 tree (8 processes) | 609.7 / 735.2 | 426.8 / 695.9 | 609.7 / 735.2 | 419.2 / 661.8 | -183.0 / -39.3 |
+
+  - Each tree was `claude.exe` and the user MCP servers' `cmd.exe`, `conhost.exe` and three `node.exe` processes, about 305 MB working set and 200 MB private at the start, the same in every session; the member count stayed 8 for the hour.
+  - Private bytes did not grow over the hour: the holder, each `claude.exe` and each tree ended at or below its start (one MCP `node.exe` ended 0.1 MB above). The holder's stayed between 120.1 and 120.2 MB. Idle `claude.exe` private bytes moved within 467 to 534 MB; they rose by small steps from about 482 MB at minute 20 to 503 and 493 MB in the samples after the hour. Session 1's peaked at 715 MB at minute 7 and settled between 544 and 584 MB.
+  - Working sets fell in steps at minutes 36, 41, 46, 51 and 56 (holder 138 to 67 MB, idle `claude.exe` 277 to 243 MB, MCP servers 305 to about 178 MB per tree, session 1's `claude.exe` 559 to 302 MB) while private bytes moved by at most 13 MB, so Windows trimmed them; working set is not a measure of growth here.
+  - A session wrote to its pseudo-terminal about 30 minutes 10 seconds after it started and every 30 minutes after that (13:24:56 and 13:54:56 for session 1, started 12:54:46; 13:28:08 and 13:58:08 for session 2 and 13:28:09 and 13:58:09 for session 3, started 12:57:58), and at no other time after its startup output; the visible screen did not change. Session 2's private bytes rose 7 and 29 MB at those writes, session 3's 4 and 2 MB.
+  - The read: 668 to 1,118 ms (mean 826 ms) per process-table query, 0.4 to 1.9 ms to sum the three trees and the holder's; no read failed.
+  - The holder's `/kill` (`taskkill /T /F`) ended each tree in 1.6 to 1.7 s, and `/shutdown` ended the holder; no process naming the scratch folder or the sessions was left.
+- **Pass criteria (plan E14):** a method under 100 ms per list of 20 sessions; numbers for the idle limit, from an hour-long run. **Passed** on Windows: `list` answers from the sampled read (under 2 ms here for 3 trees, under 3 ms for 20 in M75), and an idle Code Mode session's tree ended the hour at about 430 to 480 MB working set and 690 to 760 MB private (420 to 610 MB and 660 to 735 MB for the never-used ones over the hour), of which the operator's MCP servers are about 180 MB and 200 MB, with no growth over an hour; the holder costs about 120 MB private with three sessions and 10,000 lines in one.
+- **Not verified:** Linux `/proc`; more than an hour, where the small steps in idle private bytes at the 30-minute writes could add up; a session with 10,000 lines of scrollback in the real holder (`packages/holder`); what the 30-minute write is.
+- **Current use:** none. Code Mode sessions are planned, not implemented; this entry gates that work and sets the numbers for their idle limit.
