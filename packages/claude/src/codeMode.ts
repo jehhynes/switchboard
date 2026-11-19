@@ -7,6 +7,7 @@ import { executableDirOnPath } from '@switchboard/core';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
 import { readMarkers } from './install.js';
+import { CONVERSATION_RULES } from './conversationRules.js';
 
 /** The line Claude prints under its banner when Code Mode is on, the start's positive evidence (mechanics M63). */
 export const CODE_MODE_ON = 'Code Mode (experimental) is on';
@@ -31,7 +32,7 @@ export const HOOKS_REQUIRED = 'Code Mode sessions need sessions.installHooks.';
  * leaves, which make a child think it is a subprocess: the dock's list and claude-collab's. Other `CLAUDE_CODE_*` settings pass through.
  */
 const REMOVED =
-  /^(ELECTRON_.*|VSCODE_.*|NODE_OPTIONS|CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_VERSION|CLAUDE_EFFORT|AI_AGENT|CLAUDE_CODE_(CHILD_SESSION|SESSION_ID|ENTRYPOINT|EXECPATH|SSE_PORT|SESSION_ATTENDED|MESSAGING_\w+|EMIT_STARTUP_TIMING|STARTUP_FAILURE_RESULTS|ENABLE_SDK_FILE_CHECKPOINTING|QUESTION_PREVIEW_FORMAT|ENABLE_TASKS)|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
+  /^(ELECTRON_.*|VSCODE_.*|NODE_OPTIONS|CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_VERSION|CLAUDE_EFFORT|AI_AGENT|CLAUDE_CODE_(CHILD_SESSION|SESSION_ID|ENTRYPOINT|EXECPATH|SSE_PORT|SESSION_ATTENDED|MESSAGING_\w+|EMIT_STARTUP_TIMING|STARTUP_FAILURE_RESULTS|ENABLE_SDK_FILE_CHECKPOINTING|QUESTION_PREVIEW_FORMAT|ENABLE_TASKS|NO_FLICKER)|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
 
 /**
  * The environment of a Code Mode session's process, from the hub's: Code Mode on, the direct API, the launch, and an absolute
@@ -73,16 +74,17 @@ This section applies only while a section titled "Focus mode" appears earlier in
 export const LINK_PROMPT = `## Links in this terminal
 Start each relative file link target with "./", as in [filename.ts:42](./src/filename.ts#L42), so VS Code's terminal makes it clickable.`;
 
-/** The panel's sections, then Switchboard's link section, appended to every Code Mode start and resume. */
-export const CODE_MODE_PROMPT = `${PANEL_PROMPT}\n\n${LINK_PROMPT}`;
+/** The panel's sections, then Switchboard's link section and the conversation rules, appended to every Code Mode start and resume. */
+export const CODE_MODE_PROMPT = `${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${CONVERSATION_RULES}`;
 
 /**
  * `--settings` overrides user settings, so a gateway or credential there cannot apply; empty strings remove the credential variables, so the
  * session uses the subscription sign-in (mechanics M64). `viewMode: "focus"` starts the terminal in Focus view and adds the CLI's "Focus mode"
- * prompt section, which the panel's Focus view section requires.
+ * prompt section, which the panel's Focus view section requires. `tui: "default"` keeps the classic renderer, whose finished output scrolls into
+ * the scrollback the screen copy reads, over a user setting of `fullscreen` (architecture.md § Conversation).
  */
 export function codeModeSettings(): string {
-  return JSON.stringify({ env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' }, viewMode: 'focus' });
+  return JSON.stringify({ env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' }, viewMode: 'focus', tui: 'default' });
 }
 
 /** An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). */

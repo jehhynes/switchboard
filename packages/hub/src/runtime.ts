@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { classify, ClaudeRunner, CodeModeRunner, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
+import { classify, ClaudeRunner, CodeModeRunner, CONVERSATION_RULES, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { Comment, FlowAction, FlowEvent, FlowResult, HandledWork, Link, MarkerReading, ObservedFork, ObservedSession, OpenTerminal, OpenVSCode, Paste, PolledTicket, Provider, QueueWait, Session, SessionRunner, Settings, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, launchOptions, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, homeRepo, repoOf, repoRoots, SCHEDULE_SOURCE, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, awaitsRecheck, CONVERSATION_RULES_VERSION, RESUME_PROMPT, effectiveFocus, executableDirOnPath, handle, heldSlots, launchOptions, nothingNew, playbookChoices, PROVIDERS, queueWaits, recordRefusal, reopenRefusal, homeRepo, repoOf, repoRoots, SCHEDULE_SOURCE, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -1023,16 +1023,30 @@ export class Runtime {
    * The report contract of the Switchboard session with this Claude session ID, or of which it is a newer fork not adopted yet (PRD R78),
    * for the hook that restores it after compaction, or null.
    */
-  contract(nativeSessionId: string): string | null {
+  contract(nativeSessionId: string, source: 'compact' | 'resume' = 'compact'): string | null {
     const session = this.deps.store.sessionByNativeId(nativeSessionId) ?? this.runners.claude.forkOf?.(nativeSessionId, this.deps.store.startedSessions().filter((one) => one.codeMode !== true)) ?? null;
 
-    if (session === null) {
+    // A resume keeps the prompt the session started with, contract included; only a Code Mode session gets the current conversation rules.
+    if (session === null || (source === 'resume' && session.codeMode !== true)) {
       return null;
+    }
+
+    if (session.codeMode === true && session.rulesVersion !== CONVERSATION_RULES_VERSION) {
+      this.deps.store.updateSession(session.id, { rulesVersion: CONVERSATION_RULES_VERSION });
+      this.changed();
+    }
+
+    if (source === 'resume') {
+      this.deps.log(`gave session ${session.id} the conversation rules on resume`);
+
+      return CONVERSATION_RULES;
     }
 
     this.deps.log(`restored the report contract of session ${session.id} after compaction`);
 
-    return sessionContract(session.id, this.reportCommand, session.reports, session.provider);
+    const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
+
+    return session.codeMode === true ? `${contract}\n\n${CONVERSATION_RULES}` : contract;
   }
 
   /**

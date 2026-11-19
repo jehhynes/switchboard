@@ -303,11 +303,12 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return refused === null ? { status: 200, body: { recorded: true } } : { status: 409, body: { error: refused } };
       },
       '/contract': async (body) => {
-        if (!isRecord(body) || typeof body['nativeSessionId'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {nativeSessionId}.' } };
+        // An older contract hook names no source; it runs only after a compaction.
+        if (!isRecord(body) || typeof body['nativeSessionId'] !== 'string' || !(body['source'] === undefined || body['source'] === 'compact' || body['source'] === 'resume')) {
+          return { status: 400, body: { error: 'Expected {nativeSessionId, source?} with source compact or resume.' } };
         }
 
-        const contract = runtime.contract(body['nativeSessionId']);
+        const contract = runtime.contract(body['nativeSessionId'], body['source'] ?? 'compact');
 
         return contract === null ? { status: 404, body: { error: 'No Switchboard session has this Claude session ID.' } } : { status: 200, body: { contract } };
       },

@@ -21,12 +21,13 @@ import {
   showsStartPrompt,
 } from '../src/codeMode.js';
 import type { CodeModeRunnerDeps, HolderAccess, HolderLookup } from '../src/codeMode.js';
+import { CONVERSATION_RULES } from '../src/conversationRules.js';
 
 const fixture = (name: string): { head: string; text: string } => JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'codemode', `${name}.json`), 'utf8')) as { head: string; text: string };
 const ON = fixture('on');
 const OFF = fixture('telemetry-off');
 const TRUST = fixture('trust');
-const SETTINGS = '{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_API_KEY":"","ANTHROPIC_AUTH_TOKEN":"","ANTHROPIC_CUSTOM_HEADERS":""},"viewMode":"focus"}';
+const SETTINGS = '{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_API_KEY":"","ANTHROPIC_AUTH_TOKEN":"","ANTHROPIC_CUSTOM_HEADERS":""},"viewMode":"focus","tui":"default"}';
 const NATIVE = '11111111-2222-3333-4444-555555555555';
 const LAUNCH = 'launch-1';
 
@@ -49,6 +50,7 @@ describe('Code Mode command', () => {
         ANTHROPIC_MODEL: 'kept',
         CLAUDE_CODE_GIT_BASH_PATH: 'C:/git/bin/bash.exe',
         CLAUDE_CODE_MESSAGING_PORT: '9',
+        CLAUDE_CODE_NO_FLICKER: '1',
       },
       LAUNCH,
       'claude',
@@ -73,7 +75,14 @@ describe('Code Mode command', () => {
     expect(env['PATH']).toBeUndefined();
   });
 
-  it('overrides the gateway and credentials in --settings, so user settings cannot restore them (mechanics M64), and starts in Focus view', () => {
+  it('appends conversation rules that name only the tags the view reads, aside and rewrite, and set no reply length or shape', () => {
+    expect(CONVERSATION_RULES.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]']);
+    expect(CONVERSATION_RULES).toContain('they do not change how you write');
+    expect(CONVERSATION_RULES).not.toMatch(/\bwords\b|\bsentences\b|short answer/);
+    expect(CODE_MODE_PROMPT.endsWith(CONVERSATION_RULES)).toBe(true);
+  });
+
+  it('overrides the gateway and credentials in --settings, so user settings cannot restore them (mechanics M64), and starts in Focus view in the classic renderer', () => {
     expect(codeModeSettings()).toBe(SETTINGS);
   });
 
@@ -84,7 +93,7 @@ describe('Code Mode command', () => {
   });
 
   it('adds a link section after the panel\'s, so relative link targets start with ./ and the terminal makes them clickable (mechanics M83)', () => {
-    expect(CODE_MODE_PROMPT).toBe(`${PANEL_PROMPT}\n\n${LINK_PROMPT}`);
+    expect(CODE_MODE_PROMPT).toBe(`${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${CONVERSATION_RULES}`);
     expect(LINK_PROMPT).toMatch(/^## Links in this terminal\nStart each relative file link target with "\.\/", as in \[filename\.ts:42\]\(\.\/src\/filename\.ts#L42\), so VS Code's terminal makes it clickable\.$/);
   });
 

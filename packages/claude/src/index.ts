@@ -8,3 +8,4 @@ export * from './debrief.js';
 export * from './fork.js';
 export * from './sessionRunner.js';
 export * from './codeMode.js';
+export * from './conversationRules.js';

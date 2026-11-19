@@ -22,7 +22,7 @@ describe('planHooks', () => {
 
     expect(Object.keys(hooks)).toEqual(HOOK_EVENTS.map(([event]) => event));
     expect(hooks.Stop).toEqual([{ hooks: [ENTRY] }]);
-    expect(hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [CONTRACT_ENTRY] }]);
+    expect(hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact|resume', hooks: [CONTRACT_ENTRY] }]);
     expect(hooks.PreToolUse).toEqual([{ matcher: 'AskUserQuestion|ExitPlanMode', hooks: [ENTRY] }]);
   });
 
@@ -49,8 +49,20 @@ describe('planHooks', () => {
     const older = { hooks: Object.fromEntries(HOOK_EVENTS.map(([event, matcher]) => [event, [matcher === null ? { hooks: [ENTRY] } : { matcher, hooks: [ENTRY] }]])) };
     const upgraded = planHooks(JSON.stringify(older), HOOK, CONTRACT_HOOK, 'node') as { text: string };
 
-    expect(JSON.parse(upgraded.text).hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [CONTRACT_ENTRY] }]);
+    expect(JSON.parse(upgraded.text).hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact|resume', hooks: [CONTRACT_ENTRY] }]);
     expect(planHooks(upgraded.text, HOOK, CONTRACT_HOOK, 'node')).toEqual({ unchanged: true });
+
+    // A contract hook installed for compaction only also runs after a resume; another entry of its group keeps running after compaction only.
+    const other = { type: 'command', command: 'fmt' };
+    const compactOnly = { hooks: { ...older.hooks, SessionStart: [{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [CONTRACT_ENTRY, other] }] } };
+    const rematched = planHooks(JSON.stringify(compactOnly), HOOK, CONTRACT_HOOK, 'node') as { text: string };
+
+    expect(JSON.parse(rematched.text).hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [other] }, { matcher: 'compact|resume', hooks: [CONTRACT_ENTRY] }]);
+    expect(planHooks(rematched.text, HOOK, CONTRACT_HOOK, 'node')).toEqual({ unchanged: true });
+
+    const alone = { hooks: { ...older.hooks, SessionStart: [{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [CONTRACT_ENTRY] }] } };
+
+    expect(JSON.parse((planHooks(JSON.stringify(alone), HOOK, CONTRACT_HOOK, 'node') as { text: string }).text).hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact|resume', hooks: [CONTRACT_ENTRY] }]);
   });
 
   it("gives Switchboard's entries a new sessions.nodePath in place, keeping the other entries and keys", () => {
@@ -63,7 +75,7 @@ describe('planHooks', () => {
     const hooks = JSON.parse(moved.text).hooks;
 
     expect(hooks.Stop).toEqual([{ hooks: [gc, { ...ENTRY, extra: 1, command: node }] }]);
-    expect(hooks.SessionStart).toEqual([{ hooks: [{ ...ENTRY, command: node }] }, { matcher: 'compact', hooks: [{ ...CONTRACT_ENTRY, command: node }] }]);
+    expect(hooks.SessionStart).toEqual([{ hooks: [{ ...ENTRY, command: node }] }, { matcher: 'compact|resume', hooks: [{ ...CONTRACT_ENTRY, command: node }] }]);
     expect(JSON.stringify(hooks)).not.toContain('"command":"node","args":["C:/Users/me/.switchboard');
     expect(planHooks(moved.text, HOOK, CONTRACT_HOOK, node)).toEqual({ unchanged: true });
   });
@@ -94,7 +106,7 @@ describe('planHooks', () => {
     const hooks = JSON.parse(plan.text).hooks;
 
     expect(hooks.Stop).toEqual([{ hooks: [gc] }, { hooks: [entry(`${live}/hook.mjs`)] }, { hooks: [ENTRY] }]);
-    expect(hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact', hooks: [CONTRACT_ENTRY] }]);
+    expect(hooks.SessionStart).toEqual([{ hooks: [ENTRY] }, { matcher: 'compact|resume', hooks: [CONTRACT_ENTRY] }]);
     expect(hooks.Setup).toBeUndefined();
     expect(hooks.PostToolUse).toEqual([{ matcher: 'Write', hooks: [{ type: 'command', command: 'fmt' }] }, { matcher: 'AskUserQuestion|ExitPlanMode', hooks: [ENTRY] }]);
     // This hub's own home and Ground Control's are never checked.
@@ -334,7 +346,15 @@ describe('contract hook', () => {
 
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'Report to Switchboard with these commands:\n- R stage s1 <stage>' } });
-    expect(requests).toEqual([{ authorization: 'Bearer t0k', path: '/contract', body: { nativeSessionId: 'native-1' } }]);
+    expect(requests).toEqual([{ authorization: 'Bearer t0k', path: '/contract', body: { nativeSessionId: 'native-1', source: 'compact' } }]);
+  });
+
+  it('asks for what a resume restores, naming the source, and prints it', async () => {
+    reply = { status: 200, body: { contract: 'Rules' } };
+    const result = await run({ ...compact, source: 'resume' });
+
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'Rules' } });
+    expect(requests).toEqual([{ authorization: 'Bearer t0k', path: '/contract', body: { nativeSessionId: 'native-1', source: 'resume' } }]);
   });
 
   it('prints nothing and exits 0 for another session, a subagent, bad input, or a hub that is gone', async () => {
@@ -344,8 +364,8 @@ describe('contract hook', () => {
     reply = { status: 200, body: { contract: 'C' } };
     expect(await run({ ...compact, agent_id: 'sub' })).toEqual({ status: 0, stdout: '' });
     // Codex runs the hook on every SessionStart, having no matcher (mechanics M31).
-    expect(await run({ ...compact, source: 'resume' })).toEqual({ status: 0, stdout: '' });
     expect(await run({ ...compact, source: 'startup' })).toEqual({ status: 0, stdout: '' });
+    expect(await run({ ...compact, source: 'clear' })).toEqual({ status: 0, stdout: '' });
     expect(await run('not json')).toEqual({ status: 0, stdout: '' });
     expect(requests).toHaveLength(1);
 

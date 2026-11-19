@@ -7,6 +7,7 @@ import type { PermissionMode, Provider, ScheduleSettings, Settings } from './set
 import { REPORT_KINDS } from './model.js';
 import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, WorkItem, WorkItemStatus } from './model.js';
 import { focusUrl } from './focus.js';
+import { CONVERSATION_RULES_VERSION } from './conversation.js';
 import type { Anchor, SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionContract, sessionPrompt, triagePrompt } from './template.js';
@@ -2754,6 +2755,8 @@ class Flow {
       movedAt: null,
       codeMode: held !== null,
       launchId: held?.launchId ?? null,
+      // The start appends the conversation rules (architecture.md § Conversation).
+      rulesVersion: held === null ? null : CONVERSATION_RULES_VERSION,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     // Rows open only the latest session, so an older held one ends (PRD R95).

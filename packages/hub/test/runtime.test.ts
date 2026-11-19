@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { ClaudeRunner } from '@switchboard/claude';
+import { ClaudeRunner, CONVERSATION_RULES } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
@@ -2641,9 +2641,42 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     const [{ action, stored }] = seen as [(typeof seen)[number]];
     expect(action).toMatchObject({ provider: 'claude', codeMode: true, nativeSessionId: expect.stringMatching(UUID), launchId: expect.stringMatching(UUID) });
     expect(action.nativeSessionId).not.toBe(action.launchId);
-    expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId });
+    expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId, rulesVersion: 1 });
     expect(context.store.session(action.sessionId)).toMatchObject({ state: 'running', shortId: action.nativeSessionId!.slice(0, 8) });
     context.runtime.stop();
+  });
+
+  it('gives a Code Mode session the conversation rules after a resume and with its contract after a compaction, and records their version', async () => {
+    const codeMode = fakeRunner();
+    const context = setup(config({ codeMode: true }), () => T0, { codeMode });
+
+    codeMode.start = async (action) => ({ shortId: action.nativeSessionId!.slice(0, 8), nativeSessionId: action.nativeSessionId!, launchId: action.launchId! });
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+
+    const session = context.store.activeSessions()[0]!;
+
+    // A session started before the rules existed.
+    context.store.updateSession(session.id, { rulesVersion: null });
+    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(CONVERSATION_RULES);
+    expect(context.store.session(session.id)?.rulesVersion).toBe(1);
+    expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toMatch(/^Report to Switchboard with these commands:\n[\s\S]*\n\n## Conversation view\n/);
+    context.runtime.stop();
+  });
+
+  it('gives a background session nothing after a resume, which keeps its contract, and only its contract after a compaction', async () => {
+    const { source, runtime, store } = setup();
+
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+
+    const native = store.session('s1')!.nativeSessionId!;
+
+    expect(runtime.contract(native, 'resume')).toBeNull();
+    expect(runtime.contract(native, 'compact')).not.toContain('## Conversation view');
+    expect(store.session('s1')?.rulesVersion ?? null).toBeNull();
+    runtime.stop();
   });
 
   it('applies the background runner\'s observation when the holder read fails, and changes no held session', async () => {

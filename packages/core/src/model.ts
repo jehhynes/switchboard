@@ -225,6 +225,8 @@ export interface Session {
   launchId?: string | null;
   /** The process tree the holder last listed for a Code Mode session, pids with creation times; the resume guard checks it (PRD R95). */
   lastTree?: Array<{ pid: number; created: string }> | null;
+  /** The conversation rules version a Code Mode session's prompt carries, from its start or the contract hook; null for none (architecture.md § Conversation). */
+  rulesVersion?: number | null;
 }
 
 /**
