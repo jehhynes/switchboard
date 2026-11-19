@@ -13,6 +13,13 @@ import type { Reply } from './server.js';
 export interface HubApp {
   post: Record<string, (body: unknown) => Promise<Reply>>;
   snapshot(): unknown;
+  /** Registers a window's `/events` stream and returns its window key (architecture.md § Window scope). */
+  windowOpened?(workspace: string | null): string;
+  windowClosed?(key: string): void;
+  /** The snapshot a window's stream shows: its own work item only. */
+  windowState?(key: string): unknown;
+  /** Opens a window's conversation stream; null for a key no window holds. */
+  conversation?(key: string, write: (frame: string) => void): { close(): void } | null;
   /** The dock view (PRD R71). */
   dock(): object;
   /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
@@ -109,7 +116,16 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   const server = await listenHub({
     identity: { hub: HUB_NAME, protocol: PROTOCOL, version, pid: process.pid },
     onShutdown: () => void stop('a client asked it to stop').then(() => exit(0)),
-    ...(app === undefined ? {} : { post: app.post, snapshot: () => app.snapshot(), dock: () => app.dock() }),
+    ...(app === undefined
+      ? {}
+      : {
+          post: app.post,
+          snapshot: ({ key }: { key: string | null }) => (key !== null && app.windowState !== undefined ? app.windowState(key) : app.snapshot()),
+          dock: () => app.dock(),
+          ...(app.windowOpened === undefined ? {} : { windowOpened: (workspace: string | null) => app.windowOpened!(workspace) }),
+          ...(app.windowClosed === undefined ? {} : { windowClosed: (key: string) => app.windowClosed!(key) }),
+          ...(app.conversation === undefined ? {} : { conversation: (key: string, write: (frame: string) => void) => app.conversation!(key, write) }),
+        }),
   });
 
   // A burst of changes, such as a poll's worktree links, rebuilds the views once.

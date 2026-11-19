@@ -12,12 +12,14 @@ const POLL_MS = 100;
 
 /** The holder calls the hub makes; `HolderClient` provides them. */
 export interface HolderConnection {
-  readonly welcome: { protocol: number; build: string; pid: number };
+  readonly welcome: { protocol: number; build: string; pid: number; features?: string[] };
   readonly compatible: boolean;
   spawn(request: SpawnRequest): Promise<{ session: string; pid: number }>;
   list(): Promise<SessionEntry[]>;
   kill(session: string): Promise<number | null>;
   screen(session: string): Promise<{ head: string; text: string }>;
+  /** Present on a holder client; call it only when `welcome.features` names `snapshot`. */
+  snapshot?(session: string, scrollback: number): Promise<{ data: string; cols: number; rows: number; rev: number }>;
   shutdown(): Promise<void>;
   onClose(listener: () => void): void;
   close(): void;
@@ -93,6 +95,11 @@ export class HolderLink {
   /** The port and token of the holder this link is connected to, which an attach client uses; null while none answered. */
   record(): { port: number; token: string } | null {
     return this.#client === null || this.#answered === null ? null : { port: this.#answered.port, token: this.#answered.token };
+  }
+
+  /** The holder this link is connected to, without a lookup; null while none answered. */
+  connected(): HolderConnection | null {
+    return this.#client?.holder ?? null;
   }
 
   /** Closes the connection; the holder and its sessions keep running. */

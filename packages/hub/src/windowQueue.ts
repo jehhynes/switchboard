@@ -105,12 +105,15 @@ export class WindowQueue {
 
   /**
    * The commands for a window opened from `workspace` that are pending and recent, oldest first, and when the window is `focused`, those for any
-   * window, which the dock left for the window it brought to the front. Claiming removes them.
+   * window, which the dock left for the window it brought to the front. Claiming removes them; one `accepts` refuses stays queued as it was, with
+   * its ID, time and workspace.
    */
-  claimCommands(workspace: string | null, focused: boolean): Record<string, unknown>[] {
+  claimCommands(workspace: string | null, focused: boolean, accepts: (command: Record<string, unknown>) => boolean = () => true): Record<string, unknown>[] {
     const now = this.now();
     const recent = this.queued.commands.filter((pending) => now - pending.at <= OPEN_CLAIM_MS);
-    const mine = recent.filter((pending) => (pending.workspace === null ? focused : workspace !== null && folderKey(pending.workspace) === folderKey(workspace)));
+    const mine = recent.filter(
+      (pending) => (pending.workspace === null ? focused : workspace !== null && folderKey(pending.workspace) === folderKey(workspace)) && accepts(pending.command),
+    );
 
     if (mine.length > 0 || recent.length < this.queued.commands.length) {
       this.update({ ...this.queued, commands: recent.filter((pending) => !mine.includes(pending)) });

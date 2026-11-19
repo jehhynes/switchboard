@@ -13,8 +13,17 @@ export interface HubServerOptions {
   onShutdown(): void;
   /** Handlers for authorized `POST` paths, given the parsed JSON body. */
   post?: Record<string, (body: unknown) => Promise<Reply>>;
-  /** The snapshot, sent as a `state` event when an `/events` stream opens and on each `update`. */
-  snapshot?: () => unknown;
+  /**
+   * The snapshot a window's stream shows, sent as a `state` event when an `/events` stream opens and on each `update`: with window keys, the
+   * window's scoped snapshot (architecture.md § Window scope). Undefined sends nothing, as before the first build.
+   */
+  snapshot?: (window: { workspace: string | null; key: string | null }) => unknown;
+  /** Registers a window's `/events` stream and returns the window key its `hello` carries. */
+  windowOpened?: (workspace: string | null) => string;
+  /** The window's `/events` stream closed, so its key dies. */
+  windowClosed?: (key: string) => void;
+  /** Opens a window's conversation stream for its key, writing each SSE frame; null for a key no window holds. */
+  conversation?: (key: string, write: (frame: string) => void) => { close(): void } | null;
   /**
    * The dock view, sent as a `dock` event when a `/dock/events` stream opens, on each `update`, and when a VS Code window opens, closes or
    * changes focus, with `windows` added (PRD R71).
@@ -47,7 +56,7 @@ export interface HubServer {
   close(): Promise<void>;
 }
 
-type View = 'window' | 'dock';
+type View = 'window' | 'dock' | 'conversation';
 
 /**
  * The VS Code windows the hub's `/events` streams come from: each item window's workspace file, and the one in front, which the dock follows
@@ -108,6 +117,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const clickStreams: ServerResponse[] = [];
   // Each window stream's workspace file, null for a window that is not an item window.
   const workspaces = new Map<ServerResponse, string | null>();
+  // Each window stream's key, when the app issues them.
+  const keys = new Map<ServerResponse, string>();
   let front: string | null = null;
   // When the focus change that set `front` happened, and each window's latest reported change, so a report that arrives late changes nothing.
   let frontAt = -Infinity;
@@ -125,17 +136,23 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
   const openWindows = (): OpenWindows => ({ open: [...new Set([...workspaces.values()].filter((file): file is string => file !== null))], front, count: workspaces.size });
   const dock = options.dock;
-  const views: Record<View, { event: string; data: (() => unknown) | undefined }> = {
-    window: { event: 'state', data: options.snapshot },
+  const views: Record<Exclude<View, 'conversation'>, { event: string; data: ((stream: ServerResponse) => unknown) | undefined }> = {
+    window: { event: 'state', data: options.snapshot === undefined ? undefined : (stream) => options.snapshot!({ workspace: workspaces.get(stream) ?? null, key: keys.get(stream) ?? null }) },
     dock: { event: 'dock', data: dock === undefined ? undefined : () => ({ ...dock(), windows: openWindows(), ...(theme === undefined ? {} : { theme }) }) },
   };
   // Set by stopViews and close: the app that builds the views may already be closed.
   let closing = false;
 
-  const message = (view: View): string | null => {
-    const { event, data } = views[view];
+  /** The view's event for a stream; a window's state is its own, so it is built per stream, the dock's once. */
+  const message = (view: View, stream?: ServerResponse): string | null => {
+    if (view === 'conversation') {
+      return null;
+    }
 
-    return closing || data === undefined ? null : `event: ${event}\ndata: ${JSON.stringify(data())}\n\n`;
+    const { event, data } = views[view];
+    const built = closing || data === undefined || (view === 'window' && stream === undefined) ? undefined : data(stream!);
+
+    return built === undefined ? null : `event: ${event}\ndata: ${JSON.stringify(built)}\n\n`;
   };
 
   const windowsChanged = (): void => {
@@ -173,9 +190,20 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
   /** A window stream's `workspace` names its workspace file, `focused=1` says it has focus, and `at` is when the window read its focus. */
   const openStream = (request: IncomingMessage, response: ServerResponse, view: View, query?: URLSearchParams): void => {
+    const workspace = view === 'window' ? query?.get('workspace') || null : null;
+    const key = view === 'window' ? (options.windowOpened?.(workspace) ?? null) : null;
+
+    if (key !== null) {
+      keys.set(response, key);
+    }
+
+    if (view === 'window') {
+      workspaces.set(response, workspace);
+    }
+
     response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    response.write(`event: hello\ndata: ${JSON.stringify(options.identity)}\n\n`);
-    response.write(message(view) ?? '');
+    response.write(`event: hello\ndata: ${JSON.stringify(key === null ? options.identity : { ...options.identity, window: key })}\n\n`);
+    response.write(message(view, response) ?? '');
     streams.set(response, view);
     emptySince = null;
 
@@ -184,9 +212,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (view === 'window') {
-      const workspace = query?.get('workspace') || null;
-
-      workspaces.set(response, workspace);
       const at = Number(query?.get('at'));
 
       focus(workspace, query?.get('focused') === '1', Number.isFinite(at) && query?.get('at') ? at : now());
@@ -198,6 +223,11 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
       if (clickStreams.includes(response)) {
         clickStreams.splice(clickStreams.indexOf(response), 1);
+      }
+
+      if (keys.has(response)) {
+        options.windowClosed?.(keys.get(response)!);
+        keys.delete(response);
       }
 
       if (workspaces.has(response)) {
@@ -220,6 +250,42 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     });
   };
 
+  /** A window's conversation stream (architecture.md § Conversation API); refused for a key no connected window holds. */
+  const openConversation = (request: IncomingMessage, response: ServerResponse, key: string): void => {
+    let pending: string[] | null = [];
+    const write = (frame: string): void => {
+      if (pending === null) {
+        response.write(frame);
+      } else {
+        pending.push(frame);
+      }
+    };
+    const stream = closing ? null : (options.conversation?.(key, write) ?? null);
+
+    if (stream === null) {
+      json(response, 403, { error: 'Not in this window.' });
+      return;
+    }
+
+    response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+
+    for (const frame of pending) {
+      response.write(frame);
+    }
+
+    pending = null;
+    streams.set(response, 'conversation');
+    emptySince = null;
+    request.on('close', () => {
+      stream.close();
+      streams.delete(response);
+
+      if (streams.size === 0) {
+        emptySince = now();
+      }
+    });
+  };
+
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const path = url.pathname;
@@ -234,6 +300,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       openStream(request, response, 'window', url.searchParams);
     } else if (request.method === 'GET' && path === '/dock/events') {
       openStream(request, response, 'dock', url.searchParams);
+    } else if (request.method === 'GET' && path === '/v1/conversation/events') {
+      openConversation(request, response, url.searchParams.get('window') ?? '');
     } else if (request.method === 'POST' && path === '/window/theme') {
       readJson(request).then(
         (body) => {
@@ -330,10 +398,15 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         clients: () => streams.size,
         emptySince: () => emptySince,
         update: () => {
-          // Each view is built once, and only while a stream shows it.
+          // The dock's view is built once, and only while a stream shows it; each window's is its own.
           const built = new Map<View, string | null>();
 
           for (const [stream, view] of streams) {
+            if (view === 'window') {
+              stream.write(message(view, stream) ?? '');
+              continue;
+            }
+
             if (!built.has(view)) {
               built.set(view, message(view));
             }

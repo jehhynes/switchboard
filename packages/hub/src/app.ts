@@ -22,6 +22,12 @@ import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
 import { WindowQueue } from './windowQueue.js';
+import { ConversationService, claudePaths } from './conversation.js';
+import { buildSnapshot } from './snapshot.js';
+import type { Snapshot } from './snapshot.js';
+import { SnapshotBuilder } from './snapshotBuilder.js';
+import type { Built } from './snapshotBuilder.js';
+import { WindowScopes } from './windows.js';
 import { volumeReply } from './volume.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
@@ -166,6 +172,11 @@ export interface AppOptions {
   codeModeIdleMs?: number;
   /** Overrides for tests. */
   deps?: Partial<RuntimeDeps>;
+  /**
+   * The script that runs the snapshot worker (architecture.md § Hub lifecycle): the hub bundle itself, which runs as the worker when started as
+   * one. Without it the snapshot is built on the main thread.
+   */
+  snapshotWorker?: string;
 }
 
 /** Opens the store, loads configuration, and runs the core for the hub process. */
@@ -276,8 +287,48 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   };
   const watchers: FSWatcher[] = [watch(configDir, (_event, file) => file === 'settings.json' && reload())];
 
+  // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
+  const scopes = new WindowScopes({ store, windows, now: deps.now });
+  const builtListeners: Array<() => void> = [];
+  const builder = new SnapshotBuilder({
+    inputs: () => runtime.snapshotInputs(),
+    inThread: (inputs) => {
+      const snapshot = buildSnapshot(store, inputs);
+
+      return { snapshot, dock: dockView(snapshot, inputs.now, windows) };
+    },
+    onBuilt: (built) => published(built),
+    worker: options.snapshotWorker === undefined ? null : { script: options.snapshotWorker, data: { kind: 'snapshot', db: join(home, 'switchboard.db'), windows } },
+    now: deps.now,
+    log: deps.log,
+  });
+  const conversation = new ConversationService({
+    store,
+    windows: scopes,
+    ...claudePaths(claudeRoot, homedir(), Boolean(process.env['CLAUDE_CONFIG_DIR'])),
+    screen: (session, scrollback) => runtime.heldScreen(session, scrollback),
+    hooks: () => config.settings.sessions.installHooks,
+    now: deps.now,
+    newId: randomUUID,
+    log: deps.log,
+  });
+  /** A finished build: windows bound to a new work item start from empty, and every stream gets the new views. */
+  const published = (built: Built): void => {
+    conversation.scopesChanged(scopes.update(built.snapshot));
+    conversation.sessionsChanged();
+
+    for (const listener of builtListeners) {
+      listener();
+    }
+  };
+  /** The latest views; on the main thread, built again when a change came since, so a reader sees it at once. */
+  const views = (): Built => (builder.inThread && builder.dirty ? builder.buildNow() : (builder.latest() ?? builder.buildNow()));
+
+  runtime.onChange(() => builder.schedule());
+
   await runtime.startup();
   runtime.start();
+  conversation.start();
 
   const debriefTimer = setInterval(() => void debriefs.scan(), DEBRIEF_SCAN_MS);
 
@@ -403,11 +454,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return { status: 200, body: { recorded: true } };
       },
       '/history': async (body) => {
-        if (!isRecord(body) || !Number.isInteger(body['ticketId'])) {
-          return { status: 400, body: { error: 'Expected {ticketId, revision?}.' } };
+        if (!isRecord(body) || !Number.isInteger(body['ticketId']) || typeof body['window'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } };
         }
 
         const ticketId = body['ticketId'] as number;
+
+        // A window reads only its own work item's History, or one the dock sent it (architecture.md § Window scope).
+        if (!scopes.allowsTicket(body['window'], ticketId, views().snapshot)) {
+          return { status: 403, body: { error: 'Not in this window.' } };
+        }
 
         // A reader that names the revision it shows gets the full history only when it changed.
         if (typeof body['revision'] === 'string' && store.ticket(ticketId) !== null && store.historyRevision(ticketId) === body['revision']) {
@@ -419,33 +475,45 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return history === null ? { status: 409, body: { error: `Unknown ticket ${body['ticketId']}.` } } : { status: 200, body: history };
       },
       '/volume': async (body) => volumeReply(store, deps.now(), body),
+      '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/claim': async (body) => {
-        if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean')) {
-          return { status: 400, body: { error: 'Expected {folder, workspace?, focused?}.' } };
+        if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean') || !optionalString(body['window'])) {
+          return { status: 400, body: { error: 'Expected {folder, workspace?, focused?, window?}.' } };
         }
 
         const workspace = body['workspace'] ?? null;
+        const keyed = typeof body['window'] === 'string' && scopes.has(body['window']);
         const claimed = windowQueue.claimOpen(body['folder'], workspace);
         const attach = claimed === null ? null : codeModeOpen(claimed);
         const sessionId = attach === null ? claimed : null;
-        const commands = [...(attach === null ? [] : [attach]), ...windowQueue.claimCommands(workspace, body['focused'] === true)].map((command) =>
+        // A History command the dock left lets the window that claims it, named by its key, read that ticket's History. A claim with no key a
+        // connected window holds leaves it queued as it was, for the next claim, which has one, since the window could not read that History;
+        // it keeps its ID, so the dock can still withdraw it, its time, so it still expires, and its workspace, so it still goes to its window.
+        const accepts = (command: Record<string, unknown>) => keyed || command['type'] !== 'history';
+        const delivered = [...(attach === null ? [] : [attach]), ...windowQueue.claimCommands(workspace, body['focused'] === true, accepts)].map((command) =>
           command['type'] === 'terminal' ? { ...command, ...terminalRun(command) } : command,
         );
+
+        for (const command of delivered.filter((one) => one['type'] === 'history' && Number.isInteger(one['ticketId']))) {
+          scopes.grant(body['window'] as string, command['ticketId'] as number);
+        }
+
         const claimant = workspace ?? (body['folder'] || 'a window with no folder');
+
 
         // The log shows whether a window took what the dock left for it (PRD R71).
         if (claimed !== null) {
           deps.log(`session ${claimed} claimed by ${claimant}${attach === null ? '' : ' as its attach terminal'}`);
         }
 
-        if (commands.length > 0) {
-          deps.log(`window commands claimed by ${claimant}: ${commands.map((command) => String(command['type'])).join(', ')}`);
+        if (delivered.length > 0) {
+          deps.log(`window commands claimed by ${claimant}: ${delivered.map((command) => String(command['type'])).join(', ')}`);
         }
 
         // The window opens the session in its provider's view; an unknown one, such as a deleted session's, in Claude's.
         const provider = sessionId === null ? null : (store.sessionByNativeId(sessionId)?.provider ?? 'claude');
 
-        return { status: 200, body: { sessionId, provider, commands } };
+        return { status: 200, body: { sessionId, provider, commands: delivered } };
       },
       '/window': async (body) => {
         if (!isRecord(body) || !optionalString(body['workspace']) || !isWindowCommand(body['command'], body['workspace'] ?? null)) {
@@ -552,8 +620,12 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
     },
     snapshot: () => runtime.snapshot(),
+    windowOpened: (workspace) => scopes.open(workspace, builder.latest()?.snapshot ?? null),
+    windowClosed: (key) => scopes.close(key),
+    windowState: (key) => scopes.scoped(key, views().snapshot),
+    conversation: (key, write) => conversation.open(key, write),
     dock: () => {
-      const view = dockView(runtime.snapshot(), deps.now(), windows);
+      const view = views().dock;
 
       // The dock opens a row's item window from its file, so the file is there before the view is.
       for (const window of view.groups.flatMap((group) => group.rows.flatMap((row) => (row.window === null ? [] : [row.window])))) {
@@ -585,7 +657,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       sendWindows = send;
     },
     snoozedUrls: () => store.snoozedTickets(deps.now()).flatMap((ticket) => (ticket.url === '' ? [] : [ticket.url])),
-    cards: () => cardsOf(runtime.snapshot()),
+    cards: () => cardsOf(views().snapshot),
     snoozeUrl: (url, until) => {
       const ticket = store.ticketInScopeByUrl(url);
 
@@ -596,11 +668,13 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return ticket === null ? null : { refused: runtime.send({ type: 'restore', ticketId: ticket.id }).refused };
     },
-    onChange: (listener) => void runtime.onChange(listener),
+    onChange: (listener) => void builtListeners.push(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
     close: () => {
       clearTimeout(pending);
       clearInterval(debriefTimer);
+      conversation.stop();
+      builder.close();
       runtime.stop();
 
       for (const watcher of watchers) {

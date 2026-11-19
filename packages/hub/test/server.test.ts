@@ -51,6 +51,58 @@ describe('listenHub', () => {
     }
   });
 
+  it("gives each window a key in its hello and its own state, refuses a conversation stream for a key no window holds, and ends the key with the stream", async () => {
+    const closed: string[] = [];
+    const conversations: string[] = [];
+    let keys = 0;
+
+    server = await listenHub({
+      identity,
+      onShutdown: () => {},
+      windowOpened: (workspace) => `key-${++keys}-${workspace ?? 'folder'}`,
+      windowClosed: (key) => closed.push(key),
+      snapshot: ({ key }) => ({ shownTo: key }),
+      conversation: (key, write) => {
+        if (!key.startsWith('key-')) {
+          return null;
+        }
+
+        write(`event: hello\ndata: {"to":"${key}"}\n\n`);
+        conversations.push(key);
+
+        return { close: () => conversations.push(`closed ${key}`) };
+      },
+    });
+
+    const events: Array<[string, string]> = [];
+    const stream = await openEvents(recordOf(server), () => undefined, 2000, (event, data) => events.push([event, data]), { workspace: 'C:/w/a.code-workspace', focused: '0' });
+
+    await until(() => (events.length >= 2 ? true : null));
+    expect(events.map(([event, data]) => [event, JSON.parse(data)])).toEqual([
+      ['hello', { ...identity, window: 'key-1-C:/w/a.code-workspace' }],
+      ['state', { shownTo: 'key-1-C:/w/a.code-workspace' }],
+    ]);
+
+    expect(await call(server.port, 'GET', '/v1/conversation/events?window=forged', server.token)).toMatchObject({ status: 403, body: JSON.stringify({ error: 'Not in this window.' }) });
+    expect((await call(server.port, 'GET', '/v1/conversation/events?window=key-1', null))?.status).toBe(401);
+
+    const chunks: string[] = [];
+    const outbound = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/events?window=key-1-C%3A%2Fw%2Fa.code-workspace', headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => chunks.push(chunk));
+    });
+
+    outbound.on('error', () => {});
+    outbound.end();
+    await until(() => (chunks.join('').includes('"to"') ? true : null));
+    expect(server.clients()).toBe(2);
+    outbound.destroy();
+    await until(() => (conversations.includes('closed key-1-C:/w/a.code-workspace') ? true : null));
+    stream?.close();
+    await until(() => (closed.length === 1 ? true : null));
+    expect(closed).toEqual(['key-1-C:/w/a.code-workspace']);
+  });
+
   it('answers /hub without a token', async () => {
     server = await listenHub({ identity, onShutdown: () => {} });
 

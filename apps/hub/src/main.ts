@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { switchboardHome } from '@switchboard/core';
-import { ATTACH_TIMEOUT_MS, buildOf, connectHolder, createHubApp, findHub, gitBashRoot, handledBody, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, serveHub, stopHub, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, connectHolder, createHubApp, findHub, gitBashRoot, handledBody, isSnapshotWorker, postToHub, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runSnapshotWorker, serveHub, stopHub, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -243,7 +243,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
   const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const configDir = resolve(flag(argv, 'config') || switchboardHome(home));
-  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }) });
+  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: () => createHubApp({ home, configDir, log, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }) });
 
   if ('existing' in result) {
     process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);
@@ -284,13 +284,18 @@ process.on('unhandledRejection', (error) => {
   process.stderr.write(`unhandledRejection: ${String(error)}\n`);
 });
 
-void main(process.argv.slice(2))
-  .then((code) => {
-    if (code >= 0) {
-      process.exit(code);
-    }
-  })
-  .catch((error: unknown) => {
-    process.stderr.write(`Hub failed: ${String(error)}\n`);
-    process.exit(1);
-  });
+// The hub runs its own bundle again as its snapshot worker (architecture.md § Hub lifecycle).
+if (isSnapshotWorker()) {
+  runSnapshotWorker();
+} else {
+  void main(process.argv.slice(2))
+    .then((code) => {
+      if (code >= 0) {
+        process.exit(code);
+      }
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(`Hub failed: ${String(error)}\n`);
+      process.exit(1);
+    });
+}

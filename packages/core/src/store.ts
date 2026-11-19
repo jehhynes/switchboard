@@ -654,6 +654,17 @@ export class Store {
     this.#db.close();
   }
 
+  /** Runs `fn` in one read transaction, so every query sees the same committed state, as the snapshot worker's build needs. */
+  readTransaction<T>(fn: () => T): T {
+    this.#db.exec('BEGIN');
+
+    try {
+      return fn();
+    } finally {
+      this.#db.exec('COMMIT');
+    }
+  }
+
   /** Runs `fn` in one write transaction; an exception rolls it back. */
   transaction<T>(fn: () => T): T {
     this.#db.exec('BEGIN IMMEDIATE');

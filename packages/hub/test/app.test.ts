@@ -501,7 +501,7 @@ describe('createHubApp', () => {
     expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/2']);
   });
 
-  it('returns a ticket\'s history, or that it is unchanged since a revision, and refuses an unknown ticket with 409 and a missing ticketId with 400 (PRD R59)', async () => {
+  it('returns a ticket\'s history to a window the dock sent it to, or that it is unchanged since a revision, and refuses another window with 403, an unknown ticket with 409 and a missing ticketId with 400 (PRD R59)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const store = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
 
@@ -509,23 +509,48 @@ describe('createHubApp', () => {
     store.close();
 
     const app = await start();
-    const reply = await app.post['/history']!({ ticketId: 1 });
+    const window = app.windowOpened!(null);
+    const other = app.windowOpened!(join(temp.home, 'other.code-workspace'));
+
+    // A window reads only its own work item's History, or one whose History command it claimed (architecture.md § Window scope).
+    expect(await app.post['/history']!({ window, ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+
+    for (const ticketId of [1, 2]) {
+      expect(await app.post['/window']!({ workspace: null, command: { type: 'history', ticketId, key: '#7' } })).toMatchObject({ status: 200 });
+    }
+
+    expect(await app.post['/claim']!({ folder: '', focused: true, window })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }, { type: 'history', ticketId: 2 }] } });
+
+    // A claim with no key a window holds leaves History commands for the next claim.
+    expect(await app.post['/window']!({ workspace: null, command: { type: 'history', ticketId: 1, key: '#7' } })).toMatchObject({ status: 200 });
+    expect(await app.post['/claim']!({ folder: '', focused: true, window: 'stale' })).toMatchObject({ body: { commands: [] } });
+    expect(await app.post['/claim']!({ folder: '', focused: true, window })).toMatchObject({ body: { commands: [{ type: 'history', ticketId: 1 }] } });
+
+    // Another folder window that claimed nothing gets nothing.
+    const bystander = app.windowOpened!(null);
+
+    expect(await app.post['/history']!({ window: bystander, ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+
+    const reply = await app.post['/history']!({ window, ticketId: 1 });
 
     expect(reply.status).toBe(200);
     expect(reply.body).toMatchObject({ ticket: { id: 1, sourceKey: '7', title: 'Seven' }, workItems: [], poolTriages: [], events: [], revision: '0' });
-    expect(await app.post['/history']!({ ticketId: 1, revision: '0' })).toEqual({ status: 200, body: { unchanged: true } });
+    expect(await app.post['/history']!({ window, ticketId: 1, revision: '0' })).toEqual({ status: 200, body: { unchanged: true } });
+    expect(await app.post['/history']!({ window: other, ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await app.post['/history']!({ window: 'forged', ticketId: 1 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
 
     // A snooze is logged, so the revision a reader shows is stale and it gets the full history again.
     expect(await app.post['/action']!({ type: 'snooze', ticketId: 1, until: null })).toMatchObject({ status: 200 });
 
-    const after = await app.post['/history']!({ ticketId: 1, revision: '0' });
+    const after = await app.post['/history']!({ window, ticketId: 1, revision: '0' });
 
     expect(after.body).toMatchObject({ events: [{ type: 'snooze', actor: 'operator', ticketId: 1 }] });
     expect(after.body).not.toHaveProperty('unchanged');
-    expect(await app.post['/history']!({ ticketId: 2 })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
-    expect(await app.post['/history']!({ ticketId: 2, revision: '0' })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
-    expect(await app.post['/history']!({ ticketId: '1' })).toEqual({ status: 400, body: { error: 'Expected {ticketId, revision?}.' } });
-    expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {ticketId, revision?}.' } });
+    expect(await app.post['/history']!({ window, ticketId: 2 })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
+    expect(await app.post['/history']!({ window, ticketId: 2, revision: '0' })).toEqual({ status: 409, body: { error: 'Unknown ticket 2.' } });
+    expect(await app.post['/history']!({ window, ticketId: '1' })).toEqual({ status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } });
+    expect(await app.post['/history']!({ ticketId: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } });
+    expect(await app.post['/history']!(null)).toEqual({ status: 400, body: { error: 'Expected {window, ticketId, revision?}.' } });
   });
 
   it('shows the dock only while a dock stream is connected, and tells it when the config files change', async () => {
@@ -813,7 +838,7 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'w-native', provider: 'claude', commands: [] } });
     expect(await postToHub(record, '/open', { sessionId: 1 }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, cwd, workspace?}.' });
     expect(await postToHub(record, '/open', { sessionId: 'x', cwd: 'D:/x', workspace: 3 }, 5000)).toMatchObject({ status: 400 });
-    expect(await postToHub(record, '/claim', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {folder, workspace?, focused?}.' });
+    expect(await postToHub(record, '/claim', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {folder, workspace?, focused?, window?}.' });
     expect(await postToHub(record, '/claim', { folder: '', focused: 'yes' }, 5000)).toMatchObject({ status: 400 });
     const settings = await postToHub(record, '/window', { workspace: null, command: { type: 'openUrl', url: 'D:/drafts/reply.md' } }, 5000);
 
@@ -824,7 +849,9 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/window', { workspace: null, command: { type: 'log' } }, 5000)).toMatchObject({ status: 200 });
     expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' } }, 5000)).toMatchObject({ status: 200 });
     expect(await postToHub(record, '/claim', { folder: '', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }, { type: 'log' }] } });
+    // A History command waits for a claim that names a window key, so the window that takes it can read that History.
+    expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'log' }] } });
+    expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true, window: app.windowOpened!(null) }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }] } });
     expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 200 });
     expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({
       status: 200,
@@ -877,7 +904,8 @@ describe('createHubApp', () => {
       'window command N history left for any window',
       'window command N log left for any window',
       'window command N changes left for C:/h/w.code-workspace',
-      'window commands claimed by a window with no folder: history, log',
+      'window commands claimed by a window with no folder: log',
+      'window commands claimed by a window with no folder: history',
       'window command N openTabs left for C:/h/w.code-workspace',
       'window commands claimed by C:/h/w.code-workspace: changes, openTabs',
       'window command N terminal left for C:/h/w.code-workspace',

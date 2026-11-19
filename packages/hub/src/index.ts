@@ -22,3 +22,7 @@ export * from './holder.js';
 export * from './attach.js';
 export * from './held.js';
 export * from './holderCli.js';
+export * from './conversation.js';
+export * from './snapshotBuilder.js';
+export * from './snapshotWorker.js';
+export * from './windows.js';
