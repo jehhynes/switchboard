@@ -50,11 +50,29 @@ export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, c
 }
 
 /**
+ * Sections of the system prompt the VS Code extension appends to its Claude panel, copied word for word from its `extension.js`, version
+ * 2.1.327, so a Code Mode session writes as the panel does: file references as relative Markdown links, and text between tool calls kept
+ * visible in Focus view. The panel's "User Selection Context" and "Who you are writing for" sections are left out.
+ */
+export const PANEL_PROMPT = `## Code References in Text
+IMPORTANT: When referencing files or code locations, use markdown link syntax to make them clickable:
+- For files: [filename.ts](src/filename.ts)
+- For specific lines: [filename.ts:42](src/filename.ts#L42)
+- For a range of lines: [filename.ts:42-51](src/filename.ts#L42-L51)
+- For folders: [src/utils/](src/utils/)
+Unless explicitly asked for by the user, DO NOT USE backtickets \` or HTML tags like code for file references - always use markdown [text](link) format.
+The URL links should be relative paths from the root of  the user's workspace.
+
+## Focus view in this editor
+This section applies only while a section titled "Focus mode" appears earlier in this prompt; if there is none, ignore this section. That section describes the terminal's Focus view and does not apply here, and neither does guidance above that text between tool calls may not be shown to the user, or that you should close with a recap that stands on its own. In this editor's Focus view, tool calls, tool results, and thinking are collapsed into expandable summary rows, and every text message you write stays visible in order, including text between tool calls, so the user can see it. Brief updates between tool calls are fine. Do not repeat what you already said in your final message; if the tool calls since your last text message did not change what you said, a brief closing note is enough. Still end each turn with a text message, even a short one, rather than ending on a tool call. If you are running as a subagent, ignore this section. Only your final message is returned to your caller, so put everything it needs there.`;
+
+/**
  * `--settings` overrides user settings, so a gateway or credential there cannot apply; empty strings remove the credential variables, so the
- * session uses the subscription sign-in (mechanics M64).
+ * session uses the subscription sign-in (mechanics M64). `viewMode: "focus"` starts the terminal in Focus view and adds the CLI's "Focus mode"
+ * prompt section, which the panel's Focus view section requires.
  */
 export function codeModeSettings(): string {
-  return JSON.stringify({ env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' } });
+  return JSON.stringify({ env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' }, viewMode: 'focus' });
 }
 
 /** An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). */
@@ -68,16 +86,20 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
     action.name,
     ...(action.model === null ? [] : ['--model', action.model]),
     '--append-system-prompt',
-    action.contract,
+    `${action.contract}\n\n${PANEL_PROMPT}`,
     '--settings',
     codeModeSettings(),
     action.prompt,
   ];
 }
 
-/** A promptless resume, which reads as idle until the operator types (mechanics M68). */
+/**
+ * A promptless resume, which reads as idle until the operator types (mechanics M68). Claude resends the start's system prompt until a
+ * compaction, which renders it again from this process's flags (mechanics M30), so the resume appends the panel's sections; the contract hook
+ * restores the contract after a compaction.
+ */
 export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null): string[] {
-  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--settings', codeModeSettings()];
+  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', PANEL_PROMPT, '--settings', codeModeSettings()];
 }
 
 /** The file the pseudo-terminal runs: Windows looks for `claude.exe` when the path names no extension. */

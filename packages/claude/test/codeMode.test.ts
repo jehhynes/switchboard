@@ -9,6 +9,7 @@ import {
   CODE_MODE_IDLE_MS,
   CodeModeRunner,
   HOOKS_REQUIRED,
+  PANEL_PROMPT,
   claudeFile,
   codeModeEnvironment,
   codeModeEvidence,
@@ -23,7 +24,7 @@ const fixture = (name: string): { head: string; text: string } => JSON.parse(rea
 const ON = fixture('on');
 const OFF = fixture('telemetry-off');
 const TRUST = fixture('trust');
-const SETTINGS = '{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_API_KEY":"","ANTHROPIC_AUTH_TOKEN":"","ANTHROPIC_CUSTOM_HEADERS":""}}';
+const SETTINGS = '{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_API_KEY":"","ANTHROPIC_AUTH_TOKEN":"","ANTHROPIC_CUSTOM_HEADERS":""},"viewMode":"focus"}';
 const NATIVE = '11111111-2222-3333-4444-555555555555';
 const LAUNCH = 'launch-1';
 
@@ -70,20 +71,26 @@ describe('Code Mode command', () => {
     expect(env['PATH']).toBeUndefined();
   });
 
-  it('overrides the gateway and credentials in --settings, so user settings cannot restore them (mechanics M64)', () => {
+  it('overrides the gateway and credentials in --settings, so user settings cannot restore them (mechanics M64), and starts in Focus view', () => {
     expect(codeModeSettings()).toBe(SETTINGS);
+  });
+
+  it("appends only the panel's Code References and Focus view sections", () => {
+    expect(PANEL_PROMPT.match(/^## .*$/gm)).toEqual(['## Code References in Text', '## Focus view in this editor']);
+    expect(PANEL_PROMPT).toContain('DO NOT USE backtickets ` or HTML tags');
+    expect(PANEL_PROMPT).toMatch(/^## Code References in Text\n[\s\S]*the user's workspace\.\n\n## Focus view in this editor\nThis section applies only while a section titled "Focus mode"[\s\S]*so put everything it needs there\.$/);
   });
 
   it('starts with the session ID, permission mode, name, model, contract and settings, and the prompt as one last argument', () => {
     const action = { permissionMode: 'auto', name: 'Switchboard · #12', model: 'haiku', contract: 'Report with …', prompt: '/fix the bug\nnow' } as const;
 
-    expect(codeModeStartArgs(action, NATIVE)).toEqual(['--session-id', NATIVE, '--permission-mode', 'auto', '-n', 'Switchboard · #12', '--model', 'haiku', '--append-system-prompt', 'Report with …', '--settings', SETTINGS, '/fix the bug\nnow']);
+    expect(codeModeStartArgs(action, NATIVE)).toEqual(['--session-id', NATIVE, '--permission-mode', 'auto', '-n', 'Switchboard · #12', '--model', 'haiku', '--append-system-prompt', `Report with …\n\n${PANEL_PROMPT}`, '--settings', SETTINGS, '/fix the bug\nnow']);
     expect(codeModeStartArgs({ ...action, model: null }, NATIVE)).not.toContain('--model');
   });
 
-  it('resumes with no prompt, keeping the permission mode, model and settings', () => {
-    expect(codeModeResumeArgs(NATIVE, 'manual', 'opus')).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--settings', SETTINGS]);
-    expect(codeModeResumeArgs(NATIVE, 'auto', null)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--settings', SETTINGS]);
+  it("resumes with no prompt, keeping the permission mode, model and settings, and appends the panel's sections for after a compaction", () => {
+    expect(codeModeResumeArgs(NATIVE, 'manual', 'opus')).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--append-system-prompt', PANEL_PROMPT, '--settings', SETTINGS]);
+    expect(codeModeResumeArgs(NATIVE, 'auto', null)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', PANEL_PROMPT, '--settings', SETTINGS]);
   });
 
   it('runs claude.exe on Windows when the path names no extension', () => {
