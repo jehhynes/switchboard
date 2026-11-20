@@ -291,7 +291,12 @@ public static class SettingsPages
 
         var remove = new PageButton("remove-persona", "Remove persona", true, Argument: at, Tip: "Removes the persona and its playbook assignments from the draft. Sessions that have it keep its ID and speak with the voice settings.");
         var title = state.PersonaId(index) is { } id ? $"Persona {id}" : $"Persona {index + 1}";
-        var view = SettingsPage(state, title, SettingsFields.PersonaFields(state, index), [remove], []);
+        // A persona named like a voice reads as a voice choice in the settings and in voice.playbookPersonas.
+        var name = SettingsFields.GetAt(state.SettingsValue, $"voice.personas[{index}].name") is JsonValue value && value.TryGetValue<string>(out var text) ? text.Trim() : "";
+        var notes = SettingsFields.TtsVoices.Contains(name.ToLowerInvariant())
+            ? new[] { $"{name} is also the name of an OpenAI voice, which makes the settings hard to read. Choose another name." }
+            : [];
+        var view = SettingsPage(state, title, SettingsFields.PersonaFields(state, index), [remove], notes);
 
         return view.Sections.Count == 0 && view.Message is null ? view with { Message = "Fix this entry in settings.json in an editor, or remove it." } : view;
     }

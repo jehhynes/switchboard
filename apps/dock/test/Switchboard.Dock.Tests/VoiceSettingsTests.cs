@@ -201,6 +201,22 @@ public sealed class VoiceSettingsTests
         Assert.Equal("This persona no longer exists.", SettingsPages.Page(state).Message);
     }
 
+    [Theory]
+    [InlineData(" Cedar ", true)]
+    [InlineData("shimmer", true)]
+    [InlineData("Cedric", false)]
+    public void Page_PersonaNamedLikeAVoice_WarnsToChooseAnotherName(string name, bool warns)
+    {
+        var state = State();
+
+        state.SetDraft(SettingsFields.SetAt(state.SettingsValue!, "voice.personas[1].name", name));
+        state.Page = "persona:1";
+
+        var notes = SettingsPages.Page(state).Notes;
+
+        Assert.Equal(warns ? [$"{name.Trim()} is also the name of an OpenAI voice, which makes the settings hard to read. Choose another name."] : [], notes);
+    }
+
     [Fact]
     public void Page_PersonaNotAnObject_ShowsItsErrorAndRemove()
     {
@@ -486,8 +502,12 @@ public sealed class VoiceSettingsTests
         Click(Tagged(window, "create"));
 
         Assert.Equal("persona:2", editor.State!.Page);
+        Named<TextBox>(window, "field:voice.personas[2].name").Text = "Sage";
+        Settle();
+        Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), (text) => text.Text == "Sage is also the name of an OpenAI voice, which makes the settings hard to read. Choose another name.");
         Named<TextBox>(window, "field:voice.personas[2].name").Text = "Vega";
         Settle();
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<TextBlock>(), (text) => text.Text?.Contains("OpenAI voice", StringComparison.Ordinal) == true);
         Assert.Contains(window.GetVisualDescendants().OfType<Button>(), (button) => button.Classes.Contains("nav") && (string?)button.Tag == "persona:2" && button.GetVisualDescendants().OfType<TextBlock>().Any((text) => text.Text == "Vega"));
 
         Click(Tagged(window, "remove-persona"));
