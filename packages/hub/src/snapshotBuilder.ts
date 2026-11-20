@@ -90,10 +90,13 @@ export class SnapshotBuilder {
     }
   }
 
-  close(): void {
+  /** Stops building; resolves once the worker has ended and so closed its read-only store. */
+  async close(): Promise<void> {
+    const worker = this.#worker;
+
     this.#closed = true;
-    void this.#worker?.terminate();
     this.#worker = null;
+    await worker?.terminate();
   }
 
   async #run(): Promise<void> {

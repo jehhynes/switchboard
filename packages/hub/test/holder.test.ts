@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseHolderRecord, recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HolderLink } from '../src/holder.js';
 import type { HolderConnection, HolderLinkDeps } from '../src/holder.js';
 
@@ -23,17 +23,23 @@ function alive(pid: number): boolean {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const pid of pids.splice(0).filter(alive)) {
-    if (process.platform === 'win32') {
-      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
-    } else {
-      process.kill(pid, 'SIGKILL');
+    try {
+      if (process.platform === 'win32') {
+        execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        process.kill(pid, 'SIGKILL');
+      }
+    } catch {
+      // taskkill fails when the process, or a member of its tree, ended while it ran; termination completes after it returns.
     }
+
+    await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5_000 });
   }
 
   for (const home of homes.splice(0)) {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

@@ -914,7 +914,10 @@ describe('ConversationService', () => {
   });
 });
 
-describe('ConversationService send', () => {
+describe('ConversationService send', { timeout: 20_000 }, () => {
+  /** Waits for typing to settle: each screen read replays it in xterm, which waits on a real timer, so the wait has no budget of its own below the test's. */
+  const settled = (check: () => void) => vi.waitFor(check, { timeout: 15_000 });
+
   function setupSend(held = new FakeHeld(), holderAnswerMs?: number, voice?: ConversationVoice, extra: Partial<ConversationServiceDeps> = {}) {
     const store = Store.open(':memory:');
     const view = world();
@@ -974,7 +977,7 @@ describe('ConversationService send', () => {
 
     expect(answer).toMatchObject({ status: 200, body: { message: { type: 'message', id: 'm-1', origin: 'typed', text: 'Fix the build', delivery: 'open', error: null } } });
     expect((answer.body as { message: object }).message).not.toHaveProperty('opId');
-    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
 
     expect(held.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r']);
     expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
@@ -1023,14 +1026,14 @@ describe('ConversationService send', () => {
 
     expect(mine.frames[0]).toMatchObject({ type: 'hello', voice: { enabled: true, here: true, mic: 'off' }, settings: { expandReplies: true } });
     expect(service.send(body(mine.key, { text: '/x why' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: '/x why', spokenRequested: true } } });
-    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
     expect(held.writes[0]).toBe('\u001b[200~[spoken] [expressive] \\/x why\u001b[201~');
     await service.poll();
     expect(store.conversation('s2', null, 10).items).toMatchObject([{ id: 'm-1', text: '/x why', transcriptUuid: 'typed-2', spokenRequested: true }]);
 
     // A slash command chosen from the list goes untagged.
     expect(service.send(body(mine.key, { opId: 'op-2', text: '/compact', command: true }))).toMatchObject({ status: 200, body: { message: { spokenRequested: false } } });
-    await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-2')?.delivery).toBe('sent'));
     expect(held.writes[2]).toBe('\u001b[200~/compact\u001b[201~');
     expect(calls.filter((call) => call.startsWith('spokenFor'))).toEqual(['spokenFor s2 false', 'spokenFor s2 true']);
   });
@@ -1100,13 +1103,13 @@ describe('ConversationService send', () => {
     const mine = open(view.file);
 
     expect(service.send(body(mine.key, { text: 'Fix the build, please' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', pieces, spokenRequested: true } } });
-    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
     expect(holder.writes[0]).toBe('\u001b[200~[spoken] [voice] Fix the build, please\u001b[201~');
     expect(calls).toContain('delivered m-1 sent');
 
     // The voice's own turn, and a [partial] part, which never asks for a spoken reply.
     expect(service.dictate(mine.key, 's2', 'and the tests', pieces, true)).toMatchObject({ message: { id: 'm-3', origin: 'voice', partial: true, spokenRequested: false } });
-    await vi.waitFor(() => expect(store.message('m-3')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-3')?.delivery).toBe('sent'));
     expect(holder.writes.at(-2)).toBe('\u001b[200~[voice] [partial] and the tests\u001b[201~');
     expect(service.dictate(mine.key, 's2', 'too', pieces, false)).toMatchObject({ message: { origin: 'voice', spokenRequested: true } });
 
@@ -1114,7 +1117,9 @@ describe('ConversationService send', () => {
     const sent = service.dictate(null, 's2', 'from the terminal', pieces, false);
 
     expect(sent).toMatchObject({ message: { origin: 'voice', spokenRequested: true } });
-    await vi.waitFor(() => expect(holder.writes).toContain('\u001b[200~[spoken] [voice] from the terminal\u001b[201~'));
+    // The queue types in order, so this, the last message, settling means none is still typing when the test's folder is removed.
+    await settled(() => expect(store.message((sent as { message: { id: string } }).message.id)?.delivery).toBe('sent'));
+    expect(holder.writes).toContain('\u001b[200~[spoken] [voice] from the terminal\u001b[201~');
     const before = mine.frames.length;
 
     expect(service.dictate(null, 'nope', 'hello', pieces, false)).toEqual({ refused: 'The session has ended. Open it in the terminal to resume it.' });
@@ -1147,7 +1152,7 @@ describe('ConversationService send', () => {
     const mine = open(view.file);
 
     expect(service.send(body(mine.key, { text: 'hold on' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', interrupted } } });
-    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
     expect(holder.writes[0]).toBe('\u001b[200~[spoken] [voice] [heard all of your reply but: "is refreshed in two places."] hold on\u001b[201~');
     expect(store.message('m-1')).toMatchObject({ text: 'hold on', interrupted });
     expect(typedText(store.message('m-1')!, false, true)).toBe('[spoken] [voice] [heard all of your reply but: "is refreshed in two places."] hold on');
@@ -1158,7 +1163,7 @@ describe('ConversationService send', () => {
     expect(part).toMatchObject({ message: { partial: true } });
     expect(part).not.toHaveProperty('message.interrupted');
     expect(service.dictate(mine.key, 's2', 'stop', pieces, false, { replyId: 'r2', said: '', rest: 'Done.' })).toMatchObject({ message: { interrupted: { replyId: 'r2' } } });
-    await vi.waitFor(() => expect(holder.writes.some((write) => write.includes('[voice] [interrupted your reply before its first words] stop'))).toBe(true));
+    await settled(() => expect(holder.writes.some((write) => write.includes('[voice] [interrupted your reply before its first words] stop'))).toBe(true));
     // A typed message holds no dictation, and so names no reply.
     voice.dictated = () => null;
     held = interrupted;
@@ -1167,6 +1172,8 @@ describe('ConversationService send', () => {
     expect(typed).toMatchObject({ status: 200, body: { message: { origin: 'typed', text: 'typed' } } });
     expect(typed).not.toHaveProperty('body.message.interrupted');
     expect(held).toEqual(interrupted);
+    // The last message settling means none is still typing when the test's folder is removed.
+    await settled(() => expect(store.message((typed.body as { message: { id: string } }).message.id)?.delivery).toBe('sent'));
   });
 
   it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {
@@ -1268,9 +1275,9 @@ describe('ConversationService send', () => {
     expect(held.writes).toEqual([]);
 
     expect(service.send(body(key, { opId: 'op-c3', text: '/compact keep the plan', command: true }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: '/compact keep the plan' } } });
-    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
     expect(service.send(body(key, { opId: 'op-c4', text: '/compact keep the plan', command: false }))).toMatchObject({ status: 200 });
-    await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-2')?.delivery).toBe('sent'));
 
     expect(held.writes).toEqual(['\u001b[200~/compact keep the plan\u001b[201~', '\r', '\u001b[200~\\/compact keep the plan\u001b[201~', '\r']);
   });
@@ -1281,9 +1288,9 @@ describe('ConversationService send', () => {
 
     held.menu = true;
     service.send(body(key));
-    await vi.waitFor(() => expect(logs).toContain('session s2: a message waits, a menu is open'));
+    await settled(() => expect(logs).toContain('session s2: a message waits, a menu is open'));
     store.updateSession('s2', { state: 'ended' });
-    await vi.waitFor(() => expect(store.message('m-1')).toBeNull());
+    await settled(() => expect(store.message('m-1')).toBeNull());
 
     // It leaves the conversation; its last event tells the window why, with its text, so the composer can take it back.
     expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-1', text: 'Fix the build', delivery: 'not-sent', error: 'The session has ended. Open it in the terminal to resume it.' } });
@@ -1302,7 +1309,7 @@ describe('ConversationService send', () => {
 
     held.refuse = 'The session has ended. Open it in the terminal to resume it.';
     service.send(body(key));
-    await vi.waitFor(() => expect(store.message('m-1')).toBeNull());
+    await settled(() => expect(store.message('m-1')).toBeNull());
     held.refuse = null;
 
     held.menu = true;
@@ -1311,7 +1318,7 @@ describe('ConversationService send', () => {
     // The window has moved on to the newer session, yet it still hears that its message was not sent.
     vi.spyOn(scopes, 'showing').mockReturnValue([]);
     held.menu = false;
-    await vi.waitFor(() => expect(store.message('m-2')).toBeNull());
+    await settled(() => expect(store.message('m-2')).toBeNull());
     expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-2', delivery: 'not-sent', text: 'Fix the build' } });
     expect(logs).toContain('session s2: message m-2 not-sent: A newer session of this work item started; the message was not sent.');
     expect(held.writes).toEqual([]);
@@ -1322,7 +1329,7 @@ describe('ConversationService send', () => {
 
     store.insertSession({ ...(store.session('s2') as StoredSession), id: 's2b', nativeSessionId: 'n2b', startedAt: NOW + 1 });
     expect(service.dictate(null, 's2', 'run the tests', [{ text: 'run the tests', score: null, f0: null, dropped: false }], false)).toMatchObject({ message: { origin: 'voice' } });
-    await vi.waitFor(() => expect(held.writes).toContain('\u001b[200~[voice] run the tests\u001b[201~'));
+    await settled(() => expect(held.writes).toContain('\u001b[200~[voice] run the tests\u001b[201~'));
     expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
   });
 
@@ -1348,7 +1355,7 @@ describe('ConversationService send', () => {
     // The paste is never answered, and the input box does not hold it, so it counts as sent; its transcript line places it if it lands.
     held.write = () => new Promise(() => undefined);
     service.send(body(key));
-    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
     expect(store.message('m-1')?.error).toBeNull();
     expect(held.released).toBe(1);
 
@@ -1356,7 +1363,7 @@ describe('ConversationService send', () => {
     held.write = write;
     held.screen = () => new Promise(() => undefined);
     service.send(body(key, { opId: 'op-2' }));
-    await vi.waitFor(() => expect(store.message('m-2')).toBeNull());
+    await settled(() => expect(store.message('m-2')).toBeNull());
     expect(logs).toContain('session s2: message m-2 not-sent: The terminal holder did not answer.');
   });
 
@@ -1372,7 +1379,7 @@ describe('ConversationService send', () => {
     service.send(body(key, { opId: 'op-2', text: 'Second' }));
     store.updateSession('s2', { state: 'running' });
     held.menu = false;
-    await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-2')?.delivery).toBe('sent'));
     expect(held.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r', '\u001b[200~Second\u001b[201~', '\r']);
   });
 
@@ -1386,7 +1393,7 @@ describe('ConversationService send', () => {
     const service = make();
 
     service.open(scopes.open(view.file, view.view), () => undefined);
-    await vi.waitFor(() => expect(store.message('m-spoken')).toBeNull());
+    await settled(() => expect(store.message('m-spoken')).toBeNull());
     service.stop();
     // The box held exactly what was typed, so it was cleared.
     expect(held.writes).toEqual(['\u0015']);
@@ -1419,7 +1426,7 @@ describe('ConversationService send', () => {
 
     const frames = stream(service);
 
-    await vi.waitFor(() => expect(store.message('m-held')).toBeNull());
+    await settled(() => expect(store.message('m-held')).toBeNull());
     service.stop();
     expect(store.message('m-untyped')).toBeNull();
     expect(held.writes).toEqual(['\u0015']);
@@ -1439,7 +1446,7 @@ describe('ConversationService send', () => {
     const next = make();
     const later = stream(next);
 
-    await vi.waitFor(() => expect([store.message('m-resumed'), store.message('m-old')]).toEqual([null, null]));
+    await settled(() => expect([store.message('m-resumed'), store.message('m-old')]).toEqual([null, null]));
     next.stop();
     expect(held.box).toBe('other launch');
     expect(held.writes).toEqual(['\u0015']);
@@ -1457,7 +1464,7 @@ describe('ConversationService send', () => {
     const short = fourth.open(scopes.open(view.file, view.view), (frame) => shortFrames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
 
     short!.close();
-    await vi.waitFor(() => expect(store.message('m-closed')).toBeNull());
+    await settled(() => expect(store.message('m-closed')).toBeNull());
     expect(held.box).toBe('');
     expect(given(shortFrames)).toEqual([]);
     expect(given(stream(fourth)).map((one) => [one.id, one.delivery, one.giveBack])).toEqual([['m-closed', 'not-sent', true]]);
@@ -1470,7 +1477,7 @@ describe('ConversationService send', () => {
     const third = make();
 
     stream(third);
-    await vi.waitFor(() => expect(store.message('m-gone')?.delivery).toBe('sent'));
+    await settled(() => expect(store.message('m-gone')?.delivery).toBe('sent'));
     third.stop();
   });
 });

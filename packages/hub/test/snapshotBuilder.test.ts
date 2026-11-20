@@ -19,7 +19,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+  // Windows can hold a file just closed for a moment longer, as its scanner reads it.
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 const inputs = (): SnapshotInputs => ({
@@ -116,7 +117,7 @@ describe('SnapshotBuilder', () => {
     expect(reads).toBe(2);
     expect(built[0]!.snapshot.workItems.map((item) => item.ticket.title)).toEqual(['Built in a worker']);
     expect(builder.latest()).toBe(built[1]);
-    builder.close();
+    await builder.close();
   });
 
   it.runIf(existsSync(WORKER))('builds in a worker thread from a read-only store the same snapshot and dock view the main thread would', async () => {
@@ -141,7 +142,7 @@ describe('SnapshotBuilder', () => {
     expect(built[0]!.snapshot).toEqual(JSON.parse(JSON.stringify(buildSnapshot(store, inputs()))));
     expect(built[0]!.dock).toEqual(JSON.parse(JSON.stringify(dockView(buildSnapshot(store, inputs()), T0, 'C:/w'))));
     expect(logs).toEqual([]);
-    builder.close();
+    await builder.close();
     store.close();
   });
 
@@ -164,7 +165,7 @@ describe('SnapshotBuilder', () => {
     await until(() => built.length === 2);
     expect(builder.inThread).toBe(true);
     expect(logs).toEqual([expect.stringMatching(/^snapshot worker failed, building on the main thread: /)]);
-    builder.close();
+    await builder.close();
   });
 
   it('builds on the main thread a build a worker took and never answered, when the worker exits', async () => {
@@ -189,7 +190,7 @@ describe('SnapshotBuilder', () => {
     expect(built[0]!.snapshot.workItems).toHaveLength(1);
     builder.schedule();
     await until(() => built.length === 2);
-    builder.close();
+    await builder.close();
   });
 
   it('answers an unreadable store with the error, which the main thread logs, and builds on demand on the main thread', async () => {
@@ -213,6 +214,6 @@ describe('SnapshotBuilder', () => {
       expect(logs[0]).toMatch(/^snapshot build failed: /);
     }
 
-    builder.close();
+    await builder.close();
   });
 });
