@@ -196,7 +196,7 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
 
-  it('draws our messages as bubbles on the right, at most 85% wide in the Chat view\'s request bubble colour with a smaller bottom-right corner, with the time and delivery under them', () => {
+  it('draws our messages as bubbles on the right, at most 85% wide in the Chat view\'s request bubble colour with a smaller bottom-right corner, with the delivery and the time over them', () => {
     const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
     const rule = (selector: string) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
 
@@ -211,7 +211,9 @@ describe('the Conversation view page', () => {
     const root = document.createElement('div');
 
     root.innerHTML = renderConversation(state([typed('t1', 'uncertain', 'The transcript does not show the message.')]), new Set(), T0);
-    expect([...root.querySelector('li[data-id="t1"]')!.children].map((child) => child.className)).toEqual(['box', 'stamp-line', 'delivery uncertain']);
+    expect([...root.querySelector('li[data-id="t1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box']);
+    // The state comes before the time, so the times stay flush right.
+    expect([...root.querySelector('li[data-id="t1"] > .stamp-line')!.children].map((child) => child.className)).toEqual(['delivery uncertain', 'stamp-dot', 'stamp']);
   });
 
   it('shows a time only where the minute changes from the item before, never repeating it under a message and over its reply', () => {
@@ -267,8 +269,8 @@ describe('the Conversation view page', () => {
     expect(['m1', 'r1', 'n1', 'a1', 'm2', 'r2'].map(stamps)).toEqual(['1:46 PM', '1:47 PM', null, '2:05 PM', '9:00 AM', '9:30 PM']);
     expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('datetime')).toBe(new Date(at(19, 13, 46)).toISOString());
     expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('title')).toMatch(/^2026-11-19 13:46:00 \S+$/);
-    // The stamp sits under a message's bubble, and a slash command shows in the editor font.
-    expect([...root.querySelector('li[data-id="m1"]')!.children].map((child) => child.className)).toEqual(['box command', 'stamp-line']);
+    // The stamp sits over a message's bubble, as over a reply, and a slash command shows in the editor font.
+    expect([...root.querySelector('li[data-id="m1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box command']);
     expect(root.querySelector('li[data-id="m2"] .box')?.className).toBe('box');
     // No divider before the first turn; one, without the year, before the turn on the next day, which the keys skip.
     expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['m1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2']);
@@ -797,19 +799,39 @@ describe('the composer', () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("draws a typed message's delivery under its box, with why it did not go, and none under a terminal message", () => {
+  it("draws a typed message's error state before its time over its box, with why in the tooltip, never sending or sent, and none for a terminal message", () => {
     const root = document.createElement('div');
+    const minute = (n: number) => T0 + n * 60_000;
+    const at = (item: ItemView, when: number): ItemView => ({ ...item, at: when, ord: when });
 
-    root.innerHTML = renderConversation(state({ items: [message('m0', T0, 'from the terminal'), typed('m1', 'open'), typed('m2', 'sent'), typed('m3', 'not-sent', 'The session has <ended>.'), typed('m4', 'uncertain', 'The transcript does not show the message.')] }));
+    root.innerHTML = renderConversation(
+      state({
+        items: [
+          message('m0', minute(0), 'from the terminal'),
+          at(typed('m1', 'open'), minute(1)),
+          at(typed('m2', 'sent'), minute(2)),
+          at(typed('m3', 'uncertain', 'The transcript does not show <the message>.'), minute(3)),
+          // The same minute as m3: no time, so one sent or sending shows no line, and an uncertain one shows its state alone.
+          at(typed('m4', 'sent'), minute(3)),
+          at(typed('m5', 'open'), minute(3)),
+          at(typed('m6', 'uncertain', 'The message is still in the input box; check the terminal.'), minute(3)),
+        ],
+      }),
+    );
 
-    expect([...root.querySelectorAll('.message')].map((li) => li.querySelector('.delivery')?.textContent ?? null)).toEqual([
-      null,
-      'sending',
-      'sent',
-      'not sent · The session has <ended>.',
-      'uncertain · The transcript does not show the message.',
-    ]);
-    expect(root.querySelector('.delivery.not-sent')).not.toBeNull();
+    const line = (id: string) => root.querySelector(`li[data-id="${id}"] > .stamp-line`);
+    const delivery = (id: string) => line(id)?.querySelector('.delivery') ?? null;
+
+    expect(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6'].map((id) => delivery(id)?.textContent ?? null)).toEqual([null, null, null, 'uncertain', null, null, 'uncertain']);
+    expect([...line('m1')!.children].map((child) => child.className)).toEqual(['stamp']);
+    expect([...line('m2')!.children].map((child) => child.className)).toEqual(['stamp']);
+    expect(delivery('m3')?.getAttribute('title')).toBe('uncertain · The transcript does not show <the message>.');
+    expect(line('m3')?.textContent).toMatch(/^uncertain•\d+:\d\d [AP]M$/);
+    expect(line('m4')).toBeNull();
+    expect(line('m5')).toBeNull();
+    expect([...line('m6')!.children].map((child) => child.className)).toEqual(['delivery uncertain']);
+    // Nothing under a bubble.
+    expect([...root.querySelectorAll('.message')].map((li) => li.lastElementChild?.className)).toEqual(['box', 'box', 'box', 'box', 'box', 'box', 'box']);
   });
 });
 

@@ -42,7 +42,7 @@ body:not([data-tab="conversation"]) #composer { display: none; }
 .timeline > li { --pad-top: 8px; position: relative; margin: 0; padding-top: var(--pad-top); padding-bottom: 8px; }
 .timeline > li:first-child { --pad-top: 0px; }
 .timeline > li.reply:has(> .stamp-line) { --pad-top: 20px; }
-/* A message's time sits right under its bubble, and the reply after it follows closely, so the two read as one exchange. */
+/* The reply after a message follows it closely, so the two read as one exchange. */
 .timeline > li.message { padding-bottom: 4px; }
 .stamp-line { display: flex; justify-content: flex-end; padding-bottom: 2px; }
 .reply > .stamp-line { position: absolute; top: 2px; right: 0; padding-bottom: 0; }
@@ -52,13 +52,12 @@ body:not([data-tab="conversation"]) #composer { display: none; }
 /* Our messages as chat bubbles on the right: at most 85% wide, filled with VS Code's own colour for the user's request bubble in its Chat view
    (`chat.requestBubbleBackground`, a light tint of the selection colour, so the theme's foreground stays readable on it), the inactive selection
    colour on a VS Code without it, and a contrast border in high contrast themes, which define no bubble colour. A smaller bottom-right corner
-   is the tail; the time and the delivery line sit right under it. */
+   is the tail; the time and the delivery sit on the line over it. */
 .message { display: flex; flex-direction: column; align-items: flex-end; }
 .message .box { box-sizing: border-box; max-width: 85%; margin: 4px 0; border: 1px solid var(--vscode-contrastBorder, transparent); border-radius: 12px 12px 4px 12px; background: var(--vscode-chat-requestBubbleBackground, var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.2))); color: var(--vscode-foreground); padding: 6px 12px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 /* High contrast themes define no bubble colour, and their inactive selection colour is too light for their text: only the contrast border. */
 body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .message .box { background: transparent; }
-.message .box:first-child { margin-top: 0; }
-.message > .stamp-line { padding: 0; }
+.message .box:first-child, .message .stamp-line + .box { margin-top: 0; }
 .message .box.command { font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; }
 .message.provisional .box { opacity: 0.7; }
 /* A reply's dot, and the line that joins the dots of replies in a row, as in Claude Code's timeline. */
@@ -111,7 +110,11 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .earlier-items, .pill { font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: 10px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 1px 10px; }
 .earlier-items { display: block; margin: 0 auto 8px; }
 .pill { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); }
-.message .delivery { margin-top: 2px; font-size: 0.85em; color: var(--vscode-descriptionForeground); text-align: right; }
+/* A typed message's delivery, before its time on the line over the bubble, so the times line up at the right. */
+.message .stamp-line { align-items: center; gap: 4px; color: var(--vscode-descriptionForeground); font-size: 0.85em; line-height: 16px; }
+.message .stamp-line .stamp { font-size: inherit; }
+.message .delivery { white-space: nowrap; cursor: default; }
+.message .delivery .codicon { font-size: 12px; vertical-align: middle; }
 .message .delivery.not-sent, .message .delivery.uncertain { color: var(--vscode-editorWarning-foreground); }
 /* The composer, measured from Claude Code's input: at most 680 px wide and centred, 16 px from the view's edges, an 8 px radius, a hairline
    over the footer, and a ring in the focus colour where Claude Code's is orange. */

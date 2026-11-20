@@ -44,10 +44,14 @@ const DAY_WITH_YEAR = new Intl.DateTimeFormat('en-US', { weekday: 'short', month
 
 /** The small time over a message or a reply. */
 function stamp(at: number): string {
+  return `<div class="stamp-line">${stampTime(at)}</div>`;
+}
+
+function stampTime(at: number): string {
   const parts = Object.fromEntries(STAMP_FULL.formatToParts(at).map((part) => [part.type, part.value]));
   const full = `${parts['year']}-${parts['month']}-${parts['day']} ${parts['hour']}:${parts['minute']}:${parts['second']} ${parts['timeZoneName']}`;
 
-  return `<div class="stamp-line"><time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(full)}">${STAMP.format(at)}</time></div>`;
+  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(full)}">${STAMP.format(at)}</time>`;
 }
 
 /** The local calendar day of a time, to tell when a turn starts on another day. */
@@ -109,17 +113,23 @@ export function renderMarkdown(text: string): string {
   return markdown.render(text).replace(/<a href="([^"]*)"/g, (_match, href: string) => `<a href="#" data-href="${href}"`);
 }
 
-/** One of our messages: its bubble with its time under it, and for one typed in the composer, whether it went and why not. */
+/**
+ * One of our messages: its bubble under a line with its time, where the minute changes, and for one typed in the composer that may not have
+ * gone, its error state before the time, with why in the tooltip: "uncertain • 1:47 PM". A message sent or still sending shows only its time.
+ */
 function message(item: MessageView, stamped: boolean): string {
+  // Only an error state shows: a message sent or still sending shows only its time; one not sent has left the conversation.
+  const state = item.origin === 'typed' && (item.delivery === 'uncertain' || item.delivery === 'not-sent') ? item.delivery : null;
+  const why = item.error === null ? '' : ` · ${item.error}`;
   const delivery =
-    item.origin !== 'typed' || item.delivery === null
-      ? ''
-      : `<div class="delivery ${item.delivery}">${DELIVERY[item.delivery]}${item.error === null || item.delivery === 'sent' ? '' : ` · ${escape(item.error)}`}</div>`;
+    state === null ? '' : `<span class="delivery ${state}" title="${escape(`${DELIVERY[state]}${why}`)}">${DELIVERY[state]}</span>`;
+  // The state comes before the time, so every time stays flush right in one column.
+  const line = stamped || delivery !== '' ? `<div class="stamp-line">${delivery}${stamped && delivery !== '' ? '<span class="stamp-dot" aria-hidden="true">•</span>' : ''}${stamped ? stampTime(item.at) : ''}</div>` : '';
 
-  // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it; a typed message's line says where it is.
+  // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it.
   const queued = item.provisional && item.origin === 'terminal';
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${stamped ? stamp(item.at) : ''}${delivery}</li>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${line}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div></li>`;
 }
 
 function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean): string {
