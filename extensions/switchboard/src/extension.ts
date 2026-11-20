@@ -128,6 +128,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   reportConfigError();
   installBundle(context.asAbsolutePath('dist/hub.js'), bundle);
 
+  // The web page draws Mermaid with the build the extension carries, which the hub serves from the home (architecture.md § Web page).
+  try {
+    installBundle(context.asAbsolutePath('dist/mermaid/mermaid.min.js'), join(switchboardHome(home), 'web', 'mermaid.min.js'));
+  } catch {
+    // The page then shows diagrams as their code.
+  }
+
   // A holder that cannot be installed fails only Code Mode starts, and a voice process only speech; the cause goes to the hub log, which every
   // window shows (PRD R94, architecture.md § Voice).
   for (const install of [installHolder(context.asAbsolutePath('dist/holder'), switchboardHome(home)), installVoice(context.asAbsolutePath('dist/voice'), switchboardHome(home))]) {
@@ -461,6 +468,19 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     { dispose: () => clearInterval(sideBarTimer) },
     { dispose: () => clearTimeout(expandTimer) },
     vscode.commands.registerCommand('switchboard.showHubLog', showHubLog),
+    // A one-time link to the web page, opened in the browser, which exchanges it for its cookie (architecture.md § Web page).
+    vscode.commands.registerCommand('switchboard.openWebPage', async () => {
+      const record = keeper.current();
+      const reply = record === null ? null : await postToHub(record, '/page/link', {}, 5_000);
+      const url = reply?.status === 200 ? (reply.body as { url?: unknown }).url : undefined;
+
+      if (typeof url !== 'string') {
+        void vscode.window.showErrorMessage(`Switchboard: the web page could not be opened: ${reply?.error ?? 'the hub is not running'}.`);
+        return;
+      }
+
+      await vscode.env.openExternal(vscode.Uri.parse(url));
+    }),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
     // As the Conversation view's plus button: a conversation hosted by this window (architecture.md § Hosted conversations).

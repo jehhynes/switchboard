@@ -105,6 +105,11 @@
         "category": "Switchboard"
       },
       {
+        "command": "switchboard.openWebPage",
+        "title": "Open Web Page",
+        "category": "Switchboard"
+      },
+      {
         "command": "switchboard.newClaudeTab",
         "title": "New Claude Session in Editor Tab",
         "category": "Switchboard",

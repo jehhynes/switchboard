@@ -79,7 +79,7 @@ describe('the status bar item (PRD R64, R71)', () => {
 
     const contributes = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
 
-    assert.deepStrictEqual(contributes.commands.map((entry) => entry.command), ['switchboard.showDock', 'switchboard.showHubLog', 'switchboard.newClaudeTab', 'switchboard.forgetSideBarWidths', 'switchboard.continueInBackground', 'switchboard.continueSidebarInBackground', 'switchboard.openArtifact', 'switchboard.newSession', 'switchboard.talkHere', 'switchboard.choosePersona', 'switchboard.stopSpeaking', 'switchboard.toggleSpeakReplies', 'switchboard.toggleMicrophone', 'switchboard.replayLastReply', 'switchboard.showVoiceLog']);
+    assert.deepStrictEqual(contributes.commands.map((entry) => entry.command), ['switchboard.showDock', 'switchboard.showHubLog', 'switchboard.openWebPage', 'switchboard.newClaudeTab', 'switchboard.forgetSideBarWidths', 'switchboard.continueInBackground', 'switchboard.continueSidebarInBackground', 'switchboard.openArtifact', 'switchboard.newSession', 'switchboard.talkHere', 'switchboard.choosePersona', 'switchboard.stopSpeaking', 'switchboard.toggleSpeakReplies', 'switchboard.toggleMicrophone', 'switchboard.replayLastReply', 'switchboard.showVoiceLog']);
     // Stop Speaking has a key (architecture.md § Voice).
     assert.deepStrictEqual(contributes.keybindings, [{ command: 'switchboard.stopSpeaking', key: 'ctrl+alt+.', mac: 'cmd+alt+.' }, { command: 'switchboard.toggleMicrophone', key: 'ctrl+alt+m', mac: 'cmd+alt+m' }]);
     // The views are the Switchboard pane's, in the Explorer and Source Control (PRD R92), and the Conversation view's, in the secondary side bar or,
