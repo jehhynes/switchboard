@@ -470,8 +470,23 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
     }
 
+    Connection state = Hub.Connection.Connecting;
+
+    /// <summary>The dock has the hub's current view, so its rows and their controls act; otherwise they show dimmed and disabled.</summary>
+    public bool IsLive => state == Hub.Connection.Connected;
+
+    /// <summary>No hub runs, so the dock offers to start one.</summary>
+    public bool CanStartHub => state == Hub.Connection.NotRunning;
+
     public void Show(Connection state, string? notRunning = null)
     {
+        if (this.state != state)
+        {
+            this.state = state;
+            Changed(nameof(IsLive));
+            Changed(nameof(CanStartHub));
+        }
+
         if (state != Hub.Connection.Connected)
         {
             pendingView = null;

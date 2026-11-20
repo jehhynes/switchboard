@@ -68,6 +68,37 @@ public sealed class HubStarter(string switchboardHome, Func<DateTime>? now = nul
     /// </summary>
     public string? Start()
     {
+        lock (gate)
+        {
+            return StartAfterGrace();
+        }
+    }
+
+    /// <summary>
+    /// Starts a hub at once, for the dock's Start hub button: unless the hub last started is still running, it skips the grace and the time
+    /// between starts; returns why it could not start one, or null.
+    /// </summary>
+    public string? StartNow()
+    {
+        lock (gate)
+        {
+            if (launched is { HasExited: false })
+            {
+                return null;
+            }
+
+            missingSince ??= clock();
+            started = clock();
+            problem = Try();
+
+            return problem;
+        }
+    }
+
+    readonly Lock gate = new();
+
+    string? StartAfterGrace()
+    {
         missingSince ??= clock();
 
         if (clock() - missingSince < Grace)
@@ -112,7 +143,11 @@ public sealed class HubStarter(string switchboardHome, Func<DateTime>? now = nul
 
         try
         {
-            launched?.Dispose();
+            // Cleared before the start, so a start that throws leaves no disposed process for the next check to read.
+            var previous = launched;
+
+            launched = null;
+            previous?.Dispose();
             launched = run(StartInfo(launch, bundle, switchboardHome, environment ?? Environment.GetEnvironmentVariables(), OperatingSystem.IsWindows(), extraArgs ?? []));
             return null;
         }

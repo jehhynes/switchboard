@@ -81,6 +81,23 @@ public sealed class HubStarterTests
     }
 
     [Fact]
+    public void StartNow_HubMissing_StartsAtOnceWithoutTheGraceOrTheWaitBetweenStarts()
+    {
+        var starter = Starter();
+
+        Assert.Equal(HubStarter.Never, starter.StartNow());
+        Assert.Empty(started);
+
+        starter.Remember(Installed());
+        Assert.Null(starter.StartNow());
+        Assert.Single(started);
+
+        // The fake start returns no process, so none is running and another press starts again.
+        Assert.Null(starter.StartNow());
+        Assert.Equal(2, started.Count);
+    }
+
+    [Fact]
     public void Start_AgainWithin30Seconds_StartsNothingAndKeepsItsAnswer()
     {
         var starter = Starter();
@@ -148,6 +165,29 @@ public sealed class HubStarterTests
         starter.Remember(Installed());
 
         Assert.Equal("Switchboard could not start the hub: Permission denied", StartAfterGrace(starter));
+    }
+
+    [Fact]
+    public async Task StartNow_RestartAfterTheLastHubExitedFails_SaysWhyAndCanBePressedAgain()
+    {
+        var starts = 0;
+        var starter = new HubStarter(Switchboard, () => now, (_) =>
+        {
+            if (starts++ > 0)
+            {
+                throw new System.ComponentModel.Win32Exception("Permission denied");
+            }
+
+            return Process.Start(OperatingSystem.IsWindows() ? new ProcessStartInfo("cmd.exe", "/c exit 0") : new ProcessStartInfo("/bin/sh", "-c true"));
+        });
+
+        starter.Remember(Installed());
+        Assert.Null(starter.StartNow());
+        await starter.Launched!.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("Switchboard could not start the hub: Permission denied", starter.StartNow());
+        Assert.Equal("Switchboard could not start the hub: Permission denied", starter.StartNow());
+        Assert.Null(starter.Launched);
     }
 
     [Fact]

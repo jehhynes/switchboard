@@ -124,6 +124,11 @@ public sealed partial class MainWindow : Window
             {
                 WatchStatus();
             }
+            // A menu opened on a row before the hub went away would still act on it.
+            else if (e.PropertyName is nameof(DockViewModel.IsLive) && !model.IsLive)
+            {
+                ClosePopups();
+            }
         };
         StatusClock = () => clock.Elapsed;
         // The 1-second check could miss a short hover, so leaving the toast restarts its time too.
@@ -956,12 +961,12 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
             CancelDrag();
         }
-        else if (e.Key == Key.F8 && (e.KeyModifiers & ~KeyModifiers.Shift) == KeyModifiers.None)
+        else if (e.Key == Key.F8 && (e.KeyModifiers & ~KeyModifiers.Shift) == KeyModifiers.None && model.IsLive)
         {
             e.Handled = true;
             await NextTurn(backwards: e.KeyModifiers == KeyModifiers.Shift);
         }
-        else if (e.KeyModifiers == KeyModifiers.Alt && e.Key is Key.Up or Key.Down && model.Selected is { } key && model.Row(key) is { Row.Movable: true } row
+        else if (e.KeyModifiers == KeyModifiers.Alt && e.Key is Key.Up or Key.Down && model.IsLive && model.Selected is { } key && model.Row(key) is { Row.Movable: true } row
             && row.Row.Controls.FirstOrDefault((control) => control.Label == (e.Key == Key.Up ? "Move up" : "Move down")) is { } move)
         {
             e.Handled = true;
@@ -1184,6 +1189,11 @@ public sealed partial class MainWindow : Window
     /// <summary>The row's click (PRD R71): its session and its item window; a click on another row replaces a click still running.</summary>
     async Task Open(RowViewModel row)
     {
+        if (!model.IsLive)
+        {
+            return;
+        }
+
         model.Selected = row.Key;
 
         // A second click on the row being switched to would stop its session twice; a click on another row replaces the first click.
@@ -1469,6 +1479,13 @@ public sealed partial class MainWindow : Window
 
     async Task Act(JsonObject action)
     {
+        // A row's control acts only on the hub's current view.
+        if (!model.IsLive)
+        {
+            model.Status = "Switchboard is not running, so the dock cannot act on the row.";
+            return;
+        }
+
         model.Status = null;
         model.Status = await hub.Act(action.DeepClone().AsObject());
     }
@@ -1884,6 +1901,22 @@ public sealed partial class MainWindow : Window
     }
 
     void OnDismissStatusClicked(object? sender, RoutedEventArgs e) => model.Status = null;
+
+    /// <summary>Starts the hub now, without waiting for the dock's own start; tests replace it, as they run no hub.</summary>
+    internal Func<string?>? StartHub { get; set; }
+
+    /// <summary>Start hub, shown while no hub runs: starts one at once and shows why it could not, if it could not.</summary>
+    void OnStartHubClicked(object? sender, RoutedEventArgs e)
+    {
+        if (StartHub is { } start)
+        {
+            model.Status = start();
+        }
+        else
+        {
+            model.Status = stream is null ? "Open VS Code to start Switchboard." : stream.StartHub();
+        }
+    }
 
     void OnClearSearchClicked(object? sender, RoutedEventArgs e)
     {

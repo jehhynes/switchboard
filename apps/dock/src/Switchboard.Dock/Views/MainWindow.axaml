@@ -207,6 +207,9 @@
       <Setter Property="Background" Value="{DynamicResource DockTurn}" />
       <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
+    <Style Selector="ItemsControl#GroupList:disabled">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
     <Style Selector="TextBlock.failed">
       <Setter Property="Foreground" Value="{DynamicResource DockError}" />
     </Style>
@@ -409,6 +412,7 @@
         <StackPanel Name="ListContent">
           <TextBlock Name="ConnectionLine" Text="{Binding Connection}" IsVisible="{Binding Connection, Converter={x:Static ObjectConverters.IsNotNull}}"
                      TextWrapping="Wrap" Margin="8,6" Classes="muted" />
+          <Button Name="StartHubButton" Content="Start hub" IsVisible="{Binding CanStartHub}" Click="OnStartHubClicked" HorizontalAlignment="Left" Margin="8,0,8,6" />
           <ItemsControl ItemsSource="{Binding Notes}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="x:String">
@@ -422,7 +426,8 @@
                   ToolTip.Tip="Open Held Sessions" AutomationProperties.Name="Open Held Sessions">
             <TextBlock Text="{Binding HeldNote}" TextWrapping="Wrap" Classes="warning" />
           </Button>
-          <ItemsControl Name="GroupList" ItemsSource="{Binding Groups}">
+          <!-- Without the hub the last rows stay for reference, dimmed, and their controls do nothing. -->
+          <ItemsControl Name="GroupList" ItemsSource="{Binding Groups}" IsEnabled="{Binding IsLive}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="views:GroupViewModel">
                 <StackPanel IsVisible="{Binding IsShown}" Margin="0,0,0,8">

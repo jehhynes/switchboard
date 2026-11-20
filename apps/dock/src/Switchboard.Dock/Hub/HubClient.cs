@@ -40,6 +40,25 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
 
     const string NotRunningDefault = "Switchboard is not running. Open VS Code to start it.";
 
+    /// <summary>
+    /// Starts a hub now, for the dock's Start hub button, rather than after the starter's wait; returns why it could not, or null while one starts.
+    /// Without a starter it starts nothing and says to open VS Code.
+    /// </summary>
+    public string? StartHub()
+    {
+        if (starter is null)
+        {
+            return NotRunningDefault;
+        }
+
+        var problem = starter.StartNow();
+
+        NotRunningText = problem ?? "Starting Switchboard…";
+        Changed?.Invoke();
+
+        return problem;
+    }
+
     /// <summary>Raised on the stream's thread after the view or the connection changes.</summary>
     public event Action? Changed;
 
