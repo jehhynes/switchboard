@@ -996,6 +996,20 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(JSON.stringify(mine.frames)).not.toContain('pastedAt');
   });
 
+  it("types the hub's continue text after a usage limit through the same guarded input, with no window, and refuses a session it cannot type into (architecture.md § Rate limits)", async () => {
+    const { service, held, store } = setupSend();
+
+    expect(service.continueAfterLimit('s2', 'Continue.')).toBeNull();
+    await settled(() => expect(store.conversation('s2', null, 10).items.at(-1)).toMatchObject({ origin: 'typed', text: 'Continue.', delivery: 'sent' }));
+    expect(held.writes).toEqual(['\u001b[200~Continue.\u001b[201~', '\r']);
+    expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
+
+    store.updateSession('s2', { state: 'ended' });
+    expect(service.continueAfterLimit('s2', 'Continue.')).toBe('The session has ended. Open it in the terminal to resume it.');
+    expect(service.continueAfterLimit('nope', 'Continue.')).toBe('The session has ended. Open it in the terminal to resume it.');
+    expect(held.writes).toHaveLength(2);
+  });
+
   /** A voice that records what the conversation layer asks of it. */
   function fakeVoice(spoken = { spoken: true, expressive: false }) {
     const calls: string[] = [];
@@ -1555,6 +1569,15 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot follow this session while sessions.installHooks is off.' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
+  });
+
+  it('carries when a held session waiting on its limit resumes: the reset Claude Code waits for, else the next attempt (architecture.md § Rate limits)', () => {
+    const limit = { kind: 'usage' as const, window: 'five_hour', resetsAt: NOW + 3_600_000, exact: true, cli: true, message: null, since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: NOW + 3_780_000 };
+
+    expect(sessionView(session({ codeMode: true, state: 'failed', rateLimit: limit }), true, true).limit).toEqual({ until: NOW + 3_600_000, retry: false });
+    expect(sessionView(session({ codeMode: true, state: 'failed', rateLimit: { ...limit, attempts: 1 } }), true, true).limit).toEqual({ until: NOW + 3_780_000, retry: true });
+    expect(sessionView(session({ codeMode: true, state: 'running', rateLimit: limit }), true, true).limit).toBeNull();
+    expect(sessionView(session({ state: 'failed', rateLimit: limit }), true, true).limit).toBeNull();
   });
 
   it("shows the session's persona while voice is on, and its tone section pending until the prompt has the current one (architecture.md § Personas)", () => {

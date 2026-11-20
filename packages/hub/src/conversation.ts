@@ -1,6 +1,6 @@
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
-import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion } from '@switchboard/core';
+import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { PersonaSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
 import { stepsText } from '@switchboard/conversation';
@@ -44,6 +44,11 @@ export interface SessionView {
    * the live session's prompt has another tone section until its next resume or compaction.
    */
   persona: { id: string; name: string; pinned: boolean; tonePending: boolean } | null;
+  /**
+   * While the session waits for a usage or rate limit to reset (architecture.md § Rate limits): when it resumes, and `retry` when that is the hub's
+   * next attempt rather than the reset. Absent from an older hub.
+   */
+  limit?: { until: number; retry: boolean } | null;
 }
 
 /** The voice settings a session's persona is read from. */
@@ -116,7 +121,19 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
     conversation,
     reason,
     persona: personaOf(session, personas),
+    limit: limitOf(session),
   };
+}
+
+/** When a held session waiting on its limit resumes: Claude Code's own reset when it waits itself, else the hub's next attempt. */
+function limitOf(session: Session): { until: number; retry: boolean } | null {
+  const limit = session.rateLimit;
+
+  if (limit == null || !waitsOnLimit(session) || (session.codeMode !== true && session.execution !== 'app-server')) {
+    return null;
+  }
+
+  return limit.cli && limit.resetsAt !== null && limit.attempts === 0 ? { until: limit.resetsAt, retry: false } : { until: limit.nextAt, retry: limit.resetsAt === null || limit.attempts > 0 };
 }
 
 /** A session's persona as its view shows it, or null with voice off, an empty roster or a persona no longer in it. */
@@ -948,6 +965,35 @@ export class ConversationService {
   }
 
   /**
+   * Types the hub's continue text into a session waiting on its usage limit (architecture.md § Rate limits), as a typed message no window sent:
+   * through the same guarded input, so it waits for an empty input box and is never typed twice. Why not, for a session that cannot take it.
+   */
+  continueAfterLimit(sessionId: string, text: string, guard: () => string | null = () => null): string | null {
+    const session = this.deps.store.session(sessionId);
+
+    if (session === null) {
+      return SESSION_ENDED;
+    }
+
+    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+
+    if (view.conversation !== 'full') {
+      return view.reason ?? SESSION_ENDED;
+    }
+
+    const cannotType = session.state === 'ended' ? null : (this.#adapter(session)?.cannotSend(session) ?? null);
+
+    if (cannotType !== null) {
+      return cannotType;
+    }
+
+    // `guard` is checked again just before the typing, as the session's queue may hold it until the limit no longer applies.
+    this.#type(session, null, session.launchId ?? null, text, { opId: `limit-${this.deps.newId()}`, command: false, pieces: null, partial: false, guard });
+
+    return null;
+  }
+
+  /**
    * Stores a message `open` and queues its typing in the session's input: `[spoken]` when its reply will be heard (architecture.md § Voice), never
    * for a slash command or a `[partial]` part, and `[voice]` or `[voice] [partial]` with dictation (architecture.md § Dictation), followed by the
    * interruption note of a reply it spoke over (architecture.md § Voice check and barge-in).
@@ -957,7 +1003,7 @@ export class ConversationService {
     window: string | null,
     launch: string | null,
     text: string,
-    options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean; interrupted?: Interruption | null },
+    options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean; interrupted?: Interruption | null; guard?: () => string | null },
   ): ConversationMessage {
     const sessionId = session.id;
     const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial) ?? { spoken: false, expressive: false };
@@ -1001,7 +1047,7 @@ export class ConversationService {
 
     this.#changed(sessionId, { type: 'message', message });
     const deliver = (to: Session, toLaunch: string | null): void => this.#adapter(to)?.send(to, message, typed, (outcome) => this.#delivered(message.id, outcome), {
-      check: () => this.#check(sessionId, toLaunch, options.olderToo === true),
+      check: () => this.#check(sessionId, toLaunch, options.olderToo === true) ?? options.guard?.() ?? null,
       reserve: () => this.deps.input.reserve(sessionId, toLaunch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
       command: options.command,

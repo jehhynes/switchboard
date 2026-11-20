@@ -18,6 +18,8 @@ export interface SessionView {
   /** `codex` for a Codex app-server session, whose native questions and approvals come as `requests`. */
   provider?: string;
   requests?: NativeRequest[];
+  /** While the session waits for a usage or rate limit to reset: when it resumes, and `retry` for the hub's next attempt. */
+  limit?: { until: number; retry: boolean } | null;
 }
 
 /** A Codex app-server session's pending question or approval, answered with the `answer` command. */

@@ -558,7 +558,7 @@ const dockWithRuns = () => {
   }
 
   runtime.onChange(() => builder.schedule());
-  runtime.setConversationReader({ read: (sessionIds) => conversation.readNow(sessionIds), catchUp: (sessionId) => conversation.catchUp(sessionId) });
+  runtime.setConversationReader({ read: (sessionIds) => conversation.readNow(sessionIds), catchUp: (sessionId) => conversation.catchUp(sessionId), continueAfterLimit: (sessionId, text, guard) => conversation.continueAfterLimit(sessionId, text, guard) });
 
   await runtime.startup();
   runtime.start();

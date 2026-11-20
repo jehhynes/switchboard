@@ -457,6 +457,8 @@ export const MIGRATIONS = [
   ALTER TABLE messages ADD COLUMN interruptedSaid TEXT;
   ALTER TABLE messages ADD COLUMN interruptedRest TEXT;`,
   `ALTER TABLE workItems ADD COLUMN provider TEXT;`,
+  // Rate limits (architecture.md § Rate limits): the limit a session's last turn stopped at, as JSON.
+  `ALTER TABLE sessions ADD COLUMN rateLimit TEXT;`,
 ];
 
 /**
@@ -472,7 +474,7 @@ const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
-const OBJECTS = new Set(['question', 'move', 'blockers', 'lastTree']);
+const OBJECTS = new Set(['question', 'move', 'blockers', 'lastTree', 'rateLimit']);
 
 type Row = Record<string, unknown>;
 
@@ -619,7 +621,7 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
   // The persona event names a pin; the version of the tone section a prompt got is bookkeeping (architecture.md § Personas).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId']),
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId', 'rateLimit']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

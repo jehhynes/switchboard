@@ -583,6 +583,11 @@ class Builder {
           return { category: 'session', ...prompt, detail: null };
         }
 
+        // A turn that ended at a usage or rate limit (architecture.md § Rate limits).
+        if (event.type === 'marker' && typeof detail['limit'] === 'object' && detail['limit'] !== null) {
+          return { category: 'session', icon: 'watch', text: `${name} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>) };
+        }
+
         const known = texts[str(after)] ?? { text: `${name}: ${str(after)}`, icon: 'terminal' };
 
         return { category: 'session', ...known, detail: said ? str(said) : null };
@@ -620,6 +625,15 @@ class Builder {
         return { category: 'session', icon: 'error', text: 'Continuing in the background failed', detail: str(detail['message']), tone: 'error' };
       case 'move-cancelled':
         return { category: 'session', icon: 'circle-slash', text: `${capital(session)} stayed in its tab, whose process did not exit` };
+      case 'limit-found':
+        return { category: 'session', icon: 'watch', text: `${capital(session)} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>) };
+      case 'limit-attempt':
+        return detail['error'] == null
+          ? { category: 'session', icon: 'debug-continue', text: `Switchboard typed the continue text into ${session} after its usage limit`, detail: `Attempt ${str(detail['attempt'])}` }
+          : { category: 'session', icon: 'warning', text: `Switchboard could not continue ${session} after its usage limit`, detail: str(detail['error']), tone: 'warning' };
+      case 'limit-skipped':
+        skip.add('status').add('error');
+        return { category: 'session', icon: 'circle-slash', text: `Switchboard left ${session} to you after its usage limit, because you typed in it` };
       case 'reply-failed':
         skip.add('error');
         return { category: 'session', icon: 'error', text: 'Sending your answer failed', detail: str(detail['message']), tone: 'error' };
@@ -943,4 +957,12 @@ function blockerLines(before: unknown, after: unknown): string[] {
   }
 
   return refs(before).length > 0 ? ['No open blockers'] : [];
+}
+
+
+/** A limit event's reset and whether Claude Code waits for it itself (architecture.md § Rate limits). */
+function limitDetail(limit: Record<string, unknown>): string {
+  const reset = typeof limit['resetsAt'] === 'number' ? `Resets ${timeText(limit['resetsAt'])}` : 'No reset time given';
+
+  return limit['cli'] === true ? `${reset}; Claude Code continues on its own` : reset;
 }

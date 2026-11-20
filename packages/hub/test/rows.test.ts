@@ -21,6 +21,8 @@ import {
   startPromptText,
   stripeOf,
   waitTexts,
+  limitTexts,
+  limitTime,
 } from '../src/rows.js';
 import type { WorkItemView } from '../src/runtime.js';
 import { item, NOW, pool, session, snapshot, triage } from './views.js';
@@ -507,5 +509,47 @@ describe('snapshotErrors and setupNotes', () => {
     ]);
     expect(setupNotes(snapshot([], { sources: [], sourceStates: [] }))).toEqual(['No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.']);
     expect(setupNotes(snapshot([], { sources: [], sourceStates: [], configDir: '/home/me/.claude/switchboard' }))).toEqual(['No source is configured. Add one in /home/me/.claude/switchboard/settings.json.']);
+  });
+});
+
+
+describe('limitTexts (architecture.md § Rate limits)', () => {
+  const RESET = NOW + 2 * 3_600_000;
+  const limit = { kind: 'usage' as const, window: 'five_hour', resetsAt: RESET, exact: true, cli: true, message: "You've hit your 5-hour limit · resets 2:00pm (America/New_York)", since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: RESET + 180_000 };
+  const time = (at: number) => limitTime(at, NOW);
+
+  it("shows the reset Claude Code waits for itself, with Switchboard's own attempt in the tooltip", () => {
+    const [text] = limitTexts(item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: limit })] }), NOW);
+
+    expect(text).toEqual({ text: `Rate limited · resumes ${time(RESET)}`, title: `${limit.message}\nClaude Code continues on its own after the reset; Switchboard continues it at ${time(RESET + 180_000)} if it has not.` });
+  });
+
+  it("shows the hub's next attempt: resumes before the first, retries after one or without a reset time", () => {
+    const held = (patch: object) => limitTexts(item(1, { status: 'running', sessions: [session({ execution: 'app-server', state: 'failed', stateDetail: 'rate_limit', rateLimit: { ...limit, ...patch } })] }), NOW)[0]!.text;
+
+    expect(held({ cli: false, nextAt: RESET + 60_000 })).toBe(`Rate limited · resumes ${time(RESET + 60_000)}`);
+    expect(held({ cli: false, resetsAt: null, nextAt: NOW + 300_000 })).toBe(`Rate limited · retries ${time(NOW + 300_000)}`);
+    expect(held({ attempts: 2, nextAt: NOW + 600_000 })).toBe(`Rate limited · retries ${time(NOW + 600_000)}`);
+  });
+
+  it('shows when a background session can be continued, and nothing once a turn runs or without a limit', () => {
+    expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'failed', stateDetail: 'rate_limit', rateLimit: limit })] }), NOW)[0]?.text).toBe(`Rate limited · resets ${time(RESET)}`);
+    expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'ended', released: true, rateLimit: limit })] }), NOW)[0]?.text).toBe(`Rate limited · resets ${time(RESET)}`);
+    expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'ended', released: true, rateLimit: limit })] }), RESET)).toEqual([]);
+    expect(limitTexts(item(1, { status: 'running', sessions: [session({ state: 'running', rateLimit: limit })] }), NOW)).toEqual([]);
+    expect(limitTexts(item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'running', rateLimit: limit })] }), NOW)).toEqual([]);
+    expect(limitTexts(item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'idle' })] }), NOW)).toEqual([]);
+  });
+
+  it('names another day by its weekday', () => {
+    expect(limitTime(NOW + 26 * 3_600_000, NOW)).toMatch(/^[A-Z][a-z]{2} \d{1,2}:\d{2} [AP]M$/);
+    expect(limitTime(NOW, NOW)).toMatch(/^\d{1,2}:\d{2} [AP]M$/);
+  });
+
+  it("explains a queued start held by its provider's usage limit", () => {
+    const [wait] = waitTexts(item(1, { status: 'queued', waits: [{ kind: 'limit', provider: 'codex', until: RESET }] }));
+
+    expect(wait!.text).toBe(`Starts after the usage limit resets, ${limitTime(RESET, null)}`);
+    expect(wait!.title).toContain('A Codex session stopped at a usage limit');
   });
 });

@@ -273,6 +273,15 @@ export function selectedEntry(state: ConversationState): ConversationEntry | nul
 }
 
 /** Whether the session is working, which the header's spinning codicon and the timeline's spinner show. */
+/** `Rate limited · resumes 1:20 PM`, or `retries` when the time is the hub's next attempt; another day adds the weekday. */
+export function limitText(limit: { until: number; retry: boolean }, now = Date.now()): string {
+  const at = new Date(limit.until);
+  const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const when = at.toDateString() === new Date(now).toDateString() ? time : `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+
+  return `Rate limited · ${limit.retry ? 'retries' : 'resumes'} ${when}`;
+}
+
 export function isWorking(session: SessionView | null): boolean {
   return session?.state === 'starting' || session?.state === 'running';
 }
@@ -363,6 +372,11 @@ export function micOn(voice: VoiceView | null): boolean {
 
 /** The header's codicon for the session's state (architecture.md § Conversation view). */
 export function stateIcon(session: SessionView | null): { icon: string; text: string } {
+  // A session waiting for a usage limit to reset (architecture.md § Rate limits).
+  if (session?.limit != null) {
+    return { icon: 'watch', text: limitText(session.limit) };
+  }
+
   switch (session?.state) {
     case undefined:
       return { icon: 'circle-slash', text: 'No session' };

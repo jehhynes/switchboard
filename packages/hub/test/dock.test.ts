@@ -933,3 +933,15 @@ describe('workspace files', () => {
     expect(readFileSync(file, 'utf8')).toBe(workspaceText(window));
   });
 });
+
+
+describe('a row waiting on a usage limit (architecture.md § Rate limits)', () => {
+  it('stays In progress on the agent\'s turn, with the Rate limited mark and when it resumes on line 3', () => {
+    const resetsAt = NOW + 3_600_000;
+    const limited = row(item(1, { status: 'running', stage: '2/5 finding defects', stageAt: NOW, sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: { kind: 'usage', window: 'five_hour', resetsAt, exact: true, cli: true, message: 'limit', since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: resetsAt + 180_000 } })] }));
+
+    expect(limited).toMatchObject({ mark: { kind: 'limited', glyph: '\u{eb7c}', title: 'Rate limited' }, stripe: null, turn: 'agent' });
+    expect(limited.details[0]?.text).toMatch(/^Rate limited · resumes \d{1,2}:\d{2} [AP]M$/);
+    expect(dockView(snapshot([item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: { kind: 'usage', window: null, resetsAt: null, exact: false, cli: false, message: null, since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: NOW + 300_000 } })] })]), NOW, W).groups.find((group) => group.rows.length > 0)?.key).toBe('progress');
+  });
+});

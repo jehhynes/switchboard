@@ -61,8 +61,15 @@ export function pasteText(text: string, command = false): string {
 
 /** What the visible screen says about typing, from Claude Code's classic renderer (claude-collab `session.js` `screenState`). */
 export const screenState = {
-  /** A numbered choice or confirmation is open; typed text would answer it. */
-  menu: (text: string): boolean => /^\s*❯\s*\d+\.\s/m.test(text) || /Esc to (cancel|exit|go back)|Enter to (confirm|select)/i.test(text),
+  /**
+   * A numbered choice or confirmation is open; typed text would answer it. Claude Code's wait for a usage limit's reset says "Esc to cancel" but
+   * takes a message, which re-arms it (mechanics M100), so its lines do not count.
+   */
+  menu: (text: string): boolean => {
+    const shown = text.split('\n').filter((line) => !/continuing automatically/i.test(line)).join('\n');
+
+    return /^\s*❯\s*\d+\.\s/m.test(shown) || /Esc to (cancel|exit|go back)|Enter to (confirm|select)/i.test(shown);
+  },
   /**
    * Text typed but not sent: every line of the input box, from the "❯" line right under a rule to the next rule, read with dim cells (the
    * placeholder, a suggested prompt) blanked, so a draft whose first line is empty still counts.

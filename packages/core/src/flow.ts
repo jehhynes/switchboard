@@ -1,11 +1,12 @@
 import type { Playbook } from './playbook.js';
 import { activeSession, failedAtTriage, groupOf, ownPrompt, QUESTION_CARD, reviewKey, START_PROMPT, waitsOnCard, waitsOnPermission, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
+import { backoff, givesUp, limitFor, MAX_ATTEMPTS, providerLimitUntil, waitsOnLimit } from './limit.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { homeRepo, isRootPattern, repoOf, repoRoots, samePath, ticketRoot } from './repo.js';
 import type { PermissionMode, Provider, ScheduleSettings, Settings } from './settings.js';
 import { REPORT_KINDS } from './model.js';
-import type { Immediacy, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, WorkItem, WorkItemStatus } from './model.js';
+import type { Immediacy, LimitReading, ReportKind, Session, SessionKind, SessionState, Severity, Ticket, TicketBlocker, WorkItem, WorkItemStatus } from './model.js';
 import { focusUrl } from './focus.js';
 import type { Anchor, SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
@@ -33,6 +34,10 @@ const EMPTY_TRIAGE = { context: null, playbook: null, immediacy: null, severity:
 export const MESSAGES = {
   stopped: 'Stopped by you.',
   setupWithoutWorktree: 'Setup ended without a worktree.',
+  setupAtLimit: 'Setup stopped at a usage limit. Retry it after the reset.',
+  turnAtLimit: 'The turn stopped at a usage limit. Open the session to continue it after the reset.',
+  limitSkipped: 'You typed in the session during its usage-limit wait, so Switchboard did not continue it.',
+  limitGaveUp: `The session stopped at a usage limit, and ${MAX_ATTEMPTS} attempts to continue it did not start a turn.`,
   turnEnded: 'The turn ended without a done report.',
   sessionEnded: 'The session ended without a done report.',
   turnEndedWithoutApproval: 'The turn ended without an approval report.',
@@ -152,6 +157,8 @@ export interface ObservedSession {
   interactive?: boolean;
   /** A held session's process tree as the holder last read it, which the resume guard checks (PRD R95). */
   tree?: Array<{ pid: number; created: string }>;
+  /** The usage or rate limit the turn the read found ended at (architecture.md § Rate limits). */
+  limit?: LimitReading;
 }
 
 /** A live fork that may replace a session (PRD R78), with the fork's own state. */
@@ -190,11 +197,21 @@ export type FlowEvent =
   | { type: 'session-start-failed'; sessionId: string; message: string }
   /** `checked` lists the sessions the read looked for, so a session whose start completed during the read is not ended; all when absent. */
   | { type: 'roster'; sessions: ObservedSession[]; checked?: string[]; forks?: ObservedFork[] }
-  | { type: 'marker'; sessionId: string; state: LiveState; detail: string | null }
+  /** `limit`: what the runner read about the usage or rate limit a turn ended at (architecture.md § Rate limits). */
+  | { type: 'marker'; sessionId: string; state: LiveState; detail: string | null; limit?: LimitReading | null }
+  /** A limit read after the turn end's marker, such as Claude Code's own wait written just after its Stop (mechanics M100). */
+  | { type: 'limit-found'; sessionId: string; limit: LimitReading }
+  /** The hub typed the continue text into a session waiting on its limit, or could not, with why (architecture.md § Rate limits). */
+  | { type: 'limit-attempt'; sessionId: string; error: string | null }
+  /** The hub did not continue a session waiting on its limit, because the operator acted in its terminal since. */
+  | { type: 'limit-skipped'; sessionId: string; reason: string }
   | { type: 'release-cancelled'; sessionId: string }
   /** The terminal holder that held this Code Mode session is gone (PRD R94). */
   | { type: 'holder-lost'; sessionId: string }
-  /** The holder lists this Code Mode session with no terminal attached and no input or output for the idle limit (PRD R95). */
+  /**
+   * The holder lists this Code Mode session with no terminal attached and no input or output for the idle limit (PRD R95), or this Codex app-server
+   * thread has had no turn for it (PRD R107).
+   */
   | { type: 'held-idle'; sessionId: string }
   /** `POST /attach` is about to resume this ended Code Mode session under this launch, stored first so a hub restart during the spawn can recognize it (PRD R95). */
   | { type: 'held-resuming'; sessionId: string; launchId: string }
@@ -393,7 +410,7 @@ const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-c
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
  * roster reads, are logged only when they change a row.
  */
-const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'ticket', 'session-start-failed', 'stop-failed', 'move-cancelled']);
+const ALWAYS_LOGGED: ReadonlySet<FlowEvent['type']> = new Set([...OPERATOR_EVENTS, 'report', 'ticket', 'session-start-failed', 'stop-failed', 'move-cancelled', 'limit-found', 'limit-attempt', 'limit-skipped']);
 
 function actorOf(type: FlowEvent['type']): Actor {
   if (OPERATOR_EVENTS.has(type)) {
@@ -447,6 +464,21 @@ export function sessionName(kind: SessionKind, item: Pick<WorkItem, 'playbook'>,
   return `switchboard · ${kind === 'task' ? (item.playbook ?? 'ad-hoc') : kind} · ${ticket.source} ${ticket.sourceKey}`;
 }
 
+/** A limit as the log keeps it, without the message, which the session's transcript holds. */
+function limitDetail(limit: LimitReading): Record<string, unknown> {
+  return { kind: limit.kind, window: limit.window, resetsAt: limit.resetsAt, cli: limit.cli };
+}
+
+/** A turn that failed with `rate_limit` when the runner read nothing more about the limit. */
+const UNREAD_LIMIT: LimitReading = { kind: 'usage', window: null, resetsAt: null, exact: false, cli: false, message: null };
+
+/** The provider a work item's next session starts in: its playbook's, else its own choice while it has none, else `sessions.provider`. */
+export function itemProvider(settings: Settings, playbooks: ReadonlyMap<string, Playbook>, item: Pick<WorkItem, 'playbook' | 'provider'>): Provider {
+  const playbook = item.playbook === null ? null : (playbooks.get(item.playbook) ?? null);
+
+  return playbook === null ? (item.provider ?? settings.sessions.provider) : (playbook.provider ?? settings.sessions.provider);
+}
+
 /** The event's own fields for the log: no prompt, context or polled list, except the prompt the operator edited in Start with prompt… (PRD R77). */
 function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | null {
   switch (event.type) {
@@ -466,7 +498,13 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
     case 'session-start-failed':
       return { message: event.message };
     case 'marker':
-      return { state: event.state, detail: event.detail };
+      return { state: event.state, detail: event.detail, ...(event.limit == null ? {} : { limit: limitDetail(event.limit) }) };
+    case 'limit-found':
+      return { limit: limitDetail(event.limit) };
+    case 'limit-attempt':
+      return { attempt: (store.session(event.sessionId)?.rateLimit?.attempts ?? 0) + 1, ...(event.error === null ? {} : { error: event.error }) };
+    case 'limit-skipped':
+      return { reason: event.reason };
     case 'report': {
       const { prompt: _prompt, ...report } = event.report as Report & { prompt?: string };
       return report;
@@ -634,8 +672,9 @@ class Flow {
       case 'handled':
         return this.registerHandled(event);
       case 'poll-failed':
-      case 'tick':
         return;
+      case 'tick':
+        return this.limitsDue();
       case 'triage-succeeded':
         return this.triageSucceeded(event);
       case 'triage-failed':
@@ -649,7 +688,13 @@ class Flow {
       case 'roster':
         return this.roster(event.sessions, event.checked, event.forks ?? []);
       case 'marker':
-        return this.marker(event.sessionId, event.state, event.detail);
+        return this.marker(event.sessionId, event.state, event.detail, event.limit ?? null);
+      case 'limit-found':
+        return this.limitFound(event.sessionId, event.limit);
+      case 'limit-attempt':
+        return this.limitAttempt(event.sessionId, event.error);
+      case 'limit-skipped':
+        return this.limitSkipped(event.sessionId);
       case 'holder-lost':
         return this.holderLost(event.sessionId);
       case 'held-idle':
@@ -1615,7 +1660,7 @@ class Flow {
           this.store.updateSession(session.id, { released: true, releasing: false, question: null });
         }
 
-        this.setState({ ...session, released: session.released || entry.interactive === true, releasing: session.releasing && entry.interactive !== true }, entry.state, entry.detail);
+        this.setState({ ...session, released: session.released || entry.interactive === true, releasing: session.releasing && entry.interactive !== true }, entry.state, entry.detail, entry.limit ?? null);
       }
     }
 
@@ -1665,15 +1710,15 @@ class Flow {
    * A hook marker sets the state of a live session only, because a killed process leaves its marker behind. A session waiting on a prompt before
    * it starts leaves that state only when the roster lists its process (PRD R41).
    */
-  private marker(sessionId: string, state: LiveState, detail: string | null): void {
+  private marker(sessionId: string, state: LiveState, detail: string | null, limit: LimitReading | null): void {
     const session = this.session(sessionId);
 
     if (session.state !== 'starting' && session.state !== 'ended' && session.move === null && !waitsToStart(session)) {
-      this.setState(session, state, detail);
+      this.setState(session, state, detail, limit);
     }
   }
 
-  private setState(session: Session, state: LiveState, detail: string | null): void {
+  private setState(session: Session, state: LiveState, detail: string | null, limit: LimitReading | null = null): void {
     // A turn that ends asking lettered questions no message has answered waits on the operator's answer, not finished or blocked (PRD R103).
     if (state === 'idle' && detail === null && this.asksInCard(session)) {
       detail = QUESTION_CARD;
@@ -1684,18 +1729,22 @@ class Flow {
     }
 
     const reopened = session.outcome === 'opened' ? { outcome: null, outcomeDetail: null } : {};
+    // A turn that ends at a limit keeps it until a turn ends without one; a new turn keeps it, so a limit hit again counts the attempts.
+    const reading = TURN_ENDED.includes(state) ? (limit ?? (state === 'failed' && detail === 'rate_limit' ? UNREAD_LIMIT : null)) : undefined;
+    const limited = reading === undefined ? {} : { rateLimit: reading === null ? null : limitFor(reading, session.rateLimit, session.launchId ?? null, this.now) };
 
-    this.store.updateSession(session.id, { state, stateAt: this.now, stateDetail: detail, endedAt: null, ...reopened });
+    this.store.updateSession(session.id, { state, stateAt: this.now, stateDetail: detail, endedAt: null, ...reopened, ...limited });
 
-    const current = { ...session, state, stateDetail: detail, ...reopened };
+    const current = { ...session, state, stateDetail: detail, ...reopened, ...limited };
+    const atLimit = waitsOnLimit(current);
     // A new turn after the last one ended, as when the operator resumes the session in VS Code.
     const resumed = (state === 'running' || state === 'waiting') && (session.state === 'ended' || TURN_ENDED.includes(session.state));
 
     if (TURN_ENDED.includes(state)) {
-      if (persistent(current)) {
-        this.endHeld(current);
-      } else {
+      if (!persistent(current)) {
         this.release(current);
+      } else if (!atLimit) {
+        this.endHeld(current);
       }
     } else if (current.codeMode === true && current.releasing && !current.released) {
       // A new turn, such as one typed in an attached terminal, cancels an end that waited for the terminal to detach; its turn end decides again (PRD R95).
@@ -1706,7 +1755,11 @@ class Flow {
     const item = this.latest(current);
 
     if (item !== null && current.kind === 'setup') {
-      this.setupState(item, current, state, resumed);
+      // A held setup session stopped at a limit continues after the reset, so its turn end decides nothing (architecture.md § Rate limits).
+      if (!(atLimit && persistent(current))) {
+        this.setupState(item, current, state, resumed);
+      }
+
       return;
     }
 
@@ -1719,7 +1772,16 @@ class Flow {
       this.store.updateSession(session.id, { outcome: null, outcomeDetail: null });
     }
 
-    if (TURN_ENDED.includes(state) && current.outcome === null && item.status === 'running') {
+    if (TURN_ENDED.includes(state) && current.outcome === null && item.status === 'running' && atLimit) {
+      // A held session continues after the reset; a background one is released, so the operator continues it (architecture.md § Rate limits).
+      if (!persistent(current)) {
+        if (item.approvalHeld) {
+          this.restoreApproval(item, MESSAGES.turnAtLimit);
+        } else {
+          this.block(item, MESSAGES.turnAtLimit);
+        }
+      }
+    } else if (TURN_ENDED.includes(state) && current.outcome === null && item.status === 'running') {
       const cause = state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : null;
 
       // A hosted conversation offers no done report, so a turn that ends leaves it open (architecture.md § Hosted conversations).
@@ -1781,7 +1843,7 @@ class Flow {
       }
 
       if (item.unassignedAt === null && this.store.worktreeFor(item.ticketId) === null) {
-        this.fail(item, MESSAGES.setupWithoutWorktree);
+        this.fail(item, session.rateLimit != null ? MESSAGES.setupAtLimit : MESSAGES.setupWithoutWorktree);
       } else {
         this.finishSetup(item, session);
       }
@@ -1808,7 +1870,7 @@ class Flow {
    * so its turn end decides setup. A resume after setup failed because the process was gone, as at a logout, retries it.
    */
   private setupState(item: WorkItem, session: Session, state: LiveState, resumed: boolean): void {
-    if (resumed && item.status === 'failed' && item.error === MESSAGES.setupWithoutWorktree) {
+    if (resumed && ((item.status === 'failed' && (item.error === MESSAGES.setupWithoutWorktree || item.error === MESSAGES.setupAtLimit)) || item.status === 'blocked')) {
       this.setStatus(item.id, { status: 'setup', error: null });
     } else if (TURN_ENDED.includes(state) && (persistent(session) || (session.released && !session.releasing)) && item.status === 'setup' && (item.unassignedAt !== null || this.store.worktreeFor(item.ticketId) !== null)) {
       this.finishSetup(item, session);
@@ -1853,7 +1915,17 @@ class Flow {
   private endHeld(session: Session): void {
     const item = this.store.workItem(session.workItemId);
 
-    if (item === null || session.codeMode === true || session.released || session.releasing) {
+    if (item === null) {
+      return;
+    }
+
+    // Nothing continues a limited session of a done work item or one a newer session replaced, so its wait ends (architecture.md § Rate limits).
+    if (session.rateLimit != null && (item.status === 'done' || this.store.sessionsFor(item.id).at(-1)?.id !== session.id)) {
+      this.store.updateSession(session.id, { rateLimit: null });
+      session = { ...session, rateLimit: null };
+    }
+
+    if (session.codeMode === true || session.released || session.releasing || waitsOnLimit(session)) {
       return;
     }
 
@@ -1923,16 +1995,90 @@ class Flow {
     }
   }
 
-  /** The idle limit ends a held session after its turn, or in any state while hooks are off and it is unobserved (PRD R95). */
+  /**
+   * The idle limit ends a held session after its turn, or in any state while hooks are off and it is unobserved (PRD R95), and releases an app-server
+   * thread's subscription after its turn (PRD R107); neither while the session waits on its usage limit.
+   */
   private heldIdle(sessionId: string): void {
     const session = this.store.session(sessionId);
 
-    if (session === null || session.codeMode !== true || session.state === 'starting' || session.state === 'ended') {
+    if (session === null || !persistent(session) || session.state === 'starting' || session.state === 'ended') {
       return;
     }
 
-    if (TURN_ENDED.includes(session.state) || !this.context.settings.sessions.installHooks) {
+    // A session waiting on its limit keeps its process, which may be waiting for the reset itself, until the hub resumes it or gives up
+    // (architecture.md § Rate limits).
+    if (waitsOnLimit(session)) {
+      return;
+    }
+
+    // An app-server thread's state comes from Codex, not hooks, so only a turn end counts.
+    if (TURN_ENDED.includes(session.state) || (session.codeMode === true && !this.context.settings.sessions.installHooks)) {
       this.release(session);
+    }
+  }
+
+  /** A limit read after the turn end's marker: kept like one the marker carried, and a run the turn end settled runs again (architecture.md § Rate limits). */
+  private limitFound(sessionId: string, reading: LimitReading): void {
+    const session = this.store.session(sessionId);
+
+    if (session === null || !TURN_ENDED.includes(session.state)) {
+      return;
+    }
+
+    const rateLimit = limitFor(reading, session.rateLimit, session.launchId ?? null, this.now);
+
+    this.store.updateSession(sessionId, { rateLimit });
+
+    const item = this.latest(session);
+
+    if (session.rateLimit != null || item === null || !persistent(session) || item.statusAt < session.stateAt) {
+      return;
+    }
+
+    if (session.kind === 'task' && (item.status === 'finished' || item.status === 'blocked')) {
+      this.setStatus(item.id, { status: 'running', error: null });
+    }
+  }
+
+  /** The hub typed the continue text, or could not: the next attempt waits by the backoff in case no turn starts (architecture.md § Rate limits). */
+  private limitAttempt(sessionId: string, _error: string | null): void {
+    const session = this.store.session(sessionId);
+    const limit = session?.rateLimit;
+
+    if (session == null || limit == null || !waitsOnLimit(session)) {
+      return;
+    }
+
+    this.store.updateSession(sessionId, { rateLimit: { ...limit, attempts: limit.attempts + 1, attemptedAt: this.now, nextAt: this.now + backoff(limit.attempts) } });
+  }
+
+  /** The operator acted in the session's terminal during the wait, so the hub leaves the session to them (architecture.md § Rate limits). */
+  private limitSkipped(sessionId: string): void {
+    const session = this.store.session(sessionId);
+
+    if (session !== null && waitsOnLimit(session)) {
+      this.stopWaiting(session, MESSAGES.limitSkipped);
+    }
+  }
+
+  /** Each tick gives up on a session whose attempts did not start a turn (architecture.md § Rate limits). */
+  private limitsDue(): void {
+    for (const session of this.store.activeSessions()) {
+      if (waitsOnLimit(session) && givesUp(session.rateLimit!, this.now)) {
+        this.stopWaiting(session, MESSAGES.limitGaveUp);
+      }
+    }
+  }
+
+  /** Ends a session's wait on its limit: its work item, when the session is its latest and still runs, waits on the operator with the cause. */
+  private stopWaiting(session: Session, cause: string): void {
+    this.store.updateSession(session.id, { rateLimit: null });
+
+    const item = this.latest(session);
+
+    if (item !== null && (item.status === 'running' || item.status === 'setup')) {
+      this.block(item, cause);
     }
   }
 
@@ -2822,7 +2968,7 @@ class Flow {
         return;
       }
 
-      if (this.store.ticket(item.ticketId)?.handledAssignmentKey == null && queueWaits(this.store, item, limit, used).length === 0) {
+      if (this.store.ticket(item.ticketId)?.handledAssignmentKey == null && queueWaits(this.store, item, limit, used, itemProvider(this.context.settings, this.context.playbooks, item), this.now).length === 0) {
         this.startSession(item);
         used = heldSlots(this.store);
       }

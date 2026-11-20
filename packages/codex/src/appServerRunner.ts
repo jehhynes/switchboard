@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { extname, resolve } from 'node:path';
-import type { LiveState, MarkerReading, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason, StopFailure } from '@switchboard/core';
+import type { LimitReading, LiveState, MarkerReading, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult, StopReason, StopFailure } from '@switchboard/core';
 import { artifactsDir, isCodexPermissionMode, PERMISSION_PROMPT } from '@switchboard/core';
 import { AppServer, AppServerError, object } from './appServer.js';
 import type { Json } from './appServer.js';
@@ -21,7 +21,10 @@ export interface AppServerRunnerDeps {
   log?(line: string): void;
   created(id: string, threadId: string): void;
   instructions(action: StartAction): string;
-  state(id: string, state: LiveState, detail: string | null): void;
+  /** `limit`: the usage or rate limit a failed turn stopped at (architecture.md § Rate limits). */
+  state(id: string, state: LiveState, detail: string | null, limit?: LimitReading): void;
+  /** A reset time for a limit read earlier, from a rate-limit update that came after the failed turn (architecture.md § Rate limits). */
+  limitFound?(id: string, limit: LimitReading): void;
   now(): number;
 }
 
@@ -36,9 +39,27 @@ export class AppServerRunner implements SessionRunner {
   readonly #configuring = new Map<string, Promise<void>>();
   readonly #compactions = new Map<string, string>();
   readonly #seenCompactions = new Map<string, Set<string>>();
+  /** The latest reset time of each rate-limit window, from `account/rateLimits/updated` (mechanics M100). */
+  readonly #windows = new Map<string, { resetsAt: number | null; full: boolean }>();
+  /** The limit each session's last failed turn stopped at, which a later rate-limit update can give a reset. */
+  readonly #limits = new Map<string, LimitReading>();
 
   constructor(readonly deps: AppServerRunnerDeps) {
     deps.server.listen((event) => {
+      if (event['method'] === 'account/rateLimits/updated') {
+        this.#rateLimits(object(object(event['params'])['rateLimits']));
+        const resetsAt = this.#resetsAt();
+        if (resetsAt !== null) {
+          for (const [id, limit] of this.#limits) {
+            if (limit.kind !== 'usage' || limit.resetsAt === resetsAt) continue;
+            const updated = { ...limit, resetsAt, exact: true };
+            this.#limits.set(id, updated);
+            deps.limitFound?.(id, updated);
+          }
+        }
+        return;
+      }
+
       if (!['thread/status/changed', 'turn/started', 'turn/completed', 'item/completed'].includes(String(event['method'])) && event['id'] === undefined) return;
       const params = object(event['params']);
       const threadId = params['threadId'];
@@ -58,9 +79,13 @@ export class AppServerRunner implements SessionRunner {
       let state: { state: LiveState; detail: string | null } | null = null;
       if (event['method'] === 'thread/status/changed') state = threadState(object(params['status']));
       if (event['method'] === 'turn/started') state = { state: 'running', detail: null };
+      let limit: LimitReading | undefined;
       if (event['method'] === 'turn/completed') {
         const turn = object(params['turn']);
-        state = turn['status'] === 'failed' || turn['status'] === 'interrupted'
+        limit = turn['status'] === 'failed' ? (turnLimit(object(turn['error']), this.#resetsAt()) ?? undefined) : undefined;
+        state = limit !== undefined
+          ? { state: 'failed', detail: 'rate_limit' }
+          : turn['status'] === 'failed' || turn['status'] === 'interrupted'
           ? { state: 'failed', detail: String(object(turn['error'])['message'] ?? (turn['status'] === 'interrupted' ? 'The turn was interrupted.' : 'The turn failed.')) }
           : { state: 'idle', detail: null };
       }
@@ -69,9 +94,31 @@ export class AppServerRunner implements SessionRunner {
         if (state.state === 'idle' && this.#states.get(session.id)?.state === 'failed') return;
         this.#states.set(session.id, state);
         this.#stateGeneration.set(session.id, deps.server.generation);
-        deps.state(session.id, state.state, state.detail);
+        if (limit === undefined) {
+          this.#limits.delete(session.id);
+          deps.state(session.id, state.state, state.detail);
+        } else {
+          this.#limits.set(session.id, limit);
+          deps.state(session.id, state.state, state.detail, limit);
+        }
       }
     });
+  }
+
+  /** Keeps each window of a sparse rate-limit update; a window at 100% holds its reset time. */
+  #rateLimits(snapshot: Json): void {
+    for (const name of ['primary', 'secondary']) {
+      const window = snapshot[name];
+      if (window === null || typeof window !== 'object') continue;
+      const fields = object(window);
+      this.#windows.set(`${String(snapshot['limitId'] ?? 'codex')}/${name}`, { resetsAt: typeof fields['resetsAt'] === 'number' ? fields['resetsAt'] * 1000 : null, full: typeof fields['usedPercent'] === 'number' && fields['usedPercent'] >= 100 });
+    }
+  }
+
+  /** The latest reset of a full window, or null when no update named one. */
+  #resetsAt(): number | null {
+    const full = [...this.#windows.values()].filter(w => w.full && w.resetsAt !== null && w.resetsAt > this.deps.now()).map(w => w.resetsAt!);
+    return full.length === 0 ? null : Math.max(...full);
   }
 
   async start(action: StartAction): Promise<StartResult> {
@@ -270,12 +317,17 @@ export class AppServerRunner implements SessionRunner {
           const result = await this.deps.server.request('thread/turns/list', { threadId: session.nativeSessionId, sortDirection: 'desc', itemsView: 'notLoaded', limit: 1 });
           const tail = Array.isArray(result['data']) ? object(result['data'][0]) : null;
           last = undefined;
-          if (tail?.['status'] === 'failed' || tail?.['status'] === 'interrupted') last = { state: 'failed', detail: String(object(tail['error'])['message'] ?? 'The turn was interrupted.') };
+          const tailLimit = tail?.['status'] === 'failed' ? turnLimit(object(tail['error']), this.#resetsAt()) : null;
+          if (tailLimit !== null) {
+            last = { state: 'failed', detail: 'rate_limit' };
+            this.#limits.set(session.id, tailLimit);
+          } else if (tail?.['status'] === 'failed' || tail?.['status'] === 'interrupted') last = { state: 'failed', detail: String(object(tail['error'])['message'] ?? 'The turn was interrupted.') };
         }
         if (state.state === 'idle' && last?.state === 'failed') state = last;
         this.#states.set(session.id, state);
         this.#stateGeneration.set(session.id, this.deps.server.generation);
-        observed.push({ sessionId: session.id, ...state });
+        const replayed = state.state === 'failed' && state.detail === 'rate_limit' ? this.#limits.get(session.id) : undefined;
+        observed.push({ sessionId: session.id, ...state, ...(replayed === undefined ? {} : { limit: replayed }) });
         } catch (error) {
           if (error instanceof AppServerError && error.refused) {
             if (session.state !== 'ended' && !/not found|no .*thread|archived|does not exist/i.test(error.message)) observed.push({ sessionId: session.id, state: 'failed' as const, detail: error.message });
@@ -327,6 +379,17 @@ export class AppServerRunner implements SessionRunner {
     }
     return results;
   }
+}
+
+/**
+ * The limit a failed turn's error names (mechanics M100): `usageLimitExceeded` a usage limit, `rateLimitExceeded` a throttle, with the reset of a
+ * full rate-limit window when an update gave one. Null for any other error.
+ */
+export function turnLimit(error: Json, resetsAt: number | null): LimitReading | null {
+  const info = error['codexErrorInfo'];
+  if (info !== 'usageLimitExceeded' && info !== 'rateLimitExceeded') return null;
+  const message = typeof error['message'] === 'string' ? error['message'].slice(0, 500) : null;
+  return { kind: info === 'usageLimitExceeded' ? 'usage' : 'throttle', window: null, resetsAt, exact: resetsAt !== null, cli: false, message };
 }
 
 export function items(turn: Json): Json[] { return Array.isArray(turn['items']) ? turn['items'].map(object) : []; }

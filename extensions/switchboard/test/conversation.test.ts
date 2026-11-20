@@ -3,7 +3,7 @@ import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, Statu
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenReply, micOn, selectedEntry, stateIcon, statusLine, timeline, totalUnread, voiceStatus, withEarlier } from '../src/conversationModel.js';
+import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenReply, limitText, micOn, selectedEntry, stateIcon, statusLine, timeline, totalUnread, voiceStatus, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
@@ -216,6 +216,14 @@ describe('the conversation state', () => {
     expect(stateIcon({ ...SESSION, state: 'ended' }).icon).toBe('circle-slash');
     expect(stateIcon({ ...SESSION, state: 'starting' }).icon).toBe('loading~spin');
     expect(stateIcon(null).icon).toBe('circle-slash');
+  });
+
+  it('shows a session waiting for a usage limit to reset with a watch and when it resumes (architecture.md § Rate limits)', () => {
+    const until = new Date(2026, 10, 20, 13, 21).getTime();
+
+    expect(stateIcon({ ...SESSION, state: 'idle', limit: { until, retry: false } })).toEqual({ icon: 'watch', text: 'Rate limited · resumes 1:21 PM' });
+    expect(limitText({ until, retry: true }, until)).toBe('Rate limited · retries 1:21 PM');
+    expect(limitText({ until, retry: false }, until - 24 * 3_600_000)).toBe('Rate limited · resumes Fri 1:21 PM');
   });
 
   it('waits for a reply to the latest message only while the session works, as the header spins, until a reply comes', () => {

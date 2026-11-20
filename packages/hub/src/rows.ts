@@ -1,5 +1,6 @@
 import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, reviewOrder, triageLabel, turnOf, waitsOnPermission, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
 import type { OpenVSCode, Provider, TicketBlocker } from '@switchboard/core';
+import { waitsOnLimit } from '@switchboard/core/limit';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
@@ -640,8 +641,57 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
         return { text: 'Starts when the ticket wakes', title: 'The ticket is snoozed.' };
       case 'blockers':
         return { text: `Starts when ${refList(wait.blockers)} ${wait.blockers.length === 1 ? 'closes' : 'close'}`, title: blockersTitle(wait.blockers) };
+      case 'limit':
+        return { text: `Starts after the usage limit resets, ${limitTime(wait.until, null)}`, title: `A ${wait.provider === 'codex' ? 'Codex' : 'Claude'} session stopped at a usage limit, so new ${wait.provider === 'codex' ? 'Codex' : 'Claude'} sessions wait until it resets at ${limitTime(wait.until, null, true)}.` };
     }
   });
+}
+
+/** A limit's time: `1:20 PM` today, else with its weekday, `Mon 4:00 AM`; `full` gives the date too. */
+export function limitTime(at: number, now: number | null, full = false): string {
+  const date = new Date(at);
+  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+  if (full) {
+    return date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  return now !== null && new Date(now).toDateString() === date.toDateString() ? time : `${date.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+}
+
+/**
+ * Line 3's limit text for a work item whose latest session stopped at a usage or rate limit (architecture.md § Rate limits): when it resumes, the
+ * reset Claude Code waits for itself, else the hub's next attempt; for a background session, which the operator continues, when the limit resets.
+ */
+export function limitTexts(item: WorkItemView, now: number): { text: string; title: string }[] {
+  const session = item.sessions.at(-1);
+  const limit = session?.rateLimit;
+
+  if (session === undefined || limit == null) {
+    return [];
+  }
+
+  const held = session.codeMode === true || session.execution === 'app-server';
+  const lines = [limit.message ?? (limit.kind === 'throttle' ? 'The provider is limiting requests.' : 'The session stopped at a usage limit.')];
+
+  // A background session is released after its turn, so its blocked work item shows the reset until it passes.
+  if (!held) {
+    return limit.resetsAt === null || limit.resetsAt <= now || item.status !== 'blocked' ? [] : [{ text: `Rate limited · resets ${limitTime(limit.resetsAt, now)}`, title: [...lines, 'Open the session to continue it after the reset.'].join('\n') }];
+  }
+
+  if (!waitsOnLimit(session)) {
+    return [];
+  }
+
+  const attempts = limit.attempts === 0 ? [] : [`Switchboard typed the continue text ${limit.attempts} ${limit.attempts === 1 ? 'time' : 'times'}.`];
+
+  if (limit.cli && limit.resetsAt !== null && limit.attempts === 0) {
+    return [{ text: `Rate limited · resumes ${limitTime(limit.resetsAt, now)}`, title: [...lines, `Claude Code continues on its own after the reset; Switchboard continues it at ${limitTime(limit.nextAt, now)} if it has not.`].join('\n') }];
+  }
+
+  const verb = limit.resetsAt === null || limit.attempts > 0 ? 'retries' : 'resumes';
+
+  return [{ text: `Rate limited · ${verb} ${limitTime(limit.nextAt, now)}`, title: [...lines, `Switchboard continues it at ${limitTime(limit.nextAt, now, true)}.`, ...attempts].join('\n') }];
 }
 
 /** The open issues blocking a ticket whose work has not queued, for line 3 of an open work item's or pool ticket's row (PRD R90). */

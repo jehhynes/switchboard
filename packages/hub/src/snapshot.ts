@@ -3,7 +3,7 @@
  * inputs, so the hub can build it in a worker thread with its own read-only connection and keep its main thread free.
  */
 import type { Comment, Link, OpenTerminal, OpenVSCode, Paste, Playbook, Provider, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
-import { effectiveFocus, heldSlots, homeRepo, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
+import { effectiveFocus, heldSlots, homeRepo, itemProvider, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
 import type { HeldSession } from './held.js';
 import { doneSince } from './rows.js';
 import type { RepoKeys } from './rows.js';
@@ -181,7 +181,7 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
         parent: item.parentId === null ? null : store.ticket(store.workItem(item.parentId)!.ticketId),
         moved: ticket.adhocKey !== null && store.workItemsForTicket(item.ticketId)[0]?.id === item.id,
         approvalSends: item.playbook !== null && playbooks.get(item.playbook)?.approvalSends === true,
-        waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used) : [],
+        waits: item.status === 'queued' ? queueWaits(store, item, settings.sessions.concurrency, used, itemProvider(settings, playbooks, item), inputs.now) : [],
         reopenable: reopenRefusal(item, store.workItemsForTicket(item.ticketId), ticket) === null,
         playbookChoices: item.status === 'unstarted' ? playbookChoices(item.playbook, ticket.source, playbooks) : [],
       };

@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { ClaudeRunner, conversationRules } from '@switchboard/claude';
+import { ClaudeRunner, conversationRules, projectSlug } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
-import { DEFAULT_SETTINGS, launchOptions, parsePlaybook, QUESTION_CARD, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
+import { BACKOFF_MS, CLI_MARGIN_MS, CONTINUE_TEXT, DEFAULT_SETTINGS, launchOptions, MESSAGES, parsePlaybook, QUESTION_CARD, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { NotWritten } from '@switchboard/conversation';
@@ -3927,5 +3927,235 @@ describe('Codex app-server resume (PRD R107)', () => {
     expect(stop).toHaveBeenCalledWith({ sessionId: 's1', shortId: h.started.nativeSessionId }, 'release');
     expect(h.store.session('s1')).toMatchObject({ state: 'ended' });
     h.runtime.stop(); h.store.close();
+  });
+});
+
+
+describe('rate limits (architecture.md § Rate limits)', () => {
+  const RESET = T0 + 2 * 3_600_000;
+  const prompt = { type: 'user', message: { role: 'user', content: 'Go.' }, origin: { kind: 'human' } };
+  const usage = { type: 'assistant', message: { content: [{ type: 'text', text: "You've hit your 5-hour limit · resets 2:00pm (America/New_York)" }] }, apiError: 'usage_limit_reached', apiErrorParams: { rate_limit_info: { status: 'rejected', resetsAt: RESET / 1000, rateLimitType: 'five_hour' } }, error: 'rate_limit', isApiErrorMessage: true };
+  const grace = { type: 'user', message: { role: 'user', content: '[Usage limit reached; a short grace allowance remains …]' }, isMeta: true, usageLimitNote: 'wrap_up' };
+  const wait = { type: 'system', subtype: 'informational', content: 'Usage limit reached · continuing automatically at 2:00pm · esc to cancel' };
+
+  function runner(overrides: Partial<SessionRunner> = {}): SessionRunner & { starts: string[] } {
+    const starts: string[] = [];
+
+    return {
+      start: async (action) => {
+        starts.push(action.sessionId);
+        return { shortId: `${action.sessionId}-short`, nativeSessionId: `${action.sessionId}-native`, ...(action.codeMode === true ? { launchId: `${action.sessionId}-launch` } : {}) };
+      },
+      observe: async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: session.state === 'starting' ? ('running' as const) : (session.state as 'running'), detail: session.stateDetail })) }),
+      markers: () => new Map(),
+      isBackground: async () => true,
+      stop: async () => null,
+      reconcile: async () => [],
+      installHooks: async () => null,
+      starts,
+      ...overrides,
+    };
+  }
+
+  /** A held session s1 of an ad-hoc work item whose transcript holds `lines`, and a marker reading the test sets. */
+  async function heldWith(lines: unknown[], typed_: { keyAt: number | null } = { keyAt: null }) {
+    let now = T0;
+    let observed: { state: 'running' | 'idle' | 'failed'; detail: string | null } = { state: 'running', detail: null };
+    const codeMode = runner({
+      markers: (sessions) => new Map(sessions.filter((session) => session.nativeSessionId !== null).map((session) => [session.nativeSessionId!, { at: now, observed, recheck: false }])),
+    });
+    const context = setup(config({ codeMode: true }), () => now, { codeMode });
+    const typed: string[] = [];
+    const guards: Array<() => string | null> = [];
+
+    // The holder's last key from an attached terminal, which the hub's own typing never sets.
+    (context.runtime as unknown as { keyAt: () => Promise<number | null> }).keyAt = async () => typed_.keyAt;
+    context.runtime.setConversationReader({ read: () => {}, catchUp: () => null, continueAfterLimit: (sessionId, text, guard) => (typed.push(`${sessionId}: ${text}`), guards.push(guard), null) });
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+
+    const session = context.store.activeSessions()[0]!;
+    const dir = join(home, '.claude', 'projects', projectSlug(session.cwd));
+    const path = join(dir, `${session.nativeSessionId}.jsonl`);
+
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+
+    return {
+      ...context,
+      id: session.id,
+      codeMode,
+      typed,
+      guards,
+      key: (at: number | null) => (typed_.keyAt = at),
+      append: (line: unknown) => writeFileSync(path, readFileSync(path, 'utf8') + JSON.stringify(line) + '\n'),
+      observe: (state: typeof observed) => (observed = state),
+      at: (time: number) => (now = time),
+    };
+  }
+
+  it('reads the reset time from the transcript when the marker shows the failed turn, and keeps the work item running', async () => {
+    const t = await heldWith([prompt, usage]);
+
+    t.observe({ state: 'failed', detail: 'rate_limit' });
+    t.runtime.readMarkers();
+    expect(t.store.session(t.id)).toMatchObject({ state: 'failed', rateLimit: { kind: 'usage', resetsAt: RESET, exact: true, cli: false } });
+    expect(t.store.workItem(1)?.status).toBe('running');
+    t.runtime.stop();
+  });
+
+  it("finds Claude Code's own wait written after the turn's marker, and stops looking two minutes after the turn end", async () => {
+    const t = await heldWith([prompt, grace]);
+
+    t.observe({ state: 'idle', detail: null });
+    t.runtime.readMarkers();
+    expect(t.store.session(t.id)?.rateLimit).toMatchObject({ resetsAt: null, cli: false });
+    expect(t.store.workItem(1)?.status).toBe('running');
+
+    t.append(wait);
+    t.at(T0 + 5_000);
+    t.runtime.readMarkers();
+    expect(t.store.session(t.id)?.rateLimit).toMatchObject({ cli: true });
+    expect(t.store.session(t.id)?.rateLimit?.resetsAt).not.toBeNull();
+
+    const before = t.store.session(t.id)?.rateLimit;
+
+    t.append(usage);
+    t.at(T0 + 121_000);
+    t.runtime.readMarkers();
+    expect(t.store.session(t.id)?.rateLimit).toEqual(before);
+    t.runtime.stop();
+  });
+
+  it('types the continue text once the next attempt is due, and backs off after it', async () => {
+    const t = await heldWith([prompt, usage, wait]);
+
+    t.observe({ state: 'failed', detail: 'rate_limit' });
+    t.runtime.readMarkers();
+    expect(t.store.session(t.id)?.rateLimit?.nextAt).toBe(RESET + CLI_MARGIN_MS);
+
+    t.at(RESET + CLI_MARGIN_MS - 1);
+    await t.runtime.continueLimited();
+    expect(t.typed).toEqual([]);
+
+    t.at(RESET + CLI_MARGIN_MS);
+    await t.runtime.continueLimited();
+    expect(t.typed).toEqual([`${t.id}: ${CONTINUE_TEXT}`]);
+    expect(t.store.session(t.id)?.rateLimit).toMatchObject({ attempts: 1, attemptedAt: RESET + CLI_MARGIN_MS, nextAt: RESET + CLI_MARGIN_MS + 5 * 60_000 });
+    expect(t.logs.filter((line) => line.includes('usage limit'))).toEqual([`session ${t.id} continued after its usage limit, attempt 1`]);
+
+    await t.runtime.continueLimited();
+    expect(t.typed).toHaveLength(1);
+    t.runtime.stop();
+  });
+
+  it('leaves the session to the operator who typed in its terminal during the wait', async () => {
+    const t = await heldWith([prompt, usage], { keyAt: T0 + 60_000 });
+
+    t.observe({ state: 'failed', detail: 'rate_limit' });
+    t.runtime.readMarkers();
+    t.at(RESET + 3_600_000);
+    await t.runtime.continueLimited();
+    expect(t.typed).toEqual([]);
+    expect(t.store.session(t.id)?.rateLimit ?? null).toBeNull();
+    expect(t.store.workItem(1)).toMatchObject({ status: 'blocked', error: MESSAGES.limitSkipped });
+    t.runtime.stop();
+  });
+
+  it('releases an idle Codex app-server thread an hour after its turn, but not one waiting on its usage limit (PRD R107)', async () => {
+    let now = T0;
+    const codexAppServer = runner();
+    const context = setup(config({ provider: 'codex' }), () => now, { codexAppServer });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'one', repoRoot: 'D:/git/widgets', start: true });
+    context.runtime.send({ type: 'adhoc', prompt: 'two', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.runtime.send({ type: 'marker', sessionId: 's1', state: 'idle', detail: null });
+    context.runtime.send({ type: 'marker', sessionId: 's2', state: 'failed', detail: 'rate_limit', limit: { kind: 'usage', window: null, resetsAt: T0 + 7_200_000, exact: true, cli: false, message: null } });
+
+    now = T0 + 3_600_000 - 1;
+    context.runtime.wake();
+    await context.runtime.settled();
+    expect(context.store.session('s1')?.state).toBe('idle');
+
+    now = T0 + 3_600_000;
+    context.runtime.wake();
+    await context.runtime.settled();
+    expect(context.store.session('s1')).toMatchObject({ state: 'ended', released: true });
+    expect(context.store.session('s2')).toMatchObject({ state: 'failed', released: false, releasing: false });
+    context.runtime.stop();
+  });
+
+  it("passes a guard that refuses the typing once the session's limit or work item changed while it was queued", async () => {
+    const t = await heldWith([prompt, usage, wait]);
+
+    t.observe({ state: 'failed', detail: 'rate_limit' });
+    t.runtime.readMarkers();
+    t.at(RESET + CLI_MARGIN_MS);
+    await t.runtime.continueLimited();
+
+    const [guard] = t.guards;
+
+    // The attempt itself moved nextAt, so the queued typing's guard now refuses; so does a new turn.
+    expect(guard!()).toBe('The session no longer waits on that usage limit.');
+    t.store.updateSession(t.id, { state: 'running' });
+    expect(guard!()).toBe('The session no longer waits on that usage limit.');
+    t.runtime.stop();
+  });
+
+  it('skips an attempt whose work item stopped running, and a key typed after a refused attempt still leaves it to the operator', async () => {
+    const t = await heldWith([prompt, usage]);
+
+    t.observe({ state: 'failed', detail: 'rate_limit' });
+    t.runtime.readMarkers();
+    t.store.updateWorkItem(1, { status: 'blocked' });
+    t.at(RESET + 3_600_000);
+    await t.runtime.continueLimited();
+    expect(t.typed).toEqual([]);
+
+    t.store.updateWorkItem(1, { status: 'running' });
+    t.runtime.send({ type: 'limit-attempt', sessionId: t.id, error: 'The session is busy.' });
+    t.key(RESET + 3_600_000 + 30_000);
+    t.at(RESET + 3_600_000 + BACKOFF_MS[0]!);
+    await t.runtime.continueLimited();
+    expect(t.typed).toEqual([]);
+    expect(t.store.workItem(1)).toMatchObject({ status: 'blocked', error: MESSAGES.limitSkipped });
+    t.runtime.stop();
+  });
+
+  it('reads the limit when the roster settles the turn end before the marker pass does', async () => {
+    const t = await heldWith([prompt, grace]);
+
+    t.codeMode.observe = async (sessions) => ({ sessions: sessions.map((session) => ({ sessionId: session.id, state: 'idle' as const, detail: null })) });
+    await (t.runtime as unknown as { readRoster(): Promise<void> }).readRoster();
+    expect(t.store.session(t.id)).toMatchObject({ state: 'idle', rateLimit: { kind: 'usage' } });
+    expect(t.store.workItem(1)?.status).toBe('running');
+    t.runtime.stop();
+  });
+
+  it('reads once after a hub start a turn end older than two minutes that has no limit yet', async () => {
+    const t = await heldWith([prompt, grace]);
+
+    t.store.updateSession(t.id, { state: 'idle', stateAt: T0 - 10 * 60_000, rateLimit: null });
+    t.observe({ state: 'idle', detail: null });
+    t.runtime.readMarkers();
+    expect(t.store.session(t.id)?.rateLimit).toMatchObject({ kind: 'usage' });
+    t.runtime.stop();
+  });
+
+  it('does not continue a session resumed under another launch, or a background one', async () => {
+    const t = await heldWith([prompt, usage]);
+
+    t.observe({ state: 'failed', detail: 'rate_limit' });
+    t.runtime.readMarkers();
+    t.store.updateSession(t.id, { launchId: 'another' });
+    t.at(RESET + 3_600_000);
+    await t.runtime.continueLimited();
+    expect(t.typed).toEqual([]);
+
+    t.store.updateSession(t.id, { launchId: t.store.session(t.id)!.rateLimit!.launchId, codeMode: false });
+    await t.runtime.continueLimited();
+    expect(t.typed).toEqual([]);
+    t.runtime.stop();
   });
 });

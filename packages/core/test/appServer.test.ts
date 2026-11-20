@@ -31,6 +31,17 @@ describe('Codex app-server sessions', () => {
     expect(h.store.session('s1')).toMatchObject({state:'ended',released:true});
     h.store.close();
   });
+  it('releases an idle thread at the idle limit after its turn, never during one or while it waits on a usage limit (PRD R107, R111)', () => {
+    const h = new Harness({settings:settings({sessions:{provider:'codex',installHooks:false}})}); start(h);
+    expect(h.act({type:'held-idle',sessionId:'s1'})).toEqual([]);
+    h.act({type:'marker',sessionId:'s1',state:'failed',detail:'rate_limit',limit:{kind:'usage',window:null,resetsAt:h.now+3_600_000,exact:true,cli:false,message:null}});
+    expect(h.act({type:'held-idle',sessionId:'s1'})).toEqual([]);
+    h.act({type:'marker',sessionId:'s1',state:'running',detail:null});
+    h.act({type:'marker',sessionId:'s1',state:'idle',detail:null});
+    expect(h.act({type:'held-idle',sessionId:'s1'})).toEqual([{type:'stop-session',sessionId:'s1',shortId:'thread-1',provider:'codex',execution:'app-server',reason:'release'}]);
+    expect(h.store.session('s1')).toMatchObject({releasing:true});
+    h.store.close();
+  });
   it('starts hosted Codex conversations without Code Mode or hooks, and counts slots only during a turn', () => {
     const h = new Harness({settings:settings({sessions:{provider:'codex',codeMode:false,installHooks:false}})});
     const action = h.act({type:'new-conversation',hostWindow:'D:/folder',folder:'D:/folder'})[0] as Extract<FlowAction,{type:'start-session'}>;

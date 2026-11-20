@@ -22,3 +22,4 @@ export * from './volume.js';
 export * from './classifier.js';
 export * from './conversation.js';
 export * from './persona.js';
+export * from './limit.js';

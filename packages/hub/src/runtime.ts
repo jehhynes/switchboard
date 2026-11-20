@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { classify, ClaudeRunner, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
+import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster, readTranscriptLimit } from '@switchboard/claude';
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
+import { CONTINUE_TEXT, givesUp, waitsOnLimit } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
@@ -52,6 +53,8 @@ const RESUME_POLL_MS = 2_000;
 const NODE_CHECK_TIMEOUT_MS = 10_000;
 /** How long input to a held session after its turn defers its end, for the prompt's marker to be read. */
 export const INPUT_SETTLE_MS = 60_000;
+/** How long after a turn end the hub keeps reading the transcript for a limit line written after the turn's marker (mechanics M100). */
+export const LIMIT_READ_MS = 120_000;
 /** Why a message cannot be typed into a session (architecture.md § Typing a message). */
 export const SESSION_ENDED = 'The session has ended. Open it in the terminal to resume it.';
 export const SESSION_RELAUNCHED = 'The session was resumed since the view showed it; send the message again.';
@@ -188,6 +191,12 @@ export class Runtime {
   private readonly orphansLogged = new Set<string>();
   /** The leftover pids the resume guard last refused an attach for, per ended Code Mode session, until a resume or a leftover stop succeeds (PRD R95). */
   private readonly guarded = new Map<string, number[]>();
+  /** The transcript size last read for a limit, per session, so an unchanged transcript is not read again (architecture.md § Rate limits). */
+  private readonly limitReads = new Map<string, string>();
+  /** The turn ends read for a limit since the hub started, by session, launch and turn end time. */
+  private readonly limitTurns = new Set<string>();
+  /** Sessions the hub is continuing after their limit now, so a tick does not continue one twice. */
+  private readonly continuing = new Set<string>();
 
   constructor(
     private readonly deps: RuntimeDeps,
@@ -221,7 +230,8 @@ export class Runtime {
       log: deps.log,
       created: (id, threadId) => { if (deps.store.session(id) !== null) deps.store.updateSession(id, { nativeSessionId: threadId, shortId: threadId }); },
       instructions: action => `${action.contract}\n\n${conversationRules(artifactsDir(action.cwd, action.workItemId), this.config.settings.voice.enabled, 'codex')}${action.tone == null ? '' : `\n\n${action.tone}`}`,
-      state: (sessionId, state, detail) => { this.send({ type: 'marker', sessionId, state, detail }); },
+      state: (sessionId, state, detail, limit) => { this.send({ type: 'marker', sessionId, state, detail, ...(limit === undefined ? {} : { limit }) }); },
+      limitFound: (sessionId, limit) => { this.send({ type: 'limit-found', sessionId, limit }); },
       now: deps.now,
     });
 
@@ -381,7 +391,28 @@ export class Runtime {
 
     this.buildSources();
     this.restartPolls();
+    this.wake();
+  }
+
+  /** The minute timer: ends due snoozes and gives up on limits in the flow, then continues sessions whose limit has reset (architecture.md § Rate limits). */
+  wake(): void {
     this.send({ type: 'tick' });
+    this.endIdleThreads();
+    this.track(this.continueLimited());
+  }
+
+  /**
+   * Releases each Codex app-server thread whose turn ended the idle limit ago, as the holder's idle end does for a Code Mode session; a message
+   * resumes it (PRD R107). The flow keeps a thread waiting on its usage limit.
+   */
+  private endIdleThreads(): void {
+    const now = this.deps.now();
+
+    for (const session of this.deps.store.activeSessions()) {
+      if (session.execution === 'app-server' && (session.state === 'idle' || session.state === 'failed') && !session.released && !session.releasing && now - session.stateAt >= (this.deps.codeModeIdleMs ?? CODE_MODE_IDLE_MS)) {
+        this.send({ type: 'held-idle', sessionId: session.id });
+      }
+    }
   }
 
   /** The sources the operator turned on in the dock's header (PRD R3). */
@@ -517,7 +548,7 @@ export class Runtime {
   }
 
   start(): void {
-    this.timers.push(setInterval(() => void this.readRoster(), ROSTER_MS), setInterval(() => this.readMarkers(), MARKER_MS), setInterval(() => this.send({ type: 'tick' }), WAKE_MS));
+    this.timers.push(setInterval(() => void this.readRoster(), ROSTER_MS), setInterval(() => this.readMarkers(), MARKER_MS), setInterval(() => this.wake(), WAKE_MS));
     this.watchMarkers();
     this.restartPolls();
   }
@@ -895,7 +926,7 @@ export class Runtime {
     if (fresh.length > 0) {
       const filteredForks = forks.filter((fork) => !stale.has(fork.sessionId));
 
-      this.send({ type: 'roster', sessions: observed.filter((entry) => !stale.has(entry.sessionId)), checked: fresh, ...(filteredForks.length > 0 ? { forks: filteredForks } : {}) });
+      this.send({ type: 'roster', sessions: observed.filter((entry) => !stale.has(entry.sessionId)).map((entry) => this.withLimit(entry)), checked: fresh, ...(filteredForks.length > 0 ? { forks: filteredForks } : {}) });
     }
 
     for (const sessionId of lost.filter((id) => !stale.has(id))) {
@@ -988,9 +1019,163 @@ export class Runtime {
       const card = observed?.state === 'idle' && observed.detail === null && session.state === 'idle' && session.stateDetail === QUESTION_CARD;
 
       if (observed !== null && !card && session.state !== 'starting' && (observed.state !== session.state || observed.detail !== session.stateDetail)) {
-        this.send({ type: 'marker', sessionId: session.id, ...observed });
+        const limit = observed.state === 'idle' || (observed.state === 'failed' && observed.detail === 'rate_limit') ? this.transcriptLimit(session, true) : null;
+
+        this.send({ type: 'marker', sessionId: session.id, ...observed, ...(limit === null ? {} : { limit }) });
+      } else if (session.state === 'idle' || session.state === 'failed') {
+        // Each turn end is read at least once after a hub start, so a limit a stopped hub had not read yet is found (architecture.md § Rate limits).
+        const turn = `${session.id} ${session.launchId ?? ''} ${session.stateAt}`;
+
+        if (this.deps.now() - session.stateAt < LIMIT_READ_MS || !this.limitTurns.has(turn)) {
+          this.limitTurns.add(turn);
+          this.limitAfterTurn(session);
+        }
       }
     }
+  }
+
+  /**
+   * The limit a Claude session's transcript shows its current turn ended at, or null (mechanics M100). Unless `always`, an unchanged transcript is
+   * not read again.
+   */
+  private transcriptLimit(session: Session, always: boolean): LimitReading | null {
+    if (session.provider !== 'claude' || session.nativeSessionId === null) {
+      return null;
+    }
+
+    const found = findTranscript(join(dirname(this.deps.claudeSettings), 'projects'), session.cwd, session.nativeSessionId);
+
+    if (found === null) {
+      return null;
+    }
+
+    let key: string;
+
+    try {
+      key = `${found.path} ${statSync(found.path).size}`;
+    } catch {
+      return null;
+    }
+
+    if (!always && this.limitReads.get(session.id) === key) {
+      return null;
+    }
+
+    this.limitReads.set(session.id, key);
+
+    return readTranscriptLimit(found.path, this.deps.now());
+  }
+
+  /**
+   * A roster entry that ends a Claude session's turn, with the limit its transcript shows, so a turn end the roster decides first is settled with
+   * it as a marker's would be (architecture.md § Rate limits).
+   */
+  private withLimit(entry: ObservedSession): ObservedSession {
+    const session = this.deps.store.session(entry.sessionId);
+    const ends = entry.state === 'idle' || (entry.state === 'failed' && entry.detail === 'rate_limit');
+
+    if (entry.limit !== undefined || !ends || session === null || (session.state === entry.state && session.stateDetail === entry.detail)) {
+      return entry;
+    }
+
+    const limit = this.transcriptLimit(session, true);
+
+    return limit === null ? entry : { ...entry, limit };
+  }
+
+  /** A limit line written after a turn end's marker, such as Claude Code's own wait just after its Stop, or a new reset time (mechanics M100). */
+  private limitAfterTurn(session: Session): void {
+    const reading = this.transcriptLimit(session, false);
+    const known = session.rateLimit;
+
+    if (reading !== null && (known == null || known.cli !== reading.cli || known.resetsAt !== reading.resetsAt || known.kind !== reading.kind)) {
+      this.send({ type: 'limit-found', sessionId: session.id, limit: reading });
+    }
+  }
+
+  /**
+   * Continues each held session or app-server thread whose limit's next attempt is due, by typing Claude Code's own continue text through the
+   * conversation, when it is still its work item's running session under the launch the limit was found in. Input in its terminal since the
+   * limit, other than the hub's own typing, leaves it to the operator (architecture.md § Rate limits).
+   */
+  async continueLimited(): Promise<void> {
+    const now = this.deps.now();
+
+    for (const session of this.deps.store.activeSessions()) {
+      const limit = session.rateLimit;
+
+      if (!waitsOnLimit(session) || limit == null || limit.nextAt > now || givesUp(limit, now) || this.continuing.has(session.id) || (session.codeMode !== true && session.execution !== 'app-server')) {
+        continue;
+      }
+
+      if (this.limitStale(session.id, limit) !== null) {
+        continue;
+      }
+
+      this.continuing.add(session.id);
+
+      try {
+        if (session.codeMode === true) {
+          const keyAt = await this.keyAt(session.id);
+
+          if (keyAt === undefined) {
+            continue;
+          }
+
+          if (keyAt !== null && keyAt > limit.at) {
+            this.deps.log(`session ${session.id} not continued after its usage limit: the operator typed in it`);
+            this.send({ type: 'limit-skipped', sessionId: session.id, reason: 'input' });
+            continue;
+          }
+        }
+
+        // The checks above awaited; a turn may have started, the work item changed or the session ended meanwhile.
+        if (this.limitStale(session.id, limit) !== null) {
+          continue;
+        }
+
+        const guard = () => this.limitStale(session.id, limit);
+        const refused = this.conversation.continueAfterLimit === undefined ? 'Nothing can type into the session.' : this.conversation.continueAfterLimit(session.id, CONTINUE_TEXT, guard);
+
+        this.deps.log(`session ${session.id} continued after its usage limit, attempt ${limit.attempts + 1}${refused === null ? '' : `: ${refused}`}`);
+        this.send({ type: 'limit-attempt', sessionId: session.id, error: refused });
+      } finally {
+        this.continuing.delete(session.id);
+      }
+    }
+  }
+
+  /**
+   * When a terminal attached to the held session last typed a key, which the hub's own typing never sets (architecture.md § Typing a message):
+   * null for never, undefined when the holder cannot tell.
+   */
+  private async keyAt(sessionId: string): Promise<number | null | undefined> {
+    try {
+      const screen = await this.heldScreen(sessionId, 0);
+
+      return screen === null || screen.keyAt === undefined ? undefined : screen.keyAt;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Why the hub no longer continues a session after `limit`, or null while it still should: the session still waits on that limit, under the
+   * launch it was found in, as its work item's latest session, with the work item running and its ticket not snoozed.
+   */
+  private limitStale(sessionId: string, limit: SessionLimit): string | null {
+    const session = this.deps.store.session(sessionId);
+    const item = session === null ? null : this.deps.store.workItem(session.workItemId);
+
+    if (session === null || item === null || !waitsOnLimit(session) || session.rateLimit?.at !== limit.at || session.rateLimit.nextAt !== limit.nextAt || (session.launchId ?? null) !== limit.launchId) {
+      return 'The session no longer waits on that usage limit.';
+    }
+
+    if ((item.status !== 'running' && item.status !== 'setup') || this.deps.store.sessionsFor(item.id).at(-1)?.id !== session.id || this.deps.store.ticket(item.ticketId)?.snoozed === true) {
+      return 'The work item no longer runs that session.';
+    }
+
+    return null;
   }
 
   /**
@@ -2448,6 +2633,8 @@ export interface ConversationReader {
   read(sessionIds: string[]): void;
   /** Reads a session's conversation that can only be read asynchronously; null when nothing is held back. */
   catchUp(sessionId: string): Promise<void> | null;
+  /** Types the text into the session as the hub's own message after its usage limit; why not when it cannot (architecture.md § Rate limits). */
+  continueAfterLimit?(sessionId: string, text: string, guard: () => string | null): string | null;
 }
 
 /** The live held sessions an event may end a turn of: a marker or roster read that finds one idle that was not. */

@@ -85,10 +85,11 @@ describe('Codex app-server runner', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sb-appserver-')); cleanup.push(() => rmSync(dir, { force: true, recursive: true }));
     const session = { id: 's1', nativeSessionId: null, state: 'starting', execution: 'app-server', released: false, cwd: dir, workItemId: 1 } as Session;
     const state = vi.fn();
+    const limitFound = vi.fn();
     const p = peer(handler ?? ((method) => method === 'thread/start' ? { thread: { id: 'thread-1' } } : method === 'thread/turns/list' ? { data: [] } : { thread: { id: 'thread-1', status: { type: 'idle' } } }));
-    const runner = new AppServerRunner({ server: p.server, session: () => session, sessions: () => [session], created: (_id, native) => { session.nativeSessionId = native; }, instructions: () => 'contract and rules', instructionsDelivered: (_id, hash, compactionId) => { session.instructionsHash = hash; session.instructionsCompactionId = compactionId; }, state, now: () => 1 });
+    const runner = new AppServerRunner({ server: p.server, session: () => session, sessions: () => [session], created: (_id, native) => { session.nativeSessionId = native; }, instructions: () => 'contract and rules', instructionsDelivered: (_id, hash, compactionId) => { session.instructionsHash = hash; session.instructionsCompactionId = compactionId; }, state, limitFound, now: () => 1 });
     const action = { sessionId: 's1', cwd: dir, workItemId: 1, permissionMode: 'plan', model: null, prompt: 'hello', name: 'task', contract: 'contract' } as StartAction;
-    return { ...p, runner, session, state, action };
+    return { ...p, runner, session, state, limitFound, action };
   }
 
   it('starts a persistent thread with its contract, model and per-thread permissions, then sends the first prompt once', async () => {
@@ -116,6 +117,33 @@ describe('Codex app-server runner', () => {
     p.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { status: 'failed', error: { message: 'broken' } } } });
     p.emit({ method: 'thread/status/changed', params: { threadId: 'thread-1', status: { type: 'idle' } } });
     expect(await p.runner.observe([p.session])).toEqual({ sessions: [{ sessionId: 's1', state: 'failed', detail: 'broken' }] });
+  });
+
+  it('reads a usage or rate limit from a failed turn, with the reset of a full window from a rate-limit update (mechanics M100)', async () => {
+    const p = setup(); await p.runner.start(p.action); p.session.state = 'running';
+    p.emit({ method: 'account/rateLimits/updated', params: { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, resetsAt: 7_200, windowDurationMins: 300 }, secondary: { usedPercent: 40, resetsAt: 900_000 } } } });
+    p.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { status: 'failed', error: { message: "You've hit your usage limit. Try again later.", codexErrorInfo: 'usageLimitExceeded' } } } });
+    expect(p.state).toHaveBeenLastCalledWith('s1', 'failed', 'rate_limit', { kind: 'usage', window: null, resetsAt: 7_200_000, exact: true, cli: false, message: "You've hit your usage limit. Try again later." });
+
+    p.emit({ method: 'turn/started', params: { threadId: 'thread-1' } });
+    p.emit({ method: 'account/rateLimits/updated', params: { rateLimits: { limitId: 'codex', primary: { usedPercent: 20, resetsAt: 7_200 } } } });
+    p.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { status: 'failed', error: { message: 'Slow down.', codexErrorInfo: 'rateLimitExceeded' } } } });
+    expect(p.state).toHaveBeenLastCalledWith('s1', 'failed', 'rate_limit', { kind: 'throttle', window: null, resetsAt: null, exact: false, cli: false, message: 'Slow down.' });
+
+    p.emit({ method: 'turn/started', params: { threadId: 'thread-1' } });
+    p.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { status: 'failed', error: { message: 'Overloaded.', codexErrorInfo: 'serverOverloaded' } } } });
+    expect(p.state).toHaveBeenLastCalledWith('s1', 'failed', 'Overloaded.');
+  });
+
+  it('gives a usage limit read without a reset the reset of a rate-limit update that comes after the failed turn, and replays it on a read', async () => {
+    const p = setup(); await p.runner.start(p.action); p.session.state = 'running';
+    p.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { status: 'failed', error: { message: 'Usage limit.', codexErrorInfo: 'usageLimitExceeded' } } } });
+    expect(p.state).toHaveBeenLastCalledWith('s1', 'failed', 'rate_limit', expect.objectContaining({ resetsAt: null }));
+    p.emit({ method: 'account/rateLimits/updated', params: { rateLimits: { primary: { usedPercent: 100, resetsAt: 9_000 } } } });
+    expect(p.limitFound).toHaveBeenCalledWith('s1', expect.objectContaining({ kind: 'usage', resetsAt: 9_000_000, exact: true }));
+    p.emit({ method: 'account/rateLimits/updated', params: { rateLimits: { primary: { usedPercent: 100, resetsAt: 9_000 } } } });
+    expect(p.limitFound).toHaveBeenCalledTimes(1);
+    expect(await p.runner.observe([p.session])).toEqual({ sessions: [{ sessionId: 's1', state: 'failed', detail: 'rate_limit', limit: expect.objectContaining({ resetsAt: 9_000_000 }) }] });
   });
 
   it('interrupts only the named thread and unsubscribes, without stopping the daemon', async () => {

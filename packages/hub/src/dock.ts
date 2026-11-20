@@ -44,6 +44,7 @@ import {
   issueKey,
   issueOfUrl,
   waitTexts,
+  limitTexts,
   blockerTexts,
 } from './rows.js';
 import type { Control, RepoKeys, RowGroup } from './rows.js';
@@ -376,7 +377,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     url: item.ticket.url,
     mark: kind === null ? null : { kind, glyph: MARK_GLYPHS[kind], title: MARK_TITLES[kind] },
     details: orMarkTitle(kind, [
-      ...[...startPromptText(item), ...waitTexts(item)].map(({ text, title }) => ({ text, title, tone: null })),
+      ...[...startPromptText(item), ...limitTexts(item, now), ...waitTexts(item)].map(({ text, title }) => ({ text, title, tone: null })),
       ...blockerTexts(item.ticket, item.status).map(({ text, title }) => ({ text, title, tone: 'warning' as const })),
       ...wake(item.ticket),
       ...[item.warning, item.error].filter((note): note is string => note !== null).map((note) => clipped(note, CAPS.note, 'warning')),

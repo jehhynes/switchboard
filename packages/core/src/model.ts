@@ -246,6 +246,35 @@ export interface Session {
   personaVersion?: string | null;
   /** The operator pinned `personaId` to this session. */
   personaPinned?: boolean;
+  /** The usage or rate limit the session's last turn stopped at, until a new turn starts (architecture.md § Rate limits). Absent reads as none. */
+  rateLimit?: SessionLimit | null;
+}
+
+/**
+ * What a runner read about a limit a turn stopped at (mechanics M100): `usage` is a usage limit with a reset time, `throttle` a temporary refusal.
+ * `resetsAt` is epoch milliseconds, or null when nothing gave it; `exact` says it came from a field, not from text cut to the minute. `cli`:
+ * Claude Code waits for the reset in the session's own process and continues by itself.
+ */
+export interface LimitReading {
+  kind: 'usage' | 'throttle';
+  window: string | null;
+  resetsAt: number | null;
+  exact: boolean;
+  cli: boolean;
+  message: string | null;
+}
+
+/** A session's limit as the flow keeps it: the reading, when it was found, the launch it was found in, and the resumes tried (architecture.md § Rate limits). */
+export interface SessionLimit extends LimitReading {
+  /** When the first limit of this run was found; `at` when this one was. */
+  since: number;
+  at: number;
+  launchId: string | null;
+  attempts: number;
+  /** When the hub next continues the session, if it has not continued by then. */
+  nextAt: number;
+  /** When the hub last typed the continue text; absent before its first attempt. */
+  attemptedAt?: number;
 }
 
 /**
@@ -272,4 +301,6 @@ export type QueueWait =
   /** A live session of the ticket; `playbook` is its work item's, or null when it is this work item's own session. */
   | { kind: 'session'; sessionId: string; shortId: string | null; ownItem: boolean; playbook: string | null }
   | { kind: 'snoozed' }
-  | { kind: 'blockers'; blockers: TicketBlocker[] };
+  | { kind: 'blockers'; blockers: TicketBlocker[] }
+  /** A session of the provider the work item starts in stopped at a usage limit, until `until` (architecture.md § Rate limits). */
+  | { kind: 'limit'; provider: Provider; until: number };

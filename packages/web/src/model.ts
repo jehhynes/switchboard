@@ -178,7 +178,16 @@ export function awaitingReply(items: readonly ItemView[], session: SessionView |
 }
 
 /** The session state's codicon and its words. */
-export function stateIcon(state: SessionView['state'] | null | undefined, waitingFor: SessionView['waitingFor'] = null): { icon: string; text: string } {
+export function stateIcon(state: SessionView['state'] | null | undefined, waitingFor: SessionView['waitingFor'] = null, limit: SessionView['limit'] = null): { icon: string; text: string } {
+  // A session waiting for a usage limit to reset (architecture.md § Rate limits).
+  if (limit != null) {
+    const at = new Date(limit.until);
+    const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const when = at.toDateString() === new Date().toDateString() ? time : `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+
+    return { icon: 'watch', text: `Rate limited · ${limit.retry ? 'retries' : 'resumes'} ${when}` };
+  }
+
   switch (state) {
     case 'starting':
       return { icon: 'loading~spin', text: 'Starting' };

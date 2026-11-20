@@ -547,8 +547,8 @@ describe('sessions', () => {
     h.act({ type: 'marker', sessionId: b.session, state: 'running', detail: null });
     expect(h.item(b.item)).toMatchObject({ status: 'running', error: null });
 
-    h.act({ type: 'marker', sessionId: b.session, state: 'failed', detail: 'rate_limit' });
-    expect(h.item(b.item)).toMatchObject({ status: 'blocked', error: 'The turn failed: rate_limit.' });
+    h.act({ type: 'marker', sessionId: b.session, state: 'failed', detail: 'server_error' });
+    expect(h.item(b.item)).toMatchObject({ status: 'blocked', error: 'The turn failed: server_error.' });
 
     const c = new Harness({ playbooks: playbooks(undefined, FINISH) });
     const d = running(c, '3', 'dev:finish');

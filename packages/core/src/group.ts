@@ -1,6 +1,7 @@
 import type { DoneReason, Session, Triage, WorkItem } from './model.js';
+import { waitsOnLimit } from './limit.js';
 
-// Imports only types, so the History webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
+// Imports only types and `limit.ts`, which imports only types, so the History webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
 
 /** Dock groups (PRD R27): Blocked on you, Ready for review, In progress, Unstarted and Done; Snoozed is the dock's own. */
 export type Group = 'blocked' | 'review' | 'progress' | 'unstarted' | 'done';
@@ -33,7 +34,7 @@ export function waitsOnCard(session: { state: Session['state']; stateDetail?: st
 }
 
 /** `triage` is the work item's latest triage, or null when it has none. A caller without `stateDetail` gets no permission mark. */
-type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: (Pick<Session, 'state' | 'outcome' | 'promptless'> & { stateDetail?: string | null })[]; triage: Pick<Triage, 'error'> | null };
+type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: (Pick<Session, 'state' | 'outcome' | 'promptless' | 'rateLimit'> & { stateDetail?: string | null })[]; triage: Pick<Triage, 'error'> | null };
 
 /** Hosted conversations remain open while their session waits for another message. */
 function idleConversation(item: Grouped): boolean {
@@ -134,7 +135,7 @@ export function reviewOrder(a: Pick<WorkItem, 'id' | 'readyAt' | 'orderAt'>, b: 
 }
 
 /** What differs between rows of one group (PRD R27): what the operator must do, the working phase, or how the work ended. */
-export type Mark = 'question' | 'permission' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'idle' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
+export type Mark = 'question' | 'permission' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'limited' | 'idle' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
 
 export const DONE_WORDS: Record<DoneReason, string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
 
@@ -150,6 +151,7 @@ export const MARK_TITLES: Record<Mark, string> = {
   queued: 'Queued',
   setup: 'Setting up',
   running: 'Running',
+  limited: 'Rate limited',
   idle: 'Idle',
   triaging: 'Triaging',
   'done-session': DONE_WORDS.session,
@@ -169,6 +171,7 @@ export const MARK_GLYPHS: Record<Mark, string> = {
   queued: '\u{ea82}', // clock
   setup: '\u{eb6d}', // tools
   running: '\u{eb19}', // loading
+  limited: '\u{eb7c}', // watch
   idle: '\u{ebb5}', // circle-large-outline
   triaging: '\u{eb19}', // loading
   'done-session': '\u{eab2}', // check
@@ -193,6 +196,11 @@ export function markOf(item: Grouped & Pick<WorkItem, 'doneReason'> & { approval
 
       if (item.status === 'awaiting-approval') {
         return item.approvalSends ? 'send' : 'review';
+      }
+
+      // A run whose session waits for a usage limit to reset continues on its own (architecture.md § Rate limits).
+      if ((item.status === 'running' || item.status === 'setup') && waitsOnLimit(activeSession(item))) {
+        return 'limited';
       }
 
       if (idleConversation(item)) return 'idle';

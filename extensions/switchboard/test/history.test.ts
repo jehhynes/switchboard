@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PERMISSION_PROMPT, Store, handle, parsePlaybook } from '@switchboard/core';
+import { DEFAULT_SETTINGS, MESSAGES, PERMISSION_PROMPT, Store, handle, parsePlaybook } from '@switchboard/core';
 import type { FlowEvent, HistoryChange, HistoryEvent, Playbook, Settings, TicketHistory } from '@switchboard/core';
 import { describe, expect, it, vi } from 'vitest';
 import { startHistory } from '../src/webview/historyMain.js';
@@ -380,6 +380,17 @@ describe('History model', () => {
         { text: 'Session abc12345 resumed in the terminal holder', lines: [], category: 'session' },
       ],
       [event('move-cancelled', 'hub', null, []), { text: 'Session abc12345 stayed in its tab, whose process did not exit', lines: [], category: 'session' }],
+      [
+        event('marker', 'hub', { state: 'failed', detail: 'rate_limit', limit: { kind: 'usage', window: 'five_hour', resetsAt: 1795198800000, cli: true } }, [change('session', 'update', { state: ['running', 'failed'], stateDetail: [null, 'rate_limit'] }, { sessionId: 's1' })]),
+        { text: 'Session abc12345 stopped at a usage limit', detail: expect.stringMatching(/^Resets .+; Claude Code continues on its own$/), category: 'session' },
+      ],
+      [event('limit-found', 'hub', { limit: { kind: 'usage', window: null, resetsAt: null, cli: false } }, []), { text: 'Session abc12345 stopped at a usage limit', detail: 'No reset time given', category: 'session' }],
+      [event('limit-attempt', 'hub', { attempt: 2 }, []), { text: 'Switchboard typed the continue text into session abc12345 after its usage limit', detail: 'Attempt 2', category: 'session' }],
+      [event('limit-attempt', 'hub', { attempt: 3, error: 'The session has ended.' }, []), { text: 'Switchboard could not continue session abc12345 after its usage limit', detail: 'The session has ended.', tone: 'warning' }],
+      [
+        event('limit-skipped', 'hub', { reason: 'input' }, [change('workItem', 'update', { status: ['running', 'blocked'], error: [null, MESSAGES.limitSkipped] })]),
+        { text: 'Switchboard left session abc12345 to you after its usage limit, because you typed in it', lines: [], category: 'session' },
+      ],
       [event('start', 'operator', { guidance: 'Check the 2024 thread.' }, [], null), { text: 'You started it with guidance', detail: 'Check the 2024 thread.', category: 'you', tone: 'accent' }],
       [event('pick', 'operator', { guidance: 'Reply in Spanish.' }, [], null), { text: 'You picked it from the pool with guidance', detail: 'Reply in Spanish.', category: 'you' }],
       [event('start', 'operator', null, [], null), { text: 'You started it', detail: null, category: 'you' }],

@@ -56,6 +56,9 @@ describe('readInputScreen', () => {
     expect(await readInputScreen({ data: drawn('half a thought'), cols: 40, rows: 6 })).toMatchObject({ menu: false, draft: 'half a thought' });
     expect(await readInputScreen({ data: drawn('', true), cols: 40, rows: 6 })).toMatchObject({ menu: true, draft: '' });
     expect((await readInputScreen({ data: 'Do you trust this folder?\r\nEnter to confirm · Esc to cancel', cols: 40, rows: 6 })).menu).toBe(true);
+    // Claude Code's wait for a usage limit's reset takes a message, though it says Esc cancels it (mechanics M100).
+    const wait = ['● Usage limit reached · continuing automatically at 2:19pm · esc to cancel', '', RULE, '❯ ', RULE, '  ⚠ Usage limit reached · limit resets 2:19pm', '    Continuing automatically at 2:19pm · Esc to cancel'].join('\r\n');
+    expect(await readInputScreen({ data: wait, cols: 120, rows: 10 })).toMatchObject({ menu: false, draft: '' });
     // The box as Claude Code 2.1.328 drew it in the live run of mechanics M86: a rule carrying the session's name, and the mode line below.
     const label = '─'.repeat(20) + ' switchboard · ad-hoc · adhoc 1 ─';
     const live = (box: string) => ['● ready', '', '✻ Baked for 1s · done 3:32 PM', '', label, `❯ ${box}`, RULE, '  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents'].join('\r\n');
