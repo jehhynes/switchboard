@@ -45,8 +45,10 @@ export interface ConversationViewDeps {
   openTerminal(): Promise<unknown>;
   /** Opens one of the window's artifacts by its path (architecture.md § Artifacts). */
   openArtifact(path: string): Promise<unknown>;
-  /** Hears each new state, as the Artifacts view does. */
+  /** Hears each new state, as the artifacts do, before the page gets it. */
   changed?(state: ConversationState): void;
+  /** The paths of the artifacts new or changed since they were last opened in the workspace, which the Artifacts tab marks and counts. */
+  unopened?(): string[];
   log(line: string): void;
 }
 
@@ -251,14 +253,14 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     return status === undefined ? STATUS_GONE : previewLinks(status.markdown, status.cwd);
   }
 
-  /** Opens a status in the Markdown preview: the one the status row shows, or one the earlier statuses list gave. */
+  /** Opens a status in the Markdown preview: the one the Status tab shows, or one the earlier statuses list gave. */
   async openStatus(status: StatusView): Promise<void> {
     this.#keep(status);
     await vscode.commands.executeCommand('markdown.showPreview', statusUri(status));
   }
 
   /**
-   * Lists the current session's statuses before the one the status row shows, newest first, from the hub's `statuses` command, and opens the one
+   * Lists the current session's statuses before the one the Status tab shows, newest first, from the hub's `statuses` command, and opens the one
    * picked in the Markdown preview; each page's last pick loads the next.
    */
   async earlierStatuses(): Promise<void> {
@@ -367,13 +369,21 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
 
   #set(state: ConversationState): void {
     this.#state = state;
-    this.#post({ type: 'state', state });
+    this.deps.changed?.(state);
+    this.refresh();
 
     for (const view of this.#views.values()) {
       view.badge = unreadBadge(state.unread);
     }
+  }
 
-    this.deps.changed?.(state);
+  #stateMessage(): { type: 'state'; state: ConversationState; unopened: string[] } {
+    return { type: 'state', state: this.#state, unopened: this.deps.unopened?.() ?? [] };
+  }
+
+  /** Draws the state again, as after the artifacts opened in the workspace changed. */
+  refresh(): void {
+    this.#post(this.#stateMessage());
   }
 
   /**
@@ -504,7 +514,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       const run = (): Promise<unknown> => {
         switch (message.type) {
           case 'ready':
-            return Promise.resolve(view.webview.postMessage({ type: 'state', state: this.#state }))
+            return Promise.resolve(view.webview.postMessage(this.#stateMessage()))
               .then(() => view.webview.postMessage({ type: 'focus', focused: vscode.window.state.focused }))
               .then(() => this.#giveBack());
           case 'seen':

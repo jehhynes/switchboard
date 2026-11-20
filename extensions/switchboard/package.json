@@ -82,11 +82,6 @@
           "id": "switchboard.conversation",
           "name": "Conversation",
           "when": "!switchboard.noSecondarySidebar"
-        },
-        {
-          "id": "switchboard.artifacts",
-          "name": "Artifacts",
-          "when": "!switchboard.noSecondarySidebar"
         }
       ],
       "switchboard-conversation-activity": [
@@ -94,11 +89,6 @@
           "type": "webview",
           "id": "switchboard.conversationActivity",
           "name": "Conversation",
-          "when": "switchboard.noSecondarySidebar"
-        },
-        {
-          "id": "switchboard.artifactsActivity",
-          "name": "Artifacts",
           "when": "switchboard.noSecondarySidebar"
         }
       ]
@@ -208,16 +198,6 @@
     ],
     "markdown.previewStyles": [
       "./dist/mermaidPreview.css"
-    ],
-    "viewsWelcome": [
-      {
-        "view": "switchboard.artifacts",
-        "contents": "The session's artifacts show here as it writes them: plans, reports, comparisons, diagrams, pages and media."
-      },
-      {
-        "view": "switchboard.artifactsActivity",
-        "contents": "The session's artifacts show here as it writes them: plans, reports, comparisons, diagrams, pages and media."
-      }
     ]
   },
   "scripts": {

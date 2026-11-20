@@ -1,8 +1,8 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, renderConversation, replyText } from './conversationRender.js';
+import { ago, renderConversation, replyText, TABS } from './conversationRender.js';
 import { statusLine } from '../conversationModel.js';
-import type { ConversationMessage, SendTarget } from './conversationRender.js';
+import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 
 interface VsCodeApi {
   postMessage(message: ConversationMessage): void;
@@ -12,10 +12,11 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-/** What the page keeps while hidden, since it is not retained: its open folds and whether it was scrolled to the end. */
+/** What the page keeps while hidden, since it is not retained: its open folds, whether it was scrolled to the end, and the tab shown. */
 interface PageState {
   open: string[];
   scroll: number | null;
+  tab?: Tab;
 }
 
 /** How long a copy button shows its check. */
@@ -24,9 +25,9 @@ const COPIED_MS = 2_000;
 export const SEEN_MS = 1_000;
 /** How often the page checks again while an unread item is on its way to seen, so one hidden and shown again in between starts over. */
 const SEEN_CHECK_MS = 250;
-/** How long a status that replaced the one before is marked New, unless the operator opens it first. */
+/** How long a status that replaced the one before is marked New once the Status tab shows it, unless the operator opens it first. */
 export const STATUS_NEW_MS = 60_000;
-/** How often the status row's age is redrawn. */
+/** How often the ages of the status and the artifacts are redrawn. */
 const STATUS_AGE_MS = 30_000;
 /** The tallest the composer grows before it scrolls, as Claude Code's. */
 const COMPOSER_MAX_PX = 200;
@@ -170,6 +171,9 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   const saved = vscode.getState() as Partial<PageState> | null;
   const open = new Set(saved?.open ?? []);
   let state: ConversationState = EMPTY_CONVERSATION;
+  let tab: Tab = TABS.some((one) => one.tab === saved?.tab) ? saved!.tab! : 'conversation';
+  // The artifacts new or changed since they were last opened in the workspace, which the extension keeps.
+  let unopened = new Set<string>();
   let shownIds = new Set<string>();
   let restore = saved?.scroll ?? null;
   let focused: string | null = null;
@@ -178,7 +182,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   // Copy buttons waiting for the extension to say it wrote the clipboard.
   const copies = new Map<number, HTMLElement>();
   let nextCopy = 1;
-  // The status the row last showed, and until when a status that replaced it is marked New.
+  // The status the Status tab last had, and until when a status that replaced it is marked New: Infinity until the tab shows it.
   let shownStatus: { sessionId: string | null; id: string; markdown: string } | null = null;
   // Whether this VS Code window has the focus, which the extension says; unread items count as seen only then.
   let windowFocused = false;
@@ -188,24 +192,24 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   let reportedFor: string | null = null;
   let seenTimer: ReturnType<typeof setTimeout> | undefined;
   let wasConnected = false;
-  // The timeline's size changes without a window resize when the status row folds or the composer grows.
+  // The timeline's size changes without a window resize when a fold opens or the composer grows.
   const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => checkSeen()) : null;
   /**
-   * The unread items on screen: the status row, which is pinned, and the replies at least half in the timeline's viewport, or filling half of it.
-   * None while the window has no focus or the page is hidden.
+   * The unread items on screen, only in the tab shown: the status on the Status tab, and the replies at least half in the timeline's viewport, or
+   * filling half of it. None while the window has no focus or the page is hidden.
    */
   const visibleUnread = (): string[] => {
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
-    if (!windowFocused || document.visibilityState === 'hidden' || scroller === null) {
+    if (!windowFocused || document.visibilityState === 'hidden') {
       return [];
     }
 
-    const view = scroller.getBoundingClientRect();
+    const view = scroller?.getBoundingClientRect();
 
     return [...root.querySelectorAll<HTMLElement>('[data-unread]')]
       .filter((element) => {
-        if (!scroller.contains(element)) {
+        if (scroller === null || view === undefined || !scroller.contains(element)) {
           return true;
         }
 
@@ -271,40 +275,51 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     if (freshUntil !== 0) {
       freshUntil = 0;
       clearTimeout(freshTimer);
-      root.querySelector('.status-row')?.classList.remove('fresh');
-      root.querySelector('.status-new')?.remove();
+
+      if (root.isConnected) {
+        draw();
+      }
     }
   };
-  // A status that replaces the one the row showed for the same session is New for a while; a first status after the stage is too.
+  // A New status's minute starts once the Status tab shows it, so one that came while another tab was shown is still New there.
+  const startFreshClock = (): void => {
+    if (freshUntil !== Infinity || tab !== 'status' || document.visibilityState === 'hidden') {
+      return;
+    }
+
+    freshUntil = Date.now() + STATUS_NEW_MS;
+    freshTimer = setTimeout(() => {
+      freshUntil = 0;
+
+      if (root.isConnected) {
+        draw();
+      }
+    }, STATUS_NEW_MS);
+  };
+  // A status that replaces the one the page had for the same session is New for a while; a first status after the stage is too.
   const noteStatus = (): void => {
     const status = state.status;
     const sessionId = state.scope?.sessionId ?? null;
 
     if (status !== null && !status.fallback && shownStatus !== null && shownStatus.sessionId === sessionId && (shownStatus.id !== status.id || shownStatus.markdown !== status.markdown)) {
-      freshUntil = Date.now() + STATUS_NEW_MS;
+      freshUntil = Infinity;
       clearTimeout(freshTimer);
-      freshTimer = setTimeout(() => {
-        freshUntil = 0;
-
-        if (root.isConnected) {
-          draw();
-        }
-      }, STATUS_NEW_MS);
       live.textContent = `New status: ${statusLine(status.markdown)}`;
     } else if (status === null || shownStatus?.sessionId !== sessionId) {
-      seenStatus();
+      freshUntil = 0;
+      clearTimeout(freshTimer);
     }
 
     shownStatus = status === null ? null : { sessionId, id: status.id, markdown: status.markdown };
   };
 
-  // The row's age, redrawn while the page is shown; a page taken off the document stops.
+  // The ages of the status and the artifacts, redrawn while the page is shown; a page taken off the document stops.
   const tickAges = (): void => {
     if (!root.isConnected) {
       return;
     }
 
-    for (const age of root.querySelectorAll<HTMLElement>('.status-age')) {
+    for (const age of root.querySelectorAll<HTMLElement>('.age')) {
       age.textContent = ago(Number(age.dataset['at']), Date.now());
     }
 
@@ -316,20 +331,53 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   const save = (): void => {
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
-    vscode.setState({ open: [...open], scroll: scroller === null || atEnd(scroller) ? null : scroller.scrollTop } satisfies PageState);
+    // Off the Conversation tab, the scroll position it had is kept until it is shown again.
+    const scroll = scroller === null ? restore : atEnd(scroller) ? null : scroller.scrollTop;
+
+    vscode.setState({ open: [...open], scroll, tab } satisfies PageState);
   };
   const atEnd = (scroller: HTMLElement): boolean => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
+
+  // The tab and scope the page last drew, so a redraw of the same Status or Artifacts tab keeps its scroll position.
+  let drawn: string | null = null;
+  /** A focused tab or button outside the timeline, found again after a redraw by its tab, action and path. */
+  const focusKey = (element: Element | null): { tab?: string | undefined; action?: string | undefined; path?: string | undefined } | null => {
+    if (!(element instanceof HTMLElement) || !root.contains(element) || element.closest('.timeline') !== null) {
+      return null;
+    }
+
+    return element.dataset['tab'] !== undefined ? { tab: element.dataset['tab'] } : element.dataset['action'] !== undefined ? { action: element.dataset['action'], path: element.dataset['path'] } : null;
+  };
 
   const draw = (): void => {
     const before = root.querySelector<HTMLElement>('.scroll');
     // A redraw puts the focus back on the item it was on only while the timeline had it, never taking it from the composer.
     const timelineFocused = root.contains(document.activeElement);
+    const refocus = focusKey(document.activeElement);
     const wasAtEnd = before === null || atEnd(before);
     const top = before?.scrollTop ?? 0;
+    const panelTop = root.querySelector<HTMLElement>('.panel')?.scrollTop ?? 0;
+    const view = `${tab} ${state.scope?.scopeGen ?? ''} ${state.scope?.sessionId ?? ''}`;
     const ids = new Set(state.items.map((item) => item.id));
     const added = state.items.filter((item) => !shownIds.has(item.id));
 
-    root.innerHTML = renderConversation(state, open, Date.now(), freshUntil > Date.now());
+    // Items that come while another tab is shown, with the conversation scrolled up, are below where the operator was reading.
+    if (before === null && restore !== null && added.length > 0 && shownIds.size > 0) {
+      unseenBelow = true;
+    }
+
+    startFreshClock();
+    root.innerHTML = renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened });
+    // The composer belongs to the Conversation tab.
+    document.body.dataset['tab'] = tab;
+
+    const panel = root.querySelector<HTMLElement>('.panel');
+
+    if (panel !== null && drawn === view) {
+      panel.scrollTop = panelTop;
+    }
+
+    drawn = view;
 
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
@@ -345,19 +393,19 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         if (added.length > 0 && shownIds.size > 0) {
           unseenBelow = true;
         }
+      }
 
-        if (unseenBelow) {
-          const pill = document.createElement('button');
+      if (unseenBelow && !atEnd(scroller)) {
+        const pill = document.createElement('button');
 
-          pill.className = 'pill';
-          pill.textContent = 'New messages';
-          pill.addEventListener('click', () => {
-            scroller.scrollTop = scroller.scrollHeight;
-            unseenBelow = false;
-            pill.remove();
-          });
-          root.appendChild(pill);
-        }
+        pill.className = 'pill';
+        pill.textContent = 'New messages';
+        pill.addEventListener('click', () => {
+          scroller.scrollTop = scroller.scrollHeight;
+          unseenBelow = false;
+          pill.remove();
+        });
+        root.appendChild(pill);
       }
 
       resized?.disconnect();
@@ -382,15 +430,43 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
     shownIds = ids;
 
-    if (focused !== null && timelineFocused) {
+    if (refocus !== null) {
+      [...root.querySelectorAll<HTMLElement>('[data-tab], [data-action]')].find((element) => focusKey(element) !== null && element.dataset['tab'] === refocus.tab && element.dataset['action'] === refocus.action && element.dataset['path'] === refocus.path)?.focus();
+    } else if (focused !== null && timelineFocused) {
       root.querySelector<HTMLElement>(`li[data-id="${CSS.escape(focused)}"]`)?.focus();
     }
 
     checkSeen();
   };
 
+  /** Shows a tab, keeping the conversation's scroll position for when it is shown again. */
+  const selectTab = (next: Tab): void => {
+    if (next === tab) {
+      return;
+    }
+
+    const scroller = root.querySelector<HTMLElement>('.scroll');
+
+    if (scroller !== null) {
+      restore = atEnd(scroller) ? null : scroller.scrollTop;
+    }
+
+    tab = next;
+    focused = null;
+    draw();
+    save();
+    root.querySelector<HTMLElement>(`[role="tab"][data-tab="${tab}"]`)?.focus();
+  };
+
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+    const tabButton = target.closest<HTMLElement>('[role="tab"]');
+
+    if (tabButton !== null) {
+      selectTab(tabButton.dataset['tab'] as Tab);
+      return;
+    }
+
     const link = target.closest<HTMLElement>('a[data-href]');
 
     if (link !== null) {
@@ -431,10 +507,6 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       const id = fold.dataset['fold'];
 
       if (id !== undefined) {
-        if (id === 'status' && fold.open) {
-          seenStatus();
-        }
-
         if (fold.open) {
           open.add(id);
         } else {
@@ -447,6 +519,21 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     },
     true,
   );
+
+  // The tab strip is one tab stop, as VS Code's: Left and Right move to the tab before or after, Home and End to the first or last.
+  root.addEventListener('keydown', (event) => {
+    const current = (event.target as HTMLElement).closest<HTMLElement>('[role="tab"]');
+    const keys: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, Home: -TABS.length, End: TABS.length };
+
+    if (current === null || keys[event.key] === undefined) {
+      return;
+    }
+
+    const index = TABS.findIndex((one) => one.tab === current.dataset['tab']);
+
+    event.preventDefault();
+    selectTab(TABS[Math.max(0, Math.min(TABS.length - 1, index + keys[event.key]!))]!.tab);
+  });
 
   // The timeline is one tab stop; Up and Down move between items, Enter or Space toggles an item's first fold.
   root.addEventListener('keydown', (event) => {
@@ -489,9 +576,13 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   });
 
   window.addEventListener('resize', checkSeen);
-  document.addEventListener('visibilitychange', checkSeen);
+  document.addEventListener('visibilitychange', () => {
+    // A New status that came while the page was hidden starts its minute once the page shows it.
+    startFreshClock();
+    checkSeen();
+  });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> }>) => {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> }>) => {
     if (event.data.type === 'focus') {
       windowFocused = event.data.focused;
       checkSeen();
@@ -504,6 +595,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       checkSeen();
     } else if (event.data.type === 'state') {
       state = event.data.state;
+      unopened = new Set(event.data.unopened ?? []);
 
       // A reconnect starts from the hub's state: items reported while the stream was down are reported again if still unread.
       if (state.connected && !wasConnected) {

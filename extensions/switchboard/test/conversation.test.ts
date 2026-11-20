@@ -7,6 +7,10 @@ import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
 import { ago, linkAllowed, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
+import type { Tab } from '../src/webview/conversationRender.js';
+
+/** The page's extras for a tab. */
+const on = (tab: Tab, unopened: string[] = []) => ({ tab, unopened: new Set(unopened) });
 
 const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2' };
@@ -379,19 +383,23 @@ describe('unread replies and statuses', () => {
   const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
   const status = (id: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown: 'Done.', fallback: false, unread: true, ...patch });
 
-  it("marks an unread reply's dot and the unread status row, and never a seen one, a note or the stage", () => {
+  it("marks an unread reply's dot on the Conversation tab and the unread status on the Status tab, and never a seen one, a note or the stage", () => {
     const root = document.createElement('div');
+    const shown = state([reply('r1', T0, { unread: true }), reply('r2', T0 + 1), reply('n1', T0 + 2, { kind: 'note', unread: true })], { status: status('st1') });
 
-    root.innerHTML = renderConversation(state([reply('r1', T0, { unread: true }), reply('r2', T0 + 1), reply('n1', T0 + 2, { kind: 'note', unread: true })], { status: status('st1') }), new Set(), T0);
-    expect([...root.querySelectorAll<HTMLElement>('[data-unread]')].map((one) => one.dataset['unread'])).toEqual(['st1', 'r1']);
+    root.innerHTML = renderConversation(shown, new Set(), T0);
+    expect([...root.querySelectorAll<HTMLElement>('[data-unread]')].map((one) => one.dataset['unread'])).toEqual(['r1']);
     expect(root.querySelector('li[data-id="r1"]')?.className).toBe('reply reply unread');
     expect(root.querySelector('li[data-id="r1"] .dot')?.getAttribute('title')).toBe('Unread');
     expect(root.querySelector('li[data-id="r2"] .dot')?.textContent).toBe('');
-    expect(root.querySelector('details.status-row')?.getAttribute('aria-label')).toBe('Status, unread');
 
-    root.innerHTML = renderConversation(state([], { status: status('stage-2', { fallback: true, unread: true }) }), new Set(), T0);
+    root.innerHTML = renderConversation(shown, new Set(), T0, false, on('status'));
+    expect([...root.querySelectorAll<HTMLElement>('[data-unread]')].map((one) => one.dataset['unread'])).toEqual(['st1']);
+    expect(root.querySelector('.status-tab')?.getAttribute('aria-label')).toBe('Status, unread');
+
+    root.innerHTML = renderConversation(state([], { status: status('stage-2', { fallback: true, unread: true }) }), new Set(), T0, false, on('status'));
     expect(root.querySelector('[data-unread]')).toBeNull();
-    expect(root.querySelector('details.status-row')?.getAttribute('aria-label')).toBe('Status');
+    expect(root.querySelector('.tab-badge')).toBeNull();
   });
 
   it('reports each unread item seen once it was visible in a focused window for a second, leaving those outside the timeline unread', () => {
@@ -428,8 +436,8 @@ describe('unread replies and statuses', () => {
     vi.advanceTimersByTime(999);
     expect(seen()).toEqual([]);
     vi.advanceTimersByTime(1);
-    // The pinned status row and the reply in view; the reply scrolled above the timeline stays unread.
-    expect(seen()).toEqual([{ type: 'seen', ids: ['st1', 'r2'], target: { scopeGen: 1, sessionId: 's2' } }]);
+    // The reply in view; the reply scrolled above the timeline stays unread, and the status, on the Status tab, too.
+    expect(seen()).toEqual([{ type: 'seen', ids: ['r2'], target: { scopeGen: 1, sessionId: 's2' } }]);
 
     // A redraw before the hub's answer does not report them again.
     send({ type: 'state', state: state(items, { status: status('st1'), unread: 3 }) });
@@ -477,7 +485,7 @@ describe('unread replies and statuses', () => {
     vi.useRealTimers();
   });
 
-  it('starts the second over for an item hidden and shown again without a scroll, and checks when the status row folds', () => {
+  it('starts the second over for an item hidden and shown again without a scroll, and checks when the Conversation tab is shown again', () => {
     vi.useFakeTimers();
     vi.setSystemTime(T0);
 
@@ -510,18 +518,15 @@ describe('unread replies and statuses', () => {
     vi.advanceTimersByTime(600);
     expect(seen()).toEqual([{ type: 'seen', ids: ['r1'], target: { scopeGen: 1, sessionId: 's2' } }]);
 
-    // Folding the status row shows more of the timeline, which is checked at once.
+    // A reply that arrived while another tab was shown counts only once the Conversation tab shows it again.
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="artifacts"]')!.click();
     send({ type: 'state', state: state([reply('r1', T0), reply('r2', T0 + 1, { unread: true })], { status: status('st1', { unread: false }) }) });
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       return this.classList.contains('scroll') ? rect(0, 100) : (this as HTMLElement).dataset['unread'] === 'r2' ? rect(...box) : rect(0, 0);
     });
-    box = [200, 260];
     vi.advanceTimersByTime(5_000);
-    box = [20, 80];
-    const row = root.querySelector<HTMLDetailsElement>('details.status-row')!;
-
-    row.open = true;
-    row.dispatchEvent(new Event('toggle'));
+    expect(seen()).toHaveLength(1);
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
     vi.advanceTimersByTime(1_000);
     expect(seen().at(-1)).toMatchObject({ ids: ['r2'] });
     vi.restoreAllMocks();
@@ -784,7 +789,7 @@ describe('reply links and the secondary side bar', () => {
   });
 });
 
-describe('the status row', () => {
+describe('the Status tab', () => {
   const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
   const status = (id: string, markdown: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown, fallback: false, unread: false, ...patch });
 
@@ -838,37 +843,42 @@ describe('the status row', () => {
     expect(statusLine('- 1. `a.ts` fixed')).toBe('a.ts fixed');
   });
 
-  it('pins the status under the header, folded to its first line, with the whole status escaped when open and the tools to open it', () => {
-    const html = renderConversation(state({ status: status('st-1', '## Done <img src=x onerror=alert(1)>\n\n| a |\n|---|\n| 1 |') }), new Set(), T0 + 4 * 60_000);
+  it('draws the status on the Status tab under its time, how long ago and the tools to open it, escaped, and the stage or a line before it', () => {
+    const at = T0 + 4 * 60_000;
     const root = document.createElement('div');
 
-    root.innerHTML = html;
-
-    const row = root.querySelector<HTMLDetailsElement>('.status > details.status-row')!;
-
-    expect(root.firstElementChild?.className).toBe('header');
-    expect(root.children[1]?.className).toBe('status');
-    expect(row.open).toBe(false);
-    expect(row.querySelector('summary .codicon-pulse')).not.toBeNull();
-    expect(row.querySelector('summary')!.textContent).toBe('Status·4 min agoDone <img src=x onerror=alert(1)>');
+    root.innerHTML = renderConversation(state({ status: status('st-1', '## Done <img src=x onerror=alert(1)>\n\n| a |\n|---|\n| 1 |') }), new Set(), at, false, on('status'));
+    expect([...root.children].map((child) => child.className)).toEqual(['header', 'tabs', 'panel']);
+    expect(root.querySelector('.status-head .codicon-pulse')).not.toBeNull();
+    expect(root.querySelector('.status-time')?.textContent).toBe(new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(T0));
+    expect(root.querySelector('.status-age')?.textContent).toBe('4 min ago');
+    expect(root.querySelector('.status-body h2')?.textContent).toBe('Done <img src=x onerror=alert(1)>');
     expect(root.querySelector('img')).toBeNull();
-    expect(row.querySelector('.status-body table')).not.toBeNull();
+    expect(root.querySelector('.status-body table')).not.toBeNull();
     expect(root.querySelector('[data-action="status-open"]')).not.toBeNull();
     expect(root.querySelector('[data-action="statuses"]')).not.toBeNull();
     expect(root.querySelector('.status-new')).toBeNull();
+    expect(root.querySelector('.timeline')).toBeNull();
 
-    root.innerHTML = renderConversation(state({ status: status('st-1', 'x') }), new Set(['status']), T0, true);
-    expect(root.querySelector<HTMLDetailsElement>('details.status-row')!.open).toBe(true);
+    root.innerHTML = renderConversation(state({ status: status('st-1', 'x') }), new Set(), T0, true, on('status'));
     expect(root.querySelector('.status-new')?.textContent).toBe('New');
+    expect(root.querySelector('[data-tab="status"] .tab-badge')?.textContent).toBe('New');
 
-    // The stage stands in, dimmed, with nothing to open; no status and no stage, no row.
-    root.innerHTML = renderConversation(state({ status: status('stage-2', 'Reading the inbox code', { fallback: true }) }), new Set(), T0);
-    expect(root.querySelector('details.status-row.fallback .status-first')?.textContent).toBe('Reading the inbox code');
+    // Not on the Conversation tab any more.
+    root.innerHTML = renderConversation(state({ status: status('st-1', 'x') }), new Set(), T0, true);
+    expect(root.querySelector('.status-tab')).toBeNull();
+    expect(root.querySelector('[data-tab="status"] .tab-badge')?.textContent).toBe('New');
+
+    // The stage stands in, dimmed, with nothing to open; with neither, a line says so.
+    root.innerHTML = renderConversation(state({ status: status('stage-2', 'Reading the inbox code', { fallback: true }) }), new Set(), T0, false, on('status'));
+    expect(root.querySelector('.status-tab.fallback .status-body')?.textContent).toBe('Reading the inbox code\n');
+    expect(root.querySelector('.status-tab.fallback .empty')?.textContent).toContain('no status yet');
     expect(root.querySelector('[data-action="status-open"]')).toBeNull();
-    expect(renderConversation(state(), new Set(), T0)).not.toContain('status-row');
+    root.innerHTML = renderConversation(state(), new Set(), T0, false, on('status'));
+    expect(root.querySelector('.panel > .empty')?.textContent).toBe('The session has posted no status yet. Ask it for one, and its latest shows here.');
   });
 
-  it('marks a status that replaced the one shown as New until it is opened or a minute passes, redraws its age, and posts its tools', () => {
+  it('marks a status that replaced the one before as New for a minute once the Status tab shows it or until it is opened, redraws its age, and posts its tools', () => {
     vi.useFakeTimers();
     vi.setSystemTime(T0);
 
@@ -877,35 +887,42 @@ describe('the status row', () => {
     const posted: Array<{ type: string }> = [];
     const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
     const show = (patch: Partial<ConversationState>) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state(patch) } }));
+    const badge = () => root.querySelector('[data-tab="status"] .tab-badge')?.textContent ?? null;
 
     document.body.replaceChildren(root, live);
     startConversation(root, live, vscode);
     show({ status: status('stage-2', 'Reading', { fallback: true }) });
-    expect(root.querySelector('.status-new')).toBeNull();
+    expect(badge()).toBeNull();
 
-    // The first status after the stage, and each that replaces it, is New.
+    // The first status after the stage, and each that replaces it, is New; on another tab it stays New, however long.
     show({ status: status('st-1', 'First.') });
-    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(badge()).toBe('New');
     expect(live.textContent).toBe('New status: First.');
-    expect(root.querySelector('.status-age')?.textContent).toBe('just now');
-    vi.advanceTimersByTime(STATUS_NEW_MS);
+    vi.advanceTimersByTime(5 * STATUS_NEW_MS);
+    expect(badge()).toBe('New');
+
+    // Shown on the Status tab, it is New for a minute.
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    expect(root.querySelector('.status-new')).not.toBeNull();
+    expect(root.querySelector('.status-age')?.textContent).toBe('5 min ago');
+    vi.advanceTimersByTime(STATUS_NEW_MS - 1);
+    expect(root.querySelector('.status-new')).not.toBeNull();
+    vi.advanceTimersByTime(1);
     expect(root.querySelector('.status-new')).toBeNull();
+    expect(badge()).toBeNull();
     vi.advanceTimersByTime(3 * 60_000);
-    expect(root.querySelector('.status-age')?.textContent).toBe('4 min ago');
+    expect(root.querySelector('.status-age')?.textContent).toBe('9 min ago');
 
-    show({ status: status('st-2', '## Second') });
-    expect(root.querySelector('.status-new')).not.toBeNull();
-    // A redraw with the same status keeps the mark; opening the row clears it.
-    show({ status: status('st-2', '## Second') });
-    expect(root.querySelector('.status-new')).not.toBeNull();
-
-    const row = root.querySelector<HTMLDetailsElement>('details.status-row')!;
-
-    row.open = true;
-    row.dispatchEvent(new Event('toggle'));
+    // An unread status keeps the badge after its New mark.
+    show({ status: status('st-1', 'First.', { unread: true }) });
     expect(root.querySelector('.status-new')).toBeNull();
+    expect(badge()).toBe('New');
 
-    show({ status: status('st-3', 'Third.') });
+    show({ status: status('st-2', '## Second') });
+    expect(root.querySelector('.status-new')).not.toBeNull();
+    // A redraw with the same status keeps the mark; opening it in the preview clears it.
+    show({ status: status('st-2', '## Second') });
+    expect(root.querySelector('.status-new')).not.toBeNull();
     root.querySelector<HTMLElement>('[data-action="status-open"]')!.click();
     expect(root.querySelector('.status-new')).toBeNull();
     root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
@@ -915,5 +932,175 @@ describe('the status row', () => {
     show({ scope: { ...SCOPE, sessionId: 's5' }, session: { ...SESSION, id: 's5' }, status: status('st-5', 'Other.', { sessionId: 's5' }) });
     expect(root.querySelector('.status-new')).toBeNull();
     vi.useRealTimers();
+  });
+
+  it('starts the minute of a status that became New while the page was hidden once the page is shown', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    let hidden = false;
+    const vscode = { postMessage: () => undefined, getState: () => ({ open: [], scroll: null, tab: 'status' }), setState: () => undefined };
+    const show = (markdown: string) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state({ status: status('st-1', markdown) }) } }));
+
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => (hidden ? 'hidden' : 'visible'));
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    show('First.');
+    hidden = true;
+    show('First, updated.');
+    vi.advanceTimersByTime(5 * STATUS_NEW_MS);
+    hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(root.querySelector('.status-new')).not.toBeNull();
+    vi.advanceTimersByTime(STATUS_NEW_MS);
+    expect(root.querySelector('.status-new')).toBeNull();
+    expect(root.querySelector('.status-tab')?.getAttribute('role')).toBe('region');
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('reports the status seen once the Status tab showed it in a focused window for a second', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    const send = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    send({ type: 'focus', focused: true });
+    send({ type: 'state', state: state({ status: status('st-1', 'Done.', { unread: true }) }) });
+    vi.advanceTimersByTime(5_000);
+    expect(posted.filter((message) => message.type === 'seen')).toEqual([]);
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    vi.advanceTimersByTime(1_000);
+    expect(posted.filter((message) => message.type === 'seen')).toEqual([{ type: 'seen', ids: ['st-1'], target: { scopeGen: 1, sessionId: 's2' } }]);
+    vi.useRealTimers();
+  });
+});
+
+describe('the tab strip', () => {
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [reply('r1', T0)], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+
+  it('draws Conversation, Status and Artifacts under the header as tabs, the selected one alone in the panel, and none for a window with no work item', () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state(), new Set(), T0);
+
+    const tabs = [...root.querySelectorAll<HTMLElement>('.tabs[role="tablist"] > [role="tab"]')];
+
+    expect(tabs.map((tab) => [tab.textContent, tab.getAttribute('aria-selected'), tab.tabIndex])).toEqual([
+      ['Conversation', 'true', 0],
+      ['Status', 'false', -1],
+      ['Artifacts', 'false', -1],
+    ]);
+    expect(root.querySelector('[role="tabpanel"]')?.className).toBe('scroll');
+    expect(root.querySelector('.timeline')).not.toBeNull();
+
+    root.innerHTML = renderConversation(state(), new Set(), T0, false, on('artifacts'));
+    expect(root.querySelector('[role="tab"].selected')?.textContent).toBe('Artifacts');
+    expect(root.querySelector('.timeline')).toBeNull();
+    expect(root.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe('tab-artifacts');
+
+    expect(renderConversation({ ...state(), scope: null }, new Set(), T0)).not.toContain('tablist');
+  });
+
+  it('switches tabs by click and by the arrow, Home and End keys, keeps the tab and the scroll position, and shows the composer only on the Conversation tab', () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    let saved: unknown = { open: [], scroll: null, tab: 'status' };
+    const vscode = { postMessage: () => undefined, getState: () => saved, setState: (next: unknown) => (saved = next) };
+    const selected = () => root.querySelector('[role="tab"].selected')?.getAttribute('data-tab');
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state() } }));
+    // A reloaded page shows the tab it showed before.
+    expect(selected()).toBe('status');
+    expect(document.body.dataset['tab']).toBe('status');
+
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
+    expect(selected()).toBe('conversation');
+    expect(document.body.dataset['tab']).toBe('conversation');
+    expect(saved).toMatchObject({ tab: 'conversation' });
+
+    const key = (name: string) => (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }));
+
+    expect(document.activeElement?.getAttribute('data-tab')).toBe('conversation');
+    key('ArrowRight');
+    expect(selected()).toBe('status');
+    key('End');
+    expect(selected()).toBe('artifacts');
+    key('ArrowRight');
+    expect(selected()).toBe('artifacts');
+    key('Home');
+    expect(selected()).toBe('conversation');
+    key('ArrowLeft');
+    expect(selected()).toBe('conversation');
+
+    // The conversation's scroll position comes back with its tab.
+    const scroller = root.querySelector<HTMLElement>('.scroll')!;
+
+    Object.defineProperty(scroller, 'scrollHeight', { value: 1_000, configurable: true });
+    Object.defineProperty(scroller, 'clientHeight', { value: 100, configurable: true });
+    scroller.scrollTop = 300;
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="artifacts"]')!.click();
+    expect(saved).toMatchObject({ tab: 'artifacts', scroll: 300 });
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
+    expect(root.querySelector<HTMLElement>('.scroll')!.scrollTop).toBe(300);
+  });
+
+  it('keeps the focused tab or button, the Status and Artifacts scroll position and the New messages pill over redraws and tab changes', () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    let saved: unknown = null;
+    const vscode = { postMessage: () => undefined, getState: () => saved, setState: (next: unknown) => (saved = next) };
+    const send = (shown: ConversationState) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: shown } }));
+    const tall = (element: HTMLElement) => {
+      Object.defineProperty(element, 'scrollHeight', { value: 1_000, configurable: true });
+      Object.defineProperty(element, 'clientHeight', { value: 100, configurable: true });
+    };
+    const withStatus = state({ status: { id: 'st-1', sessionId: 's2', at: T0, markdown: 'Long.', fallback: false, unread: false } });
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    send(withStatus);
+
+    // The keys keep working after a state arrives while a tab has the focus.
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    expect(document.activeElement?.getAttribute('data-tab')).toBe('status');
+    send(withStatus);
+    expect(document.activeElement?.getAttribute('data-tab')).toBe('status');
+
+    // So does a focused button on the tab, and the tab's scroll position.
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.focus();
+    root.querySelector<HTMLElement>('.panel')!.scrollTop = 250;
+    send(withStatus);
+    expect(document.activeElement?.getAttribute('data-action')).toBe('statuses');
+    expect(root.querySelector<HTMLElement>('.panel')!.scrollTop).toBe(250);
+    // Another tab starts at its top.
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="artifacts"]')!.click();
+    expect(root.querySelector<HTMLElement>('.panel')!.scrollTop).toBe(0);
+
+    // A reply that comes while another tab is shown and the conversation is scrolled up brings the pill back with it.
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
+    tall(root.querySelector<HTMLElement>('.scroll')!);
+    root.querySelector<HTMLElement>('.scroll')!.scrollTop = 300;
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    send(state({ items: [reply('r1', T0), reply('r2', T0 + 1)] }));
+    const scroller = root.querySelector<HTMLElement>('.scroll');
+
+    expect(scroller).toBeNull();
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1_000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(100);
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
+    expect(root.querySelector<HTMLElement>('.scroll')!.scrollTop).toBe(300);
+    expect(root.querySelector('.pill')?.textContent).toBe('New messages');
+    vi.restoreAllMocks();
   });
 });

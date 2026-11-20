@@ -3,95 +3,55 @@ import * as vscode from 'vscode';
 import type { ArtifactView } from '@switchboard/hub';
 import { artifactFile, artifactPage, assetResolver, assetsRoot, unopened } from './artifactModel.js';
 import type { Opened } from './artifactModel.js';
-import { artifactIcon, EMPTY_CONVERSATION } from './conversationModel.js';
+import { EMPTY_CONVERSATION } from './conversationModel.js';
 import type { ConversationState } from './conversationModel.js';
-import { ago, escape } from './webview/conversationRender.js';
+import { escape } from './webview/conversationRender.js';
 
-/**
- * The Artifacts view's two contributions (architecture.md § Artifacts view), under the Conversation view in its container, chosen by the same
- * `switchboard.noSecondarySidebar` context key.
- */
-export const ARTIFACT_VIEWS = ['switchboard.artifacts', 'switchboard.artifactsActivity'] as const;
-/** Opens an artifact of this window by its path, from the view's rows and the timeline's. */
+/** Opens an artifact of this window by its path, from the Artifacts tab's rows and the timeline's. */
 export const OPEN_ARTIFACT = 'switchboard.openArtifact';
 /** The webview panel an HTML artifact opens in. */
 export const ARTIFACT_PANEL = 'switchboard.artifact';
 /** The workspace state key of when each artifact was last opened, by work item and path. */
 const OPENED = 'artifacts.opened';
-/** How often the rows' ages are redrawn. */
-const AGE_MS = 60_000;
-
 /**
- * The Artifacts view (architecture.md § Artifacts view): a native tree of the window's work item's artifacts, newest first, with a badge
- * counting those written or rewritten since they were last opened here. A click opens an artifact natively.
+ * The window's artifacts (architecture.md § Artifacts): which of them are new or changed since they were last opened in the workspace, which the
+ * Conversation view's Artifacts tab marks and counts, and opening one natively.
  */
-export class ArtifactsView implements vscode.TreeDataProvider<ArtifactView> {
+export class Artifacts {
   #state: ConversationState = EMPTY_CONVERSATION;
-  readonly #changed = new vscode.EventEmitter<ArtifactView | undefined>();
-  readonly onDidChangeTreeData = this.#changed.event;
-  #views: Array<vscode.TreeView<ArtifactView>> = [];
   readonly #panels = new ArtifactPanels();
 
-  constructor(private readonly memento: vscode.Memento) {}
+  /** `changed` hears when the opened artifacts change, so the Artifacts tab is drawn again. */
+  constructor(
+    private readonly memento: vscode.Memento,
+    private readonly changed: () => void,
+  ) {}
 
   register(): vscode.Disposable {
-    this.#views = ARTIFACT_VIEWS.map((id) => vscode.window.createTreeView(id, { treeDataProvider: this }));
-
-    const ages = setInterval(() => {
-      if (this.#views.some((view) => view.visible)) {
-        this.#changed.fire(undefined);
-      }
-    }, AGE_MS);
-
-    return vscode.Disposable.from(
-      ...this.#views,
-      this.#changed,
-      this.#panels,
-      vscode.commands.registerCommand(OPEN_ARTIFACT, (path: unknown) => this.open(String(path))),
-      { dispose: () => clearInterval(ages) },
-    );
+    return vscode.Disposable.from(this.#panels, vscode.commands.registerCommand(OPEN_ARTIFACT, (path: unknown) => this.open(String(path))));
   }
 
-  /** What the view lists, its badge and the HTML panels open, for the integration suite. */
+  /** What the Artifacts tab lists, its badge and the HTML panels open, for the integration suite. */
   shown(): { artifacts: ArtifactView[]; badge: number; panels: Array<{ path: string; html: string }> } {
     return { artifacts: this.#state.artifacts, badge: this.#unopened().length, panels: this.#panels.shown() };
   }
 
-  /** Follows the Conversation view's state: its scope's artifacts, the badge, and the HTML panels open on them. */
-  update(state: ConversationState): void {
-    const before = this.#state;
+  /** The paths of the artifacts new or changed since they were last opened in the workspace. */
+  unopenedPaths(): string[] {
+    return this.#unopened().map((artifact) => artifact.path);
+  }
 
+  /** Follows the Conversation view's state: its scope's artifacts, and the HTML panels open on them. */
+  update(state: ConversationState): void {
     this.#state = state;
 
     // The first time a work item's artifacts are seen in this workspace, they count as opened, so the badge counts only later ones. They are seen
     // once a hello named the folder, not on the scope event before it.
     if (state.connected && state.scope !== null && state.artifactsDir !== null && this.#opened(state.scope.workItemId) === null) {
-      void this.#record(state.scope.workItemId, Object.fromEntries(state.artifacts.map((artifact) => [artifact.path, artifact.updatedAt]))).then(() => this.#badge());
-    }
-
-    if (before.artifacts !== state.artifacts || before.scope?.workItemId !== state.scope?.workItemId) {
-      this.#changed.fire(undefined);
-      this.#badge();
+      void this.#record(state.scope.workItemId, Object.fromEntries(state.artifacts.map((artifact) => [artifact.path, artifact.updatedAt]))).then(() => this.changed());
     }
 
     this.#panels.update(state);
-  }
-
-  getTreeItem(artifact: ArtifactView): vscode.TreeItem {
-    const item = new vscode.TreeItem(artifact.title, vscode.TreeItemCollapsibleState.None);
-
-    item.id = artifact.path;
-    item.iconPath = new vscode.ThemeIcon(artifactIcon(artifact.type));
-    item.description = `${artifact.kind} · ${ago(artifact.updatedAt, Date.now())}`;
-    item.tooltip = new vscode.MarkdownString(`**${escape(artifact.title)}**\n\n\`${artifact.path}\`\n\nUpdated ${new Date(artifact.updatedAt).toLocaleString()}`);
-    item.command = { command: OPEN_ARTIFACT, title: 'Open', arguments: [artifact.path] };
-    item.accessibilityInformation = { label: `${artifact.title}, ${artifact.kind}, updated ${ago(artifact.updatedAt, Date.now())}` };
-
-    return item;
-  }
-
-  getChildren(element?: ArtifactView): ArtifactView[] {
-    return element === undefined ? this.#state.artifacts : [];
   }
 
   /**
@@ -128,7 +88,7 @@ export class ArtifactsView implements vscode.TreeDataProvider<ArtifactView> {
 
     if (workItemId !== undefined) {
       await this.#record(workItemId, { ...(this.#opened(workItemId) ?? {}), [artifact.path]: artifact.updatedAt });
-      this.#badge();
+      this.changed();
     }
   }
 
@@ -144,15 +104,6 @@ export class ArtifactsView implements vscode.TreeDataProvider<ArtifactView> {
     const workItemId = this.#state.scope?.workItemId;
 
     return workItemId === undefined ? [] : unopened(this.#state.artifacts, this.#opened(workItemId) ?? {});
-  }
-
-  #badge(): void {
-    const count = this.#unopened().length;
-    const badge = count === 0 ? undefined : { value: count, tooltip: count === 1 ? '1 new or changed artifact' : `${count} new or changed artifacts` };
-
-    for (const view of this.#views) {
-      view.badge = badge;
-    }
   }
 }
 

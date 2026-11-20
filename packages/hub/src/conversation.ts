@@ -45,7 +45,7 @@ export type ReplyView = { type: 'reply'; provisional: boolean; unread: boolean }
 export type ItemView = MessageView | ReplyView;
 
 /**
- * The status row's status (architecture.md § Statuses): the session's latest `[status]`, or, before its first, the work item's stage as a
+ * The Status tab's status (architecture.md § Statuses): the session's latest `[status]`, or, before its first, the work item's stage as a
  * `fallback`, whose ID names the work item and whose `at` is when the stage was reported.
  */
 export interface StatusView {
@@ -492,7 +492,7 @@ export class ConversationService {
   }
 
   /**
-   * The status row of a window's scope: its current session's latest status, else its work item's stage as a fallback, else null. Only a work
+   * The status of a window's scope: its current session's latest status, else its work item's stage as a fallback, else null. Only a work
    * item has a stage.
    */
   status(scope: WindowScope): StatusView | null {
@@ -514,7 +514,7 @@ export class ConversationService {
   /** The status each window was last sent, so a `status` event goes only when its row changes. */
   readonly #statusShown = new Map<string, string>();
 
-  /** Sends each of the windows its status row again when it changed: a new or updated status, or the stage that stands in before the first. */
+  /** Sends each of the windows its status again when it changed: a new or updated status, or the stage that stands in before the first. */
   #statusChanged(keys: Iterable<string>): void {
     for (const key of keys) {
       const scope = this.deps.windows.scope(key);

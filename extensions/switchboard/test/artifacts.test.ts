@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import MarkdownIt from 'markdown-it';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactView, ItemView, ReplyView, SessionView, WindowScope } from '@switchboard/hub';
 import { artifactCsp, artifactFile, artifactPage, assetResolver, assetsRoot, rewriteResources, unopened } from '../src/artifactModel.js';
 import { applyEvent, artifactIcon, EMPTY_CONVERSATION, placeArtifacts, timeline } from '../src/conversationModel.js';
@@ -75,6 +75,42 @@ describe('artifact rows', () => {
 
   it('shows no artifact rows before the session has messages', () => {
     expect(renderConversation(state({ artifacts: [artifact('chat/a.md', T0)] }))).not.toContain('artifact-open');
+  });
+});
+
+describe('the Artifacts tab', () => {
+  it('lists the artifacts newest first with codicon, title, kind and age, marks and counts the new or changed ones, and opens one on a click', () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    const artifacts = [artifact('chat/b.html', T0 - 4 * 60_000, { type: 'html', title: 'B <i>page</i>' }), artifact('chat/a.md', T0 - 2 * 3_600_000)];
+
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, { postMessage: (one: { type: string }) => posted.push(one), getState: () => ({ open: [], scroll: null, tab: 'artifacts' }), setState: () => undefined });
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state({ artifacts }), unopened: ['chat/b.html', 'chat/gone.md'] } }));
+
+    const rows = [...root.querySelectorAll<HTMLElement>('.artifact-list > li')];
+
+    expect(rows.map((row) => row.className)).toEqual(['artifact-item unopened', 'artifact-item']);
+    expect(rows[0]!.querySelector('.codicon')?.className).toBe('codicon codicon-globe');
+    expect(rows[0]!.querySelector('.artifact-title')?.innerHTML).toBe('B &lt;i&gt;page&lt;/i&gt;');
+    expect(rows.map((row) => row.querySelector('.artifact-kind')?.textContent)).toEqual(['comparison · 4 min ago', 'comparison · 2 h ago']);
+    expect(rows[0]!.querySelector('button')?.getAttribute('aria-label')).toBe('Open artifact: B <i>page</i>, comparison, new or changed');
+    expect(rows[1]!.querySelector('.artifact-new')).toBeNull();
+    // Only paths of the window's artifacts count.
+    expect(root.querySelector('[data-tab="artifacts"] .tab-badge')?.textContent).toBe('1');
+    rows[1]!.querySelector('button')!.click();
+    expect(posted.filter((one) => one.type === 'artifact')).toEqual([{ type: 'artifact', path: 'chat/a.md' }]);
+
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state({ artifacts }), unopened: [] } }));
+    expect(root.querySelector('[data-tab="artifacts"] .tab-badge')).toBeNull();
+    vi.advanceTimersByTime(30_000 * 4);
+    expect(root.querySelector('.artifact-kind')?.textContent).toBe('comparison · 6 min ago');
+    vi.useRealTimers();
+
+    expect(renderConversation(state(), new Set(), T0, false, { tab: 'artifacts', unopened: new Set() })).toContain("The session's artifacts show here as it writes them");
   });
 });
 

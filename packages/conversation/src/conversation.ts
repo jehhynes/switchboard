@@ -451,7 +451,7 @@ export class SessionConversation {
   #publish(text: string, at: number, _aside: boolean, via: Via, replaces: string | undefined, move = true): string {
     const parsed = parseReply(text, this.rules());
 
-    // A reply that is only a status rewrites nothing: the view shows it in the status row, not in the timeline.
+    // A reply that is only a status rewrites nothing: the view shows it on its Status tab, not in the timeline.
     parsed.rewrite &&= parsed.opening !== '';
     const existing = replaces === undefined ? null : this.deps.store.reply(replaces);
 

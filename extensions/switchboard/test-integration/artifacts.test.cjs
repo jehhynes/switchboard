@@ -48,11 +48,11 @@ describe('artifacts', () => {
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   });
 
-  it('contributes the Artifacts view under the Conversation view, and lists the window\'s artifacts with a badge for new ones', async () => {
+  it("lists the window's artifacts on the Conversation view's Artifacts tab, with a badge for new ones, and contributes no Artifacts view of its own", async () => {
     const commands = await vscode.commands.getCommands(true);
 
-    assert.ok(commands.includes('switchboard.artifacts.focus'), 'VS Code registered no focus command for the Artifacts view');
-    await vscode.commands.executeCommand('switchboard.artifacts.focus');
+    assert.ok(!commands.includes('switchboard.artifacts.focus'), 'VS Code still has an Artifacts view');
+    await vscode.commands.executeCommand('switchboard.conversation.focus');
 
     extension.receiveConversation({ type: 'hello', scope, sessions: [session], items: [], more: false, status: null, artifactsDir: root, artifacts: [artifact('chat/comparison-engines.md', 'markdown', 1_000, 'Engines')] });
     // The first artifacts a workspace sees for a work item count as opened.

@@ -145,39 +145,114 @@ function artifactRow(artifact: ArtifactView): string {
   );
 }
 
-/** How long ago a status was posted, as the status row says it: "just now", "4 min ago", "2 h ago", "3 d ago". */
+/** How long ago a status or an artifact was written, as the Status and Artifacts tabs say it: "just now", "4 min ago", "2 h ago", "3 d ago". */
 export function ago(at: number, now: number): string {
   const minutes = Math.floor(Math.max(0, now - at) / 60_000);
 
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 24 * 60 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / (24 * 60))} d ago`;
 }
 
-/**
- * The status row (architecture.md § Statuses), pinned under the header and folded like a fold row: "Status · 4 min ago" and the first line;
- * open, the whole status as Markdown. A status that replaced the one before shows a New mark while `fresh`. The work item's stage stands in
- * before the session's first status, dimmed, with nothing to open.
- */
-export function renderStatus(status: StatusView | null, open: ReadonlySet<string>, fresh: boolean, now: number): string {
-  if (status === null) {
-    return '';
-  }
+/** The view's tabs (architecture.md § Conversation view): the conversation, the status and the artifacts, each taking the view's full height. */
+export type Tab = 'conversation' | 'status' | 'artifacts';
+export const TABS: ReadonlyArray<{ tab: Tab; label: string }> = [
+  { tab: 'conversation', label: 'Conversation' },
+  { tab: 'status', label: 'Status' },
+  { tab: 'artifacts', label: 'Artifacts' },
+];
 
-  const title = status.fallback ? "The work item's stage; the session has posted no status yet" : 'Status';
-  const age = `<time class="status-age" data-at="${status.at}" datetime="${new Date(status.at).toISOString()}">${ago(status.at, now)}</time>`;
-  const mark = fresh ? '<span class="status-new">New</span>' : '';
-  const actions = status.fallback
-    ? ''
-    : '<span class="status-actions"><button class="icon" type="button" data-action="status-open" title="Open in the Markdown preview" aria-label="Open the status in the Markdown preview"><span class="codicon codicon-open-preview" aria-hidden="true"></span></button>' +
-      '<button class="icon" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>';
-  const summary = `<summary title="${escape(title)}"><span class="codicon codicon-chevron-right status-chevron" aria-hidden="true"></span><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">Status</span><span class="status-dot" aria-hidden="true">·</span>${age}${mark}<span class="status-first">${escape(statusLine(status.markdown))}</span></summary>`;
-
-  const unread = status.unread && !status.fallback ? ` unread" data-unread="${escape(status.id)}` : '';
-
-  return `<details class="status-row${status.fallback ? ' fallback' : ''}${fresh ? ' fresh' : ''}${unread}" data-fold="status" aria-label="${unread === '' ? 'Status' : 'Status, unread'}"${open.has('status') ? ' open' : ''}>${summary}<div class="status-body body">${renderMarkdown(status.markdown)}</div></details>${actions === '' ? '' : `<div class="status-tools">${actions}</div>`}`;
+/** What the page adds to the state to draw it: the tab shown, and the artifacts new or changed since they were last opened in the workspace. */
+export interface PageView {
+  tab: Tab;
+  unopened: ReadonlySet<string>;
 }
 
-/** The view's HTML: the header with the session's state, the status row, a note when the view cannot talk to the session, and the timeline. */
-export function renderConversation(state: ConversationState, open: ReadonlySet<string> = new Set(), now: number = Date.now(), fresh = false): string {
+const CONVERSATION_TAB: PageView = { tab: 'conversation', unopened: new Set() };
+
+/** A status's time on the Status tab: "Thu, Nov 19, 1:46 PM". */
+const STATUS_TIME = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+/** An age that the page redraws every 30 seconds. */
+function age(at: number, now: number, className: string): string {
+  return `<time class="${className} age" data-at="${at}" datetime="${new Date(at).toISOString()}">${ago(at, now)}</time>`;
+}
+
+/** Whether the Status tab's badge shows: the latest status is New, or unread (architecture.md § Unread); never the stage. */
+export function statusBadge(status: StatusView | null, fresh: boolean): boolean {
+  return status !== null && !status.fallback && (fresh || status.unread);
+}
+
+/**
+ * The Status tab (architecture.md § Statuses): the session's latest status as Markdown under a line with its time, how long ago, a New mark while
+ * `fresh`, and the buttons that open it and the earlier statuses in the Markdown preview. Before the first status, the work item's stage, dimmed;
+ * with neither, a line that says so.
+ */
+export function renderStatus(status: StatusView | null, fresh: boolean, now: number): string {
+  if (status === null) {
+    return '<p class="empty">The session has posted no status yet. Ask it for one, and its latest shows here.</p>';
+  }
+
+  if (status.fallback) {
+    return (
+      '<div class="status-tab fallback"><p class="empty">The session has posted no status yet. Until it does, the work item\'s stage:</p>' +
+      `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">Stage</span><span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}</div>` +
+      `<div class="status-body body">${renderMarkdown(status.markdown)}</div></div>`
+    );
+  }
+
+  const mark = fresh ? '<span class="status-new">New</span>' : '';
+  const actions =
+    '<span class="status-actions"><button class="icon" type="button" data-action="status-open" title="Open in the Markdown preview" aria-label="Open the status in the Markdown preview"><span class="codicon codicon-open-preview" aria-hidden="true"></span></button>' +
+    '<button class="icon" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>';
+  const time = `<span class="status-time" title="${escape(new Date(status.at).toString())}">${escape(STATUS_TIME.format(status.at))}</span>`;
+  const unread = status.unread ? ` unread" data-unread="${escape(status.id)}` : '';
+
+  return (
+    `<div class="status-tab${fresh ? ' fresh' : ''}${unread}" role="region" aria-label="${unread === '' ? 'Status' : 'Status, unread'}">` +
+    `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span>${time}<span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}${mark}${actions}</div>` +
+    `<div class="status-body body">${renderMarkdown(status.markdown)}</div></div>`
+  );
+}
+
+/**
+ * The Artifacts tab (architecture.md § Artifacts): the work item's artifacts newest first, each a row with its type's codicon, title, kind and age,
+ * marked while new or changed since last opened in the workspace; a click opens it natively.
+ */
+export function renderArtifacts(artifacts: readonly ArtifactView[], unopened: ReadonlySet<string>, now: number): string {
+  if (artifacts.length === 0) {
+    return "<p class=\"empty\">The session's artifacts show here as it writes them: plans, reports, comparisons, diagrams, pages and media.</p>";
+  }
+
+  const rows = artifacts.map((artifact) => {
+    const fresh = unopened.has(artifact.path);
+    const label = `Open artifact: ${artifact.title}, ${artifact.kind}${fresh ? ', new or changed' : ''}`;
+
+    return (
+      `<li class="artifact-item${fresh ? ' unopened' : ''}"><button class="artifact-open" type="button" data-action="artifact" data-path="${escape(artifact.path)}" title="${escape(`${artifact.path}\nUpdated ${new Date(artifact.updatedAt).toLocaleString()}`)}" aria-label="${escape(label)}">` +
+      `<span class="codicon codicon-${artifactIcon(artifact.type)}" aria-hidden="true"></span><span class="artifact-title">${escape(artifact.title)}</span>` +
+      `<span class="artifact-kind">${escape(artifact.kind)} · ${age(artifact.updatedAt, now, 'artifact-age')}</span>${fresh ? '<span class="artifact-new" aria-hidden="true"></span>' : ''}</button></li>`
+    );
+  });
+
+  return `<ul class="artifact-list" aria-label="Artifacts">${rows.join('')}</ul>`;
+}
+
+/** The tab strip, as VS Code's panel tabs: the selected tab underlined; Status with a New badge, Artifacts with the count of new or changed ones. */
+function renderTabs(selected: Tab, badges: Record<Tab, string>): string {
+  const tabs = TABS.map(({ tab, label }) => {
+    const badge = badges[tab] === '' ? '' : `<span class="tab-badge">${escape(badges[tab])}</span>`;
+    const name = badges[tab] === '' ? label : `${label}, ${tab === 'status' ? 'new status' : `${badges[tab]} new or changed`}`;
+
+    return `<button class="tab${tab === selected ? ' selected' : ''}" type="button" role="tab" id="tab-${tab}" data-tab="${tab}" aria-selected="${tab === selected}" aria-controls="panel" aria-label="${escape(name)}" tabindex="${tab === selected ? 0 : -1}"><span class="tab-label">${label}</span>${badge}</button>`;
+  });
+
+  return `<nav class="tabs" role="tablist" aria-label="Switchboard">${tabs.join('')}</nav>`;
+}
+
+/**
+ * The view's HTML: the header with the session's state, the tab strip, and the selected tab: the conversation, with a note when the view cannot
+ * talk to the session, and the timeline; the status; or the artifacts.
+ */
+export function renderConversation(state: ConversationState, open: ReadonlySet<string> = new Set(), now: number = Date.now(), fresh = false, page: PageView = CONVERSATION_TAB): string {
   if (state.scope === null) {
     return `<p class="empty">${state.connected ? 'This window has no Switchboard session.' : 'Connecting to Switchboard…'}</p>`;
   }
@@ -218,7 +293,14 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
   const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}</ol>`;
 
-  const status = renderStatus(state.status, open, fresh, now);
+  const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
+  const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });
+  const panel =
+    page.tab === 'status'
+      ? `<div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-status">${renderStatus(state.status, fresh, now)}</div>`
+      : page.tab === 'artifacts'
+        ? `<div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
+        : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>`;
 
-  return `${header}${status === '' ? '' : `<div class="status">${status}</div>`}${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll">${earlier}${body}</div>`;
+  return `${header}${tabs}${panel}`;
 }

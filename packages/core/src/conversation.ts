@@ -95,7 +95,7 @@ export interface ConversationStatus {
   replyId: string;
   at: number;
   markdown: string;
-  /** When the operator saw it in the status row (architecture.md § Unread); null while unread. Only the latest status counts as unread. */
+  /** When the operator saw it on the Conversation view's Status tab (architecture.md § Unread); null while unread. Only the latest status counts as unread. */
   seenAt: number | null;
 }
 

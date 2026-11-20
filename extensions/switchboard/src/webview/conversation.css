@@ -10,27 +10,32 @@ button.icon { display: inline-flex; align-items: center; border: none; backgroun
 button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .notice, .empty { margin: 8px 20px; color: var(--vscode-descriptionForeground); }
-/* The status row, pinned under the header and folded like Claude Code's fold rows: a chevron, the pulse codicon, "Status · 4 min ago" and the
-   first line; open, the whole status, scrolling within 40% of the view. Its tools sit at the right of the folded line. */
-.status { position: relative; flex: none; border-bottom: 1px solid var(--vscode-sideBarActivityBarTop-border, var(--vscode-panel-border, transparent)); }
-.status-row > summary { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 64px 6px 12px; cursor: pointer; list-style: none; user-select: none; }
-.status-row > summary::-webkit-details-marker { display: none; }
-.status-row > summary:hover { background: var(--vscode-list-hoverBackground); }
-.status-chevron { color: var(--vscode-icon-foreground); transition: transform 0.1s; }
-.status-row[open] .status-chevron { transform: rotate(90deg); }
-.status-row .codicon-pulse { color: var(--vscode-descriptionForeground); }
-.status-label { font-weight: 500; }
+/* The tab strip, drawn as VS Code's panel tabs: uppercase labels in the panel title colours, the selected one underlined in the active border
+   colour, a badge after a label. */
+.tabs { display: flex; flex: none; align-items: stretch; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-sideBarActivityBarTop-border, transparent)); user-select: none; }
+.tab { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 6px; height: 35px; border: none; border-bottom: 1px solid transparent; background: transparent; color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground)); font: inherit; font-size: 11px; text-transform: uppercase; cursor: pointer; }
+.tab:hover { color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground)); }
+.tab.selected { color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground)); border-bottom-color: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder)); }
+.tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.tab-badge { min-width: 8px; padding: 1px 5px; border-radius: 11px; font-size: 11px; line-height: 14px; text-align: center; text-transform: none; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
+/* The Status and Artifacts tabs take the view's full height and scroll on their own. */
+.panel { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 20px 16px; }
+.panel > .empty { margin: 0; }
+body:not([data-tab="conversation"]) #composer { display: none; }
+/* The Status tab: a line with the pulse codicon, the time, how long ago, the New mark and the tools, over the whole status as Markdown. */
+.status-head { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 8px; user-select: none; }
+.status-head .codicon-pulse { color: var(--vscode-descriptionForeground); }
+.status-label, .status-time { font-weight: 500; white-space: nowrap; }
 .status-dot, .status-age { flex: none; color: var(--vscode-descriptionForeground); white-space: nowrap; font-size: 0.92em; }
-.status-first { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.status-row[open] .status-first { visibility: hidden; }
-.status-row.fallback .status-first { color: var(--vscode-descriptionForeground); }
 .status-new { flex: none; padding: 0 6px; border-radius: 8px; font-size: 0.85em; line-height: 16px; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
-.status-body { max-height: 40vh; overflow-y: auto; padding: 0 12px 10px 32px; }
+.status-actions { display: flex; gap: 2px; margin-left: auto; }
 .status-body > :first-child { margin-top: 0; }
 .status-body > :last-child { margin-bottom: 0; }
-.status-tools { position: absolute; top: 4px; right: 6px; display: flex; gap: 2px; }
-.status-actions { display: flex; gap: 2px; }
-body.vscode-reduce-motion .status-chevron { transition: none; }
+.status-tab.fallback .status-body { color: var(--vscode-descriptionForeground); }
+.status-tab.fallback > .empty { margin: 0 0 8px; }
+/* The Artifacts tab: one row per artifact, a dot in the badge colour while it is new or changed since last opened. */
+.artifact-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.artifact-new { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-activityBarBadge-background, var(--vscode-badge-background)); }
 .scroll { flex: 1; overflow-y: auto; padding: 20px 20px 16px; }
 /* Items are spaced as Claude Code's messages: 8 px above and below, 24 px above a reply with a time, none above the first. */
 .timeline { list-style: none; margin: 0; padding: 0; }
@@ -122,7 +127,7 @@ body.vscode-reduce-motion .status-chevron { transition: none; }
 .live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
 
-/* An artifact: a one-line row that opens it, indented with the replies. */
+/* An artifact: a one-line row that opens it, indented with the replies on the timeline. */
 .timeline > li.artifact { padding-left: 30px; }
 .artifact-open { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; margin: 0; border: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.4)); border-radius: 6px; padding: 4px 8px; background: transparent; color: var(--vscode-foreground); font: inherit; text-align: left; cursor: pointer; }
 .artifact-open:hover { background: var(--vscode-list-hoverBackground); }
@@ -130,8 +135,8 @@ body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
 .artifact-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-kind { flex: none; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 
-/* Unread (architecture.md § Unread): a reply's dot and the status row's pulse in the badge colour, until the view shows them in a focused window
+/* Unread (architecture.md § Unread): a reply's dot and the status's pulse in the badge colour, until the view shows them in a focused window
    for a second; the word is for screen readers. */
 .reply.unread .dot { background: var(--vscode-activityBarBadge-background, var(--vscode-badge-background)); }
-.status-row.unread .codicon-pulse { color: var(--vscode-activityBarBadge-background, var(--vscode-badge-background)); }
+.status-tab.unread .codicon-pulse { color: var(--vscode-activityBarBadge-background, var(--vscode-badge-background)); }
 .unread-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

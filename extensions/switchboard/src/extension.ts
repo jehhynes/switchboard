@@ -18,7 +18,7 @@ import { claimIsFor } from './claims.js';
 import { act, claimOpen, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
-import { ArtifactsView } from './artifacts.js';
+import { Artifacts } from './artifacts.js';
 import { ConversationView } from './conversation.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
 import { extendMarkdownIt } from './markdownMermaid.js';
@@ -74,8 +74,8 @@ export interface SwitchboardApi {
   receiveConversation(event: ConversationEvent): void;
   /** The Conversation view's badge, its current session's unread count (architecture.md § Unread); undefined while none is unread or the view is not resolved. */
   conversationBadge(): vscode.ViewBadge | undefined;
-  /** What the Artifacts view lists, its badge and the HTML artifact panels open (architecture.md § Artifacts view). */
-  artifacts(): ReturnType<ArtifactsView['shown']>;
+  /** What the Conversation view's Artifacts tab lists, its badge and the HTML artifact panels open (architecture.md § Artifacts). */
+  artifacts(): ReturnType<Artifacts['shown']>;
   /** Turns ```mermaid fences into diagrams in the Markdown preview (architecture.md § Artifacts), which VS Code's Markdown extension calls. */
   extendMarkdownIt(md: MarkdownIt): MarkdownIt;
   /** The window key of this window's hub stream, or null. */
@@ -282,11 +282,12 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
     return leaveTerminal(terminal);
   };
-  const artifacts = new ArtifactsView(context.workspaceState);
-  const conversation = new ConversationView(context.extensionUri, {
+  const artifacts = new Artifacts(context.workspaceState, () => conversation.refresh());
+  const conversation: ConversationView = new ConversationView(context.extensionUri, {
     openTerminal: openWindowTerminal,
     openArtifact: (path) => artifacts.open(path),
     changed: (shown) => artifacts.update(shown),
+    unopened: () => artifacts.unopenedPaths(),
     log: (line) => hubLog.appendLine(`[conversation] ${line}`),
   });
   const paneClick = (message: PaneMessage): Promise<unknown> => {

@@ -11,7 +11,7 @@ export interface ConversationState {
   more: boolean;
   /** Whether the stream is open. */
   connected: boolean;
-  /** The status row's status: the current session's latest, or the work item's stage before it; null for neither. */
+  /** The Status tab's status: the current session's latest, or the work item's stage before it; null for neither. */
   status: StatusView | null;
   /** The work item's artifact folder, which the artifacts' paths are relative to; null when the window has none. */
   artifactsDir: string | null;
@@ -84,7 +84,7 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
       const { scope } = event as Extract<ConversationEvent, { type: 'scope' }>;
       const moved = scope?.workItemId !== state.scope?.workItemId || scope?.sessionId !== state.scope?.sessionId;
 
-      // The row of a work item or session the window no longer shows goes, and the artifacts of a work item it no longer shows; the next hello
+      // The status of a work item or session the window no longer shows goes, and the artifacts of a work item it no longer shows; the next hello
       // brings the new ones.
       const left = scope?.workItemId !== state.scope?.workItemId;
 
@@ -185,7 +185,7 @@ function conversationEntries(items: ItemView[]): Entry[] {
       continue;
     }
 
-    // A reply that is only a status shows in the status row, not in the timeline.
+    // A reply that is only a status shows on the Status tab, not in the timeline.
     if (item.withdrawn || placed.has(item.id) || (item.kind === 'reply' && item.opening === '' && item.rewrittenBy === null)) {
       continue;
     }
@@ -213,7 +213,7 @@ export function statusLine(markdown: string): string {
   return line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)*/, '').replace(/[*_`]/g, '').trim();
 }
 
-/** An artifact's codicon by its type, in the timeline and the Artifacts view. */
+/** An artifact's codicon by its type, in the timeline and the Artifacts tab. */
 export function artifactIcon(type: ArtifactView['type']): string {
   switch (type) {
     case 'markdown':
