@@ -5,6 +5,8 @@ import type { DockRow, Snapshot } from '@switchboard/hub';
 import { dockView, postToHub, windowsDir, writeWorkspaceFile } from '@switchboard/hub';
 import { openUrlOf } from './search.js';
 import { reuseFilter } from './tabs.js';
+import type { KeyState } from './terminalKeys.js';
+import { TerminalKeys } from './terminalKeys.js';
 import type { HubState } from './state.js';
 
 const ACTION_TIMEOUT_MS = 10_000;
@@ -72,7 +74,12 @@ export async function openTab(target: string): Promise<void> {
  * Terminals this window opened sessions in, by `attach:` or `resume:` and the Claude or Codex session ID, so an attach left open is not shown for
  * a resume, or by `code:` and the Switchboard session ID for a Code Mode session's attach terminal.
  */
-const terminals = new Map<string, vscode.Terminal>();
+const terminals = new TerminalKeys<vscode.Terminal>(() => vscode.window.terminals);
+
+/** Gives the terminals this window opened the workspace state that keeps them across an extension host restart. */
+export function setTerminalState(state: KeyState): void {
+  terminals.setState(state);
+}
 
 /** The agents a session can run in; the hub names one with each session (PRD R22). */
 export type Provider = 'claude' | 'codex';
@@ -117,11 +124,6 @@ export function terminalCommandOf(command: Record<string, unknown>): TerminalCom
   };
 }
 
-/** Whether a terminal still runs: it has not exited and VS Code still lists it. */
-function runs(terminal: vscode.Terminal | undefined): terminal is vscode.Terminal {
-  return terminal !== undefined && terminal.exitStatus === undefined && vscode.window.terminals.includes(terminal);
-}
-
 /**
  * Open in terminal (PRD R28): shows the terminal this window already opened the session in while it runs, else opens `claude attach <short ID>`
  * for a Claude session in its background process, or `claude --resume <session ID>` or `codex resume <thread ID>` in its directory. A session
@@ -131,27 +133,30 @@ function runs(terminal: vscode.Terminal | undefined): terminal is vscode.Termina
  */
 export async function openTerminal(record: HubRecord | null, command: TerminalCommand): Promise<void> {
   if (command.codeMode) {
-    openAttachTerminal(command);
+    await openAttachTerminal(command);
     return;
   }
 
   const { sessionId, cwd, name, shortId, active, provider } = command;
   const key = `${shortId === null ? 'resume' : 'attach'}:${sessionId}`;
-  const existing = terminals.get(key);
 
-  if (runs(existing)) {
-    existing.show();
-    return;
-  }
+  await terminals.serial(key, async () => {
+    const existing = await terminals.find(key);
 
-  if (active) {
-    await openSession(record, sessionId, cwd, provider);
-    return;
-  }
+    if (existing !== undefined) {
+      existing.show();
+      return;
+    }
 
-  const args = provider === 'codex' ? ['resume', sessionId] : shortId === null ? ['--resume', sessionId] : ['attach', shortId];
+    if (active) {
+      await openSession(record, sessionId, cwd, provider);
+      return;
+    }
 
-  show(key, name, command.executable ?? provider, args, cwd);
+    const args = provider === 'codex' ? ['resume', sessionId] : shortId === null ? ['--resume', sessionId] : ['attach', shortId];
+
+    show(key, name, command.executable ?? provider, args, cwd);
+  });
 }
 
 /**
@@ -159,7 +164,7 @@ export async function openTerminal(record: HubRecord | null, command: TerminalCo
  * Switchboard session ID, which `/clear`, `/branch` and `/resume` leave unchanged. The attach client stays running after its session ends and
  * offers Enter to resume it, so a terminal this window opened that still runs is shown. Never the Claude view, which refuses Code Mode.
  */
-function openAttachTerminal(command: TerminalCommand): void {
+function openAttachTerminal(command: TerminalCommand): Promise<void> {
   const { sessionId, executable, args } = command;
 
   if (executable === null || args === null) {
@@ -167,14 +172,17 @@ function openAttachTerminal(command: TerminalCommand): void {
   }
 
   const key = `code:${sessionId}`;
-  const existing = terminals.get(key);
 
-  if (runs(existing)) {
-    existing.show();
-    return;
-  }
+  return terminals.serial(key, async () => {
+    const existing = await terminals.find(key);
 
-  show(key, command.name, executable, args, command.cwd);
+    if (existing !== undefined) {
+      existing.show();
+      return;
+    }
+
+    show(key, command.name, executable, args, command.cwd);
+  });
 }
 
 /** Opens and shows a terminal that runs `executable` with `args`, named by the ticket key, and keeps it under `key`. */
@@ -183,7 +191,7 @@ function show(key: string, name: string, executable: string, args: string[], cwd
   const env = executableDirOnPath(executable);
   const terminal = vscode.window.createTerminal({ name: `Switchboard · ${name}`, shellPath: executable, shellArgs: args, cwd, ...(Object.keys(env).length > 0 ? { env } : {}) });
 
-  terminals.set(key, terminal);
+  void terminals.keep(key, terminal);
   terminal.show();
 }
 

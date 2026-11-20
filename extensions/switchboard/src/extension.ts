@@ -15,7 +15,7 @@ import type { HistoryMessage } from './historyPanel.js';
 import { LogTail } from './hubLog.js';
 import { startHub } from './hubProcess.js';
 import { claimIsFor } from './claims.js';
-import { act, claimOpen, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
+import { act, claimOpen, setTerminalState, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
 import { Artifacts } from './artifacts.js';
@@ -100,6 +100,7 @@ const TABS_STATE_WAIT_MS = 15_000;
 const EXPAND_MS = 3_000;
 
 export function activate(context: vscode.ExtensionContext): SwitchboardApi {
+  setTerminalState(context.workspaceState);
   // SWITCHBOARD_HOME points a window at another home, such as live acceptance's; the hub gets it as --home.
   const home = process.env['SWITCHBOARD_HOME'] || homedir();
   const bundle = hubBundlePath(home);

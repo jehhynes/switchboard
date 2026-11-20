@@ -79,6 +79,34 @@ describe("a row's Open in terminal", () => {
     assert.strictEqual(shown.length, 4);
   });
 
+  it('opens a new terminal after its terminal closed, rather than one that VS Code gave the same process ID (mechanics M89)', async () => {
+    const realStandIn = Object.getOwnPropertyDescriptor(vscode.window, 'createTerminal');
+
+    Object.defineProperty(vscode.window, 'createTerminal', {
+      configurable: true,
+      value: (options) => {
+        const terminal = { options, exitStatus: undefined, processId: Promise.resolve(4242), show: () => shown.push(options.shellArgs) };
+
+        created.push(terminal);
+        listed.push(terminal);
+        return terminal;
+      },
+    });
+
+    try {
+      await run({ sessionId: 'r-native', shortId: 'abcd0042' });
+      await run({ sessionId: 'r-native', shortId: 'abcd0042' });
+      assert.strictEqual(created.length, 1);
+
+      listed = [{ options: {}, exitStatus: undefined, processId: Promise.resolve(4242), show: () => shown.push('same process ID') }];
+      await run({ sessionId: 'r-native', shortId: 'abcd0042' });
+      assert.strictEqual(created.length, 2);
+      assert.deepStrictEqual(shown, [['attach', 'abcd0042'], ['attach', 'abcd0042'], ['attach', 'abcd0042']]);
+    } finally {
+      Object.defineProperty(vscode.window, 'createTerminal', realStandIn);
+    }
+  });
+
   it('keeps an attach terminal apart from a resume of the same session', async () => {
     await run({ sessionId: 'd-native', shortId: 'abcd0008' });
     await run({ sessionId: 'd-native', shortId: null });
