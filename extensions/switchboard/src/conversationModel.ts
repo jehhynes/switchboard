@@ -320,15 +320,18 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
     return { text: '$(warning) Voice', tooltip: `Voice: ${voice.error} Click to show the voice log.`, command: 'switchboard.showVoiceLog', warning: true };
   }
 
+  // Half-duplex capture (architecture.md § Dictation) does not listen while the voice speaks.
+  const halfDuplex = voice.halfDuplex === undefined ? '' : ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.`;
+
   if (voice.speaking !== null) {
-    return { text: '$(unmute) Speaking', tooltip: 'Click to stop speaking.', command: 'switchboard.stopSpeaking', warning: false };
+    return { text: '$(unmute) Speaking', tooltip: `${halfDuplex.trim()} Click to stop speaking.`.trim(), command: 'switchboard.stopSpeaking', warning: false };
   }
 
   // The mic (architecture.md § Dictation).
   switch (voice.mic) {
     case 'listening':
     case 'hearing':
-      return { text: '$(mic-filled) Listening', tooltip: 'Dictation sends when you stop talking. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false };
+      return { text: '$(mic-filled) Listening', tooltip: `Dictation sends when you stop talking.${halfDuplex} Click to turn the mic off.`, command: 'switchboard.toggleMicrophone', warning: false };
     case 'typing':
       return { text: '$(mic-filled) Typing', tooltip: 'Dictation pauses while the composer has the focus. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false };
     case 'starting':

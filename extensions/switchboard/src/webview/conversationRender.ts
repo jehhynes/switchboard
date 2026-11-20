@@ -254,11 +254,14 @@ export function renderMicButton(voice: VoiceView | null): string {
     return button('off', 'Mic off: the voice is not in this window. Click to talk here with the mic on.', true, 'elsewhere');
   }
 
+  // Half-duplex capture (architecture.md § Dictation) does not listen while the voice speaks.
+  const halfDuplex = voice.halfDuplex === undefined ? '' : ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.`;
+
   switch (voice.mic) {
     case 'listening':
-      return button('on', 'Mic on: listening. Dictation sends when you stop talking. Click to turn the mic off.', false, 'listening');
+      return button('on', `Mic on: listening. Dictation sends when you stop talking.${halfDuplex} Click to turn the mic off.`, false, 'listening');
     case 'hearing':
-      return button('filled', 'Mic on: hearing you. Click to turn the mic off.', false, 'hearing');
+      return button('filled', `Mic on: hearing you.${halfDuplex} Click to turn the mic off.`, false, 'hearing');
     case 'typing':
       return button('paused', 'Mic paused while you type: dictation goes on when you send or leave the box. Click to turn the mic off.', false, 'paused');
     case 'starting':

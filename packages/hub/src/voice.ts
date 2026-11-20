@@ -20,6 +20,11 @@ export interface VoiceView {
   speakReplies: boolean;
   /** Why capture cannot run, while the mic is `unavailable` here; playback and speech errors are the voice's, which the dock shows. */
   error: string | null;
+  /**
+   * Only while the voice is here and its capture cancels no echo: why, such as "no echo cancellation on Remote Audio". Listening then pauses
+   * while the voice plays, and talking over a reply does not stop it (architecture.md § Dictation).
+   */
+  halfDuplex?: string;
 }
 
 /** The key dictation uses for the target's session terminal window, which no window key can equal (architecture.md § Voice). */
@@ -170,6 +175,8 @@ export class VoiceControl {
   #micOn = false;
   /** What capture is doing, as the process last said. */
   #mic: MicState = 'off';
+  /** Why the open capture cancels no echo, as the process last said; null while it does or nothing captures. */
+  #halfDuplex: string | null = null;
   readonly #composers = new Map<string, Composer>();
   readonly #heard = new Map<string, Heard>();
   /** The window the voice last moved to by its own command, which hears dictation when no focused window shows the target. */
@@ -220,6 +227,7 @@ export class VoiceControl {
       speaking: session === null ? null : (this.#playing.get(session) ?? null),
       speakReplies: this.speakReplies,
       error: here && this.#mic === 'unavailable' ? this.#audioError : null,
+      ...(here && this.#halfDuplex !== null ? { halfDuplex: this.#halfDuplex } : {}),
     };
   }
 
@@ -1102,8 +1110,9 @@ export class VoiceControl {
         this.#enrollmentChanged(message.state, message.error);
         return;
       case 'audio':
-        if (message.mic !== this.#mic) {
+        if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex) {
           this.#mic = message.mic;
+          this.#halfDuplex = message.halfDuplex ?? null;
           this.viewsChanged();
         }
 
@@ -1240,6 +1249,7 @@ export class VoiceControl {
     this.#dropTerminalDrafts('the voice process stopped');
     this.#stopFlush();
     this.#mic = 'off';
+    this.#halfDuplex = null;
     this.#target = { gen: this.#target.gen, sessionId: null };
     this.viewsChanged();
   }

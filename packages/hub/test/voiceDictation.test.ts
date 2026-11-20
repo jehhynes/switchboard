@@ -280,7 +280,7 @@ describe('VoiceControl dictation', () => {
   });
 
   it('passes heard tags to the glossary, logs a dictated message\'s delivery, and shows the mic only where the voice is', async () => {
-    const { control, connection, fragments } = await setup();
+    const { control, connection, fragments, notified } = await setup();
 
     control.heard([{ heard: 'a llama', meant: 'Ollama' }]);
     expect(connection.sent.at(-1)).toEqual({ type: 'heard', heard: 'a llama', meant: 'Ollama' });
@@ -290,6 +290,19 @@ describe('VoiceControl dictation', () => {
     connection.receive({ type: 'audio', mic: 'unavailable', engine: 'decibri', device: null, error: 'No speech recognition model in m.' });
     expect(control.view('k1')).toMatchObject({ here: true, mic: 'unavailable', error: 'No speech recognition model in m.' });
     expect(control.view('k2')).toMatchObject({ here: false, mic: 'off', error: null });
+    expect(control.view('k1')).not.toHaveProperty('halfDuplex');
+
+    // Half-duplex capture says why only in the window the voice is in, and the window hears of it when it changes.
+    const sent = notified.length;
+
+    connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, error: null, halfDuplex: 'no echo cancellation on Remote Audio' });
+    expect(control.view('k1')).toMatchObject({ here: true, mic: 'listening', halfDuplex: 'no echo cancellation on Remote Audio' });
+    expect(control.view('k2')).not.toHaveProperty('halfDuplex');
+    expect(notified.slice(sent)).toEqual([expect.objectContaining({ key: 'k1', type: 'voice', payload: { voice: expect.objectContaining({ halfDuplex: 'no echo cancellation on Remote Audio' }) } })]);
+    connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, error: null });
+    expect(control.view('k1')).not.toHaveProperty('halfDuplex');
+    expect(notified.at(-1)).toMatchObject({ key: 'k1', type: 'voice' });
+    expect(notified.at(-1)!.payload.voice).not.toHaveProperty('halfDuplex');
     control.replyChanged({ id: 'r1', sessionId: 's1', kind: 'reply', source: 'transcript', withdrawn: false, rewrittenBy: null, speak: null, spokenState: 'none', answers: null } as unknown as ConversationReply);
   });
   it('types dictation into the target\'s terminal while it is in front, with no window event, and drops a cut-off utterance there', async () => {

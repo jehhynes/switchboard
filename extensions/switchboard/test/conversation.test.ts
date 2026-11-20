@@ -111,7 +111,12 @@ describe('the conversation state', () => {
     expect(voiceStatus({ ...voice, mic: 'typing' })).toMatchObject({ text: '$(mic-filled) Typing' });
     expect(voiceStatus({ ...voice, mic: 'starting' })).toMatchObject({ text: '$(mic-filled) Mic starting' });
     expect(voiceStatus({ ...voice, mic: 'paused-other-app' })).toEqual({ text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone.', command: null, warning: false });
-    expect(voiceStatus({ ...voice, mic: 'listening', speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking' });
+    expect(voiceStatus({ ...voice, mic: 'listening', speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', tooltip: 'Click to stop speaking.' });
+    expect(voiceStatus({ ...voice, mic: 'listening' })).toMatchObject({ tooltip: 'Dictation sends when you stop talking. Click to turn the mic off.' });
+    // Half-duplex capture: the tooltip says listening pauses while a reply plays, and why.
+    const halfDuplex = { ...voice, mic: 'listening' as const, halfDuplex: 'no echo cancellation on Remote Audio' };
+    expect(voiceStatus(halfDuplex)).toMatchObject({ tooltip: 'Dictation sends when you stop talking. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off.' });
+    expect(voiceStatus({ ...halfDuplex, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', tooltip: 'Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to stop speaking.' });
     expect(micOn({ ...voice, mic: 'listening' })).toBe(true);
     expect(micOn({ ...voice, mic: 'paused-other-app' })).toBe(true);
     expect(micOn({ ...voice, mic: 'idle-off' })).toBe(false);
@@ -879,6 +884,11 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('<span class="mic-glyph paused"><span class="codicon codicon-mic" aria-hidden="true"></span><span class="codicon codicon-debug-pause mic-badge"');
     expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('Mic paused: another app is using the microphone.');
     expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('class="mic paused"');
+    // Half-duplex capture says why listening pauses while a reply plays, only while it listens or hears.
+    expect(renderMicButton({ ...VOICE, mic: 'listening' })).not.toContain('Listening pauses');
+    const halfDuplex = { ...VOICE, halfDuplex: 'no echo cancellation on Remote Audio' };
+    expect(renderMicButton({ ...halfDuplex, mic: 'listening' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
+    expect(renderMicButton({ ...halfDuplex, mic: 'hearing' })).toContain('title="Mic on: hearing you. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
   });
 });
 
