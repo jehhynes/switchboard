@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isFolderHost, switchboardHome } from '@switchboard/core';
-import type { OpenTerminal, OpenVSCode, Provider } from '@switchboard/core';
+import type { OpenTerminal, OpenVSCode, Provider, PullRequestStatus } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
@@ -238,9 +238,10 @@ export interface DockRow {
   /**
    * The ticket's links (PRD R52), a link to the ticket itself left out: `label` names it in the right-click menu (`PR #19002`, `gh 18941` or its
    * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon. A `mentioned` link,
-   * found in the ticket's text (PRD R61), follows the others and is drawn muted.
+   * found in the ticket's text (PRD R61), follows the others and is drawn muted. A pull request its source has read carries `pr`, its state,
+   * review decision and checks (PRD R92).
    */
-  links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null; mentioned: boolean }[];
+  links: { label: string; url: string; kind: 'pr' | 'issue' | 'url'; badge: string; glyph: string | null; mentioned: boolean; pr?: PullRequestStatus }[];
   /** How many earlier work items with the same playbook, or one it is a return of, were done, for the return icon and count on line 2 (PRD R51); 0 when it is not marked. */
   returned: number;
   /** Unread replies and statuses of the work item's current session in its Conversation view, as a count after the title (PRD R100); 0 on a pool row. */
@@ -318,7 +319,7 @@ export function dockRow(snapshot: Snapshot, entry: WorkItemView | PoolView, grou
   const kind = snapshot.sourceStates.find((source) => source.name === entry.ticket.source)?.kind;
   const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, order, snapshot.openVSCode, snapshot.openTerminal, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
 
-  return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys), returned: entry.returned, unread: 'status' in entry ? entry.unread : 0, comment: 'status' in entry ? commentOf(entry) : null, band };
+  return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys, snapshot.pullRequests), returned: entry.returned, unread: 'status' in entry ? entry.unread : 0, comment: 'status' in entry ? commentOf(entry) : null, band };
 }
 
 function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: string): DockHeld {
@@ -448,7 +449,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
 }
 
 /** The ticket's links in the order reported, mentioned ones last, each once, named by its pull request or issue number when it has one (PRD R52, R61). */
-function linksOf(entry: WorkItemView | PoolView, keys: RepoKeys | undefined): DockRow['links'] {
+function linksOf(entry: WorkItemView | PoolView, keys: RepoKeys | undefined, pullRequests: Snapshot['pullRequests'] = {}): DockRow['links'] {
   const seen = new Set<string>();
   const ordered = [...entry.links.filter((link) => !link.mentioned), ...entry.links.filter((link) => link.mentioned)];
 
@@ -468,7 +469,7 @@ function linksOf(entry: WorkItemView | PoolView, keys: RepoKeys | undefined): Do
     }
 
     return kind === 'pr'
-      ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH, mentioned }]
+      ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH, mentioned, ...(pullRequests[link.target] === undefined ? {} : { pr: pullRequests[link.target] }) }]
       : [{ label: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), url: link.target, kind, badge: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), glyph: null, mentioned }];
   });
 }

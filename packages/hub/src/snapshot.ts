@@ -2,7 +2,7 @@
  * The snapshot every window and the dock are built from (architecture.md § Hub lifecycle): a pure projection of the store and the runtime's
  * inputs, so the hub can build it in a worker thread with its own read-only connection and keep its main thread free.
  */
-import type { Comment, Link, OpenTerminal, OpenVSCode, Paste, Playbook, Provider, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { Comment, Link, OpenTerminal, OpenVSCode, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { effectiveFocus, heldSlots, homeRepo, itemProvider, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
 import type { HeldSession } from './held.js';
 import { doneSince } from './rows.js';
@@ -25,6 +25,8 @@ export interface SnapshotInputs {
   hookErrors: Record<Provider, string | null>;
   sourceErrors: Record<string, string>;
   sourceNotes: Record<string, string[]>;
+  /** The pull requests of open work items, by URL, as their sources last read them (PRD R92). */
+  pullRequests: Record<string, PullRequestStatus>;
   now: number;
   configDir: string;
 }
@@ -103,6 +105,8 @@ export interface Snapshot {
   notes?: string[];
   /** How rows shorten other repositories' keys (PRD R27); absent from an older hub's. */
   repoKeys?: RepoKeys;
+  /** The pull requests of open work items, by URL, as their sources last read them (PRD R92); absent from an older hub. */
+  pullRequests?: Record<string, PullRequestStatus>;
   /** The terminal holder's sessions joined with the store, orphans first (PRD R94); absent when it holds none. */
   held?: HeldSession[];
   /** In a window's scoped snapshot only: how many work items need the operator, without naming them (architecture.md § Window scope). */
@@ -228,6 +232,7 @@ export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
     },
     notes: [...sources].flatMap((name) => (inputs.sourceNotes[name] ?? []).map((note) => `${name}: ${note}`)),
     repoKeys: repoKeysOf(settings, store.reposBySource()),
+    pullRequests: { ...inputs.pullRequests },
     ...(held.length > 0 ? { held } : {}),
   };
 }

@@ -35,6 +35,7 @@ const inputs = (now = T0): SnapshotInputs => ({
   hookErrors: { claude: null, codex: null },
   sourceErrors: {},
   sourceNotes: {},
+  pullRequests: {},
   now,
   configDir: 'C:/cfg',
 });

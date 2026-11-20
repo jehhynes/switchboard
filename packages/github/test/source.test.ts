@@ -815,3 +815,41 @@ describe('GithubSource.checkLink', () => {
     expect(await new GithubSource(config(), fakeGh({ json: { data: { repository: { pullRequest: null } } } })).checkLink(ticket('20356'), PR)).toEqual({ error: 'GitHub returned an unexpected response.' });
   });
 });
+
+describe('pull requests (PRD R92)', () => {
+  it('reads review decisions, checks and states of GitHub pull requests in one query, leaving out other URLs and ones GitHub does not find', async () => {
+    const commit = (state: string | null) => ({ nodes: [{ commit: { statusCheckRollup: state === null ? null : { state } } }] });
+    const gh = fakeGh({
+      json: {
+        data: {
+          p0: { pullRequest: { state: 'OPEN', isDraft: false, reviewDecision: 'CHANGES_REQUESTED', commits: commit('FAILURE') } },
+          p1: { pullRequest: { state: 'OPEN', isDraft: true, reviewDecision: 'REVIEW_REQUIRED', commits: commit('PENDING') } },
+          p2: { pullRequest: { state: 'MERGED', isDraft: false, reviewDecision: 'APPROVED', commits: commit('SUCCESS') } },
+          p3: { pullRequest: null },
+        },
+      },
+    });
+    const source = new GithubSource(config(), gh);
+    const urls = ['https://github.com/acme/widgets/pull/1', 'https://github.com/acme/widgets/pull/2', 'https://github.com/other/repo/pull/3', 'https://github.com/acme/widgets/pull/4', 'https://github.com/acme/widgets/issues/5', 'https://example.com/pull/6'];
+
+    expect(await source.pullRequests(urls)).toEqual({
+      statuses: {
+        'https://github.com/acme/widgets/pull/1': { state: 'open', review: 'changes-requested', checks: 'failing' },
+        'https://github.com/acme/widgets/pull/2': { state: 'draft', review: 'pending', checks: 'running' },
+        'https://github.com/other/repo/pull/3': { state: 'merged', review: 'approved', checks: 'passing' },
+      },
+    });
+    expect(gh).toHaveBeenCalledTimes(1);
+    expect(gh.mock.calls[0]![0]).toContain('p2: repository(owner: "other", name: "repo") { pullRequest(number: 3)');
+  });
+
+  it('reports a failed or malformed read and asks for nothing without a pull request', async () => {
+    expect(await new GithubSource(config(), fakeGh({ error: 'The GitHub CLI is not signed in. Run gh auth login.' })).pullRequests(['https://github.com/a/b/pull/1'])).toEqual({ error: 'The GitHub CLI is not signed in. Run gh auth login.' });
+    expect('error' in (await new GithubSource(config(), fakeGh({ json: { nope: 1 } })).pullRequests(['https://github.com/a/b/pull/1']))).toBe(true);
+
+    const gh = fakeGh();
+
+    expect(await new GithubSource(config(), gh).pullRequests(['https://github.com/a/b/issues/1'])).toEqual({ statuses: {} });
+    expect(gh).not.toHaveBeenCalled();
+  });
+});

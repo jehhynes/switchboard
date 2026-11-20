@@ -73,6 +73,12 @@ describe('WindowScopes', () => {
 
     expect(noted).not.toHaveProperty('notes');
     expect(noted.errors.sources).toEqual({});
+    // Only its own work items' pull requests: another window's are private to it.
+    const mine = 'https://github.com/o/r/pull/12';
+    const theirs = 'https://github.com/o/r/pull/99';
+    const linked = { ...view, workItems: view.workItems.map((one) => (one.id === 2 ? { ...one, links: [{ id: 1, ticketId: one.ticketId, label: 'PR', target: mine, reportedAt: NOW, mentioned: false }] } : one)), pullRequests: { [mine]: { state: 'open' as const, review: null, checks: 'passing' as const }, [theirs]: { state: 'open' as const, review: 'approved' as const, checks: null } } };
+
+    expect(scopes.scoped(key, linked).pullRequests).toEqual({ [mine]: { state: 'open', review: null, checks: 'passing' } });
     expect(store.windowBinding(windowFileKey(file))).toEqual({ file: windowFileKey(file), workItemId: 2, since: NOW, scopeGen: 1, selectedWorkItemId: 2, selectedSessionId: 's2', ticketId: 1, title: 'Issue <1>' });
   });
 

@@ -1024,6 +1024,8 @@ const dockWithRuns = () => {
       // A VS Code window in front is no session's terminal, unless the dock reported a terminal since that window's change.
       if (key !== null) {
         voice.windowGained(at);
+        // A window coming to the front reads its pull requests again (PRD R92).
+        runtime.refreshPullRequests();
       }
 
       voice.update();

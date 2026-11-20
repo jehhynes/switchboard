@@ -461,8 +461,13 @@ export class WindowScopes {
     const ids = new Set(window === undefined ? [] : this.#listed(window).map((ref) => ref.workItemId));
     const { held: _held, notes: _notes, ...rest } = snapshot;
 
+    const workItems = snapshot.workItems.filter((item) => ids.has(item.id));
+    // Only its own work items' pull requests.
+    const linked = new Set(workItems.flatMap((item) => item.links.map((link) => link.target)));
+    const pullRequests = Object.fromEntries(Object.entries(snapshot.pullRequests ?? {}).filter(([url]) => linked.has(url)));
+
     // The sources' notes and errors can name other tickets, so a window gets neither.
-    return { ...rest, errors: { ...snapshot.errors, sources: {} }, workItems: snapshot.workItems.filter((item) => ids.has(item.id)), pool: [], needsCount: snapshot.workItems.filter(needsYou).length };
+    return { ...rest, errors: { ...snapshot.errors, sources: {} }, workItems, pool: [], needsCount: snapshot.workItems.filter(needsYou).length, pullRequests };
   }
 
   /** Lets the window that claimed a ticket's History command open that ticket's History. */

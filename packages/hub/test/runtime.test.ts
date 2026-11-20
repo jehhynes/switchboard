@@ -9,13 +9,14 @@ import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { NotWritten } from '@switchboard/conversation';
 import { markOf } from '@switchboard/core/group';
-import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, Session, SessionRunner, Settings, Source, StartAction, Ticket } from '@switchboard/core';
+import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, PullRequestStatus, Session, SessionRunner, Settings, Source, StartAction, Ticket } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import type { HolderConnection } from '../src/holder.js';
-import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, questionCardOpen, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, SESSION_ENDED, SESSION_RELAUNCHED, triageText, WAKE_MS } from '../src/runtime.js';
+import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, PULL_REQUESTS_FOCUS_MS, questionCardOpen, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, SESSION_ENDED, SESSION_RELAUNCHED, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
+import { dockView } from '../src/dock.js';
 
 const T0 = Date.UTC(2026, 9, 3, 12);
 
@@ -157,6 +158,7 @@ class FakeSource implements Source {
   checkLink?: NonNullable<Source['checkLink']>;
   ticketAt?: NonNullable<Source['ticketAt']>;
   assignmentAt?: NonNullable<Source['assignmentAt']>;
+  pullRequests?: NonNullable<Source['pullRequests']>;
 
   async poll(current: readonly Ticket[]): Promise<PollResult> {
     this.polls++;
@@ -463,6 +465,57 @@ describe('Runtime', () => {
     }
   });
 
+
+  it('reads the pull requests of open work items in each poll and again when a window comes to the front, and shows them on their links (PRD R92)', async () => {
+    let now = T0;
+    const { store, source, runtime } = setup(config(), () => now);
+    const asked: string[][] = [];
+    const statuses: Record<string, PullRequestStatus> = { 'https://github.com/acme/widgets/pull/12': { state: 'open', review: 'changes-requested', checks: 'failing' } };
+
+    source.pullRequests = async (urls) => {
+      asked.push([...urls]);
+      return { statuses };
+    };
+    source.result = { tickets: [issue('7')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    // No pull request linked yet: nothing to read.
+    expect(asked).toEqual([]);
+    store.addLink({ ticketId: 1, label: 'PR', target: 'https://github.com/acme/widgets/pull/12', reportedAt: T0, mentioned: false });
+    store.addLink({ ticketId: 1, label: 'Issue', target: 'https://github.com/acme/widgets/issues/3', reportedAt: T0, mentioned: false });
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(asked).toEqual([['https://github.com/acme/widgets/pull/12']]);
+    expect(dockView(runtime.snapshot(), now, 'W').groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')?.links.find((link) => link.kind === 'pr')?.pr).toEqual({ state: 'open', review: 'changes-requested', checks: 'failing' });
+
+    // A window in front reads them again, at most every 30 seconds.
+    statuses['https://github.com/acme/widgets/pull/12'] = { state: 'merged', review: 'approved', checks: 'passing' };
+    runtime.refreshPullRequests();
+    await runtime.settled();
+    runtime.refreshPullRequests();
+    await runtime.settled();
+    expect(asked).toHaveLength(2);
+    expect(runtime.snapshot().pullRequests?.['https://github.com/acme/widgets/pull/12']?.state).toBe('merged');
+    // A merged pull request is not read again.
+    now += PULL_REQUESTS_FOCUS_MS;
+    runtime.refreshPullRequests();
+    await runtime.settled();
+    expect(asked).toHaveLength(2);
+    // A ticket that left the poll keeps its open work item's pull request read.
+    store.addLink({ ticketId: 1, label: 'PR 3', target: 'https://github.com/acme/widgets/pull/14', reportedAt: T0, mentioned: false });
+    source.result = { tickets: [] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(store.workItem(1)?.status).not.toBe('done');
+    expect(asked.at(-1)).toEqual(['https://github.com/acme/widgets/pull/14']);
+    source.result = { tickets: [issue('7')] };
+    // A failed read keeps what was read.
+    store.addLink({ ticketId: 1, label: 'PR 2', target: 'https://github.com/acme/widgets/pull/13', reportedAt: T0, mentioned: false });
+    source.pullRequests = async () => ({ error: 'GitHub did not answer within 30 seconds.' });
+    await runtime.pollSource('github');
+    await runtime.settled();
+    expect(runtime.snapshot().pullRequests?.['https://github.com/acme/widgets/pull/12']?.state).toBe('merged');
+  });
 
   it("lists worktrees in the home repository's resolved root and offers no pattern as a repo root (PRD R6, R25)", async () => {
     const cfg = config();

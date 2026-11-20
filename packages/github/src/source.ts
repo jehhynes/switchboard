@@ -1,4 +1,4 @@
-import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, Source, Ticket, TicketBlocker, TicketLookup } from '@switchboard/core';
+import type { Anchor, ContextResult, LinkCheck, PolledTicket, PollResult, PullRequestsResult, PullRequestStatus, Source, Ticket, TicketBlocker, TicketLookup } from '@switchboard/core';
 import { clip } from '@switchboard/core';
 import type { GithubConfig } from './config.js';
 import { inAssignedStatus } from './config.js';
@@ -127,6 +127,27 @@ interface ContextIssue {
   closedByPullRequestsReferences: { nodes: PullRequest[] };
 }
 
+/** How many pull requests one GraphQL query reads. */
+const PULL_REQUESTS_PER_QUERY = 50;
+
+interface PullRequestNode {
+  state: string;
+  isDraft: boolean;
+  reviewDecision: string | null;
+  commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }> };
+}
+
+/** A pull request's GraphQL fields as the pane shows them. */
+export function pullRequestStatus(node: PullRequestNode): PullRequestStatus {
+  const checks = node.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null;
+
+  return {
+    state: node.state === 'MERGED' ? 'merged' : node.state === 'CLOSED' ? 'closed' : node.isDraft ? 'draft' : 'open',
+    review: node.reviewDecision === 'APPROVED' ? 'approved' : node.reviewDecision === 'CHANGES_REQUESTED' ? 'changes-requested' : node.reviewDecision === 'REVIEW_REQUIRED' ? 'pending' : null,
+    checks: checks === 'SUCCESS' ? 'passing' : checks === 'FAILURE' || checks === 'ERROR' ? 'failing' : checks === 'PENDING' || checks === 'EXPECTED' ? 'running' : null,
+  };
+}
+
 export class GithubSource implements Source {
   constructor(
     private readonly config: GithubConfig,
@@ -155,6 +176,50 @@ export class GithubSource implements Source {
     } catch {
       return { error: UNEXPECTED };
     }
+  }
+
+  /**
+   * The review decision, checks and state of the pull requests at `urls` (PRD R92), read in one query per 50 with aliases; a URL that is not
+   * a GitHub pull request, or that GitHub does not find, is left out. A failed or malformed read is an error.
+   */
+  async pullRequests(urls: readonly string[]): Promise<PullRequestsResult> {
+    const wanted = [...new Set(urls)].flatMap((url) => {
+      const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/i.exec(url);
+
+      return match === null ? [] : [{ url, owner: match[1]!, name: match[2]!, number: Number(match[3]) }];
+    });
+    const statuses: Record<string, PullRequestStatus> = {};
+
+    try {
+      for (let start = 0; start < wanted.length; start += PULL_REQUESTS_PER_QUERY) {
+        const batch = wanted.slice(start, start + PULL_REQUESTS_PER_QUERY);
+        // Owners and names go in as JSON strings, which are valid GraphQL strings, and numbers as numbers.
+        const fields = batch.map((one, index) => `p${index}: repository(owner: ${JSON.stringify(one.owner)}, name: ${JSON.stringify(one.name)}) { pullRequest(number: ${one.number}) { state isDraft reviewDecision commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }`);
+        const result = await this.gh(`query { ${fields.join(' ')} }`, {});
+
+        if ('error' in result) {
+          return result;
+        }
+
+        const data = (result.json as { data?: Record<string, { pullRequest: PullRequestNode | null } | null> }).data;
+
+        if (data === undefined) {
+          return { error: UNEXPECTED };
+        }
+
+        batch.forEach((one, index) => {
+          const node = data[`p${index}`]?.pullRequest;
+
+          if (node != null) {
+            statuses[one.url] = pullRequestStatus(node);
+          }
+        });
+      }
+    } catch {
+      return { error: UNEXPECTED };
+    }
+
+    return { statuses };
   }
 
   /** The key of the issue a branch of `repo` names, such as `63-fix` in `acme/widgets-dashboard` (PRD R25). */

@@ -35,6 +35,19 @@ export type TicketLookup = { ticket: { sourceKey: string; ref: string; repo: str
 
 export type AssignmentLookup = { ticket: Extract<TicketLookup, { ticket: unknown }>['ticket']; assignmentKey: string | null; assigned: boolean } | { error: string };
 
+/**
+ * A pull request at a glance (PRD R92): `open`, `draft`, `merged` or `closed`; its review decision, `pending` while a review it needs is
+ * outstanding, null when none is asked; and its latest commit's checks, null when it has none.
+ */
+export interface PullRequestStatus {
+  state: 'open' | 'draft' | 'merged' | 'closed';
+  review: 'approved' | 'changes-requested' | 'pending' | null;
+  checks: 'passing' | 'failing' | 'running' | null;
+}
+
+/** The pull requests a source read, by URL, or why the read failed. */
+export type PullRequestsResult = { statuses: Record<string, PullRequestStatus> } | { error: string };
+
 /** A source plugin (PRD R1). It reads and never writes. */
 export interface Source {
   /** The settings key, such as `github`. */
@@ -54,4 +67,6 @@ export interface Source {
    * source's board (PRD R85). A registered ticket is read with `anyBoard`, so leaving the board does not fail the poll.
    */
   assignmentAt?(url: string, anyBoard?: boolean): Promise<AssignmentLookup | null>;
+  /** Reads the pull requests at `urls`; one that is not this source's, or that it cannot find, is left out (PRD R92). */
+  pullRequests?(urls: readonly string[]): Promise<PullRequestsResult>;
 }

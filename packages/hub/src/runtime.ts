@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster, readTranscriptLimit } from '@switchboard/claude';
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
-import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
+import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PolledTicket, Provider, PullRequestStatus, WorkItemStatus, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
 import { CONTINUE_TEXT, givesUp, waitsOnLimit } from '@switchboard/core';
 import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
@@ -23,6 +23,12 @@ import type { Snapshot, SnapshotInputs } from './snapshot.js';
 
 export { buildSnapshot, repoKeysOf } from './snapshot.js';
 export type { PoolView, Snapshot, SnapshotInputs, WorkItemView } from './snapshot.js';
+
+/** How often a window coming to the front reads its pull requests again at most (PRD R92). */
+export const PULL_REQUESTS_FOCUS_MS = 30_000;
+
+/** The work item statuses that are not done. */
+const OPEN_STATUSES: WorkItemStatus[] = ['triaging', 'unstarted', 'queued', 'setup', 'running', 'awaiting-approval', 'finished', 'blocked', 'failed'];
 
 const NOT_SWITCHBOARD = "This session is not one of Switchboard's work items.";
 const NEVER_BACKGROUND = 'This session never ran in the background, so it cannot continue there.';
@@ -134,6 +140,10 @@ export class Runtime {
   private sourceErrors: Record<string, string> = {};
   /** What each source's last poll left out, such as an issue another source owns (PRD R44). */
   private sourceNotes: Record<string, string[]> = {};
+  /** The pull requests of open work items' tickets, by URL, as their sources last read them (PRD R92). */
+  private readonly pullRequests = new Map<string, PullRequestStatus>();
+  /** When a window's focus last asked for the pull requests again. */
+  private pullRequestsAskedAt = Number.NEGATIVE_INFINITY;
   /** Each runner's hook error from its last install. */
   private hookErrors: Record<Provider, string | null> = { claude: null, codex: null };
   /** Why `sessions.nodePath` cannot run, which the hooks and session reports need; shown with the hook errors. */
@@ -719,6 +729,7 @@ export class Runtime {
     this.sourceNotes[name] = notes;
     this.send({ type: 'poll', source: name, tickets: result.tickets, assignments });
     await this.findWorktrees(name, source);
+    await this.readPullRequests(name, source);
 
     return result.tickets;
   }
@@ -1788,6 +1799,7 @@ export class Runtime {
       hookErrors: { ...this.hookErrors },
       sourceErrors: { ...this.sourceErrors },
       sourceNotes: { ...this.sourceNotes },
+      pullRequests: Object.fromEntries(this.pullRequests),
       now: this.deps.now(),
       configDir: this.deps.configDir,
     };
@@ -1857,6 +1869,55 @@ export class Runtime {
 
       this.timers.push(setInterval(() => void this.pollSource(name), seconds * 1000));
       void this.pollSource(name);
+    }
+  }
+
+  /**
+   * Reads the pull requests linked to tickets that have a work item not done (PRD R92), whatever their source, skipping one it last read as merged or
+   * closed, in the source's poll; a failed read keeps what was read before.
+   */
+  private async readPullRequests(name: string, source: Source): Promise<void> {
+    if (source.pullRequests === undefined) {
+      return;
+    }
+
+    const store = this.deps.store;
+    // Every work item not done, of any source, since a Zoho or ad hoc ticket can link a GitHub pull request too.
+    const tickets = new Set(OPEN_STATUSES.flatMap((status) => store.workItemsWithStatus(status)).map((item) => item.ticketId));
+    const urls = [...tickets]
+      .flatMap((ticketId) => store.linksFor(ticketId).map((link) => link.target))
+      .filter((url) => /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+\/?$/i.test(url) && !['merged', 'closed'].includes(this.pullRequests.get(url)?.state ?? ''));
+
+    if (urls.length === 0) {
+      return;
+    }
+
+    const result = await source.pullRequests(urls);
+
+    if ('error' in result) {
+      this.deps.log(`${name}: pull requests not read: ${result.error}`);
+      return;
+    }
+
+    for (const [url, status] of Object.entries(result.statuses)) {
+      this.pullRequests.set(url, status);
+    }
+
+    this.changed();
+  }
+
+  /** A window came to the front: its pull requests are read again, at most every `PULL_REQUESTS_FOCUS_MS` (PRD R92). */
+  refreshPullRequests(): void {
+    const now = this.deps.now();
+
+    if (now - this.pullRequestsAskedAt < PULL_REQUESTS_FOCUS_MS || this.stopped) {
+      return;
+    }
+
+    this.pullRequestsAskedAt = now;
+
+    for (const [name, source] of this.sources) {
+      this.track(this.sourceOperation(name, () => this.readPullRequests(name, source)));
     }
   }
 
