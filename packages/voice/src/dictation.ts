@@ -19,6 +19,8 @@ const BARGE_PREROLL = 0.3 * ASR_RATE;
 /** After a reply ends, audio still this loud in its last 0.6 s keeps the words held and checked for up to `TAIL_HOLD_MS`. */
 const TAIL_KEEP = 0.6 * ASR_RATE;
 const TAIL_HOLD_MS = 1_500;
+/** A piece dropped this soon after a reply stopped playing may be its echo, so it starts no room hold. */
+export const ROOM_ECHO_GUARD_MS = 2_000;
 
 export interface DictationDeps {
   capture: Capture;
@@ -119,6 +121,9 @@ export class Dictation {
   #deaf = false;
   /** The capture mode last logged: a half-duplex reason, or null for full duplex; undefined before the first open. */
   #loggedDuplex: string | null | undefined = undefined;
+  /** When the room hold ends (epoch milliseconds), while one runs: the voice check heard someone else (`voice.roomHold`). */
+  #roomHoldUntil: number | null = null;
+  #roomTimer: unknown = null;
 
   constructor(private readonly deps: DictationDeps) {}
 
@@ -158,6 +163,11 @@ export class Dictation {
   /** Why the open capture has no working echo cancellation, so listening pauses while the voice plays; null with none or with no capture. */
   get halfDuplex(): string | null {
     return this.#stream?.halfDuplex ?? null;
+  }
+
+  /** When the room hold ends, while one runs, else null (architecture.md § Voice check and barge-in). */
+  get roomHold(): number | null {
+    return this.#roomHoldUntil;
   }
 
   /** Why capture or recognition cannot run; null while they can. */
@@ -251,6 +261,12 @@ export class Dictation {
     if (this.#stream !== null) {
       this.#armIdle();
     }
+
+    if (!this.deps.settings().roomHold && this.#roomHoldUntil !== null) {
+      this.#endRoomHold();
+      this.deps.log('room hold ended: voice.roomHold is off');
+      this.deps.changed();
+    }
   }
 
   /**
@@ -333,6 +349,7 @@ export class Dictation {
     this.#watch?.close();
     this.#watch = null;
     this.#stopCapture();
+    this.#endRoomHold();
     this.deps.turn?.close();
   }
 
@@ -677,6 +694,7 @@ export class Dictation {
 
     if (check.dropped) {
       this.deps.log(`piece dropped by the voice check (${check.reason === 'pitch' ? 'pitch' : 'score'} ${check.reason === 'pitch' ? `${check.f0} Hz` : check.score}): ${text}`);
+      this.#roomVoice(audio);
 
       // An end the turn model judged on words that included these is judged again without them.
       if (utterance.completeAt !== null) {
@@ -836,6 +854,57 @@ export class Dictation {
     this.#transcriber?.end(false);
     this.#utterance = null;
     this.#checks++;
+  }
+
+  /**
+   * The room hold (architecture.md § Voice check and barge-in): a piece the voice check dropped is someone else in the room, unless a reply was
+   * playing or stopped within `ROOM_ECHO_GUARD_MS`, or it sounds like a learnt reply voice, both its possible echo. While `voice.roomHold` is on,
+   * dictated turns are held for `voice.roomHoldSeconds` after the latest such voice; the hub keeps them in the composer unsent.
+   */
+  #roomVoice(audio: Float32Array): void {
+    const settings = this.deps.settings();
+    const now = this.deps.now();
+
+    if (!settings.roomHold) {
+      return;
+    }
+
+    if (this.deps.playing?.() != null || now < (this.deps.playedUntil?.() ?? -Infinity) + ROOM_ECHO_GUARD_MS) {
+      return;
+    }
+
+    const reply = this.deps.voiceprint?.replyVoiceScore(audio) ?? null;
+
+    if (reply !== null && reply >= settings.matchThreshold) {
+      this.deps.log(`no room hold: the dropped piece sounds like a reply voice (${reply})`);
+      return;
+    }
+
+    const extended = this.#roomHoldUntil !== null;
+
+    this.#roomHoldUntil = now + settings.roomHoldSeconds * 1000;
+
+    if (this.#roomTimer !== null) {
+      this.#clearTimer(this.#roomTimer);
+    }
+
+    this.#roomTimer = this.#timer(() => {
+      this.#roomTimer = null;
+      this.#roomHoldUntil = null;
+      this.deps.log('room hold ended: dictated messages send on their own again');
+      this.deps.changed();
+    }, settings.roomHoldSeconds * 1000);
+    this.deps.log(`room hold ${extended ? 'extended' : 'started'}: someone else is talking, so dictated messages stay in the composer for ${settings.roomHoldSeconds} s`);
+    this.deps.changed();
+  }
+
+  #endRoomHold(): void {
+    if (this.#roomTimer !== null) {
+      this.#clearTimer(this.#roomTimer);
+      this.#roomTimer = null;
+    }
+
+    this.#roomHoldUntil = null;
   }
 
   /** The mic idle timeout, `voice.micIdleMinutes` of silence; 0 never stops capture. */

@@ -11,8 +11,9 @@ import { Clock, FakeCapture, FakeEngine, settle } from './fakes.js';
 type Sent = Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' }>;
 
 /** A voice check that passes a piece unless `verdict` fails it, and an enrolment that saves unless told to fail. */
-function fakeVoiceprint(options: { verdict?: (text: string) => PieceCheck | null; unavailable?: string; enrollError?: string } = {}) {
+function fakeVoiceprint(options: { verdict?: (text: string) => PieceCheck | null; unavailable?: string; enrollError?: string; replyVoice?: number | null } = {}) {
   const voiceprint = {
+    replyVoiceScore: () => options.replyVoice ?? null,
     checks: [] as Array<{ text: string; samples: number }>,
     enrolls: [] as number[],
     unavailable: () => options.unavailable ?? null,
@@ -701,5 +702,93 @@ describe('Dictation', () => {
     expect(dictation.state).toBe('listening');
     say('fix it', 100);
     expect(kinds(sent).at(-1)).toBe('words "fix it"');
+  });
+});
+
+describe('Dictation room hold', () => {
+  const someoneElse = (text: string): PieceCheck | null => (text.includes('dinner') ? { score: 0.2, f0: 220, dropped: true, reason: 'score' } : null);
+
+  it('holds dictated turns for voice.roomHoldSeconds after a voice that is not the operator\'s, extends at each one, and ends on its own', async () => {
+    const { dictation, say, quiet, logs, clock, changed, listening } = setup({ voiceprint: fakeVoiceprint({ verdict: someoneElse }), settings: { roomHoldSeconds: 30 } });
+
+    await listening();
+    expect(dictation.roomHold).toBeNull();
+    const before = changed();
+    say('is dinner ready', 100);
+    quiet(PHRASE_SILENCE_MS);
+    expect(dictation.roomHold).toBeGreaterThan(clock.t + 29_000);
+    expect(dictation.roomHold).toBeLessThanOrEqual(clock.t + 30_000);
+    expect(changed()).toBeGreaterThan(before);
+    expect(logs).toContain('room hold started: someone else is talking, so dictated messages stay in the composer for 30 s');
+    const first = dictation.roomHold!;
+    quiet(10_000);
+    say('dinner in five', 100);
+    quiet(PHRASE_SILENCE_MS);
+    expect(dictation.roomHold).toBeGreaterThan(first);
+    expect(logs.at(-1)).toBe('room hold extended: someone else is talking, so dictated messages stay in the composer for 30 s');
+    const until = dictation.roomHold!;
+    quiet(until - clock.t - 100);
+    expect(dictation.roomHold).toBe(until);
+    quiet(200);
+    expect(dictation.roomHold).toBeNull();
+    expect(logs).toContain('room hold ended: dictated messages send on their own again');
+  });
+
+  it('starts no hold for the operator\'s own words, with voice.roomHold off, or for a piece that may be a reply\'s echo', async () => {
+    const own = setup({ voiceprint: fakeVoiceprint({ verdict: someoneElse }) });
+
+    await own.listening();
+    own.say('fix the login', 100);
+    own.quiet(PHRASE_SILENCE_MS);
+    expect(own.dictation.roomHold).toBeNull();
+
+    const off = setup({ voiceprint: fakeVoiceprint({ verdict: someoneElse }), settings: { roomHold: false } });
+
+    await off.listening();
+    off.say('is dinner ready', 100);
+    off.quiet(PHRASE_SILENCE_MS);
+    expect(off.dictation.roomHold).toBeNull();
+
+    // Like a learnt reply voice.
+    const echo = setup({ voiceprint: fakeVoiceprint({ verdict: someoneElse, replyVoice: 0.8 }) });
+
+    await echo.listening();
+    echo.say('is dinner ready', 100);
+    echo.quiet(PHRASE_SILENCE_MS);
+    expect(echo.dictation.roomHold).toBeNull();
+    expect(echo.logs).toContain('no room hold: the dropped piece sounds like a reply voice (0.8)');
+
+    // Just after a reply stopped playing.
+    const after = setup({ voiceprint: fakeVoiceprint({ verdict: someoneElse, replyVoice: 0.3 }) });
+
+    await after.listening();
+    after.speech.until = after.clock.t;
+    after.say('is dinner ready', 100);
+    after.quiet(PHRASE_SILENCE_MS);
+    expect(after.dictation.roomHold).toBeNull();
+    after.quiet(3_000);
+    after.say('is dinner ready now', 100);
+    after.quiet(PHRASE_SILENCE_MS);
+    expect(after.dictation.roomHold).not.toBeNull();
+  });
+
+  it('ends a hold when voice.roomHold is turned off, and when the dictation closes', async () => {
+    const { dictation, say, quiet, settings, logs, listening } = setup({ voiceprint: fakeVoiceprint({ verdict: someoneElse }) });
+
+    await listening();
+    say('is dinner ready', 100);
+    quiet(PHRASE_SILENCE_MS);
+    expect(dictation.roomHold).not.toBeNull();
+    settings.roomHold = false;
+    dictation.settingsChanged();
+    expect(dictation.roomHold).toBeNull();
+    expect(logs.at(-1)).toBe('room hold ended: voice.roomHold is off');
+    settings.roomHold = true;
+    quiet(5_000);
+    say('dinner is ready', 100);
+    quiet(PHRASE_SILENCE_MS);
+    expect(dictation.roomHold).not.toBeNull();
+    dictation.close();
+    expect(dictation.roomHold).toBeNull();
   });
 });

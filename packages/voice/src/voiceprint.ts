@@ -287,6 +287,18 @@ export class Voiceprint {
     return this.#voices.get(voice)?.vector ?? null;
   }
 
+  /** How closely audio matches the closest learnt reply voice, so a voice that is not the operator's can be told from the reply's own echo; null with none learnt or no embedding. */
+  replyVoiceScore(samples: Float32Array): number | null {
+    if (this.#voices.size === 0 || samples.length < MIN_SECONDS * RATE) {
+      return null;
+    }
+
+    const embedding = this.embed(samples);
+    const scores = [...this.#voices.values()].map((print) => similarity(embedding, print.vector)).filter((score): score is number => score !== null);
+
+    return scores.length === 0 ? null : Math.max(...scores);
+  }
+
   /**
    * A piece's voice check: dropped when its score is under `voice.matchThreshold` (less `SHORT_PIECE_ALLOWANCE` for one or two words) or its
    * pitch is too high. Audio under `MIN_SECONDS`, no enrolment or no model scores null and passes the score part.

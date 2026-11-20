@@ -166,6 +166,25 @@ describe('Voiceprint', () => {
 });
 
 describe('sherpaEmbedder', () => {
+  it('scores audio against the closest learnt reply voice, and none before one is learnt or for audio too short', () => {
+    const voiceprint = new Voiceprint({ dir: home(), embedder: () => fakeEmbedder(), log: () => undefined });
+
+    expect(voiceprint.replyVoiceScore(tone(2, 200))).toBeNull();
+    // Loud audio reads as [1, 0], quiet as [0, 1]: marin learnt from loud audio, cedar from quiet.
+    voiceprint.learnVoice('marin', tone(3, 200));
+    voiceprint.learnVoice('cedar', tone(3, 200, 0.01));
+    expect(voiceprint.replyVoiceScore(tone(2, 200))).toBe(1);
+    expect(voiceprint.replyVoiceScore(tone(2, 200, 0.01))).toBe(1);
+    expect(voiceprint.replyVoiceScore(tone(0.5, 200))).toBeNull();
+  });
+
+  it('scores a voice unlike every learnt reply voice low', () => {
+    const voiceprint = new Voiceprint({ dir: home(), embedder: () => fakeEmbedder(), log: () => undefined });
+
+    voiceprint.learnVoice('marin', tone(3, 200));
+    expect(voiceprint.replyVoiceScore(tone(2, 200, 0.01))).toBe(0);
+  });
+
   it('runs the speaker model on the CPU through the build recognition uses, and says why when it cannot', () => {
     const dir = mkdtempSync(join(tmpdir(), 'embedder-'));
     const model = join(dir, 'speaker.onnx');
