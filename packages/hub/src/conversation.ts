@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inTranscript } from '@switchboard/core';
+import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
 import { artifactsDir, CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
@@ -37,8 +37,11 @@ export interface SessionView {
 }
 
 export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'workItemId' | 'transcriptUuid' | 'opId' | 'pastedAt'>;
-/** `provisional`: not in the transcript yet, so placed by when it was first seen (`inTranscript`). */
-export type ReplyView = { type: 'reply'; provisional: boolean } & Omit<ConversationReply, 'workItemId' | 'transcriptUuid'>;
+/**
+ * `provisional`: not in the transcript yet, so placed by when it was first seen (`inTranscript`); `unread`: it counts as unread and the operator
+ * has not seen it (architecture.md § Unread).
+ */
+export type ReplyView = { type: 'reply'; provisional: boolean; unread: boolean } & Omit<ConversationReply, 'workItemId' | 'transcriptUuid' | 'seenAt'>;
 export type ItemView = MessageView | ReplyView;
 
 /**
@@ -51,13 +54,15 @@ export interface StatusView {
   at: number;
   markdown: string;
   fallback: boolean;
+  /** A status the operator has not seen (architecture.md § Unread); never the stage. */
+  unread: boolean;
 }
 
 /** An artifact of the window's work item (architecture.md § Artifacts); `path` is `<owner>/<file>` in the window's `artifactsDir`. */
 export type ArtifactView = Artifact;
 
 export function statusView(status: ConversationStatus): StatusView {
-  return { id: status.id, sessionId: status.sessionId, at: status.at, markdown: status.markdown, fallback: false };
+  return { id: status.id, sessionId: status.sessionId, at: status.at, markdown: status.markdown, fallback: false, unread: status.seenAt === null };
 }
 
 export function sessionView(session: Session, current: boolean, hooks: boolean): SessionView {
@@ -93,9 +98,13 @@ export function itemView(item: ({ type: 'message' } & ConversationMessage) | ({ 
   if (view.type === 'message') {
     delete (view as { opId?: unknown }).opId;
     delete (view as { pastedAt?: unknown }).pastedAt;
+
+    return { ...view, provisional: !inTranscript(item) } as ItemView;
   }
 
-  return { ...view, provisional: !inTranscript(item) } as ItemView;
+  const { seenAt, ...reply } = view;
+
+  return { ...reply, provisional: !inTranscript(item), unread: seenAt === null && countsUnread(reply) };
 }
 
 /** A screen read of a held session from the holder; null when the holder is not connected or does not serve snapshots. */
@@ -129,8 +138,13 @@ export interface ConversationServiceDeps {
   /** Waits between screen reads while a message is typed; a timer by default. */
   sleep?(ms: number): Promise<void>;
   newId(): string;
+  /** A session's unread count changed, which the dock's rows show; the hub builds its views again. */
+  unreadChanged?(): void;
   log(line: string): void;
 }
+
+/** The most IDs one `seen` command marks. */
+export const SEEN_MAX_IDS = 200;
 
 type Send = (type: string, payload: Record<string, unknown>) => void;
 
@@ -292,6 +306,7 @@ export class ConversationService {
   #changed(sessionId: string, change: ConversationChange, also?: string): void {
     if (change.type === 'status') {
       this.#statusChanged(this.deps.windows.showing(sessionId));
+      this.#unreadChanged(sessionId);
       return;
     }
 
@@ -304,6 +319,31 @@ export class ConversationService {
 
     for (const key of keys) {
       this.#send(key, change.type, change.type === 'message' ? { message: item } : { reply: item });
+    }
+
+    // A new message can push an unread reply past the retention limit, so every change counts again.
+    this.#unreadChanged(sessionId);
+  }
+
+  /** Each session's unread count when it last changed, so the dock hears of a change once. */
+  readonly #unread = new Map<string, number>();
+  /** The unread count each window was last sent. */
+  readonly #unreadShown = new Map<string, number>();
+
+  /** Sends the windows showing the session its unread count when it changed, and tells the hub when the session's count changed. */
+  #unreadChanged(sessionId: string): void {
+    const count = this.deps.store.unreadCount(sessionId);
+
+    for (const key of this.deps.windows.showing(sessionId)) {
+      if (this.#streams.has(key) && this.#unreadShown.get(key) !== count) {
+        this.#unreadShown.set(key, count);
+        this.#send(key, 'unread', { count });
+      }
+    }
+
+    if (this.#unread.get(sessionId) !== count) {
+      this.#unread.set(sessionId, count);
+      this.deps.unreadChanged?.();
     }
   }
 
@@ -341,6 +381,7 @@ export class ConversationService {
         if (streams.size === 0) {
           this.#streams.delete(key);
           this.#statusShown.delete(key);
+          this.#unreadShown.delete(key);
           this.#followArtifacts();
         }
       },
@@ -353,7 +394,8 @@ export class ConversationService {
 
     if (scope === null) {
       this.#statusShown.delete(key);
-      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [] };
+      this.#unreadShown.set(key, 0);
+      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, unread: 0, artifactsDir: null, artifacts: [] };
     }
 
     const current = scope.sessionId === null ? null : this.deps.store.session(scope.sessionId);
@@ -372,6 +414,10 @@ export class ConversationService {
 
     this.#statusShown.set(key, JSON.stringify(status));
 
+    const unread = scope.sessionId === null ? 0 : this.deps.store.unreadCount(scope.sessionId);
+
+    this.#unreadShown.set(key, unread);
+
     const folder = this.#artifactFolder(scope, key);
 
     return {
@@ -381,6 +427,7 @@ export class ConversationService {
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
       status,
+      unread,
       artifactsDir: folder?.dir ?? null,
       artifacts: folder?.list() ?? [],
     };
@@ -461,7 +508,7 @@ export class ConversationService {
       return null;
     }
 
-    return { id: `stage-${scope.workItemId}`, sessionId: scope.sessionId, at: item.stageAt ?? item.statusAt ?? this.deps.now(), markdown: item.stage, fallback: true };
+    return { id: `stage-${scope.workItemId}`, sessionId: scope.sessionId, at: item.stageAt ?? item.statusAt ?? this.deps.now(), markdown: item.stage, fallback: true, unread: false };
   }
 
   /** The status each window was last sent, so a `status` event goes only when its row changes. */
@@ -700,6 +747,52 @@ export class ConversationService {
     // An uncertain message keeps its place; a sent one waits for the line where Claude received it.
     this.deps.store.updateMessage(id, outcome.delivery === 'sent' ? { delivery: 'sent', error: null } : { delivery: outcome.delivery, error: outcome.error, provisional: false });
     this.#changed(message.sessionId, { type: 'message', message: this.deps.store.message(id)! });
+  }
+
+  /**
+   * `seen` (architecture.md § Unread): replies and statuses of the window's current session that its view showed in a focused window for a
+   * second, each marked seen on its own. Refused with 403 outside the window's scope, for a forged session or for an ID that is not a reply or
+   * status of that session, marking none, and 409 for a stale `scopeGen`. The windows showing the session get each marked reply and status again
+   * and the new unread count. Marking again changes nothing, so a repeated `opId` is safe.
+   */
+  seen(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, opId, sessionId, ids } = body;
+
+    if (
+      typeof window !== 'string' ||
+      typeof scopeGen !== 'number' ||
+      typeof opId !== 'string' ||
+      typeof sessionId !== 'string' ||
+      !Array.isArray(ids) ||
+      ids.length > SEEN_MAX_IDS ||
+      !ids.every((id) => typeof id === 'string')
+    ) {
+      return { status: 400, body: { error: `Expected {window, scopeGen, opId, sessionId, ids}, with at most ${SEEN_MAX_IDS} IDs.` } };
+    }
+
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const marked = this.deps.store.markSeen(sessionId, ids as string[], this.deps.now());
+
+    if (marked === null) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    for (const id of marked.replies) {
+      this.#changed(sessionId, { type: 'reply', reply: this.deps.store.reply(id)! });
+    }
+
+    if (marked.statuses.length > 0) {
+      this.#statusChanged(this.deps.windows.showing(sessionId));
+    }
+
+    this.#unreadChanged(sessionId);
+
+    return { status: 200, body: { unread: this.deps.store.unreadCount(sessionId) } };
   }
 
   /**

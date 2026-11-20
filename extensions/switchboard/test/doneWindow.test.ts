@@ -72,6 +72,7 @@ function item(patch: Partial<WorkItemView> = {}): WorkItemView {
     worktree: { id: 1, ticketId: 7, path: WORKTREE, branch: '107-fix', linkedBy: 'report' },
     links: [],
     returned: 0,
+    unread: 0,
     ...patch,
   };
 }

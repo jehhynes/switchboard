@@ -185,6 +185,7 @@ describe('ConversationService', () => {
     const projects = join(dir, 'projects');
     const logs: string[] = [];
     let id = 0;
+    const unreadChanges = { count: 0 };
     const service = new ConversationService({
       store,
       windows: scopes,
@@ -199,6 +200,7 @@ describe('ConversationService', () => {
         await new Promise((resolve) => setImmediate(resolve));
       },
       newId: () => String(++id),
+      unreadChanged: () => unreadChanges.count++,
       log: (line) => logs.push(line),
     });
 
@@ -219,8 +221,73 @@ describe('ConversationService', () => {
       return { key, frames, stream };
     };
 
-    return { store, view, scopes, service, transcript, reply, open, logs, held };
+    return { store, view, scopes, service, transcript, reply, open, logs, held, unreadChanges };
   }
+
+  it("counts its session's unread replies and status, marks each seen on its own, and tells its own windows and the dock", async () => {
+    const { view, service, transcript, reply, open, store, unreadChanges } = setup();
+
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', unread: 0 });
+    transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[status]\nDone.')]);
+    transcript('D:/w3', 'n3', [reply('b1', 'Theirs.')]);
+    await service.poll();
+
+    expect(mine.frames.filter((frame) => frame.type === 'reply')).toMatchObject([{ reply: { opening: 'One.', unread: true } }, { reply: { opening: 'Two.', unread: true } }]);
+    expect(mine.frames.filter((frame) => frame.type === 'reply')[0]!['reply']).not.toHaveProperty('seenAt');
+    expect(mine.frames.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { markdown: 'Done.', unread: true } }]);
+    expect(mine.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 3 });
+    expect(theirs.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 1 });
+    // Each session's count changed, so the dock's rows are built again.
+    expect(unreadChanges.count).toBeGreaterThanOrEqual(2);
+
+    const [one, two] = store.conversation('s2', null, 10).items.map((item) => item.id);
+    const statusId = store.latestStatus('s2')!.id;
+    const before = { mine: mine.frames.length, theirs: theirs.frames.length, changes: unreadChanges.count };
+
+    // Another window's item, an unknown ID, another session, a stale scope and a malformed body mark nothing.
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o1', sessionId: 's2', ids: [two, store.conversation('s3', null, 10).items[0]!.id] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o2', sessionId: 's2', ids: ['forged'] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o3', sessionId: 's3', ids: [] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o4', sessionId: 's2', ids: [two] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.seen({ window: mine.key, scopeGen: 0, opId: 'o5', sessionId: 's2', ids: [two] })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o6', sessionId: 's2', ids: 'x' }).status).toBe(400);
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o7', sessionId: 's2', ids: Array.from({ length: 201 }, () => two) }).status).toBe(400);
+    expect(store.unreadCount('s2')).toBe(3);
+    expect(mine.frames.length).toBe(before.mine);
+
+    // The second reply and the status are seen; the first stays unread.
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o8', sessionId: 's2', ids: [two, statusId] })).toEqual({ status: 200, body: { unread: 1 } });
+    const after = mine.frames.slice(before.mine);
+
+    expect(after.filter((frame) => frame.type === 'reply')).toMatchObject([{ reply: { id: two, unread: false } }]);
+    expect(after.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { id: statusId, unread: false } }]);
+    expect(after.filter((frame) => frame.type === 'unread')).toMatchObject([{ count: 1 }]);
+    expect(theirs.frames.length).toBe(before.theirs);
+    expect(unreadChanges.count).toBe(before.changes + 1);
+    expect(store.reply(one!)?.seenAt).toBeNull();
+
+    // Marking again sends nothing new and leaves the dock alone.
+    const again = mine.frames.length;
+
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o8', sessionId: 's2', ids: [two] })).toEqual({ status: 200, body: { unread: 1 } });
+    expect(mine.frames.length).toBe(again);
+    expect(unreadChanges.count).toBe(before.changes + 1);
+
+    // Any change counts again, as a message that pushes an unread reply past the retention limit.
+    store.markSeen('s2', [one!], NOW);
+    transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[status]\nDone.'), JSON.stringify({ type: 'user', uuid: 'u3', timestamp: new Date(NOW).toISOString(), message: { role: 'user', content: 'Next?' } })]);
+    await service.poll();
+    expect(mine.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 0 });
+    expect(unreadChanges.count).toBe(before.changes + 2);
+    store.updateReply(one!, { seenAt: null });
+
+    // A reconnect's hello carries the count and each item's state.
+    mine.stream.close();
+    expect(open(view.file).frames[0]).toMatchObject({ type: 'hello', unread: 1, items: [{ id: one, unread: true }, { id: two, unread: false }, { type: 'message', text: 'Next?' }], status: { unread: false } });
+  });
 
   it("says hello with the window's scope, its current session and its items, and sends each window only its own session's replies", async () => {
     const { view, service, transcript, reply, open } = setup();
@@ -233,8 +300,8 @@ describe('ConversationService', () => {
 
     expect(mine.frames).toMatchObject([{ v: 1, seq: 1, type: 'hello', protocol: 1, scope: { workItemId: 2, sessionId: 's2', scopeGen: 1 }, sessions: [{ id: 's2', state: 'running', conversation: 'full', rules: 'current' }], items: [], more: false }]);
     await service.poll();
-    expect(mine.frames.slice(1)).toMatchObject([{ type: 'reply', reply: { sessionId: 's2', opening: 'Mine.', kind: 'reply', source: 'transcript' } }]);
-    expect(theirs.frames.slice(1)).toMatchObject([{ type: 'reply', reply: { sessionId: 's3', opening: 'Not yours.' } }]);
+    expect(mine.frames.slice(1)).toMatchObject([{ type: 'reply', reply: { sessionId: 's2', opening: 'Mine.', kind: 'reply', source: 'transcript' } }, { type: 'unread', count: 1 }]);
+    expect(theirs.frames.slice(1)).toMatchObject([{ type: 'reply', reply: { sessionId: 's3', opening: 'Not yours.' } }, { type: 'unread', count: 1 }]);
     expect(JSON.stringify(mine.frames)).not.toContain('Not yours.');
     expect(JSON.stringify(theirs.frames)).not.toContain('Mine.');
     // The reply drops the store's work item and transcript fields.

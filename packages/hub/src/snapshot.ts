@@ -56,6 +56,8 @@ export interface WorkItemView extends WorkItem {
   reopenable: boolean;
   /** The playbooks Start with guidance… offers an `unstarted` work item, its own among them; empty otherwise (PRD R35). */
   playbookChoices: string[];
+  /** Unread replies and statuses of its latest session in the Conversation view (architecture.md § Unread). */
+  unread: number;
   /** The pids that last kept the latest session, an ended Code Mode session, from resuming, which Stop ends (PRD R95); absent otherwise. */
   leftovers?: number[];
 }
@@ -154,6 +156,7 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
 
     return items.filter((item) => item.playbook !== null && counted.has(item.playbook) && started(item)).length;
   };
+  const unreadOf = (latest: Session | undefined): number => (latest?.codeMode === true ? store.unreadCount(latest.id) : 0);
   const used = heldSlots(store);
   const held = inputs.held;
 
@@ -169,6 +172,7 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
         focus: effectiveFocus(triages, ticket.url),
         sessions: store.sessionsFor(item.id).map(({ lastTree: _lastTree, ...session }) => session),
         ...leftoversOf(store.sessionsFor(item.id).at(-1)),
+        unread: unreadOf(store.sessionsFor(item.id).at(-1)),
         worktree: store.worktreeFor(item.ticketId),
         links: store.linksFor(item.ticketId),
         pastes: store.pastesFor(item.id),

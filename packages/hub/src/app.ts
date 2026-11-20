@@ -312,6 +312,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     hooks: () => config.settings.sessions.installHooks,
     now: deps.now,
     newId: randomUUID,
+    // The dock's rows count each work item's unread items, so a change builds the views again.
+    unreadChanged: () => builder.schedule(),
     log: deps.log,
   });
   /** A finished build: windows bound to a new work item start from empty, and every stream gets the new views. */
@@ -519,6 +521,7 @@ const dockWithRuns = () => {
       '/volume': async (body) => volumeReply(store, deps.now(), body),
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text}.' } }),
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
+      '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),
       '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/claim': async (body) => {
         if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean') || !optionalString(body['window'])) {

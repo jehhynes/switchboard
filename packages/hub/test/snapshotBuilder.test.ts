@@ -58,6 +58,34 @@ const until = async (test: () => boolean): Promise<void> => {
   }
 };
 
+describe('buildSnapshot', () => {
+  it("counts the unread replies and status of a work item's latest Code Mode session, and none for another session", () => {
+    const store = storeWithItem(':memory:');
+    const session = (id: string, codeMode: boolean) =>
+      store.insertSession({ id, workItemId: 1, kind: 'task', provider: 'claude', nativeSessionId: null, shortId: null, cwd: 'D:/w', state: 'running', stateAt: T0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: T0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, codeMode } as never);
+    const reply = (id: string, sessionId: string) =>
+      store.addReply({ id, sessionId, workItemId: 1, at: T0, kind: 'reply', answers: null, opening: id, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: null });
+
+    session('old', true);
+    reply('r-old', 'old');
+    expect(buildSnapshot(store, inputs()).workItems[0]!.unread).toBe(1);
+
+    // Only the latest session counts; an earlier one's replies are not in the window's view.
+    session('new', true);
+    reply('r1', 'new');
+    reply('r2', 'new');
+    store.setStatus({ id: 'st1', sessionId: 'new', workItemId: 1, replyId: 'r2', at: T0, markdown: 'x' });
+    expect(buildSnapshot(store, inputs()).workItems[0]!.unread).toBe(3);
+    store.markSeen('new', ['r1', 'st1'], T0);
+    expect(buildSnapshot(store, inputs()).workItems[0]!.unread).toBe(1);
+    expect(dockView(buildSnapshot(store, inputs()), T0, 'C:/w').groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')?.unread).toBe(1);
+
+    // A background session has no conversation.
+    session('background', false);
+    expect(buildSnapshot(store, inputs()).workItems[0]!.unread).toBe(0);
+  });
+});
+
 describe('SnapshotBuilder', () => {
   it('builds once for changes that come together, and again for a change during a build', async () => {
     const store = storeWithItem(':memory:');

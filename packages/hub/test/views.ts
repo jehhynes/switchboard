@@ -66,6 +66,7 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     pastes: [],
     comments: [],
     returned: 0,
+    unread: 0,
     parent: null,
     moved: false,
     approvalSends: false,
