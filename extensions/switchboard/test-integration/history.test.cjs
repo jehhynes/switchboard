@@ -16,10 +16,18 @@ describe('a row\'s History', () => {
   let warned = [];
   const original = vscode.window.showWarningMessage;
 
-  /** Leaves the History command with the hub, as the dock does, and claims it, which lets this window read that ticket's History (architecture.md § Window scope). */
+  /**
+   * Leaves the History command with the hub, as the dock does, and claims it with this window's key, which lets this window read that ticket's
+   * History (architecture.md § Window scope). The dock's commands for any window go only to the focused window, and the suite's window loses the
+   * focus whenever another app takes it, so the test claims as the focused window does rather than through the extension, which sends its real
+   * focus; claim.test.cjs covers that claim.
+   */
   const grant = async (ticketId) => {
-    await post('/window', { workspace: null, command: { type: 'history', ticketId, key: 'gh 77' } });
-    await extension.claim(extension.hub(), () => Promise.resolve());
+    assert.strictEqual(await post('/window', { workspace: null, command: { type: 'history', ticketId, key: 'gh 77' } }), 200);
+
+    const window = await until(() => extension.windowKey(), 'the window has no key');
+
+    assert.strictEqual(await post('/claim', { folder: vscode.workspace.workspaceFolders[0].uri.fsPath, workspace: null, focused: true, window }), 200);
   };
   const history = async (ticketId) => {
     await grant(ticketId);
@@ -142,6 +150,7 @@ describe('a row\'s History', () => {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
     const before = extension.hub();
+    const oldKey = extension.windowKey();
 
     // No hub answers between the shutdown and the restart, as for a tab VS Code restores before the window connects.
     await new Promise((done) => {
@@ -164,6 +173,8 @@ describe('a row\'s History', () => {
     await extension.run({ type: 'history', ticketId: TICKET, key: 'gh 77' });
     await until(() => tabs()[0]?.error?.startsWith('Switchboard: '), `the tab did not report the missing hub: ${JSON.stringify(tabs())}`);
     await until(() => extension.hub() !== null && extension.hub().pid !== before.pid, 'the window did not reconnect to a new hub', 60_000);
+    // The new hub's hello gives the window its key there; a claim with the old one would grant nothing.
+    await until(() => extension.windowKey() !== null && extension.windowKey() !== oldKey, 'the new hub gave the window no key', 60_000);
     // The new hub gave the window a new key, which the dock's command lets read the ticket.
     await history(TICKET);
     await until(() => tabs()[0]?.shown === revision() && tabs()[0].error === null, `the tab was not read again: ${JSON.stringify(tabs())}`);
