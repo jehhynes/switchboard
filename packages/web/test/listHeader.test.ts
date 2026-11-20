@@ -30,7 +30,7 @@ class FakeSource {
 const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, ticketId: null, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const github: SourceGroup = { kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] };
-const zoho: SourceGroup = { kind: 'zoho', enabled: true, title: 'desk: polled\nhelp: not polled\nClick to choose', sources: [{ name: 'desk', enabled: true }, { name: 'help', enabled: false }] };
+const zoho: SourceGroup = { kind: 'zoho', label: 'Zoho Desk', enabled: true, title: 'desk: polled\nhelp: not polled\nClick to choose', sources: [{ name: 'desk', enabled: true }, { name: 'help', enabled: false }] };
 const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ notes: [], sources: [github, zoho], repoRoots: ['D:/w1'], schedules: [], ...patch });
 const closed = (): SearchView => ({ open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null });
 
@@ -73,7 +73,7 @@ describe('the list header (architecture.md § Web page)', () => {
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
   const hello = (source: FakeSource, patch: Record<string, unknown> = {}) => source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], header: header(), scope: null, ...patch });
 
-  it("draws each source kind's logo, grey while off, with the hub's tooltip, and a tag for a kind without a logo", () => {
+  it("draws each source kind's logo, grey while off, with the hub's tooltip, and a plug for a kind without a logo", () => {
     const host = document.createElement('div');
 
     host.innerHTML = html(renderListHeader(header({ sources: [github, { ...zoho, enabled: false }, { kind: 'jira', enabled: true, title: 'jira: polled', sources: [{ name: 'jira', enabled: true }] }] }), { menu: null, sheet: null, search: closed() }));
@@ -86,13 +86,13 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(title?.textContent).toBe('Switchboard');
     expect(title?.querySelector('img.list-title-icon')?.getAttribute('src')).toBe('icon-192.png');
     expect(title?.querySelector('img')?.getAttribute('alt')).toBe('');
-    expect(buttons.map((one) => one.getAttribute('aria-label'))).toEqual(['gh', 'zoho', 'jira']);
+    expect(buttons.map((one) => one.getAttribute('aria-label'))).toEqual(['gh', 'Zoho Desk', 'jira']);
     expect(buttons[0]!.title).toBe('gh: polled\nClick to stop polling gh');
     expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true');
     expect(buttons[1]!.getAttribute('aria-haspopup')).toBe('menu');
     expect(buttons[0]!.querySelector('svg.source-logo.github:not(.off)')).not.toBeNull();
     expect(buttons[1]!.querySelector('svg.source-logo.zoho.off')).not.toBeNull();
-    expect(buttons[2]!.querySelector('.codicon-tag.source-logo')).not.toBeNull();
+    expect(buttons[2]!.querySelector('.codicon-plug.source-logo')).not.toBeNull();
     // No sources, no icons.
     host.innerHTML = html(renderListHeader(header({ sources: [] }), { menu: null, sheet: null, search: closed() }));
     expect(host.querySelector('.header-sources')).toBeNull();
@@ -108,6 +108,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.source-menu')).toBeNull();
 
     click('.source-toggle[data-kind="zoho"]');
+    expect(root.querySelector('.source-menu')?.getAttribute('aria-label')).toBe('Zoho Desk sources');
     expect([...root.querySelectorAll('.source-menu .menu-row')].map((row) => [row.textContent, row.getAttribute('aria-checked')])).toEqual([['desk', 'true'], ['help', 'false']]);
     click('.source-menu [data-source="help"]');
     await flush();

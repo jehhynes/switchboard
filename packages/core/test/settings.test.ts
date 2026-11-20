@@ -18,8 +18,8 @@ describe('parseSettings', () => {
     });
   });
 
-  it('refuses a source named all, which the volume report uses for every source', () => {
-    expect(parseSettings(JSON.stringify({ sources: { all: { kind: 'zoho' } } }))).toEqual({ errors: ['sources.all: all names every source in the volume report, so a source needs another name.'] });
+  it('allows all as a source name after volume reporting was removed', () => {
+    expect(parseSettings(JSON.stringify({ sources: { all: { kind: 'zoho' } } }))).toMatchObject({ settings: { sources: { all: { kind: 'zoho' } } } });
   });
 
   it('refuses plugins that are not a list of absolute or ~ paths', () => {
@@ -39,7 +39,7 @@ describe('parseSettings', () => {
         },
         alerts: { surface: 'web' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, briefReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
-        web: { port: 0, iframeBrowser: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
+        web: { port: 0, iframeBrowser: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['Alex@Example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
       }),
     );
 

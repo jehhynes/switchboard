@@ -52,8 +52,8 @@
               "attach",
               "s1"
             ],
-            "name": "gh-113-widgets-655280-s1",
-            "title": "Issue <13> · sb:gh-113-widgets-655280-s1",
+            "name": "gh-113-widgets-760e0e-s1",
+            "title": "Issue <13> · sb:gh-113-widgets-760e0e-s1",
             "handoff": null,
             "active": false,
             "codeMode": true
@@ -200,8 +200,8 @@
               "--resume",
               "aaaa1111-native"
             ],
-            "name": "gh-107-58c609-aaaa1111",
-            "title": "Issue <7> · sb:gh-107-58c609-aaaa1111",
+            "name": "gh-107-9a479b-aaaa1111",
+            "title": "Issue <7> · sb:gh-107-9a479b-aaaa1111",
             "handoff": null,
             "active": false
           },
@@ -376,8 +376,8 @@
               "--resume",
               "aaaa1111-native"
             ],
-            "name": "gh-110-support-c6262c-aaaa1111",
-            "title": "Issue <10> · sb:gh-110-support-c6262c-aaaa1111",
+            "name": "gh-110-support-d24afb-aaaa1111",
+            "title": "Issue <10> · sb:gh-110-support-d24afb-aaaa1111",
             "handoff": null,
             "active": false
           },
@@ -767,8 +767,8 @@
               "attach",
               "cm15"
             ],
-            "name": "gh-115-widgets-655280-cm15",
-            "title": "Issue <15> · sb:gh-115-widgets-655280-cm15",
+            "name": "gh-115-widgets-760e0e-cm15",
+            "title": "Issue <15> · sb:gh-115-widgets-760e0e-cm15",
             "handoff": null,
             "active": false,
             "codeMode": true
@@ -1293,7 +1293,6 @@
     {
       "kind": "github",
       "label": "GitHub",
-      "queue": false,
       "enabled": true,
       "title": "github: polled\nClick to stop polling it.",
       "sources": [
@@ -1306,7 +1305,6 @@
     {
       "kind": "zoho",
       "label": "Zoho Desk",
-      "queue": true,
       "enabled": false,
       "title": "zoho: not polled\nClick to poll it.",
       "sources": [

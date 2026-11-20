@@ -316,7 +316,7 @@ export function loadConfig(
 
   const parsed = parseSettings(text);
 
-  const rejected = 'errors' in parsed ? parsed.errors : sourcesErrors(parsed.settings, recorded, plugins);
+  const rejected = 'errors' in parsed ? parsed.errors : [...plugins.errors, ...sourcesErrors(parsed.settings, recorded, plugins)];
 
   if ('errors' in parsed || rejected.length > 0) {
     return { ...previous, settingsError: rejected.join(' '), settingsWarnings: [] };

@@ -10,7 +10,7 @@ const STATUS = `{
   "Peer": { "k": { "DNSName": "phone.tail1234.ts.net.", "UserID": 2 } },
   "User": {
     "2": { "ID": 2, "LoginName": "other@example.com" },
-    "9007199254740993": { "ID": 9007199254740993, "LoginName": "alex@example.com", "DisplayName": "Alex" }
+    "9007199254740993": { "ID": 9007199254740993, "LoginName": "Alex@Example.com", "DisplayName": "Alex" }
   }
 }`;
 
@@ -47,7 +47,7 @@ describe('tailscaleIdentity', () => {
     expect(await answer({ code: 1, stderr: 'failed to connect to local tailscaled\n' })).toEqual({ error: 'tailscale status failed: failed to connect to local tailscaled' });
     expect(await answer({ stdout: STATUS.replace('"Running"', '"Stopped"') })).toEqual({ error: 'Tailscale is not running (Stopped)' });
     expect(await answer({ stdout: STATUS.replace('PC.tail1234.ts.net.', '') })).toEqual({ error: 'Tailscale gave no machine name (none); turn on MagicDNS' });
-    expect(await answer({ stdout: STATUS.replace('"alex@example.com"', 'null') })).toEqual({ error: "Tailscale named no login for this machine's owner" });
+    expect(await answer({ stdout: STATUS.replace('"Alex@Example.com"', 'null') })).toEqual({ error: "Tailscale named no login for this machine's owner" });
     expect(await answer({ stdout: 'not json' })).toEqual({ error: 'tailscale status did not answer JSON' });
     // With no Self.UserID, a peer's user is never taken for the owner.
     expect(await answer({ stdout: STATUS.replace(', "UserID": 9007199254740993 }', ' }') })).toEqual({ error: "Tailscale named no login for this machine's owner" });

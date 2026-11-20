@@ -296,6 +296,7 @@ export interface HistoryView {
 /** One header icon: the configured sources of one kind (`DockSourceGroup` in the hub's `dock.ts`). */
 export interface SourceGroup {
   kind: string;
+  label?: string;
   /** Whether any source of the kind is polled. */
   enabled: boolean;
   /** The icon's tooltip: each source and whether it is polled, then what a click does. */

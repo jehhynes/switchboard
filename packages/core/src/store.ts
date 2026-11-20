@@ -494,21 +494,21 @@ export const MIGRATIONS = [
   );`,
   // Support volume is removed (PRD R84): other engineers' tickets lose their ticket-only triages, and every ticket its queue fields, volume facts
   // and classification. Their tickets stay, as a ticket that left the pool does.
-  `DELETE FROM triages WHERE workItemId IS NULL AND ticketId IN (SELECT id FROM tickets WHERE source IN ('zoho', 'forum') AND pool = 0);
+  `DELETE FROM triages WHERE workItemId IS NULL AND ticketId IN (SELECT id FROM tickets WHERE (source = 'zoho' OR source IN (SELECT name FROM sourceStates WHERE volumeStartedAt IS NOT NULL)) AND pool = 0);
    DROP TABLE ticketClassifications;
    DELETE FROM events WHERE type IN ('volume-gap', 'volume-worked') AND id NOT IN (SELECT eventId FROM changes);
    UPDATE changes SET fields = json_remove(fields, '$.inQueue', '$.assigneeId')
      WHERE entity = 'ticket' AND (json_type(fields, '$.inQueue') IS NOT NULL OR json_type(fields, '$.assigneeId') IS NOT NULL);
    DELETE FROM changes WHERE entity = 'ticket' AND op = 'update' AND fields = '{}';
+   INSERT INTO historyRevisions (ticketId, revision) SELECT id, 1 FROM tickets WHERE (source = 'zoho' OR source IN (SELECT name FROM sourceStates WHERE volumeStartedAt IS NOT NULL)) AND true
+     ON CONFLICT (ticketId) DO UPDATE SET revision = revision + 1;
    DROP INDEX currentQueue;
    ALTER TABLE tickets DROP COLUMN inQueue;
    ALTER TABLE tickets DROP COLUMN assigneeId;
    ALTER TABLE sourceStates DROP COLUMN volumeStartedAt;
    ALTER TABLE sourceStates DROP COLUMN volumeLastAt;
    ALTER TABLE sourceStates DROP COLUMN volumeInterval;
-   ALTER TABLE sourceStates DROP COLUMN volumeTimezone;
-   INSERT INTO historyRevisions (ticketId, revision) SELECT id, 1 FROM tickets WHERE source IN ('zoho', 'forum') AND true
-     ON CONFLICT (ticketId) DO UPDATE SET revision = revision + 1;`,
+   ALTER TABLE sourceStates DROP COLUMN volumeTimezone;`,
   // Voice on a paired device (architecture.md § Remote access): allowed only from this computer, per sign-in, so revoking or pairing anew drops it.
   `ALTER TABLE pageSessions ADD COLUMN voice INTEGER NOT NULL DEFAULT 0;`,
   // Registered sessions (PRD R81), which resume in the terminal holder once ended, known from the register event's session insert, and a held

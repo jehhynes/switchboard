@@ -13,7 +13,7 @@ function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Ext
   return actions[0] as Extract<FlowAction, { type: T }>;
 }
 
-const pollZoho = (h: Harness, ...tickets: PolledTicket[]) => h.act({ type: 'poll', queue: true, source: 'zoho', tickets });
+const pollZoho = (h: Harness, ...tickets: PolledTicket[]) => h.act({ type: 'poll', source: 'zoho', tickets });
 
 const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': { description: 'A support case', autoStart: true, workdir: 'repoRoot', template: '/process-case {{ticket.ref}}' } });
 

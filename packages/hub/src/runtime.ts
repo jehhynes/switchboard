@@ -98,8 +98,8 @@ export interface RuntimeDeps {
   exec: Exec;
   /** Builds a polling source from its settings, or says why it cannot. Null for a source Switchboard does not know. */
   makeSource(name: string, settings: SourceSettings): { source: Source } | { error: string } | null;
-  /** The label and queue capability of a source kind's plugin; undefined for a kind with no plugin. Without it, a kind is its own label and no queue. */
-  kindInfo?(kind: string): { label: string; queue: boolean } | undefined;
+  /** The source kind's plugin label; undefined for a kind with no plugin. */
+  kindInfo?(kind: string): { label: string } | undefined;
   now(): number;
   sleep(ms: number): Promise<void>;
   newSessionId(): string;
@@ -964,7 +964,7 @@ export class Runtime {
 
     delete this.sourceErrors[name];
     this.sourceNotes[name] = notes;
-    this.send({ type: 'poll', source: name, tickets: result.tickets, assignments, ...(source.queue === true ? { queue: true } : {}) });
+    this.send({ type: 'poll', source: name, tickets: result.tickets, assignments });
     await this.findWorktrees(name, source);
     await this.readPullRequests(name, source);
 
@@ -1941,7 +1941,7 @@ export class Runtime {
       sourceErrors: { ...this.sourceErrors },
       sourceNotes: { ...this.sourceNotes },
       pullRequests: Object.fromEntries(this.pullRequests),
-      kinds: Object.fromEntries(Object.values(settings.sources).map(({ kind }) => [kind, this.deps.kindInfo?.(kind) ?? { label: kind, queue: false }])),
+      kinds: Object.fromEntries(Object.values(settings.sources).map(({ kind }) => [kind, this.deps.kindInfo?.(kind) ?? { label: kind }])),
       now: this.deps.now(),
       configDir: this.deps.configDir,
     };

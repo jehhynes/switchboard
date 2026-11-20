@@ -95,7 +95,6 @@ function json(result: DeskResult): unknown {
 class DeskError extends Error {}
 
 export class ZohoSource implements Source {
-  readonly queue = true;
   private teams: { teamOf: Map<string, string[]>; names: Map<string, string>; until: number } | null = null;
   /** Each ticket's scope entry, by ticket ID, with the modifiedTime it was read at. */
   private entered = new Map<string, { modifiedTime: string; at: number | null }>();

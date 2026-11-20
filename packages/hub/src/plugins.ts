@@ -91,13 +91,16 @@ export class PluginRegistry {
 
   /** The set `paths` names, importing each path not imported yet. */
   async resolve(paths: readonly string[]): Promise<PluginSet> {
+    const loaded: Array<[string, Loaded]> = [];
     for (const path of paths) {
-      if (!this.modules.has(path)) {
-        this.modules.set(path, await this.importPlugin(path));
+      const entry = this.modules.get(path) ?? await this.importPlugin(path);
+      if ('plugin' in entry) {
+        this.modules.set(path, entry);
       }
+      loaded.push([path, entry]);
     }
 
-    return pluginSet(paths.map((path) => [path, this.modules.get(path)!]));
+    return pluginSet(loaded);
   }
 
   /** Resolves `paths` and puts that set in force. */

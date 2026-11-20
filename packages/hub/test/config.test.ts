@@ -28,7 +28,7 @@ function write(path: string, text: string): void {
 const FORUM: SourcePlugin = {
   kind: 'forum',
   label: 'Forum',
-  queue: true,
+
   optionsError: (options, name) => (typeof options['userId'] === 'string' ? null : `sources.${name}.userId must be set.`),
   create: () => ({ error: 'not built in this test' }),
 };
@@ -203,6 +203,25 @@ describe('readConfigFile', () => {
 });
 
 describe('loadConfig', () => {
+  it('rejects unused failed or duplicate plugin modules at startup and preserves the active configuration on reload', () => {
+    write(settingsFile(), JSON.stringify({ sessions: { concurrency: 3 }, playbooks: { 'dev:develop': TASK } }));
+    const valid = loadConfig(configDir());
+    const cases = [
+      pluginSet([['D:/plugins/missing.js', { error: 'missing module' }]]),
+      pluginSet([['D:/plugins/one.js', { plugin: FORUM }], ['D:/plugins/two.js', { plugin: FORUM }]]),
+    ];
+    for (const plugins of cases) {
+      write(settingsFile(), JSON.stringify({ plugins: ['D:/plugins/unavailable.js'], sessions: { concurrency: 4 } }));
+      const initial = loadConfig(configDir(), undefined, {}, plugins);
+      expect(initial.settingsError).toBe(plugins.errors.join(' '));
+      expect(initial.settings.sessions.concurrency).toBe(2);
+      const reloaded = loadConfig(configDir(), valid, {}, plugins);
+      expect(reloaded.settingsError).toBe(plugins.errors.join(' '));
+      expect(reloaded.settings).toBe(valid.settings);
+      expect(reloaded.playbooks).toBe(valid.playbooks);
+    }
+  });
+
   it('reads the playbooks from settings.json and leaves out invalid ones', () => {
     write(settingsFile(), JSON.stringify({ playbooks: { 'dev:develop': TASK, 'dev:bad': { description: 'x' } } }));
 

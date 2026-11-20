@@ -154,7 +154,7 @@ export interface SearchView {
 
 /**
  * Each source kind's logo, as the header draws it (carried over from the retired dock's `App.axaml`): GitHub's
- * mark, Zoho Desk's outline and Forum's letters, each in the colour of its ticket pill, grey while the kind is off.
+ * mark and Zoho Desk's outline, each in the colour of its ticket pill, grey while the kind is off.
  */
 const LOGOS: Record<string, { viewBox: string; path: string; stroke: boolean; evenOdd: boolean }> = {
   github: {
@@ -169,21 +169,15 @@ const LOGOS: Record<string, { viewBox: string; path: string; stroke: boolean; ev
     evenOdd: false,
     path: 'M12 36 L15 18 Q15.3 16 17.5 16 L29.5 16 Q31 16 31.2 14.5 L31.6 11.6 Q31.7 10.4 30.5 10.1 Q29 9.7 29 8.4 L29 5 Q29 3 31 3 L35.5 3 Q37.5 3 37.5 5 L37.5 17.5 L25 24.5 L20 20.5 M35.6 24 L34.6 30.5 Q34.3 32 32.6 32 L17.5 32L12 36',
   },
-  forum: {
-    viewBox: '0 0 335 185',
-    stroke: false,
-    evenOdd: true,
-    path: 'M75 20H260V145H160L100 180V145H75Z M95 40V125H120V145L150 125H240V40Z',
-  },
 };
 
-/** A source kind's logo, grey while off, with `extra` classes; a kind without one shows a tag, so its button is never blank. */
+/** A source kind's logo, grey while off, with `extra` classes; a kind without one shows a plug, so its button is never blank. */
 export function SourceLogo({ kind, enabled, extra = '' }: { kind: string; enabled: boolean; extra?: string }) {
   const logo = LOGOS[kind];
   const state = `${enabled ? '' : ' off'}${extra === '' ? '' : ` ${extra}`}`;
 
   if (logo === undefined) {
-    return <span class={`codicon codicon-tag source-logo${state}`} aria-hidden="true"></span>;
+    return <span class={`codicon codicon-plug source-logo${state}`} aria-hidden="true"></span>;
   }
 
   const paint = logo.stroke
@@ -367,7 +361,7 @@ function HolderNotices({ header, view }: { header: PageHeader | null; view: Head
  */
 function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView }) {
   const several = group.sources.length > 1;
-  const name = several ? group.kind : (group.sources[0]?.name ?? group.kind);
+  const name = several ? (group.label ?? group.kind) : (group.sources[0]?.name ?? group.kind);
   const open = view.menu === `source:${group.kind}`;
   const state = several ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open } : { 'aria-pressed': group.enabled };
 
@@ -377,7 +371,7 @@ function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView })
         <SourceLogo kind={group.kind} enabled={group.enabled} />
       </button>
       {several && open ? (
-        <ul class="glass menu source-menu" role="menu" aria-label={`${group.kind} sources`}>
+        <ul class="glass menu source-menu" role="menu" aria-label={`${group.label ?? group.kind} sources`}>
           {group.sources.map((one) => (
             <li role="none">
               <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={one.enabled} data-action="list-source-entry" data-source={one.name}>

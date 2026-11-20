@@ -18,7 +18,6 @@ export function zohoSource(name: string, settings: SourceSettings, bash = 'bash'
 export const zohoPlugin: SourcePlugin = {
   kind: 'zoho',
   label: 'Zoho Desk',
-  queue: true,
   optionsError: (options, name) => {
     const parsed = parseZohoConfig(options, name);
 

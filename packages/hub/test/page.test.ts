@@ -205,7 +205,7 @@ describe('remote access', () => {
   });
 
   const remote: RemoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
-  const proxied = { host: 'pc.tail.ts.net', 'x-forwarded-proto': 'https', 'x-forwarded-for': '100.64.0.2', 'x-forwarded-host': 'pc.tail.ts.net', 'tailscale-user-login': 'alex@example.com' };
+  const proxied = { host: 'pc.tail.ts.net', 'x-forwarded-proto': 'https', 'x-forwarded-for': '100.64.0.2', 'x-forwarded-host': 'pc.tail.ts.net', 'tailscale-user-login': 'Alex@Example.com' };
 
   it('takes a request with no proxy header as local by its loopback Host, and a proxied one as remote only from an allowed host and login over HTTPS', () => {
     expect(pageOrigin({ host: '127.0.0.1:5000' }, '127.0.0.1', 5000, remote)).toEqual({ host: null, login: null, origin: 'http://127.0.0.1:5000' });
@@ -386,7 +386,7 @@ describe('pageList', () => {
 
 describe('pageHeader', () => {
   it("offers the list view's sources, repo roots and schedules", () => {
-    const sources = [{ kind: 'github', enabled: true, title: 'gh: polled', sources: [{ name: 'gh', enabled: true }] }];
+    const sources = [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: polled', sources: [{ name: 'gh', enabled: true }] }];
 
     expect(pageHeader({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] })).toEqual({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
   });

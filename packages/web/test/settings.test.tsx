@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CHECK_DELAY_MS, settings } from '../src/settings.js';
-import { EditorState, fieldOfError, getAt, parseConfig, readField, setAt, withCurrent } from '../src/settingsModel.js';
+import { EditorState, fieldOfError, getAt, parseConfig, readField, setAt, withCurrent, sourceFields, sourceTitle } from '../src/settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -11,6 +11,7 @@ const config = (value: unknown, patch: Record<string, unknown> = {}) => ({
   providers: ['claude', 'codex'],
   templateVariables: ['ticket.title'],
   sourceKinds: ['github', 'zoho', 'forum'],
+  sourceLabels: { github: 'GitHub', zoho: 'Zoho Desk', forum: 'Forum' },
   inUse: {},
   enabled: {},
   configDir: 'C:/home/.switchboard',
@@ -18,6 +19,28 @@ const config = (value: unknown, patch: Record<string, unknown> = {}) => ({
 });
 
 describe('the Settings model (settingsModel.ts)', () => {
+  it('uses a plugin’s declared label and typed fields, skipping malformed descriptions', () => {
+    const state = new EditorState(parseConfig(config({ sources: { helpdesk: { kind: 'forum' } } }, {
+      sourceLabels: { forum: 'Community' },
+      sourceFields: { forum: [null, { key: 'bad', label: 'Bad', type: 'object' }, { key: 'userId', label: 'User', type: 'text', help: 'Your ID' }, { key: 'limit', label: 'Limit', type: 'integer', placeholder: '20', advanced: true }, { key: 'enabled', label: 'Enabled', type: 'boolean', placeholder: 'true' }, { key: 'names', label: 'Names', type: 'list' }] },
+    })));
+    expect(sourceTitle(state, 'helpdesk')).toBe('helpdesk (Community)');
+    const sections = sourceFields(state, 'helpdesk');
+    expect(sections.map(section => section.heading)).toEqual(['Source', 'Community', 'Advanced']);
+    expect(sections[1]!.fields.map(field => [field.path, field.kind])).toEqual([['sources.helpdesk.userId', 'text'], ['sources.helpdesk.enabled', 'boolean'], ['sources.helpdesk.names', 'list']]);
+    expect(sections[1]!.fields[1]!.fallback).toBe(true);
+    expect(sections[2]!.fields[0]).toMatchObject({ path: 'sources.helpdesk.limit', kind: 'integer', placeholder: '20' });
+  });
+
+  it('offers configurable Zoho scope and pool fields with no organization defaults', () => {
+    const state = new EditorState(parseConfig(config({ sources: { zoho: {} } })));
+    const fields = sourceFields(state, 'zoho').flatMap(section => section.fields);
+    expect(fields.map(field => field.path)).toEqual(expect.arrayContaining(['sources.zoho.tokenCommand', 'sources.zoho.scopeField', 'sources.zoho.scopeValue', 'sources.zoho.poolTeams', 'sources.zoho.scopeHistoryField', 'sources.zoho.contextFields', 'sources.zoho.historyFields']));
+    expect(fields.some(field => field.path.includes('escalation'))).toBe(false);
+    expect(fields.find(field => field.path === 'sources.zoho.automationAgentIds')!.listDefault).toBeUndefined();
+    expect(fields.find(field => field.path === 'sources.zoho.tokenCommand')!.placeholder).toBeUndefined();
+  });
+
   it('reads and sets dotted paths, list entries and a playbook persona key with a dot, leaving the input unchanged', () => {
     const root = { voice: { personas: [{ id: 'nova' }], playbookPersonas: { 'dev:a.b': 'nova' } } };
 
@@ -209,15 +232,15 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(field<HTMLTextAreaElement>('web.remoteHosts').value).toBe('');
     field<HTMLInputElement>('web.tailscale').click();
     type('web.remoteHosts', 'pc.tail.ts.net\nhttps://pc');
-    type('web.remoteLogins', ' alex@example.com \n\n');
+    type('web.remoteLogins', ' Alex@Example.com \n\n');
     await settle(CHECK_DELAY_MS);
-    expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteHosts: ['pc.tail.ts.net', 'https://pc'], remoteLogins: ['alex@example.com'] } });
+    expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteHosts: ['pc.tail.ts.net', 'https://pc'], remoteLogins: ['Alex@Example.com'] } });
     expect(host.querySelector('[data-path="web.remoteHosts"] .settings-field-error')?.textContent).toBe('web.remoteHosts must be a list of host names such as pc.tailnet.ts.net, without a port.');
 
     // Emptying a list removes its key.
     type('web.remoteHosts', '');
     await settle(CHECK_DELAY_MS);
-    expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteLogins: ['alex@example.com'] } });
+    expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteLogins: ['Alex@Example.com'] } });
   });
 
   it('lists the paired devices under Remote access, signs one out, and pairs a device with a QR code and code, showing a refusal', async () => {

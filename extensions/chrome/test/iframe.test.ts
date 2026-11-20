@@ -150,7 +150,7 @@ describe('iframe header exceptions', () => {
     expect(r.state.rules[1]?.condition.regexFilter).toBe('^https?://localhost:5000/');
     expect(await r.rules.external({ type: 'iframe-enable', urls: ['https://forum.example.com/'] }, sender)).toEqual({ ok: true });
     expect(r.state.rules.map((rule) => rule.id)).toEqual([1, 2]);
-    expect(r.state.rules[0]?.condition.regexFilter).toBe('^https?://forum\\.acme\\.com/');
+    expect(r.state.rules[0]?.condition.regexFilter).toBe('^https?://forum\\.example\\.com/');
     for (const urls of [undefined, ['javascript:alert(1)'], ['https://pc.tail.ts.net/page/'], ['http://localhost:47615/']]) expect(await r.rules.external({ type: 'iframe-enable', urls }, sender)).toHaveProperty('error');
     r.state.rules.pop(); await r.rules.sweep();
     expect(r.state.rules).toEqual([]); expect(r.state.leases).toEqual({});

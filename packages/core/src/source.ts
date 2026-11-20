@@ -52,12 +52,7 @@ export type PullRequestsResult = { statuses: Record<string, PullRequestStatus> }
 export interface Source {
   /** The settings key, such as `github`. */
   readonly name: string;
-  /**
-   * A team queue: its polled tickets carry `inQueue`, and the hub keeps the whole observed queue for volume reporting, with each ticket's
-   * classification, rather than only the operator's tickets and the pool (PRD R84).
-   */
-  readonly queue?: boolean;
-  /** `current` holds the source's tickets that are assigned, in the pool or in the queue now, as the store keeps them. */
+  /** `current` holds the source's tickets that are assigned or in the pool now, as the store keeps them. */
   poll(current: readonly Ticket[]): Promise<PollResult>;
   /** The triage context: the ticket's text, clipped and formatted for the classifier. */
   context(ticket: Ticket): Promise<ContextResult>;

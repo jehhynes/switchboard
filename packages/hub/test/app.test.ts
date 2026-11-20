@@ -321,7 +321,7 @@ describe('createHubApp', () => {
   it('serves the web page to the remote hosts and logins of its settings, adding Tailscale\'s once it answers, and logs why not (PRD R115)', async () => {
     writeSettings({ sessions: { installHooks: false }, web: { remoteHosts: ['extra.example.net'], remoteLogins: ['a@example.com'], tailscale: true } });
 
-    const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'pc.tail1.ts.net.', UserID: 7 }, User: { '7': { LoginName: 'alex@example.com' } } });
+    const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'pc.tail1.ts.net.', UserID: 7 }, User: { '7': { LoginName: 'Alex@Example.com' } } });
     const lines: string[] = [];
     const exec = async (file: string, args: string[]) => (file === 'tailscale' ? { code: 0, stdout: status, stderr: '', missing: false, timedOut: false } : noCli(file, args, { timeoutMs: 0 }));
     const app = await createHubApp({ home: temp.home, log: (line) => lines.push(line), deps: { exec } });
@@ -344,7 +344,7 @@ describe('createHubApp', () => {
   it('reads the remote hosts, logins and web.tailscale again when settings.json changes, and has the server end the remote pages they no longer allow (PRD R115)', async () => {
     writeSettings({ sessions: { installHooks: false } });
 
-    const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'pc.tail1.ts.net.', UserID: 7 }, User: { '7': { LoginName: 'alex@example.com' } } });
+    const status = JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'pc.tail1.ts.net.', UserID: 7 }, User: { '7': { LoginName: 'Alex@Example.com' } } });
     const lines: string[] = [];
     let asked = 0;
     const exec = async (file: string, args: string[]) => (file === 'tailscale' ? (asked++, { code: 0, stdout: status, stderr: '', missing: false, timedOut: false }) : noCli(file, args, { timeoutMs: 0 }));
@@ -511,10 +511,10 @@ describe('createHubApp', () => {
     const states = () => (app.snapshot() as { sourceStates: unknown }).sourceStates;
     const enabled = async () => ((await app.post['/v1/conversation/page-settings-read']!({})).body as { enabled: Record<string, boolean> }).enabled;
 
-    expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: false }]);
+    expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', enabled: false }]);
     expect(await enabled()).toEqual({ zoho: false, adhoc: false });
     expect(await toggleSource(app, { name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
-    expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: true }]);
+    expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', enabled: true }]);
     expect(await enabled()).toEqual({ zoho: true, adhoc: false });
     expect(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).toBe(text);
 
@@ -525,7 +525,7 @@ describe('createHubApp', () => {
     // The state is kept in the store, so a new hub starts the source again.
     const again = await start();
 
-    expect((again.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: true }]);
+    expect((again.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', enabled: true }]);
   });
 
   it("tells an open page's Settings to read again after a toggle, and not after a refused one", async () => {
@@ -552,14 +552,14 @@ describe('createHubApp', () => {
     expect(await check({ sources: { zoho: { enabled: true } } })).toEqual(["sources.zoho.enabled is not a setting; turn a source on and off in the list's header."]);
   });
 
-  it('loads the source plugins settings name, polls a queue source through one, and checks a draft that names another (PRD R1)', async () => {
+  it('loads the source plugins settings name, polls a pool source through one, and checks a draft that names another (PRD R1)', async () => {
     const plugins = join(temp.home, 'plugins');
     mkdirSync(plugins, { recursive: true });
     const module = (kind: string) =>
-      `export default { kind: '${kind}', label: 'Forum ${kind}', queue: true, fields: [{ key: 'userId', label: 'User ID', type: 'text' }], ` +
+      `export default { kind: '${kind}', label: 'Forum ${kind}', fields: [{ key: 'userId', label: 'User ID', type: 'text' }], ` +
       `optionsError: (options, name) => (typeof options.userId === 'string' ? null : 'sources.' + name + '.userId must be set.'), ` +
-      `create: (name) => ({ source: { name, queue: true, keyOfBranch: () => null, context: async () => ({ context: '' }), ` +
-      `poll: async () => ({ tickets: [{ sourceKey: '7', ref: 'T7', sourceId: null, title: 'Topic 7', url: 'https://forum.example/t/7', assigned: false, pool: true, inQueue: true, assigneeId: null, sortAt: null, repo: '' }] }) } }) };`;
+      `create: (name) => ({ source: { name, keyOfBranch: () => null, context: async () => ({ context: '' }), ` +
+      `poll: async () => ({ tickets: [{ sourceKey: '7', ref: 'T7', sourceId: null, title: 'Topic 7', url: 'https://forum.example/t/7', assigned: false, pool: true, sortAt: null, repo: '' }] }) } }) };`;
     writeFileSync(join(plugins, 'forum.mjs'), module('forum'));
     writeFileSync(join(plugins, 'desk.mjs'), module('desk'));
     writeSettings({ plugins: ['~/plugins/forum.mjs'], sessions: { installHooks: false }, sources: { forum: { userId: '1' } } });
@@ -569,11 +569,11 @@ describe('createHubApp', () => {
     expect(read.sourceKinds).toEqual(['github', 'zoho', 'forum']);
     expect(read.sourceLabels['forum']).toBe('Forum forum');
     expect(read.sourceFields).toEqual({ forum: [{ key: 'userId', label: 'User ID', type: 'text' }] });
-    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'forum', kind: 'forum', label: 'Forum forum', queue: true, enabled: false }]);
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'forum', kind: 'forum', label: 'Forum forum', enabled: false }]);
 
     expect(await toggleSource(app, { name: 'forum', enabled: true })).toEqual({ status: 200, body: { done: true } });
-    await until(() => ((app.snapshot() as { pool: { ticket: { title: string; inQueue: boolean } }[] }).pool.find((entry) => entry.ticket.title === 'Topic 7') ?? null));
-    expect((app.snapshot() as { pool: { ticket: { inQueue: boolean } }[] }).pool[0]!.ticket.inQueue).toBe(true);
+    await until(() => ((app.snapshot() as { pool: { ticket: { title: string } }[] }).pool.find((entry) => entry.ticket.title === 'Topic 7') ?? null));
+    expect((app.snapshot() as { pool: { ticket: { source: string; pool: boolean } }[] }).pool[0]!.ticket).toMatchObject({ source: 'forum', pool: true });
 
     const check = async (settings: unknown) => ((await app.post['/v1/conversation/page-settings-check']!({ settings })).body as { errors: string[] }).errors;
 
@@ -604,6 +604,23 @@ describe('createHubApp', () => {
 
     const kinds = async (app: Awaited<ReturnType<typeof createHubApp>>) => ((await app.post['/v1/conversation/page-settings-read']!({})).body as { sourceKinds: string[] }).sourceKinds;
     const settingsError = (app: Awaited<ReturnType<typeof createHubApp>>) => (app.snapshot() as { errors: { settings: string | null } }).errors.settings;
+
+    it('accepts settings after a plugin missing at startup has been built', async () => {
+      const value = { plugins: ['~/plugins/later.mjs'], sessions: { installHooks: false }, sources: { later: { userId: '1' } } };
+      writeSettings(value);
+      const app = await start();
+
+      expect(settingsError(app)).toContain('it could not be loaded');
+      expect(await kinds(app)).toEqual(['github', 'zoho']);
+      writePlugin('later', 'later');
+      // Vitest caches missing dynamic imports; Node retries them.
+      vi.resetModules();
+      expect(await app.post['/v1/conversation/page-settings-check']!({ settings: value })).toMatchObject({ status: 200, body: { errors: [] } });
+      const read = (await app.post['/v1/conversation/page-settings-read']!({})).body as { settings: { version: string }; configDir: string };
+      expect(await app.post['/v1/conversation/page-settings-save']!({ value, version: read.settings.version, configDir: read.configDir })).toMatchObject({ status: 200, body: { saved: true } });
+      await until(async () => (await kinds(app)).includes('later') ? true : null);
+      expect(settingsError(app)).toBeNull();
+    });
 
     it('keeps the plugins in force when the reloaded file is rejected (PRD R42)', async () => {
       const forum = writePlugin('forum', 'forum');
@@ -658,7 +675,7 @@ describe('createHubApp', () => {
     const app = await createHubApp({ home: temp.home, configDir, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());
 
-    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: false }]);
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', enabled: false }]);
     expect((app.snapshot() as { configDir: string }).configDir).toBe(configDir);
 
     writeFileSync(
@@ -668,7 +685,7 @@ describe('createHubApp', () => {
     await until(() => ((app.snapshot() as { playbooks: unknown[] }).playbooks.length === 1 ? true : null));
 
     expect(await toggleSource(app, { name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
-    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: true }]);
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', label: 'Zoho Desk', enabled: true }]);
     expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'))).toEqual({ sessions: { installHooks: false } });
   });
 

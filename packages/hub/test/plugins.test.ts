@@ -25,7 +25,7 @@ function writePlugin(name: string, body: string): string {
 }
 
 const plugin = (kind: string, extra = '') =>
-  `export default { kind: '${kind}', label: 'Forum', queue: true, ${extra} optionsError: () => null, create: (name) => ({ source: { name, queue: true, poll: async () => ({ tickets: [] }), context: async () => ({ context: '' }), keyOfBranch: () => null } }) };`;
+  `export default { kind: '${kind}', label: 'Forum', ${extra} optionsError: () => null, create: (name) => ({ source: { name, poll: async () => ({ tickets: [] }), context: async () => ({ context: '' }), keyOfBranch: () => null } }) };`;
 
 describe('PluginRegistry', () => {
   it('has the built-in plugins with no plugins setting', async () => {
@@ -33,9 +33,9 @@ describe('PluginRegistry', () => {
 
     expect((await registry.use([])).all().map((entry) => entry.kind)).toEqual(['github', 'zoho']);
     expect(registry.current.errors).toEqual([]);
-    expect(BUILT_IN_PLUGINS.map((entry) => [entry.kind, entry.label, entry.queue === true])).toEqual([
-      ['github', 'GitHub', false],
-      ['zoho', 'Zoho Desk', true],
+    expect(BUILT_IN_PLUGINS.map((entry) => [entry.kind, entry.label])).toEqual([
+      ['github', 'GitHub'],
+      ['zoho', 'Zoho Desk'],
     ]);
   });
 
@@ -47,7 +47,7 @@ describe('PluginRegistry', () => {
 
     expect(set.errors).toEqual([]);
     expect(set.all().map((entry) => entry.kind)).toEqual(['github', 'zoho', 'forum', 'desk']);
-    expect(set.get('forum')!.create('support', { kind: 'forum', pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} }, { bash: 'bash' })).toMatchObject({ source: { name: 'support', queue: true } });
+    expect(set.get('forum')!.create('support', { kind: 'forum', pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} }, { bash: 'bash' })).toMatchObject({ source: { name: 'support' } });
   });
 
   it('reports a missing module, a bad export and a kind already taken, and leaves those kinds out', async () => {

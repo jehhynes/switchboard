@@ -50,7 +50,7 @@ describe('local file link targets', () => {
     expect(linkTarget('FILE:///d%3A/My%20Docs/%E2%9C%93.md')).toEqual({ path: 'd:/My Docs/✓.md', line: null });
     expect(linkTarget('file:/D:/a.ts')).toEqual({ path: 'D:/a.ts', line: null });
     expect(linkTarget('file://localhost/D:/a.ts#L2')).toEqual({ path: 'D:/a.ts', line: 2 });
-    expect(linkTarget('file:///home/operator/notes.md')).toEqual({ path: '/home/operator/notes.md', line: null });
+    expect(linkTarget('file:///home/alex/notes.md')).toEqual({ path: '/home/alex/notes.md', line: null });
     expect(linkTarget('file://server/share/a.txt')).toEqual({ path: '//server/share/a.txt', line: null });
     // An encoded # is part of the name, not a fragment.
     expect(linkTarget('file:///D:/a%23b.ts#L4')).toEqual({ path: 'D:/a#b.ts', line: 4 });

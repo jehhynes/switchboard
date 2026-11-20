@@ -165,7 +165,7 @@ export interface ObservedFork {
 }
 
 export type FlowEvent =
-  | { type: 'poll'; source: string; tickets: PolledTicket[]; assignments?: { ticketId: number; expectedKey: string; key: string | null }[]; queue?: boolean }
+  | { type: 'poll'; source: string; tickets: PolledTicket[]; assignments?: { ticketId: number; expectedKey: string; key: string | null }[] }
   | { type: 'handled'; sessionId: string; source: string; sourceKey: string; ref: string; repo: string; title: string; url: string; key: string; release: boolean; assigned: boolean }
   | { type: 'poll-failed'; source: string; error: string }
   | {
@@ -677,7 +677,7 @@ class Flow {
   apply(event: FlowEvent): void {
     switch (event.type) {
       case 'poll':
-        return this.poll(event.source, event.tickets, event.assignments, event.queue === true);
+        return this.poll(event.source, event.tickets, event.assignments);
       case 'handled':
         return this.registerHandled(event);
       case 'poll-failed':
@@ -822,7 +822,7 @@ class Flow {
 
   // Sources
 
-  private poll(source: string, polled: PolledTicket[], assignments: Extract<FlowEvent, { type: 'poll' }>['assignments'] = [], queue = false): void {
+  private poll(source: string, polled: PolledTicket[], assignments: Extract<FlowEvent, { type: 'poll' }>['assignments'] = []): void {
     const returned = new Set<number>();
     const assignmentChanges: { ticketId: number; reason: string }[] = [];
     for (const assignment of assignments) {

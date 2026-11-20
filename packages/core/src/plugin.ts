@@ -1,7 +1,7 @@
 import type { SourceSettings } from './settings.js';
 import type { Source } from './source.js';
 
-/** A source setting the dock's settings window shows as a field. */
+/** A source setting the Settings editor shows as a field. */
 export interface SourceField {
   /** The option key, with `.` for a nested key, such as `project.owner`. */
   key: string;
@@ -22,15 +22,13 @@ export interface SourcePluginContext {
 
 /**
  * A source plugin (PRD R1): a built-in one, or the default export of a module that `plugins` names. The hub builds each source whose kind
- * is the plugin's with `create`, and checks its keys with `parseConfig`.
+ * is the plugin's with `create`, and checks its keys with `optionsError`.
  */
 export interface SourcePlugin {
   /** Lowercase letters, digits and hyphens, such as `github`. */
   kind: string;
-  /** The name the dock shows, such as `GitHub`. */
+  /** The name the page shows, such as `GitHub`. */
   label: string;
-  /** Its sources are team queues (`Source.queue`), so the dock offers the volume report. */
-  queue?: boolean;
   fields?: SourceField[];
   /** Null when the source's own keys are valid. */
   optionsError(options: Record<string, unknown>, name: string): string | null;

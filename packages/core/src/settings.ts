@@ -546,8 +546,6 @@ export function parseSettings(text: string): SettingsResult {
       read.errors.push(`${path}: a source's name must be lowercase letters, digits and hyphens.`);
     } else if (name === SCHEDULE_SOURCE) {
       read.errors.push(`${path}: schedules are set under schedules.`);
-    } else if (name === 'all') {
-      read.errors.push(`${path}: all names every source in the volume report, so a source needs another name.`);
     } else if (name === ADHOC_SOURCE && kind !== undefined) {
       read.errors.push(`${path}.kind is not a setting; adhoc holds only the ad-hoc repo root.`);
     }

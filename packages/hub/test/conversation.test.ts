@@ -1978,7 +1978,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     let pollRefusal: string | null = null;
     const refusePoll = (why: string | null) => void (pollRefusal = why);
     const restarts: Array<string | undefined> = [];
-    let header: PageHeader = { notes: [], sources: [{ kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
+    let header: PageHeader = { notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
     const pools: Array<[number, string, unknown]> = [];
@@ -2116,12 +2116,12 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     const { service, openPage, sourceCalls, setHeader, scopes, view } = setup();
     const page = openPage();
 
-    expect(page.frames[0]).toMatchObject({ type: 'hello', header: { sources: [{ kind: 'github', enabled: true, sources: [{ name: 'gh', enabled: true }] }] } });
+    expect(page.frames[0]).toMatchObject({ type: 'hello', header: { sources: [{ kind: 'github', label: 'GitHub', enabled: true, sources: [{ name: 'gh', enabled: true }] }] } });
     service.conversationsChanged();
     expect(page.frames.filter((frame) => frame.type === 'list')).toEqual([]);
 
     // A source turned off changes only the header, which still reaches the page.
-    setHeader({ notes: [], sources: [{ kind: 'github', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], schedules: [] });
+    setHeader({ notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], schedules: [] });
     service.conversationsChanged();
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { sources: [{ enabled: false }] } });
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);

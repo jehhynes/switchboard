@@ -415,8 +415,6 @@ export interface DockSourceGroup {
   kind: string;
   /** The plugin's name for the kind, such as `GitHub`. */
   label: string;
-  /** The kind's sources are team queues, which the volume report covers. */
-  queue: boolean;
   enabled: boolean;
   /** The icon's tooltip: each source and whether it is polled, then what a click does. */
   title: string;
@@ -434,7 +432,7 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
 
     const first = states.find((state) => state.kind === kind)!;
 
-    return { kind, label: first.label, queue: first.queue, enabled: sources.some((source) => source.enabled), title: [...lines, action].join('\n'), sources };
+    return { kind, label: first.label, enabled: sources.some((source) => source.enabled), title: [...lines, action].join('\n'), sources };
   });
 }
 

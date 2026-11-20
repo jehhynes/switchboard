@@ -44,6 +44,15 @@ export interface SettingsFile {
   error: string | null;
 }
 
+export interface PluginField {
+  key: string;
+  label: string;
+  type: 'text' | 'integer' | 'boolean' | 'list';
+  help?: string;
+  placeholder?: string;
+  advanced?: boolean;
+}
+
 /** What `page-settings-read` answers. */
 export interface EditorConfig {
   settings: SettingsFile;
@@ -52,6 +61,8 @@ export interface EditorConfig {
   providers: readonly string[];
   templateVariables: readonly string[];
   sourceKinds: readonly string[];
+  sourceLabels?: Readonly<Record<string, string>>;
+  sourceFields?: Readonly<Record<string, readonly PluginField[]>>;
   inUse: Readonly<Record<string, number>>;
   enabled: Readonly<Record<string, boolean>>;
   configDir: string;
@@ -73,6 +84,8 @@ export function parseConfig(body: Record<string, unknown>): EditorConfig {
     providers: strings(body['providers']),
     templateVariables: strings(body['templateVariables']),
     sourceKinds: strings(body['sourceKinds']),
+    sourceLabels: record(body['sourceLabels'], (entry) => typeof entry === 'string' ? entry : ''),
+    sourceFields: record(body['sourceFields'], (entry) => Array.isArray(entry) ? entry.filter((field): field is PluginField => isObject(field) && typeof field['key'] === 'string' && typeof field['label'] === 'string' && ['text', 'integer', 'boolean', 'list'].includes(String(field['type']))) : []),
     inUse: record(body['inUse'], (entry) => (typeof entry === 'number' ? entry : 0)),
     enabled: record(body['enabled'], (entry) => entry === true),
     configDir: text(body['configDir']) ?? '',
@@ -1271,9 +1284,9 @@ export function generalFields(state: EditorState): Section[] {
   ];
 }
 
-export const SOURCE_LABELS: Readonly<Record<string, string>> = { github: 'GitHub', zoho: 'Zoho Desk', forum: 'Forum' };
+export const SOURCE_LABELS: Readonly<Record<string, string>> = { github: 'GitHub', zoho: 'Zoho Desk' };
 
-export const sourceLabel = (kind: string): string => SOURCE_LABELS[kind] ?? kind;
+export const sourceLabel = (kind: string, config?: EditorConfig): string => config?.sourceLabels?.[kind] ?? SOURCE_LABELS[kind] ?? kind;
 
 /** The settings every source has; a change of kind keeps only these, because each plugin rejects another's keys. */
 export const COMMON_SOURCE_KEYS = ['kind', 'pollIntervalSeconds', 'repoRoot', 'triagePlaybook', 'setupPrompt', 'namespace'];
@@ -1289,7 +1302,7 @@ export function sourceKind(settings: Json | undefined | null, name: string): str
 export function sourceTitle(state: EditorState, name: string): string {
   const kind = sourceKind(state.value, name);
 
-  return kind === name ? sourceLabel(name) : `${name} (${sourceLabel(kind)})`;
+  return kind === name ? sourceLabel(name, state.config) : `${name} (${sourceLabel(kind, state.config)})`;
 }
 
 type OptionField = { key: string; field: Omit<Field, 'path'>; advanced: boolean };
@@ -1313,19 +1326,16 @@ const OPTION_FIELDS: Readonly<Record<string, readonly OptionField[]>> = {
   zoho: [
     { key: 'orgId', field: { label: 'Organization ID', kind: 'text', help: '' }, advanced: false },
     { key: 'agentId', field: { label: 'Agent ID', kind: 'text', help: 'Your Zoho agent ID.' }, advanced: false },
-    { key: 'escalationField', field: { label: 'Escalation field', kind: 'text', help: 'The custom field that holds the escalation tier.', placeholder: 'cf_queue' }, advanced: true },
-    { key: 'escalationValue', field: { label: 'Escalation value', kind: 'text', help: 'The escalation tier that puts a ticket in scope.', placeholder: 'Support' }, advanced: true },
-    { key: 'automationAgentIds', field: { label: 'Automation agent IDs', kind: 'list', help: 'One per line. Agents whose hold on a ticket is not a claim. Empty means none.', listDefault: ['8000000000000000002', '8000000000000000003'] }, advanced: true },
-    { key: 'tokenCommand', field: { label: 'Token command', kind: 'text', help: 'Prints a Desk access token. Runs in Git Bash.', placeholder: 'bash ~/.claude/scripts/desk-token.sh' }, advanced: true },
+    { key: 'tokenCommand', field: { label: 'Token command', kind: 'text', help: 'Prints a Desk access token. Runs in Git Bash.' }, advanced: false },
+    { key: 'scopeField', field: { label: 'Scope field', kind: 'text', help: 'The custom field whose value puts an Open ticket in scope.' }, advanced: false },
+    { key: 'scopeValue', field: { label: 'Scope value', kind: 'text', help: 'The value that puts a ticket in scope.' }, advanced: false },
+    { key: 'poolTeams', field: { label: 'Pool teams', kind: 'list', help: 'One per line. A ticket held by a member of one of these teams stays in the pool.' }, advanced: false },
+    { key: 'scopeHistoryField', field: { label: 'Scope history field', kind: 'text', help: 'The scope field’s name in ticket history. Empty, only a change to Open counts.' }, advanced: true },
+    { key: 'automationAgentIds', field: { label: 'Automation agent IDs', kind: 'list', help: 'One per line. Agents whose hold on a ticket is not a claim.' }, advanced: true },
+    { key: 'contextFields', field: { label: 'Context fields', kind: 'list', help: 'One per line. Custom fields triage sees. Empty, the scope field.' }, advanced: true },
+    { key: 'historyFields', field: { label: 'History fields', kind: 'list', help: 'One per line. History fields whose changes triage sees.', listDefault: ['Status', 'Case Owner', 'Team'] }, advanced: true },
     { key: 'apiBase', field: { label: 'API base', kind: 'text', help: '', placeholder: 'https://desk.zoho.com/api/v1' }, advanced: true },
     { key: 'maxPages', field: { label: 'Page limit', kind: 'integer', help: 'A poll that needs more pages fails.', placeholder: '20' }, advanced: true },
-  ],
-  forum: [
-    { key: 'userId', field: { label: 'User ID', kind: 'text', help: 'Your forum user ID.' }, advanced: false },
-    { key: 'forumId', field: { label: 'Forum ID', kind: 'integer', help: '', placeholder: '11' }, advanced: true },
-    { key: 'queryCommand', field: { label: 'Query command', kind: 'text', help: 'Runs SQL from stdin against the forum database. Runs in Git Bash.', placeholder: 'bash ~/.claude/scripts/run-forum-sql.sh' }, advanced: true },
-    { key: 'maxRows', field: { label: 'Row limit', kind: 'integer', help: 'A poll that returns this many open topics is incomplete.', placeholder: '500' }, advanced: true },
-    { key: 'auditDatabase', field: { label: 'Audit database', kind: 'text', help: 'The change-history database on the same host.', placeholder: 'audit' }, advanced: true },
   ],
 };
 
@@ -1354,18 +1364,19 @@ export function sourceFields(state: EditorState, name: string): Section[] {
       label: 'Kind',
       kind: 'select',
       help: "The plugin that reads the source. Changing it drops the old plugin's settings.",
-      options: withCurrent([{ value: '', label: `Same as the name (${name})` }, ...state.config.sourceKinds.map((entry) => ({ value: entry, label: sourceLabel(entry) }))], getAt(value, `${path}.kind`)),
+      options: withCurrent([{ value: '', label: `Same as the name (${name})` }, ...state.config.sourceKinds.map((entry) => ({ value: entry, label: sourceLabel(entry, state.config) }))], getAt(value, `${path}.kind`)),
     });
   }
 
   const kind = sourceKind(value, name);
-  const options = (OPTION_FIELDS[kind] ?? []).map((entry) => ({ field: { ...entry.field, path: `${path}.${entry.key}` } as Field, advanced: entry.advanced }));
+  const declared: OptionField[] = (state.config.sourceFields?.[kind] ?? []).map((entry) => ({ key: entry.key, field: { label: entry.label, kind: entry.type, help: typeof entry.help === 'string' ? entry.help : '', ...(entry.type === 'boolean' ? { fallback: entry.placeholder === 'true' } : typeof entry.placeholder === 'string' ? { placeholder: entry.placeholder } : {}) }, advanced: entry.advanced === true }));
+  const options = (OPTION_FIELDS[kind] ?? declared).map((entry) => ({ field: { ...entry.field, path: `${path}.${entry.key}` } as Field, advanced: entry.advanced }));
   const sections: Section[] = [{ heading: 'Source', fields: common }];
   const plain = options.filter((entry) => !entry.advanced).map((entry) => entry.field);
   const advanced = options.filter((entry) => entry.advanced).map((entry) => entry.field);
 
   if (plain.length > 0) {
-    sections.push({ heading: sourceLabel(kind), fields: plain });
+    sections.push({ heading: sourceLabel(kind, state.config), fields: plain });
   }
 
   if (advanced.length > 0) {
@@ -1576,7 +1587,7 @@ export function nav(state: EditorState): NavEntry[] {
   }
 
   for (const kind of state.config.sourceKinds.filter((entry) => !sources.includes(entry))) {
-    entries.push({ kind: 'add', label: `New ${sourceLabel(kind)} source`, addSource: kind, current: false, dirty: false, errors: false });
+    entries.push({ kind: 'add', label: `New ${sourceLabel(kind, state.config)} source`, addSource: kind, current: false, dirty: false, errors: false });
   }
 
   entries.push(add(state, 'New source', 'new-source'));
@@ -1721,7 +1732,7 @@ export function pageView(state: EditorState): PageView {
         placeholder: 'widgets-dashboard',
         name,
         error: name === '' && !touched ? null : state.newSourceError,
-        kinds: state.config.sourceKinds.map((kind) => ({ value: kind, label: sourceLabel(kind) })),
+        kinds: state.config.sourceKinds.map((kind) => ({ value: kind, label: sourceLabel(kind, state.config) })),
         kind: state.newSourceKind,
       },
     };

@@ -81,7 +81,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 - **Versions:** Claude Code CLI 2.1.288, VS Code 1.140.0, Claude Code extension 2.1.288, gh 2.100.0.
 - **Setup:** isolated home `.wip/acceptance-home` with the operator's GitHub settings and minimal playbooks, all `autoStart: false`. The panel ran in a separate VS Code instance (its own user-data-dir, `SWITCHBOARD_HOME`, the Switchboard extension under development), driven over its debugging port. The acceptance hub's hook entries were removed afterwards, leaving `~/.claude/settings.json` identical to its copy from before the run. Screenshots are in `.wip/acceptance/`.
-- **1. GitHub read: pass.** 9 work items, one for each issue assigned to `work-login` or `work-ai-login` in 🎁 Assigned, ⚒️ Dev or 🔍 Review. The 2 issues in 🆕 New were left out. Each was triaged with `claude-sonnet-5` into a `dev:*` playbook, and the issues with a branch-named worktree showed it. No work item was approved.
+- **1. GitHub read: pass.** 9 work items, one for each issue assigned to one of the operator's logins in 🎁 Assigned, ⚒️ Dev or 🔍 Review. The 2 issues in 🆕 New were left out. Each was triaged with `claude-sonnet-5` into a `dev:*` playbook, and the issues with a branch-named worktree showed it. No work item was approved.
 - **2. Ad-hoc session: pass.** A prompt in the scratch repo wrote `hello2.txt`, reported the stage "Wrote hello2.txt", reported the worktree and reported done. The panel showed Running, then the stage, then Done. The session was released (`claude stop`) after its turn ended, and the worktree was linked by report.
 - **3. Controls: pass.**
   - Attach opened a terminal on the running session; closing the terminal left the session running with its pid.
@@ -95,13 +95,13 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - The settings.json and marker writes described in M8.
 - **Not covered:** Open in VS Code for a session from another folder, which M13 covers.
 
-## M10. Zoho Desk reads and the Support pool
+## M10. Zoho Desk reads and the pool
 
 - **Date:** 2026-10-03.
-- **Versions:** Zoho Desk REST API v1, the operator's `desk-token.sh` runner, Claude Code CLI 2.1.288.
-- **Experiment:** read-only GETs: `/tickets/search?status=Open` paged by 100, `/teams`, and one ticket's detail, conversations, threads and history. Then the Zoho source and a hub in an isolated home with the draft `triage:zoho` and `support:case` playbooks, which triaged the pool and started no session.
+- **Versions:** Zoho Desk REST API v1, a token command, Claude Code CLI 2.1.288.
+- **Experiment:** read-only GETs: `/tickets/search?status=Open` paged by 100, `/teams`, and one ticket's detail, conversations, threads and history. Then the Zoho source and a hub in an isolated home with draft `triage:zoho` and `support:case` playbooks, which triaged the pool and started no session.
 - **Result:**
-  - The desk had 707 Open tickets: 8 search requests, about 5.5 seconds a poll. 5 had escalation `Support`. 3 were held by support agents and went to the pool; 2 were held by an engineer and were left out.
+  - A poll that pages every Open ticket takes about 0.7 seconds a page of 100. Tickets in scope held by members of the pool teams went to the pool; those held by anyone else were left out.
   - `/tickets/search` returns `cf` and `createdTime`. The conversation list and the history come newest first. The list omits thread bodies, so each thread is read on its own.
   - A history `Case Owner` change carries agent IDs, and a `Team` change carries team IDs.
   - 2026-11-16: `GET /tickets/{id}` on a ticket in the trash returns 200 with its last status, such as `Open`, and `isTrashed` and `isDeleted` true; `/tickets/search` omits it, and `/tickets/{id}/history` answers 404 `URL_NOT_FOUND`.
@@ -111,34 +111,26 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Superseded in part by M46:** the Zoho poll now filters the search by the escalation value instead of paging every Open ticket.
 - **Current use:** the Zoho source and the pool (architecture.md § Settings, § Flow).
 
-## M11. Forum reads and the Support pool
+## M11. Moved
 
-- **Date:** 2026-10-03.
-- **Versions:** the operator's `run-forum-sql.sh` runner (mysqlsh) over the VPN, Claude Code CLI 2.1.288.
-- **Experiment:** read-only SELECTs: the open-topic count, then the Forum source's poll and one topic's posts. Then a hub in an isolated home with the draft `triage:forum` and `support:case` playbooks, which triaged the pool and started no session.
-- **Result:**
-  - The forum had 7 open, unlocked, undeleted topics, all unassigned, so all 7 were in the pool and none was assigned. A poll takes about 5 seconds, most of it the runner's mysqlsh start.
-  - `--result-format=json/raw` prints one JSON object per row, and the SQL reads from stdin with `-`.
-  - The pool listed the 7 topics oldest first by their last public post. Each was triaged into `support:case`: six defects and one data-fix-request, with immediacy and severity in the summary. No work item or session was created, and nothing was written.
-- **Fixtures:** `packages/forum/test/fixtures`: the recorded rows with topic IDs from 90001, titles "Topic <n>", keys "topic-<n>", authors "Person <k>" and same-length filler bodies; timestamps are kept. Two synthetic rows add a topic assigned to the operator and one assigned to someone else, because the live forum had neither.
-- **Current use:** the Forum source (architecture.md § Settings).
+This entry moved, with the forum source it covered, to that source plugin's own repository.
 
 ## M12. Which bash runs source commands
 
 - **Date:** 2026-10-03.
 - **Versions:** VS Code with Code.exe as the hub's Node, Git for Windows at `C:\Program Files\Git`, Windows 11.
-- **Experiment:** the operator's hub, started by the extension, polled Zoho and Forum with the installed settings. Then a read-only poll of both sources from PowerShell, where `bash` resolves as it does for the hub.
+- **Experiment:** the operator's hub, started by the extension, polled its sources with the installed settings, whose commands run through `bash`. Then a read-only poll of those sources from PowerShell, where `bash` resolves as it does for the hub.
 - **Result:**
-  - Under Code.exe, and from PowerShell, `bash` resolves to WSL's `C:\Windows\System32\bash.exe`. The runner scripts ran under `/home/operator` and failed: `jq: command not found` for Zoho, `mysqlsh: No such file or directory` for Forum.
-  - M10 and M11 passed only because they ran from Git Bash, where `bash` is Git Bash.
-  - With `findBash`, which picked `C:\Program Files\Git\bin\bash.exe` beside `git.exe` in `Git\cmd`, the PowerShell poll read Zoho pool 6 and Forum pool 7.
+  - Under Code.exe, and from PowerShell, `bash` resolves to WSL's `C:\Windows\System32\bash.exe`. The operator's scripts ran in WSL's home and failed, such as `jq: command not found` for the Zoho token command.
+  - M10 passed only because it ran from Git Bash, where `bash` is Git Bash.
+  - With `findBash`, which picked `C:\Program Files\Git\bin\bash.exe` beside `git.exe` in `Git\cmd`, the PowerShell poll read every source's pool.
 - **Lesson:** run live source checks the way the hub runs them, under Code.exe's environment, not from a shell.
 - **Current use:** `findBash` in the hub (architecture.md § Settings).
 
 ## M13. Live acceptance round 2, 2026-10-03
 
 - **Versions:** Claude Code CLI 2.1.288, VS Code 1.140.0, hub build 9ecae83cf81bd0a3.
-- **Setup:** as M9, with a fresh database in `.wip/acceptance-home/.switchboard`, the GitHub source disabled, ad-hoc in `.wip/mech`, and the operator's Zoho and Forum settings, read-only. The instance's window had `.wip/mech/other` open, so sessions in `.wip/mech` came from another folder. The acceptance hook entries were removed afterwards, leaving `~/.claude/settings.json` byte-identical to its copy from before the run. Screenshots are in `.wip/acceptance2/`.
+- **Setup:** as M9, with a fresh database in `.wip/acceptance-home/.switchboard`, the GitHub source disabled, ad-hoc in `.wip/mech`, and the operator's Zoho Desk settings, read-only. The instance's window had `.wip/mech/other` open, so sessions in `.wip/mech` came from another folder. The acceptance hook entries were removed afterwards, leaving `~/.claude/settings.json` byte-identical to its copy from before the run. Screenshots are in `.wip/acceptance2/`.
 - **Launch:** a shell inside VS Code carries `ELECTRON_RUN_AS_NODE` and `VSCODE_*` variables; `Code.exe` started with them runs as Node and exits. Clear them before starting the acceptance instance.
 - **Trust:** Claude trusts a folder only by its own entry, not a trusted parent. A session in the untrusted `.wip/mech/other` failed with the trust message, so the sessions ran in the trusted `.wip/mech`.
 - **1. Open in VS Code from another folder: pass.** Open on a done ad-hoc item opened a `.wip/mech` window in the acceptance instance; the operator's instance kept its own three windows. That window claimed the pending open and showed the item's last session in a Claude tab with its history. A second Open added no window and no tab.
@@ -150,27 +142,18 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 ## M14. Zoho scope entry from ticket history
 
 - **Date:** 2026-10-04.
-- **Versions:** Zoho Desk REST API v1, the operator's `desk-token.sh` runner.
-- **Experiment:** read-only GETs: one page of `/tickets/search?status=Open`, then `/tickets/{id}/history?limit=100` for its 3 Support tickets.
+- **Versions:** Zoho Desk REST API v1, a token command.
+- **Experiment:** read-only GETs: one page of `/tickets/search?status=Open`, then `/tickets/{id}/history?limit=100` for its tickets in scope.
 - **Result:**
   - Search rows carry `modifiedTime` and `status`; every row on the page had status and status type `Open`.
-  - History changes name the field `Escalation` (not `cf_queue`) and `Status`, with `oldValue` and `newValue` as labels, such as `General -> Support` and `Deferred -> Open`.
-  - Deferred returns to Open on its own at 08:00 UTC. One ticket moved Open → Deferred → Open 3 minutes apart, 6 hours after its escalation, so its scope entry is the return to Open.
-  - History pages with `from`, counting from 1: `from=1` returns the same page as no `from`, and `from=101` the next 100. One ticket had 121 events.
+  - History changes name a custom field by its label, not its API name (`cf_…`), and `Status` as `Status`, with `oldValue` and `newValue` as labels, so the scope field needs its history name (`scopeHistoryField`) apart from its API name.
+  - A deferral status can return to Open on its own, so a ticket that left Open and came back minutes later enters scope at the return to Open, after its last change of the scope field.
+  - History pages with `from`, counting from 1: `from=1` returns the same page as no `from`, and `from=101` the next 100.
 - **Current use:** the Zoho source's scope entry (architecture.md § Settings).
 
-## M15. Forum scope entry from the change-history store
+## M15. Moved
 
-- **Date:** 2026-10-04.
-- **Versions:** the production forum database through the operator's `run-forum-sql.sh`, database `audit`.
-- **Experiment:** read-only queries on the 9 open Forum topics: each topic's `AuditEntity` rows (`EntityType = 1`) joined to `AuditScope`, then the source's scope-entry query and its `EXPLAIN`.
-- **Result:**
-  - The database connection reads `audit` by qualified name, so no second connection is needed.
-  - `FieldNames` is comma-separated with no spaces. The insert row (`ChangeType = 1`) lists every field, `Status` included. Later rows name only the fields that changed: `Status` when a topic was resolved (`/setstatus?status=Resolved`) or reopened by a post, and `DevStatus` and `Milestone` from the GitHub webhook.
-  - One topic created on 2026-09-28 was resolved on 2026-10-01 and reopened by a post on 2026-10-02 17:27; its scope entry is the reopening. One created on 2026-09-18 reached its current status on 2026-10-01.
-  - The query in the source matches `Status` only, by the operator's definition of Forum scope.
-  - `EXPLAIN`: a range scan on `an index on EntityType` (23 rows) and an `eq_ref` join on `AuditScope`'s primary key. The query took about 5 seconds, mostly the runner's start.
-- **Current use:** the Forum source's scope entry (architecture.md § Settings).
+This entry moved, with the forum source it covered, to that source plugin's own repository.
 
 ## M16. Webview anchor clicks open twice
 
@@ -184,8 +167,8 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 ## M17. A missing or mistyped project status field
 
 - **Date:** 2026-10-06.
-- **Versions:** gh 2.100.0; project `acme/3`.
-- **Experiment:** `fieldValueByName(name:"NoSuchField")` on a project item, and `repositoryOwner(login:"acme"){ ... on ProjectV2Owner{ projectV2(number:3){ field(name:$status){ __typename } } } }` with `Status`, `NoSuchField` and `Title`. Then `GithubSource.poll` with each name.
+- **Versions:** gh 2.100.0; the operator's project board.
+- **Experiment:** `fieldValueByName(name:"NoSuchField")` on a project item, and `repositoryOwner(login:"<owner>"){ ... on ProjectV2Owner{ projectV2(number:<number>){ field(name:$status){ __typename } } } }` with `Status`, `NoSuchField` and `Title`. Then `GithubSource.poll` with each name.
 - **Result:** `fieldValueByName` with an unknown name returns null and gh exits 0, so every issue read as unassigned. `field(name:)` returns `ProjectV2SingleSelectField` for `Status` and `ProjectV2Field` for `Title`; for `NoSuchField` gh exits 1 with `Could not resolve to a Unions::ProjectV2FieldConfiguration with the name NoSuchField`. Asking for `field(name:)` on every project an issue belongs to would fail the whole search when any other project lacks the field, so the poll asks the configured project once. The poll listed 10 issues, 8 assigned, with `Status`, and failed with the missing-field and wrong-type messages for the other two.
 - **Current use:** the GitHub source's field check (architecture.md § Settings).
 
@@ -223,9 +206,9 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 - **Date:** 2026-10-07.
 - **Versions:** Claude Code CLI 2.1.292, Git for Windows 2.53 at `C:\Program Files\Git`, Windows 11.
-- **Observation:** the approval prompts of two widgets work items were stored as `C:/Program Files/Git/legacy-ship 16416` and `C:/Program Files/Git/address-feedback 19703 publish`. The sessions ran the report command with Claude Code's Bash tool, which is Git Bash.
-- **Experiment:** in Git Bash, `node -e … -- --prompt "/legacy-ship 16416" ~/x.ps1` printed `["--prompt","C:/Program Files/Git/legacy-ship 16416","C:/Users/operator/x.ps1"]`; with `MSYS_NO_PATHCONV=1` it printed `["--prompt","/legacy-ship 16416","/c/Users/operator/x.ps1"]`. The `--prompt=/…` form is rewritten too. In Git Bash `MSYSTEM` is `MINGW64` and `cygpath -m /` prints `C:/Program Files/Git/`.
-- **Not covered:** a prompt that starts with `/` and also holds a URL is rewritten further (`https://` becomes `https;\\`), and a `--summary`, stage or link label starting with `/` is rewritten too; the CLI restores neither. A prompt holding `pr:123` is not rewritten at all. Prompts such as `/sb-ship <issue>`, `/<skill> <issue> publish` and `/review-pr pr:<pr> publish` are restored or left intact.
+- **Observation:** the approval prompts of two work items were stored as `C:/Program Files/Git/ship 16416` and `C:/Program Files/Git/answer-qa 19703 publish`. The sessions ran the report command with Claude Code's Bash tool, which is Git Bash.
+- **Experiment:** in Git Bash, `node -e … -- --prompt "/ship 16416" ~/x.ps1` printed `["--prompt","C:/Program Files/Git/ship 16416","C:/Users/operator/x.ps1"]`; with `MSYS_NO_PATHCONV=1` it printed `["--prompt","/ship 16416","/c/Users/operator/x.ps1"]`. The `--prompt=/…` form is rewritten too. In Git Bash `MSYSTEM` is `MINGW64` and `cygpath -m /` prints `C:/Program Files/Git/`.
+- **Not covered:** a prompt that starts with `/` and also holds a URL is rewritten further (`https://` becomes `https;\\`), and a `--summary`, stage or link label starting with `/` is rewritten too; the CLI restores neither. A prompt holding `pr:123` is not rewritten at all. Prompts such as `/ship <issue>`, `/<skill> <issue> publish` and `/review-pr pr:<pr> publish` are restored or left intact.
 - **Limitation:** `MSYS_NO_PATHCONV=1` for a whole session would also stop the rewrite of paths such as `~/…` that sessions pass to native programs like `pwsh -File`, so it is not set.
 - **Current use:** the report CLI's restoring of an approval prompt under Git Bash (architecture.md § Session reports).
 
@@ -317,7 +300,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Date:** 2026-10-09; the glob matching and the Zoho Desk redirect on 2026-10-20.
 - **Versions:** VS Code 1.141.0 (`2a59476c`), installed and in the integration suite; VS Code 1.142.0 (`6d62b1d5`) on 2026-10-20.
 - **Inspection:** `workbench.desktop.main.js` registers `workbench.action.browser.open` ("Open Integrated Browser"). It takes a URL string or `{url, openToSide, reuseUrlFilter}`. With `reuseUrlFilter`, it looks for an open browser tab whose URL matches the filter's scheme, authority and path, the authority and path as globs, and whose query holds the filter's parameters; the bookmark is not compared; it navigates that tab to `url` and shows it instead of opening another. Otherwise it opens a browser editor in the group the integrated browser prefers (`workbench.browser.newTabPlacement`, `activeGroup` by default). The command is not part of the extension API. `workbench.action.browser.openFile` opens a local `.html` file.
-- **Experiment:** [tabs.test.cjs](../extensions/switchboard/test-integration/tabs.test.cjs) opened two pages of a test-owned loopback server, the first again, then two Markdown files and the first again with `vscode.openWith(uri, 'vscode.markdown.preview.editor', {preview: false})`, and a text file with `showTextDocument` and `preview: false`. VS Code showed two browser tabs, both loaded, neither in preview mode, so the next open did not replace them, one Markdown preview editor tab (`TabInputCustom`, view type `vscode.markdown.preview.editor`) per file, not in preview mode, and the text file in a pinned editor. `markdown.togglePreview` on a preview editor tab turned it into the file's text editor in the same tab, leaving one tab. `markdown.showPreview` opens a separate webview panel instead, so editing the file adds a text editor tab, and an unlocked one is reused for the next Markdown file. Without `reuseUrlFilter` the third open added a third browser tab. A browser tab's `Tab.input` is undefined in the extension API. A loopback page at `/support/acme/ShowHomePage.do#Cases/dv/1019` that replaced itself with `/agent/acme/acme-inc/tickets/details/1019`, as Zoho Desk does, got a second tab when opened again with the link as its own filter, and one tab with the filter `/agent/*/*/tickets/details/1019`. On 2026-10-20 the operator's item windows held Zoho tabs at `desk.zoho.com/agent/acme/acme-inc/tickets/details/<id>`, read from their saved editor state, for tickets whose links are `ShowHomePage.do#Cases/dv/<id>`, with the same ID.
+- **Experiment:** `tabs.test.cjs` in the retired VS Code extension opened two pages of a test-owned loopback server, the first again, then two Markdown files and the first again with `vscode.openWith(uri, 'vscode.markdown.preview.editor', {preview: false})`, and a text file with `showTextDocument` and `preview: false`. VS Code showed two browser tabs, both loaded, neither in preview mode, so the next open did not replace them, one Markdown preview editor tab (`TabInputCustom`, view type `vscode.markdown.preview.editor`) per file, not in preview mode, and the text file in a pinned editor. `markdown.togglePreview` on a preview editor tab turned it into the file's text editor in the same tab, leaving one tab. `markdown.showPreview` opens a separate webview panel instead, so editing the file adds a text editor tab, and an unlocked one is reused for the next Markdown file. Without `reuseUrlFilter` the third open added a third browser tab. A browser tab's `Tab.input` is undefined in the extension API. A loopback page at `/support/acme/ShowHomePage.do#Cases/dv/1019` that replaced itself with `/agent/acme/acme-inc/tickets/details/1019`, as Zoho Desk does, got a second tab when opened again with the link as its own filter, and one tab with the filter `/agent/*/*/tickets/details/1019`. On 2026-10-20 the operator's item windows held Zoho tabs at `desk.zoho.com/agent/acme/acme-inc/tickets/details/<id>`, read from their saved editor state, for tickets whose links are `ShowHomePage.do#Cases/dv/<id>`, with the same ID.
 - **Not verified:** pages that need the operator's sign-in, such as GitHub and Zoho Desk, in the integrated browser's own storage (`workbench.browser.dataStorage`); the first VS Code version with the command.
 - **Used until 2026-11-24:** item window tabs (PRD R72; the removed VS Code extension section of architecture.md).
 
@@ -332,7 +315,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
   - After the worker was stopped, the second pull request woke it, joined the group, took the first pull request's index, and the first closed. The unmarked pull request tab stayed outside the group throughout.
   - Removing the bookmark adds a history entry: Back showed `…/pull/4#switchboard-tab`. The reload there removed the bookmark again and placed nothing, and the marked issue replaced the grouped issue.
   - Loading `https://x.test/a` from `https://x.test/a#b` requested the page again, so removing the bookmark keeps a bare `#`.
-  - With the network on and no Zoho sign-in, a marked `desk.zoho.com/agent/acme/acme-inc/tickets/details/<id>` link was redirected to `desk.zoho.com/support/login.sas?serviceurl=…`, so a kind read from the tab's address no longer matched the next Zoho link, and the operator saw a second Zoho tab in their Chrome. With the kind recorded in `chrome.storage.session`, a second link opened after `ServiceWorker.stopAllWorkers` replaced the first tab, and session storage held only the new tab's `placedKind:<id>` key.
+  - With the network on and no Zoho sign-in, a marked `desk.zoho.com/agent/<portal>/<department>/tickets/details/<id>` link was redirected to `desk.zoho.com/support/login.sas?serviceurl=…`, so a kind read from the tab's address no longer matched the next Zoho link, and the operator saw a second Zoho tab in their Chrome. With the kind recorded in `chrome.storage.session`, a second link opened after `ServiceWorker.stopAllWorkers` replaced the first tab, and session storage held only the new tab's `placedKind:<id>` key.
   - A link opened in the first moments after the extension was installed, before its worker had started, was not placed.
 - **Not verified:** a link from the dock through Windows' URL handler to Chrome; the operator's branded Chrome, which no longer accepts `--load-extension` (M23); how GitHub, Zoho Desk and Forum treat the marks when the extension is missing; whether Chrome warns before an extension closes a tab with unsaved changes; where Zoho Desk takes a signed-in agent's link; Duplicate, Reopen closed tab or session restore of a tab whose current entry still has the bookmark, as after Back to it, which would be placed again.
 - **Current use:** the kind a tab of the web page's Switchboard tab group keeps through a redirect, in `chrome.storage.session` (PRD R123; architecture.md § Browser extension, M135). The dock, which had stopped marking its links, was removed on 2026-11-24.
@@ -343,7 +326,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Date:** 2026-10-10.
 - **Versions:** Claude Code extension 2.1.296 (`extension.js`); Ground Control M63 inspected the same argument on 2.1.284.
 - **Inspection:** the extension contributes `claude-vscode.editor.open` and registers it as `(sessionId?, initialPrompt?, viewColumn?, newSessionGroupId?, fullEditor?, {programmatic}?)`. With any `programmatic` value it never writes `claudeCode.preferredLocation` and does not focus the input box; with no session ID, `pin-to-panel` opens an editor tab, and `honor-preferred-location` uses the sidebar when the setting is `sidebar` and no tab holds the session; `createPanel` shows a session the sidebar already holds there. Without `programmatic` it opens a tab, focuses the input, and sets the preference to `panel` unless `fullEditor` is true or the session is shown in the sidebar. With no session ID it starts a new session; an open session's tab is revealed instead. The extension activates `onStartupFinished`, and executing its contributed command activates it earlier.
-- **Experiment:** the operator's Support bridge extension (`D:\git\support\extensions\session-launcher`) made the same `pin-to-panel` call from a title-bar button until it moved here; its README (support commit `e543213`) recorded that on 2.1.286 the call opened a tab and left the setting alone. The operator's `preferredLocation` is `sidebar`.
+- **Experiment:** an extension of the operator's made the same `pin-to-panel` call from a title-bar button until it moved here; its README recorded that on 2.1.286 the call opened a tab and left the setting alone. The operator's `preferredLocation` is `sidebar`.
 - **Not verified:** the call from Switchboard's installed extension; the argument order is undocumented and can change with any Claude Code extension update.
 - **Used until 2026-11-24:** New Claude Session in Editor Tab (PRD R75; the removed VS Code extension section of architecture.md), and Open in VS Code under a `sidebar` preference (architecture.md § Claude Code runner).
 
@@ -368,7 +351,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Start.** `codex exec --json <options> -C <cwd> -- <prompt>`, spawned without a shell and stdin ignored, prints JSONL: `thread.started {thread_id}`, `turn.started`, `item.completed` items (an `error` item is a warning, such as a clamped hook timeout or an unknown config key), then `turn.completed` or `turn.failed {error: {message}}`, and exits 0 or 1. A failed API call's message is the API's error JSON. The thread ID is a UUIDv7 whose first 8 hex digits cover about 65 seconds, so no abbreviation is unique. One rollout per thread under `<CODEX_HOME>/sessions/YYYY/MM/DD/`; resume appends to it. A detached spawn with its output in files keeps running after its parent exits. Outside a git repository Codex refuses at once with exit 1 and `Not inside a trusted directory and --skip-git-repo-check was not specified.`, but not with `--dangerously-bypass-approvals-and-sandbox` (M32); in a fresh untrusted repository it ran, so Codex has no counterpart of Claude's directory trust refusal.
 - **Contract.** `-c developer_instructions="<text>"` (a TOML string) becomes the thread's first developer message; the prompt is the only user message. Resume replays it, and passing it again with the same text adds no second message. A compaction rebuilds the developer instructions from the config, so a process resumed without the flag loses them (the model recalled them only through the encrypted compaction summary). A `SessionStart` hook printing `{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext}}` adds a developer message; with a hook that printed only for `source: "compact"`, the text was added once after a forced compaction (`-c model_auto_compact_token_limit=12000`), and a later resume without it still followed it.
 - **Permission modes**, through `modeArgs` in `packages/codex/src/args.ts`, each fresh start and its resume running a workspace write and an HTTPS call, recorded in `out/gate-modes-*.json` with the rollout's turn context: `auto` → `on-request`, reviewer `auto_review`, `workspace-write`, network on (`--approve-for-me` plus network), the writes succeeded; `plan` → `never`, `read-only`, the writes were denied; `dontAsk` → `never`, `workspace-write`, network on, the writes succeeded; `bypassPermissions` → `danger-full-access`, the writes and calls succeeded. The resumed turns had the start's turn context. Resume keeps the sandbox but takes the approval policy from the config unless the run passes it again, and takes `-c`, `-m` and `--dangerously-bypass-approvals-and-sandbox` but not `-s` or `--approve-for-me`, so every run passes the mode as `-c` overrides.
-- **Credentials in the sandbox.** Under `auto` and `dontAsk`, with the network on, DNS and unauthenticated HTTPS worked but `gh api user` answered 401 and `curl` failed TLS with `SEC_E_NO_CREDENTIALS`: commands in the Windows sandbox cannot use the operator's credential store. Under `auto` the model asked to escalate a refused network call in one run, which the reviewer approved, and not in two others. Under `bypassPermissions` both worked (`gh` as `work-login`). So a playbook whose skills call `gh` or other signed-in tools runs only in `bypassPermissions`.
+- **Credentials in the sandbox.** Under `auto` and `dontAsk`, with the network on, DNS and unauthenticated HTTPS worked but `gh api user` answered 401 and `curl` failed TLS with `SEC_E_NO_CREDENTIALS`: commands in the Windows sandbox cannot use the operator's credential store. Under `auto` the model asked to escalate a refused network call in one run, which the reviewer approved, and not in two others. Under `bypassPermissions` both worked (`gh` as the operator). So a playbook whose skills call `gh` or other signed-in tools runs only in `bypassPermissions`.
 - **Skills.** Codex lists `~/.claude/skills` among its skill roots, so the operator's skills need no linking. A prompt starting `$<skill>` injects the skill; a literal `/<skill>` made the model try to read the SKILL.md, which the read-only sandbox refused.
 - **Hooks.** `<CODEX_HOME>/hooks.json`; payloads carry `session_id` (the thread ID), `turn_id`, `transcript_path`, `cwd`, `hook_event_name`, `model`, `permission_mode`, and `source`, `prompt`, `trigger`, `last_assistant_message` by event, no PID. A hook runs only once trusted: `codex app-server` over stdio, `initialize`, `hooks/list` (`key`, `command`, `trustStatus` of `untrusted`, `modified` or `trusted`, `currentHash`), then `config/batchWrite` of `hooks.state` with each hash; a changed command reads `modified`. An `async: true` Stop hook did not run before an `exec` process exited; a synchronous one did. Switchboard's hook script, run synchronously from an `exec` run, recorded the PID and creation time of the run's own `codex.exe`, the same values a separate CIM query read while the run lived (`out/w2-marker.json`, `out/w2-cim.json`).
 - **Process identity.** An unknown key such as `-c switchboard_run="<tag>"` is ignored with a warning item. `Get-CimInstance Win32_Process -Filter "Name='codex.exe' AND CommandLine LIKE '%switchboard_run=%<tag>%'"` found a detached run as exactly one process with its PID and creation time.
@@ -419,7 +402,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Date:** 2026-10-13.
 - **Versions:** GitHub GraphQL API through gh; VS Code 1.141.1 test host; Playwright's Chromium through `playwright-cli` 0.1.22, headless and signed out.
 - **Experiment:**
-  - The GraphQL `url` of `IssueComment` and `PullRequestReviewComment` on acme/widgets issue 19504 and pull request 19515 is `…/issues/19504#issuecomment-<id>`, `…/pull/19515#issuecomment-<id>` for a pull request comment, and `…/pull/19515#discussion_r<id>` for a review-thread comment.
+  - The GraphQL `url` of `IssueComment` and `PullRequestReviewComment` on issue 19504 and pull request 19515 of the operator's repository is `…/issues/19504#issuecomment-<id>`, `…/pull/19515#issuecomment-<id>` for a pull request comment, and `…/pull/19515#discussion_r<id>` for a review-thread comment.
   - In the VS Code test host, `openTab` opened a test-owned loopback page at `…/focus#issuecomment-5` in the integrated browser; the page's script read `location.hash` as `#issuecomment-5`, and opening the same URL again reused the tab without loading the page again.
   - In Chromium, `https://github.com/cli/cli/issues/14090#issuecomment-5382045207`, the 46th of 99 comments on a page that folds comments behind two Load more buttons, loaded with that comment 77 pixels below the top of a 720-pixel viewport. `https://github.com/cli/cli/pull/14181#discussion_r3801438940`, the first comment of a resolved review thread, loaded with that comment at the top of the viewport.
 - **Not verified:** scrolling inside VS Code's integrated browser on a signed-in GitHub page; an outdated review thread; a comment of a private repository.
@@ -530,12 +513,12 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Not verified:** installing the signed `.xpi` from `about:addons` by hand, and any permission prompt it shows; granting the host permissions again by hand in `about:addons` after Remove; the add-on's own `browser.permissions.getAll()`; requests to a hub from the signed copy; Ctrl+C from a terminal outside VS Code, whose label snap Firefox accepts.
 - **Current use:** the Firefox workspace's `dev`, `lint` and `sign` scripts, loading `dist/` over the signed copy, and the manifest's description length (architecture.md § Browser extension).
 
-## M123. Observed Support volume retention
+## M123. Observed support volume retention
 
 - **Date:** 2026-10-18.
 - **Versions:** Node 24.14.0, VS Code 1.142.0 (`6d62b1d5dace93a33b3a6d3eca1317bd5e15bcb1`), Claude CLI 2.1.301. No agent session or hook was used for these source/volume checks.
-- **Live source acceptance:** built Zoho and Forum adapters polled read-only into `.wip/support-live-home/switchboard.db`, isolated from the operator's database. Flow applied the polls without executing any returned actions. Zoho returned 17 active Support tickets: 16 pool, 0 assigned to the operator, 1 held by another engineer. Forum returned 3: 2 pool, 0 assigned to the operator, 1 held by another engineer. Forum's first attempt failed because the VPN was disconnected; after the operator connected it, the poll passed. No ticket was picked, claimed or written to, and no triage or task session ran.
-- **Results:** the two queue-only tickets had no work items. Each source's initial poll produced zero arrivals and retained every returned ticket. An isolated loopback hub serving `/volume` returned 401 without authorization and 200 with its token, with 12 weekly rows. Zoho and Forum logs are `.wip/support-live.log` and `.wip/support-live-forum.log`.
+- **Live source acceptance:** built Zoho and Forum adapters polled read-only into `.wip/case-live-home/switchboard.db`, isolated from the operator's database. Flow applied the polls without executing any returned actions. Zoho returned 17 active support tickets: 16 pool, 0 assigned to the operator, 1 held by another engineer. Forum returned 3: 2 pool, 0 assigned to the operator, 1 held by another engineer. Forum's first attempt failed because the VPN was disconnected; after the operator connected it, the poll passed. No ticket was picked, claimed or written to, and no triage or task session ran.
+- **Results:** the two queue-only tickets had no work items. Each source's initial poll produced zero arrivals and retained every returned ticket. An isolated loopback hub serving `/volume` returned 401 without authorization and 200 with its token, with 12 weekly rows. Zoho and Forum logs are `.wip/case-live.log` and `.wip/case-live-forum.log`.
 - **Presentation:** an isolated native preview of the production `VolumeWindow`, using the scratch hub and database, displayed 20 tickets in the current partial week and unavailable previous weeks.
 - **Current use:** none. R84 is removed: the sources no longer return other engineers' tickets, and the `/volume` route and `VolumeWindow` checked here are gone.
 
@@ -582,20 +565,20 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 - **Limits:** this verifies the generic report and source reconciliation path. No customer case was published for this check.
 - **Current use:** handled assignments (PRD R85, architecture.md § Handled assignments (R85)). Status or project membership changes alone do not end an assignment.
 
-## M46. Zoho search filtered by escalation
+## M46. Zoho search filtered by a custom field
 
 - **Date:** 2026-10-20.
-- **Versions:** Zoho Desk REST API v1, the operator's `desk-token.sh` runner, Node 24.14.0.
-- **Trigger:** zoho 444953 went to Done at 12:51:03 UTC on 2026-10-20 although it stayed Open, Support and assigned to the operator: the 12:51:00 poll, which paged through all 835 Open tickets by `from`, did not return it, and the 12:56:00 poll did. The raw pages were not kept, so a list that shifted between pages and a search index that lagged an edit at 12:50:03 are both possible causes.
-- **Experiment:** read-only GETs of `/tickets/search` with `status=Open`, `customField1=cf_queue:Support` (the colon encoded or not), `sortBy=createdTime`, `limit` and `from`; `/tickets/search` with the field filter alone; and `/tickets/{id}` for a ticket that does not exist.
+- **Versions:** Zoho Desk REST API v1, a token command, Node 24.14.0.
+- **Trigger:** a ticket went to Done although it stayed Open, in scope and assigned to the operator: one poll, which paged through every Open ticket by `from`, did not return it, and the next poll did. The raw pages were not kept, so a list that shifted between pages and a search index that lagged an edit a minute earlier are both possible causes.
+- **Experiment:** read-only GETs of `/tickets/search` with `status=Open`, `customField1=<field>:<value>` (the colon encoded or not), `sortBy=createdTime`, `limit` and `from`; `/tickets/search` with the field filter alone; and `/tickets/{id}` for a ticket that does not exist.
 - **Result:**
-  - `status=Open` with the field filter returned 17 tickets in one request in 0.8 seconds. The unfiltered walk took 9 requests and about 5 seconds, and its client-side Support filter found the same 17 tickets; the filter matches the value exactly.
-  - The field filter without `status=Open` returned 2,358 tickets. Every row of the unfiltered `status=Open` walk had status and status type `Open`.
+  - `status=Open` with the field filter returned the tickets in scope in one request in under a second. The unfiltered walk took several requests and about 5 seconds, and its client-side filter found the same tickets; the filter matches the value exactly.
+  - The field filter without `status=Open` also returns closed tickets. Every row of the unfiltered `status=Open` walk had status and status type `Open`.
   - Filtered rows carry the same fields as unfiltered ones, including `cf`, `assigneeId`, `status`, `modifiedTime`, `createdTime` and `customerResponseTime`. `sortBy=createdTime` with `from` pages the filtered list.
-  - Search `from` counts from 0, unlike history's (M14): with 8 matches, `from=0&limit=4` and `from=4&limit=4` returned all 8 oldest first, and `from=1&limit=100` returned 7, without the oldest, zoho 420923.
-  - One filtered read reported `count` 17 with 16 rows, minutes after a ticket closed; it may have used `from=1`, which drops a row. The poll pages by row count, not `count`.
+  - Search `from` counts from 0, unlike history's (M14): with 8 matches, `from=0&limit=4` and `from=4&limit=4` returned all 8 oldest first, and `from=1&limit=100` returned 7, without the oldest.
+  - One filtered read reported a `count` one higher than its rows, minutes after a ticket closed; it may have used `from=1`, which drops a row. The poll pages by row count, not `count`.
   - `/tickets/{id}` for a missing ticket answers HTTP 404.
-- **Current use:** the Zoho poll's escalation search and its read by ID of a current ticket the search omits (architecture.md § Settings).
+- **Current use:** the Zoho poll's scope search and its read by ID of a current ticket the search omits (architecture.md § Settings).
 
 ## M47. Terminal windows on Linux: Ptyxis, `claude attach`, `claude --resume` and `codex resume`
 
@@ -698,7 +681,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 ## M56. GitHub issue dependencies through `gh api graphql`
 
 - **Date:** 2026-11-03.
-- **Versions:** gh 2.103.3, signed in as `personal-login`.
+- **Versions:** gh 2.103.3, signed in as the operator’s personal login.
 - **Experiment:** introspected `Issue` and `IssueDependenciesSummary`, then read `issueDependenciesSummary { blockedBy totalBlockedBy }` and `blockedBy(first:N) { nodes { number state url repository { nameWithOwner } } }` on public issues found with `is:issue is:blocked`, and on the open issues of `work-login/switchboard`.
 - **Result:** `Issue.blockedBy` is a connection of the issues blocking it, with the usual paging arguments; `Issue.blocking` is its reverse. `blockedBy` lists closed blockers too: `jimmie-potts/agent-device-hub#24` listed two `CLOSED` blockers, with summary `blockedBy: 0` (open only) and `totalBlockedBy: 2`. An issue with only open blockers had equal counts. The fields need no preview header, and a repository with no dependencies returns empty connections. Search's `is:blocked` returned some issues whose blockers had all been removed. The poll's `ISSUES_QUERY` with `blockedBy(first:50)` read a 75-issue search page of `arturmiller/specbound`, most with two or three blockers, in one request without a complexity error.
 - **Not verified:** a blocker in a repository the token cannot read; the schema allows a null node.
@@ -727,7 +710,7 @@ Ground Control's [mechanics.md](../../ground-control/docs/mechanics.md) holds th
 
 ## M59. Board-wide issue search across repositories
 
-Checked 2026-11-05 with `gh` 2.100.0 against project `acme/3`, through `gh api graphql` with `ISSUES_QUERY` (which reads `repository { nameWithOwner }`).
+Checked 2026-11-05 with `gh` 2.100.0 against the operator's project board, through `gh api graphql` with `ISSUES_QUERY` (which reads `repository { nameWithOwner }`).
 
 - `is:issue is:open project:acme/3`, with no `repo:` qualifier, returns the open issues of every repository on the board in one result set: the first page of 100 held 96 `acme/widgets`, 1 `acme/widgets-dashboard` and 3 `acme/widgets-infra` issues, and `endCursor` continued into the next page. The same query with `-repo:acme/widgets` returned 56 issues from six other repositories in one page.
 - With `assignee:work-login assignee:work-ai-login`, the qualifiers are ORed and the search returned 10 issues on one page.
@@ -736,7 +719,7 @@ Checked 2026-11-05 with `gh` 2.100.0 against project `acme/3`, through `gh api g
 
 ## M60. Closed issues in a board search
 
-Checked 2026-11-09 with `gh` against project `acme/3`, through `gh api graphql` `search(type:ISSUE)`.
+Checked 2026-11-09 with `gh` against the operator's project board, through `gh api graphql` `search(type:ISSUE)`.
 
 - `is:issue assignee:work-login assignee:work-ai-login project:acme/3`, with no state qualifier, returned 19 issues: the 8 open ones and the 11 that `is:closed` returns, so a search without `is:open` reads both states.
 - Of the 11 closed issues, 7 were in `⚒️ Dev`, closed between 2026-11-07 and 2026-11-09 as `COMPLETED`, and 4 were in `🚀 Releasable`, which is not an assigned status.

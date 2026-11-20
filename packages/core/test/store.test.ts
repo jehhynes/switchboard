@@ -97,10 +97,10 @@ describe('Store', () => {
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version};
       INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, inQueue, assigneeId, repoRoot) VALUES
-        (1, 'zoho', '1', 'Other', '', 0, 0, 1, 'other', ''), (2, 'zoho', '2', 'Pool', '', 0, 1, 1, NULL, ''), (3, 'github', '3', 'Gone', '', 0, 0, 0, NULL, '');
+        (1, 'community', '1', 'Other', '', 0, 0, 1, 'other', ''), (2, 'zoho', '2', 'Pool', '', 0, 1, 1, NULL, ''), (3, 'github', '3', 'Gone', '', 0, 0, 0, NULL, '');
       INSERT INTO triages (id, ticketId, startedAt, endedAt, playbook) VALUES (1, 1, 1, 2, 'support:defect'), (2, 2, 1, 2, 'support:defect'), (3, 3, 1, 2, 'dev:question');
       INSERT INTO ticketClassifications VALUES (1, 'support:defect', NULL, NULL, 2);
-      INSERT INTO sourceStates (name, enabled, volumeStartedAt, volumeLastAt, volumeInterval) VALUES ('zoho', 1, 1, 5, 300000);
+      INSERT INTO sourceStates (name, enabled, volumeStartedAt, volumeLastAt, volumeInterval) VALUES ('community', 1, 1, 5, 300000);
       INSERT INTO events (id, at, type, actor, ticketId) VALUES (10, 3, 'poll', 'hub', 1), (11, 4, 'volume-worked', 'hub', 1), (12, 5, 'volume-gap', 'hub', NULL), (13, 6, 'poll', 'hub', 2);
       INSERT INTO changes (eventId, ticketId, entity, entityId, op, fields) VALUES
         (10, 1, 'ticket', '1', 'update', '{"inQueue":[true,false],"assigneeId":["other",null]}'),
@@ -111,7 +111,7 @@ describe('Store', () => {
     const store = Store.open(path);
     expect([store.ticket(1)?.title, store.ticket(2)?.pool]).toEqual(['Other', true]);
     expect([store.poolTriages(1), store.poolTriages(2).length, store.poolTriages(3).length]).toEqual([[], 1, 1]);
-    expect(store.enabledSources().has('zoho')).toBe(true);
+    expect(store.enabledSources().has('community')).toBe(true);
     // An open History tab that read the old changes reads them again.
     expect([store.historyRevision(1), store.historyRevision(2), store.historyRevision(3)]).toEqual(['5', '1', '0']);
     store.close();

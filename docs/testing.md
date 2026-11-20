@@ -67,7 +67,7 @@ Keep decisions in packages, and the list's rules in the hub's dock view (`dockVi
 
 Automated tests prove decisions against recorded fixtures. Live acceptance proves that the recorded mechanisms still hold and that the parts work together. The developing agent runs it, not the operator, after any change to the runner, a source's fetch, or the report path.
 
-Run it with an isolated home (`hub.js --home=<repo>/.wip/acceptance-home`, so the Switchboard home is `.wip/acceptance-home/.switchboard`), a config folder of its own under it (`--config`), and its own hub, never the operator's. Drive it from that hub's web page, opened with a sign-in link from `hub.js web` with the same `--home`, in a browser profile of its own; attach to its sessions from the page's Console tab and from the terminal app (Windows Terminal, or Ptyxis on Linux) that Open in terminal starts. Claude keeps the operator's profile, its sign-in and its trust. Start the acceptance hub with `CODEX_HOME` set to `.wip/acceptance-home/.codex`, holding a copy of `~/.codex/auth.json`, so its Codex hooks and their `hooks.state` trust entries stay out of `~/.codex`. Reports reach the isolated hub because the CLI takes its home from the `hub.js` it runs from. The acceptance hub's hook entries point at its own home; remove them when the run ends. Use real Claude and read-only GitHub, Zoho Desk and Forum reads only; never a pick or any source write.
+Run it with an isolated home (`hub.js --home=<repo>/.wip/acceptance-home`, so the Switchboard home is `.wip/acceptance-home/.switchboard`), a config folder of its own under it (`--config`), and its own hub, never the operator's. Drive it from that hub's web page, opened with a sign-in link from `hub.js web` with the same `--home`, in a browser profile of its own; attach to its sessions from the page's Console tab and from the terminal app (Windows Terminal, or Ptyxis on Linux) that Open in terminal starts. Claude keeps the operator's profile, its sign-in and its trust. Start the acceptance hub with `CODEX_HOME` set to `.wip/acceptance-home/.codex`, holding a copy of `~/.codex/auth.json`, so its Codex hooks and their `hooks.state` trust entries stay out of `~/.codex`. Reports reach the isolated hub because the CLI takes its home from the `hub.js` it runs from. The acceptance hub's hook entries point at its own home; remove them when the run ends. Use real Claude and read-only GitHub, Zoho Desk and configured plugin source reads only; never a pick or any source write.
 
 1. **GitHub read.** Configure the GitHub source with the operator's settings and every playbook set to `autoStart: false`. Confirm that the work items match the issues currently assigned to the operator in the configured statuses, and that each has a triage result. Never approve a GitHub work item during acceptance, because its playbook would run the operator's skills against a real issue.
 2. **Ad-hoc session.** Use a scratch git repository under `.wip/`, trusted by running `claude` there once. Run an ad-hoc prompt that writes a file, reports a stage, reports a worktree, and reports done. Observe `running`, the stage, `done` and the release stop in the page's list.
@@ -89,7 +89,7 @@ No provider-choice test starts a real agent: hub and package tests use fake runn
 
 ## Fixtures and isolation
 
-- Record and scrub source payloads and Claude and Codex CLI output (`claude agents --json`, `--bg` output, classifier JSON, `codex exec --json` output and stderr, rollout records, the process query's answer). Never call GitHub, Zoho, the Forum database or a real Claude session from a test.
+- Record and scrub source payloads and Claude and Codex CLI output (`claude agents --json`, `--bg` output, classifier JSON, `codex exec --json` output and stderr, rollout records, the process query's answer). Never call GitHub, Zoho Desk, a plugin’s service or a real Claude session from a test.
 - Record and scrub Code Mode screens and markers from the runs in [mechanics.md](mechanics.md) M63–M77. Never run a real Claude or a real pseudo-terminal holding Claude in a test.
 - Inject the Switchboard home, clock and process spawner.
 - Test each platform's process table and path rules on any platform by passing the platform and recorded fixtures, such as `packages/codex/test/fixtures/proc/`. A test that needs real processes or the platform's own path rules runs only on that platform (`it.runIf`, `it.skipIf`), and the other platform's code has a test of its own, against a recorded answer such as `cim-tagged.json` where it cannot run here. Write expected path keys literally, with a fixed mixed-case name where case rules differ by platform.
@@ -99,12 +99,16 @@ No provider-choice test starts a real agent: hub and package tests use fake runn
 - Use literal expected values. Do not derive an expectation by calling the code under test.
 - Assert counts where an empty result would pass a contents check.
 - Make fakes fail on unexpected calls.
-- Never run a skill that claims or writes to Zoho Desk or Forum, such as `/support-process`, in a test or a live check, and never Pick or Approve a Support work item. Test picks with fake runners.
+- Never run a skill that claims or writes to a source, such as a support-case skill, in a test or a live check, and never Pick or Approve a support work item. Test picks with fake runners.
 
 ## Handled assignments
 
 Test handled-assignment rules (R85) in core with arbitrary source and playbook names, and GitHub's event interpretation in the GitHub adapter. Live acceptance uses isolated storage, real read-only GitHub assignment queries and the report CLI; it changes no source assignments or project status.
 
-## Support volume
+## Source plugins
+
+Cover module loading, validation and duplicate kinds; draft settings resolving plugins without activating them; rejected and overlapping reloads; source names independent of kinds; and plugin labels and fields in the Settings editor. Malformed field descriptions must not break an editor.
+
+## Queue volume
 
 R84 is removed ([prd.md](prd.md)); test the rules that replaced it (R5, R46, R18, R47) as any other requirement.

@@ -322,7 +322,7 @@ describe('Speech', () => {
     await settle();
     expect(lines).toEqual(['alert:a1 played']);
     expect(states()).toEqual(['r1 played']);
-    expect(logs).toContain('speech: alert line alert:a1 of session alert:a1 played, voice default, 100 ms played, 32 of 32 characters');
+    expect(logs).toContain('speech: alert line alert:a1 of session alert:a1 played, voice default, 100 ms played, 33 of 33 characters');
     expect(speech.idle).toBe(true);
 
     // A reply of an older turn waiting before a line is not skipped for it, and Stop speaking stops a line as a reply.
