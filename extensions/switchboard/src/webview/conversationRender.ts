@@ -310,7 +310,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   // While the session works on a reply, a spinner under the operator's latest message; it has no data-id, so the keys skip it.
   // While the session waits on a question or a permission, it stands still.
   const spin = state.session?.state === 'waiting' ? '' : ' codicon-modifier-spin';
-  const spinner = `<li class="working" title="Working on a reply"><span role="status">Working on a reply</span><span class="codicon codicon-loading${spin}" aria-hidden="true"></span></li>`;
+  // As Claude Code's panel draws it: the spinner and "Thinking…" beside it; a screen reader hears "Thinking".
+  const spinner = `<li class="working"><span class="working-icon codicon codicon-loading${spin}" aria-hidden="true"></span><span class="working-label" aria-hidden="true">Thinking…</span><span role="status">Thinking</span></li>`;
   // A turn starts at each message; one that starts on another day than the turn before it has a divider, as in Claude Code's panel.
   let turnDay: string | null = null;
   // A time shows only where the minute changes from the item before, so a message and the reply to it in the same minute read as one exchange.

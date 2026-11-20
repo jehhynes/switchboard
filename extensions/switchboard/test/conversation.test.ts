@@ -290,9 +290,12 @@ describe('the Conversation view page', () => {
 
     root.innerHTML = renderConversation(state(asked));
     expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['reply reply', 'message', 'working', 'reply aside']);
-    expect(root.querySelector('.working .codicon')?.className).toBe('codicon codicon-loading codicon-modifier-spin');
+    expect(root.querySelector('.working .codicon')?.className).toBe('working-icon codicon codicon-loading codicon-modifier-spin');
+    // "Thinking…" beside it, as in Claude Code's panel, which a screen reader hears once, as "Thinking".
+    expect(root.querySelector('.working .working-label')?.textContent).toBe('Thinking…');
+    expect(root.querySelector('.working .working-label')?.getAttribute('aria-hidden')).toBe('true');
     expect(root.querySelector('.working')?.getAttribute('data-id')).toBeNull();
-    expect(root.querySelector('.working [role="status"]')?.textContent).toBe('Working on a reply');
+    expect(root.querySelector('.working [role="status"]')?.textContent).toBe('Thinking');
     expect(root.querySelector('.working .codicon')?.getAttribute('aria-hidden')).toBe('true');
 
     root.innerHTML = renderConversation(state([...asked, reply('r2', T0 + 3)]));
@@ -303,7 +306,7 @@ describe('the Conversation view page', () => {
     expect(root.querySelector('.working')).toBeNull();
     // It stands still while the session waits on a question.
     root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'waiting', waitingFor: 'question' } }));
-    expect(root.querySelector('.working .codicon')?.className).toBe('codicon codicon-loading');
+    expect(root.querySelector('.working .codicon')?.className).toBe('working-icon codicon codicon-loading');
   });
 
   it('draws file:, drive-letter, relative and spaced links as links, and unsafe schemes as text', () => {
