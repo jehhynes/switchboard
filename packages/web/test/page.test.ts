@@ -292,6 +292,83 @@ describe('the page', () => {
     page.close();
   });
 
+  it('lists the persona roster under the header, keeps it open over stream events, and pins the one picked', async () => {
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+
+      return { status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [{ id: 'nova', name: 'Nova' }, { id: 'iris', name: 'Iris' }] } : {}), text: async () => '' } as unknown as Response;
+    });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, now: () => 10_000 });
+    const source = FakeSource.last!;
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: false } })], items: [], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('button.persona')!.click();
+    expect(root.querySelector('.persona-list')?.textContent).toBe('Loading…');
+    await flush();
+    await flush();
+    source.emit('reply', { reply: reply('r1', 1) });
+    expect([...root.querySelectorAll('.persona-list button')].map((one) => one.textContent)).toEqual(['Nova', 'Iris', 'Clear pin']);
+    root.querySelector<HTMLElement>('.persona-list button[data-persona="iris"]')!.click();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/persona'))?.body).toMatchObject({ sessionId: 's', personaId: 'iris' });
+    expect(root.querySelector('.persona-list')).toBeNull();
+    page.close();
+  });
+
+  it('brings the conversation back where the operator left it after the Status tab', () => {
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+
+    Object.defineProperties(panel, { scrollHeight: { value: 500, configurable: true }, clientHeight: { value: 100, configurable: true } });
+    panel.scrollTop = 50;
+    panel.dispatchEvent(new Event('scroll'));
+    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
+    expect(panel.scrollTop).toBe(50);
+    // And after an artifact opened from its row.
+    source.emit('artifact', { artifact: { path: 'chat/a.md', owner: 'chat', kind: 'plan', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: 1_500 } });
+    root.querySelector<HTMLElement>('#panel [data-action="artifact"]')!.click();
+    expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('artifacts');
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
+    expect(panel.scrollTop).toBe(50);
+    page.close();
+  });
+
+  it('keeps each voice control its own button, so a focused Stop never turns into Talk here', () => {
+    const { page, source } = start();
+    const voice = { enabled: true, here: true, mic: 'off', speaking: 'r1', speakReplies: true, error: null, recognizer: null };
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [], voice });
+
+    const stop = root.querySelector<HTMLElement>('[data-voice="stop"]')!;
+
+    stop.focus();
+    source.emit('voice', { voice: { ...voice, here: false, speaking: null } });
+    expect(stop.isConnected).toBe(false);
+    expect(root.querySelector('[data-voice="talk-here"]')).not.toBe(stop);
+    page.close();
+  });
+
+  it('keeps the focus on a voice control over an unrelated stream event, and opens one header menu at a time', () => {
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'p', name: 'P', pinned: false, tonePending: false } })], items: [], more: false, status: null, artifacts: [], voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } });
+
+    const control = root.querySelector<HTMLElement>('.voice-controls button')!;
+
+    control.focus();
+    source.emit('unread', { workItemId: 1, count: 1 });
+    expect(document.activeElement).toBe(control);
+    root.querySelector<HTMLElement>('button.persona')!.click();
+    root.querySelector<HTMLElement>('button.picker')!.click();
+    expect(root.querySelectorAll('.conversation-list')).toHaveLength(1);
+    expect(root.querySelector('.persona-list')).toBeNull();
+    page.close();
+  });
+
   it('closes the conversation dropdown on a press outside the header and on Escape', () => {
     const { page, source } = start();
 

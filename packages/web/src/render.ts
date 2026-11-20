@@ -2,7 +2,7 @@ import { providerMark } from '@switchboard/conversation/providerIcons';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
-import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionParts } from '@switchboard/conversation/questions';
+import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import type { ArtifactView, MessageView, NativeRequest, PageGroup, ReplyView, StatusView, VoiceView } from './types.js';
 
@@ -32,9 +32,11 @@ export interface View {
   artifact: string | null;
   /** What the operator picked or typed for a Codex request's questions, by `<request ID>:<question ID>`. */
   requestValues: Map<string, string>;
+  /** The header's persona menu while open: the roster, null while it loads, or why it could not. */
+  personas: { items: Array<{ id: string; name: string }> | null; error: string | null } | null;
 }
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map() });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null });
 
 const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -96,10 +98,21 @@ export function renderHeader(state: PageState, view: View): string {
   const personaButton =
     persona == null
       ? ''
-      : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
+      : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${view.personas !== null}" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
   const picker = `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${view.picker}" title="${escape(title)}">${codicon(stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit))}<span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
 
-  return `<header class="header">${picker}${providerMark(state.session?.provider)}${personaButton}</header>`;
+  const menu = view.personas;
+  const rows =
+    menu === null
+      ? ''
+      : menu.error !== null
+        ? `<li class="menu-note">${escape(menu.error)}</li>`
+        : menu.items === null
+          ? '<li class="menu-note">Loading…</li>'
+          : [...menu.items.map((one) => `<li><button type="button" role="menuitem" data-action="persona-pick" data-persona="${escape(one.id)}"${persona?.id === one.id ? ' class="selected"' : ''}>${escape(one.name)}</button></li>`), persona?.pinned === true ? '<li><button type="button" role="menuitem" data-action="persona-pick" data-persona="">Clear pin</button></li>' : ''].join('');
+  const personaMenu = menu === null ? '' : `<ul class="conversation-list persona-list" role="menu" aria-label="Persona">${rows}</ul>`;
+
+  return `<header class="header">${picker}${providerMark(state.session?.provider)}${personaButton}${personaMenu}</header>`;
 }
 
 export function renderTabs(view: View, state: PageState): string {
@@ -162,20 +175,31 @@ function artifactRow(artifact: ArtifactView): string {
  * in place, folded into one line, "2 questions — answer below", that opens them.
  */
 export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>): string {
-  const parts = questionParts(markdown);
+  const segments = questionSegments(markdown);
 
-  if (parts === null) {
+  if (segments === null) {
     return renderMarkdown(markdown);
   }
 
-  if (parts.after.trim() === '') {
-    return renderMarkdown(parts.before);
-  }
+  // The last run of questions, when only blank lines follow it, ends the message as the rules ask, and the card alone shows it.
+  const last = segments.reduce((found, segment, index) => (segment.questions > 0 ? index : found), -1);
+  const ending = segments.slice(last + 1).every((segment) => segment.text.trim() === '');
 
-  const count = parseQuestions(markdown).length;
-  const fold = `questions:${key}`;
+  return segments
+    .map((segment, index) => {
+      if (segment.questions === 0) {
+        return segment.text.trim() === '' ? '' : renderMarkdown(segment.text);
+      }
 
-  return `${renderMarkdown(parts.before)}<details class="fold questions-fold" data-fold="${escape(fold)}"${open.has(fold) ? ' open' : ''}><summary>${count} question${count === 1 ? '' : 's'} — answer below</summary><div class="was">${renderMarkdown(parts.questions)}</div></details>${renderMarkdown(parts.after)}`;
+      if (ending && index === last) {
+        return '';
+      }
+
+      const fold = `questions:${key}:${index}`;
+
+      return `<details class="fold questions-fold" data-fold="${escape(fold)}"${open.has(fold) ? ' open' : ''}><summary>${segment.questions} question${segment.questions === 1 ? '' : 's'} — answer below</summary><div class="was">${renderMarkdown(segment.text)}</div></details>`;
+    })
+    .join('');
 }
 
 /** A question card: each question with its options as radio or checkbox rows, an Other field, and Submit; greyed with its picks once answered. */
@@ -305,11 +329,11 @@ export function renderRequest(request: NativeRequest, values: ReadonlyMap<string
   const head = `<div class="request-title"><span class="codicon codicon-${request.kind === 'permission' ? 'shield' : 'question'}" aria-hidden="true"></span> ${escape(request.title)}</div>`;
 
   if (request.kind === 'unsupported') {
-    return `<div class="request">${head}<p class="empty">Answer it in the terminal.</p></div>`;
+    return `<div class="request" data-key="request-${escape(request.id)}">${head}<p class="empty">Answer it in the terminal.</p></div>`;
   }
 
   if (request.kind === 'permission') {
-    return `<div class="request">${head}<div class="request-actions">${request.decisions.map((decision) => `<button type="button" class="request-button" data-action="request-decision" data-request="${escape(request.id)}" data-decision="${escape(decision)}">${escape(DECISIONS[decision] ?? decision)}</button>`).join('')}</div></div>`;
+    return `<div class="request" data-key="request-${escape(request.id)}">${head}<div class="request-actions">${request.decisions.map((decision) => `<button type="button" class="request-button" data-action="request-decision" data-request="${escape(request.id)}" data-decision="${escape(decision)}">${escape(DECISIONS[decision] ?? decision)}</button>`).join('')}</div></div>`;
   }
 
   const fields = request.questions.map((question) => {
@@ -317,10 +341,10 @@ export function renderRequest(request: NativeRequest, values: ReadonlyMap<string
     const value = values.get(key) ?? '';
     const options = question.options.map((option) => `<button type="button" class="question-option" role="radio" aria-checked="${value === option}" data-action="request-option" data-field="${escape(key)}" data-value="${escape(option)}"><span class="question-mark radio${value === option ? ' checked' : ''}" aria-hidden="true">${value === option ? '<span class="radio-dot"></span>' : ''}</span><span class="question-option-text">${escape(option)}</span></button>`).join('');
 
-    return `<div class="question-block"><div class="question-text">${escape(question.question)}</div><div class="question-options">${options}<input class="question-other request-field" type="${question.secret === true ? 'password' : 'text'}" data-field="${escape(key)}" placeholder="${question.options.length === 0 ? 'Answer…' : 'Other…'}" value="${question.options.includes(value) ? '' : escape(value)}"></div></div>`;
+    return `<div class="question-block" data-key="${escape(key)}"><div class="question-text">${escape(question.question)}</div><div class="question-options">${options}<input class="question-other request-field" type="${question.secret === true ? 'password' : 'text'}" data-field="${escape(key)}" placeholder="${question.options.length === 0 ? 'Answer…' : 'Other…'}" value="${question.options.includes(value) ? '' : escape(value)}"></div></div>`;
   });
 
-  return `<div class="request question-card">${head}${fields.join('')}<div class="question-footer"><button type="button" class="question-submit" data-action="request-answer" data-request="${escape(request.id)}">Submit</button></div></div>`;
+  return `<div class="request question-card" data-key="request-${escape(request.id)}">${head}${fields.join('')}<div class="question-footer"><button type="button" class="question-submit" data-action="request-answer" data-request="${escape(request.id)}">Submit</button></div></div>`;
 }
 
 /** The Status tab: the latest status as Markdown with its time and age and a New mark while unread, or the stage dimmed. */
@@ -402,9 +426,9 @@ export function renderVoice(voice: VoiceView | null): string {
     return '';
   }
 
-  const speak = `<button class="ghost" type="button" data-voice="speak-replies" aria-pressed="${voice.speakReplies}" title="Speak replies: ${voice.speakReplies ? 'on' : 'off'}"><span class="codicon codicon-${voice.speakReplies ? 'unmute' : 'mute'}" aria-hidden="true"></span><span>Speak replies</span></button>`;
-  const stop = voice.here && voice.speaking !== null ? '<button class="ghost" type="button" data-voice="stop" title="Stop speaking (Escape)"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span>Stop</span></button>' : '';
-  const where = voice.here ? '<span class="voice-state">Voice here</span>' : '<button class="ghost" type="button" data-voice="talk-here" title="Voice is not on this page. Click to talk here."><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span>Voice is not on this page</span></button>';
+  const speak = `<button class="ghost" type="button" data-key="speak-replies" data-voice="speak-replies" aria-pressed="${voice.speakReplies}" title="Speak replies: ${voice.speakReplies ? 'on' : 'off'}"><span class="codicon codicon-${voice.speakReplies ? 'unmute' : 'mute'}" aria-hidden="true"></span><span>Speak replies</span></button>`;
+  const stop = voice.here && voice.speaking !== null ? '<button class="ghost" type="button" data-key="stop" data-voice="stop" title="Stop speaking (Escape)"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span>Stop</span></button>' : '';
+  const where = voice.here ? '<span class="voice-state" data-key="here">Voice here</span>' : '<button class="ghost" type="button" data-key="talk-here" data-voice="talk-here" title="Voice is not on this page. Click to talk here."><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span>Voice is not on this page</span></button>';
 
   return `${speak}${stop}${where}`;
 }

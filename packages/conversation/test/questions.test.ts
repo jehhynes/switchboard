@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionParts } from '../src/questions.js';
+import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionSegments } from '../src/questions.js';
 import type { CardItem, QuestionChoice } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
@@ -141,10 +141,11 @@ describe('where the questions are, and how a later message left them', () => {
     expect(questionLines('No questions.')).toBeNull();
   });
 
-  it('cuts the Markdown before, around and after its questions, with nothing after questions that end it', () => {
-    expect(questionParts(asked)).toEqual({ before: 'Two things before I go on.\n', questions: asked.split('\n').slice(2).join('\n'), after: '' });
-    expect(questionParts('Intro\n1. Port?\n   - A) 1\n   - B) 2\n\nMore after.')).toEqual({ before: 'Intro', questions: '1. Port?\n   - A) 1\n   - B) 2', after: '\nMore after.' });
-    expect(questionParts('Nothing asked.')).toBeNull();
+  it('cuts the Markdown into runs of text and of questions, keeping the text between two questions as its own run', () => {
+    expect(questionSegments(asked)).toEqual([{ questions: 0, text: 'Two things before I go on.\n' }, { questions: 2, text: asked.split('\n').slice(2).join('\n') }]);
+    expect(questionSegments('Intro\n1. Port?\n   - A) 1\n   - B) 2\n\nMore after.')).toEqual([{ questions: 0, text: 'Intro' }, { questions: 1, text: '1. Port?\n   - A) 1\n   - B) 2' }, { questions: 0, text: '\nMore after.' }]);
+    expect(questionSegments('1. Port?\n   - A) 1\n   - B) 2\n\nWhy it matters.\n\n2. Name?\n   - A) x\n   - B) y')).toEqual([{ questions: 1, text: '1. Port?\n   - A) 1\n   - B) 2' }, { questions: 0, text: '\nWhy it matters.\n' }, { questions: 1, text: '2. Name?\n   - A) x\n   - B) y' }]);
+    expect(questionSegments('Nothing asked.')).toBeNull();
   });
 
   it('counts a message as an answer only when it answers one of the questions, else as skipping them', () => {

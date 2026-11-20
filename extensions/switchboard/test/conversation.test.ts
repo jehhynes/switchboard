@@ -7,7 +7,7 @@ import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenRep
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { SENT_NOTE_MS, shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
-import { ago, linkAllowed, personaButton, PICKER, renderConversation, renderMarkdown, renderMicButton, renderVoiceControls } from '../src/webview/conversationRender.js';
+import { ago, linkAllowed, personaButton, PICKER, renderConversation, renderMarkdown, renderMicButton, renderVoiceControls, withoutQuestions } from '../src/webview/conversationRender.js';
 import type { Tab } from '../src/webview/conversationRender.js';
 
 /** The page's extras for a tab. */
@@ -48,7 +48,9 @@ describe('the conversation state', () => {
     const native = { ...SESSION, provider: 'codex' as const, state: 'waiting' as const, waitingFor: 'question' as const, requests: [{id:'1:0',kind:'question' as const,title:'Choose <red> or blue',questions:[{id:'color',question:'Which color?',options:['Red','Blue']}],decisions:[]}] };
     const state = applyEvent(EMPTY_CONVERSATION, hello([uncertain], { sessions: [native] }));
     const html = renderConversation(state);
-    expect(html).toContain('data-action="answer-request" data-request="1:0"');
+    expect(html).toContain('data-action="request-answer" data-request="1:0"');
+    // A card at the end of the conversation, in place of the turn row.
+    expect(html).not.toContain('Thinking');
     expect(html).toContain('Choose &#60;red&#62; or blue');
     expect(html).toContain('delivery unknown; check before resending');
     expect(html).not.toContain('Claude is waiting');
@@ -60,8 +62,33 @@ describe('the conversation state', () => {
     startConversation(root,live,{postMessage:(message:unknown)=>posted.push(message),getState:()=>null,setState:()=>{}});
     const native={...SESSION,provider:'codex' as const,requests:[{id:'1:0',kind:'permission' as const,title:'Approve command',questions:[],decisions:['accept','decline']}]};
     window.dispatchEvent(new MessageEvent('message',{data:{type:'state',state:applyEvent(EMPTY_CONVERSATION,hello([],{sessions:[native]}))}}));
-    root.querySelector<HTMLElement>('[data-action="answer-request"]')!.click();
-    expect(posted.at(-1)).toEqual({type:'answer-request',requestId:'1:0',target:{sessionId:'s2',scopeGen:1}});
+    // A permission's decisions are buttons in its card; a click answers with no dialog.
+    root.querySelector<HTMLElement>('[data-action="request-decision"][data-decision="accept"]')!.click();
+    expect(posted.at(-1)).toMatchObject({type:'answer-request',requestId:'1:0',answer:'accept',target:{sessionId:'s2',scopeGen:1}});
+    expect(root.querySelector<HTMLButtonElement>('[data-action="request-decision"]')!.disabled).toBe(true);
+    // A refusal shows in the card and lets the operator try again.
+    window.dispatchEvent(new MessageEvent('message',{data:{type:'answered',id:(posted.at(-1) as {id:number}).id,error:'This Codex request is no longer pending.'}}));
+    expect(root.querySelector('.request .question-error')?.textContent).toBe('This Codex request is no longer pending.');
+    expect(root.querySelector<HTMLButtonElement>('[data-action="request-decision"]')!.disabled).toBe(false);
+  });
+  it('answers a Codex question from its card with a picked option or a typed answer, and offers Open in terminal for one it cannot answer', () => {
+    const root=document.createElement('div');const live=document.createElement('div');const posted:Array<Record<string,unknown>>=[];
+    document.body.replaceChildren(root,live);
+    startConversation(root,live,{postMessage:(message:unknown)=>posted.push(message as Record<string,unknown>),getState:()=>null,setState:()=>{}});
+    const native={...SESSION,provider:'codex' as const,state:'waiting' as const,waitingFor:'question' as const,requests:[{id:'1:0',kind:'question' as const,title:'Codex has a question',questions:[{id:'color',question:'Which color?',options:['Red','Blue']},{id:'name',question:'Name?',options:[]}],decisions:[]}]};
+    window.dispatchEvent(new MessageEvent('message',{data:{type:'state',state:applyEvent(EMPTY_CONVERSATION,hello([],{sessions:[native]}))}}));
+    const submit=()=>root.querySelector<HTMLButtonElement>('[data-action="request-answer"]')!;
+    expect(submit().disabled).toBe(true);
+    root.querySelector<HTMLElement>('[data-action="request-option"][data-value="Blue"]')!.click();
+    const field=root.querySelector<HTMLInputElement>('.request-field[data-field="1:0:name"]')!;
+    field.value='Ada';
+    field.dispatchEvent(new Event('input',{bubbles:true}));
+    expect(submit().disabled).toBe(false);
+    submit().click();
+    expect(posted.at(-1)).toMatchObject({type:'answer-request',requestId:'1:0',answer:{color:'Blue',name:'Ada'}});
+    window.dispatchEvent(new MessageEvent('message',{data:{type:'state',state:applyEvent(EMPTY_CONVERSATION,hello([],{sessions:[{...native,requests:[{...native.requests[0]!,kind:'unsupported' as const}]}]}))}}));
+    root.querySelector<HTMLElement>('.request [data-action="terminal"]')!.click();
+    expect(posted.at(-1)).toEqual({type:'terminal'});
   });
   it('starts from each hello, adds and replaces items in time order, and takes only its current session\'s state', () => {
     let state = applyEvent(EMPTY_CONVERSATION, hello([message('m1', T0, 'Why?')]));
@@ -1462,7 +1489,7 @@ describe('the Status tab', () => {
     root.querySelector<HTMLElement>('[data-action="status-open"]')!.click();
     expect(root.querySelector('.status-new')).toBeNull();
     root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
-    expect(posted.filter((message) => message.type.startsWith('status'))).toEqual([{ type: 'status-open' }, { type: 'statuses' }]);
+    expect(posted.filter((message) => message.type.startsWith('status'))).toEqual([{ type: 'status-open', statusId: null }, { type: 'statuses', id: expect.any(Number), before: 'st-2' }]);
 
     // Another session's first status is not New.
     show({ scope: { ...SCOPE, sessionId: 's5' }, session: { ...SESSION, id: 's5' }, status: status('st-5', 'Other.', { sessionId: 's5' }) });
@@ -1716,7 +1743,7 @@ describe('several conversations in a window (architecture.md § Conversation vie
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: empty } }));
     expect(host.hidden).toBe(true);
     root.querySelector<HTMLButtonElement>('button[data-action="new"]')!.click();
-    expect(posted.filter((message) => message.type === 'new')).toEqual([{ type: 'new' }]);
+    expect(posted.filter((message) => message.type === 'providers')).toHaveLength(1);
 
     // Once it has a conversation, the composer comes back.
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: base({ scope: { ...TWO, kind: 'folder' } }) } }));
@@ -1748,8 +1775,17 @@ describe('several conversations in a window (architecture.md § Conversation vie
     root.querySelector<HTMLButtonElement>('button[data-work-item="9"]')!.click();
     expect(posted.filter((message) => message.type === 'select')).toEqual([{ type: 'select', workItemId: 9 }]);
     expect(root.querySelector('[role="listbox"]')).toBeNull();
+    // The plus opens a menu of providers in the header; a choice posts new with it.
     root.querySelector<HTMLButtonElement>('button[data-action="new"]')!.click();
-    expect(posted.filter((message) => message.type === 'new')).toEqual([{ type: 'new' }]);
+
+    const asked = posted.find((message) => message.type === 'providers')!;
+
+    expect(root.querySelector('.header-menu')?.textContent).toBe('Loading…');
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'menu', id: asked['id'], items: [{ value: 'codex', label: 'Codex', note: 'Default', current: false }, { value: 'claude', label: 'Claude', note: '', current: false }], error: null } }));
+    expect([...root.querySelectorAll('.header-menu button')].map((one) => one.textContent)).toEqual(['CodexDefault', 'Claude']);
+    root.querySelector<HTMLButtonElement>('.header-menu button[data-value="claude"]')!.click();
+    expect(posted.filter((message) => message.type === 'new')).toEqual([{ type: 'new', provider: 'claude' }]);
+    expect(root.querySelector('.header-menu')).toBeNull();
 
     // A draft stays with its conversation.
     input.value = 'Draft for the work item';
@@ -1982,5 +2018,156 @@ describe('the composer on every tab (architecture.md § Conversation view)', () 
     expect(root.querySelector('.notice')).toBeNull();
     expect(root.lastElementChild?.classList.contains('session-note')).toBe(true);
     vi.useRealTimers();
+  });
+});
+
+describe('inline menus and lists instead of quick picks (architecture.md § Conversation view)', () => {
+  const start = () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const posted: Array<Record<string, unknown>> = [];
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, { postMessage: (message: unknown) => posted.push(message as Record<string, unknown>), getState: () => null, setState: () => undefined });
+
+    return { root, posted, send: (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data })) };
+  };
+
+  it('opens the persona roster as a menu under the header, pins or clears from it with the keys, and closes on Escape', () => {
+    const { root, posted, send } = start();
+    const persona = { id: 'nova', name: 'Nova', pinned: true, tonePending: false };
+
+    send({ type: 'state', state: applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0)], { sessions: [{ ...SESSION, persona }] })) });
+
+    const button = root.querySelector<HTMLButtonElement>('button.persona')!;
+
+    button.focus();
+    button.click();
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+
+    const asked = posted.find((one) => one['type'] === 'personas')!;
+
+    send({ type: 'menu', id: asked['id'], items: [{ value: 'nova', label: 'Nova', note: 'Pinned', current: true }, { value: 'iris', label: 'Iris', note: '', current: false }, { value: '', label: 'Clear pin', note: '', current: false }], error: null });
+    // The first choice takes the focus, Down moves, Enter on a button picks.
+    expect(document.activeElement?.getAttribute('data-value')).toBe('nova');
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement?.getAttribute('data-value')).toBe('iris');
+    (document.activeElement as HTMLElement).click();
+    expect(posted.at(-1)).toEqual({ type: 'persona', personaId: 'iris', target: { scopeGen: 1, sessionId: 's2' } });
+    expect(root.querySelector('.header-menu')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('button.persona'));
+
+    root.querySelector<HTMLButtonElement>('button.persona')!.click();
+    send({ type: 'menu', id: posted.at(-1)!['id'], items: [{ value: '', label: 'Clear pin', note: '', current: false }], error: null });
+    root.querySelector<HTMLButtonElement>('.header-menu button')!.click();
+    expect(posted.at(-1)).toMatchObject({ type: 'persona', personaId: null });
+
+    // Escape closes it; a reply for a menu no longer open is dropped; a refusal shows in the menu.
+    root.querySelector<HTMLButtonElement>('button.persona')!.click();
+    const third = posted.at(-1)!['id'];
+
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.header-menu')).toBeNull();
+    send({ type: 'menu', id: third, items: [], error: null });
+    expect(root.querySelector('.header-menu')).toBeNull();
+    root.querySelector<HTMLButtonElement>('button.persona')!.click();
+    send({ type: 'menu', id: posted.at(-1)!['id'], items: [], error: 'The hub did not answer.' });
+    expect(root.querySelector('.header-menu')?.textContent).toBe('The hub did not answer.');
+  });
+
+  it('lists the earlier statuses on the Status tab, pages back with Older statuses, and opens one in the preview', () => {
+    const { root, posted, send } = start();
+    const status = (id: string, at: number, markdown: string): StatusView => ({ id, sessionId: 's2', at, markdown, fallback: false, unread: false });
+
+    send({ type: 'state', state: applyEvent(EMPTY_CONVERSATION, hello([], { status: status('st-9', T0, 'Now.') })) });
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
+    expect(posted.at(-1)).toMatchObject({ type: 'statuses', before: 'st-9' });
+    expect(root.querySelector('.earlier-statuses')?.textContent).toContain('Loading…');
+    send({ type: 'statuses', id: posted.at(-1)!['id'], statuses: [status('st-8', T0 - 60_000, '## Built it'), status('st-7', T0 - 120_000, 'Started.')], more: true, error: null });
+    expect([...root.querySelectorAll('.earlier-status .title')].map((one) => one.textContent)).toEqual(['Built it', 'Started.']);
+    root.querySelector<HTMLElement>('[data-action="statuses-more"]')!.click();
+    expect(posted.at(-1)).toMatchObject({ type: 'statuses', before: 'st-7' });
+    send({ type: 'statuses', id: posted.at(-1)!['id'], statuses: [status('st-6', T0 - 180_000, 'Planned.')], more: false, error: null });
+    expect(root.querySelectorAll('.earlier-status')).toHaveLength(3);
+    expect(root.querySelector('[data-action="statuses-more"]')).toBeNull();
+    root.querySelector<HTMLElement>('.earlier-status[data-status="st-8"]')!.click();
+    expect(posted.at(-1)).toEqual({ type: 'status-open', statusId: 'st-8' });
+    // The history button closes the list again; another session's status drops it.
+    root.querySelector<HTMLElement>('[data-action="statuses"]')!.click();
+    expect(root.querySelector('.earlier-statuses')).toBeNull();
+  });
+});
+
+describe('review round 1 (cross-check)', () => {
+  const extension = () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, { postMessage: () => undefined, getState: () => null, setState: () => undefined });
+
+    return { root, show: (patch: Partial<ConversationState> = {}) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: { ...applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0)])), ...patch } } })) };
+  };
+  const waiting: SessionView = { ...SESSION, state: 'waiting', waitingFor: 'question', persona: { id: 'p', name: 'Persona', pinned: false, tonePending: false } };
+
+  it('keeps the text between two runs of questions, folding the first and leaving out the last, which ends the message', () => {
+    const html = withoutQuestions('1. First?\n - A) One\n - B) Two\n\nIMPORTANT MIDDLE PARAGRAPH\n\n2. Second?\n - A) Three\n - B) Four', 'reply:r', new Set());
+    const host = document.createElement('div');
+
+    host.innerHTML = html;
+    expect(host.textContent).toContain('IMPORTANT MIDDLE PARAGRAPH');
+    expect(host.querySelectorAll('details.questions-fold')).toHaveLength(1);
+    expect(host.querySelector('details.questions-fold')?.textContent).toContain('First?');
+    expect(host.textContent).not.toContain('Second?');
+  });
+
+  it('opens one header menu at a time', () => {
+    const { root, show } = extension();
+
+    show({ session: waiting });
+    root.querySelector<HTMLElement>('[data-action="persona"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="picker"]')!.click();
+    expect(root.querySelectorAll('.conversation-list')).toHaveLength(1);
+    expect(root.querySelector('.header-menu')).toBeNull();
+  });
+
+  it("keeps each Codex request's typed answer with its own request when another goes", () => {
+    const { root, show } = extension();
+    const request = (id: string) => ({ id, kind: 'question' as const, title: id, decisions: [], questions: [{ id: 'answer', question: id, options: [] }] });
+
+    show({ session: { ...waiting, requests: [request('a'), request('b')] } });
+
+    const first = root.querySelector<HTMLInputElement>('.request-field')!;
+
+    first.focus();
+    first.value = 'Answer for a';
+    first.dispatchEvent(new Event('input', { bubbles: true }));
+    show({ session: { ...waiting, requests: [request('b')] } });
+    expect(root.querySelector<HTMLInputElement>('.request-field')!.value).toBe('');
+  });
+
+  it('follows a height change smaller than the at-end margin to the actual end', () => {
+    const { root, show } = extension();
+
+    show();
+
+    const scroll = root.querySelector<HTMLElement>('.scroll')!;
+    let top = 100;
+    let height = 200;
+
+    Object.defineProperties(scroll, { scrollHeight: { get: () => height }, clientHeight: { get: () => 100 }, scrollTop: { get: () => top, set: (value: number) => void (top = Math.min(value, height - 100)) } });
+    show();
+    height = 212;
+    show();
+    expect(scroll.scrollTop).toBe(112);
+  });
+
+  it('keeps the ended note and Resume for an ended Codex session, whose reason is null since a message resumes it', () => {
+    const { root, show } = extension();
+
+    show({ session: { ...SESSION, provider: 'codex', state: 'ended', waitingFor: null, conversation: 'full', reason: null } });
+    expect(root.querySelector('.session-note [data-action="terminal"]')?.textContent).toBe('Resume');
+    expect(root.querySelector('.session-note-text')?.textContent).toBe('The session has ended. A message or Resume continues it.');
   });
 });

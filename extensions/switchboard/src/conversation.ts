@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import type { HubRecord, Provider } from '@switchboard/core';
 import { openConversation, postToHub } from '@switchboard/hub';
 import type { EventStream, ItemView, StatusView } from '@switchboard/hub';
-import { applyEvent, EMPTY_CONVERSATION, lastSpokenReply, micOn, statusLine, totalUnread, voiceStatus, withEarlier } from './conversationModel.js';
+import { applyEvent, EMPTY_CONVERSATION, lastSpokenReply, micOn, totalUnread, voiceStatus, withEarlier } from './conversationModel.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
 import type { ConversationMessage, SeenTarget, SendTarget } from './webview/conversationRender.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
@@ -59,9 +59,6 @@ export interface ConversationViewDeps {
 export function unreadBadge(unread: number): vscode.ViewBadge | undefined {
   return unread > 0 ? { value: unread, tooltip: unread === 1 ? '1 unread reply or status' : `${unread} unread replies and statuses` } : undefined;
 }
-
-/** A status's time in the earlier statuses list: "Thu, Nov 19, 1:46 PM". */
-const STATUS_TIME = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /** How long a stream that ended waits before it opens again. */
 const RECONNECT_MS = 1_000;
@@ -309,73 +306,52 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     await vscode.commands.executeCommand('markdown.showPreview', statusUri(status));
   }
 
+  /** Earlier statuses the Status tab listed, by ID, so one clicked there opens in the preview. */
+  readonly #listed = new Map<string, StatusView>();
+
   /**
-   * Lists the current session's statuses before the one the Status tab shows, newest first, from the hub's `statuses` command, and opens the one
-   * picked in the Markdown preview; each page's last pick loads the next.
+   * A page of the current session's statuses before `before` (the one the Status tab shows, or the last listed), newest first, from the hub's
+   * `statuses` command, for the Status tab's inline list; why not, when the hub refuses or the scope moved meanwhile.
    */
-  async earlierStatuses(): Promise<void> {
+  async statusesBefore(before: string | null): Promise<{ statuses: StatusView[]; more: boolean; error: string | null }> {
     const target = this.#target;
     const scope = this.#state.scope;
-    const shown = this.#state.status;
 
     if (target === null || scope === null || scope.sessionId === null) {
-      return;
+      return { statuses: [], more: false, error: 'This window has no session.' };
     }
 
-    const unmoved = (): boolean => {
-      const now = this.#state.scope;
+    const reply = await postToHub(target.record, '/v1/conversation/statuses', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), sessionId: scope.sessionId, before }, HISTORY_TIMEOUT_MS);
 
-      return this.#target === target && now?.workItemId === scope.workItemId && now.sessionId === scope.sessionId && now.scopeGen === scope.scopeGen;
-    };
-    type StatusPick = vscode.QuickPickItem & { status?: StatusView; more?: string };
-    const picks: StatusPick[] = [];
-    let before = shown === null || shown.fallback ? null : shown.id;
-
-    for (;;) {
-      const reply = await postToHub(target.record, '/v1/conversation/statuses', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), sessionId: scope.sessionId, before }, HISTORY_TIMEOUT_MS);
-
-      if (reply?.status !== 200) {
-        void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
-        return;
-      }
-
-      // The scope may have moved while the request ran.
-      if (!unmoved()) {
-        return;
-      }
-
-      const { statuses, more } = reply.body as { statuses: StatusView[]; more: boolean };
-
-      picks.push(...statuses.map((status) => ({ label: statusLine(status.markdown) || 'Status', description: STATUS_TIME.format(status.at), status })));
-
-      if (picks.length === 0) {
-        void vscode.window.showInformationMessage('Switchboard: this session has no earlier statuses.');
-        return;
-      }
-
-      const last = statuses.at(-1);
-      const chosen = await vscode.window.showQuickPick<StatusPick>(more && last !== undefined ? [...picks, { label: '$(history) Older statuses…', more: last.id }] : picks, {
-        title: 'Earlier statuses',
-        placeHolder: 'Open a status in the Markdown preview',
-        matchOnDescription: true,
-      });
-
-      // Or while the list was open: a status of a session the window no longer shows is not opened.
-      if (!unmoved()) {
-        return;
-      }
-
-      if (chosen?.status !== undefined) {
-        await this.openStatus(chosen.status);
-        return;
-      }
-
-      if (chosen?.more === undefined) {
-        return;
-      }
-
-      before = chosen.more;
+    if (reply?.status !== 200) {
+      return { statuses: [], more: false, error: reply?.error ?? 'The hub did not answer.' };
     }
+
+    if (this.#target !== target || this.#state.scope?.sessionId !== scope.sessionId || this.#state.scope.scopeGen !== scope.scopeGen) {
+      return { statuses: [], more: false, error: 'The window shows another session now.' };
+    }
+
+    const { statuses, more } = reply.body as { statuses: StatusView[]; more: boolean };
+
+    if (this.#listedFor !== scope.sessionId) {
+      this.#listed.clear();
+      this.#listedFor = scope.sessionId;
+    }
+
+    for (const status of statuses) {
+      this.#listed.set(status.id, status);
+    }
+
+    return { statuses, more, error: null };
+  }
+
+  #listedFor: string | null = null;
+
+  /** Opens the status the Status tab shows, or one its earlier statuses list showed, in the Markdown preview. */
+  openListedStatus(statusId: string | null): Promise<void> {
+    const status = statusId === null ? this.#state.status : (this.#listed.get(statusId) ?? null);
+
+    return status === null || (statusId !== null && this.#listedFor !== this.#state.scope?.sessionId) ? Promise.resolve() : this.openStatus(status);
   }
 
   /** Hands the texts of messages that were not sent to a visible page, keeping them when none took them; a call during a hand-off tries again after it. */
@@ -462,30 +438,21 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
   }
 
-  async answerRequest(requestId: string, shown: SeenTarget): Promise<void> {
+  /**
+   * Answers a Codex request from its card in the view (architecture.md § Conversation view): a permission's decision, or every question's
+   * answer; resolves why it was not taken, or null. The hub checks it is still pending.
+   */
+  async answerRequest(requestId: string, shown: SeenTarget, answer: unknown): Promise<string | null> {
     const target = this.#target;
-    const request = this.#state.session?.id === shown.sessionId ? this.#state.session.requests?.find(r => r.id === requestId) : undefined;
-    if (target === null || request === undefined) return;
-    if (request.kind === 'unsupported') { await this.deps.openTerminal(); return; }
-    let answer: unknown;
-    if (request.kind === 'permission') {
-      const labels: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };
-      const offered = request.decisions.map(decision => ({ title: labels[decision] ?? decision, decision }));
-      const picked = await vscode.window.showWarningMessage('Codex requests permission', { modal: true, detail: request.title }, ...offered);
-      if (picked === undefined) return;
-      answer = picked.decision;
-    } else {
-      const answers: Record<string, string> = {};
-      for (const question of request.questions) {
-        let picked = question.options.length === 0 ? 'Type an answer…' : await vscode.window.showQuickPick([...question.options, 'Type an answer…'], { title: question.question });
-        if (picked === 'Type an answer…') picked = await vscode.window.showInputBox({ prompt: question.question, ignoreFocusOut: true, password: question.secret === true });
-        if (picked === undefined || picked.trim() === '') return;
-        answers[question.id] = picked;
-      }
-      answer = answers;
+    const request = this.#state.session?.id === shown.sessionId ? this.#state.session.requests?.find((one) => one.id === requestId) : undefined;
+
+    if (target === null || request === undefined) {
+      return 'This request is no longer pending.';
     }
+
     const reply = await postToHub(target.record, '/v1/conversation/answer', { window: target.key, scopeGen: shown.scopeGen, sessionId: shown.sessionId, requestId, answer }, HISTORY_TIMEOUT_MS);
-    if (reply?.status !== 200) void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'Codex did not confirm the answer. Check its terminal.'}`);
+
+    return reply?.status === 200 ? null : (reply?.error ?? 'Codex did not confirm the answer. Check its terminal.');
   }
 
   /** Draws the voice's status bar item from this window's voice state. */
@@ -522,52 +489,45 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
   }
 
-  /**
-   * Choose Persona… and the header's persona button (architecture.md § Personas): lists the roster from the hub's `personas`, and pins the one
-   * picked to this window's selected conversation's session, or clears its pin.
-   */
-  async choosePersona(): Promise<void> {
+  /** The header's persona menu (architecture.md § Personas): the roster from the hub's `personas`, the session's own marked, and Clear pin while one is pinned. */
+  async personaChoices(): Promise<{ items: Array<{ value: string; label: string; note: string; current: boolean }>; error: string | null }> {
     const target = this.#target;
     const scope = this.#state.scope;
     const session = this.#state.session;
 
-    if (target === null || scope === null || scope.sessionId === null || session === null) {
-      void vscode.window.showWarningMessage('Switchboard: this window has no session to give a persona.');
-      return;
+    if (target === null || scope === null || session === null) {
+      return { items: [], error: 'This window has no session to give a persona.' };
     }
 
     const listed = await postToHub(target.record, '/v1/conversation/personas', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID() }, HISTORY_TIMEOUT_MS);
 
     if (listed?.status !== 200) {
-      void vscode.window.showWarningMessage(`Switchboard: ${listed?.error ?? 'the hub did not answer.'}`);
-      return;
+      return { items: [], error: listed?.error ?? 'The hub did not answer.' };
     }
 
     const { personas } = listed.body as { personas: Array<{ id: string; name: string }> };
+    const current = this.#state.session?.persona ?? null;
 
-    if (personas.length === 0) {
-      void vscode.window.showInformationMessage('Switchboard: no personas. Add them to voice.personas in settings.json, with voice.enabled on.');
-      return;
+    return {
+      items: [
+        ...personas.map((persona) => ({ value: persona.id, label: persona.name, note: current?.id === persona.id ? (current.pinned ? 'Pinned' : 'Current') : '', current: current?.id === persona.id })),
+        ...(current?.pinned === true && personas.length > 0 ? [{ value: '', label: 'Clear pin', note: "The playbook's persona or a free one", current: false }] : []),
+      ],
+      error: null,
+    };
+  }
+
+  /** Pins a roster persona to the session the page showed, or clears its pin with null; resolves why not, or null. */
+  async pinPersona(personaId: string | null, shown: SeenTarget): Promise<string | null> {
+    const target = this.#target;
+
+    if (target === null || this.#state.scope?.sessionId !== shown.sessionId) {
+      return 'The window shows another session now.';
     }
 
-    type PersonaPick = vscode.QuickPickItem & { personaId: string | null };
-    const current = session.persona;
-    const picks: PersonaPick[] = [
-      ...personas.map((persona) => ({ label: persona.name, description: current?.id === persona.id ? (current.pinned ? 'pinned' : 'current') : '', personaId: persona.id })),
-      ...(current?.pinned === true ? [{ label: '$(pinned-dirty) Clear pin', description: "Use the playbook's persona or a free one", personaId: null }] : []),
-    ];
-    const chosen = await vscode.window.showQuickPick<PersonaPick>(picks, { title: 'Persona', placeHolder: 'Pin a persona to this session' });
+    const reply = await postToHub(target.record, '/v1/conversation/persona', { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, personaId }, HISTORY_TIMEOUT_MS);
 
-    // The window may have moved to another session while the list was open.
-    if (chosen === undefined || this.#target !== target || this.#state.scope?.sessionId !== scope.sessionId) {
-      return;
-    }
-
-    const reply = await postToHub(target.record, '/v1/conversation/persona', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), sessionId: scope.sessionId, personaId: chosen.personaId }, HISTORY_TIMEOUT_MS);
-
-    if (reply?.status !== 200) {
-      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
-    }
+    return reply?.status === 200 ? null : (reply?.error ?? 'The hub did not answer.');
   }
 
   /** Talk here: the voice moves to this window's selected conversation's session. */
@@ -750,37 +710,67 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
 
   #creatingConversation = false;
 
+  /** The providers a new session can use, the default first, for the plus button's menu; why not, when the hub does not say. */
+  async providerChoices(): Promise<{ items: Array<{ value: string; label: string; note: string; current: boolean }>; error: string | null }> {
+    const target = this.#target;
+
+    if (target === null || this.#state.scope === null) {
+      return { items: [], error: 'This window has no Switchboard work item to start a session beside.' };
+    }
+
+    const settings = await postToHub(target.record, '/v1/conversation/providers', {}, SEND_TIMEOUT_MS);
+    const preferred = (settings?.body as { defaultProvider?: unknown } | null)?.defaultProvider;
+
+    if (settings?.status !== 200 || (preferred !== 'claude' && preferred !== 'codex')) {
+      return { items: [], error: settings?.error ?? 'The hub did not provide the session providers. Reload VS Code to update it.' };
+    }
+
+    return { items: ([preferred, preferred === 'claude' ? 'codex' : 'claude'] as Provider[]).map((provider) => ({ value: provider, label: provider === 'claude' ? 'Claude' : 'Codex', note: provider === preferred ? 'Default' : '', current: false })), error: null };
+  }
+
   /**
-   * Starts a new conversation hosted by this window (architecture.md § Hosted conversations), the view's plus button and Switchboard: New Session.
-   * A command that got no answer is posted once more with the same `opId`, which the hub answers with the conversation it already made.
+   * Starts a new conversation hosted by this window (architecture.md § Hosted conversations) in the provider the plus button's menu gave, or, from
+   * Switchboard: New Session, the one picked in a quick pick, the default first. A command that got no answer is posted once more with the same
+   * `opId`, which the hub answers with the conversation it already made. Resolves why it was not made, or null; the command shows it as a warning.
    */
-  async newConversation(): Promise<void> {
-    if (this.#creatingConversation) return;
+  async newConversation(provider?: Provider): Promise<string | null> {
+    if (this.#creatingConversation) return null;
     const target = this.#target;
     const scope = this.#state.scope;
 
     if (target === null || scope === null) {
-      void vscode.window.showWarningMessage('Switchboard: this window has no Switchboard work item to start a session beside.');
-      return;
+      return this.#warn(provider, 'This window has no Switchboard work item to start a session beside.');
     }
 
     this.#creatingConversation = true;
     try {
-      const settings = await postToHub(target.record, '/v1/conversation/providers', {}, SEND_TIMEOUT_MS);
-      const preferred = (settings?.body as { defaultProvider?: unknown } | null)?.defaultProvider;
-      if (settings?.status !== 200 || (preferred !== 'claude' && preferred !== 'codex')) {
-        void vscode.window.showWarningMessage(`Switchboard: ${settings?.error ?? 'The hub did not provide the session providers. Reload VS Code to update it.'}`);
-        return;
+      let chosen = provider;
+
+      if (chosen === undefined) {
+        const choices = await this.providerChoices();
+
+        if (choices.error !== null) return this.#warn(provider, choices.error);
+        const picked = await vscode.window.showQuickPick(choices.items.map((item, index) => ({ label: item.label, description: item.note, provider: item.value as Provider, picked: index === 0 })), { title: 'New session', placeHolder: 'Choose a provider', ignoreFocusOut: true });
+        if (picked === undefined || this.#target !== target) return null;
+        chosen = picked.provider;
       }
-      const choices: Array<vscode.QuickPickItem & { provider: Provider }> = ([preferred, preferred === 'claude' ? 'codex' : 'claude'] as Provider[]).map(provider => ({ label: provider === 'claude' ? 'Claude' : 'Codex', description: provider === preferred ? 'Default' : '', provider, picked: provider === preferred }));
-      const chosen = await vscode.window.showQuickPick(choices, { title: 'New session', placeHolder: 'Choose a provider', ignoreFocusOut: true });
-      if (chosen === undefined || this.#target !== target) return;
-      const body = { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), provider: chosen.provider };
+
+      const body = { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), provider: chosen };
       const reply = (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS)) ?? (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS));
-      if (reply?.status !== 200) void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+
+      return reply?.status === 200 ? null : this.#warn(provider, reply?.error ?? 'The hub did not answer.');
     } finally {
       this.#creatingConversation = false;
     }
+  }
+
+  /** A refusal of the command (no provider given) shows as a warning; the view shows its own above the composer. */
+  #warn(provider: Provider | undefined, error: string): string {
+    if (provider === undefined) {
+      void vscode.window.showWarningMessage(`Switchboard: ${error}`);
+    }
+
+    return error;
   }
 
   /** Opens a reply's link: a web page in the browser, a file at its line in an editor; anything else is dropped. */
@@ -835,7 +825,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
           case 'terminal':
             return this.deps.openTerminal();
           case 'answer-request':
-            return this.answerRequest(String(message.requestId), message.target);
+            return this.answerRequest(String(message.requestId), message.target, message.answer).then((error) => view.webview.postMessage({ type: 'answered', id: message.id, error }));
           case 'select':
             return this.select(Number(message.workItemId));
           case 'talk-here':
@@ -851,13 +841,17 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
           case 'replay':
             return this.replay(String(message.replyId));
           case 'new':
-            return this.newConversation();
+            return this.newConversation(message.provider === 'codex' ? 'codex' : 'claude').then((error) => (error === null ? undefined : view.webview.postMessage({ type: 'refused', error, workItemId: null })));
+          case 'providers':
+            return this.providerChoices().then((answer) => view.webview.postMessage({ type: 'menu', id: message.id, ...answer }));
+          case 'personas':
+            return this.personaChoices().then((answer) => view.webview.postMessage({ type: 'menu', id: message.id, ...answer }));
           case 'persona':
-            return this.choosePersona();
+            return this.pinPersona(typeof message.personaId === 'string' ? message.personaId : null, message.target).then((error) => (error === null ? undefined : view.webview.postMessage({ type: 'refused', error, workItemId: null })));
           case 'status-open':
-            return this.#state.status === null ? Promise.resolve() : this.openStatus(this.#state.status);
+            return this.openListedStatus(typeof message.statusId === 'string' ? message.statusId : null);
           case 'statuses':
-            return this.earlierStatuses();
+            return this.statusesBefore(typeof message.before === 'string' ? message.before : null).then((answer) => view.webview.postMessage({ type: 'statuses', id: message.id, ...answer }));
           case 'artifact':
             return this.deps.openArtifact(String(message.path));
           case 'copy':

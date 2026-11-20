@@ -484,7 +484,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     composerHost.hidden = state.scope === null;
     input.disabled = !full;
     input.placeholder = full ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
-    voiceControls.innerHTML = renderVoice(state.voice);
+    morph(voiceControls, renderVoice(state.voice));
     grow();
     refresh();
   };
@@ -546,9 +546,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let ownTop = 0;
   /** What the panel last showed: its tab and conversation; another starts at its top, or at its end for a conversation. */
   let shown: string | null = null;
+  /** Where the conversation was when another tab was shown. */
+  let left: { conversation: string; pinned: boolean; top: number } | null = null;
+  /** Keeps where the conversation is when the page moves from it to another tab, by a tab or an artifact's row. */
+  const leaving = (next: Tab): void => {
+    if (view.tab === 'conversation' && next !== 'conversation' && state.scope !== null) {
+      left = { conversation: `${state.scope.scopeGen} ${state.session?.id ?? ''}`, pinned, top: panel.scrollTop };
+    }
+  };
   const atEnd = (): boolean => panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
   const followEnd = (): void => {
-    if (view.tab === 'conversation' && state.scope !== null && pinned && !atEnd()) {
+    if (view.tab === 'conversation' && state.scope !== null && pinned && panel.scrollTop < panel.scrollHeight - panel.clientHeight - 1) {
       panel.scrollTop = panel.scrollHeight;
       ownTop = panel.scrollTop;
     }
@@ -581,7 +589,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null));
 
     // An ended session's reason sits just above the composer it disables, on every tab; the page has no terminal to resume it in.
-    morph(note, state.session?.state === 'ended' && state.session.reason !== null ? `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason)}</span></div>` : '');
+    morph(note, state.session?.state === 'ended' ? `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason ?? 'The session has ended. A message continues it.')}</span></div>` : '');
 
     if (state.scope === null) {
       morph(head, '');
@@ -611,13 +619,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The composer first, so the conversation is scrolled against its final height.
     updateComposer();
 
-    const showing = `${view.tab} ${state.scope.scopeGen} ${state.session?.id ?? ''}`;
+    const conversation = `${state.scope.scopeGen} ${state.session?.id ?? ''}`;
+    const showing = `${view.tab} ${conversation}`;
 
     if (showing !== shown) {
       shown = showing;
-      pinned = true;
-      panel.scrollTop = view.tab === 'conversation' ? panel.scrollHeight : 0;
+
+      // The conversation comes back where the operator left it, while it is the same conversation; another tab or conversation starts afresh.
+      const kept = view.tab === 'conversation' && left !== null && left.conversation === conversation ? left : null;
+
+      pinned = kept?.pinned ?? true;
+      panel.scrollTop = view.tab !== 'conversation' ? 0 : kept !== null && !kept.pinned ? kept.top : panel.scrollHeight;
       ownTop = panel.scrollTop;
+
+      if (view.tab === 'conversation') {
+        left = null;
+      }
     }
 
     const timelineList = panel.querySelector('.timeline');
@@ -812,6 +829,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const tab = target.closest<HTMLElement>('[data-tab]')?.dataset['tab'] as Tab | undefined;
 
     if (tab !== undefined && TABS.some((one) => one.tab === tab)) {
+      leaving(tab);
       view.tab = tab;
       view.artifact = tab === 'artifacts' ? view.artifact : null;
       draw();
@@ -827,10 +845,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'picker':
         view.picker = !view.picker;
+        // One header menu at a time.
+        view.personas = null;
         draw();
         break;
       case 'persona':
         void choosePersona();
+        break;
+      case 'persona-pick':
+        view.personas = null;
+        draw();
+
+        if (state.session !== null) {
+          void command('persona', { sessionId: state.session.id, personaId: button!.dataset['persona'] || null }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? 'The persona was not pinned.')));
+        }
+
         break;
       case 'earlier':
         void earlier();
@@ -846,6 +875,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       }
       case 'artifact':
+        leaving('artifacts');
         view.tab = 'artifacts';
         view.artifact = button!.dataset['path'] ?? null;
         draw();
@@ -937,16 +967,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
-    if (view.picker && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+    if ((view.picker || view.personas !== null) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.picker = false;
+      view.personas = null;
       draw();
     }
   });
   root.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && view.picker) {
+    if (event.key === 'Escape' && (view.picker || view.personas !== null)) {
+      const opener = view.picker ? 'button.picker' : 'button.persona';
+
       view.picker = false;
+      view.personas = null;
       draw();
-      head.querySelector<HTMLElement>('button.picker')?.focus();
+      head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
     }
   });
@@ -1007,29 +1041,32 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
 
-  /** The header's persona button: the roster, and pinning one to the session; a list in the header, as the dropdown is. */
+  /** The header's persona button: the roster in a menu under the header, as the dropdown is, and pinning one to the session. */
   const choosePersona = async (): Promise<void> => {
-    const answer = await command('personas');
-    const personas = (answer.body['personas'] as Array<{ id: string; name: string }> | undefined) ?? [];
-
-    if (personas.length === 0 || state.session === null) {
+    if (view.personas !== null) {
+      view.personas = null;
+      draw();
       return;
     }
 
-    const menuList = document.createElement('ul');
+    view.picker = false;
+    view.personas = { items: null, error: null };
+    draw();
 
-    menuList.className = 'conversation-list persona-list';
-    menuList.innerHTML = [...personas.map((one) => `<li><button type="button" data-persona="${escape(one.id)}">${escape(one.name)}</button></li>`), state.session.persona?.pinned ? '<li><button type="button" data-persona="">Clear pin</button></li>' : ''].join('');
-    head.querySelector('.header')?.appendChild(menuList);
-    menuList.addEventListener('click', (event) => {
-      const chosenOne = (event.target as HTMLElement).closest<HTMLElement>('[data-persona]');
+    const shown = state.scope?.scopeGen;
+    const answer = await command('personas');
 
-      if (chosenOne !== null && state.session !== null) {
-        void command('persona', { sessionId: state.session.id, personaId: chosenOne.dataset['persona'] || null });
-      }
+    if (view.personas === null || shown !== state.scope?.scopeGen) {
+      return;
+    }
 
-      menuList.remove();
-    });
+    view.personas = answer.status === 200 ? { items: (answer.body['personas'] as Array<{ id: string; name: string }> | undefined) ?? [], error: null } : { items: null, error: String(answer.body['error'] ?? 'Switchboard did not answer.') };
+
+    if (view.personas.items?.length === 0) {
+      view.personas = { items: null, error: 'No personas. Add them to voice.personas in settings.json, with voice.enabled on.' };
+    }
+
+    draw();
   };
 
   // ---- The stream ----

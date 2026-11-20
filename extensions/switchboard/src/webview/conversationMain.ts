@@ -1,7 +1,8 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
 import { ago, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS } from './conversationRender.js';
-import type { CardDraft } from './conversationRender.js';
+import type { CardDraft, EarlierStatuses, HeaderMenu } from './conversationRender.js';
+import type { StatusView } from '@switchboard/hub';
 import { answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { selectedEntry, statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
@@ -16,6 +17,12 @@ interface VsCodeApi {
 }
 
 declare function acquireVsCodeApi(): VsCodeApi;
+
+/** What the extension answers the page's header menus, earlier statuses and Codex request answers with. */
+type MenuReply =
+  | { type: 'menu'; id: number; items: HeaderMenu['items']; error: string | null }
+  | { type: 'statuses'; id: number; statuses: StatusView[]; more: boolean; error: string | null }
+  | { type: 'answered'; id: number; error: string | null };
 
 /**
  * What the page keeps while hidden, since it is not retained, and over a reload: its open folds, whether it was scrolled to the end, the tab
@@ -541,6 +548,31 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     draw();
     vscode.postMessage({ type: 'send', id, text, target: { scopeGen: state.scope.scopeGen, sessionId: state.session.id, launch: state.session.launch } });
   };
+  // The header menu open, the Status tab's earlier statuses while listed, and the Codex requests' answers, numbered apart from the sends.
+  let menu: (HeaderMenu & { id: number }) | null = null;
+  let earlier: (EarlierStatuses & { id: number; sessionId: string | null }) | null = null;
+  let nextAsk = 1;
+  const requestValues = new Map<string, string>();
+  const requestErrors = new Map<string, string>();
+  const requestSending = new Set<string>();
+  const requestSends = new Map<number, string>();
+  /** Closes the header menu, giving the focus back to the button that opened it when it had it. */
+  const closeMenu = (refocus: boolean): void => {
+    const kind = menu?.kind;
+
+    menu = null;
+    draw();
+
+    if (refocus) {
+      root.querySelector<HTMLElement>(kind === 'persona' ? 'button.persona' : '[data-action="new"]')?.focus();
+    }
+  };
+  /** Asks the extension for the statuses before one, adding them to those listed. */
+  const askStatuses = (before: string | null, listed: StatusView[]): void => {
+    earlier = { statuses: listed, more: false, loading: true, error: null, id: nextAsk++, sessionId: state.scope?.sessionId ?? null };
+    draw();
+    vscode.postMessage({ type: 'statuses', id: earlier.id, before });
+  };
   // The status the Status tab last had, and until when a status that replaced it is marked New: Infinity until the tab shows it.
   let shownStatus: { sessionId: string | null; id: string; markdown: string } | null = null;
   // Whether this VS Code window has the focus, which the extension says; unread items count as seen only then.
@@ -563,7 +595,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   const follow = (): void => {
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
-    if (scroller !== null && pinned && !atEnd(scroller)) {
+    // At the very end: the 24 px of `atEnd` only tells the operator's own scroll near the end from one away from it.
+    if (scroller !== null && pinned && scroller.scrollTop < scroller.scrollHeight - scroller.clientHeight - 1) {
       scroller.scrollTop = scroller.scrollHeight;
       ownTop = scroller.scrollTop;
     }
@@ -740,7 +773,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
 
     startFreshClock();
-    morph(root, renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards, pill: unseenBelow }));
+    morph(root, renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards, pill: unseenBelow, menu, earlier, requests: { values: requestValues, errors: requestErrors, sending: requestSending } }));
     document.body.dataset['tab'] = tab;
 
     const scroller = root.querySelector<HTMLElement>('.scroll');
@@ -833,10 +866,66 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const button = target.closest<HTMLElement>('[data-action]');
     const action = button?.dataset['action'];
 
-    if (action === 'answer-request' && state.scope !== null && state.session !== null) {
-      vscode.postMessage({ type: 'answer-request', requestId: button?.dataset['request'] ?? '', target: { sessionId: state.session.id, scopeGen: state.scope.scopeGen } });
-    } else if (action === 'terminal' || action === 'earlier' || action === 'statuses' || action === 'new' || action === 'persona') {
+    if (action === 'terminal' || action === 'earlier') {
       vscode.postMessage({ type: action });
+    } else if (action === 'persona' || action === 'new') {
+      // The persona and the plus open their menus in the header; the extension fetches what they list.
+      const kind = action === 'persona' ? 'persona' : 'provider';
+
+      if (menu?.kind === kind) {
+        closeMenu(true);
+        return;
+      }
+
+      open.delete(PICKER);
+      menu = { kind, items: null, error: null, id: nextAsk++ };
+      draw();
+      vscode.postMessage(kind === 'persona' ? { type: 'personas', id: menu.id } : { type: 'providers', id: menu.id });
+    } else if (action === 'menu-pick' && menu !== null) {
+      const value = button!.dataset['value'] ?? '';
+      const kind = menu.kind;
+
+      closeMenu(true);
+
+      if (kind === 'persona' && state.scope !== null && state.session !== null) {
+        vscode.postMessage({ type: 'persona', personaId: value === '' ? null : value, target: { scopeGen: state.scope.scopeGen, sessionId: state.session.id } });
+      } else if (kind === 'provider' && (value === 'claude' || value === 'codex')) {
+        vscode.postMessage({ type: 'new', provider: value });
+      }
+    } else if (action === 'statuses') {
+      // The history button opens the earlier statuses as a list on the Status tab, and closes it again.
+      if (earlier !== null) {
+        earlier = null;
+        draw();
+        return;
+      }
+
+      askStatuses(state.status === null || state.status.fallback ? null : state.status.id, []);
+    } else if (action === 'statuses-more' && earlier !== null) {
+      askStatuses(earlier.statuses.at(-1)?.id ?? null, earlier.statuses);
+    } else if (action === 'status-earlier') {
+      vscode.postMessage({ type: 'status-open', statusId: button!.dataset['status'] ?? '' });
+    } else if (action === 'request-option') {
+      requestValues.set(button!.dataset['field']!, button!.dataset['value']!);
+      requestErrors.delete(button!.dataset['field']!.split(':').slice(0, -1).join(':'));
+      draw();
+    } else if ((action === 'request-decision' || action === 'request-answer') && state.scope !== null && state.session !== null) {
+      // A Codex request is answered from its card: a permission with the decision clicked, questions with every answer given.
+      const requestId = button!.dataset['request'] ?? '';
+      const request = state.session.requests?.find((one) => one.id === requestId);
+
+      if (request === undefined || requestSending.has(requestId)) {
+        return;
+      }
+
+      const answer = action === 'request-decision' ? (button!.dataset['decision'] ?? '') : Object.fromEntries(request.questions.map((question) => [question.id, (requestValues.get(`${requestId}:${question.id}`) ?? '').trim()]));
+      const id = nextAsk++;
+
+      requestSending.add(requestId);
+      requestErrors.delete(requestId);
+      requestSends.set(id, requestId);
+      draw();
+      vscode.postMessage({ type: 'answer-request', id, requestId, answer, target: { sessionId: state.session.id, scopeGen: state.scope.scopeGen } });
     } else if (action === 'pill') {
       // The New messages pill goes to the end, where the conversation follows new items again.
       const scroller = root.querySelector<HTMLElement>('.scroll');
@@ -849,6 +938,9 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         ownTop = scroller.scrollTop;
       }
     } else if (action === 'picker') {
+      // One header menu at a time.
+      menu = null;
+
       if (!open.delete(PICKER)) {
         open.add(PICKER);
       }
@@ -892,7 +984,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       vscode.postMessage({ type: 'artifact', path: button!.dataset['path'] ?? '' });
     } else if (action === 'status-open') {
       seenStatus();
-      vscode.postMessage({ type: 'status-open' });
+      vscode.postMessage({ type: 'status-open', statusId: null });
     } else if (action === 'copy-code' || action === 'copy-reply') {
       // A code block's text as written, without the newline that ends every block; a reply's Markdown from the state, not from the page.
       const id = button!.closest<HTMLElement>('li[data-id]')?.dataset['id'];
@@ -932,6 +1024,22 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   root.addEventListener('input', (event) => {
     const field = event.target as HTMLElement;
 
+    if (field instanceof HTMLInputElement && field.classList.contains('request-field')) {
+      const key = field.dataset['field']!;
+      const requestId = key.split(':').slice(0, -1).join(':');
+      const request = state.session?.requests?.find((one) => one.id === requestId);
+
+      requestValues.set(key, field.value);
+
+      const submit = [...root.querySelectorAll<HTMLButtonElement>('[data-action="request-answer"]')].find((one) => one.dataset['request'] === requestId) ?? null;
+
+      if (submit !== null && request !== undefined) {
+        submit.disabled = !request.questions.every((question) => (requestValues.get(`${requestId}:${question.id}`) ?? '').trim() !== '');
+      }
+
+      return;
+    }
+
     if (!(field instanceof HTMLInputElement) || !field.classList.contains('question-other')) {
       return;
     }
@@ -968,22 +1076,29 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
   // Escape stops speech while the view has focus, unless it closes the conversation list.
   root.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !open.has(PICKER) && state.voice?.here === true && state.voice.speaking !== null) {
+    if (event.key === 'Escape' && !open.has(PICKER) && menu === null && state.voice?.here === true && state.voice.speaking !== null) {
       vscode.postMessage({ type: 'stop-speaking' });
     }
   });
 
   // A press outside the header closes the conversation list, as a VS Code dropdown does.
   document.addEventListener('pointerdown', (event) => {
-    if (open.has(PICKER) && !(event.target instanceof Node && root.querySelector('.header')?.contains(event.target) === true)) {
+    if ((open.has(PICKER) || menu !== null) && !(event.target instanceof Node && root.querySelector('.header')?.contains(event.target) === true)) {
       open.delete(PICKER);
+      menu = null;
       draw();
     }
   });
 
-  // Escape closes the conversation list; Up and Down move within it.
+  // Escape closes the conversation list or a header menu; Up and Down move within it.
   root.addEventListener('keydown', (event) => {
-    if (!open.has(PICKER)) {
+    if (menu !== null && event.key === 'Escape') {
+      closeMenu(true);
+      event.stopImmediatePropagation();
+      return;
+    }
+
+    if (!open.has(PICKER) && menu === null) {
       return;
     }
 
@@ -1102,7 +1217,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     checkSeen();
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | ExtrasReply>) => {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | MenuReply | ExtrasReply>) => {
     if (event.data.type === 'files' || event.data.type === 'commands' || event.data.type === 'mentions' || event.data.type === 'image') {
       composer?.receive(event.data);
     } else if (event.data.type === 'draft') {
@@ -1111,6 +1226,37 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       composer?.words(event.data.text);
     } else if (event.data.type === 'refused') {
       composer?.refused(event.data.error, event.data.workItemId);
+    } else if (event.data.type === 'menu') {
+      // The header menu's choices, only for the menu still open that asked.
+      if (menu?.id === event.data.id) {
+        const opener = document.activeElement?.closest('button.persona, [data-action="new"]') ?? null;
+
+        menu = { ...menu, items: event.data.items, error: event.data.error };
+        draw();
+
+        if (opener !== null) {
+          root.querySelector<HTMLElement>('.header-menu button')?.focus();
+        }
+      }
+    } else if (event.data.type === 'statuses') {
+      if (earlier?.id === event.data.id) {
+        earlier = { ...earlier, statuses: [...earlier.statuses, ...event.data.statuses], more: event.data.more, loading: false, error: event.data.error };
+        draw();
+      }
+    } else if (event.data.type === 'answered') {
+      // A Codex request's answer: taken, the request leaves with the hub's next state; refused, its card says why.
+      const requestId = requestSends.get(event.data.id);
+
+      if (requestId !== undefined) {
+        requestSends.delete(event.data.id);
+        requestSending.delete(requestId);
+
+        if (event.data.error !== null) {
+          requestErrors.set(requestId, event.data.error);
+        }
+
+        draw();
+      }
     } else if (event.data.type === 'focus') {
       windowFocused = event.data.focused;
       checkSeen();
@@ -1140,6 +1286,25 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         if (draft.sent !== null && !draft.sending && draft.workItemId === state.scope?.workItemId && from !== -1 && state.items.slice(from + 1).some((item) => item.type === 'message' && !item.withdrawn && item.delivery !== 'open' && item.text === draft.sent)) {
           draft.sent = null;
         }
+      }
+
+      // The earlier statuses and a header menu belong to the conversation they were opened in; a request's answers go with the request.
+      if (earlier !== null && earlier.sessionId !== (state.scope?.sessionId ?? null)) {
+        earlier = null;
+      }
+
+      if (menu !== null && (state.scope === null || state.session === null)) {
+        menu = null;
+      }
+
+      const pending = new Set((state.session?.requests ?? []).map((request) => request.id));
+
+      for (const key of [...requestValues.keys()].filter((key) => !pending.has(key.split(':').slice(0, -1).join(':')))) {
+        requestValues.delete(key);
+      }
+
+      for (const key of [...requestErrors.keys()].filter((key) => !pending.has(key))) {
+        requestErrors.delete(key);
       }
 
       noteStatus();

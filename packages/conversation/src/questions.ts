@@ -176,19 +176,47 @@ function parseBlocks(markdown: string): Array<Block & { multi: boolean }> {
 }
 
 /**
- * A reply's or a status's Markdown cut around its questions, for a view that draws them as a card: the text before them, their own lines, and
- * the text after them, which is empty when they end the message, as the conversation rules ask; null when it asks none.
+ * A reply's or a status's Markdown cut into runs of text and runs of questions, in order, for a view that draws the questions as a card: blocks
+ * with only blank lines between them are one run, and `count` is how many questions a run asks. Null when it asks none.
  */
-export function questionParts(markdown: string): { before: string; questions: string; after: string } | null {
-  const range = questionLines(markdown);
+export function questionSegments(markdown: string): Array<{ questions: number; text: string }> | null {
+  const blocks = parseBlocks(markdown);
 
-  if (range === null) {
+  if (blocks.length === 0) {
     return null;
   }
 
   const lines = markdown.replace(/\r/g, '').split('\n');
+  const runs: Array<{ first: number; last: number; count: number }> = [];
 
-  return { before: lines.slice(0, range.first).join('\n'), questions: lines.slice(range.first, range.last + 1).join('\n'), after: lines.slice(range.last + 1).join('\n') };
+  for (const block of blocks) {
+    const previous = runs.at(-1);
+
+    if (previous !== undefined && lines.slice(previous.last + 1, block.first).every((line) => line.trim() === '')) {
+      previous.last = block.last;
+      previous.count++;
+    } else {
+      runs.push({ first: block.first, last: block.last, count: 1 });
+    }
+  }
+
+  const segments: Array<{ questions: number; text: string }> = [];
+  let at = 0;
+
+  for (const run of runs) {
+    if (run.first > at) {
+      segments.push({ questions: 0, text: lines.slice(at, run.first).join('\n') });
+    }
+
+    segments.push({ questions: run.count, text: lines.slice(run.first, run.last + 1).join('\n') });
+    at = run.last + 1;
+  }
+
+  if (at < lines.length) {
+    segments.push({ questions: 0, text: lines.slice(at).join('\n') });
+  }
+
+  return segments;
 }
 
 /**

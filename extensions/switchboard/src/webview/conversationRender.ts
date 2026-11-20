@@ -1,9 +1,12 @@
 import MarkdownIt from 'markdown-it';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
+
+/** A Codex session's pending question or approval, as the hub sends it. */
+type NativeRequest = NonNullable<SessionView['requests']>[number];
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { artifactIcon, awaitingReply, PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
-import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionParts } from '@switchboard/conversation/questions';
+import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionSegments } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 
 /** What the page posts to the extension. */
@@ -12,7 +15,7 @@ export type ConversationMessage =
   | { type: 'earlier' }
   | { type: 'open'; href: string }
   | { type: 'terminal' }
-  | { type: 'answer-request'; requestId: string; target: SeenTarget }
+  | { type: 'answer-request'; id: number; requestId: string; answer: unknown; target: SeenTarget }
   | { type: 'select'; workItemId: number }
   | { type: 'talk-here' }
   | { type: 'stop-speaking' }
@@ -20,16 +23,18 @@ export type ConversationMessage =
   | { type: 'mic'; on: boolean }
   | { type: 'composer'; focused: boolean; draft: string }
   | { type: 'replay'; replyId: string }
-  | { type: 'new' }
-  | { type: 'persona' }
+  | { type: 'new'; provider: 'claude' | 'codex' }
+  | { type: 'providers'; id: number }
+  | { type: 'personas'; id: number }
+  | { type: 'persona'; personaId: string | null; target: SeenTarget }
   | { type: 'send'; id: number; text: string; target: SendTarget; command?: true }
   | { type: 'files'; id: number; query: string }
   | { type: 'commands'; id: number }
   | { type: 'attach' }
   | { type: 'image'; id: number; mime: string; data: string }
   | { type: 'copy'; id: number; text: string }
-  | { type: 'status-open' }
-  | { type: 'statuses' }
+  | { type: 'status-open'; statusId: string | null }
+  | { type: 'statuses'; id: number; before: string | null }
   | { type: 'artifact'; path: string }
   | { type: 'seen'; ids: string[]; target: SeenTarget };
 
@@ -330,24 +335,31 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
  * line, "2 questions — answer below", that opens them.
  */
 export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>): string {
-  const parts = questionParts(markdown);
+  const segments = questionSegments(markdown);
 
-  if (parts === null) {
+  if (segments === null) {
     return renderMarkdown(markdown);
   }
 
-  if (parts.after.trim() === '') {
-    return renderMarkdown(parts.before);
-  }
+  // The last run of questions, when only blank lines follow it, ends the message as the rules ask, and the card alone shows it.
+  const last = segments.reduce((found, segment, index) => (segment.questions > 0 ? index : found), -1);
+  const ending = segments.slice(last + 1).every((segment) => segment.text.trim() === '');
 
-  const count = parseQuestions(markdown).length;
-  const fold = `questions:${key}`;
+  return segments
+    .map((segment, index) => {
+      if (segment.questions === 0) {
+        return segment.text.trim() === '' ? '' : renderMarkdown(segment.text);
+      }
 
-  return (
-    renderMarkdown(parts.before) +
-    `<details class="fold questions-fold" data-fold="${escape(fold)}"${open.has(fold) ? ' open' : ''}><summary>${count} question${count === 1 ? '' : 's'} — answer below</summary><div class="was">${renderMarkdown(parts.questions)}</div></details>` +
-    renderMarkdown(parts.after)
-  );
+      if (ending && index === last) {
+        return '';
+      }
+
+      const fold = `questions:${key}:${index}`;
+
+      return `<details class="fold questions-fold" data-fold="${escape(fold)}"${open.has(fold) ? ' open' : ''}><summary>${segment.questions} question${segment.questions === 1 ? '' : 's'} — answer below</summary><div class="was">${renderMarkdown(segment.text)}</div></details>`;
+    })
+    .join('');
 }
 
 /** What the page keeps of a question card the operator has not answered yet: the choices made, and the answer being sent or refused. */
@@ -447,7 +459,23 @@ export interface PageView {
   cards?: ReadonlyMap<string, CardDraft>;
   /** Whether the New messages pill shows: new items came below a conversation scrolled up. */
   pill?: boolean;
+  /** The header menu open, if any. */
+  menu?: HeaderMenu | null;
+  /** The earlier statuses listed on the Status tab, while their list is open. */
+  earlier?: EarlierStatuses | null;
+  /** The Codex requests' answers and refusals. */
+  requests?: RequestDrafts;
 }
+
+/** The Status tab's list of the session's earlier statuses, newest first, while it is open; `more` while older ones can be loaded. */
+export interface EarlierStatuses {
+  statuses: StatusView[];
+  more: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
+const NO_REQUESTS: RequestDrafts = { values: new Map(), errors: new Map(), sending: new Set() };
 
 const CONVERSATION_TAB: PageView = { tab: 'conversation', unopened: new Set() };
 
@@ -469,7 +497,7 @@ export function statusBadge(status: StatusView | null, fresh: boolean): boolean 
  * `fresh`, and the buttons that open it and the earlier statuses in the Markdown preview. Before the first status, the work item's stage, dimmed;
  * with neither, a line that says so.
  */
-export function renderStatus(status: StatusView | null, fresh: boolean, now: number, card = '', open: ReadonlySet<string> = new Set()): string {
+export function renderStatus(status: StatusView | null, fresh: boolean, now: number, card = '', open: ReadonlySet<string> = new Set(), earlier: EarlierStatuses | null = null): string {
   if (status === null) {
     return '<p class="empty">The session has posted no status yet. Ask it for one, and its latest shows here.</p>';
   }
@@ -485,15 +513,35 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
   const mark = fresh ? '<span class="status-new">New</span>' : '';
   const actions =
     '<span class="status-actions"><button class="icon" type="button" data-action="status-open" title="Open in the Markdown preview" aria-label="Open the status in the Markdown preview"><span class="codicon codicon-open-preview" aria-hidden="true"></span></button>' +
-    '<button class="icon" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>';
+    `<button class="icon${earlier === null ? '' : ' pressed'}" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses" aria-expanded="${earlier !== null}" aria-controls="earlier-statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>`;
   const time = `<span class="status-time" title="${escape(new Date(status.at).toString())}">${escape(STATUS_TIME.format(status.at))}</span>`;
   const unread = status.unread ? ` unread" data-unread="${escape(status.id)}` : '';
 
   return (
     `<div class="status-tab${fresh ? ' fresh' : ''}${unread}" role="region" aria-label="${unread === '' ? 'Status' : 'Status, unread'}">` +
     `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span>${time}<span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}${mark}${actions}</div>` +
-    `<div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, open)}</div>${card}</div>`
+    `<div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, open)}</div>${card}${earlierStatuses(earlier)}</div>`
   );
+}
+
+/** A status's time in the earlier statuses list: "Thu, Nov 19, 1:46 PM". */
+const EARLIER_TIME = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+/**
+ * The Status tab's list of earlier statuses (architecture.md § Statuses), opened by its history button: each status's first line and time,
+ * newest first, a click opening it in the Markdown preview, and Older statuses while there are more.
+ */
+function earlierStatuses(earlier: EarlierStatuses | null): string {
+  if (earlier === null) {
+    return '';
+  }
+
+  const rows = earlier.statuses
+    .map((status) => `<li><button type="button" class="earlier-status" data-action="status-earlier" data-status="${escape(status.id)}" title="Open in the Markdown preview"><span class="title">${escape(statusLine(status.markdown) || 'Status')}</span><span class="earlier-time">${escape(EARLIER_TIME.format(status.at))}</span></button></li>`)
+    .join('');
+  const foot = earlier.error !== null ? `<p class="question-error" role="alert">${escape(earlier.error)}</p>` : earlier.loading ? '<p class="empty">Loading…</p>' : earlier.statuses.length === 0 ? '<p class="empty">This session has no earlier statuses.</p>' : earlier.more ? '<button type="button" class="earlier-items" data-action="statuses-more">Older statuses</button>' : '';
+
+  return `<section class="earlier-statuses" id="earlier-statuses" aria-label="Earlier statuses"><h3 class="earlier-head">Earlier statuses</h3><ul class="earlier-list">${rows}</ul>${foot}</section>`;
 }
 
 /**
@@ -565,14 +613,94 @@ function picker(state: ConversationState, open: boolean): string {
  * The header's persona button (architecture.md § Personas): the session's persona's name, which opens the list to pin another; nothing for a
  * session with none.
  */
-export function personaButton(persona: SessionView['persona'] | undefined): string {
+export function personaButton(persona: SessionView['persona'] | undefined, expanded = false): string {
   if (persona == null) {
     return '';
   }
 
   const title = [`Persona: ${persona.name}${persona.pinned ? ', pinned to this session' : ''}.`, persona.tonePending ? 'Its tone changes when the session next resumes or compacts.' : '', 'Click to choose another.'].filter((part) => part !== '').join(' ');
 
-  return `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" title="${escape(title)}" aria-label="${escape(title)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
+  return `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" aria-haspopup="menu" aria-expanded="${expanded}" title="${escape(title)}" aria-label="${escape(title)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
+}
+
+/** An inline menu the header opens (architecture.md § Conversation view): the persona roster to pin from, or the providers a new session can use. */
+export interface HeaderMenu {
+  kind: 'persona' | 'provider';
+  /** Null while the extension fetches them. */
+  items: Array<{ value: string; label: string; note: string; current: boolean }> | null;
+  error: string | null;
+}
+
+/** A header menu as a list under the header, drawn as the conversation dropdown is, one button per choice. */
+function headerMenu(menu: HeaderMenu): string {
+  const note = (text: string): string => `<li class="menu-note" role="none">${escape(text)}</li>`;
+  const rows =
+    menu.error !== null
+      ? note(menu.error)
+      : menu.items === null
+        ? note('Loading…')
+        : menu.items.length === 0
+          ? note(menu.kind === 'persona' ? 'No personas. Add them to voice.personas in settings.json, with voice.enabled on.' : 'No providers.')
+          : menu.items
+              .map(
+                (item) =>
+                  `<li role="none"><button type="button" role="menuitem" data-action="menu-pick" data-menu="${menu.kind}" data-value="${escape(item.value)}"${item.current ? ' class="selected" aria-current="true"' : ''}>` +
+                  `<span class="title">${escape(item.label)}</span>${item.note === '' ? '' : `<span class="menu-item-note">${escape(item.note)}</span>`}</button></li>`,
+              )
+              .join('');
+
+  return `<ul class="conversation-list header-menu" data-key="menu-${menu.kind}" role="menu" aria-label="${menu.kind === 'persona' ? 'Persona' : 'New session'}">${rows}</ul>`;
+}
+
+/** The plus, which opens the menu of providers for a new session. */
+function plusButton(open: boolean): string {
+  return `<button class="icon" type="button" data-action="new" title="New session" aria-label="New session" aria-haspopup="menu" aria-expanded="${open}"><span class="codicon codicon-add" aria-hidden="true"></span></button>`;
+}
+
+const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };
+
+/** What the page keeps of the Codex requests it shows: the answers picked or typed by `<request ID>:<question ID>`, and why one was refused. */
+export interface RequestDrafts {
+  values: ReadonlyMap<string, string>;
+  errors: ReadonlyMap<string, string>;
+  sending: ReadonlySet<string>;
+}
+
+/**
+ * A Codex session's pending request as a card at the end of the conversation (architecture.md § Conversation view), in the question card's
+ * style: a permission with its decisions as buttons; questions with their options and a field for a typed answer, a secret one hidden, and
+ * Submit; one the view cannot answer, with Open in terminal.
+ */
+export function requestCard(request: NativeRequest, drafts: RequestDrafts): string {
+  const icon = request.kind === 'permission' ? 'shield' : request.kind === 'question' ? 'question' : 'terminal';
+  const head = `<div class="request-title"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span class="request-text">${escape(request.title)}</span></div>`;
+  const busy = drafts.sending.has(request.id);
+  const error = drafts.errors.get(request.id);
+  const why = error === undefined ? '' : `<span class="question-error" role="alert">${escape(error)}</span>`;
+  const card = (body: string): string => `<li class="request-item" data-key="request-${escape(request.id)}"><div class="question-card request" data-request-card="${escape(request.id)}" role="group" aria-label="${request.kind === 'permission' ? 'Permission request' : 'Question from Codex'}">${body}</div></li>`;
+
+  if (request.kind === 'unsupported') {
+    return card(`${head}<div class="question-footer"><span class="question-state">Answer it in the terminal.</span><button type="button" class="terminal-question-open" data-action="terminal">Open in terminal</button></div>`);
+  }
+
+  if (request.kind === 'permission') {
+    const buttons = request.decisions.map((decision) => `<button type="button" class="request-button${decision === 'accept' ? ' primary' : ''}" data-action="request-decision" data-request="${escape(request.id)}" data-decision="${escape(decision)}"${busy ? ' disabled' : ''}>${escape(DECISIONS[decision] ?? decision)}</button>`).join('');
+
+    return card(`${head}<div class="question-footer">${why}${buttons}</div>`);
+  }
+
+  const fields = request.questions.map((question) => {
+    const key = `${request.id}:${question.id}`;
+    const value = drafts.values.get(key) ?? '';
+    const options = question.options
+      .map((option) => `<button type="button" class="question-option" role="radio" aria-checked="${value === option}" data-action="request-option" data-field="${escape(key)}" data-value="${escape(option)}"${busy ? ' disabled' : ''}><span class="question-mark radio${value === option ? ' checked' : ''}" aria-hidden="true">${value === option ? '<span class="radio-dot"></span>' : ''}</span><span class="question-option-text">${escape(option)}</span></button>`)
+      .join('');
+
+    return `<div class="question-block" data-key="${escape(key)}"><div class="question-text">${escape(question.question)}</div><div class="question-options" role="radiogroup" aria-label="${escape(question.question)}">${options}<input class="question-other request-field" type="${question.secret === true ? 'password' : 'text'}" data-field="${escape(key)}" placeholder="${question.options.length === 0 ? 'Answer…' : 'Other…'}" aria-label="${escape(question.question)}" value="${question.options.includes(value) ? '' : escape(value)}"${busy ? ' disabled' : ''}></div></div>`;
+  });
+  const ready = request.questions.every((question) => (drafts.values.get(`${request.id}:${question.id}`) ?? '').trim() !== '');
+
+  return card(`${head}${fields.join('')}<div class="question-footer">${why}<button type="button" class="question-submit" data-action="request-answer" data-request="${escape(request.id)}"${busy || !ready ? ' disabled' : ''}>${busy ? 'Sending…' : 'Submit'}</button></div>`);
 }
 
 /**
@@ -596,7 +724,7 @@ export function turnRow(session: SessionView | null, awaiting: boolean): string 
     );
   }
 
-  if (!awaiting || session === null) {
+  if (!awaiting || session === null || (session.requests ?? []).length > 0) {
     return '';
   }
 
@@ -616,7 +744,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return `<p class="empty">${state.connected ? 'This window has no Switchboard session.' : 'Connecting to Switchboard…'}</p>`;
   }
 
-  const plus = '<button class="icon" data-action="new" title="New session" aria-label="New session"><span class="codicon codicon-add"></span></button>';
+  const menu = page.menu ?? null;
+  const plus = `${plusButton(menu?.kind === 'provider')}${menu?.kind === 'provider' ? headerMenu(menu) : ''}`;
 
   // A folder window with no conversation yet: the folder's name and the plus, which starts one (architecture.md § Conversation view).
   if (state.scope.workItemId === null) {
@@ -624,13 +753,14 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   }
 
   const provider = providerMark(state.session?.provider);
-  const header = `<header class="header">${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
+  const header = `<header class="header">${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona, menu?.kind === 'persona')}${menu?.kind === 'persona' ? headerMenu(menu) : ''}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   // An ended session's reason sits just above the composer it disables, on every tab, with Resume; any other reason heads the conversation.
-  const ended = state.session?.state === 'ended' && state.session.reason !== null;
+  // A Codex session that ended has no reason, since a message resumes it, but gets the note and Resume too.
+  const ended = state.session?.state === 'ended';
   const notes = state.session?.reason == null || ended ? [] : [state.session.reason];
   const endedNote = !ended
     ? ''
-    : `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason!)}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
+    : `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason ?? 'The session has ended. A message or Resume continues it.')}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
   const shown = timeline(state.items, state.artifacts);
   // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).
   const canAnswer = state.connected && state.session?.conversation === 'full';
@@ -679,28 +809,25 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
     return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card, state.settings.expandReplies));
   });
+  // A Codex session's pending questions and approvals, answered in cards at the end of the conversation.
+  const requests = (state.session?.requests ?? []).map((request) => requestCard(request, page.requests ?? NO_REQUESTS)).join('');
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
-  const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 && spinner === '' ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${spinner}</ol>`;
+  const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 && spinner === '' && requests === '' ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${requests}${spinner}</ol>`;
 
   const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
   const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });
   const status = state.status;
   const statusCard = status === null || status.fallback ? '' : cardOf(cardKey('status', status.id), status.markdown, statusAnswer(state.items, status));
-  // While an AskUserQuestion menu holds the session, the view says so: the menu is answered in the terminal (voice-design § 5).
-  const requests = state.session?.requests ?? [];
-  const asking = requests.length > 0
-    ? requests.map(request => `<div class="terminal-question" role="status"><span class="terminal-question-text">${escape(request.title)}</span><button type="button" data-action="answer-request" data-request="${escape(request.id)}">${request.kind === 'unsupported' ? 'Open in terminal' : request.kind === 'permission' ? 'Review permission' : 'Answer'}</button></div>`).join('')
-    : '';
   // Each tab's panel, and each conversation's, is its own node, so a redraw keeps its scroll position and another tab or conversation starts afresh.
   const shownKey = `${state.scope.scopeGen}-${state.session?.id ?? ''}`;
   // The New messages pill sits at the bottom of the conversation's own area, just above the composer, never behind it.
   const pill = `<button class="pill" type="button" data-action="pill"${page.pill === true ? '' : ' hidden'}>New messages</button>`;
   const panel =
     page.tab === 'status'
-      ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard, open)}</div>`
+      ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard, open, page.earlier ?? null)}</div>`
       : page.tab === 'artifacts'
         ? `<div class="panel" id="panel" data-key="artifacts-${shownKey}" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
-        : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll-area" data-key="conversation-${shownKey}"><div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${pill}</div>${asking}`;
+        : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll-area" data-key="conversation-${shownKey}"><div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${pill}</div>`;
 
   return `${header}${tabs}${panel}${endedNote}`;
 }
