@@ -14,6 +14,19 @@ export interface Output {
   readonly engine: string;
 }
 
+/** One open capture: 16 kHz mono 16-bit PCM as it comes, and the audio played, pushed as it plays, for echo cancellation. */
+export interface CaptureStream {
+  stop(): void;
+  /** Audio being played, 24 kHz mono 16-bit PCM, in played order. */
+  reference(pcm: Buffer): void;
+}
+
+/** The capture device; decibri's `Microphone` in the process, a fake in tests (architecture.md § Dictation). */
+export interface Capture {
+  /** `device` is a case-insensitive part of the device's name, or null for the system default. */
+  open(device: string | null, onPcm: (pcm: Buffer) => void, onError: (error: Error) => void): Promise<CaptureStream>;
+}
+
 /** A short two-tone chime, 24 kHz 16-bit mono PCM, that the voice plays when another work item starts needing the operator. */
 export function needsYouChime(sampleRate = 24_000): Buffer {
   const tones = [

@@ -11,7 +11,14 @@ export const HELLO_DEADLINE_MS = 5_000;
 export interface VoiceTarget {
   sessionId: string;
   workItemId: number;
+  /** The session's repository as `owner/name`, from its folder's `origin` remote, whose fixed terms the recogniser loads; null or left out with none. */
+  repo?: string | null;
 }
+
+/** What capture is doing (architecture.md § Dictation), as the window's `VoiceView.mic` shows it. */
+export const MIC_STATES = ['off', 'listening', 'hearing', 'typing', 'idle-off', 'paused-other-app', 'unavailable', 'starting'] as const;
+
+export type MicState = (typeof MIC_STATES)[number];
 
 /** The focused scoped window's selected conversation's current session, or null while no scoped window has the focus. */
 export type VoiceFocus = { sessionId: string; via: 'window' } | null;
@@ -37,6 +44,14 @@ export type HubMessage =
   /** Stop speaking: the playing reply is `interrupted` where it stopped, and the queued ones `skipped`. */
   | { type: 'stop' }
   | { type: 'earcon'; kind: 'needs-you' }
+  /** Capture on or off, as the operator set it (architecture.md § Dictation). */
+  | { type: 'mic'; on: boolean }
+  /** The here window's composer has the focus: recognition in flight is finished, nothing is sent, and listening pauses until it is off. */
+  | { type: 'typing'; on: boolean }
+  /** The target's latest reply, which the turn model reads with the operator's words. */
+  | { type: 'context'; sessionId: string; lastReply: string }
+  /** A reply's heard tag, for the glossary. */
+  | { type: 'heard'; heard: string; meant: string }
   | { type: 'shutdown' };
 
 export type VoiceMessage =
@@ -45,8 +60,17 @@ export type VoiceMessage =
   | { type: 'active'; gen: number; sessionId: string | null; reason: ActiveReason }
   | { type: 'speech'; gen: number; replyId: string; sessionId: string; state: SpeechState; atMs: number | null; said: number | null }
   | { type: 'progress'; gen: number; replyId: string; sessionId: string; chars: number; atMs: number }
-  /** Playback's state: `mic` is `off` until capture (slice 10); `error` the last playback or speech failure, or null. */
-  | { type: 'audio'; mic: 'off'; engine: string; device: string | null; error: string | null };
+  /** Capture's state and the last capture, playback or speech failure, or null; `device` the capture device in use, or null. */
+  | { type: 'audio'; mic: MicState; engine: string; device: string | null; error: string | null }
+  /** The live words of an utterance, not settled yet; empty once they settled or were dropped. */
+  | { type: 'words'; gen: number; utteranceId: string; sessionId: string; text: string }
+  /** A piece of an utterance settled, with its voice check results, which a later slice adds (null until then). */
+  | { type: 'piece'; gen: number; utteranceId: string; sessionId: string; pieceId: string; text: string; score: number | null; f0: number | null; dropped: boolean }
+  /**
+   * An utterance ended: `final` when turn detection ended it, so the hub may send it; false when it was cut off (the composer took the focus,
+   * the mic went off, another app started recording, the voice moved), so the hub sends nothing. `text` is its pieces' words.
+   */
+  | { type: 'utterance'; gen: number; utteranceId: string; sessionId: string; text: string; final: boolean; interrupted: null };
 
 /** Splits a byte stream into lines; a line over the limit is an error, since the peer is not following the protocol. */
 export class LineReader {
@@ -120,7 +144,7 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
       const focus = m.focus;
       const targets = Array.isArray(m.targets) ? m.targets : null;
 
-      if (targets === null || !targets.every((one) => isObject(one) && isId(one.sessionId) && Number.isInteger(one.workItemId))) {
+      if (targets === null || !targets.every((one) => isObject(one) && isId(one.sessionId) && Number.isInteger(one.workItemId) && (one.repo === undefined || one.repo === null || isId(one.repo)))) {
         return invalid;
       }
 
@@ -130,7 +154,7 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
 
       return {
         type: 'targets',
-        targets: targets.map((one) => ({ sessionId: (one as Fields).sessionId as string, workItemId: (one as Fields).workItemId as number })),
+        targets: targets.map((one) => ({ sessionId: (one as Fields).sessionId as string, workItemId: (one as Fields).workItemId as number, repo: ((one as Fields).repo as string | null | undefined) ?? null })),
         focus: focus === null ? null : { sessionId: (focus as Fields).sessionId as string, via: 'window' },
       };
     }
@@ -157,6 +181,13 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
       return { type: m.type };
     case 'earcon':
       return m.kind === 'needs-you' ? { type: 'earcon', kind: 'needs-you' } : invalid;
+    case 'mic':
+    case 'typing':
+      return typeof m.on === 'boolean' ? { type: m.type, on: m.on } : invalid;
+    case 'context':
+      return isId(m.sessionId) && isText(m.lastReply) ? { type: 'context', sessionId: m.sessionId, lastReply: m.lastReply } : invalid;
+    case 'heard':
+      return isText(m.heard) && isText(m.meant) && m.heard.trim() !== '' && m.meant.trim() !== '' && m.heard.length <= 200 && m.meant.length <= 200 ? { type: 'heard', heard: m.heard, meant: m.meant } : invalid;
     default:
       return { error: `Unknown message type ${JSON.stringify(m.type)}.` };
   }

@@ -96,6 +96,14 @@ export class Router {
     return true;
   }
 
+  /** The operator spoke: an away timeout running counts again from now (voice-design § 11, decision 1). */
+  spoke(): void {
+    if (this.#away !== null) {
+      this.#clear('away');
+      this.#startAway();
+    }
+  }
+
   close(): void {
     this.#clear('debounce');
     this.#clear('away');

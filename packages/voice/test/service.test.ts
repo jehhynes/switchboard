@@ -20,6 +20,80 @@ function setup() {
 }
 
 describe('VoiceService', () => {
+  it('passes the mic, the composer\'s focus, the context, heard tags and the target to dictation, reports capture\'s state, and feeds it the audio played', async () => {
+    const clock = new Clock();
+    const tts = new FakeTts();
+    const output = new FakeOutput();
+    const sent: VoiceMessage[] = [];
+    const calls: string[] = [];
+    let hooks!: { changed(): void; spoke(): void; send(message: VoiceMessage): void };
+    let state: 'off' | 'listening' = 'off';
+    const service = new VoiceService({
+      tts,
+      output,
+      send: (message) => sent.push(message),
+      heard: (heard, meant) => calls.push(`heard ${heard}=${meant}`),
+      dictation: (given) => {
+        hooks = given;
+        return {
+          get state() {
+            return state;
+          },
+          error: null,
+          mic: (on: boolean) => calls.push(`mic ${on}`),
+          typing: (on: boolean) => calls.push(`typing ${on}`),
+          context: (sessionId: string, lastReply: string) => calls.push(`context ${sessionId} ${lastReply}`),
+          target: (gen: number, sessionId: string | null, repo: string | null) => calls.push(`target ${gen} ${sessionId} ${repo}`),
+          reference: (pcm: Buffer) => calls.push(`reference ${pcm.length}`),
+          settingsChanged: () => calls.push('settings'),
+          close: () => calls.push('close'),
+        } as unknown as import('../src/dictation.js').Dictation;
+      },
+      now: clock.now,
+      log: () => undefined,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      every: clock.every,
+    });
+
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, inputDevice: 'Headset' } });
+    service.receive({ type: 'mic', on: true });
+    service.receive({ type: 'typing', on: true });
+    service.receive({ type: 'context', sessionId: 's1', lastReply: 'Done.' });
+    service.receive({ type: 'heard', heard: 'a llama', meant: 'Ollama' });
+    service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: 'acme/app' }], focus: null });
+    service.receive({ type: 'talk-here', sessionId: 's1' });
+    expect(calls).toEqual(['settings', 'mic true', 'typing true', 'context s1 Done.', 'heard a llama=Ollama', 'target 1 s1 acme/app']);
+
+    // Turning voice off in the settings stops capture, whatever the mic was set to.
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: false } });
+    expect(calls.slice(-2)).toEqual(['settings', 'mic false']);
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true, inputDevice: 'Headset' } });
+
+    state = 'listening';
+    hooks.changed();
+    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', error: null });
+    hooks.send({ type: 'words', gen: 1, utteranceId: 'u', sessionId: 's1', text: 'hi' });
+    expect(sent.at(-1)).toMatchObject({ type: 'words', text: 'hi' });
+
+    // Speech restarts the away count: with no window focused, Talk here times out two minutes after the last speech.
+    clock.advance(100_000);
+    hooks.spoke();
+    clock.advance(100_000);
+    expect(sent.filter((one) => one.type === 'active').at(-1)).toMatchObject({ sessionId: 's1' });
+    clock.advance(20_000);
+    expect(sent.filter((one) => one.type === 'active').at(-1)).toMatchObject({ sessionId: null, reason: 'gone' });
+    expect(calls.at(-1)).toBe('target 2 null null');
+
+    service.receive({ type: 'talk-here', sessionId: 's1' });
+    service.receive({ type: 'speak', gen: 3, replyId: 'r1', sessionId: 's1', text: 'One.', tone: null, turn: null, ...VOICE });
+    tts.requests[0]!.audio(480);
+    await settle();
+    expect(calls).toContain('reference 480');
+    service.close();
+    expect(calls.at(-1)).toBe('close');
+  });
+
   it('greets a hub with the target and playback state, and configures speech from the settings', () => {
     const { tts, service } = setup();
 

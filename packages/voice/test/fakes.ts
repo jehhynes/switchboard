@@ -1,4 +1,5 @@
-import type { Output, Playback } from '../src/output.js';
+import type { AsrEngine, AsrStream } from '../src/asr.js';
+import type { Capture, CaptureStream, Output, Playback } from '../src/output.js';
 import type { SocketLike, Speaking, SpeechVoice } from '../src/tts.js';
 
 /** Timers run by hand, in time order. */
@@ -180,6 +181,71 @@ export class FakeSocket implements SocketLike {
 
   event(event: Record<string, unknown>): void {
     this.onmessage?.({ data: JSON.stringify(event) });
+  }
+}
+
+/** A capture device the test feeds: `pcm` delivers audio to the open stream, `fail` fails it. */
+export class FakeCapture implements Capture {
+  readonly devices: Array<string | null> = [];
+  readonly references: Buffer[] = [];
+  stream: { onPcm: (pcm: Buffer) => void; onError: (error: Error) => void; stopped: boolean } | null = null;
+  opens = 0;
+  fail: Error | null = null;
+
+  async open(device: string | null, onPcm: (pcm: Buffer) => void, onError: (error: Error) => void): Promise<CaptureStream> {
+    this.devices.push(device);
+    this.opens++;
+
+    if (this.fail !== null) {
+      throw this.fail;
+    }
+
+    const stream = { onPcm, onError, stopped: false };
+
+    this.stream = stream;
+
+    return {
+      stop: () => {
+        stream.stopped = true;
+      },
+      reference: (pcm) => this.references.push(pcm),
+    };
+  }
+
+  /** Delivers `ms` of silence to the open stream. */
+  pcm(ms: number): void {
+    if (this.stream !== null && !this.stream.stopped) {
+      this.stream.onPcm(Buffer.alloc(ms * 32));
+    }
+  }
+
+  get open_(): boolean {
+    return this.stream !== null && !this.stream.stopped;
+  }
+}
+
+/** A recogniser whose words the test sets: each stream reads `text` as it stood when audio came, and `held` once finished. */
+export class FakeEngine implements AsrEngine {
+  text = '';
+  held = '';
+  streams = 0;
+
+  stream(): AsrStream {
+    this.streams++;
+    this.text = '';
+
+    let text = '';
+
+    return {
+      accept: () => {
+        text = this.text;
+      },
+      text: () => text,
+      finish: () => {
+        text = `${this.text} ${this.held}`.trim();
+        this.held = '';
+      },
+    };
   }
 }
 

@@ -1,8 +1,15 @@
 import { createConnection, createServer } from 'node:net';
 import type { Server } from 'node:net';
-import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { decibriOutput } from './decibri.js';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { ASR_MODEL, ASR_RATE, sherpaEngine } from './asr.js';
+import { decibriCapture, decibriOutput } from './decibri.js';
+import { Dictation } from './dictation.js';
+import { writeHotwords } from './hotwords.js';
+import { watchMicUse } from './micUse.js';
+import { TURN_MODEL, turnModel } from './turn.js';
+import { Vocabulary } from './vocabulary.js';
 import { PROTOCOL } from './protocol.js';
 import { parseVoiceRecord, voiceLockAddress, voiceRecordPath } from './record.js';
 import { VoiceServer } from './server.js';
@@ -92,7 +99,38 @@ async function main(): Promise<void> {
   const build = option('build') ?? 'dev';
   const token = randomBytes(32).toString('hex');
   const tts = new Tts({ key: () => readKey() });
-  const service = new VoiceService({ tts, output: await decibriOutput(SAMPLE_RATE), send: (message) => server.send(message), now: Date.now, log });
+  // Models, terms, the glossary and hotword files live in <home>/voice (architecture.md § Dictation); the scripts beside this one.
+  const voiceHome = join(home, 'voice');
+  const scripts = dirname(process.argv[1]!);
+  const vocabulary = new Vocabulary(voiceHome, Date.now, log);
+  const capture = await decibriCapture(ASR_RATE, SAMPLE_RATE);
+  const service: VoiceService = new VoiceService({
+    tts,
+    output: await decibriOutput(SAMPLE_RATE),
+    send: (message) => server.send(message),
+    heard: (heard, meant) => void vocabulary.heard(heard, meant),
+    dictation: (hooks) =>
+      new Dictation({
+        capture,
+        recognizer: (terms) => {
+          const modelDir = join(voiceHome, 'models', ASR_MODEL);
+
+          return existsSync(join(modelDir, 'tokens.txt')) ? sherpaEngine(modelDir, writeHotwords(voiceHome, modelDir, terms), process.argv[1]!) : { error: `No speech recognition model in ${modelDir}.` };
+        },
+        vocabulary,
+        turn: turnModel(join(voiceHome, 'models', TURN_MODEL), join(scripts, 'turn.js'), log),
+        watchMicUse: (changed, failed) => watchMicUse({ script: join(scripts, 'micuse.ps1'), changed, failed, log }),
+        settings: () => service.settings,
+        send: hooks.send,
+        changed: hooks.changed,
+        spoke: hooks.spoke,
+        newId: () => randomUUID(),
+        now: Date.now,
+        log,
+      }),
+    now: Date.now,
+    log,
+  });
   let idle: NodeJS.Timeout | null = null;
   let exiting = false;
   const exit = async (reason: string): Promise<void> => {

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The voice process: speech out through OpenAI realtime speech and decibri playback, and the voice target. Holds no conversation, session or work item state; the main entry imports no native module.",
+  "description": "The voice process: speech out through OpenAI realtime speech and decibri playback, dictation through decibri capture, sherpa-onnx recognition and a turn model, and the voice target. Holds no conversation, session or work item state; the main entry imports no native module.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -28,6 +28,9 @@
     "vitest": "^3.2.0"
   },
   "optionalDependencies": {
-    "decibri": "5.8.0"
+    "@huggingface/tokenizers": "0.2.0",
+    "decibri": "5.8.0",
+    "onnxruntime-node": "1.31.1",
+    "sherpa-onnx-node": "2.0.1"
   }
 }

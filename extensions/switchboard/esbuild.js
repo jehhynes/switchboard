@@ -37,18 +37,32 @@ const holder = {
   plugins: [{ name: 'holder-files', setup: (build) => build.onEnd((result) => { if (result.errors.length === 0) { copyNodePty(); writeManifest('dist/holder'); } }) }],
 };
 
-// The voice process runs on the operator's Node.js too, since decibri, its playback, is a native module (architecture.md § Voice).
-// decibri stays outside the bundle: it loads its binary from its platform package.
+// The voice process runs on the operator's Node.js too, since decibri (capture and playback) and sherpa-onnx (recognition) are native modules
+// (architecture.md § Voice, § Dictation); turn.js is its turn model's process, which loads onnxruntime apart from sherpa-onnx's own runtime.
+// The native modules stay outside the bundle: each loads its binary from its own or its platform package.
 const voice = {
-  entryPoints: { voice: '../../packages/voice/src/main.ts' },
+  entryPoints: { voice: '../../packages/voice/src/main.ts', turn: '../../packages/voice/src/turnWorker.ts' },
   bundle: true,
   format: 'cjs',
   platform: 'node',
   target: 'node22',
-  external: ['decibri'],
+  external: ['decibri', 'sherpa-onnx-node', 'onnxruntime-node'],
   outdir: 'dist/voice',
   logLevel: 'info',
-  plugins: [{ name: 'voice-files', setup: (build) => build.onEnd((result) => { if (result.errors.length === 0) { copyDecibri(); writeManifest('dist/voice'); } }) }],
+  plugins: [
+    {
+      name: 'voice-files',
+      setup: (build) =>
+        build.onEnd((result) => {
+          if (result.errors.length === 0) {
+            copyDecibri();
+            copyRecognition();
+            fs.copyFileSync('../../packages/voice/assets/micuse.ps1', 'dist/voice/micuse.ps1');
+            writeManifest('dist/voice');
+          }
+        }),
+    },
+  ],
 };
 
 // The History, pane and conversation scripts run in webviews, and the Mermaid script in the Markdown preview: browsers.
@@ -161,6 +175,52 @@ function copyDecibri() {
   for (const file of filesUnder(binary).filter((one) => !one.endsWith('.md'))) {
     fs.mkdirSync(path.dirname(path.join('dist/voice/node_modules', name, file)), { recursive: true });
     fs.copyFileSync(path.join(binary, file), path.join('dist/voice/node_modules', name, file));
+  }
+}
+
+/** Copies the files of an installed package that `wanted` keeps into the voice build's node_modules; false when it is not installed. */
+function copyPackage(name, wanted, from) {
+  // Looked up by folder, since a package's exports can hide its package.json.
+  const source = (require('node:module').createRequire(from === undefined ? __filename : path.join(from, 'x.js')).resolve.paths(name) ?? [])
+    .map((dir) => path.join(dir, name))
+    .find((dir) => fs.existsSync(path.join(dir, 'package.json')));
+
+  if (source === undefined) {
+    return false;
+  }
+
+  for (const file of filesUnder(source).filter(wanted)) {
+    fs.mkdirSync(path.dirname(path.join('dist/voice/node_modules', name, file)), { recursive: true });
+    fs.copyFileSync(path.join(source, file), path.join('dist/voice/node_modules', name, file));
+  }
+
+  return true;
+}
+
+/**
+ * Copies what recognition and the turn model load at run time for this platform: sherpa-onnx-node's scripts and its platform package beside it
+ * (`sherpa-onnx-win-x64` on Windows), and onnxruntime-node's scripts and this platform's binaries with onnxruntime-common.
+ */
+function copyRecognition() {
+  const script = (file) => file === 'package.json' || (file.endsWith('.js') && !file.includes('/'));
+
+  if (!copyPackage('sherpa-onnx-node', script)) {
+    console.warn('sherpa-onnx-node is not installed, so the voice process cannot recognise speech.');
+  } else if (!copyPackage(`sherpa-onnx-${process.platform === 'win32' ? 'win' : process.platform}-${process.arch}`, (file) => !file.endsWith('.md'), path.join(path.dirname(require.resolve('sherpa-onnx-node'))))) {
+    console.warn('sherpa-onnx has no package for this platform, so the voice process cannot recognise speech.');
+  }
+
+  // The turn model's tokenizer, which the turn process loads by name.
+  if (!copyPackage('@huggingface/tokenizers', (file) => !file.endsWith('.md') && !file.startsWith('types/'))) {
+    console.warn('@huggingface/tokenizers is not installed, so turn detection waits out the pause alone.');
+  }
+
+  const binaries = `bin/napi-v6/${process.platform}/${process.arch}/`;
+
+  if (!copyPackage('onnxruntime-node', (file) => file === 'package.json' || (file.startsWith('dist/') && file.endsWith('.js')) || file.startsWith(binaries))) {
+    console.warn('onnxruntime-node is not installed, so turn detection waits out the pause alone.');
+  } else {
+    copyPackage('onnxruntime-common', (file) => file === 'package.json' || (file.startsWith('dist/cjs/') && (file.endsWith('.js') || file.endsWith('/package.json'))), path.dirname(path.dirname(require.resolve('onnxruntime-node'))));
   }
 }
 

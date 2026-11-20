@@ -1,7 +1,8 @@
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
+import type { Dictation } from './dictation.js';
 import type { Output } from './output.js';
-import type { HubMessage, VoiceMessage } from './protocol.js';
+import type { HubMessage, VoiceMessage, VoiceTarget } from './protocol.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
 import type { Speaking, SpeechVoice, TtsVoiceSettings } from './tts.js';
@@ -9,6 +10,10 @@ import type { Speaking, SpeechVoice, TtsVoiceSettings } from './tts.js';
 export interface VoiceServiceDeps {
   tts: { configure(settings: TtsVoiceSettings): void; warm(): void; speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void, as?: SpeechVoice): Speaking; close(): void };
   output: Output;
+  /** Dictation (architecture.md § Dictation), made with the service's hooks; without it the mic stays off. */
+  dictation?: (hooks: { changed(): void; spoke(): void; send(message: VoiceMessage): void }) => Dictation;
+  /** A reply's heard tag, for the glossary. */
+  heard?(heard: string, meant: string): void;
   send(message: VoiceMessage): void;
   now(): number;
   log(line: string): void;
@@ -26,11 +31,36 @@ export class VoiceService {
   #error: string | null = null;
   readonly #router: Router;
   readonly #speech: Speech;
+  readonly #dictation: Dictation | null;
+  #targets = new Map<string, VoiceTarget>();
 
   constructor(private readonly deps: VoiceServiceDeps) {
+    this.#dictation =
+      deps.dictation?.({
+        changed: () => deps.send(this.#audio()),
+        spoke: () => this.#router.spoke(),
+        send: (message) => deps.send(message),
+      }) ?? null;
+    // What plays is also the echo canceller's reference, so a reply played aloud is not heard as the operator.
+    const output: Output = {
+      engine: deps.output.engine,
+      open: async (device) => {
+        const playback = await deps.output.open(device);
+
+        return {
+          write: (pcm) => {
+            this.#dictation?.reference(pcm);
+            return playback.write(pcm);
+          },
+          drain: () => playback.drain(),
+          stop: () => playback.stop(),
+        };
+      },
+    };
+
     this.#speech = new Speech({
       tts: deps.tts,
-      output: deps.output,
+      output,
       device: () => this.#settings.outputDevice,
       report: (message) => deps.send(message),
       failed: (error) => this.#failed(error),
@@ -43,6 +73,7 @@ export class VoiceService {
         this.#speech.halt();
         deps.log(`voice target ${sessionId ?? 'none'} (${reason}), generation ${gen}`);
         deps.send({ type: 'active', gen, sessionId, reason });
+        this.#dictation?.target(gen, sessionId, sessionId === null ? null : (this.#targets.get(sessionId)?.repo ?? null));
 
         if (sessionId !== null) {
           deps.tts.warm();
@@ -65,6 +96,7 @@ export class VoiceService {
   receive(message: HubMessage): void {
     switch (message.type) {
       case 'targets':
+        this.#targets = new Map(message.targets.map((target) => [target.sessionId, target]));
         this.#router.update(message.targets, message.focus);
         return;
       case 'talk-here':
@@ -76,6 +108,25 @@ export class VoiceService {
       case 'settings':
         this.#settings = { ...DEFAULT_SETTINGS.voice, ...message.settings };
         this.deps.tts.configure({ voice: this.#settings.voice, style: this.#settings.style, speed: this.#settings.speed, expressive: this.#settings.expressive });
+        this.#dictation?.settingsChanged();
+
+        // With voice turned off nothing listens, whatever the mic was set to.
+        if (!this.#settings.enabled) {
+          this.#dictation?.mic(false);
+        }
+
+        return;
+      case 'mic':
+        this.#dictation?.mic(message.on);
+        return;
+      case 'typing':
+        this.#dictation?.typing(message.on);
+        return;
+      case 'context':
+        this.#dictation?.context(message.sessionId, message.lastReply);
+        return;
+      case 'heard':
+        this.deps.heard?.(message.heard, message.meant);
         return;
       case 'speak':
         if (message.gen !== this.#router.gen || message.sessionId !== this.#router.target) {
@@ -99,7 +150,13 @@ export class VoiceService {
     }
   }
 
+  /** The settings, as the hub last sent them, for dictation. */
+  get settings(): VoiceSettings {
+    return this.#settings;
+  }
+
   close(): void {
+    this.#dictation?.close();
     this.#router.close();
     this.#speech.halt();
     this.deps.tts.close();
@@ -113,6 +170,12 @@ export class VoiceService {
   }
 
   #audio(): VoiceMessage {
-    return { type: 'audio', mic: 'off', engine: this.deps.output.engine, device: this.#settings.outputDevice, error: this.#error };
+    return {
+      type: 'audio',
+      mic: this.#dictation?.state ?? 'off',
+      engine: this.deps.output.engine,
+      device: this.#dictation === null ? this.#settings.outputDevice : this.#settings.inputDevice,
+      error: this.#dictation?.error ?? this.#error,
+    };
   }
 }

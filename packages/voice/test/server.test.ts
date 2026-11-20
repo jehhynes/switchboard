@@ -94,7 +94,7 @@ describe('voice protocol', () => {
   it('reads each hub message and refuses invalid fields', () => {
     expect(parseHubMessage('{"type":"targets","targets":[{"sessionId":"s1","workItemId":3}],"focus":{"sessionId":"s1","via":"window"}}')).toEqual({
       type: 'targets',
-      targets: [{ sessionId: 's1', workItemId: 3 }],
+      targets: [{ sessionId: 's1', workItemId: 3, repo: null }],
       focus: { sessionId: 's1', via: 'window' },
     });
     expect(parseHubMessage('{"type":"targets","targets":[],"focus":null}')).toEqual({ type: 'targets', targets: [], focus: null });
