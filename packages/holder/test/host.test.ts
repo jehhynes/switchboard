@@ -354,7 +354,7 @@ describe('attach', () => {
 
     await tick();
     expect(state.ptys[0]!.sizes).toEqual([[120, 40]]);
-    expect(one.isReplayed()).toBe(true);
+    await expect.poll(one.isReplayed).toBe(true);
     expect(one.received.join('')).toContain('hello \u001b[1mworld');
     state.ptys[0]!.emit('more');
     one.attachment.input('\u001b[200~pasted\u001b[201~\r');
@@ -562,22 +562,23 @@ describe('attach', () => {
 
     await tick();
 
-    // In batches the fast client keeps up with; the paused one falls behind.
-    for (let batch = 0; batch < 40; batch++) {
+    // Fill the paused client's kernel buffer, whose size differs by platform, while the reader keeps up.
+    let bytes = 0;
+
+    await expect.poll(async () => {
       for (let index = 0; index < 10; index++) {
         state.ptys[0]!.emit('y'.repeat(4096));
+        bytes += 4096;
       }
 
-      await tick(10);
-    }
-
-    await tick(200);
+      await expect.poll(() => fast.received.join('').length).toBeGreaterThanOrEqual(bytes);
+      return (await client.list())[0]?.clients;
+    }, { timeout: 15_000 }).toBe(1);
     expect((await client.list())[0]).toMatchObject({ clients: 1, exitedAt: null });
-    expect(fast.received.join('').length).toBeGreaterThanOrEqual(400 * 4096);
     fast.attachment.close();
     slow.socket.destroy();
     client.close();
-  });
+  }, 20_000);
 });
 
 describe('ending a session by closing its terminal', () => {

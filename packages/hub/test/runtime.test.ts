@@ -2685,6 +2685,25 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     runtime.stop();
   });
 
+  it.each([false, true])('drops a deferred turn end after shutdown, including a rejected read (%s)', async (reject) => {
+    const { runtime, store, logs } = setup(config({ codeMode: true }), () => T0, { codeMode: fakeRunner() });
+    runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await runtime.settled();
+    const id = store.activeSessions()[0]!.id;
+    let finish = (): void => {};
+    runtime.setConversationReader({
+      read: () => {},
+      catchUp: () => new Promise<void>((resolve, fail) => { finish = () => reject ? fail(new Error('disconnected')) : resolve(); }),
+    });
+    runtime.send({ type: 'marker', sessionId: id, state: 'idle', detail: null });
+    runtime.stop();
+    store.close();
+    logs.length = 0;
+    finish();
+    await runtime.settled();
+    expect(logs).toEqual([]);
+  });
+
   it('finds a card after more replies than one page, and takes no message still being typed as its answer (PRD R103)', () => {
     const store = Store.open(':memory:');
     const reply = (id: string, opening: string, at: number) => store.addReply({ id, sessionId: 's1', workItemId: 1, at, kind: 'reply', answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });

@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
+import { hostKey, PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
 import type { Interruption, Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView, typedText } from '../src/conversation.js';
@@ -483,7 +483,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
       expect(scopes.scope(key)?.conversations).toEqual([{ workItemId: inFolder, primary: false }]);
     }
 
-    expect(scopes.keysOf(support.toLowerCase())).toHaveLength(spellings.length);
+    expect(scopes.keysOf(support)).toHaveLength(spellings.length);
 
     writeFileSync(join(dir, 'a.txt'), '');
 
@@ -564,7 +564,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
 
     scopes.close(folder);
     expect(scopes.selectFor(newer, support)).toEqual({ keys: [], selected: true });
-    expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
+    expect(store.windowBinding(hostKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
     expect(scopes.scope(scopes.open(null, view, link))).toMatchObject({ kind: 'folder', workItemId: newer, scopeGen: 3 });
   });
 
@@ -594,7 +594,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     // Asked by a link to the folder: hosted by and run in its canonical folder, and stored as that folder's selection before any window opens.
     expect(service.dockConversation({ folder: link, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
     expect(calls).toEqual([[support, support]]);
-    expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: 3, selectedSessionId: 'd1', title: 'support' });
+    expect(store.windowBinding(hostKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: 3, selectedSessionId: 'd1', title: 'support' });
 
     // The response was lost: the retry, by another spelling, answers the same work item and makes none.
     expect(service.dockConversation({ folder: `${support}${sep}`, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
@@ -629,7 +629,7 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     }
 
     expect(service.dockConversation({ folder: support, opId: 'x' })).toEqual({ status: 409, body: { error: 'New sessions need Code Mode (sessions.codeMode).' } });
-    expect(store.windowBinding(windowFileKey(support))).toBeNull();
+    expect(store.windowBinding(hostKey(support))).toBeNull();
   });
 });
 

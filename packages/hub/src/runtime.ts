@@ -312,8 +312,12 @@ export class Runtime {
 
     this.track(
       read
-        .catch((error: unknown) => this.deps.log(`conversation read before a turn end failed: ${String(error)}`))
+        .catch((error: unknown) => {
+          if (!this.stopped) this.deps.log(`conversation read before a turn end failed: ${String(error)}`);
+        })
         .then(() => {
+          if (this.stopped) return;
+
           const now = this.deps.store.session(id!);
 
           if (now !== null && now.state === state && now.stateAt === stateAt) {
