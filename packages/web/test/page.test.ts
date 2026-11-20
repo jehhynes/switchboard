@@ -216,6 +216,66 @@ describe('the page', () => {
     page.close();
   });
 
+  it("shows dictation's live words under the box and the hub's draft in it, never over text typed after it (architecture.md § Dictation)", () => {
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+
+    const input = root.querySelector('textarea')!;
+    const live = root.querySelector<HTMLElement>('.live-words')!;
+
+    expect(live.hidden).toBe(true);
+    source.emit('words', { messageId: 'u1', text: 'fix the' });
+    expect(live.hidden).toBe(false);
+    expect(live.textContent).toBe('fix the');
+    source.emit('draft', { text: 'fix the login', sessionId: 's' });
+    source.emit('words', { messageId: 'u1', text: '' });
+    expect(live.hidden).toBe(true);
+    expect(input.value).toBe('fix the login');
+    source.emit('draft', { text: 'fix the login flow', sessionId: 's' });
+    expect(input.value).toBe('fix the login flow');
+    // Another session's draft, and one that would replace typed text, leave the box alone.
+    source.emit('draft', { text: 'elsewhere', sessionId: 'other' });
+    expect(input.value).toBe('fix the login flow');
+    input.value = 'my own words';
+    source.emit('draft', { text: 'fix the login flow now', sessionId: 's' });
+    expect(input.value).toBe('my own words');
+    page.close();
+  });
+
+  it("fills the box with a draft that came while a message was being sent once the send answered, keeps each conversation's draft baseline, and clears live words on a switch", async () => {
+    const { page, source } = start();
+    const helloOn = (workItemId: number, sessionId: string) =>
+      source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, workItemId, sessionId }, sessions: [session({ id: sessionId })], items: [], more: false, status: null, artifacts: [] });
+
+    helloOn(1, 's');
+
+    const input = root.querySelector('textarea')!;
+    const live = root.querySelector<HTMLElement>('.live-words')!;
+
+    input.value = 'typed first';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    // Dictation goes on while the typed message is being sent.
+    source.emit('draft', { text: 'spoken next', sessionId: 's' });
+    expect(input.value).toBe('typed first');
+    await flush();
+    await flush();
+    expect(input.value).toBe('spoken next');
+
+    // A, then B, then A again: A's draft still follows the hub, since nothing was typed over it.
+    source.emit('words', { messageId: 'u1', text: 'half heard' });
+    helloOn(2, 's2');
+    expect(live.hidden).toBe(true);
+    source.emit('draft', { text: 'for two', sessionId: 's2' });
+    expect(input.value).toBe('for two');
+    helloOn(1, 's');
+    expect(input.value).toBe('spoken next');
+    source.emit('draft', { text: 'spoken next and more', sessionId: 's' });
+    expect(input.value).toBe('spoken next and more');
+    page.close();
+  });
+
   it('disables the composer with the reason for a session it cannot talk to', () => {
     const { page, source } = start();
 

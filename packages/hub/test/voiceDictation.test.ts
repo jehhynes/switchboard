@@ -192,6 +192,22 @@ describe('VoiceControl dictation', () => {
     expect(control.dictated('k1', 's1')).toBeNull();
   });
 
+  it('shows live words in every window and page showing the target session, while the draft goes to the one window dictation picked', async () => {
+    const { connection, windows, notified, piece } = await setup();
+
+    windows.set('page', scope('page', 1, 's1'));
+    connection.receive({ type: 'words', gen: 1, utteranceId: 'u1', sessionId: 's1', text: 'fix the' });
+    piece('fix the');
+    connection.receive({ type: 'words', gen: 1, utteranceId: 'u1', sessionId: 's1', text: '' });
+    expect(events(notified, 'words')).toEqual([
+      ['k1', { messageId: 'u1', text: 'fix the' }],
+      ['page', { messageId: 'u1', text: 'fix the' }],
+      ['k1', { messageId: 'u1', text: '' }],
+      ['page', { messageId: 'u1', text: '' }],
+    ]);
+    expect(events(notified, 'draft')).toEqual([['k1', { text: 'fix the', sessionId: 's1' }]]);
+  });
+
   it('leaves the draft unsent while the composer has the focus, after a cut, or for an older generation, and Enter then sends it as a voice message', async () => {
     const { control, connection, dictated, piece, end, notified } = await setup();
 

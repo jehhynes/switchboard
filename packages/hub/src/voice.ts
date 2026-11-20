@@ -934,9 +934,12 @@ export class VoiceControl {
       case 'words': {
         const heard = message.text === '' ? (this.#heard.get(message.utteranceId) ?? null) : this.#heardFor(message.gen, message.utteranceId, message.sessionId);
 
-        // Live words only in the window the voice is in.
-        if (heard !== null && heard.gen === this.#target.gen) {
-          this.#notify(heard.key, 'words', { messageId: message.utteranceId, text: message.text });
+        // Live words show in every window and page showing the session, whichever one dictation goes to, since they are display only; none
+        // while dictation types into the session's terminal, whose words no composer receives.
+        if (heard !== null && heard.gen === this.#target.gen && heard.key !== TERMINAL) {
+          for (const key of this.deps.windows.keys().filter((one) => this.deps.windows.scope(one)?.sessionId === heard.sessionId)) {
+            this.deps.notify(key, 'words', { messageId: message.utteranceId, text: message.text });
+          }
         }
 
         return;

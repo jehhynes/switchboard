@@ -6,7 +6,7 @@ import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView } from './types.js';
 
 /** The stream's event types the page reads. */
-export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress'];
+export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft'];
 /** How long an unread reply or status must be visible on a focused page before it counts as seen (architecture.md § Unread). */
 export const SEEN_MS = 1_000;
 const SEEN_CHECK_MS = 250;
@@ -60,7 +60,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- The composer ----
   composerHost.innerHTML =
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span><button class="dismiss" type="button" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>' +
-    '<div class="composer"><div class="composer-menu" role="listbox" hidden></div><textarea rows="1" aria-label="Message"></textarea><div class="composer-footer"><div class="composer-controls">' +
+    '<div class="composer"><div class="composer-menu" role="listbox" hidden></div><textarea rows="1" aria-label="Message"></textarea><div class="live-words" aria-live="polite" hidden></div><div class="composer-footer"><div class="composer-controls">' +
     '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button><div class="voice-controls"></div></div>' +
     // The microphone's place, for dictation in a later slice.
     '<span class="composer-mic" hidden></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up"></span></button></div></div>';
@@ -70,6 +70,32 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const errorBox = composerHost.querySelector<HTMLElement>('.composer-error')!;
   const menu = composerHost.querySelector<HTMLElement>('.composer-menu')!;
   const voiceControls = composerHost.querySelector<HTMLElement>('.voice-controls')!;
+  const liveWords = composerHost.querySelector<HTMLElement>('.live-words')!;
+  // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it, and one that came
+  // while a message was being sent, which fills the box once the send answered.
+  const hubDrafts = new Map<string, string>();
+  let heldDraft: { sessionId: string; text: string } | null = null;
+  const takeHubDraft = (sessionId: string, text: string): void => {
+    const before = hubDrafts.get(sessionId) ?? '';
+
+    hubDrafts.set(sessionId, text);
+
+    if (sessionId !== state.session?.id) {
+      return;
+    }
+
+    if (sending) {
+      heldDraft = { sessionId, text };
+      return;
+    }
+
+    if (input.value === '' || input.value === before) {
+      input.value = text;
+      keepDraft();
+      grow();
+      refresh();
+    }
+  };
   let sending = false;
   let draftOf: number | null = null;
   let chosen: string | null = null;
@@ -212,6 +238,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const answer = await command('send', { ...target, text, ...(asCommand ? { command: true } : {}) });
 
     sending = false;
+    const dictated = heldDraft;
+
+    heldDraft = null;
     input.readOnly = false;
     composerHost.classList.remove('sending');
 
@@ -224,7 +253,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       if (from === draftOf) {
-        input.value = '';
+        input.value = dictated !== null && dictated.sessionId === target.sessionId ? dictated.text : '';
         chosen = null;
         showError(null);
       }
@@ -235,6 +264,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         delete all[from];
         localStorage.setItem(DRAFTS, JSON.stringify(all));
       }
+
+      keepDraft();
     } else if (late !== undefined) {
       // Refused before its send answered: the text stays where it was typed, with why.
       unsent.delete(id!);
@@ -385,6 +416,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (id !== draftOf) {
       draftOf = id;
+      // Live words belong to the conversation they were heard for; its clearing event may never reach this one.
+      liveWords.textContent = '';
+      liveWords.hidden = true;
       input.value = id === null ? '' : (drafts()[id] ?? '');
       chosen = null;
       walk = null;
@@ -905,6 +939,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
 
         reconcile();
+      }
+
+      // Dictation (architecture.md § Dictation): live words show dimmed under the box; the hub's draft fills the box unless the operator typed over it.
+      if (type === 'words') {
+        liveWords.textContent = String(data['text'] ?? '');
+        liveWords.hidden = liveWords.textContent === '';
+      } else if (type === 'draft' && typeof data['sessionId'] === 'string') {
+        takeHubDraft(data['sessionId'], String(data['text'] ?? ''));
       }
 
       // A message this page sent that was not sent: a card's answer goes back to its card, any other text to its own work item's draft.
