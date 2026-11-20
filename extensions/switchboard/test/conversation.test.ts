@@ -826,6 +826,17 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(html).toContain('<div class="voice-line" title="Dictated in 2 pieces:\nfix the\n(dropped) login · match 0.82 · 118 Hz"><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated</span></div>');
     expect(html).toContain('<div class="voice-line" title="Dictated"><span class="codicon codicon-mic" aria-hidden="true"></span><span>partial</span></div>');
     expect(html.match(/voice-line/g)).toHaveLength(2);
+
+    const over = renderConversation(
+      state([
+        message('v3', T0, 'hold on', { origin: 'voice', delivery: 'sent', interrupted: { replyId: 'r1', said: 'The session token', rest: 'is refreshed.' } }),
+        message('v4', T0 + 1, 'stop', { origin: 'voice', delivery: 'sent', interrupted: { replyId: 'r2', said: '', rest: 'Done.' } }),
+      ]),
+      new Set(),
+    );
+
+    expect(over).toContain('<div class="voice-line" title="Dictated\nSpoke over the reply after &#34;The session token&#34;."><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated · interrupted the reply</span></div>');
+    expect(over).toContain('title="Dictated\nSpoke over the reply before its first words."');
   });
 
   it('draws one mic button whose glyph and tooltip carry the mic state, and nothing with voice off (architecture.md § Dictation)', () => {

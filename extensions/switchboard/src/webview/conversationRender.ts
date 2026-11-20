@@ -155,9 +155,13 @@ function message(item: MessageView, stamped: boolean): string {
 /** A dictated message's line under its box: the mic glyph, "partial" for a part of one still being spoken, and its pieces as the tooltip. */
 function voiceLine(item: MessageView): string {
   const pieces = (item.pieces ?? []).map((piece) => `${piece.dropped ? '(dropped) ' : ''}${piece.text}${piece.score === null ? '' : ` · match ${piece.score.toFixed(2)}`}${piece.f0 === null ? '' : ` · ${Math.round(piece.f0)} Hz`}`);
-  const title = pieces.length === 0 ? 'Dictated' : `Dictated in ${pieces.length} piece${pieces.length === 1 ? '' : 's'}:\n${pieces.join('\n')}`;
+  const dictated = pieces.length === 0 ? 'Dictated' : `Dictated in ${pieces.length} piece${pieces.length === 1 ? '' : 's'}:\n${pieces.join('\n')}`;
+  // Spoken over a reply being read aloud, which stopped it (architecture.md § Voice check and barge-in).
+  const over = item.interrupted === undefined ? '' : item.interrupted.said === '' ? 'Spoke over the reply before its first words.' : `Spoke over the reply after "${item.interrupted.said}".`;
+  const title = over === '' ? dictated : `${dictated}\n${over}`;
+  const label = `${item.partial === true ? 'partial' : 'dictated'}${item.interrupted === undefined ? '' : ' · interrupted the reply'}`;
 
-  return `<div class="voice-line" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${item.partial === true ? 'partial' : 'dictated'}</span></div>`;
+  return `<div class="voice-line" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${label}</span></div>`;
 }
 
 /** A playback position as the view shows it: "0:07". */
