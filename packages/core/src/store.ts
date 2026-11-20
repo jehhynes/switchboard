@@ -1554,9 +1554,16 @@ export class Store {
       .run(binding.file, binding.workItemId, binding.since, binding.scopeGen, binding.selectedWorkItemId ?? null, binding.selectedSessionId ?? null, binding.ticketId ?? null, binding.title ?? null);
   }
 
-  /** The work items of the ad hoc tickets a window binding hosts (`Ticket.hostWindow`, compared by `windowFileKey`), newest first. */
+  /**
+   * The work items of the ad hoc tickets a window binding hosts (`Ticket.hostWindow`, compared by `windowFileKey`), newest first. Compared in
+   * JavaScript, because SQLite's `lower()` lowers only ASCII letters, so a folder named "Étage" would match no spelling of itself.
+   */
   hostedWorkItems(file: string): WorkItem[] {
-    return this.#all<WorkItem>("SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE rtrim(lower(replace(t.hostWindow, '\\', '/')), '/') = ? ORDER BY w.id DESC", windowFileKey(file));
+    const key = windowFileKey(file);
+
+    return this.#all<WorkItem & { hostWindow: string }>('SELECT w.*, t.hostWindow AS hostWindow FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE t.hostWindow IS NOT NULL ORDER BY w.id DESC')
+      .filter((row) => windowFileKey(row.hostWindow) === key)
+      .map(({ hostWindow: _host, ...item }) => item as WorkItem);
   }
 
   #replyRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationReply[] {

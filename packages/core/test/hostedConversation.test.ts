@@ -43,6 +43,12 @@ describe('hosted conversations (architecture.md § Hosted conversations)', () =>
     only(h.act({ type: 'new-conversation', hostWindow: 'D:\\', folder: 'D:\\' }), 'start-session');
     expect(h.store.hostedWorkItems('d:/').map((item) => item.id)).toEqual([3]);
     expect(h.store.hostedWorkItems('D:\\')).toHaveLength(1);
+
+    // A folder whose name has an uppercase letter outside ASCII is found by every spelling of its case, which SQLite's lower() would miss.
+    only(h.act({ type: 'new-conversation', hostWindow: 'D:\\git\\Étage', folder: 'D:\\git\\Étage' }), 'start-session');
+    expect(h.store.hostedWorkItems('D:\\git\\Étage').map((item) => item.id)).toEqual([4]);
+    expect(h.store.hostedWorkItems('d:/git/étage/').map((item) => item.id)).toEqual([4]);
+    expect(h.store.hostedWorkItems('D:/git/Etage')).toEqual([]);
     expect(h.item(2)).toMatchObject({ status: 'running', taskPrompt: null });
     expect(h.store.session(start.sessionId)).toMatchObject({ promptless: true, codeMode: true, reports: ['stage', 'worktree', 'link', 'paste', 'task'] });
   });

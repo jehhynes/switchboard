@@ -481,6 +481,18 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     expect(scopes.scope(file)).toBeNull();
   });
 
+  it('lists the conversations of a folder whose name has an uppercase letter outside ASCII', () => {
+    const { scopes, view, host } = setup();
+    const etage = join(dir, 'Étage');
+
+    mkdirSync(etage);
+
+    const canonical = canonicalFolder(etage)!;
+    const hosted = host(canonical, 'e1', canonical);
+
+    expect(scopes.scope(scopes.open(null, view, etage))).toMatchObject({ kind: 'folder', title: 'Étage', workItemId: hosted, conversations: [{ workItemId: hosted, primary: false }] });
+  });
+
   it('keeps two folders that differ only in case apart where the file system has case, and refuses a folder named like a workspace file', () => {
     const { scopes, view, support, host } = setup();
     const shouting = host(support.toUpperCase(), 'f1');
