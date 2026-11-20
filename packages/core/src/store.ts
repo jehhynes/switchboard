@@ -433,6 +433,13 @@ export const MIGRATIONS = [
   // message keeps the launch it was sent to, so one a stopped hub left being typed is settled only there.
   `ALTER TABLE messages ADD COLUMN launch TEXT;
   UPDATE messages SET delivery = 'sent', error = NULL WHERE delivery = 'uncertain';`,
+  // Speech out (architecture.md § Voice): a message typed with [spoken], and a reply's [speak] passage, tone line and what became of its speech.
+  `ALTER TABLE messages ADD COLUMN spokenRequested INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE replies ADD COLUMN speak TEXT;
+  ALTER TABLE replies ADD COLUMN tone TEXT;
+  ALTER TABLE replies ADD COLUMN spokenState TEXT NOT NULL DEFAULT 'none';
+  ALTER TABLE replies ADD COLUMN spokenAtMs INTEGER;
+  ALTER TABLE replies ADD COLUMN saidChars INTEGER;`,
 ];
 
 /**
@@ -1298,8 +1305,8 @@ export class Store {
   /** Adds a message to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
   addMessage(message: Omit<ConversationMessage, 'ord'>): void {
     this.#db
-      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0, message.delivery, message.error, message.opId, message.pastedAt, message.launch ?? null);
+      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch, spokenRequested) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0, message.delivery, message.error, message.opId, message.pastedAt, message.launch ?? null, message.spokenRequested === true ? 1 : 0);
     this.#prune(message.sessionId);
   }
 
@@ -1372,10 +1379,10 @@ export class Store {
   }
 
   /** Adds a reply to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
-  addReply(reply: Omit<ConversationReply, 'ord' | 'seenAt'>): void {
+  addReply(reply: Omit<ConversationReply, 'ord' | 'seenAt' | 'spokenState' | 'spokenAtMs' | 'saidChars'>): void {
     this.#db
-      .prepare('INSERT INTO replies (ord, id, sessionId, workItemId, at, kind, answers, opening, source, replaces, rewrittenBy, withdrawn, transcriptUuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(this.#nextOrd(), reply.id, reply.sessionId, reply.workItemId, reply.at, reply.kind, reply.answers, reply.opening, reply.source, reply.replaces, reply.rewrittenBy, reply.withdrawn ? 1 : 0, reply.transcriptUuid);
+      .prepare('INSERT INTO replies (ord, id, sessionId, workItemId, at, kind, answers, opening, source, replaces, rewrittenBy, withdrawn, transcriptUuid, speak, tone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(this.#nextOrd(), reply.id, reply.sessionId, reply.workItemId, reply.at, reply.kind, reply.answers, reply.opening, reply.source, reply.replaces, reply.rewrittenBy, reply.withdrawn ? 1 : 0, reply.transcriptUuid, reply.speak ?? null, reply.tone ?? null);
     this.#prune(reply.sessionId);
   }
 
@@ -1574,10 +1581,11 @@ export class Store {
   }
 
   #messageRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationMessage[] {
-    return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<Omit<ConversationMessage, 'provisional' | 'withdrawn'> & { seq: number; provisional: number; withdrawn: number }>).map(({ seq: _seq, ...message }) => ({
+    return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<Omit<ConversationMessage, 'provisional' | 'withdrawn' | 'spokenRequested'> & { seq: number; provisional: number; withdrawn: number; spokenRequested: number }>).map(({ seq: _seq, ...message }) => ({
       ...message,
       provisional: message.provisional === 1,
       withdrawn: message.withdrawn === 1,
+      spokenRequested: message.spokenRequested === 1,
     }));
   }
 

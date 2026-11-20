@@ -17,7 +17,26 @@ const reply = (id: string, at: number, patch: Partial<ConversationReply> = {}): 
   id, sessionId: 's1', workItemId: 1, at, kind: 'reply', answers: null, opening: id, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: null, ...patch,
 });
 
+/** A reply's speech fields as the store keeps them before any speech. */
+const unspoken = { speak: null, tone: null, spokenState: 'none', spokenAtMs: null, saidChars: null } as const;
+
 describe('conversation store', () => {
+  it('keeps whether a message asked for a spoken reply, and a reply\'s passage, tone line and speech', () => {
+    const store = Store.open(':memory:');
+
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'typed', text: 'hi', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: null, spokenRequested: true });
+    store.addMessage({ id: 'm2', sessionId: 's1', workItemId: 1, at: 11, origin: 'typed', text: 'hi', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'p', pastedAt: null });
+    store.addReply(reply('r1', 20, { speak: 'Done.', tone: 'calm' }));
+    store.addReply(reply('r2', 21));
+
+    expect(store.message('m1')?.spokenRequested).toBe(true);
+    expect(store.message('m2')?.spokenRequested).toBe(false);
+    expect(store.reply('r1')).toMatchObject({ speak: 'Done.', tone: 'calm', spokenState: 'none', spokenAtMs: null, saidChars: null });
+    expect(store.reply('r2')).toMatchObject(unspoken);
+    store.updateReply('r1', { spokenState: 'interrupted', spokenAtMs: 7000, saidChars: 40 });
+    expect(store.reply('r1')).toMatchObject({ spokenState: 'interrupted', spokenAtMs: 7000, saidChars: 40 });
+  });
+
   it("keeps a session's statuses in the order read, updates one in place, pages them newest first and keeps the newest CONVERSATION_RETENTION", () => {
     const store = Store.open(':memory:');
     const status = (id: string, sessionId = 's1', markdown = id) => store.setStatus({ id, sessionId, workItemId: 1, replyId: `r-${id}`, at: 10, markdown });
@@ -58,9 +77,9 @@ describe('conversation store', () => {
 
     expect(store.conversation('s1', null, 10)).toEqual({
       items: [
-        { type: 'reply', ...reply('r1', 30), ord: 1, seenAt: null },
-        { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null, launch: null, ord: 2 },
-        { type: 'reply', ...reply('r2', 20, { withdrawn: true }), ord: 3, seenAt: null },
+        { type: 'reply', ...reply('r1', 30), ...unspoken, ord: 1, seenAt: null },
+        { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null, launch: null, spokenRequested: false, ord: 2 },
+        { type: 'reply', ...reply('r2', 20, { withdrawn: true }), ...unspoken, ord: 3, seenAt: null },
       ],
       more: false,
     });

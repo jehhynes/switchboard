@@ -10,6 +10,7 @@ describe('parseSettings', () => {
         sources: {},
         schedules: {},
         dock: { openVSCode: 'always', openTerminal: 'vscode' },
+        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null },
       },
     });
   });
@@ -23,6 +24,7 @@ describe('parseSettings', () => {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
         dock: { openVSCode: 'review', openTerminal: 'auto' },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers' },
       }),
     );
 
@@ -43,8 +45,24 @@ describe('parseSettings', () => {
         },
         schedules: {},
         dock: { openVSCode: 'review', openTerminal: 'auto' },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers' },
       },
     });
+  });
+
+  it('refuses voice values outside their choices and ranges, and other voice keys', () => {
+    expect(parseSettings('{"voice":{"voice":"nova","style":"loud","speed":2,"awayMinutes":0,"outputDevice":"","mic":true}}')).toEqual({
+      errors: [
+        'voice.mic is not a setting.',
+        'voice.voice must be one of marin, cedar, alloy, ash, ballad, coral, echo, sage, shimmer, verse.',
+        'voice.style must be one of none, pair, upbeat, deadpan, expressive.',
+        'voice.speed must be a number from 0.25 to 1.5.',
+        'voice.awayMinutes must be a whole number from 1 to 1440.',
+        'voice.outputDevice must be a device name or null.',
+      ],
+    });
+    expect(parseSettings('{"voice":{"enabled":"yes"}}')).toEqual({ errors: ['voice.enabled must be true or false.'] });
+    expect(parseSettings('{"voice":{"speed":0.25,"outputDevice":null}}')).toMatchObject({ settings: { voice: { speed: 0.25, outputDevice: null } } });
   });
 
   it('refuses a dock.openVSCode or dock.openTerminal outside its choices, and other dock keys', () => {

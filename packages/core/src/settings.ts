@@ -108,12 +108,46 @@ export interface DockSettings {
   openTerminal: OpenTerminal;
 }
 
+/** The voices of OpenAI's realtime speech models (voice-design § 4.8); OpenAI recommends marin and cedar. */
+export const TTS_VOICES = ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'] as const;
+
+export type TtsVoice = (typeof TTS_VOICES)[number];
+
+/** The speaking styles the voice process reads with; `none` adds no delivery of its own. */
+export const SPEECH_STYLES = ['none', 'pair', 'upbeat', 'deadpan', 'expressive'] as const;
+
+export type SpeechStyle = (typeof SPEECH_STYLES)[number];
+
+/** Speech speed, 1 the voice's own pace (OpenAI's realtime `speed`). */
+export const SPEECH_SPEED = { min: 0.25, max: 1.5 } as const;
+
+/** Speech out (architecture.md § Voice): machine-wide, off by default. */
+export interface VoiceSettings {
+  /** The central voice setting: no voice process, no spoken replies and no voice controls while off. */
+  enabled: boolean;
+  /** The TTS voice. */
+  voice: TtsVoice;
+  style: SpeechStyle;
+  speed: number;
+  /** Tag spoken messages `[expressive]`, so Claude writes a tone line, and read with it. */
+  expressive: boolean;
+  /** Start a reply with a `[speak]` passage expanded instead of showing the passage first (focused mode). */
+  expandReplies: boolean;
+  /** Minutes with the focus outside every scoped window after which the voice drops its target. */
+  awayMinutes: number;
+  /** Play a short sound when a work item other than the voice target's starts needing the operator. */
+  needsYouSound: boolean;
+  /** The playback device, a case-insensitive part of its name; null for the system default. */
+  outputDevice: string | null;
+}
+
 export interface Settings {
   sessions: SessionSettings;
   triage: TriageSettings;
   sources: Record<string, SourceSettings>;
   schedules: Record<string, ScheduleSettings>;
   dock: DockSettings;
+  voice: VoiceSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -123,6 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
+  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -212,6 +247,38 @@ class Reader {
     return value;
   }
 
+  /** A number within a range, whole or not. */
+  number(section: Json, key: string, path: string, fallback: number, min: number, max: number): number {
+    const value = section[key];
+
+    if (value === undefined) {
+      return fallback;
+    }
+
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+      this.errors.push(`${path}.${key} must be a number from ${min} to ${max}.`);
+      return fallback;
+    }
+
+    return value;
+  }
+
+  /** A non-empty string, or null. */
+  optionalName(section: Json, key: string, path: string): string | null {
+    const value = section[key];
+
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value !== 'string' || value.trim() === '') {
+      this.errors.push(`${path}.${key} must be a device name or null.`);
+      return null;
+    }
+
+    return value;
+  }
+
   /** A string from a fixed list. */
   choice<T extends string>(section: Json, key: string, path: string, choices: readonly T[], fallback: T): T {
     const value = this.string(section, key, path, fallback);
@@ -272,7 +339,7 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const read = new Reader();
-  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'dock', 'playbooks'], 'settings');
+  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'dock', 'voice', 'playbooks'], 'settings');
   // Each playbook is checked on its own by `parsePlaybooks`, so an invalid one is left out rather than rejecting the file.
   read.section(root, 'playbooks', 'playbooks');
 
@@ -366,7 +433,21 @@ export function parseSettings(text: string): SettingsResult {
     openTerminal: read.choice(dockIn, 'openTerminal', 'dock', OPEN_TERMINAL, defaults.dock.openTerminal),
   };
 
-  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock } };
+  const voiceIn = read.section(root, 'voice', 'voice');
+  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice'], 'voice');
+  const voice: VoiceSettings = {
+    enabled: read.boolean(voiceIn, 'enabled', 'voice', defaults.voice.enabled),
+    voice: read.choice(voiceIn, 'voice', 'voice', TTS_VOICES, defaults.voice.voice),
+    style: read.choice(voiceIn, 'style', 'voice', SPEECH_STYLES, defaults.voice.style),
+    speed: read.number(voiceIn, 'speed', 'voice', defaults.voice.speed, SPEECH_SPEED.min, SPEECH_SPEED.max),
+    expressive: read.boolean(voiceIn, 'expressive', 'voice', defaults.voice.expressive),
+    expandReplies: read.boolean(voiceIn, 'expandReplies', 'voice', defaults.voice.expandReplies),
+    awayMinutes: read.integer(voiceIn, 'awayMinutes', 'voice', defaults.voice.awayMinutes, 1, 1440),
+    needsYouSound: read.boolean(voiceIn, 'needsYouSound', 'voice', defaults.voice.needsYouSound),
+    outputDevice: read.optionalName(voiceIn, 'outputDevice', 'voice'),
+  };
+
+  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, voice } };
 }
 
 /** Why a source's repo root is not a usable pattern: `{name}` and `{owner}` each at most once, and `{owner}` only with `{name}` (PRD R16). */

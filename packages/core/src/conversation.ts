@@ -32,7 +32,14 @@ export interface ConversationMessage {
   pastedAt: number | null;
   /** The launch of the session a typed message was sent to, so a message a stopped hub left being typed is settled only in that launch. */
   launch?: string | null;
+  /** It was typed with `[spoken]`, so its reply may be spoken (architecture.md § Voice); false when left out. */
+  spokenRequested?: boolean;
 }
+
+/** What became of a reply's speech (architecture.md § Voice): `none` until it is offered, then queued, playing and how it ended. */
+export const SPOKEN_STATES = ['none', 'queued', 'playing', 'played', 'interrupted', 'skipped', 'stopped-moved', 'failed'] as const;
+
+export type SpokenState = (typeof SPOKEN_STATES)[number];
 
 /** A reply of a session: its text, and how a later copy or a rewrite changed it. */
 export interface ConversationReply {
@@ -59,6 +66,16 @@ export interface ConversationReply {
   ord: number;
   /** When the operator saw it in the Conversation view (architecture.md § Unread); null while unread. */
   seenAt: number | null;
+  /** The text of its `[speak]` passage, the part read aloud, whose markers `opening` leaves out; null without one. */
+  speak?: string | null;
+  /** Its tone line, how the reply sounds when spoken, never spoken itself; null without one. */
+  tone?: string | null;
+  /** What became of its speech; `none` when left out. */
+  spokenState?: SpokenState;
+  /** The playback position, while it plays or where it stopped, in milliseconds. */
+  spokenAtMs?: number | null;
+  /** How many characters of the passage were played. */
+  saidChars?: number | null;
 }
 
 /**
