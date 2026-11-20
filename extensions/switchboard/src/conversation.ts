@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import { openConversation, postToHub } from '@switchboard/hub';
 import type { EventStream, ItemView, StatusView } from '@switchboard/hub';
-import { applyEvent, EMPTY_CONVERSATION, lastSpokenReply, statusLine, totalUnread, voiceStatus, withEarlier } from './conversationModel.js';
+import { applyEvent, EMPTY_CONVERSATION, lastSpokenReply, micOn, statusLine, totalUnread, voiceStatus, withEarlier } from './conversationModel.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
 import type { ConversationMessage, SeenTarget, SendTarget } from './webview/conversationRender.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
@@ -94,6 +94,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   #attempts = 0;
   /** Messages this window sent that the hub took, until they go or are not sent. */
   readonly #mine = new Set<string>();
+  /** A draft the hub changed that no loaded page took yet, for the page that loads next (architecture.md § Dictation). */
+  #draft: { text: string; workItemId: number | null } | null = null;
   /** Messages the stream said were not sent before the `send` that added them was answered, with why. */
   readonly #notSentEarly = new Map<string, string>();
   /**
@@ -204,6 +206,33 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
    */
   receive(event: ConversationEvent): void {
     const message = event.type === 'message' ? (event as { message: ItemView }).message : null;
+
+    // Dictation (architecture.md § Dictation): the hub changed the composer's draft, or live words changed; a spoken turn it refused says why above
+    // the composer, whose draft keeps the text, and never joins the timeline.
+    if (event.type === 'draft') {
+      // The draft of the conversation whose session it is: the hub keeps one per conversation.
+      const sessionId = (event as { sessionId?: unknown }).sessionId;
+      const owner = this.#state.scope?.conversations.find((entry) => entry.sessionId === sessionId)?.workItemId;
+      const draft = { text: String((event as { text?: unknown }).text ?? ''), workItemId: owner ?? this.#state.scope?.workItemId ?? null };
+
+      this.#draft = draft;
+      void Promise.all([...this.#views.values()].map((view) => view.webview.postMessage({ type: 'draft', ...draft }))).then((taken) => {
+        if (taken.some(Boolean) && this.#draft === draft) {
+          this.#draft = null;
+        }
+      });
+      return;
+    }
+
+    if (event.type === 'words') {
+      this.#post({ type: 'words', text: String((event as { text?: unknown }).text ?? '') });
+      return;
+    }
+
+    if (message?.type === 'message' && message.delivery === 'refused') {
+      this.#post({ type: 'refused', error: message.error ?? 'The message was not sent.', workItemId: message.workItemId });
+      return;
+    }
 
     if (message?.type === 'message' && message.delivery === 'not-sent') {
       const error = message.error ?? 'The message was not sent.';
@@ -468,7 +497,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   }
 
   /** A voice command for this window (architecture.md § Voice); a refusal shows as a warning, except Stop speaking's, which has nothing to stop. */
-  async #voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay', extra: Record<string, unknown> = {}): Promise<void> {
+  async #voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic', extra: Record<string, unknown> = {}): Promise<void> {
     const target = this.#target;
     const scope = this.#state.scope;
 
@@ -535,6 +564,26 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   /** Talk here: the voice moves to this window's selected conversation's session. */
   talkHere(): Promise<void> {
     return this.#voiceCommand('talk-here');
+  }
+
+  /** The mic on or off (architecture.md § Dictation); turning it on also talks here. */
+  mic(on: boolean): Promise<void> {
+    return this.#voiceCommand('mic', { on });
+  }
+
+  /** Toggle Microphone: off while the voice is here with the mic on, else on, which also moves the voice here. */
+  toggleMicrophone(): Promise<void> {
+    return this.mic(!micOn(this.#state.voice));
+  }
+
+  /** The composer gained or lost the focus, or its draft changed, for the focus rule; nothing to say when the hub does not take it. */
+  async composer(focused: boolean, draft: string): Promise<void> {
+    const target = this.#target;
+    const scope = this.#state.scope;
+
+    if (target !== null && scope !== null && this.#state.voice?.enabled === true) {
+      await postToHub(target.record, '/v1/conversation/composer', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), focused, draft }, HISTORY_TIMEOUT_MS);
+    }
   }
 
   stopSpeaking(): Promise<void> {
@@ -746,6 +795,13 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
           case 'ready':
             return Promise.resolve(view.webview.postMessage(this.#stateMessage()))
               .then(() => view.webview.postMessage({ type: 'focus', focused: vscode.window.state.focused }))
+              // A draft the hub changed while the page was not loaded.
+              .then(() => {
+                const draft = this.#draft;
+
+                this.#draft = null;
+                return draft === null ? undefined : view.webview.postMessage({ type: 'draft', ...draft });
+              })
               .then(() => this.#giveBack());
           case 'seen':
             return this.seen(Array.isArray(message.ids) ? message.ids.map(String) : [], message.target);
@@ -765,6 +821,10 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
             return this.stopSpeaking();
           case 'speak-replies':
             return this.speakReplies(message.on === true);
+          case 'mic':
+            return this.mic(message.on === true);
+          case 'composer':
+            return this.composer(message.focused === true, String(message.draft));
           case 'replay':
             return this.replay(String(message.replyId));
           case 'new':

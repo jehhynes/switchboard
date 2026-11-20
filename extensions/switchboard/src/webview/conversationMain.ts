@@ -1,6 +1,6 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, complete, moreKey, PICKER, renderConversation, renderVoiceControls, replyText, TABS } from './conversationRender.js';
+import { ago, complete, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS } from './conversationRender.js';
 import type { CardDraft } from './conversationRender.js';
 import { answerText, parseQuestions } from '../questionModel.js';
 import { selectedEntry, statusLine } from '../conversationModel.js';
@@ -42,6 +42,8 @@ const STATUS_AGE_MS = 30_000;
 const COMPOSER_MAX_PX = 200;
 /** The longest title the placeholder names before it is cut. */
 const PLACEHOLDER_TITLE_CHARS = 40;
+/** How long the composer waits after the last key before it tells the hub its draft (architecture.md § Dictation). */
+export const COMPOSER_DRAFT_MS = 300;
 
 /** The work item's title for the placeholder: without leading tags such as "[Feedback]", cut at a word to fit one line. */
 export function shortTitle(title: string): string {
@@ -62,19 +64,49 @@ export function shortTitle(title: string): string {
  * enabled only for a session the view can talk to, keeps its text until the hub took the message, takes back the text of a message that was
  * not sent, and shows why above the box until dismissed.
  */
-function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: ConversationState): void; sent(id: number, error: string | null): void; unsent(text: string, error: string, workItemId: number | null): void; receive(reply: ExtrasReply): void } {
+function startComposer(
+  host: HTMLElement,
+  vscode: VsCodeApi,
+): {
+  update(state: ConversationState): void;
+  sent(id: number, error: string | null): void;
+  unsent(text: string, error: string, workItemId: number | null): void;
+  receive(reply: ExtrasReply): void;
+  draft(text: string, workItemId: number | null): void;
+  words(text: string): void;
+  refused(error: string, workItemId: number | null): void;
+} {
   // As Claude Code's input: the text area over a footer, whose left side is kept for the controls later slices add. Why a message did not go
   // shows above it until dismissed.
   host.innerHTML =
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span>' +
     '<button class="dismiss" type="button" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>' +
-    '<div class="composer"><textarea rows="1" aria-label="Message"></textarea><div class="composer-footer"><div class="composer-controls"></div>' +
-    '<button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button></div></div>';
+    '<div class="composer"><textarea rows="1" aria-label="Message"></textarea><div class="live-words" aria-live="polite" hidden></div><div class="composer-footer"><div class="composer-controls"></div>' +
+    '<span class="mic-slot"></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button></div></div>';
 
   const input = host.querySelector('textarea')!;
   const send = host.querySelector<HTMLButtonElement>('button.send')!;
   const error = host.querySelector<HTMLElement>('.composer-error')!;
   const errorText = host.querySelector<HTMLElement>('.composer-error-text')!;
+  const liveWords = host.querySelector<HTMLElement>('.live-words')!;
+  const micSlot = host.querySelector<HTMLElement>('.mic-slot')!;
+  // The voice in this window, and a draft the hub changed while the box held a message being sent, which takes the box once the hub answered.
+  let voiceHere = false;
+  let micListening = false;
+  let hubDraft: string | null = null;
+  /** The draft text the hub last had: what the box reported, or what the hub sent, so a late recognition joins the box's text instead of replacing it. */
+  let hubKnows = '';
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Tells the hub the box's focus and draft, for the focus rule (architecture.md § Dictation); a message being sent is no draft. */
+  const tellHub = (): void => {
+    if (draftTimer !== null) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
+
+    hubKnows = sending === null ? input.value : '';
+    vscode.postMessage({ type: 'composer', focused: document.activeElement === input, draft: hubKnows });
+  };
   // Messages that were not sent while another was being sent, with the conversation each belongs to, put back once the box is writable.
   const returned: Array<{ text: string; error: string; workItemId: number | null }> = [];
   const showError = (text: string | null): void => {
@@ -142,6 +174,11 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
     host.classList.toggle('sending', busy);
     grow();
     refresh();
+
+    // The hub keeps one draft per conversation: it learns the one now shown, so dictation never joins another's.
+    if (voiceHere) {
+      tellHub();
+    }
   };
   const grow = (): void => {
     input.style.height = 'auto';
@@ -167,6 +204,12 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
     host.classList.add('sending');
     refresh();
     vscode.postMessage({ type: 'send', id: sending.id, text: input.value, target: target!, ...(extras.command(input.value) ? { command: true as const } : {}) });
+
+    // Sending hands the box back to the voice: the focus goes to the timeline, and dictation resumes (architecture.md § Dictation).
+    if (voiceHere && micListening && document.activeElement === input) {
+      input.blur();
+      document.querySelector<HTMLElement>('.timeline')?.focus();
+    }
   };
   const extras = startComposerExtras(host, input, host.querySelector<HTMLElement>('.composer-controls')!, vscode, () => {
     grow();
@@ -190,9 +233,26 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
   });
   let speaking = false;
 
+  micSlot.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-voice="mic"]');
+
+    if (button !== null) {
+      vscode.postMessage({ type: 'mic', on: button.dataset['on'] === 'true' });
+    }
+  });
+  input.addEventListener('focus', tellHub);
+  input.addEventListener('blur', tellHub);
   input.addEventListener('input', () => {
     grow();
     refresh();
+
+    if (voiceHere && document.activeElement === input) {
+      if (draftTimer !== null) {
+        clearTimeout(draftTimer);
+      }
+
+      draftTimer = setTimeout(tellHub, COMPOSER_DRAFT_MS);
+    }
   });
   error.querySelector('button.dismiss')!.addEventListener('click', () => {
     showError(null);
@@ -232,8 +292,62 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
       input.disabled = !enabled;
       input.placeholder = enabled ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
       voiceControls.innerHTML = renderVoiceControls(state.voice);
+      micSlot.innerHTML = enabled ? renderMicButton(state.voice) : '';
       speaking = state.voice?.here === true && state.voice.speaking !== null;
+      const wasHere = voiceHere;
+
+      voiceHere = state.voice?.enabled === true && state.voice.here;
+
+      // A draft restored with the page, or one made before the voice came here, is told to the hub once.
+      if (voiceHere && !wasHere) {
+        tellHub();
+      }
+      micListening = voiceHere && state.voice!.mic !== 'off' && state.voice!.mic !== 'idle-off';
+      host.classList.toggle('dictating', micListening);
+
+      if (!voiceHere) {
+        liveWords.hidden = true;
+      }
+
       refresh();
+    },
+    draft: (text, workItemId) => {
+      // The hub's draft is the box's text: a spoken turn sent it, or dictation joined it (architecture.md § Dictation).
+      if (workItemId !== null && workItemId !== current) {
+        extras.setDraft(workItemId, text);
+        return;
+      }
+
+      if (sending !== null && sending.workItemId === current) {
+        hubDraft = text;
+        return;
+      }
+
+      // A recognition that settles while the box has the focus joins the end of what the operator has now, never replacing a correction.
+      if (document.activeElement === input && text.startsWith(hubKnows) && input.value !== hubKnows) {
+        input.value = `${input.value}${text.slice(hubKnows.length)}`;
+        hubKnows = text;
+        tellHub();
+      } else {
+        input.value = text;
+        hubKnows = text;
+      }
+
+      grow();
+      refresh();
+      extras.changed();
+    },
+    words: (text) => {
+      liveWords.textContent = text;
+      liveWords.hidden = text === '';
+    },
+    refused: (why, workItemId) => {
+      if (workItemId !== null && workItemId !== current) {
+        errors.set(workItemId, why);
+        return;
+      }
+
+      showError(why);
     },
     sent: (id, refusal) => {
       if (id !== sending?.id) {
@@ -260,7 +374,8 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
       }
 
       if (refusal === null) {
-        input.value = '';
+        input.value = hubDraft ?? '';
+        hubDraft = null;
         grow();
         showError(null);
         extras.sent(true);
@@ -897,9 +1012,15 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     checkSeen();
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | ExtrasReply>) => {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | { type: 'draft'; text: string; workItemId: number | null } | { type: 'words'; text: string } | { type: 'refused'; error: string; workItemId: number | null } | ExtrasReply>) => {
     if (event.data.type === 'files' || event.data.type === 'commands' || event.data.type === 'mentions' || event.data.type === 'image') {
       composer?.receive(event.data);
+    } else if (event.data.type === 'draft') {
+      composer?.draft(event.data.text, event.data.workItemId);
+    } else if (event.data.type === 'words') {
+      composer?.words(event.data.text);
+    } else if (event.data.type === 'refused') {
+      composer?.refused(event.data.error, event.data.workItemId);
     } else if (event.data.type === 'focus') {
       windowFocused = event.data.focused;
       checkSeen();

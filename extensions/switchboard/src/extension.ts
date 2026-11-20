@@ -468,6 +468,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     // The voice (architecture.md § Voice), for this window's selected conversation only.
     vscode.commands.registerCommand('switchboard.talkHere', () => conversation.talkHere()),
     vscode.commands.registerCommand('switchboard.choosePersona', () => conversation.choosePersona()),
+    vscode.commands.registerCommand('switchboard.toggleMicrophone', () => conversation.toggleMicrophone()),
     vscode.commands.registerCommand('switchboard.stopSpeaking', () => conversation.stopSpeaking()),
     vscode.commands.registerCommand('switchboard.toggleSpeakReplies', () => conversation.speakReplies()),
     vscode.commands.registerCommand('switchboard.replayLastReply', () => conversation.replay()),

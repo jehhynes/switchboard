@@ -136,6 +136,16 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .composer .send:disabled { cursor: not-allowed; opacity: 0.4; }
 .composer .send .codicon { font-size: 16px; }
 .sending .composer { opacity: 0.7; }
+/* Dictation (architecture.md § Dictation): live words dimmed under the text, and the mic button beside Send. */
+.composer .live-words { padding: 0 14px 8px; color: var(--vscode-descriptionForeground); font-style: italic; overflow-wrap: break-word; }
+.composer .mic { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 5px; cursor: pointer; color: var(--vscode-foreground); background: transparent; }
+.composer .mic:hover { background: var(--vscode-toolbar-hoverBackground); }
+.composer .mic.typing, .composer .mic.starting, .composer .mic.paused { opacity: 0.6; }
+.composer .mic.unavailable .codicon { color: var(--vscode-editorWarning-foreground); }
+.composer .mic.hearing .codicon { animation: mic-pulse 1s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { opacity: 0.4; } }
+body.vscode-reduce-motion .composer .mic.hearing .codicon { animation: none; }
+.message .voice-line { display: flex; justify-content: flex-end; align-items: center; gap: 4px; margin-top: 2px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 /* The composer's extras, measured from Claude Code's panel: its file and command lists 8 px above the box at its width, rows 4 by 8 px with a
    4 px radius, a folder path dimmed and cut from its start; footer tools as 26 px ghost buttons; a dashed ring while files are dragged over. */
 .composer { position: relative; }

@@ -16,6 +16,8 @@ export type ConversationMessage =
   | { type: 'talk-here' }
   | { type: 'stop-speaking' }
   | { type: 'speak-replies'; on: boolean }
+  | { type: 'mic'; on: boolean }
+  | { type: 'composer'; focused: boolean; draft: string }
   | { type: 'replay'; replyId: string }
   | { type: 'new' }
   | { type: 'persona' }
@@ -144,8 +146,18 @@ function message(item: MessageView, stamped: boolean): string {
 
   // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it.
   const queued = item.provisional && item.origin === 'terminal';
+  // A dictated message has a mic glyph, its pieces in the tooltip, and a part sent while it was still being spoken says so (architecture.md § Dictation).
+  const voice = item.origin === 'voice' ? voiceLine(item) : '';
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${line}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div></li>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${line}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${voice}</li>`;
+}
+
+/** A dictated message's line under its box: the mic glyph, "partial" for a part of one still being spoken, and its pieces as the tooltip. */
+function voiceLine(item: MessageView): string {
+  const pieces = (item.pieces ?? []).map((piece) => `${piece.dropped ? '(dropped) ' : ''}${piece.text}${piece.score === null ? '' : ` · match ${piece.score.toFixed(2)}`}${piece.f0 === null ? '' : ` · ${Math.round(piece.f0)} Hz`}`);
+  const title = pieces.length === 0 ? 'Dictated' : `Dictated in ${pieces.length} piece${pieces.length === 1 ? '' : 's'}:\n${pieces.join('\n')}`;
+
+  return `<div class="voice-line" title="${escape(title)}"><span class="codicon codicon-mic" aria-hidden="true"></span><span>${item.partial === true ? 'partial' : 'dictated'}</span></div>`;
 }
 
 /** A playback position as the view shows it: "0:07". */
@@ -200,6 +212,42 @@ export function renderVoiceControls(voice: VoiceView | null): string {
     : '<button class="ghost voice-elsewhere" type="button" data-voice="talk-here" title="Voice is not in this window. Click to talk here."><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span>Voice is not in this window</span></button>';
 
   return `${speakReplies}${stop}${where}`;
+}
+
+/**
+ * The composer's mic button (architecture.md § Dictation): `mic` off, `mic-filled` while listening, pulsing while it hears, dimmed while the
+ * composer has the focus; in a window the voice is not in, `circle-slash`, and a click talks here. Empty with voice off.
+ */
+export function renderMicButton(voice: VoiceView | null): string {
+  if (voice === null || !voice.enabled) {
+    return '';
+  }
+
+  const button = (icon: string, title: string, on: boolean, kind: string): string =>
+    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}"><span class="codicon codicon-${icon}" aria-hidden="true"></span></button>`;
+
+  if (!voice.here) {
+    return button('circle-slash', 'Voice is not in this window. Click to talk here.', true, 'elsewhere');
+  }
+
+  switch (voice.mic) {
+    case 'listening':
+      return button('mic-filled', 'Listening: dictation sends when you stop talking. Click to turn the mic off.', false, 'listening');
+    case 'hearing':
+      return button('mic-filled', 'Hearing you. Click to turn the mic off.', false, 'hearing');
+    case 'typing':
+      return button('mic-filled', 'Typing: dictation pauses while the box has the focus, and goes on when you send or leave it. Click to turn the mic off.', false, 'typing');
+    case 'starting':
+      return button('mic-filled', 'The mic is starting. Click to turn it off.', false, 'starting');
+    case 'paused-other-app':
+      return button('mic', 'Paused: another app is using the microphone. Click to turn the mic off.', false, 'paused');
+    case 'unavailable':
+      return button('mic', `The mic cannot run: ${voice.error ?? 'unknown error'} Click to try again.`, true, 'unavailable');
+    case 'idle-off':
+      return button('mic', 'The mic stopped after a quiet spell. Click to turn it on.', true, 'off');
+    default:
+      return button('mic', 'Turn the mic on (Ctrl+Alt+M).', true, 'off');
+  }
 }
 
 /** The fold key of a reply's Show more, which flips its start, collapsed in focused mode or expanded with `voice.expandReplies`. */

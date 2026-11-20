@@ -3,11 +3,11 @@ import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, Statu
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenReply, selectedEntry, stateIcon, statusLine, timeline, totalUnread, voiceStatus, withEarlier } from '../src/conversationModel.js';
+import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenReply, micOn, selectedEntry, stateIcon, statusLine, timeline, totalUnread, voiceStatus, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
-import { ago, linkAllowed, personaButton, PICKER, renderConversation, renderMarkdown, renderVoiceControls } from '../src/webview/conversationRender.js';
+import { ago, linkAllowed, personaButton, PICKER, renderConversation, renderMarkdown, renderMicButton, renderVoiceControls } from '../src/webview/conversationRender.js';
 import type { Tab } from '../src/webview/conversationRender.js';
 
 /** The page's extras for a tab. */
@@ -92,8 +92,20 @@ describe('the conversation state', () => {
     expect(voiceStatus({ ...voice, here: false })).toEqual({ text: '$(circle-slash) Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', command: 'switchboard.talkHere', warning: false });
     expect(voiceStatus({ ...voice, error: 'no device' })).toMatchObject({ text: '$(warning) Voice', command: 'switchboard.showVoiceLog', warning: true });
     expect(voiceStatus({ ...voice, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', command: 'switchboard.stopSpeaking' });
-    expect(voiceStatus(voice)).toEqual({ text: '$(unmute) Voice here', tooltip: 'Replies to messages you send here are spoken.', command: null, warning: false });
-    expect(voiceStatus({ ...voice, speakReplies: false })?.tooltip).toBe('Speak replies is off.');
+    // The mic (architecture.md § Dictation).
+    expect(voiceStatus(voice)).toEqual({ text: '$(mic) Mic off', tooltip: 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false });
+    expect(voiceStatus({ ...voice, mic: 'idle-off' })).toMatchObject({ text: '$(mic) Mic off', tooltip: 'The mic stopped after a quiet spell. Click to turn it on.' });
+    expect(voiceStatus({ ...voice, mic: 'listening' })).toMatchObject({ text: '$(mic-filled) Listening', command: 'switchboard.toggleMicrophone' });
+    expect(voiceStatus({ ...voice, mic: 'hearing' })).toMatchObject({ text: '$(mic-filled) Listening' });
+    expect(voiceStatus({ ...voice, mic: 'typing' })).toMatchObject({ text: '$(mic-filled) Typing' });
+    expect(voiceStatus({ ...voice, mic: 'starting' })).toMatchObject({ text: '$(mic-filled) Mic starting' });
+    expect(voiceStatus({ ...voice, mic: 'paused-other-app' })).toEqual({ text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone.', command: null, warning: false });
+    expect(voiceStatus({ ...voice, mic: 'listening', speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking' });
+    expect(micOn({ ...voice, mic: 'listening' })).toBe(true);
+    expect(micOn({ ...voice, mic: 'paused-other-app' })).toBe(true);
+    expect(micOn({ ...voice, mic: 'idle-off' })).toBe(false);
+    expect(micOn({ ...voice, mic: 'listening', here: false })).toBe(false);
+    expect(micOn(null)).toBe(false);
 
     const items = [reply('r1', T0, { speak: 'One.' }), reply('r2', T0 + 1, { speak: 'Two.', rewrittenBy: 'r3' }), reply('r3', T0 + 2), message('m1', T0 + 3, 'Next')];
 
@@ -766,7 +778,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     item.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true }));
     item.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    expect(posted.filter((message) => message.type !== 'ready' && message.type !== 'seen')).toEqual([
+    expect(posted.filter((message) => message.type !== 'ready' && message.type !== 'seen' && message.type !== 'composer')).toEqual([
       { type: 'talk-here' },
       { type: 'speak-replies', on: false },
       { type: 'stop-speaking' },
@@ -776,6 +788,40 @@ describe('speech in the view (architecture.md § Voice)', () => {
       { type: 'stop-speaking' },
     ]);
     expect(renderVoiceControls({ ...VOICE, error: 'no <device>' })).toContain('Voice: no &#60;device&#62;');
+  });
+
+  it('marks a dictated message with the mic glyph, "partial" for a part sent while it was spoken, and its pieces in the tooltip', () => {
+    const pieces = [
+      { text: 'fix the', score: null, f0: null, dropped: false },
+      { text: 'login', score: 0.82, f0: 118.4, dropped: true },
+    ];
+    const html = renderConversation(
+      state([
+        message('v1', T0, 'fix the login', { origin: 'voice', delivery: 'sent', pieces }),
+        message('v2', T0 + 1, 'and the', { origin: 'voice', delivery: 'sent', partial: true }),
+        message('t1', T0 + 2, 'typed', { origin: 'typed', delivery: 'sent' }),
+      ]),
+      new Set(),
+    );
+
+    expect(html).toContain('<div class="voice-line" title="Dictated in 2 pieces:\nfix the\n(dropped) login · match 0.82 · 118 Hz"><span class="codicon codicon-mic" aria-hidden="true"></span><span>dictated</span></div>');
+    expect(html).toContain('<div class="voice-line" title="Dictated"><span class="codicon codicon-mic" aria-hidden="true"></span><span>partial</span></div>');
+    expect(html.match(/voice-line/g)).toHaveLength(2);
+  });
+
+  it('draws the mic button by the mic state, the not-here button elsewhere and nothing with voice off (architecture.md § Dictation)', () => {
+    expect(renderMicButton(null)).toBe('');
+    expect(renderMicButton({ ...VOICE, enabled: false })).toBe('');
+    expect(renderMicButton({ ...VOICE, here: false })).toContain('codicon-circle-slash');
+    expect(renderMicButton({ ...VOICE, here: false })).toContain('data-on="true"');
+    expect(renderMicButton(VOICE)).toMatch(/class="mic off".*data-on="true".*aria-pressed="false".*codicon-mic"/);
+    expect(renderMicButton({ ...VOICE, mic: 'listening' })).toMatch(/class="mic listening".*data-on="false".*codicon-mic-filled/);
+    expect(renderMicButton({ ...VOICE, mic: 'hearing' })).toContain('class="mic hearing"');
+    expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('Typing: dictation pauses');
+    expect(renderMicButton({ ...VOICE, mic: 'starting' })).toContain('class="mic starting"');
+    expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('Paused: another app is using the microphone.');
+    expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('stopped after a quiet spell');
+    expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toContain('The mic cannot run: No &#60;model&#62;.');
   });
 });
 
@@ -810,6 +856,72 @@ describe('the composer', () => {
 
     return { host, input, posted, show, press, sent };
   }
+
+  it('tells the hub its focus and draft, takes the hub\'s draft and live words, shows a refused turn\'s reason, and hands the box back to the voice on Enter (architecture.md § Dictation)', () => {
+    vi.useFakeTimers();
+
+    try {
+      const { input, posted, show, press, sent, host } = page();
+      const voice = { enabled: true, here: true, mic: 'listening' as const, speaking: null, speakReplies: true, error: null };
+      const post = (data: Record<string, unknown>) => window.dispatchEvent(new MessageEvent('message', { data }));
+      const composerPosts = () => posted.filter((message) => message.type === 'composer');
+
+      show({ ...state(), voice });
+      expect(host.querySelector('.mic-slot button.mic.listening')).not.toBeNull();
+      host.querySelector<HTMLButtonElement>('.mic-slot button')!.click();
+      expect(posted.at(-1)).toEqual({ type: 'mic', on: false });
+
+      // The hub's draft fills the box; live words show dimmed under it.
+      post({ type: 'draft', text: 'fix the login', workItemId: 2 });
+      // Another conversation's draft waits for it.
+      post({ type: 'draft', text: 'elsewhere', workItemId: 9 });
+      expect(input.value).toBe('fix the login');
+      expect(input.value).toBe('fix the login');
+      post({ type: 'words', text: 'flow' });
+      expect(host.querySelector<HTMLElement>('.live-words')!.hidden).toBe(false);
+      expect(host.querySelector('.live-words')!.textContent).toBe('flow');
+      post({ type: 'words', text: '' });
+      expect(host.querySelector<HTMLElement>('.live-words')!.hidden).toBe(true);
+      post({ type: 'refused', error: 'The session has ended.', workItemId: 2 });
+      expect(host.querySelector('.composer-error-text')!.textContent).toBe('The session has ended.');
+
+      // Focus, edits after a pause, and leaving the box reach the hub.
+      input.focus();
+      expect(composerPosts().at(-1)).toEqual({ type: 'composer', focused: true, draft: 'fix the login' });
+      input.value = 'fix the login flow';
+      input.dispatchEvent(new Event('input'));
+      const told = composerPosts().length;
+
+      vi.advanceTimersByTime(299);
+      expect(composerPosts()).toHaveLength(told);
+      vi.advanceTimersByTime(1);
+      expect(composerPosts().at(-1)).toEqual({ type: 'composer', focused: true, draft: 'fix the login flow' });
+
+      // A recognition that settles after the operator corrected the box joins its end instead of replacing the correction.
+      input.value = 'fix the sign-in flow';
+      post({ type: 'draft', text: 'fix the login flow now', workItemId: 2 });
+      expect(input.value).toBe('fix the sign-in flow now');
+      expect(composerPosts().at(-1)).toEqual({ type: 'composer', focused: true, draft: 'fix the sign-in flow now' });
+
+      // Enter sends and hands the box back: the focus leaves it, and the text being sent is no draft.
+      expect(press('Enter')).toBe(true);
+      expect(document.activeElement).not.toBe(input);
+      expect(composerPosts().at(-1)).toEqual({ type: 'composer', focused: false, draft: '' });
+      // Dictation that joins while the message is sent takes the box once the hub answered.
+      post({ type: 'draft', text: 'and the tests', workItemId: 2 });
+      expect(input.value).toBe('fix the sign-in flow now');
+      sent(1, null);
+      expect(input.value).toBe('and the tests');
+
+      // With the mic off, Enter keeps the focus in the box.
+      show({ ...state(), voice: { ...voice, mic: 'off' } });
+      input.focus();
+      press('Enter');
+      expect(document.activeElement).toBe(input);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('sends the text on Enter, keeps it read-only until the hub took it, and empties the box then', () => {
     const { input, posted, show, press, sent, host } = page();
@@ -855,7 +967,7 @@ describe('the composer', () => {
     };
 
     // The left side holds the attach and slash command buttons (test/composer.test.ts), and later slices' controls after them.
-    expect([...host.querySelectorAll('.composer > textarea + .composer-footer > .composer-controls > button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Attach files', 'Show slash commands']);
+    expect([...host.querySelectorAll('.composer > textarea ~ .composer-footer > .composer-controls > button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Attach files', 'Show slash commands']);
     expect(send.querySelector('.codicon')?.className).toBe('codicon codicon-arrow-up');
     expect(send.getAttribute('aria-label')).toBe('Send');
     show(state());

@@ -324,7 +324,25 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
     return { text: '$(unmute) Speaking', tooltip: 'Click to stop speaking.', command: 'switchboard.stopSpeaking', warning: false };
   }
 
-  return { text: '$(unmute) Voice here', tooltip: voice.speakReplies ? 'Replies to messages you send here are spoken.' : 'Speak replies is off.', command: null, warning: false };
+  // The mic (architecture.md § Dictation).
+  switch (voice.mic) {
+    case 'listening':
+    case 'hearing':
+      return { text: '$(mic-filled) Listening', tooltip: 'Dictation sends when you stop talking. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false };
+    case 'typing':
+      return { text: '$(mic-filled) Typing', tooltip: 'Dictation pauses while the composer has the focus. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false };
+    case 'starting':
+      return { text: '$(mic-filled) Mic starting', tooltip: 'The mic is starting. Click to turn it off.', command: 'switchboard.toggleMicrophone', warning: false };
+    case 'paused-other-app':
+      return { text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone.', command: null, warning: false };
+    default:
+      return { text: '$(mic) Mic off', tooltip: voice.mic === 'idle-off' ? 'The mic stopped after a quiet spell. Click to turn it on.' : 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false };
+  }
+}
+
+/** Whether the mic is on in this window, so Toggle Microphone turns it off; an idle stop counts as off, so the toggle starts it again. */
+export function micOn(voice: VoiceView | null): boolean {
+  return voice?.here === true && voice.mic !== 'off' && voice.mic !== 'idle-off';
 }
 
 /** The header's codicon for the session's state (architecture.md § Conversation view). */

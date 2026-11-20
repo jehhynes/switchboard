@@ -158,6 +158,11 @@
         "category": "Switchboard"
       },
       {
+        "command": "switchboard.toggleMicrophone",
+        "title": "Toggle Microphone",
+        "category": "Switchboard"
+      },
+      {
         "command": "switchboard.replayLastReply",
         "title": "Replay Last Reply",
         "category": "Switchboard"
@@ -239,6 +244,11 @@
         "command": "switchboard.stopSpeaking",
         "key": "ctrl+alt+.",
         "mac": "cmd+alt+."
+      },
+      {
+        "command": "switchboard.toggleMicrophone",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m"
       }
     ]
   },
