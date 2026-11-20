@@ -13,7 +13,7 @@ const LISTED = {
   data: [
     {
       hooks: [
-        { key: 'C:\\c\\hooks.json:stop:0:0', command: 'node support.js', trustStatus: 'untrusted', currentHash: 'sha256:support' },
+        { key: 'C:\\c\\hooks.json:stop:0:0', command: 'node other.js', trustStatus: 'untrusted', currentHash: 'sha256:other' },
         { key: 'C:\\c\\hooks.json:stop:1:0', command: 'node "C:/h/codex-hook.mjs"', trustStatus: 'untrusted', currentHash: 'sha256:a' },
         { key: 'C:\\c\\hooks.json:session_start:0:0', command: 'node "C:/h/codex-hook.mjs"', trustStatus: 'trusted', currentHash: 'sha256:b' },
         { key: 'C:\\c\\hooks.json:session_start:1:0', command: 'node "C:/h/contract.mjs"', trustStatus: 'modified', currentHash: 'sha256:c' },

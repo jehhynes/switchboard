@@ -491,7 +491,7 @@ export function rankOf(triage: Rating): number | null {
   return immediacy === undefined || severity === undefined ? null : immediacy + severity;
 }
 
-/** Priority, as the Support board derives it: a customer blocked now, or high severity (PRD R50). */
+/** Priority: a customer blocked now, or high severity (PRD R50). */
 export function isPriority(triage: Rating): boolean {
   return (triage?.immediacy != null && triage.immediacy !== 'NON-BLOCKING') || triage?.severity === 'HIGH';
 }

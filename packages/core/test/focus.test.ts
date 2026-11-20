@@ -109,7 +109,7 @@ describe('triage focus in the flow (PRD R79)', () => {
   });
 
   it('keeps a pool triage focus, which the pick carries to the new work item', () => {
-    const h = new Harness({ playbooks: playbooks(undefined, { 'support:case': { description: 'A Support case', workdir: 'repoRoot', template: '/support-process {{ticket.ref}}' } }) });
+    const h = new Harness({ playbooks: playbooks(undefined, { 'support:case': { description: 'A support case', workdir: 'repoRoot', template: '/process-case {{ticket.ref}}' } }) });
     const url = 'https://desk.example.test/500';
     const action = triageOf(h.act({ type: 'poll', queue: true, source: 'zoho', tickets: [{ sourceKey: '500', ref: 'R500', repo: '', sourceId: 'id-500', title: 'Case', url, assigned: false, pool: true, sortAt: 1, enteredAt: null }] }));
 

@@ -470,7 +470,7 @@ describe('dockView', () => {
           item(9, { status: 'unstarted', triage: triage({ immediacy: 'BLOCKING', severity: 'MED' }), playbookChoices: ['dev:develop', 'dev:other'] }),
           item(10, {
             status: 'awaiting-approval',
-            approvalPrompt: '/support-release #4521',
+            approvalPrompt: '/release-case #4521',
             approvalSummary: 'post the reply',
             approvalReport: 'D:/drafts/reply.md',
             pastes: [{ id: 1, workItemId: 10, label: 'Customer reply', file: 'D:/drafts/reply.md', reportedAt: NOW }],
@@ -731,28 +731,28 @@ describe('windowOf', () => {
 
   it('opens the latest session folder first, with the worktree second when the session ran elsewhere', () => {
     expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:\\git\\widgets\\.worktrees\\107-fix\\' })] }), W)).toEqual({
-      name: 'gh-107-58c609',
+      name: 'gh-107-9a479b',
       title: 'Issue <7>',
       folders: ['D:\\git\\widgets\\.worktrees\\107-fix\\'],
-      file: join(W, 'gh-107-58c609.code-workspace'),
+      file: join(W, 'gh-107-9a479b.code-workspace'),
     });
     expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:/git/widgets' })] }), W)).toEqual({
-      name: 'gh-107-widgets-655280',
+      name: 'gh-107-widgets-760e0e',
       title: 'Issue <7>',
       folders: ['D:/git/widgets', 'D:/git/widgets/.worktrees/107-fix'],
-      file: join(W, 'gh-107-widgets-655280.code-workspace'),
+      file: join(W, 'gh-107-widgets-760e0e.code-workspace'),
     });
     expect(windowOf(item(7, { worktree }), W)).toEqual({
-      name: 'gh-107-58c609',
+      name: 'gh-107-9a479b',
       title: 'Issue <7>',
       folders: ['D:/git/widgets/.worktrees/107-fix'],
-      file: join(W, 'gh-107-58c609.code-workspace'),
+      file: join(W, 'gh-107-9a479b.code-workspace'),
     });
     expect(windowOf(item(7, { sessions: [session({ cwd: 'D:/git/support' })], ticket: { ...item(7).ticket, source: 'zoho', sourceKey: '4521/a b' } }), W)).toEqual({
-      name: 'zoho-4521-a-b-support-c6262c',
+      name: 'zoho-4521-a-b-support-d24afb',
       title: 'Issue <7>',
       folders: ['D:/git/support'],
-      file: join(W, 'zoho-4521-a-b-support-c6262c.code-workspace'),
+      file: join(W, 'zoho-4521-a-b-support-d24afb.code-workspace'),
     });
     expect(windowOf(item(7), W)).toBeNull();
   });
@@ -804,7 +804,7 @@ describe('windowOf', () => {
     expect(names[1]).toMatch(/^gh-107-review-[0-9a-f]{6}$/);
     expect(names[0]).not.toBe(names[1]);
     expect(moved).toMatch(/^gh-107-[0-9a-f]{6}$/);
-    expect(moved).not.toBe('gh-107-58c609');
+    expect(moved).not.toBe('gh-107-9a479b');
   });
 });
 

@@ -1241,7 +1241,7 @@ describe('Runtime', () => {
     const { store, source, runtime } = setup();
     const slow = deferred();
     source.gate = slow.promise;
-    source.result = { error: 'The forum database cannot be reached; check the VPN.' };
+    source.result = { error: 'The forum cannot be reached.' };
     const scheduled = runtime.pollSource('github');
     await vi.waitFor(() => expect(source.polls).toBe(1));
 

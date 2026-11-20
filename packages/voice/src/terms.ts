@@ -6,7 +6,7 @@ import { join } from 'node:path';
  * boosted: `voice/terms/user.txt` in the Switchboard home for every session, plus `voice/terms/repos/<owner>/<repo>.txt` for the repository of
  * the target's folder, when that file exists. A term learnt from a heard tag is kept only if it is a name or a technical term, judged by the
  * meant term alone: a term in the user list passes; a one-word term passes only if it is not a common English word; a term of several words
- * passes only if each word is either not a common word or capitalized, so "Support Code" and "Code Mode" pass and "voice model" does not. Learnt
+ * passes only if each word is either not a common word or capitalized, so "VS Code" and "Code Mode" pass and "voice model" does not. Learnt
  * everyday words ("wait", "test", "main") made recognition worse when boosted; distinctive names help.
  */
 

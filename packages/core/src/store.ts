@@ -286,21 +286,22 @@ export const MIGRATIONS = [
    ALTER TABLE sourceStates ADD COLUMN volumeInterval INTEGER;
    ALTER TABLE sourceStates ADD COLUMN volumeTimezone TEXT NOT NULL DEFAULT 'America/New_York';
    CREATE INDEX currentQueue ON tickets(source, inQueue, assigned, pool);`,
+  // A store from before volume tracking has no volumeStartedAt yet, so Zoho, the queue source of that time, is named.
   `CREATE TABLE ticketClassifications (
     ticketId INTEGER PRIMARY KEY, playbook TEXT NOT NULL, immediacy TEXT, severity TEXT, at INTEGER NOT NULL
   );
   INSERT INTO ticketClassifications
     SELECT t.ticketId, t.playbook, t.immediacy, t.severity, t.endedAt FROM triages t
     JOIN tickets k ON k.id = t.ticketId
-    WHERE k.source IN ('zoho', 'forum') AND t.id = (
+    WHERE (k.source = 'zoho' OR k.source IN (SELECT name FROM sourceStates WHERE volumeStartedAt IS NOT NULL)) AND t.id = (
       SELECT id FROM triages WHERE ticketId = t.ticketId AND playbook IS NOT NULL AND error IS NULL AND endedAt IS NOT NULL
       ORDER BY endedAt DESC, id DESC LIMIT 1
     );`,
   `ALTER TABLE tickets ADD COLUMN handledAssignmentKey TEXT;`,
-  // Links triage found in a Zoho or Forum ticket's text and no session reported (PRD R61).
+  // Links triage found in a queue source's ticket text and no session reported (PRD R61).
   `ALTER TABLE links ADD COLUMN mentioned INTEGER NOT NULL DEFAULT 0;
   UPDATE links SET mentioned = 1
-    WHERE ticketId IN (SELECT id FROM tickets WHERE source IN ('zoho', 'forum'))
+    WHERE ticketId IN (SELECT id FROM tickets WHERE source = 'zoho' OR source IN (SELECT name FROM sourceStates WHERE volumeStartedAt IS NOT NULL))
     AND EXISTS (SELECT 1 FROM changes c JOIN events e ON e.id = c.eventId
       WHERE c.entity = 'link' AND c.op = 'insert' AND c.entityId = CAST(links.id AS TEXT) AND e.type = 'triage-succeeded')
     AND NOT EXISTS (SELECT 1 FROM events e

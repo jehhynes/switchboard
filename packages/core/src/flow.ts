@@ -118,7 +118,7 @@ export interface PolledTicket {
   pool: boolean;
   /** When the customer has waited since, such as Zoho's `customerResponseTime`; it orders the pool (PRD R27). */
   sortAt: number | null;
-  /** When the ticket last entered the source's scope, as the source records it, such as Zoho's escalation to Support; null when unknown (PRD R27). */
+  /** When the ticket last entered the source's scope, as the source records it, such as a Zoho ticket's move to its scope value; null when unknown (PRD R27). */
   enteredAt: number | null;
   /** The open issues blocking the ticket (PRD R90); a source that does not read them omits it. */
   blockers?: TicketBlocker[];

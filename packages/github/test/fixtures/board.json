@@ -109,9 +109,9 @@
         {
           "number": 191,
           "title": "Issue 191",
-          "url": "https://github.com/acme/widgets-infra/issues/191",
+          "url": "https://github.com/acme/widgets-infrastructure/issues/191",
           "repository": {
-            "nameWithOwner": "acme/widgets-infra"
+            "nameWithOwner": "acme/widgets-infrastructure"
           },
           "projectItems": {
             "nodes": [

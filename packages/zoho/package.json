@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Zoho Desk source: reads Support tickets and builds triage context through the Desk API, read-only. Must not import vscode.",
+  "description": "Zoho Desk source: reads the Open tickets in scope and builds triage context through the Desk API, read-only. Must not import vscode.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

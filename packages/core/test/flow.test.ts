@@ -851,14 +851,14 @@ describe('sessions', () => {
   it('reopens a work item whose approval was never approved as awaiting it, holding it through a turn', () => {
     const h = new Harness();
     const { item, session } = running(h);
-    h.report(session, { kind: 'approval', prompt: '/support-release #1', summary: 'release', report: null });
+    h.report(session, { kind: 'approval', prompt: '/release-case #1', summary: 'release', report: null });
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
 
     // As zoho 444953 did: the operator asks the session more, and a poll that omits the ticket ends the work item when the turn ends.
     h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
     h.poll();
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
-    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned', approvalPrompt: '/support-release #1' });
+    expect(h.item(item)).toMatchObject({ status: 'done', doneReason: 'unassigned', approvalPrompt: '/release-case #1' });
 
     h.act({ type: 'reopen', workItemId: item });
     expect(h.item(item)).toMatchObject({ status: 'awaiting-approval', approvalHeld: false });
@@ -1599,7 +1599,7 @@ describe('task reports (PRD R68)', () => {
   it('takes a configured repo in any spelling and a title, adds nothing for a repeat while the first is open, and accepts a report after the parent is done', () => {
     const h = new Harness();
     const { item, session } = parent(h);
-    const report = { kind: 'task', prompt: 'Write the Support runbook', repo: 'd:\\GIT\\support\\', title: ' Runbook ' } as const;
+    const report = { kind: 'task', prompt: 'Write the support runbook', repo: 'd:\\GIT\\support\\', title: ' Runbook ' } as const;
 
     h.report(session, report);
     expect(h.store.ticket(2)).toMatchObject({ title: 'Runbook', repoRoot: 'D:/git/support' });
@@ -1610,7 +1610,7 @@ describe('task reports (PRD R68)', () => {
     h.act({ type: 'mark-done', workItemId: 2 });
     h.act({ type: 'mark-done', workItemId: item });
     h.report(session, { ...report, title: '' });
-    expect(h.store.ticket(3)).toMatchObject({ title: 'Write the Support runbook', repoRoot: 'D:/git/support' });
+    expect(h.store.ticket(3)).toMatchObject({ title: 'Write the support runbook', repoRoot: 'D:/git/support' });
     expect(h.item(3)).toMatchObject({ status: 'unstarted', parentId: item });
   });
 

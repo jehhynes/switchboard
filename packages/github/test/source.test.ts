@@ -696,7 +696,7 @@ describe('GithubSource on the whole board (PRD R44)', () => {
       { sourceKey: '21512', ref: '#21512', repo: 'acme/widgets', assigned: true },
       { sourceKey: '21510', ref: '#21510', repo: 'acme/widgets', assigned: false },
       { sourceKey: 'acme/widgets-dashboard#65', ref: 'acme/widgets-dashboard#65', repo: 'acme/widgets-dashboard', assigned: false },
-      { sourceKey: 'acme/widgets-infra#191', ref: 'acme/widgets-infra#191', repo: 'acme/widgets-infra', assigned: true },
+      { sourceKey: 'acme/widgets-infrastructure#191', ref: 'acme/widgets-infrastructure#191', repo: 'acme/widgets-infrastructure', assigned: true },
     ]);
   });
 

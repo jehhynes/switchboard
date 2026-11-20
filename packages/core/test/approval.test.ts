@@ -251,7 +251,7 @@ describe('paste reports (PRD R60)', () => {
     expect(h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply.md' }).refused).toBeNull();
     h.report(session, { kind: 'paste', label: 'Private note', file: 'D:\\case\\private-note.md' });
     h.report(session, { kind: 'paste', label: 'Customer reply', file: 'D:\\case\\draft-reply-2.md' });
-    h.report(session, { kind: 'approval', prompt: '/support-release #1', summary: 'Release the case', report: 'D:\\case\\draft-reply-2.md' });
+    h.report(session, { kind: 'approval', prompt: '/release-case #1', summary: 'Release the case', report: 'D:\\case\\draft-reply-2.md' });
 
     expect(h.store.pastesFor(1).map(({ label, file }) => [label, file])).toEqual([
       ['Customer reply', 'D:\\case\\draft-reply-2.md'],

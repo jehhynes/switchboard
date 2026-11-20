@@ -15,14 +15,14 @@ function only<T extends FlowAction['type']>(actions: FlowAction[], type: T): Ext
 
 const pollZoho = (h: Harness, ...tickets: PolledTicket[]) => h.act({ type: 'poll', queue: true, source: 'zoho', tickets });
 
-const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': { description: 'A Support case', autoStart: true, workdir: 'repoRoot', template: '/support-process {{ticket.ref}}' } });
+const ZOHO_PLAYBOOKS = playbooks(undefined, { 'support:case': { description: 'A support case', autoStart: true, workdir: 'repoRoot', template: '/process-case {{ticket.ref}}' } });
 
 describe('pool triage (PRD R47, R50)', () => {
   it('triages a ticket entering the pool, offering only its namespace, stores its rating, and creates no work item', () => {
     const h = new Harness({ playbooks: ZOHO_PLAYBOOKS });
     const triage = only(pollZoho(h, zoho('500', 'pool'), zoho('501', 'neither')), 'triage');
 
-    expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the Support case.\n\nChoose one playbook:\n- support:defect: Research a defect\n- support:case: A Support case', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A Support case' }], rates: true });
+    expect(triage).toMatchObject({ workItemId: null, systemPrompt: 'Triage the support case.\n\nChoose one playbook:\n- support:defect: Research a defect\n- support:case: A support case', choices: [{ name: 'support:defect', description: 'Research a defect' }, { name: 'support:case', description: 'A support case' }], rates: true });
     expect(h.store.workItem(1)).toBeNull();
 
     h.act({ type: 'triage-succeeded', triageId: triage.triageId, context: 'ctx', playbook: 'support:case', immediacy: 'BLOCKING', severity: 'MED', model: null, links: [{ label: 'PR', target: 'https://github.com/o/r/pull/2' }] });
@@ -130,7 +130,7 @@ describe('pool triage (PRD R47, R50)', () => {
 });
 
 describe('pick (PRD R48)', () => {
-  const MANUAL = playbooks(undefined, { 'support:case': { description: 'A Support case', workdir: 'repoRoot', template: '/support-process {{ticket.ref}}' } });
+  const MANUAL = playbooks(undefined, { 'support:case': { description: 'A support case', workdir: 'repoRoot', template: '/process-case {{ticket.ref}}' } });
 
   function pooled(h: Harness, key = '500', playbook: string | null = 'support:case'): number {
     const triage = only(pollZoho(h, zoho(key, 'pool')), 'triage');
@@ -150,7 +150,7 @@ describe('pick (PRD R48)', () => {
     const start = only(h.act({ type: 'pick', ticketId }), 'start-session');
 
     expect(start).toMatchObject({ kind: 'task', cwd: 'D:/git/support', name: 'switchboard · support:case · zoho 500', permissionMode: 'auto', model: null });
-    expect(start.prompt).toBe('/support-process R500');
+    expect(start.prompt).toBe('/process-case R500');
     expect(h.item(1)).toMatchObject({ ticketId, status: 'running', playbook: 'support:case' });
     expect(h.store.triagesFor(1)).toMatchObject([{ ticketId, workItemId: 1, playbook: 'support:case' }]);
     expect(h.send({ type: 'pick', ticketId }).refused).toBe('The ticket already has a work item.');

@@ -15,7 +15,7 @@ const NOW = Date.UTC(2026, 10, 18, 12);
 const CLAUDE = '9273f594-1111-4222-8333-444455556666';
 
 function entry(session: string, fields: Partial<SessionEntry> = {}): SessionEntry {
-  return { session, label: `switchboard · ad-hoc · adhoc 1 ${CLAUDE}`, pid: 9, cwd: 'D:/git/widgets', startedAt: NOW - 3 * 60_000, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null, ...fields };
+  return { session, label: `switchboard · ad-hoc · adhoc 1 ${CLAUDE}`, pid: 9, cwd: 'D:/git/acme', startedAt: NOW - 3 * 60_000, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null, ...fields };
 }
 
 function hubSession(session: string, fields: Partial<HeldSession> = {}): HeldSession {
@@ -120,9 +120,9 @@ describe('hub.js holder (architecture.md § Visibility of held sessions)', () =>
     expect(state.out).toBe(
       [
         'Work item     Switchboard ID  Claude ID                             Folder       State   Idle  Memory  Terminals',
-        'No work item  o1              -                                     D:/git/widgets  live    3m    -       0',
-        `adhoc 1       s1              ${CLAUDE}  D:/git/widgets  idle    3m    300 MB  2`,
-        `No work item  s2              ${CLAUDE}  D:/git/widgets  exited  -     -       0`,
+        'No work item  o1              -                                     D:/git/acme  live    3m    -       0',
+        `adhoc 1       s1              ${CLAUDE}  D:/git/acme  idle    3m    300 MB  2`,
+        `No work item  s2              ${CLAUDE}  D:/git/acme  exited  -     -       0`,
         '',
       ].join('\n'),
     );
@@ -137,8 +137,8 @@ describe('hub.js holder (architecture.md § Visibility of held sessions)', () =>
       [
         "The Switchboard hub is not running, so this is the terminal holder's own list.",
         'Work item  Switchboard ID  Claude ID                             Folder       State   Idle  Memory  Terminals',
-        `adhoc 1    s1              ${CLAUDE}  D:/git/widgets  live    1m    -       0`,
-        `adhoc 1    s2              ${CLAUDE}  D:/git/widgets  exited  -     -       0`,
+        `adhoc 1    s1              ${CLAUDE}  D:/git/acme  live    1m    -       0`,
+        `adhoc 1    s2              ${CLAUDE}  D:/git/acme  exited  -     -       0`,
         '',
       ].join('\n'),
     );

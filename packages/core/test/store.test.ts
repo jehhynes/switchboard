@@ -127,11 +127,12 @@ describe('Store', () => {
     after.close();
   });
 
-  it('marks a version 31 link mentioned only when triage added it to a Zoho or Forum ticket and no accepted session report named it (PRD R61)', () => {
+  it('marks a version 31 link mentioned only when triage added it to a queue source ticket and no accepted session report named it (PRD R61)', () => {
     const path = join(dir, 'v31.db');
     const raw = new DatabaseSync(path);
     raw.exec(MIGRATIONS.slice(0, 31).join(';'));
     raw.exec(`PRAGMA user_version = 31;
+      INSERT INTO sourceStates (name, enabled, volumeStartedAt) VALUES ('zoho', 1, 1);
       INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'zoho', '1', 'One', '', 1, ''), (2, 'github', '2', 'Two', '', 1, '');
       INSERT INTO links (id, ticketId, label, target, reportedAt) VALUES
         (1, 1, 'Issue #5', 'https://github.com/o/r/issues/5', 1),

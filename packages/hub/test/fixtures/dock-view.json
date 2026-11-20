@@ -36,12 +36,12 @@
           "dim": true,
           "movable": true,
           "window": {
-            "name": "gh-113-widgets-655280",
+            "name": "gh-113-widgets-760e0e",
             "title": "Issue <13>",
             "folders": [
               "D:/git/widgets"
             ],
-            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-113-widgets-655280.code-workspace"
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-113-widgets-760e0e.code-workspace"
           },
           "open": null,
           "terminal": {
@@ -179,12 +179,12 @@
           "dim": false,
           "movable": true,
           "window": {
-            "name": "gh-107-58c609",
+            "name": "gh-107-9a479b",
             "title": "Issue <7>",
             "folders": [
               "D:/git/widgets/.worktrees/107-fix"
             ],
-            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-107-58c609.code-workspace"
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-107-9a479b.code-workspace"
           },
           "open": {
             "type": "session",
@@ -355,12 +355,12 @@
           "dim": false,
           "movable": true,
           "window": {
-            "name": "gh-110-support-c6262c",
+            "name": "gh-110-support-d24afb",
             "title": "Issue <10>",
             "folders": [
               "D:/git/support"
             ],
-            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-110-support-c6262c.code-workspace"
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-110-support-d24afb.code-workspace"
           },
           "open": {
             "type": "session",
@@ -454,7 +454,7 @@
           ],
           "main": "Approve",
           "mainGlyph": "",
-          "mainTitle": "Approve: runs /support-release #4521",
+          "mainTitle": "Approve: runs /release-case #4521",
           "pastes": [
             {
               "label": "Customer reply",
@@ -633,12 +633,12 @@
           "dim": false,
           "movable": false,
           "window": {
-            "name": "gh-108-widgets-655280",
+            "name": "gh-108-widgets-760e0e",
             "title": "Issue <8>",
             "folders": [
               "D:/git/widgets"
             ],
-            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-108-widgets-655280.code-workspace"
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-108-widgets-760e0e.code-workspace"
           },
           "open": null,
           "terminal": null,
@@ -746,12 +746,12 @@
           "dim": false,
           "movable": false,
           "window": {
-            "name": "gh-115-widgets-655280",
+            "name": "gh-115-widgets-760e0e",
             "title": "Issue <15>",
             "folders": [
               "D:/git/widgets"
             ],
-            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-115-widgets-655280.code-workspace"
+            "file": "C:\\Users\\op\\.switchboard\\windows\\gh-115-widgets-760e0e.code-workspace"
           },
           "open": {
             "type": "session",
@@ -1360,8 +1360,8 @@
           "attach",
           "cm15"
         ],
-        "name": "gh-115-widgets-655280-cm15",
-        "title": "Issue <15> · sb:gh-115-widgets-655280-cm15",
+        "name": "gh-115-widgets-760e0e-cm15",
+        "title": "Issue <15> · sb:gh-115-widgets-760e0e-cm15",
         "handoff": null,
         "active": false,
         "codeMode": true

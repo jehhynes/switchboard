@@ -49,7 +49,7 @@ describe('planCodexHooks', () => {
   });
 
   it("keeps the operator's hooks before Switchboard's and reports a file that is complete", () => {
-    const theirs = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node support.js', timeout: 10 }] }] }, other: true };
+    const theirs = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node other.js', timeout: 10 }] }] }, other: true };
     const plan = planCodexHooks(`\uFEFF${JSON.stringify(theirs)}`, HOOK, CONTRACT, 'node') as { text: string };
     const hooks = ours(plan.text);
 
@@ -59,10 +59,10 @@ describe('planCodexHooks', () => {
   });
 
   it('replaces an earlier Switchboard entry with other settings in its place', () => {
-    const old = { hooks: { Stop: [{ hooks: [{ type: 'command', command: `node "${HOOK}"`, async: true, timeout: 5 }] }, { hooks: [{ type: 'command', command: 'node support.js' }] }] } };
+    const old = { hooks: { Stop: [{ hooks: [{ type: 'command', command: `node "${HOOK}"`, async: true, timeout: 5 }] }, { hooks: [{ type: 'command', command: 'node other.js' }] }] } };
     const hooks = ours((planCodexHooks(JSON.stringify(old), HOOK, CONTRACT, 'node') as { text: string }).text).hooks;
 
-    expect(hooks['Stop']).toEqual([{ hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout: 5 }] }, { hooks: [{ type: 'command', command: 'node support.js' }] }]);
+    expect(hooks['Stop']).toEqual([{ hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout: 5 }] }, { hooks: [{ type: 'command', command: 'node other.js' }] }]);
   });
 
   it("updates only Switchboard's entry in a group it shares, keeping the other entries and the group's settings", () => {
@@ -96,13 +96,13 @@ describe('planCodexHooks', () => {
     const gone = 'C:/Temp/sb-live-home-a/.switchboard';
     const live = 'D:/acceptance/.switchboard';
     const entry = (home: string, script: string) => ({ type: 'command', command: `node "${home}/${script}"`, timeout: 5 });
-    const support = { type: 'command', command: 'node support.js' };
+    const other = { type: 'command', command: 'node other.js' };
     const file = {
       hooks: {
-        Stop: [{ hooks: [support] }, { hooks: [entry(gone, 'codex-hook.mjs')] }, { hooks: [entry(live, 'codex-hook.mjs')] }],
+        Stop: [{ hooks: [other] }, { hooks: [entry(gone, 'codex-hook.mjs')] }, { hooks: [entry(live, 'codex-hook.mjs')] }],
         SessionStart: [{ hooks: [entry(gone, 'codex-hook.mjs')] }, { hooks: [entry(gone, 'contract.mjs')] }],
         Interrupt: [{ hooks: [entry(gone, 'codex-hook.mjs')] }],
-        PreToolUse: [{ matcher: 'x', hooks: [support, entry(gone, 'codex-hook.mjs')] }],
+        PreToolUse: [{ matcher: 'x', hooks: [other, entry(gone, 'codex-hook.mjs')] }],
         // Not a Switchboard home: the script's folder is not named .switchboard.
         PostToolUse: [{ hooks: [entry('C:/tools', 'codex-hook.mjs')] }],
       },
@@ -112,10 +112,10 @@ describe('planCodexHooks', () => {
     const hooks = ours(plan.text).hooks;
     const own = (timeout = 5) => ({ hooks: [{ type: 'command', command: `node "${HOOK}"`, timeout }] });
 
-    expect(hooks['Stop']).toEqual([{ hooks: [support] }, { hooks: [entry(live, 'codex-hook.mjs')] }, own()]);
+    expect(hooks['Stop']).toEqual([{ hooks: [other] }, { hooks: [entry(live, 'codex-hook.mjs')] }, own()]);
     expect(hooks['SessionStart']).toEqual([own(), { hooks: [{ type: 'command', command: `node "${CONTRACT}"`, timeout: 10 }] }]);
     expect(hooks['Interrupt']).toBeUndefined();
-    expect(hooks['PreToolUse']).toEqual([{ matcher: 'x', hooks: [support] }, own()]);
+    expect(hooks['PreToolUse']).toEqual([{ matcher: 'x', hooks: [other] }, own()]);
     expect(hooks['PostToolUse']).toEqual([{ hooks: [entry('C:/tools', 'codex-hook.mjs')] }, own()]);
     // This hub's own home is never checked.
     expect([...new Set(asked)].sort()).toEqual([live, gone].sort());
