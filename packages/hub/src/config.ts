@@ -14,9 +14,8 @@ import {
   TRIAGE_VARIABLES,
 } from '@switchboard/core';
 import type { Playbook, PlaybookError, Provider, Settings } from '@switchboard/core';
-import { parseForumConfig } from '@switchboard/forum';
-import { parseGithubConfig } from '@switchboard/github';
-import { parseZohoConfig } from '@switchboard/zoho';
+import { pluginSet } from './plugins.js';
+import type { PluginSet } from './plugins.js';
 
 export interface Config {
   settings: Settings;
@@ -29,33 +28,23 @@ export interface Config {
   playbookErrors: PlaybookError[];
 }
 
-/** The source plugins, which a source names by its `kind` or, without one, its key under `sources`. */
-export const SOURCE_KINDS = ['github', 'zoho', 'forum'] as const;
 
 export function settingsPath(configDir: string): string {
   return join(configDir, 'settings.json');
 }
 
 /** Why a source's own keys are invalid, or null. */
-export function sourceOptionsError(name: string, kind: string, options: Record<string, unknown>): string | null {
-  const parsed =
-    kind === 'github'
-      ? parseGithubConfig(options, name)
-      : kind === 'zoho'
-        ? parseZohoConfig(options, name)
-        : kind === 'forum'
-          ? parseForumConfig(options, name)
-          : { error: `sources.${name}: ${noKind(kind)}` };
+export function sourceOptionsError(name: string, kind: string, options: Record<string, unknown>, plugins: PluginSet = pluginSet()): string | null {
+  const plugin = plugins.get(kind);
 
-  return 'error' in parsed ? parsed.error : null;
+  return plugin === undefined ? `sources.${name}: ${noKind(kind, plugins)}` : plugin.optionsError(options, name);
 }
 
 /**
- * Errors between sources, which reject the file whole (PRD R42): only a GitHub source may be named apart from its kind, because schema
- * migrations find Zoho and Forum tickets by source name; no source may take another kind's name; and no two GitHub sources may read one project
- * board, including a source that is off, because an issue would then belong to both.
+ * Errors between sources, which reject the file whole (PRD R42): no source may take another kind's name, and no two GitHub sources may read one
+ * project board, including a source that is off, because an issue would then belong to both.
  */
-export function sourcesErrors(settings: Settings, recorded: Readonly<Record<string, string>> = {}): string[] {
+export function sourcesErrors(settings: Settings, recorded: Readonly<Record<string, string>> = {}, plugins: PluginSet = pluginSet()): string[] {
   const errors: string[] = [];
   const boards = new Map<string, string>();
   const labels = new Map<string, string>();
@@ -64,10 +53,8 @@ export function sourcesErrors(settings: Settings, recorded: Readonly<Record<stri
   for (const [name, source] of Object.entries(settings.sources)) {
     const path = `sources.${name}`;
 
-    if (source.kind !== name && (SOURCE_KINDS as readonly string[]).includes(name)) {
+    if (source.kind !== name && plugins.get(name) !== undefined) {
       errors.push(`${path}: ${name} is a source kind, so a source of kind ${source.kind} needs another name.`);
-    } else if (source.kind !== name && (SOURCE_KINDS as readonly string[]).includes(source.kind) && source.kind !== 'github') {
-      errors.push(`${path}.kind: only a GitHub source may be named apart from its kind.`);
     }
 
     const project = source.kind === 'github' ? (source.options['project'] as { owner?: unknown; number?: unknown } | undefined) : undefined;
@@ -110,9 +97,9 @@ export function sourcesErrors(settings: Settings, recorded: Readonly<Record<stri
   return errors;
 }
 
-/** Why a source has no plugin. */
-export function noKind(kind: string): string {
-  return `Switchboard has no source kind ${kind}.`;
+/** Why a source has no plugin, with why each plugin the settings name failed to load. */
+export function noKind(kind: string, plugins: PluginSet = pluginSet()): string {
+  return [`Switchboard has no source kind ${kind}.`, ...plugins.errors].join(' ');
 }
 
 /** A hash of a file's text, so a save can refuse to overwrite a change made since it was read. Null for a missing file. */
@@ -146,14 +133,14 @@ const changed = (file: string) => `${file} changed on disk after the editor read
  * in `enabled`, which disable that source, unknown variables in `setupPrompt`, and each playbook's, as `playbooks.<name>: <error>`,
  * which leave that playbook out. Unknown template variables are included because the hub finds them only when rendering fails.
  */
-export function checkSettings(value: unknown, enabled: ReadonlySet<string>, recorded: Readonly<Record<string, string>> = {}): string[] {
+export function checkSettings(value: unknown, enabled: ReadonlySet<string>, recorded: Readonly<Record<string, string>> = {}, plugins: PluginSet = pluginSet()): string[] {
   const parsed = parseSettings(JSON.stringify(value));
 
   if ('errors' in parsed) {
     return parsed.errors;
   }
 
-  const errors = sourcesErrors(parsed.settings, recorded);
+  const errors = [...plugins.errors, ...sourcesErrors(parsed.settings, recorded, plugins)];
 
   for (const [name, source] of Object.entries(parsed.settings.sources)) {
     const setupError = templateError(source.setupPrompt);
@@ -162,7 +149,7 @@ export function checkSettings(value: unknown, enabled: ReadonlySet<string>, reco
       errors.push(`sources.${name}.setupPrompt: ${setupError}`);
     }
 
-    const error = enabled.has(name) && name !== ADHOC_SOURCE ? sourceOptionsError(name, source.kind, source.options) : null;
+    const error = enabled.has(name) && name !== ADHOC_SOURCE ? sourceOptionsError(name, source.kind, source.options, plugins) : null;
 
     if (error !== null) {
       errors.push(error);
@@ -253,18 +240,47 @@ export function readConfigFile(configDir: string): SettingsFile {
   }
 }
 
+/** The plugin paths a settings value names, or null when it is not valid settings. */
+export function pluginPaths(value: unknown): string[] | null {
+  const parsed = parseSettings(JSON.stringify(value));
+
+  return 'errors' in parsed ? null : parsed.settings.plugins;
+}
+
+/** The plugin paths settings.json names, or null when it is missing or invalid, so the plugins in force stay. */
+export function filePluginPaths(configDir: string): string[] | null {
+  const text = readText(settingsPath(configDir));
+
+  if (text === null) {
+    return [];
+  }
+
+  try {
+    return pluginPaths(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 /** A save's refusal, or the version of the text it wrote, so the editor can keep editing over it. */
 export type SaveResult = { errors: string[]; version: string | null };
 
 /** Writes settings.json as formatted JSON. Refuses when the file changed since `version` was read, or with the errors of {@link checkSettings}. */
-export function saveSettings(configDir: string, value: unknown, version: string | null, enabled: ReadonlySet<string>, recorded: Readonly<Record<string, string>> = {}): SaveResult {
+export function saveSettings(
+  configDir: string,
+  value: unknown,
+  version: string | null,
+  enabled: ReadonlySet<string>,
+  recorded: Readonly<Record<string, string>> = {},
+  plugins: PluginSet = pluginSet(),
+): SaveResult {
   const path = settingsPath(configDir);
 
   if (fileVersion(readText(path)) !== version) {
     return { errors: [changed('settings.json')], version: null };
   }
 
-  const errors = checkSettings(value, enabled, recorded);
+  const errors = checkSettings(value, enabled, recorded, plugins);
 
   if (errors.length > 0) {
     return { errors, version: null };
@@ -284,6 +300,7 @@ export function loadConfig(
   configDir: string,
   previous: Config = { settings: DEFAULT_SETTINGS, settingsError: null, settingsWarnings: [], playbooks: new Map(), playbookErrors: [] },
   recorded: Readonly<Record<string, string>> = {},
+  plugins: PluginSet = pluginSet(),
 ): Config {
   let text: string;
 
@@ -299,7 +316,7 @@ export function loadConfig(
 
   const parsed = parseSettings(text);
 
-  const rejected = 'errors' in parsed ? parsed.errors : sourcesErrors(parsed.settings, recorded);
+  const rejected = 'errors' in parsed ? parsed.errors : sourcesErrors(parsed.settings, recorded, plugins);
 
   if ('errors' in parsed || rejected.length > 0) {
     return { ...previous, settingsError: rejected.join(' '), settingsWarnings: [] };

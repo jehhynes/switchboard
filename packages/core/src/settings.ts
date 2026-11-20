@@ -243,6 +243,8 @@ export interface VoiceSettings {
 }
 
 export interface Settings {
+  /** Source plugin modules the hub loads, each an absolute path or one starting with `~` (PRD R1). */
+  plugins: string[];
   sessions: SessionSettings;
   triage: TriageSettings;
   sources: Record<string, SourceSettings>;
@@ -253,6 +255,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  plugins: [],
   // Commands in Codex's sandbox cannot use the operator's credentials, such as gh's, so Codex sessions default to no sandbox (mechanics M31).
   sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false, codeMode: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
@@ -495,7 +498,8 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const read = new Reader();
-  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', ...RETIRED_SECTIONS, 'alerts', 'voice', 'web', 'playbooks'], 'settings');
+  read.unknown(root, ['plugins', 'sessions', 'triage', 'sources', 'schedules', ...RETIRED_SECTIONS, 'alerts', 'voice', 'web', 'playbooks'], 'settings');
+  const plugins = parsePlugins(read, root['plugins']);
   // Each playbook is checked on its own by `parsePlaybooks`, so an invalid one is left out rather than rejecting the file.
   read.section(root, 'playbooks', 'playbooks');
 
@@ -542,6 +546,8 @@ export function parseSettings(text: string): SettingsResult {
       read.errors.push(`${path}: a source's name must be lowercase letters, digits and hyphens.`);
     } else if (name === SCHEDULE_SOURCE) {
       read.errors.push(`${path}: schedules are set under schedules.`);
+    } else if (name === 'all') {
+      read.errors.push(`${path}: all names every source in the volume report, so a source needs another name.`);
     } else if (name === ADHOC_SOURCE && kind !== undefined) {
       read.errors.push(`${path}.kind is not a setting; adhoc holds only the ad-hoc repo root.`);
     }
@@ -649,7 +655,21 @@ export function parseSettings(text: string): SettingsResult {
     diffWrap: read.choice(webIn, 'diffWrap', 'web', DIFF_WRAPS, defaults.web.diffWrap),
   };
 
-  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, alerts, voice, web }, warnings: settingsWarnings(root) };
+  return read.errors.length > 0 ? { errors: read.errors } : { settings: { plugins, sessions, triage, sources, schedules, alerts, voice, web }, warnings: settingsWarnings(root) };
+}
+
+/** `plugins`: distinct module paths, each absolute or starting with `~`. */
+function parsePlugins(read: Reader, value: unknown): string[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string' && /^(~[\\/]|[\\/]|[A-Za-z]:[\\/])/.test(entry))) {
+    read.errors.push('plugins must list module paths, each absolute or starting with ~.');
+    return [];
+  }
+
+  return [...new Set(value as string[])];
 }
 
 /** `voice.personas`: each persona's ID unique, its voice and style defaulting to the section's. */

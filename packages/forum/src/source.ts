@@ -136,6 +136,7 @@ function stripHtml(html: string): string {
 }
 
 export class ForumSource implements Source {
+  readonly queue = true;
   constructor(
     private readonly config: ForumConfig,
     private readonly query: Query,

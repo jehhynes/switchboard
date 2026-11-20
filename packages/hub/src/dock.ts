@@ -413,6 +413,10 @@ function orphanNote(held: HeldSession[]): { heldNote?: string } {
  */
 export interface DockSourceGroup {
   kind: string;
+  /** The plugin's name for the kind, such as `GitHub`. */
+  label: string;
+  /** The kind's sources are team queues, which the volume report covers. */
+  queue: boolean;
   enabled: boolean;
   /** The icon's tooltip: each source and whether it is polled, then what a click does. */
   title: string;
@@ -428,7 +432,9 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
     const only = sources.length === 1 ? sources[0]! : null;
     const action = only === null ? 'Click to choose which to poll.' : only.enabled ? 'Click to stop polling it.' : 'Click to poll it.';
 
-    return { kind, enabled: sources.some((source) => source.enabled), title: [...lines, action].join('\n'), sources };
+    const first = states.find((state) => state.kind === kind)!;
+
+    return { kind, label: first.label, queue: first.queue, enabled: sources.some((source) => source.enabled), title: [...lines, action].join('\n'), sources };
   });
 }
 

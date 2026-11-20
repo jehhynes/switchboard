@@ -7,16 +7,14 @@ import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { hostKey, hubBundlePath, SCHEDULE_SOURCE, NEW_CONVERSATION_TITLE, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, settingsWarnings, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
-import { githubSource } from '@switchboard/github';
-import { zohoSource } from '@switchboard/zoho';
-import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
 import { DoneSearch } from './dockSearch.js';
 import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
 import { isPastePath } from './report.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
-import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
+import { checkSettings, filePluginPaths, loadConfig, noKind, pluginPaths, readConfigFile, saveSettings } from './config.js';
+import { PluginRegistry } from './plugins.js';
 import type { Config } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
@@ -76,17 +74,13 @@ function isReportPath(path: unknown): path is string {
 
 const BASH = findBash(process.platform, process.env);
 
-function makeSource(name: string, settings: SourceSettings) {
-  switch (settings.kind) {
-    case 'github':
-      return githubSource(name, settings);
-    case 'zoho':
-      return zohoSource(name, settings, BASH);
-    case 'forum':
-      return forumSource(name, settings, BASH);
-    default:
-      return null;
-  }
+/** Builds a source with the plugin its kind names, from the plugins in force. */
+function sourceMaker(plugins: PluginRegistry) {
+  return (name: string, settings: SourceSettings) => {
+    const plugin = plugins.current.get(settings.kind);
+
+    return plugin === undefined ? { error: noKind(settings.kind, plugins.current) } : plugin.create(name, settings, { bash: BASH });
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -217,13 +211,20 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   mkdirSync(configDir, { recursive: true });
 
   const store = Store.open(join(home, 'switchboard.db'));
-  let config = loadConfig(configDir, undefined, store.homeRepos());
+  const plugins = new PluginRegistry(options.home);
+  await plugins.use(filePluginPaths(configDir) ?? []);
+  let config = loadConfig(configDir, undefined, store.homeRepos(), plugins.current);
   const deps: RuntimeDeps = {
     home: options.home,
     configDir,
     store,
     exec: spawnExec,
-    makeSource,
+    makeSource: sourceMaker(plugins),
+    kindInfo: (kind) => {
+      const plugin = plugins.current.get(kind);
+
+      return plugin === undefined ? undefined : { label: plugin.label, queue: plugin.queue === true };
+    },
     now: Date.now,
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     newSessionId: () => randomUUID().slice(0, 8),
@@ -360,10 +361,27 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   // settings.json, which holds the playbooks, is reloaded when it changes (PRD R42).
   let pending: NodeJS.Timeout | undefined;
+  let reloads = 0;
   const reload = () => {
     clearTimeout(pending);
-    pending = setTimeout(() => {
-      config = loadConfig(configDir, config, store.homeRepos());
+    pending = setTimeout(async () => {
+      const generation = ++reloads;
+      const paths = filePluginPaths(configDir);
+      const resolved = paths === null ? plugins.current : await plugins.resolve(paths);
+
+      // A later change started its own reload while the plugins were imported; it applies the newer file.
+      if (generation !== reloads) {
+        return;
+      }
+
+      const next = loadConfig(configDir, config, store.homeRepos(), resolved);
+
+      // A rejected file keeps the settings in force, and with them their plugins (PRD R42).
+      if (next.settingsError === null) {
+        plugins.current = resolved;
+      }
+
+      config = next;
       logWarnings(config);
       runtime.reload(config);
       voice.settingsChanged();
@@ -912,7 +930,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         codexPermissionModes: [...CODEX_PERMISSION_MODES],
         providers: [...PROVIDERS],
         templateVariables: [...TEMPLATE_VARIABLES],
-        sourceKinds: [...SOURCE_KINDS],
+        sourceKinds: plugins.current.all().map((plugin) => plugin.kind),
+        sourceLabels: Object.fromEntries(plugins.current.all().map((plugin) => [plugin.kind, plugin.label])),
+        sourceFields: Object.fromEntries(plugins.current.all().flatMap((plugin) => (plugin.fields === undefined ? [] : [[plugin.kind, plugin.fields]]))),
         inUse: openPlaybooks(runtime),
         enabled: Object.fromEntries(Object.keys(config.settings.sources).map((name) => [name, runtime.enabledSources().has(name)])),
       },
@@ -931,7 +951,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     check: async (body: unknown) =>
       isRecord(body) && 'settings' in body
-        ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos()), warnings: settingsWarnings(body['settings']) } }
+        ? await (async () => {
+            const draft = await plugins.resolve(pluginPaths(body['settings']) ?? []);
+
+            return { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos(), draft), warnings: settingsWarnings(body['settings']) } };
+          })()
         : { status: 400, body: { error: 'Expected {settings}.' } },
     save: async (body: unknown) => {
       const version = isRecord(body) ? body['version'] : undefined;
@@ -946,7 +970,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return { status: 409, body: { errors: [moved] } };
       }
 
-      const result = saveSettings(configDir, body['value'], version, runtime.enabledSources(), store.homeRepos());
+      const draft = await plugins.resolve(pluginPaths(body['value']) ?? []);
+      const result = saveSettings(configDir, body['value'], version, runtime.enabledSources(), store.homeRepos(), draft);
 
       return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
     },
@@ -967,7 +992,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       }
 
       // A file Settings could not save is left for Settings to fix, so no invalid entry, such as a voice that is not an object, is dropped here.
-      const invalid = checkSettings(file.value, runtime.enabledSources(), store.homeRepos());
+      const invalid = checkSettings(file.value, runtime.enabledSources(), store.homeRepos(), plugins.current);
 
       if (invalid.length > 0) {
         return { status: 409, body: { error: invalid.join(' ') } };
@@ -975,7 +1000,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       const voiceIn = file.value['voice'];
       const value = { ...file.value, voice: { ...(isRecord(voiceIn) ? voiceIn : {}), briefReplies: on } };
-      const result = saveSettings(configDir, value, file.version, runtime.enabledSources(), store.homeRepos());
+      const result = saveSettings(configDir, value, file.version, runtime.enabledSources(), store.homeRepos(), plugins.current);
 
       return result.errors.length === 0 ? { status: 200, body: { briefReplies: on } } : { status: 409, body: { error: result.errors.join(' ') } };
     },

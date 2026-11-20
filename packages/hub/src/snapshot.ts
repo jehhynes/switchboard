@@ -29,6 +29,8 @@ export interface SnapshotInputs {
   sourceNotes: Record<string, string[]>;
   /** The pull requests of open work items, by URL, as their sources last read them (PRD R92). */
   pullRequests: Record<string, PullRequestStatus>;
+  /** Each source kind's plugin label, and whether its sources are team queues. */
+  kinds: Record<string, { label: string; queue: boolean }>;
   now: number;
   configDir: string;
 }
@@ -91,7 +93,7 @@ export interface Snapshot {
   /** Sources being polled. */
   sources: string[];
   /** Every configured source but ad-hoc with its plugin, for the operator's source filter. */
-  sourceStates: { name: string; kind: string; enabled: boolean }[];
+  sourceStates: { name: string; kind: string; label: string; queue: boolean; enabled: boolean }[];
   /** Each configured source's playbook namespace, which names a triage in progress, such as `dev:triage`. */
   namespaces: Record<string, string>;
   /** The folder holding settings.json. */
@@ -216,7 +218,7 @@ export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
     sources: [...sources],
     sourceStates: Object.entries(settings.sources)
       .filter(([name]) => name !== ADHOC_SOURCE)
-      .map(([name, source]) => ({ name, kind: source.kind, enabled: enabled.has(name) })),
+      .map(([name, source]) => ({ name, kind: source.kind, label: inputs.kinds[source.kind]?.label ?? source.kind, queue: inputs.kinds[source.kind]?.queue ?? false, enabled: enabled.has(name) })),
     namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
     configDir: inputs.configDir,
     errors: {

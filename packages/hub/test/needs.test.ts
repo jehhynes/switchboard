@@ -83,7 +83,7 @@ function snapshot(items: WorkItemView[]): Snapshot {
     repoRoots: [],
     schedules: [],
     sources: ['github'],
-    sourceStates: [{ name: 'github', kind: 'github', enabled: true }],
+    sourceStates: [{ name: 'github', kind: 'github', label: 'github', queue: false, enabled: true }],
     namespaces: { github: 'dev' },
     configDir: 'C:\\Users\\me\\.switchboard',
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },

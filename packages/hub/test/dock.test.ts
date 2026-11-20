@@ -346,11 +346,11 @@ describe('dockView', () => {
   });
 
   it('lists the sources and repo roots for the header', () => {
-    const view = dockView(snapshot([], { sourceStates: [{ name: 'github', kind: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', enabled: false }] }), NOW, W);
+    const view = dockView(snapshot([], { sourceStates: [{ name: 'github', kind: 'github', label: 'github', queue: false, enabled: true }, { name: 'zoho', kind: 'zoho', label: 'zoho', queue: false, enabled: false }] }), NOW, W);
 
     expect(view.sources).toEqual([
-      { kind: 'github', enabled: true, title: 'github: polled\nClick to stop polling it.', sources: [{ name: 'github', enabled: true }] },
-      { kind: 'zoho', enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
+      { kind: 'github', label: 'github', queue: false, enabled: true, title: 'github: polled\nClick to stop polling it.', sources: [{ name: 'github', enabled: true }] },
+      { kind: 'zoho', label: 'zoho', queue: false, enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
     ]);
     expect(view.repoRoots).toEqual(['D:/git/widgets', 'D:/git/support']);
   });
@@ -374,14 +374,16 @@ describe('dockView', () => {
 
   it('groups the sources of one kind under one icon, which is on while any of them is polled (PRD R71)', () => {
     const groups = sourceGroups([
-      { name: 'github', kind: 'github', enabled: false },
-      { name: 'zoho', kind: 'zoho', enabled: false },
-      { name: 'personal', kind: 'github', enabled: true },
+      { name: 'github', kind: 'github', label: 'GitHub', queue: false, enabled: false },
+      { name: 'zoho', kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: false },
+      { name: 'personal', kind: 'github', label: 'GitHub', queue: false, enabled: true },
     ]);
 
     expect(groups).toEqual([
       {
         kind: 'github',
+        label: 'GitHub',
+        queue: false,
         enabled: true,
         title: 'github: not polled\npersonal: polled\nClick to choose which to poll.',
         sources: [
@@ -389,9 +391,9 @@ describe('dockView', () => {
           { name: 'personal', enabled: true },
         ],
       },
-      { kind: 'zoho', enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
+      { kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
     ]);
-    expect(sourceGroups([{ name: 'github', kind: 'github', enabled: false }, { name: 'personal', kind: 'github', enabled: false }])[0]!.enabled).toBe(false);
+    expect(sourceGroups([{ name: 'github', kind: 'github', label: 'github', queue: false, enabled: false }, { name: 'personal', kind: 'github', label: 'github', queue: false, enabled: false }])[0]!.enabled).toBe(false);
   });
 
   it('gives each row its source\'s kind, or the source name for a source no longer configured (PRD R3)', () => {
@@ -399,7 +401,7 @@ describe('dockView', () => {
     dashboard.ticket = { ...dashboard.ticket, source: 'widgets-dashboard' };
     const removed = item(9);
     removed.ticket = { ...removed.ticket, source: 'forum' };
-    const view = dockView(snapshot([dashboard, removed], { sourceStates: [{ name: 'widgets-dashboard', kind: 'github', enabled: true }] }), NOW, W);
+    const view = dockView(snapshot([dashboard, removed], { sourceStates: [{ name: 'widgets-dashboard', kind: 'github', label: 'github', queue: false, enabled: true }] }), NOW, W);
     const rows = view.groups.flatMap((group) => group.rows);
 
     expect(rows.map((row) => [row.ticket, row.source, row.sourceKind])).toEqual([
@@ -483,7 +485,7 @@ describe('dockView', () => {
         ],
         {
           pool: [pool(4)],
-          sourceStates: [{ name: 'github', kind: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', enabled: false }],
+          sourceStates: [{ name: 'github', kind: 'github', label: 'GitHub', queue: false, enabled: true }, { name: 'zoho', kind: 'zoho', label: 'Zoho Desk', queue: true, enabled: false }],
           held: [
             { session: 'o1', label: 'switchboard · ad-hoc · adhoc 9 9273f594-1111', workItemId: null, key: 'adhoc 9', nativeSessionId: '9273f594-1111', cwd: 'D:/scratch', state: 'live', idleSince: NOW - 3 * 60_000, memoryBytes: 52_428_800, clients: 0, exitedAt: null, exitCode: null, orphan: true },
             { session: 'cm15', label: 'switchboard · dev:develop · gh 115 eeee5555-native', workItemId: 15, key: 'gh 115', nativeSessionId: 'eeee5555-native', cwd: 'D:/git/widgets', state: 'waiting', idleSince: NOW - 125 * 60_000, memoryBytes: 314_572_800, clients: 1, exitedAt: null, exitCode: null, orphan: false },

@@ -302,7 +302,7 @@ describe('Snoozed (PRD R49)', () => {
     const h = new Harness();
     expect(h.send({ type: 'snooze', ticketId: 1, until: null }).refused).toBe('Unknown ticket 1.');
     expect(h.send({ type: 'restore', ticketId: 1 }).refused).toBe('Unknown ticket 1.');
-    expect(h.act({ type: 'poll', source: 'zoho', tickets: [pool('500')] })).toHaveLength(1);
+    expect(h.act({ type: 'poll', queue: true, source: 'zoho', tickets: [pool('500')] })).toHaveLength(1);
 
     const h2 = new Harness();
     h2.store.insertTicket(snoozedTicket({ source: 'zoho', sourceKey: '501', pool: true }));
@@ -404,13 +404,13 @@ describe('Snoozed (PRD R49)', () => {
   it('ends the snooze when the ticket leaves the assigned state or the pool, and keeps it while the ticket stays in scope', () => {
     const h = new Harness();
     h.poll(issue('1'), issue('2'), issue('3'));
-    h.act({ type: 'poll', source: 'zoho', tickets: [pool('500')] });
+    h.act({ type: 'poll', queue: true, source: 'zoho', tickets: [pool('500')] });
     for (const ticketId of [1, 2, 3, 4]) {
       h.act({ type: 'snooze', ticketId, until: T0 + HOUR });
     }
 
     h.poll(issue('1'), issue('2', false));
-    h.act({ type: 'poll', source: 'zoho', tickets: [] });
+    h.act({ type: 'poll', queue: true, source: 'zoho', tickets: [] });
 
     expect(h.store.ticket(1)).toMatchObject({ snoozed: true, snoozedUntil: T0 + HOUR });
     for (const ticketId of [2, 3, 4]) {

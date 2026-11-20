@@ -5,6 +5,7 @@ describe('parseSettings', () => {
   it('fills defaults for an empty object', () => {
     expect(parseSettings('{}')).toEqual({
       settings: {
+        plugins: [],
         sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false, codeMode: false },
         triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
         sources: {},
@@ -17,9 +18,20 @@ describe('parseSettings', () => {
     });
   });
 
+  it('refuses a source named all, which the volume report uses for every source', () => {
+    expect(parseSettings(JSON.stringify({ sources: { all: { kind: 'zoho' } } }))).toEqual({ errors: ['sources.all: all names every source in the volume report, so a source needs another name.'] });
+  });
+
+  it('refuses plugins that are not a list of absolute or ~ paths', () => {
+    for (const plugins of ['D:/plugins/forum.js', [1], ['plugins/forum.js'], ['']]) {
+      expect(parseSettings(JSON.stringify({ plugins }))).toEqual({ errors: ['plugins must list module paths, each absolute or starting with ~.'] });
+    }
+  });
+
   it('reads every value and passes source-specific keys through', () => {
     const result = parseSettings(
       JSON.stringify({
+        plugins: ['~/plugins/forum.js', 'D:/plugins/desk.js', '/opt/plugins/desk.js', 'D:/plugins/desk.js'],
         sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6' }, installHooks: false, debriefs: true, codeMode: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {
@@ -33,6 +45,7 @@ describe('parseSettings', () => {
 
     expect(result).toEqual({
       settings: {
+        plugins: ['~/plugins/forum.js', 'D:/plugins/desk.js', '/opt/plugins/desk.js'],
         sessions: { provider: 'codex', concurrency: 10, permissionMode: 'acceptEdits', model: 'opus', claudePath: '/opt/claude/bin/claude', codexPath: '/opt/codex/bin/codex', nodePath: 'C:/nodejs/node.exe', codex: { permissionMode: 'plan', model: 'gpt-6' }, installHooks: false, debriefs: true, codeMode: true },
         triage: { model: 'claude-sonnet-5', concurrency: 1, timeoutSeconds: 60 },
         sources: {

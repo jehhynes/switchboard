@@ -38,6 +38,7 @@ export function playbooks(names: string[] = Object.keys(PLAYBOOKS), extra: Recor
 
 export function settings(patch: { sessions?: Partial<Settings['sessions']>; triage?: Partial<Settings['triage']>; schedules?: Settings['schedules'] } = {}): Settings {
   return {
+    plugins: [],
     sessions: { ...DEFAULT_SETTINGS.sessions, ...patch.sessions },
     triage: { ...DEFAULT_SETTINGS.triage, ...patch.triage },
     sources: {

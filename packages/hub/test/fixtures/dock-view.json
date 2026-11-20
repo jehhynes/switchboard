@@ -1292,6 +1292,8 @@
   "sources": [
     {
       "kind": "github",
+      "label": "GitHub",
+      "queue": false,
       "enabled": true,
       "title": "github: polled\nClick to stop polling it.",
       "sources": [
@@ -1303,6 +1305,8 @@
     },
     {
       "kind": "zoho",
+      "label": "Zoho Desk",
+      "queue": true,
       "enabled": false,
       "title": "zoho: not polled\nClick to poll it.",
       "sources": [

@@ -1536,7 +1536,7 @@ describe("a ticket's repository and repo root (PRD R16, R21, R44)", () => {
 
   it('leaves {{ticket.repo}} and {{ticket.number}} empty for a ticket without a repository', () => {
     const h = new Harness({ playbooks: playbooks(['triage:zoho'], { 'support:repo': { description: 'Name the repository', autoStart: true, workdir: 'repoRoot', template: '[{{ticket.repo}}][{{ticket.number}}]' } }) });
-    const [triage] = h.act({ type: 'poll', source: 'zoho', tickets: [{ ...issue('5'), ref: 'T5' }] });
+    const [triage] = h.act({ type: 'poll', queue: true, source: 'zoho', tickets: [{ ...issue('5'), ref: 'T5' }] });
     const [start] = h.triaged(triage, 'support:repo');
 
     expect(start).toMatchObject({ cwd: 'D:/git/support', prompt: expect.stringContaining('[][]') });

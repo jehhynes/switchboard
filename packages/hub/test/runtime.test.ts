@@ -1708,7 +1708,7 @@ describe('Runtime', () => {
     expect(runtime.setSourceEnabled('github', false)).toBeNull();
     expect(store.enabledSources()).toEqual(new Set());
     expect(runtime.snapshot().pool).toEqual([]);
-    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', kind: 'github', enabled: false }]);
+    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', kind: 'github', label: 'github', queue: false, enabled: false }]);
     expect(runtime.snapshot().namespaces).toEqual({ github: 'dev' });
     expect(runtime.setSourceEnabled('zoho', true)).toBe('settings.json has no source named zoho.');
     expect(runtime.setSourceEnabled('adhoc', true)).toBe('settings.json has no source named adhoc.');
@@ -1853,7 +1853,7 @@ describe('Runtime', () => {
     expect(store.enabledSources()).toEqual(new Set());
 
     runtime.reload(config());
-    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', kind: 'github', enabled: false }]);
+    expect(runtime.snapshot().sourceStates).toEqual([{ name: 'github', kind: 'github', label: 'github', queue: false, enabled: false }]);
   });
 
   it('reports a source whose kind has no plugin', () => {
@@ -1871,8 +1871,8 @@ describe('Runtime', () => {
     const { runtime, store, source } = setup(cfg, undefined, undefined, undefined, { 'widgets-dashboard': dashboard });
 
     expect(runtime.snapshot().sourceStates).toEqual([
-      { name: 'github', kind: 'github', enabled: true },
-      { name: 'widgets-dashboard', kind: 'github', enabled: true },
+      { name: 'github', kind: 'github', label: 'github', queue: false, enabled: true },
+      { name: 'widgets-dashboard', kind: 'github', label: 'github', queue: false, enabled: true },
     ]);
 
     source.result = { tickets: [issue('63')] };

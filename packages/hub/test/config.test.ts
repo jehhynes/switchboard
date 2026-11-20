@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkSettings, fileVersion, loadConfig, readConfigFile, saveSettings, sourceOptionsError } from '../src/config.js';
+import { pluginSet } from '../src/plugins.js';
+import type { SourcePlugin } from '@switchboard/core';
 import { tempHome } from './helpers.js';
 
 let temp: ReturnType<typeof tempHome>;
@@ -22,6 +24,17 @@ function write(path: string, text: string): void {
   writeFileSync(path, text);
 }
 
+/** A plugin module's export, which checks one key. */
+const FORUM: SourcePlugin = {
+  kind: 'forum',
+  label: 'Forum',
+  queue: true,
+  optionsError: (options, name) => (typeof options['userId'] === 'string' ? null : `sources.${name}.userId must be set.`),
+  create: () => ({ error: 'not built in this test' }),
+};
+
+const FORUM_PLUGINS = pluginSet([['D:/plugins/forum.js', { plugin: FORUM }]]);
+
 const GITHUB = { repo: 'o/r', logins: ['me'], project: { owner: 'o', number: 3 }, assignedStatuses: ['Dev'] };
 
 const TASK = { description: 'Develop it', requiresWorktree: true, template: '/sb-plan {{ticket.sourceKey}}' };
@@ -37,23 +50,26 @@ describe('checkSettings', () => {
     ]);
   });
 
-  it('refuses a kind other than GitHub named apart from it, a source named after another kind, and two GitHub sources on one board, even when off (PRD R3)', () => {
+  it('refuses a source named after another kind, including a plugin kind, and two GitHub sources on one board, even when off (PRD R3)', () => {
     expect(
       checkSettings(
         {
           sources: {
             github: GITHUB,
             zoho: { kind: 'github' },
-            'support-again': { kind: 'zoho' },
+            forum: { kind: 'github' },
+            'desk-again': { kind: 'zoho' },
             personal: { kind: 'github', project: { owner: 'O', number: 3 } },
             other: { kind: 'github', project: { owner: 'o', number: 4 } },
           },
         },
         new Set(),
+        {},
+        FORUM_PLUGINS,
       ),
     ).toEqual([
       'sources.zoho: zoho is a source kind, so a source of kind github needs another name.',
-      'sources.support-again.kind: only a GitHub source may be named apart from its kind.',
+      'sources.forum: forum is a source kind, so a source of kind github needs another name.',
       'sources.personal.project: sources.github already reads project o/3.',
     ]);
   });
@@ -70,13 +86,22 @@ describe('checkSettings', () => {
           forum: { setupPrompt: '{{x}}' },
           jira: {},
         },
-      }, new Set(['github', 'forum', 'jira'])),
+      }, new Set(['github', 'forum', 'jira']), {}, FORUM_PLUGINS),
     ).toEqual([
       'sources.github.setupPrompt: Unknown template variable: ticket.key.',
       'sources.github.repo must be set to owner/name.',
       'sources.forum.setupPrompt: Unknown template variable: x.',
-      'sources.forum.userId must be set to your forum user ID, as a string.',
+      'sources.forum.userId must be set.',
       'sources.jira: Switchboard has no source kind jira.',
+    ]);
+  });
+
+  it('reports each plugin that failed to load, and with it the kind it would have given', () => {
+    const plugins = pluginSet([['D:/plugins/broken.js', { error: 'it could not be loaded: Cannot find module.' }], ['D:/plugins/forum2.js', { plugin: FORUM }]]);
+
+    expect(checkSettings({ sources: { jira: {} } }, new Set(['jira']), {}, plugins)).toEqual([
+      'plugins: D:/plugins/broken.js: it could not be loaded: Cannot find module.',
+      'sources.jira: Switchboard has no source kind jira. plugins: D:/plugins/broken.js: it could not be loaded: Cannot find module.',
     ]);
   });
 
@@ -127,7 +152,8 @@ describe('sourceOptionsError', () => {
   it('uses each source’s own check', () => {
     expect(sourceOptionsError('github', 'github', GITHUB)).toBeNull();
     expect(sourceOptionsError('zoho', 'zoho', { orgId: '1' })).toBe('sources.zoho.agentId must be set to your Zoho agent ID, as a string.');
-    expect(sourceOptionsError('forum', 'forum', { userId: '7' })).toBeNull();
+    expect(sourceOptionsError('forum', 'forum', { userId: '7' }, FORUM_PLUGINS)).toBeNull();
+    expect(sourceOptionsError('forum', 'forum', { userId: '7' })).toBe('sources.forum: Switchboard has no source kind forum.');
   });
 });
 

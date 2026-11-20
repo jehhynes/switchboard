@@ -1,4 +1,4 @@
-import type { Source, SourceSettings } from '@switchboard/core';
+import type { Source, SourcePlugin, SourceSettings } from '@switchboard/core';
 import { parseZohoConfig } from './config.js';
 import { commandToken, deskClient } from './desk.js';
 import { ZohoSource } from './source.js';
@@ -14,3 +14,15 @@ export function zohoSource(name: string, settings: SourceSettings, bash = 'bash'
 
   return 'error' in parsed ? parsed : { source: new ZohoSource(parsed.config, deskClient(parsed.config, commandToken(parsed.config.tokenCommand, bash)), Date.now, name) };
 }
+
+export const zohoPlugin: SourcePlugin = {
+  kind: 'zoho',
+  label: 'Zoho Desk',
+  queue: true,
+  optionsError: (options, name) => {
+    const parsed = parseZohoConfig(options, name);
+
+    return 'error' in parsed ? parsed.error : null;
+  },
+  create: (name, settings, context) => zohoSource(name, settings, context.bash),
+};

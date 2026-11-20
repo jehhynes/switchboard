@@ -12,6 +12,7 @@ export * from './settings.js';
 export * from './store.js';
 export * from './template.js';
 export * from './source.js';
+export * from './plugin.js';
 export * from './clip.js';
 export * from './snooze.js';
 export * from './schedule.js';
