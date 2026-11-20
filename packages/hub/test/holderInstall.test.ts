@@ -61,6 +61,48 @@ describe('installVoice', () => {
     expect(installLockAddress('C:/h', 'win32', VOICE_INSTALL)).toMatch(/switchboard-voice-install-[0-9a-f]{16}$/);
     expect(installLockAddress('C:/h', 'win32')).toMatch(/switchboard-holder-install-[0-9a-f]{16}$/);
   });
+
+  it("removes only old build folders, keeping the operator's models, terms, glossary, voiceprints and logs", async () => {
+    const home = temp();
+    const voice = join(home, 'voice');
+    const old = 'cccccccccccccccc';
+    const kept = [
+      'models/sherpa-onnx-nemotron/model.onnx',
+      'models/livekit-turn-detector/model.onnx',
+      'terms/user.txt',
+      'terms/repos/acme/widgets.txt',
+      'hotwords/hotwords-abc.txt',
+      'audio/clip.wav',
+      'glossary.json',
+      'voiceprint.json',
+      'tts-voiceprints.json',
+      'fragments-2026-11-20.jsonl',
+      'DDDDDDDDDDDDDDDD/notes.txt',
+      'cccccccccccccccc-backup/notes.txt',
+      'cccccccccccccccc.123.old/notes.txt',
+      'cccccccccccccccc.123.456.tmp/notes.txt',
+    ];
+
+    for (const file of [...kept, `${old}/voice.js`, `${old}.123.tmp/voice.js`, `${old}.123.456.old/voice.js`]) {
+      mkdirSync(join(voice, file, '..'), { recursive: true });
+      writeFileSync(join(voice, file), file);
+    }
+
+    const carried = temp();
+
+    writeFileSync(join(carried, 'voice.js'), 'voice');
+    writeFileSync(join(carried, 'manifest.json'), JSON.stringify({ build: BUILD_A, files: ['voice.js'] }));
+    expect(await installVoice(carried, home, () => false, () => Date.now() + 3_600_000)).toEqual({ build: BUILD_A });
+
+    for (const file of kept) {
+      expect(readFileSync(join(voice, file), 'utf8')).toBe(file);
+    }
+
+    expect(existsSync(join(voice, old))).toBe(false);
+    expect(existsSync(join(voice, `${old}.123.tmp`))).toBe(false);
+    expect(existsSync(join(voice, `${old}.123.456.old`))).toBe(false);
+    expect(readFileSync(join(voice, BUILD_A, 'voice.js'), 'utf8')).toBe('voice');
+  });
 });
 
 describe('installHolder', () => {
@@ -94,6 +136,17 @@ describe('installHolder', () => {
     expect(currentHolderBuild(home)).toBe(BUILD_B);
     await installHolder(carried(BUILD_B), home, () => false);
     expect(existsSync(join(home, 'holder', BUILD_A))).toBe(false);
+  });
+
+  it('leaves files and folders that are not builds', async () => {
+    const home = temp();
+
+    mkdirSync(join(home, 'holder', 'other'), { recursive: true });
+    writeFileSync(join(home, 'holder', 'other', 'keep.txt'), 'keep');
+    writeFileSync(join(home, 'holder', 'notes.json'), '{}');
+    expect(await installHolder(carried(BUILD_A), home, () => false, () => Date.now() + 3_600_000)).toEqual({ build: BUILD_A });
+    expect(readFileSync(join(home, 'holder', 'other', 'keep.txt'), 'utf8')).toBe('keep');
+    expect(existsSync(join(home, 'holder', 'notes.json'))).toBe(true);
   });
 
   it('keeps a build a hub reserved in the last 10 minutes, and removes it once the reservation is older', async () => {

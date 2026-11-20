@@ -39,6 +39,10 @@ export const MANIFEST_FILE = 'manifest.json';
 export const CURRENT_FILE = 'current.json';
 /** Touched in a build's folder when a hub starts a holder from it, so an install in another window does not remove it meanwhile. */
 export const IN_USE_FILE = 'in-use';
+/** A build folder's name: its 16-hex build ID. */
+const BUILD_NAME = /^[0-9a-f]{16}$/;
+/** A copy an install left behind: `<build>.<pid>.tmp` while copying, `<build>.<pid>.<time>.old` when moved aside. */
+const LEFTOVER_NAME = /^[0-9a-f]{16}\.(\d+\.tmp|\d+\.\d+\.old)$/;
 /** A build a hub reserved more recently than this is kept. */
 const RECENT_MS = 10 * 60_000;
 const LOCK_WAIT_MS = 10_000;
@@ -255,7 +259,11 @@ export function installVoice(source: string, home: string, running: (pid: number
   return installHolder(source, home, running, now, VOICE_INSTALL);
 }
 
-/** Removes build folders other than `keep`, the running holder's and recent ones; a folder a process has loaded stays until a later install. */
+/**
+ * Removes build folders, and copies an install left, other than `keep`, the running process's and recent ones; a folder a process has loaded
+ * stays until a later install. Any other entry is never touched, since `<home>/voice/` also holds the operator's models, terms, glossary,
+ * voiceprints and logs.
+ */
 function removeOldBuilds(home: string, keep: string, running: (pid: number) => boolean, now: () => number, kind: InstallKind): void {
   const root = join(home, kind.name);
   let inUse: string | null = null;
@@ -269,7 +277,9 @@ function removeOldBuilds(home: string, keep: string, running: (pid: number) => b
   }
 
   for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name === keep || entry.name === inUse || recentlyUsed(join(root, entry.name), now)) {
+    const build = BUILD_NAME.test(entry.name) || LEFTOVER_NAME.test(entry.name);
+
+    if (!entry.isDirectory() || !build || entry.name === keep || entry.name === inUse || recentlyUsed(join(root, entry.name), now)) {
       continue;
     }
 
