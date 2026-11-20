@@ -7,6 +7,7 @@ public enum FieldKind
 {
     Text,
     Integer,
+    Number,
     Boolean,
     Select,
     List,
@@ -69,6 +70,15 @@ public static partial class SettingsFields
     [GeneratedRegex(@"^-?\d+$")]
     private static partial Regex WholeNumber();
 
+    [GeneratedRegex(@"^-?\d+(\.\d+)?$")]
+    private static partial Regex Decimal();
+
+    [GeneratedRegex(@"^(.+)\[(\d+)\]$")]
+    private static partial Regex IndexedKey();
+
+    [GeneratedRegex(@"^voice\.personas\[(\d+)\]")]
+    private static partial Regex PersonaError();
+
     public static bool IsSegment(string text) => Segment().IsMatch(text);
 
     /// <summary>The settings every source has; a change of kind keeps only these, because each plugin rejects another's keys.</summary>
@@ -90,25 +100,59 @@ public static partial class SettingsFields
         return kind == name ? SourceLabel(name) : $"{name} ({SourceLabel(kind)})";
     }
 
+    /// <summary>A path segment's key and, for a list entry such as <c>personas[0]</c>, its index.</summary>
+    static (string Key, int? Index) Step(string segment) =>
+        IndexedKey().Match(segment) is { Success: true } match && int.TryParse(match.Groups[2].Value, out var index) ? (match.Groups[1].Value, index) : (segment, null);
+
+    /// <summary>The value at a dotted path, whose segments may index a list, as in <c>voice.personas[0].name</c>; null when any part is missing.</summary>
+    /// <summary>A path's segments; a <c>voice.playbookPersonas</c> key is a playbook name, which may hold a dot, so it stays one segment.</summary>
+    static string[] Segments(string path) =>
+        path.StartsWith(AssignmentsPrefix, StringComparison.Ordinal) && path.Length > AssignmentsPrefix.Length
+            ? ["voice", "playbookPersonas", path[AssignmentsPrefix.Length..]]
+            : path.Split('.');
+
+    const string AssignmentsPrefix = "voice.playbookPersonas.";
+
     public static JsonNode? GetAt(JsonNode? root, string path)
     {
-        foreach (var key in path.Split('.'))
+        foreach (var segment in Segments(path))
         {
+            var (key, index) = Step(segment);
+
             root = root is JsonObject node ? node[key] : null;
+
+            if (index is { } at)
+            {
+                root = root is JsonArray list && at < list.Count ? list[at] : null;
+            }
         }
 
         return root;
     }
 
     /// <summary>A copy of <paramref name="root"/> with <paramref name="path"/> set, or removed when <paramref name="value"/> is null; intermediate objects are created.</summary>
+    /// <remarks>A list entry on the path, as in <c>voice.personas[0].name</c>, must exist and, when not last, be an object; otherwise nothing changes.</remarks>
     public static JsonObject SetAt(JsonObject root, string path, JsonNode? value)
     {
         var copy = root.DeepClone().AsObject();
-        var keys = path.Split('.');
+        var keys = Segments(path);
         var parent = copy;
 
-        foreach (var key in keys[..^1])
+        foreach (var segment in keys[..^1])
         {
+            var (key, index) = Step(segment);
+
+            if (index is { } at)
+            {
+                if (parent[key] is not JsonArray list || at >= list.Count || list[at] is not JsonObject entry)
+                {
+                    return root.DeepClone().AsObject();
+                }
+
+                parent = entry;
+                continue;
+            }
+
             if (parent[key] is not JsonObject child)
             {
                 child = [];
@@ -118,13 +162,34 @@ public static partial class SettingsFields
             parent = child;
         }
 
+        var (last, lastIndex) = Step(keys[^1]);
+
+        if (lastIndex is { } position)
+        {
+            if (parent[last] is not JsonArray list || position >= list.Count)
+            {
+                return root.DeepClone().AsObject();
+            }
+
+            if (value is null)
+            {
+                list.RemoveAt(position);
+            }
+            else
+            {
+                list[position] = value.DeepClone();
+            }
+
+            return copy;
+        }
+
         if (value is null)
         {
-            parent.Remove(keys[^1]);
+            parent.Remove(last);
         }
         else
         {
-            parent[keys[^1]] = value.DeepClone();
+            parent[last] = value.DeepClone();
         }
 
         return copy;
@@ -162,6 +227,9 @@ public static partial class SettingsFields
                 return JsonValue.Create(isChecked);
             case FieldKind.Integer:
                 return text.Trim() == "" ? null : WholeNumber().IsMatch(text.Trim()) && long.TryParse(text.Trim(), out var number) ? JsonValue.Create(number) : JsonValue.Create(text);
+            case FieldKind.Number:
+                return text.Trim() == "" ? null
+                    : Decimal().IsMatch(text.Trim()) && double.TryParse(text.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var real) ? JsonValue.Create(real) : JsonValue.Create(text);
             case FieldKind.List:
             {
                 var lines = text.Split('\n').Select((line) => line.Trim()).Where((line) => line != "").ToList();
@@ -312,6 +380,88 @@ public static partial class SettingsFields
                 new Field("triage.model", "Model", FieldKind.Text, "Triage uses the default provider. A model from the other provider falls back to its default.", "Provider's default"),
                 new Field("triage.concurrency", "Concurrency", FieldKind.Integer, "Triages that run at once.", "2"),
                 new Field("triage.timeoutSeconds", "Timeout (seconds)", FieldKind.Integer, "", "180"),
+            ]),
+        ];
+    }
+
+    /// <summary>The voices of OpenAI's realtime speech, as core's <c>TTS_VOICES</c> lists them.</summary>
+    public static readonly IReadOnlyList<string> TtsVoices = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
+
+    /// <summary>The speaking styles, as core's <c>SPEECH_STYLES</c> lists them.</summary>
+    public static readonly IReadOnlyList<string> SpeechStyles = ["none", "pair", "upbeat", "deadpan", "expressive"];
+
+    static string Capitalized(string text) => text == "" ? text : char.ToUpperInvariant(text[0]) + text[1..];
+
+    static IReadOnlyList<FieldOption> Choices(IEnumerable<string> values) => values.Select((value) => new FieldOption(value, Capitalized(value))).ToList();
+
+    static string Setting(EditorState state, string path, string fallback) =>
+        GetAt(state.SettingsValue, path) is JsonValue value && value.TryGetValue<string>(out var text) && text != "" ? text : fallback;
+
+    /// <summary>
+    /// The Voice page (PRD R105, R106): speech settings, then a select per playbook with a persona (<c>voice.playbookPersonas</c>), each offering the
+    /// roster's personas and None, which removes the assignment.
+    /// </summary>
+    public static IReadOnlyList<Section> VoiceFields(EditorState state)
+    {
+        var value = state.SettingsValue;
+        var personas = PersonaOptions(state);
+        var assigned = GetAt(value, "voice.playbookPersonas") is JsonObject map ? map.Select((entry) => entry.Key).ToList() : [];
+        var playbooks = state.PlaybookNames;
+
+        return
+        [
+            new Section("Speech",
+            [
+                new Field("voice.enabled", "Enabled", FieldKind.Boolean, "Read replies aloud: the voice process, Speak replies, Talk here and personas. Off, nothing is spoken and no session gets a persona.", Fallback: false),
+                new Field("voice.voice", "Voice", FieldKind.Select, "The voice replies are read in when no persona applies. OpenAI recommends Marin and Cedar.", "marin", WithCurrent(Choices(TtsVoices), GetAt(value, "voice.voice"))),
+                new Field("voice.style", "Style", FieldKind.Select, "How replies are read when no persona applies, unless Expressive delivery is on.", "none", WithCurrent(Choices(SpeechStyles), GetAt(value, "voice.style"))),
+                new Field("voice.speed", "Speed", FieldKind.Number, "0.25 to 1.5; 1 is the voice’s own pace.", "1"),
+                new Field("voice.expressive", "Expressive delivery", FieldKind.Boolean, "Ask Claude for a tone line with each spoken reply, and read the reply in that tone instead of the style.", Fallback: false),
+                new Field("voice.expandReplies", "Expand replies", FieldKind.Boolean, "Show a reply whole instead of its spoken passage first, with the rest behind Show more.", Fallback: false),
+                new Field("voice.awayMinutes", "Away timeout (minutes)", FieldKind.Integer, "1 to 1440. With the focus outside every Switchboard window for this long, the voice stops speaking for its session.", "2"),
+                new Field("voice.needsYouSound", "Needs-you sound", FieldKind.Boolean, "Play a short sound between spoken replies when another work item starts needing you.", Fallback: true),
+                new Field("voice.outputDevice", "Output device", FieldKind.Text, "Part of the playback device’s name, such as Speakers. Empty uses the system default.", "System default"),
+            ]),
+            new Section("Playbook personas",
+                assigned.Select((playbook) => new Field($"voice.playbookPersonas.{playbook}", playbooks.Contains(playbook) ? playbook : $"{playbook} (missing)", FieldKind.Select, "",
+                    Options: WithCurrent([new FieldOption("", "None"), .. personas], GetAt(value, $"voice.playbookPersonas.{playbook}")))).ToList()),
+        ];
+    }
+
+    /// <summary>The roster's personas as choices: each persona with an ID, by its name and ID, in roster order.</summary>
+    public static IReadOnlyList<FieldOption> PersonaOptions(EditorState state) =>
+        state.PersonaIds.Distinct(StringComparer.Ordinal).Select((id) => new FieldOption(id, $"{state.PersonaName(id)} ({id})")).ToList();
+
+    /// <summary>The task playbooks with no persona yet, which the Voice page's Assign offers.</summary>
+    public static IReadOnlyList<string> UnassignedPlaybooks(EditorState state)
+    {
+        var assigned = GetAt(state.SettingsValue, "voice.playbookPersonas") as JsonObject;
+
+        return state.PlaybookNames.Where((name) => state.PlaybookValue(name)?.Kind == "task" && assigned?.ContainsKey(name) != true).ToList();
+    }
+
+    /// <summary>A persona's fields (PRD R106); its ID is set by New persona and not edited, because sessions and assignments store it.</summary>
+    public static IReadOnlyList<Section> PersonaFields(EditorState state, int index)
+    {
+        var path = $"voice.personas[{index}]";
+        var value = state.SettingsValue;
+
+        if (GetAt(value, path) is not JsonObject)
+        {
+            return [];
+        }
+
+        var voice = Setting(state, "voice.voice", "marin");
+        var style = Setting(state, "voice.style", "none");
+
+        return
+        [
+            new Section("Persona",
+            [
+                new Field($"{path}.name", "Name", FieldKind.Text, "1 to 40 characters. The Conversation view’s header shows it."),
+                new Field($"{path}.voice", "Voice", FieldKind.Select, "", Options: WithCurrent([new FieldOption("", $"Voice setting ({Capitalized(voice)})"), .. Choices(TtsVoices)], GetAt(value, $"{path}.voice"))),
+                new Field($"{path}.style", "Style", FieldKind.Select, "", Options: WithCurrent([new FieldOption("", $"Voice setting ({Capitalized(style)})"), .. Choices(SpeechStyles)], GetAt(value, $"{path}.style"))),
+                new Field($"{path}.personality", "Personality", FieldKind.Prompt, "At most 600 characters. How its spoken replies sound, and a tone section in its sessions’ prompts; it never changes how they work."),
             ]),
         ];
     }
@@ -511,12 +661,13 @@ public static partial class SettingsFields
     public static string? PlaybookFieldOfError(string error, IEnumerable<string> paths) =>
         paths.FirstOrDefault((path) => error.StartsWith($"{path} ", StringComparison.Ordinal)) ?? (error.Contains("template", StringComparison.OrdinalIgnoreCase) ? "template" : null);
 
-    /// <summary>Every settings field path of the general, source and schedule pages.</summary>
+    /// <summary>Every settings field path of the general, voice, persona, source and schedule pages.</summary>
     public static IReadOnlyList<string> AllSettingsPaths(EditorState state)
     {
         var sources = state.SettingsValue?["sources"] is JsonObject configured ? configured.Select((entry) => entry.Key).ToList() : [];
 
-        return GeneralFields(state).Concat(sources.SelectMany((name) => SourceFields(state, name))).Concat(state.ScheduleNames.SelectMany((name) => ScheduleFields(state, name)))
+        return GeneralFields(state).Concat(VoiceFields(state)).Concat(Enumerable.Range(0, state.PersonaCount).SelectMany((index) => PersonaFields(state, index)))
+            .Concat(sources.SelectMany((name) => SourceFields(state, name))).Concat(state.ScheduleNames.SelectMany((name) => ScheduleFields(state, name)))
             .SelectMany((section) => section.Fields).Select((field) => field.Path).ToList();
     }
 
@@ -530,9 +681,15 @@ public static partial class SettingsFields
         {
             var path = FieldOfError(error, paths);
 
-            pages[error] = path is null ? null
+            // A persona's or the voice section's error that names no field, such as an entry that is not an object, shows on its page.
+            pages[error] = path is null
+                ? PersonaError().Match(error) is { Success: true } persona ? $"persona:{persona.Groups[1].Value}"
+                    : error.StartsWith("voice.", StringComparison.Ordinal) ? "voice"
+                    : null
                 : path.StartsWith("sources.", StringComparison.Ordinal) ? $"source:{path.Split('.')[1]}"
                 : path.StartsWith("schedules.", StringComparison.Ordinal) ? $"schedule:{path.Split('.')[1]}"
+                : PersonaError().Match(path) is { Success: true } field ? $"persona:{field.Groups[1].Value}"
+                : path.StartsWith("voice.", StringComparison.Ordinal) ? "voice"
                 : "general";
         }
 

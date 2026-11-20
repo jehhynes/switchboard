@@ -111,7 +111,7 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
                 return;
             }
         }
-        else if (page == "general" || page.StartsWith("source:", StringComparison.Ordinal) || page.StartsWith("schedule:", StringComparison.Ordinal))
+        else if (page is "general" or "voice" || page.StartsWith("source:", StringComparison.Ordinal) || page.StartsWith("schedule:", StringComparison.Ordinal) || page.StartsWith("persona:", StringComparison.Ordinal))
         {
             if (state.SettingsValue is not { } value)
             {
@@ -119,6 +119,11 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
             }
 
             var next = SettingsFields.SetAt(value, field.Path, SettingsFields.ReadField(field.Kind, text, isChecked, field.ListDefault is not null));
+
+            if (field.Path.StartsWith("voice.", StringComparison.Ordinal))
+            {
+                next = Tidy(state, next);
+            }
 
             if (SourceKind(field.Path) && field.Path.Split('.')[1] is var name
                 && SettingsFields.SourceKind(next, name) != SettingsFields.SourceKind(value, name)
@@ -151,8 +156,8 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
         }
 
         // The kind and the approval report decide which playbook fields show, the agent which modes and defaults they offer, a schedule's
-        // period which of its day and time fields show, and a source's kind its plugin's fields.
-        Edited(field.Path is "kind" or "reports.approval" or "provider" || Every(field.Path) || SourceKind(field.Path));
+        // period which of its day and time fields show, a source's kind its plugin's fields, and None on a playbook's persona removes its row.
+        Edited(field.Path is "kind" or "reports.approval" or "provider" || Every(field.Path) || SourceKind(field.Path) || (field.Path.StartsWith("voice.playbookPersonas.", StringComparison.Ordinal) && text == ""));
     }
 
     static bool SourceKind(string path) => path.StartsWith("sources.", StringComparison.Ordinal) && path.EndsWith(".kind", StringComparison.Ordinal);
@@ -236,6 +241,13 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
             return;
         }
 
+        if (state.Page == "new-persona")
+        {
+            state.NewPersona = (name ?? state.NewPersona.Name, state.NewPersona.Touched);
+            Changed?.Invoke(false);
+            return;
+        }
+
         state.NewPlaybook = state.NewPlaybook with { Namespace = space ?? state.NewPlaybook.Namespace, Name = name ?? state.NewPlaybook.Name };
         Changed?.Invoke(false);
     }
@@ -273,13 +285,95 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
     }
 
     /// <summary>
-    /// Adds the New playbook page's playbook to the draft and opens its page, or on the New schedule page an empty schedule and on the New source
-    /// page a source with only its kind, whose errors name the fields to fill; refuses an invalid or taken name.
+    /// Removes a persona from the draft, with the playbook assignments that name its ID unless another entry has that ID, since the hub refuses an
+    /// assignment to a persona not in the roster. Discard restores it.
+    /// </summary>
+    public void RemovePersona(int index)
+    {
+        if (State is not { } state || state.SettingsValue is not { } value || index < 0 || index >= state.PersonaCount)
+        {
+            return;
+        }
+
+        var id = state.PersonaId(index);
+        var next = SettingsFields.SetAt(value, $"voice.personas[{index}]", null);
+
+        if (id is not null && !Enumerable.Range(0, state.PersonaCount).Any((at) => at != index && state.PersonaId(at) == id) && SettingsFields.GetAt(next, "voice.playbookPersonas") is JsonObject assigned)
+        {
+            foreach (var playbook in assigned.Where((entry) => entry.Value is JsonValue persona && persona.TryGetValue<string>(out var named) && named == id).Select((entry) => entry.Key).ToList())
+            {
+                next = SettingsFields.SetAt(next, $"voice.playbookPersonas.{playbook}", null);
+            }
+        }
+
+        state.SetDraft(Tidy(state, next));
+        state.Page = "voice";
+        Edited(true);
+    }
+
+    /// <summary>Drops the voice containers an edit emptied that the file does not have, so creating and removing a persona leaves no change.</summary>
+    static JsonObject Tidy(EditorState state, JsonObject next)
+    {
+        foreach (var path in new[] { "voice.personas", "voice.playbookPersonas", "voice" })
+        {
+            if (SettingsFields.GetAt(next, path) is JsonArray { Count: 0 } or JsonObject { Count: 0 } && SettingsFields.GetAt(state.Config.Settings.Value, path) is null)
+            {
+                next = SettingsFields.SetAt(next, path, null);
+            }
+        }
+
+        return next;
+    }
+
+    /// <summary>Gives a playbook a persona on the Voice page; the playbook's row then offers None to remove it.</summary>
+    public void AssignPersona(string playbook, string personaId)
+    {
+        if (State is not { } state || state.SettingsValue is not { } value || playbook == "" || !state.PersonaIds.Contains(personaId))
+        {
+            return;
+        }
+
+        state.SetDraft(SettingsFields.SetAt(value, $"voice.playbookPersonas.{playbook}", JsonValue.Create(personaId)));
+        Edited(true);
+    }
+
+    /// <summary>
+    /// Adds the New playbook page's playbook to the draft and opens its page, or on the New schedule page an empty schedule, on the New source page
+    /// a source with only its kind, and on the New persona page a persona with only its ID, whose errors name the fields to fill; refuses an invalid
+    /// or taken name.
     /// </summary>
     public void Create()
     {
         if (State is not { } state)
         {
+            return;
+        }
+
+        if (state.Page == "new-persona")
+        {
+            if (state.NewPersonaError is not null)
+            {
+                state.NewPersona = (state.NewPersona.Name, true);
+                Changed?.Invoke(false);
+                return;
+            }
+
+            var id = state.NewPersona.Name.Trim();
+            var index = state.PersonaCount;
+            var draft = state.SettingsValue!;
+
+            if (SettingsFields.GetAt(draft, "voice.personas") is not JsonArray)
+            {
+                draft = SettingsFields.SetAt(draft, "voice.personas", new JsonArray());
+            }
+
+            var personas = SettingsFields.GetAt(draft, "voice.personas")!.AsArray().DeepClone().AsArray();
+
+            personas.Add(new JsonObject { ["id"] = id });
+            state.SetDraft(SettingsFields.SetAt(draft, "voice.personas", personas));
+            state.NewPersona = ("", false);
+            state.Page = $"persona:{index}";
+            Edited(true);
             return;
         }
 

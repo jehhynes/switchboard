@@ -380,11 +380,11 @@ public sealed class SettingsPagesTests
         var nav = SettingsPages.Nav(SettingsConfigs.State());
 
         Assert.Equal(
-            ["heading Settings", "item General", "heading Sources", "item GitHub", "item Zoho Desk off", "add Add Forum", "add New source", "heading Schedules", "add New schedule", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook"],
+            ["heading Settings", "item General", "item Voice", "heading Personas", "add New persona", "heading Sources", "item GitHub", "item Zoho Desk off", "add Add Forum", "add New source", "heading Schedules", "add New schedule", "heading Playbooks", "namespace dev", "item develop", "item review", "namespace triage", "item github", "add New playbook"],
             nav.Select((entry) => $"{entry.Kind} {entry.Label}{(entry.Note is null ? "" : $" {entry.Note}")}"));
         Assert.True(nav[1].Current);
-        Assert.Equal("add-source", nav[5].Command);
-        Assert.Equal("forum", nav[5].Argument);
+        Assert.Equal("add-source", nav[8].Command);
+        Assert.Equal("forum", nav[8].Argument);
         Assert.DoesNotContain(nav, (entry) => entry.Dirty || entry.HasErrors);
     }
 

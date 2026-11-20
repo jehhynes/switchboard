@@ -458,7 +458,39 @@ public sealed class SettingsWindow : Window
             page.Children.Add(table);
         }
 
+        if (view.Assign is { } assign)
+        {
+            page.Children.Add(AssignRow(assign));
+        }
+
         Update();
+    }
+
+    /// <summary>The Voice page's row that gives a task playbook a persona, or a line saying why it cannot.</summary>
+    Control AssignRow(AssignView view)
+    {
+        if (view.Personas.Count == 0 || view.Playbooks.Count == 0)
+        {
+            var text = view.Personas.Count == 0 ? "Add a persona under Personas to give a playbook its own." : "Every task playbook has a persona.";
+
+            return Tinted(new TextBlock { Name = "AssignNote", Text = text, TextWrapping = TextWrapping.Wrap }, "DockMuted");
+        }
+
+        var playbooks = new ComboBox { Name = "AssignPlaybook", ItemsSource = view.Playbooks, SelectedIndex = 0, MinWidth = 200 };
+        var personas = new ComboBox { Name = "AssignPersona", ItemsSource = view.Personas.Select((option) => option.Label).ToList(), SelectedIndex = 0, MinWidth = 200 };
+        var assign = new Button { Name = "Assign", Content = "Assign", Tag = "assign" };
+
+        assign.Click += (_, _) =>
+        {
+            if (playbooks.SelectedIndex >= 0 && personas.SelectedIndex >= 0)
+            {
+                editor.AssignPersona(view.Playbooks[playbooks.SelectedIndex], view.Personas[personas.SelectedIndex].Value);
+            }
+        };
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { playbooks, personas, assign } };
+
+        return Row("Assign", "The playbook’s sessions take this persona unless one is pinned to the session.", row);
     }
 
     /// <summary>Splits fields into runs: each checkbox group's adjacent fields together, every other field alone.</summary>
@@ -687,6 +719,9 @@ public sealed class SettingsWindow : Window
                 case "remove-schedule":
                     editor.RemoveSchedule(spec.Argument!);
                     break;
+                case "remove-persona":
+                    editor.RemovePersona(int.Parse(spec.Argument!, System.Globalization.CultureInfo.InvariantCulture));
+                    break;
             }
         };
 
@@ -696,7 +731,7 @@ public sealed class SettingsWindow : Window
     Control NameFields(NewNameView names)
     {
         var space = new AutoCompleteBox { Name = "NewNamespace", Text = names.Namespace, ItemsSource = names.Namespaces, PlaceholderText = "dev", MinWidth = 160 };
-        var name = new TextBox { Name = "NewName", Text = names.Name, PlaceholderText = names.Kinds is not null ? "widgets-dashboard" : names.Schedule ? "cleanup-worktrees" : "develop", MinWidth = 200, VerticalContentAlignment = VerticalAlignment.Center };
+        var name = new TextBox { Name = "NewName", Text = names.Name, PlaceholderText = names.Kinds is not null ? "widgets-dashboard" : names.Persona ? "nova" : names.Schedule ? "cleanup-worktrees" : "develop", MinWidth = 200, VerticalContentAlignment = VerticalAlignment.Center };
         var nameErrors = new StackPanel();
 
         space.TextChanged += (_, _) =>
@@ -708,7 +743,7 @@ public sealed class SettingsWindow : Window
         };
         name.TextChanged += (_, _) =>
         {
-            if ((name.Text ?? "") != (names.Kinds is not null ? editor.State?.NewSource.Name : names.Schedule ? editor.State?.NewSchedule.Name : editor.State?.NewPlaybook.Name))
+            if ((name.Text ?? "") != (names.Kinds is not null ? editor.State?.NewSource.Name : names.Persona ? editor.State?.NewPersona.Name : names.Schedule ? editor.State?.NewSchedule.Name : editor.State?.NewPlaybook.Name))
             {
                 editor.EditNewName(null, name.Text ?? "");
             }
@@ -736,6 +771,11 @@ public sealed class SettingsWindow : Window
                     Row("Name", "Lowercase letters, digits and hyphens. It names the source's tickets, such as widgets-dashboard 63. Create adds the source to settings.json when you save.", new StackPanel { Spacing = 3, Children = { name, nameErrors } }),
                 },
             };
+        }
+
+        if (names.Persona)
+        {
+            return Row("ID", "Lowercase letters, digits and hyphens. Sessions and playbook assignments name the persona by it, so it cannot change. Create adds the persona to settings.json when you save.", new StackPanel { Spacing = 3, Children = { name, nameErrors } });
         }
 
         if (names.Schedule)
@@ -892,7 +932,7 @@ public sealed class SettingsWindow : Window
                     box.FontFamily = new FontFamily("Cascadia Mono,Consolas");
                 }
 
-                if (field.Kind == FieldKind.Integer)
+                if (field.Kind is FieldKind.Integer or FieldKind.Number)
                 {
                     box.Width = 120;
                     box.HorizontalAlignment = HorizontalAlignment.Left;

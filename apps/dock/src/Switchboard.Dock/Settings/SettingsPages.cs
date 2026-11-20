@@ -28,7 +28,11 @@ public sealed record PageView(
     string? Message,
     IReadOnlyList<SectionView> Sections,
     NewNameView? NewName,
-    PlaybookTable? Table = null);
+    PlaybookTable? Table = null,
+    AssignView? Assign = null);
+
+/// <summary>The Voice page's Assign row: the task playbooks with no persona yet and the roster's personas, or none when either list is empty.</summary>
+public sealed record AssignView(IReadOnlyList<string> Playbooks, IReadOnlyList<FieldOption> Personas);
 
 /// <summary>
 /// The window-wide bar: the file's status, a warning that settings.json changed on disk, the errors of a refused or blocked save, and whether
@@ -44,9 +48,10 @@ public sealed record TableRow(string Name, string Label, string Description, IRe
 
 /// <summary>
 /// The New playbook, New schedule or New source page's name fields and the name's error, shown once a name is typed or Create was pressed. A
-/// schedule's or source's name has no namespace (<see cref="Schedule"/>); a source also has a kind, one of <see cref="Kinds"/> as (value, label).
+/// schedule's, source's or persona's name has no namespace (<see cref="Schedule"/>); a source also has a kind, one of <see cref="Kinds"/> as (value,
+/// label); a persona's name is its ID (<see cref="Persona"/>).
 /// </summary>
-public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<string> Namespaces, string? Error, bool Schedule = false, IReadOnlyList<(string Value, string Label)>? Kinds = null, string Kind = "");
+public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<string> Namespaces, string? Error, bool Schedule = false, IReadOnlyList<(string Value, string Label)>? Kinds = null, string Kind = "", bool Persona = false);
 
 /// <summary>What each page of the Settings window and its bar show, from the editor state alone (PRD R54).</summary>
 public static class SettingsPages
@@ -58,7 +63,11 @@ public static class SettingsPages
     {
         var sources = state.SettingsValue?["sources"] is JsonObject configured ? configured.ToList() : [];
         var missing = state.Config.SourceKinds.Where((kind) => !sources.Any((entry) => entry.Key == kind));
-        List<NavEntry> nav = [new("heading", "Settings"), Item(state, "general", "General"), new("heading", "Sources")];
+        List<NavEntry> nav = [new("heading", "Settings"), Item(state, "general", "General"), Item(state, "voice", "Voice"), new("heading", "Personas")];
+
+        nav.AddRange(Enumerable.Range(0, state.PersonaCount).Select((index) => Item(state, $"persona:{index}", state.PersonaLabel(index))));
+        nav.Add(new NavEntry("add", "New persona", "navigate", "new-persona", Current: state.Page == "new-persona"));
+        nav.Add(new NavEntry("heading", "Sources"));
 
         foreach (var (name, _) in sources)
         {
@@ -117,9 +126,22 @@ public static class SettingsPages
             return state.PlaybookDirty(page["playbook:".Length..]);
         }
 
-        if (page is "new-playbook" or "new-schedule" or "new-source" || state.Draft is null)
+        if (page is "new-playbook" or "new-schedule" or "new-source" or "new-persona" || state.Draft is null)
         {
             return false;
+        }
+
+        // The Voice page edits the voice section but the personas, which have pages of their own.
+        if (page == "voice")
+        {
+            return Json(WithoutPersonas(state.Draft["voice"])) != Json(WithoutPersonas(state.Config.Settings.Value?["voice"]));
+        }
+
+        if (page.StartsWith("persona:", StringComparison.Ordinal))
+        {
+            var path = $"voice.personas[{page["persona:".Length..]}]";
+
+            return Json(SettingsFields.GetAt(state.Draft, path)) != Json(SettingsFields.GetAt(state.Config.Settings.Value, path));
         }
 
         string[] paths = page == "general" ? ["sessions", "triage"]
@@ -130,6 +152,20 @@ public static class SettingsPages
     }
 
     static string Json(JsonNode? node) => node?.ToJsonString() ?? "undefined";
+
+    static JsonNode? WithoutPersonas(JsonNode? voice)
+    {
+        if (voice is not JsonObject section)
+        {
+            return voice;
+        }
+
+        var copy = section.DeepClone().AsObject();
+
+        copy.Remove("personas");
+        // A voice section that holds only personas is no change to this page, nor is one the file does not have.
+        return copy.Count == 0 ? null : copy;
+    }
 
     public static BarView Bar(EditorState state)
     {
@@ -149,6 +185,28 @@ public static class SettingsPages
         if (page == "general")
         {
             return SettingsPage(state, "General", SettingsFields.GeneralFields(state), [], []);
+        }
+
+        if (page == "voice")
+        {
+            var voice = SettingsPage(state, "Voice", SettingsFields.VoiceFields(state), [], []);
+            var playbooks = SettingsFields.UnassignedPlaybooks(state);
+            var personas = SettingsFields.PersonaOptions(state);
+
+            return voice with { Assign = voice.Message is null ? new AssignView(personas.Count == 0 ? [] : playbooks, personas) : null };
+        }
+
+        if (page.StartsWith("persona:", StringComparison.Ordinal))
+        {
+            return PersonaPage(state, page["persona:".Length..]);
+        }
+
+        if (page == "new-persona")
+        {
+            var (name, touched) = state.NewPersona;
+            var error = name == "" && !touched ? null : state.NewPersonaError;
+
+            return new PageView("New persona", null, [new PageButton("create", "Create", true, Primary: true)], [], [], null, [], new NewNameView("", name, [], error, Schedule: true, Persona: true));
         }
 
         if (page.StartsWith("source:", StringComparison.Ordinal))
@@ -223,6 +281,21 @@ public static class SettingsPages
         return new PageView(playbook, path, delete, [], loose, null, fields, null);
     }
 
+    /// <summary>A persona's page, by its index in <c>voice.personas</c>; an entry that is not an object shows its errors and Remove persona.</summary>
+    static PageView PersonaPage(EditorState state, string at)
+    {
+        if (!int.TryParse(at, out var index) || index < 0 || index >= state.PersonaCount)
+        {
+            return new PageView("Persona", state.Config.Settings.Path, [], [], [], "This persona no longer exists.", [], null);
+        }
+
+        var remove = new PageButton("remove-persona", "Remove persona", true, Argument: at, Tip: "Removes the persona and its playbook assignments from the draft. Sessions that have it keep its ID and speak with the voice settings.");
+        var title = state.PersonaId(index) is { } id ? $"Persona {id}" : $"Persona {index + 1}";
+        var view = SettingsPage(state, title, SettingsFields.PersonaFields(state, index), [remove], []);
+
+        return view.Sections.Count == 0 && view.Message is null ? view with { Message = "Fix this entry in settings.json in an editor, or remove it." } : view;
+    }
+
     static PageView SettingsPage(EditorState state, string title, IReadOnlyList<Section> sections, IReadOnlyList<PageButton> extra, IReadOnlyList<string> notes)
     {
         var settings = state.Config.Settings;
@@ -235,7 +308,8 @@ public static class SettingsPages
         var paths = SettingsFields.AllSettingsPaths(state);
         var errors = state.SettingsErrors;
         var pages = SettingsFields.SettingsErrorPages(state);
-        var loose = errors.Where((error) => pages.GetValueOrDefault(error) is null).ToList();
+        // Errors on no page show on every settings page; one that names no field but belongs to this page, such as a persona that is not an object, shows here.
+        var loose = errors.Where((error) => pages.GetValueOrDefault(error) is not { } on || (on == state.Page && SettingsFields.FieldOfError(error, paths) is null)).ToList();
         var views = sections.Select((section) => new SectionView(section.Heading, section.Advanced, section.Fields.Select((field) =>
             FieldViewOf(field, SettingsFields.GetAt(value, field.Path), errors.Where((error) => SettingsFields.FieldOfError(error, paths) == field.Path).ToList())).ToList())).ToList();
 

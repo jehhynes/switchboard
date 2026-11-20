@@ -13,7 +13,7 @@ public sealed record NewPlaybook(string Namespace, string Name, PlaybookFields P
 /// <summary>
 /// The Settings window's state: settings.json as read, one unsaved draft of the whole file with the version it started from, the page, and the
 /// errors. Pages are <c>general</c>, <c>source:&lt;name&gt;</c>, <c>new-source</c>, <c>schedule:&lt;name&gt;</c>, <c>new-schedule</c>, <c>namespace:&lt;namespace&gt;</c>,
-/// <c>playbook:&lt;namespace:name&gt;</c> and <c>new-playbook</c>.
+/// <c>playbook:&lt;namespace:name&gt;</c>, <c>new-playbook</c>, <c>voice</c>, <c>persona:&lt;index in voice.personas&gt;</c> and <c>new-persona</c>.
 /// </summary>
 public sealed class EditorState(EditorConfig config)
 {
@@ -37,6 +37,9 @@ public sealed class EditorState(EditorConfig config)
 
     /// <summary>The name typed on the New schedule page, and whether Create was pressed, so an empty name shows its error.</summary>
     public (string Name, bool Touched) NewSchedule { get; set; } = ("", false);
+
+    /// <summary>The ID typed on the New persona page, and whether Create was pressed, so an empty ID shows its error.</summary>
+    public (string Name, bool Touched) NewPersona { get; set; } = ("", false);
 
     /// <summary>The last check's errors for the whole draft.</summary>
     public IReadOnlyList<string> Errors { get; set; } = [];
@@ -145,6 +148,50 @@ public sealed class EditorState(EditorConfig config)
         }
     }
 
+    /// <summary>The entries of <c>voice.personas</c> in the settings being edited, or none when it is not a list.</summary>
+    public IReadOnlyList<JsonNode?> Personas => SettingsFields.GetAt(SettingsValue, "voice.personas") is JsonArray list ? list.ToList() : [];
+
+    public int PersonaCount => Personas.Count;
+
+    /// <summary>The roster's persona IDs, in roster order; an entry with no ID is left out.</summary>
+    public IReadOnlyList<string> PersonaIds => Personas.Select(IdOf).OfType<string>().ToList();
+
+    static string? IdOf(JsonNode? persona) => persona is JsonObject entry && entry["id"] is JsonValue value && value.TryGetValue<string>(out var id) && id != "" ? id : null;
+
+    static string? NameOf(JsonNode? persona) => persona is JsonObject entry && entry["name"] is JsonValue value && value.TryGetValue<string>(out var name) && name.Trim() != "" ? name.Trim() : null;
+
+    /// <summary>The name of the first persona with an ID, or the ID when it has none.</summary>
+    public string PersonaName(string id) => NameOf(Personas.FirstOrDefault((persona) => IdOf(persona) == id)) ?? id;
+
+    /// <summary>A persona entry's navigation label: its name, else its ID, else its place in the roster.</summary>
+    public string PersonaLabel(int index) => Personas.ElementAtOrDefault(index) is var persona && (NameOf(persona) ?? IdOf(persona)) is { } label ? label : $"Persona {index + 1}";
+
+    /// <summary>A persona entry's ID, or null when it has none.</summary>
+    public string? PersonaId(int index) => IdOf(Personas.ElementAtOrDefault(index));
+
+    /// <summary>Why the new persona's ID cannot be used, or null.</summary>
+    public string? NewPersonaError
+    {
+        get
+        {
+            var id = NewPersona.Name.Trim();
+
+            if (!SettingsFields.IsSegment(id))
+            {
+                return "The ID must be lowercase letters, digits and hyphens.";
+            }
+
+            var voice = SettingsValue?["voice"];
+
+            if (SettingsValue is null || (voice is not null && voice is not JsonObject) || (voice?["personas"] is { } personas && personas is not JsonArray))
+            {
+                return "settings.json must hold a voice object with a personas list.";
+            }
+
+            return PersonaIds.Contains(id) ? $"A persona with the ID {id} already exists." : null;
+        }
+    }
+
     /// <summary>Why the new schedule's name cannot be used, or null.</summary>
     public string? NewScheduleError
     {
@@ -207,6 +254,8 @@ public sealed class EditorState(EditorConfig config)
     public void Refresh(EditorConfig config)
     {
         var unchanged = !Dirty;
+        var persona = PersonaPage();
+        var id = persona is { } shown ? PersonaId(shown) : null;
 
         Config = config;
 
@@ -214,5 +263,16 @@ public sealed class EditorState(EditorConfig config)
         {
             DropDraft();
         }
+
+        // A persona page is kept by its place in the roster, so a read that moved the persona finds it again by ID, or goes back to Voice.
+        if (persona is { } index && (index >= PersonaCount || PersonaId(index) != id))
+        {
+            var moved = id is null ? -1 : Enumerable.Range(0, PersonaCount).FirstOrDefault((at) => PersonaId(at) == id, -1);
+
+            Page = moved >= 0 ? $"persona:{moved}" : "voice";
+        }
     }
+
+    /// <summary>The index of the persona page shown, or null on any other page.</summary>
+    int? PersonaPage() => Page.StartsWith("persona:", StringComparison.Ordinal) && int.TryParse(Page["persona:".Length..], out var index) ? index : null;
 }
