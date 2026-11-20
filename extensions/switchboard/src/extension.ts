@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
-import { buildOf, findHub, installBundle, installHolder, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
+import { buildOf, dockView, findHub, installBundle, installHolder, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
 import { continueInBackground } from './background.js';
 import { closeDueAt, closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
@@ -32,6 +32,11 @@ import { ItemTabs } from './tabs.js';
 import type { PaneMessage } from './webview/paneRender.js';
 
 export interface SwitchboardApi {
+  /**
+   * Claims as the window a hub key names, for the integration suite, whose folder window has no binding: a key from an `/events` stream opened
+   * with an item window's workspace file lets it claim what was left for that window (architecture.md § Window scope).
+   */
+  useWindowKey(key: string | null): void;
   /** The hub this window is connected to, or null. */
   hub(): HubRecord | null;
   /** The last snapshot the hub sent, or null. */
@@ -212,7 +217,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         // A Code Mode session opens in its attach terminal, never in the Claude view (PRD R95).
         return link['codeMode'] === true
           ? openAttach(record, String(link['sessionId']), String(link['cwd']), runCommand)
-          : openSession(record, String(link['sessionId']), String(link['cwd']), providerOf(link['provider']));
+          : openSession(record, String(link['sessionId']), String(link['cwd']), providerOf(link['provider']), runCommand);
       case 'openFolder':
         // VS Code focuses a window that already has the folder.
         return vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(String(link['path'])), { forceNewWindow: true });
@@ -272,10 +277,12 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
     return claimOpen(record, runCommand, windowFile);
   };
-  /** The Conversation view's Open in terminal: this window's work item's session, in its attach terminal. */
+  /** The Conversation view's Open in terminal: the selected conversation's session, in its attach terminal. */
   const openWindowTerminal = (): Promise<unknown> => {
     const snapshot = state.current();
-    const row = snapshot === null || windowFile === null ? undefined : windowRows(snapshot, windowFile, windowsDir(home), Date.now())[0];
+    const selected = conversation.state().scope?.workItemId;
+    // Every row, done ones included, so a selected done conversation never opens another one's terminal.
+    const row = snapshot === null || selected === undefined ? undefined : dockView(snapshot, Date.now(), windowsDir(home)).groups.flatMap((group) => group.rows).find((one) => one.key === `item:${selected}`);
     const terminal = row === undefined ? null : terminalCommand(row);
 
     if (terminal === null) {
@@ -450,6 +457,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.showHubLog', showHubLog),
     vscode.commands.registerCommand('switchboard.showDock', () => showDock(keeper.current(), home)),
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
+    // As the Conversation view's plus button: a conversation hosted by this window (architecture.md § Hosted conversations).
+    vscode.commands.registerCommand('switchboard.newSession', () => conversation.newConversation()),
     ...(['tab', 'sidebar'] as const).map((where) =>
       vscode.commands.registerCommand(where === 'tab' ? 'switchboard.continueInBackground' : 'switchboard.continueSidebarInBackground', () => {
         const snapshot = state.current();
@@ -571,6 +580,10 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     artifacts: () => artifacts.shown(),
     extendMarkdownIt,
     windowKey: () => windowKey,
+    useWindowKey: (key) => {
+      windowKey = key;
+      setWindowKey(key);
+    },
     paneClick,
     paneSize: () => pane.size(),
     sideBarWidths: keptWidths,

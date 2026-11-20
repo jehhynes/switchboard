@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import type { ArtifactView, MessageView, ReplyView, StatusView } from '@switchboard/hub';
-import { artifactIcon, awaitingReply, stateIcon, statusLine, timeline } from '../conversationModel.js';
+import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 
 /** What the page posts to the extension. */
@@ -9,6 +9,8 @@ export type ConversationMessage =
   | { type: 'earlier' }
   | { type: 'open'; href: string }
   | { type: 'terminal' }
+  | { type: 'select'; workItemId: number }
+  | { type: 'new' }
   | { type: 'send'; id: number; text: string; target: SendTarget; command?: true }
   | { type: 'files'; id: number; query: string }
   | { type: 'commands'; id: number }
@@ -252,6 +254,36 @@ function renderTabs(selected: Tab, badges: Record<Tab, string>): string {
   return `<nav class="tabs" role="tablist" aria-label="Switchboard">${tabs.join('')}</nav>`;
 }
 
+/** The fold key of the header's conversation list, which the page opens and closes. */
+export const PICKER = 'conversations';
+
+/** A state's codicon with its text for a screen reader. */
+function codicon({ icon, text }: { icon: string; text: string }): string {
+  const [name, modifier] = icon.split('~');
+
+  return `<span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}" title="${escape(text)}" aria-label="${escape(text)}"></span>`;
+}
+
+/**
+ * The header's conversation dropdown (architecture.md § Conversation view): the selected conversation's title, which opens the list of the
+ * window's conversations, the primary work item first, each with its session's state and its unread count.
+ */
+function picker(state: ConversationState, open: boolean): string {
+  const scope = state.scope!;
+  const title = selectedEntry(state)?.title ?? scope.title;
+  const options = scope.conversations
+    .map((entry) => {
+      const selected = entry.workItemId === scope.workItemId;
+      const unread = entry.unread > 0 ? `<span class="count" title="${entry.unread} unread">${entry.unread}</span>` : '';
+      const icon = codicon(stateIcon(entry.state === null ? null : ({ state: entry.state, waitingFor: null } as never)));
+
+      return `<li role="option" aria-selected="${selected}"><button type="button" data-action="select" data-work-item="${entry.workItemId}"${selected ? ' class="selected"' : ''}>${icon}<span class="title">${escape(entry.title)}</span>${unread}</button></li>`;
+    })
+    .join('');
+
+  return `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${open}" title="${escape(title)}"><span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${open ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
+}
+
 /**
  * The view's HTML: the header with the session's state, the tab strip, and the selected tab: the conversation, with a note when the view cannot
  * talk to the session, and the timeline; the status; or the artifacts.
@@ -261,9 +293,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return `<p class="empty">${state.connected ? 'This window has no Switchboard session.' : 'Connecting to Switchboard…'}</p>`;
   }
 
-  const { icon, text } = stateIcon(state.session);
-  const [name, modifier] = icon.split('~');
-  const header = `<header class="header"><span class="codicon codicon-${name}${modifier === undefined ? '' : ` codicon-modifier-${modifier}`}" title="${escape(text)}" aria-label="${escape(text)}"></span><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
+  const header = `<header class="header">${codicon(stateIcon(state.session))}${picker(state, open.has(PICKER))}<button class="icon" data-action="new" title="New session" aria-label="New session"><span class="codicon codicon-add"></span></button>${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   const notes = state.session?.reason == null ? [] : [state.session.reason];
   const shown = timeline(state.items, state.artifacts);
   const waiting = awaitingReply(state.items, shown, state.session);

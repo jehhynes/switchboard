@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import MarkdownIt from 'markdown-it';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ArtifactView, ItemView, ReplyView, SessionView, WindowScope } from '@switchboard/hub';
+import type { ArtifactView, ItemView, ReplyView, SessionView, ScopeView } from '@switchboard/hub';
 import { artifactCsp, artifactFile, artifactPage, assetResolver, assetsRoot, rewriteResources, unopened } from '../src/artifactModel.js';
 import { applyEvent, artifactIcon, EMPTY_CONVERSATION, placeArtifacts, timeline } from '../src/conversationModel.js';
 import type { ConversationState } from '../src/conversationModel.js';
@@ -13,7 +13,7 @@ import { renderConversation } from '../src/webview/conversationRender.js';
 import { drawDiagrams, mermaidTheme } from '../src/webview/mermaidPreview.js';
 
 const T0 = Date.UTC(2026, 10, 19, 12);
-const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w', title: 'Fix the badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, primary: true }] };
+const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w', title: 'Fix the badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, title: 'Fix the badge', primary: true, sessionId: 's2', state: 'running', conversation: 'full', unread: 0 }] };
 const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
 const artifact = (path: string, updatedAt: number, patch: Partial<ArtifactView> = {}): ArtifactView => ({ path, owner: path.split('/')[0]!, kind: 'comparison', title: `Title of ${path}`, ext: 'md', type: 'markdown', updatedAt, ...patch });
 const reply = (id: string, at: number): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false });

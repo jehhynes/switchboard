@@ -43,6 +43,32 @@ public sealed class SwitcherTests
     }
 
     [Fact]
+    public async Task Click_HostedConversation_SelectsItInItsHostWindowBeforeLeavingTheSession()
+    {
+        var row = Fixtures.Row("item:7");
+        var hosted = row with { Window = row.Window! with { Hosted = true } };
+
+        windows.Open["gh-107-58c609"] = (42, 0);
+
+        Assert.Null(await Switcher().Click(hosted, TestContext.Current.CancellationToken));
+        Assert.Equal(["select item:7", "open aaaa1111-native D:/git/widgets/.worktrees/107-fix gh-107-58c609.code-workspace"], hub.Calls);
+        Assert.Equal(["show 42"], windows.Calls);
+    }
+
+    [Fact]
+    public async Task Click_HubRefusesTheSelection_ShowsWhyAndOpensNothing()
+    {
+        var row = Fixtures.Row("item:7");
+
+        windows.Open["gh-107-58c609"] = (42, 0);
+        hub.SelectReply = "No work item has that row.";
+
+        Assert.Equal("No work item has that row.", await Switcher().Click(row with { Window = row.Window! with { Hosted = true } }, TestContext.Current.CancellationToken));
+        Assert.Equal(["select item:7"], hub.Calls);
+        Assert.Empty(windows.Calls);
+    }
+
+    [Fact]
     public async Task Click_NoWindowYet_OpensTheWorkspaceAndWaitsForTheWindow()
     {
         windows.Open["gh-107-58c609"] = (43, 3);

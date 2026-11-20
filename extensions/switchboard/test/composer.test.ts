@@ -1,4 +1,4 @@
-import type { ItemView, MessageView, SessionView, WindowScope } from '@switchboard/hub';
+import type { ItemView, MessageView, SessionView, ScopeView } from '@switchboard/hub';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,9 +10,9 @@ import { SHIFT_HINT, VS_CODE_FILES_ONLY } from '../src/webview/composerExtras.js
 import { startConversation } from '../src/webview/conversationMain.js';
 
 const T0 = Date.UTC(2026, 10, 19, 12);
-const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix the badge', cwd: 'D:\\w', scopeGen: 1, sessionId: 's2' };
+const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:\\w', title: 'Fix the badge', cwd: 'D:\\w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, title: 'Fix the badge', primary: true, sessionId: 's2', state: 'idle', conversation: 'full', unread: 0 }] };
 const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
-const message = (id: string, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', at: T0, ord: T0, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
+const message = (id: string, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at: T0, ord: T0, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 const COMMANDS = [
   { name: 'clear', description: 'Clear the conversation history and free up context' },
@@ -366,6 +366,28 @@ describe('the composer extras', () => {
     expect(press('ArrowDown')).toBe(false);
   });
 
+  it('keeps a draft and its chosen command for each conversation of the window', () => {
+    const first = page();
+    const other = state({ scope: { ...SCOPE, workItemId: 9, sessionId: 's9', scopeGen: 2, conversations: [...SCOPE.conversations, { workItemId: 9, title: 'New session', primary: false, sessionId: 's9', state: 'idle', conversation: 'full', unread: 0 }] }, session: { ...SESSION, id: 's9' } });
+
+    first.show(state());
+    first.type('/');
+    first.reply({ type: 'commands', id: 1, commands: COMMANDS, error: null });
+    first.press('Enter');
+    first.type('/clear now');
+    first.show(other);
+    expect(first.input.value).toBe('');
+    first.type('/clear later');
+    first.press('Enter');
+    // The command was chosen in the other conversation, so this one sends its text as a message.
+    expect(first.of('send').at(-1)).not.toHaveProperty('command');
+    first.reply({ type: 'sent', id: 1, error: null });
+    first.show(state());
+    expect(first.input.value).toBe('/clear now');
+    first.press('Enter');
+    expect(first.of('send').at(-1)).toMatchObject({ text: '/clear now', command: true });
+  });
+
   it('keeps the draft and its chosen command in the page state, and takes them back on a reload', () => {
     const first = page();
 
@@ -374,7 +396,8 @@ describe('the composer extras', () => {
     first.reply({ type: 'commands', id: 1, commands: COMMANDS, error: null });
     first.press('Enter');
     first.type('/clear now');
-    expect(first.state()).toMatchObject({ draft: '/clear now', command: 'clear' });
+    // Kept by conversation, so each conversation of the window has its own (architecture.md § Conversation view).
+    expect(first.state()).toMatchObject({ drafts: { 2: { text: '/clear now', command: 'clear' } } });
 
     const second = page(first.state());
 
@@ -383,12 +406,13 @@ describe('the composer extras', () => {
     second.press('Enter');
     expect(second.of('send')).toEqual([{ type: 'send', id: 1, text: '/clear now', target: { scopeGen: 1, sessionId: 's2', launch: 'l' }, command: true }]);
     second.reply({ type: 'sent', id: 1, error: null });
-    expect(second.state()).toMatchObject({ draft: '', command: null });
+    expect((second.state() as { drafts: unknown }).drafts).toEqual({});
 
     // A saved command no longer at the start of the draft is not taken back.
-    const third = page({ draft: 'hi /clear', command: 'clear', open: ['x'], scroll: null });
+    const third = page({ drafts: { 2: { text: 'hi /clear', command: 'clear' } }, open: ['x'], scroll: null });
 
     third.show(state());
+    expect(third.input.value).toBe('hi /clear');
     third.press('Enter');
     expect(third.of('send')[0]).not.toHaveProperty('command');
     expect(third.state()).toMatchObject({ open: ['x'] });

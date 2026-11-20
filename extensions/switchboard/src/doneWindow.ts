@@ -1,5 +1,5 @@
 import type { Snapshot } from '@switchboard/hub';
-import { windowItems } from '@switchboard/hub';
+import { hostedItems, windowItems } from '@switchboard/hub';
 
 const MID_TURN = new Set(['starting', 'running', 'waiting']);
 
@@ -33,7 +33,9 @@ export class DoneWindow {
       return;
     }
 
-    const items = windowItems(snapshot, this.file, this.windows);
+    // The conversations the window hosts keep it open too, so it closes only when every one of them is done (architecture.md § Hosted conversations).
+    const items = [...windowItems(snapshot, this.file, this.windows), ...hostedItems(snapshot, this.file)];
+    const hostedOpen = hostedItems(snapshot, this.file).some((item) => item.status !== 'done');
 
     items.filter((item) => item.status !== 'done').forEach((item) => this.sawOpen.add(item.id));
     items.filter((item) => ON_REVIEW.has(item.status)).forEach((item) => this.sawReview.add(item.id));
@@ -43,6 +45,7 @@ export class DoneWindow {
     // A session in its background process needs no window; one starting, or resumed in this window's tab or a terminal, keeps it open.
     const leftReview =
       snapshot.openVSCode === 'review' &&
+      !hostedOpen &&
       items.some((item) => this.sawReview.has(item.id)) &&
       items.every((item) => !ON_REVIEW.has(item.status) && !item.sessions.some((session) => session.state === 'starting' || (session.released && !session.releasing && session.state !== 'ended')));
 

@@ -1,9 +1,9 @@
-import type { ArtifactView, ItemView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
+import type { ArtifactView, ConversationEntry, ItemView, ReplyView, ScopeView, SessionView, StatusView } from '@switchboard/hub';
 
 /** What a window's Conversation view shows, kept from its conversation stream (architecture.md § Conversation view). */
 export interface ConversationState {
-  /** The window's work item and current session; null for a window with none. */
-  scope: WindowScope | null;
+  /** The window's conversations, and of the selected one its work item and current session; null for a window with none. */
+  scope: ScopeView | null;
   session: SessionView | null;
   /** Messages and replies, oldest first. */
   items: ItemView[];
@@ -17,7 +17,7 @@ export interface ConversationState {
   artifactsDir: string | null;
   /** The work item's artifacts, newest first (architecture.md § Artifacts). */
   artifacts: ArtifactView[];
-  /** How many replies and statuses of the current session the operator has not seen, which the view's badge shows (architecture.md § Unread). */
+  /** How many replies and statuses of the selected conversation's current session the operator has not seen (architecture.md § Unread). */
   unread: number;
 }
 
@@ -25,14 +25,15 @@ export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: nul
 
 /** An event of the conversation stream, as parsed from its data line. */
 export type ConversationEvent =
-  | { type: 'hello'; scope: WindowScope | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number }
-  | { type: 'scope'; scope: WindowScope | null }
+  | { type: 'hello'; scope: ScopeView | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number }
+  | { type: 'scope'; scope: ScopeView | null }
+  | { type: 'conversations'; conversations: ConversationEntry[] }
   | { type: 'session'; session: SessionView }
   | { type: 'message'; message: ItemView }
   | { type: 'reply'; reply: ItemView }
   | { type: 'status'; status: StatusView | null }
   | { type: 'artifact'; artifact: ArtifactView | { path: string }; removed?: true }
-  | { type: 'unread'; count: number }
+  | { type: 'unread'; workItemId: number; count: number }
   | { type: string };
 
 /**
@@ -109,8 +110,17 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
       // A status of a session the window no longer shows, sent before its scope moved, is dropped.
       return status === null || status.sessionId === state.scope?.sessionId || (status.fallback && status.id === `stage-${state.scope?.workItemId}`) ? { ...state, status } : state;
     }
-    case 'unread':
-      return { ...state, unread: (event as Extract<ConversationEvent, { type: 'unread' }>).count };
+    case 'conversations': {
+      const { conversations } = event as Extract<ConversationEvent, { type: 'conversations' }>;
+
+      return state.scope === null ? state : { ...state, scope: { ...state.scope, conversations } };
+    }
+    case 'unread': {
+      const { workItemId, count } = event as Extract<ConversationEvent, { type: 'unread' }>;
+      const scope = state.scope === null ? null : { ...state.scope, conversations: state.scope.conversations.map((entry) => (entry.workItemId === workItemId ? { ...entry, unread: count } : entry)) };
+
+      return { ...state, scope, unread: workItemId === state.scope?.workItemId ? count : state.unread };
+    }
     case 'artifact': {
       const { artifact, removed } = event as Extract<ConversationEvent, { type: 'artifact' }>;
       const rest = state.artifacts.filter((one) => one.path !== artifact.path);
@@ -229,6 +239,18 @@ export function artifactIcon(type: ArtifactView['type']): string {
     default:
       return 'file';
   }
+}
+
+/** The view's badge count: every conversation's unread replies and statuses (architecture.md § Unread). */
+export function totalUnread(state: ConversationState): number {
+  const entries = state.scope?.conversations ?? [];
+
+  return entries.length === 0 ? state.unread : entries.reduce((sum, entry) => sum + (entry.workItemId === state.scope?.workItemId ? state.unread : entry.unread), 0);
+}
+
+/** The selected conversation's dropdown entry, or null. */
+export function selectedEntry(state: ConversationState): ConversationEntry | null {
+  return state.scope?.conversations.find((entry) => entry.workItemId === state.scope?.workItemId) ?? null;
 }
 
 /** Whether the session is working, which the header's spinning codicon and the timeline's spinner show. */

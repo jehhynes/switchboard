@@ -229,33 +229,30 @@ describe('a row\'s History', () => {
       vscode.window.showErrorMessage = realError;
     });
 
-    it("opens the session in this window's attach terminal through the hub, which resumes it there, not in the Claude view", async () => {
+    it("opens the session's own item window, which claims its attach terminal, since this folder window claims no open (architecture.md § Window scope)", async () => {
       const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
 
-      assert.strictEqual(await extension.historyLink({ type: 'open', sessionId: 'hist-cm', cwd: folder, provider: 'claude', codeMode: true }), 'opened');
+      assert.strictEqual(await extension.historyLink({ type: 'open', sessionId: 'hist-cm', cwd: folder, provider: 'claude', codeMode: true }), 'other-folder');
 
       assert.deepStrictEqual(errors, []);
-      assert.deepStrictEqual(ran, []);
-      assert.strictEqual(created.length, 1, JSON.stringify(created));
-      assert.deepStrictEqual({ name: created[0].name, shellArgs: created[0].shellArgs, cwd: created[0].cwd }, {
-        name: 'Switchboard · gh 77',
-        shellArgs: [join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'hub.js'), 'attach', 'hist-cm'],
-        cwd: folder,
-      });
-      assert.match(created[0].shellPath, /(^|[\\/])node(\.exe)?$/i);
+      assert.strictEqual(created.length, 0);
+      assert.strictEqual(ran.length, 1, JSON.stringify(ran));
+      assert.strictEqual(ran[0][0], 'vscode.openFolder');
+      assert.match(ran[0][1], /gh-77-[^\\/]*\.code-workspace$/);
+      assert.ok(ran[0][1].toLowerCase().startsWith(join(process.env.SWITCHBOARD_TEST_HOME, '.switchboard', 'windows').toLowerCase()), ran[0][1]);
     });
 
-    it('says the hub did not answer, and opens nothing, with no hub or when the hub does not answer the claim', async () => {
+    it('says why, and opens nothing, with no hub or when the hub refuses the open', async () => {
       const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
       const link = { type: 'open', sessionId: 'hist-cm', cwd: folder, provider: 'claude', codeMode: true };
       const paths = [];
-      // A stand-in hub that records the open and fails the claim.
+      // A stand-in hub that refuses the open.
       const stand = require('node:http').createServer((request, response) => {
         paths.push(request.url);
         request.resume();
         request.on('end', () => {
-          response.writeHead(request.url === '/open' ? 200 : 500, { 'Content-Type': 'application/json' });
-          response.end(JSON.stringify(request.url === '/open' ? { recorded: true } : { error: 'failed' }));
+          response.writeHead(409, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ error: 'The session has no window to open it in.' }));
         });
       });
 
@@ -268,19 +265,9 @@ describe('a row\'s History', () => {
         stand.close();
       }
 
-      assert.deepStrictEqual(paths, ['/open', '/claim']);
-      assert.deepStrictEqual(errors, ['Switchboard: the hub did not answer.', 'Switchboard: the hub did not answer.']);
+      assert.deepStrictEqual(paths, ['/open']);
+      assert.deepStrictEqual(errors, ['Switchboard: the hub did not answer.', 'Switchboard: The session has no window to open it in.']);
       assert.deepStrictEqual([created.length, ran.length], [0, 0]);
-    });
-
-    it("leaves a session of another folder with the hub and opens that folder's window, which claims it", async () => {
-      const elsewhere = join(process.env.SWITCHBOARD_TEST_HOME, 'elsewhere');
-
-      await extension.historyLink({ type: 'open', sessionId: 'hist-cm', cwd: elsewhere, provider: 'claude', codeMode: true });
-
-      assert.deepStrictEqual(errors, []);
-      assert.deepStrictEqual(ran, [['vscode.openFolder', vscode.Uri.file(elsewhere).fsPath]]);
-      assert.strictEqual(created.length, 0);
     });
   });
 

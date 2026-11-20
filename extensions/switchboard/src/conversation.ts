@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import { openConversation, postToHub } from '@switchboard/hub';
 import type { EventStream, ItemView, StatusView } from '@switchboard/hub';
-import { applyEvent, EMPTY_CONVERSATION, statusLine, withEarlier } from './conversationModel.js';
+import { applyEvent, EMPTY_CONVERSATION, statusLine, totalUnread, withEarlier } from './conversationModel.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
 import type { ConversationMessage, SeenTarget, SendTarget } from './webview/conversationRender.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
@@ -96,8 +96,11 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   readonly #mine = new Set<string>();
   /** Messages the stream said were not sent before the `send` that added them was answered, with why. */
   readonly #notSentEarly = new Map<string, string>();
-  /** Texts of messages that were not sent, kept until a loaded page took them, since a hidden view's page is not kept. */
-  #returned: Array<{ text: string; error: string }> = [];
+  /**
+   * Texts of messages that were not sent, with the conversation each goes back to, kept until a loaded page took them, since a hidden view's page
+   * is not kept.
+   */
+  #returned: Array<{ text: string; error: string; workItemId: number | null }> = [];
   #giving: Promise<void> | null = null;
   #giveAgain = false;
 
@@ -203,7 +206,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       const error = message.error ?? 'The message was not sent.';
 
       if (this.#mine.delete(message.id)) {
-        this.#returned.push({ text: message.text, error });
+        this.#returned.push({ text: message.text, error, workItemId: message.workItemId });
         void this.#giveBack();
       } else {
         this.#notSentEarly.set(message.id, error);
@@ -378,7 +381,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     this.refresh();
 
     for (const view of this.#views.values()) {
-      view.badge = unreadBadge(state.unread);
+      view.badge = unreadBadge(totalUnread(state));
     }
   }
 
@@ -472,7 +475,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     // The stream already said it was not sent: its text comes back as for one that ends later, so a page loaded meanwhile still gets it.
     if (notSent !== undefined) {
       this.#notSentEarly.delete(message.id);
-      this.#returned.push({ text: message.type === 'message' ? message.text : '', error: notSent });
+      this.#returned.push({ text: message.type === 'message' ? message.text : '', error: notSent, workItemId: message.type === 'message' ? message.workItemId : null });
       void this.#giveBack();
       return null;
     }
@@ -534,6 +537,43 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     return (picked ?? []).map((uri) => uri.fsPath);
   }
 
+  /** Selects one of the window's conversations (architecture.md § Window scope); the stream then brings its scope and hello. */
+  async select(workItemId: number): Promise<void> {
+    const target = this.#target;
+    const scope = this.#state.scope;
+
+    if (target === null || scope === null || scope.workItemId === workItemId) {
+      return;
+    }
+
+    const reply = await postToHub(target.record, '/v1/conversation/select', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), workItemId }, HISTORY_TIMEOUT_MS);
+
+    if (reply?.status !== 200) {
+      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    }
+  }
+
+  /**
+   * Starts a new conversation hosted by this window (architecture.md § Hosted conversations), the view's plus button and Switchboard: New Session.
+   * A command that got no answer is posted once more with the same `opId`, which the hub answers with the conversation it already made.
+   */
+  async newConversation(): Promise<void> {
+    const target = this.#target;
+    const scope = this.#state.scope;
+
+    if (target === null || scope === null) {
+      void vscode.window.showWarningMessage('Switchboard: this window has no Switchboard work item to start a session beside.');
+      return;
+    }
+
+    const body = { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID() };
+    const reply = (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS)) ?? (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS));
+
+    if (reply?.status !== 200) {
+      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    }
+  }
+
   /** Opens a reply's link: a web page in the browser, a file at its line in an editor; anything else is dropped. */
   async open(href: string): Promise<void> {
     const target = linkTarget(href, this.#state.scope?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null);
@@ -578,6 +618,10 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
             return this.open(String(message.href));
           case 'terminal':
             return this.deps.openTerminal();
+          case 'select':
+            return this.select(Number(message.workItemId));
+          case 'new':
+            return this.newConversation();
           case 'status-open':
             return this.#state.status === null ? Promise.resolve() : this.openStatus(this.#state.status);
           case 'statuses':
@@ -619,7 +663,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       void run().catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${error instanceof Error ? error.message : String(error)}`));
     });
     view.onDidDispose(() => this.#views.delete(view.viewType));
-    view.badge = unreadBadge(this.#state.unread);
+    view.badge = unreadBadge(totalUnread(this.#state));
     this.#views.set(view.viewType, view);
   }
 }

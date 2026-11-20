@@ -112,6 +112,22 @@ function windowAfter(...states: WorkItemView[][]): DoneWindow {
 const closesLater = (window: DoneWindow): boolean => window.close(false, NOW + DELAY, DELAY);
 
 describe('DoneWindow', () => {
+  it('stays open while a conversation it hosts is not done, and closes once every one is (architecture.md § Hosted conversations)', () => {
+    const hostedTicket = { ...item().ticket, id: 9, source: 'adhoc', sourceKey: '3', url: '', hostWindow: FILE.replaceAll('\\', '/') };
+    const hosted = (status: WorkItemView['status']) => item({ id: 9, ticketId: 9, playbook: null, status, ticket: hostedTicket, worktree: null, sessions: [{ ...session(9, 'idle'), cwd: WORKTREE }] });
+
+    expect(windowAfter([item(), hosted('running')], [done('idle'), hosted('running')]).closeAt(DELAY)).toBeNull();
+    expect(closesLater(windowAfter([item(), hosted('running')], [done('idle'), hosted('done')]))).toBe(true);
+    // Another window's conversation in the same folder is not this window's.
+    expect(closesLater(windowAfter([item(), { ...hosted('running'), ticket: { ...hostedTicket, hostWindow: `${WINDOWS}/gh-108-000000.code-workspace` } }], [done('idle')]))).toBe(true);
+
+    // With dock.openVSCode review, work that left review does not close the window either while a conversation it hosts is open.
+    const review = new DoneWindow(FILE, WINDOWS, false, NOW);
+
+    review.update(snapshot([item({ status: 'finished' }), hosted('running')], 'review'), NOW);
+    review.update(snapshot([done('idle'), hosted('running')], 'review'), NOW);
+    expect(review.closeAt(DELAY)).toBeNull();
+  });
   it('closes once, after its work has been done and the window unfocused for the delay', () => {
     const window = windowAfter([item()], [done('idle')]);
 

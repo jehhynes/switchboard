@@ -82,10 +82,31 @@ export function startComposerExtras(host: HTMLElement, input: HTMLTextAreaElemen
   const deferred: string[] = [];
   let dragAt = 0;
 
-  const save = (): void => {
-    const saved = (vscode.getState() as Record<string, unknown> | null) ?? {};
+  // The selected conversation, whose draft the box holds.
+  let conversation: number | null = null;
+  /** Each conversation's draft and chosen command, kept in the page's state over a reload. */
+  const kept = (): Record<string, { text: string; command: string | null }> => {
+    const drafts = ((vscode.getState() as Record<string, unknown> | null) ?? {})['drafts'];
 
-    vscode.setState({ ...saved, draft: input.value, command: chosen });
+    return typeof drafts === 'object' && drafts !== null ? (drafts as Record<string, { text: string; command: string | null }>) : {};
+  };
+  const keep = (id: number, text: string, command: string | null): void => {
+    const saved = (vscode.getState() as Record<string, unknown> | null) ?? {};
+    const drafts = { ...kept() };
+
+    if (text === '') {
+      delete drafts[id];
+    } else {
+      drafts[id] = { text, command: command !== null && sendsAsCommand(text, command) ? command : null };
+    }
+
+    vscode.setState({ ...saved, drafts });
+  };
+  // The text being sent shows read-only and is no draft.
+  const save = (): void => {
+    if (conversation !== null && !input.readOnly) {
+      keep(conversation, input.value, chosen);
+    }
   };
 
   const cwd = (): string | null => state?.scope?.cwd ?? null;
@@ -486,14 +507,6 @@ export function startComposerExtras(host: HTMLElement, input: HTMLTextAreaElemen
     insertMentions(paths);
   });
 
-  const saved = vscode.getState() as { draft?: unknown; command?: unknown } | null;
-
-  if (typeof saved?.draft === 'string' && saved.draft !== '') {
-    input.value = saved.draft;
-    chosen = typeof saved.command === 'string' && sendsAsCommand(saved.draft, saved.command) ? saved.command : null;
-    changed();
-  }
-
   return {
     /** Keys for the list and the history; true when it took the key, so the composer does nothing more with it. */
     keydown(event: KeyboardEvent): boolean {
@@ -591,6 +604,24 @@ export function startComposerExtras(host: HTMLElement, input: HTMLTextAreaElemen
     /** The box's text changed from outside, as when a message that was not sent came back. */
     changed(): void {
       save();
+    },
+    /** A conversation's kept draft, empty with none. */
+    draftOf(id: number): string {
+      return kept()[id]?.text ?? '';
+    },
+    /** Keeps a conversation's draft, with its chosen command while it is the selected one's. */
+    setDraft(id: number, text: string): void {
+      keep(id, text, id === conversation ? chosen : (kept()[id]?.command ?? null));
+    },
+    /** The selected conversation changed: its chosen command comes back while its draft still starts with it, and the walk and the list start over. */
+    enter(id: number | null): void {
+      conversation = id;
+      walk = null;
+      close();
+
+      const saved = id === null ? undefined : kept()[id];
+
+      chosen = saved?.command != null && sendsAsCommand(input.value, saved.command) ? saved.command : null;
     },
     receive(reply: ExtrasReply): void {
       if (reply.type === 'files') {

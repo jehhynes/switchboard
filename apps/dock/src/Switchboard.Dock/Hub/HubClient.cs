@@ -254,6 +254,8 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
     public Task<string?> Poll() => Post("/poll", []);
     public Task<(string? Error, JsonNode? Body)> Volume(JsonObject query) => PostFor("/volume", query);
 
+    public Task<string?> Select(string rowKey) => Post("/dock/select", new JsonObject { ["rowKey"] = rowKey });
+
     public Task<string?> StopHeld(string session) => Post("/holder/stop", new JsonObject { ["id"] = session });
 
     public Task<string?> Open(string sessionId, string cwd, string workspace) => Post("/open", new JsonObject { ["sessionId"] = sessionId, ["cwd"] = cwd, ["workspace"] = workspace });

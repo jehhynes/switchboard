@@ -71,6 +71,31 @@ function item(cwd, status, patch = {}) {
   };
 }
 
+/** Opens an `/events` stream for `file` on the window's hub and resolves its window key, so the window can claim as that item window. */
+function bindTo(extension, file) {
+  const record = extension.hub();
+
+  return new Promise((done, fail) => {
+    const outbound = require('node:http').request({ host: '127.0.0.1', port: record.port, path: `/events?workspace=${encodeURIComponent(file)}&focused=0`, headers: { Authorization: `Bearer ${record.token}` } }, (response) => {
+      let text = '';
+
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        text += chunk;
+
+        const hello = /event: hello\ndata: (.*)\n/.exec(text);
+
+        if (hello !== null) {
+          done({ key: JSON.parse(hello[1]).window, close: () => outbound.destroy() });
+        }
+      });
+    });
+
+    outbound.on('error', fail);
+    outbound.end();
+  });
+}
+
 describe('the Switchboard pane (PRD R92)', () => {
   const realExecute = vscode.commands.executeCommand;
   const realWarning = vscode.window.showWarningMessage;
@@ -201,12 +226,20 @@ describe('the Switchboard pane (PRD R92)', () => {
     // The hub reads settings.json again when it changes.
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(saved ?? '{}'), sessions: { ...JSON.parse(saved ?? '{}').sessions, claudePath: '/opt/pane-test/claude' } }));
 
+    const cleanups = [];
+
     try {
       extension.itemWindow(file);
       show([item(folder, 'running', { sessions: [waiting] })]);
       assert.strictEqual(shown('switchboard.pane').items[0].main.label, 'Open in terminal');
 
       const key = shown('switchboard.pane').items[0].key;
+      // The terminal command is left for the item window, which only a window whose key binds its file claims.
+      const bound = await bindTo(extension, file);
+      const ownKey = extension.windowKey();
+
+      extension.useWindowKey(bound.key);
+      cleanups.push(() => (extension.useWindowKey(ownKey), bound.close()));
 
       await until(async () => {
         created.length = 0;
@@ -217,6 +250,7 @@ describe('the Switchboard pane (PRD R92)', () => {
       }, 'the terminal never ran the configured CLI', 10_000);
       assert.deepStrictEqual(created.map(({ name, shellArgs, cwd }) => ({ name, shellArgs, cwd })), [{ name: 'Switchboard · gh 7', shellArgs: ['attach', 'ab12'], cwd: folder }]);
     } finally {
+      cleanups.forEach((cleanup) => cleanup());
       Object.defineProperty(vscode.window, 'createTerminal', realCreate);
       if (saved === null) {
         rmSync(settingsFile, { force: true });
@@ -238,6 +272,8 @@ describe('the Switchboard pane (PRD R92)', () => {
     Object.defineProperty(vscode.window, 'createTerminal', { configurable: true, value: (options) => (created.push(options), { options, exitStatus: undefined, show: () => {} }) });
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(saved ?? '{}'), sessions: { ...JSON.parse(saved ?? '{}').sessions, nodePath: '/opt/pane-test/node' } }));
 
+    const cleanups = [];
+
     try {
       extension.itemWindow(file);
       show([item(folder, 'running', { sessions: [question] })]);
@@ -248,6 +284,12 @@ describe('the Switchboard pane (PRD R92)', () => {
       assert.strictEqual(shown('switchboard.pane').items[0].main.title, 'Open in terminal: attaches to the Code Mode session');
 
       const key = shown('switchboard.pane').items[0].key;
+      // The terminal command is left for the item window, which only a window whose key binds its file claims.
+      const bound = await bindTo(extension, file);
+      const ownKey = extension.windowKey();
+
+      extension.useWindowKey(bound.key);
+      cleanups.push(() => (extension.useWindowKey(ownKey), bound.close()));
 
       await until(async () => {
         created.length = 0;
@@ -259,6 +301,7 @@ describe('the Switchboard pane (PRD R92)', () => {
       // No Open in Claude stop reached the hub, which would refuse it for work item 7.
       assert.deepStrictEqual(warned, []);
     } finally {
+      cleanups.forEach((cleanup) => cleanup());
       Object.defineProperty(vscode.window, 'createTerminal', realCreate);
       if (saved === null) {
         rmSync(settingsFile, { force: true });

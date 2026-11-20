@@ -1,7 +1,7 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, renderConversation, replyText, TABS } from './conversationRender.js';
-import { statusLine } from '../conversationModel.js';
+import { ago, PICKER, renderConversation, replyText, TABS } from './conversationRender.js';
+import { selectedEntry, statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 import { startComposerExtras } from './composerExtras.js';
 import type { ExtrasReply } from './composerExtras.js';
@@ -60,7 +60,7 @@ export function shortTitle(title: string): string {
  * enabled only for a session the view can talk to, keeps its text until the hub took the message, takes back the text of a message that was
  * not sent, and shows why above the box until dismissed.
  */
-function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: ConversationState): void; sent(id: number, error: string | null): void; unsent(text: string, error: string): void; receive(reply: ExtrasReply): void } {
+function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: ConversationState): void; sent(id: number, error: string | null): void; unsent(text: string, error: string, workItemId: number | null): void; receive(reply: ExtrasReply): void } {
   // As Claude Code's input: the text area over a footer, whose left side is kept for the controls later slices add. Why a message did not go
   // shows above it until dismissed.
   host.innerHTML =
@@ -73,17 +73,22 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
   const send = host.querySelector<HTMLButtonElement>('button.send')!;
   const error = host.querySelector<HTMLElement>('.composer-error')!;
   const errorText = host.querySelector<HTMLElement>('.composer-error-text')!;
-  // Messages that were not sent while another was being sent, put back once the box is writable.
-  const returned: Array<{ text: string; error: string }> = [];
+  // Messages that were not sent while another was being sent, with the conversation each belongs to, put back once the box is writable.
+  const returned: Array<{ text: string; error: string; workItemId: number | null }> = [];
   const showError = (text: string | null): void => {
     errorText.textContent = text ?? '';
     error.hidden = text === null;
   };
   const putBack = (): void => {
     for (const one of returned.splice(0)) {
-      // Below a draft, after a blank line.
-      input.value = input.value.trim() === '' ? one.text : `${input.value.replace(/\n+$/, '')}\n\n${one.text}`;
-      showError(one.error);
+      // Below a draft, after a blank line; one of another conversation goes to its draft.
+      if (one.workItemId === current) {
+        input.value = below(input.value, one.text);
+        showError(one.error);
+      } else if (one.workItemId !== null) {
+        extras.setDraft(one.workItemId, below(extras.draftOf(one.workItemId), one.text));
+        errors.set(one.workItemId, one.error);
+      }
     }
 
     grow();
@@ -92,8 +97,50 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
   };
   let enabled = false;
   let target: SendTarget | null = null;
-  let sending: number | null = null;
+  // The message being sent, its text, and the conversation it was typed in.
+  let sending: { id: number; text: string; workItemId: number | null } | null = null;
   let next = 1;
+  // A draft per conversation, kept in the page's state by the extras, and a refusal per conversation (architecture.md § Conversation view): the box
+  // holds the selected one's; the others wait.
+  let current: number | null = null;
+  const errors = new Map<number, string>();
+  /** Adds a text that was not sent below a draft, after a blank line. */
+  const below = (draft: string, text: string): string => (draft.trim() === '' ? text : `${draft.replace(/\n+$/, '')}\n\n${text}`);
+  /** Keeps the box's draft and refusal for the conversation it belonged to, and shows those of the newly selected one. */
+  const switchTo = (workItemId: number | null): void => {
+    if (workItemId === current) {
+      return;
+    }
+
+    // The text being sent is not a draft: it shows read-only in its conversation until the hub answers.
+    if (current !== null) {
+      if (sending?.workItemId !== current) {
+        extras.setDraft(current, input.value);
+      }
+
+      if (!error.hidden) {
+        errors.set(current, errorText.textContent ?? '');
+      }
+    }
+
+    current = workItemId;
+
+    const busy = sending !== null && sending.workItemId === current;
+
+    input.value = busy ? sending!.text : workItemId === null ? '' : extras.draftOf(workItemId);
+    showError(workItemId === null ? null : (errors.get(workItemId) ?? null));
+    // The extras follow the selected conversation: its chosen command, its history walk and its list.
+    extras.enter(workItemId);
+
+    if (workItemId !== null) {
+      errors.delete(workItemId);
+    }
+
+    input.readOnly = busy;
+    host.classList.toggle('sending', busy);
+    grow();
+    refresh();
+  };
   const grow = (): void => {
     input.style.height = 'auto';
     input.style.height = `${Math.min(input.scrollHeight, COMPOSER_MAX_PX)}px`;
@@ -107,11 +154,17 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
       return;
     }
 
-    sending = next++;
+    sending = { id: next++, text: input.value, workItemId: current };
+
+    // The text in flight is no draft; a refusal or a not-sent message brings it back.
+    if (current !== null) {
+      extras.setDraft(current, '');
+    }
+
     input.readOnly = true;
     host.classList.add('sending');
     refresh();
-    vscode.postMessage({ type: 'send', id: sending, text: input.value, target: target!, ...(extras.command(input.value) ? { command: true as const } : {}) });
+    vscode.postMessage({ type: 'send', id: sending.id, text: input.value, target: target!, ...(extras.command(input.value) ? { command: true as const } : {}) });
   };
   const extras = startComposerExtras(host, input, host.querySelector<HTMLElement>('.composer-controls')!, vscode, () => {
     grow();
@@ -145,22 +198,38 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
 
   return {
     update: (state) => {
+      switchTo(state.scope?.workItemId ?? null);
       enabled = state.connected && state.session?.conversation === 'full';
       extras.update(state);
       target = state.scope === null || state.session === null ? null : { scopeGen: state.scope.scopeGen, sessionId: state.session.id, launch: state.session.launch };
       host.hidden = state.scope === null;
       input.disabled = !enabled;
-      input.placeholder = enabled ? `Message ${shortTitle(state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
+      input.placeholder = enabled ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
       refresh();
     },
     sent: (id, refusal) => {
-      if (id !== sending) {
+      if (id !== sending?.id) {
         return;
       }
+
+      const from = sending.workItemId;
+      const sent = sending;
 
       sending = null;
       input.readOnly = false;
       host.classList.remove('sending');
+
+      // Sent from a conversation no longer selected: a refused text goes back to its draft, with why.
+      if (from !== current) {
+        if (from !== null && refusal !== null) {
+          extras.setDraft(from, below(extras.draftOf(from), sent.text));
+          errors.set(from, refusal);
+        }
+
+        extras.sent(false);
+        putBack();
+        return;
+      }
 
       if (refusal === null) {
         input.value = '';
@@ -174,12 +243,26 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
 
       putBack();
     },
-    unsent: (text, why) => {
-      returned.push({ text, error: why });
+    unsent: (text, why, workItemId) => {
+      const target = workItemId ?? current;
 
-      if (sending === null) {
-        putBack();
+      // A late refusal goes back only to the draft of the conversation it was sent in, after a message of that conversation still being sent.
+      if (sending !== null && sending.workItemId === target) {
+        returned.push({ text, error: why, workItemId: target });
+        return;
       }
+
+      if (target !== current) {
+        if (target !== null) {
+          extras.setDraft(target, below(extras.draftOf(target), text));
+          errors.set(target, why);
+        }
+
+        return;
+      }
+
+      returned.push({ text, error: why, workItemId: target });
+      putBack();
     },
     receive: (reply) => extras.receive(reply),
   };
@@ -189,7 +272,8 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
 export function startConversation(root: HTMLElement, live: HTMLElement, vscode: VsCodeApi, composerHost?: HTMLElement): void {
   const composer = composerHost === undefined ? null : startComposer(composerHost, vscode);
   const saved = vscode.getState() as Partial<PageState> | null;
-  const open = new Set(saved?.open ?? []);
+  // The conversation list never stays open across a reload.
+  const open = new Set((saved?.open ?? []).filter((id) => id !== PICKER));
   let state: ConversationState = EMPTY_CONVERSATION;
   let tab: Tab = TABS.some((one) => one.tab === saved?.tab) ? saved!.tab! : 'conversation';
   // The artifacts new or changed since they were last opened in the workspace, which the extension keeps.
@@ -498,8 +582,19 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const button = target.closest<HTMLElement>('[data-action]');
     const action = button?.dataset['action'];
 
-    if (action === 'terminal' || action === 'earlier' || action === 'statuses') {
+    if (action === 'terminal' || action === 'earlier' || action === 'statuses' || action === 'new') {
       vscode.postMessage({ type: action });
+    } else if (action === 'picker') {
+      if (!open.delete(PICKER)) {
+        open.add(PICKER);
+      }
+
+      draw();
+      root.querySelector<HTMLElement>(open.has(PICKER) ? '.conversation-list button.selected, .conversation-list button' : 'button.picker')?.focus();
+    } else if (action === 'select') {
+      open.delete(PICKER);
+      draw();
+      vscode.postMessage({ type: 'select', workItemId: Number(button!.dataset['workItem']) });
     } else if (action === 'artifact') {
       vscode.postMessage({ type: 'artifact', path: button!.dataset['path'] ?? '' });
     } else if (action === 'status-open') {
@@ -539,6 +634,27 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     },
     true,
   );
+
+  // Escape closes the conversation list; Up and Down move within it.
+  root.addEventListener('keydown', (event) => {
+    if (!open.has(PICKER)) {
+      return;
+    }
+
+    const options = [...root.querySelectorAll<HTMLElement>('.conversation-list button')];
+    const at = options.indexOf(document.activeElement as HTMLElement);
+
+    if (event.key === 'Escape') {
+      open.delete(PICKER);
+      draw();
+      root.querySelector<HTMLElement>('button.picker')?.focus();
+      event.stopImmediatePropagation();
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && options.length > 0) {
+      options[Math.max(0, Math.min(options.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]!.focus();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  });
 
   // The tab strip is one tab stop, as VS Code's: Left and Right move to the tab before or after, Home and End to the first or last.
   root.addEventListener('keydown', (event) => {
@@ -602,7 +718,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     checkSeen();
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> } | ExtrasReply>) => {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string; workItemId: number | null }> } | ExtrasReply>) => {
     if (event.data.type === 'files' || event.data.type === 'commands' || event.data.type === 'mentions' || event.data.type === 'image') {
       composer?.receive(event.data);
     } else if (event.data.type === 'focus') {
@@ -632,7 +748,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       composer?.sent(event.data.id, event.data.error);
     } else if (event.data.type === 'unsent') {
       for (const one of event.data.returned) {
-        composer?.unsent(one.text, one.error);
+        composer?.unsent(one.text, one.error, one.workItemId);
       }
     } else if (event.data.type === 'copied') {
       const button = copies.get(event.data.id);

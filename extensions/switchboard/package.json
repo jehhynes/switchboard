@@ -131,6 +131,11 @@
         "command": "switchboard.openArtifact",
         "title": "Open Artifact",
         "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.newSession",
+        "title": "New Session",
+        "category": "Switchboard"
       }
     ],
     "menus": {

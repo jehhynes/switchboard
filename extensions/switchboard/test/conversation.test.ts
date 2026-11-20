@@ -1,20 +1,20 @@
 import { readFileSync } from 'node:fs';
-import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
+import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, ScopeView } from '@switchboard/hub';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, stateIcon, statusLine, timeline, withEarlier } from '../src/conversationModel.js';
+import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, selectedEntry, stateIcon, statusLine, timeline, totalUnread, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
-import { ago, linkAllowed, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
+import { ago, linkAllowed, PICKER, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
 import type { Tab } from '../src/webview/conversationRender.js';
 
 /** The page's extras for a tab. */
 const on = (tab: Tab, unopened: string[] = []) => ({ tab, unopened: new Set(unopened) });
 
 const T0 = Date.UTC(2026, 10, 19, 12);
-const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, primary: true }] };
+const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w', title: 'Fix the <inbox> badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, title: 'Fix the <inbox> badge', primary: true, sessionId: 's2', state: 'running', conversation: 'full', unread: 0 }] };
 const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
 
 // Each item's ord is its time unless a test gives it another.
@@ -22,7 +22,7 @@ const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyVie
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent' | 'uncertain', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
-const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 /** A timeline entry's ID: an item's, or an artifact's path. */
 const idOf = (entry: Entry): string => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id);
 
@@ -51,7 +51,7 @@ describe('the conversation state', () => {
     let state = applyEvent(EMPTY_CONVERSATION, hello([], { unread: 2 }));
 
     expect(state.unread).toBe(2);
-    state = applyEvent(state, { type: 'unread', count: 3 });
+    state = applyEvent(state, { type: 'unread', workItemId: 2, count: 3 });
     expect(state.unread).toBe(3);
     expect(applyEvent(state, { type: 'scope', scope: { ...SCOPE, title: 'Renamed' } }).unread).toBe(3);
     expect(applyEvent(state, { type: 'scope', scope: { ...SCOPE, sessionId: 's9' } }).unread).toBe(0);
@@ -298,7 +298,8 @@ describe('the Conversation view page', () => {
     const root = document.createElement('div');
     const live = document.createElement('div');
     const posted: Array<{ type: string; [field: string]: unknown }> = [];
-    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    let kept: unknown = null;
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) };
     const show = (items: ItemView[]) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state(items, { session: { ...SESSION, state: 'idle' } }) } }));
     const copied = (id: number, ok: boolean) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'copied', id, ok } }));
 
@@ -429,7 +430,8 @@ describe('unread replies and statuses', () => {
     const root = document.createElement('div');
     const live = document.createElement('div');
     const posted: Array<{ type: string; [field: string]: unknown }> = [];
-    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    let kept: unknown = null;
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) };
     // Where each unread item sits, against a timeline 100 px tall at the top of the view.
     const boxes = new Map<string, [number, number]>([['r1', [-200, -140]], ['r2', [20, 80]]]);
     const rect = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
@@ -512,7 +514,8 @@ describe('unread replies and statuses', () => {
     const root = document.createElement('div');
     const live = document.createElement('div');
     const posted: Array<{ type: string; [field: string]: unknown }> = [];
-    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    let kept: unknown = null;
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) };
     let box: [number, number] = [20, 80];
     const rect = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
 
@@ -567,7 +570,8 @@ describe('the composer', () => {
     const live = document.createElement('div');
     const host = document.createElement('div');
     const posted: Array<{ type: string; [field: string]: unknown }> = [];
-    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    let kept: unknown = null;
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) };
 
     document.body.replaceChildren(root, host, live);
     startConversation(root, live, vscode, host);
@@ -899,7 +903,8 @@ describe('the Status tab', () => {
     const root = document.createElement('div');
     const live = document.createElement('div');
     const posted: Array<{ type: string }> = [];
-    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    let kept: unknown = null;
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) };
     const show = (patch: Partial<ConversationState>) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state(patch) } }));
     const badge = () => root.querySelector('[data-tab="status"] .tab-badge')?.textContent ?? null;
 
@@ -982,7 +987,8 @@ describe('the Status tab', () => {
     const root = document.createElement('div');
     const live = document.createElement('div');
     const posted: Array<{ type: string; [field: string]: unknown }> = [];
-    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    let kept: unknown = null;
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) };
     const send = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
 
     document.body.replaceChildren(root, live);
@@ -1116,5 +1122,160 @@ describe('the tab strip', () => {
     expect(root.querySelector<HTMLElement>('.scroll')!.scrollTop).toBe(300);
     expect(root.querySelector('.pill')?.textContent).toBe('New messages');
     vi.restoreAllMocks();
+  });
+});
+
+describe('several conversations in a window (architecture.md § Conversation view)', () => {
+  const HOSTED = { workItemId: 9, title: 'New session', primary: false, sessionId: 's9', state: 'idle' as const, conversation: 'full' as const, unread: 2 };
+  const TWO: ScopeView = { ...SCOPE, conversations: [SCOPE.conversations[0]!, HOSTED] };
+  const base = (patch: Partial<ConversationState> = {}): ConversationState => ({ ...EMPTY_CONVERSATION, scope: TWO, session: SESSION, connected: true, ...patch });
+
+  it('keeps each conversation unread count, badges their sum, and takes the dropdown from conversations events', () => {
+    let state = base({ unread: 1 });
+
+    expect(totalUnread(state)).toBe(3);
+    state = applyEvent(state, { type: 'unread', workItemId: 9, count: 5 });
+    expect(state.unread).toBe(1);
+    expect(state.scope?.conversations.map((entry) => entry.unread)).toEqual([0, 5]);
+    expect(totalUnread(state)).toBe(6);
+    state = applyEvent(state, { type: 'conversations', conversations: [SCOPE.conversations[0]!, { ...HOSTED, title: 'Why does the build fail?', unread: 0 }] });
+    expect(selectedEntry(state)?.workItemId).toBe(2);
+    expect(state.scope?.conversations[1]).toMatchObject({ title: 'Why does the build fail?', unread: 0 });
+    expect(totalUnread(state)).toBe(1);
+    expect(applyEvent(EMPTY_CONVERSATION, { type: 'conversations', conversations: [HOSTED] })).toBe(EMPTY_CONVERSATION);
+  });
+
+  it('draws the selected title as a dropdown that lists every conversation with its state and unread count, and a plus button', () => {
+    const closed = renderConversation(base(), new Set(), T0);
+
+    expect(closed).toContain('data-action="new"');
+    expect(closed).toContain('class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="false" title="Fix the &#60;inbox&#62; badge"');
+    expect(closed).not.toContain('role="listbox"');
+
+    const opened = renderConversation(base({ scope: { ...TWO, workItemId: 9, sessionId: 's9' } }), new Set([PICKER]), T0);
+
+    expect(opened).toContain('aria-expanded="true" title="New session"');
+    expect(opened.match(/role="option"/g)).toHaveLength(2);
+    expect(opened).toContain('<li role="option" aria-selected="true"><button type="button" data-action="select" data-work-item="9" class="selected">');
+    expect(opened).toContain('<span class="count" title="2 unread">2</span>');
+    expect(opened).toContain('codicon-check');
+  });
+
+  it('posts a choice from the list and the plus, and keeps a draft and a late refusal for each conversation', () => {
+    if (typeof CSS === 'undefined') {
+      vi.stubGlobal('CSS', { escape: (value: string) => value });
+    }
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const host = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    let kept: unknown = null;
+
+    document.body.replaceChildren(root, host, live);
+    startConversation(root, live, { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) }, host);
+
+    const input = host.querySelector('textarea')!;
+    const error = host.querySelector<HTMLElement>('.composer-error')!;
+    const show = (next: ConversationState) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: next } }));
+    const unsent = (text: string, why: string, workItemId: number) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'unsent', returned: [{ text, error: why, workItemId }] } }));
+    const hosted = base({ scope: { ...TWO, workItemId: 9, sessionId: 's9', scopeGen: 2 }, session: { ...SESSION, id: 's9' } });
+
+    show(base());
+    root.querySelector<HTMLButtonElement>('button.picker')!.click();
+    root.querySelector<HTMLButtonElement>('button[data-work-item="9"]')!.click();
+    expect(posted.filter((message) => message.type === 'select')).toEqual([{ type: 'select', workItemId: 9 }]);
+    expect(root.querySelector('[role="listbox"]')).toBeNull();
+    root.querySelector<HTMLButtonElement>('button[data-action="new"]')!.click();
+    expect(posted.filter((message) => message.type === 'new')).toEqual([{ type: 'new' }]);
+
+    // A draft stays with its conversation.
+    input.value = 'Draft for the work item';
+    show(hosted);
+    expect(input.value).toBe('');
+    expect(input.placeholder).toBe('Message New session…');
+    input.value = 'Draft for the new session';
+
+    // A message of the work item's conversation that was not sent goes back to that draft only.
+    unsent('Sent from the work item', 'The session has ended.', 2);
+    expect(input.value).toBe('Draft for the new session');
+    expect(error.hidden).toBe(true);
+
+    show(base());
+    expect(input.value).toBe('Draft for the work item\n\nSent from the work item');
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toBe('The session has ended.');
+    show(hosted);
+    expect(input.value).toBe('Draft for the new session');
+    expect(error.hidden).toBe(true);
+  });
+
+  it('keeps a message being sent with its own conversation, and a refusal that comes back meanwhile out of the other one', () => {
+    if (typeof CSS === 'undefined') {
+      vi.stubGlobal('CSS', { escape: (value: string) => value });
+    }
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const host = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    let kept: unknown = null;
+
+    document.body.replaceChildren(root, host, live);
+    startConversation(root, live, { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) }, host);
+
+    const input = host.querySelector('textarea')!;
+    const show = (next: ConversationState) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: next } }));
+    const sent = (id: number, error: string | null) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'sent', id, error } }));
+    const unsent = (text: string, why: string, workItemId: number) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'unsent', returned: [{ text, error: why, workItemId }] } }));
+    const hosted = base({ scope: { ...TWO, workItemId: 9, sessionId: 's9', scopeGen: 2 }, session: { ...SESSION, id: 's9' } });
+
+    show(base());
+    input.value = 'Second';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(posted.filter((message) => message.type === 'send')).toHaveLength(1);
+
+    // An earlier message of this conversation was not sent while the second one is being sent; then the operator switches away.
+    unsent('First', 'The session has ended.', 2);
+    show(hosted);
+    expect(input.value).toBe('');
+    expect(input.readOnly).toBe(false);
+    sent(1, null);
+    expect(input.value).toBe('');
+
+    // Back in the work item's conversation: the sent text is gone and the earlier one is back in its draft.
+    show(base());
+    expect(input.value).toBe('First');
+    expect(input.readOnly).toBe(false);
+
+    // While a message is being sent, its conversation's box stays read-only when the operator comes back to it.
+    input.value = 'Third';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    show(hosted);
+    show(base());
+    expect(input.readOnly).toBe(true);
+    expect(input.value).toBe('Third');
+    sent(2, null);
+    expect(input.value).toBe('');
+
+    // A refusal of an earlier message that comes while a later one of its conversation is being sent, elsewhere, goes back alone.
+    input.value = 'Fourth';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    show(hosted);
+    unsent('Third', 'The session was resumed.', 2);
+    sent(3, null);
+    show(base());
+    expect(input.value).toBe('Third');
+    expect(input.readOnly).toBe(false);
+
+    // And one that comes before its conversation is visited again is not lost.
+    input.value = 'Fifth';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    show(hosted);
+    unsent('Fourth', 'The session has ended.', 2);
+    show(base());
+    expect(input.value).toBe('Fifth');
+    sent(4, null);
+    expect(input.value).toBe('Fourth');
   });
 });

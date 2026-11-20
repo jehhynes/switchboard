@@ -157,9 +157,10 @@ sealed class StripeConverter : JsonConverter<Tone?>
 
 /// <summary>
 /// A work item's VS Code window: the workspace file's name, which the window title ends with as <c>sb:&lt;name&gt;</c>, the ticket title, its folders,
-/// and the workspace file the hub writes (PRD R71); a hub older than the dock sends no file.
+/// and the workspace file the hub writes (PRD R71); a hub older than the dock sends no file. <c>Hosted</c> marks a hosted conversation's row, whose
+/// window is its host's (architecture.md § Hosted conversations).
 /// </summary>
-public sealed partial record DockWindow(string Name, string Title, IReadOnlyList<string> Folders, string? File = null)
+public sealed partial record DockWindow(string Name, string Title, IReadOnlyList<string> Folders, string? File = null, bool Hosted = false)
 {
     /// <summary>
     /// The window name in the last <c>sb:&lt;name&gt;</c> at the start of a title or after <c> · </c>, or null for a window that is not an item window.

@@ -1883,6 +1883,8 @@ public sealed partial class MainWindow : Window
 
         public Task<string?> Open(string sessionId, string cwd, string workspace) => Task.FromResult<string?>(null);
 
+        public Task<string?> Select(string rowKey) => Task.FromResult<string?>(null);
+
         public Task<string?> StopHeld(string session) => Task.FromResult<string?>(null);
 
         public Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within) => Task.FromResult<DockView?>(null);

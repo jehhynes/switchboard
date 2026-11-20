@@ -86,6 +86,15 @@ sealed class FakeHub : IHub
         return Task.FromResult(OpenReply);
     }
 
+    public string? SelectReply { get; set; }
+
+    public Task<string?> Select(string rowKey)
+    {
+        Calls.Add($"select {rowKey}");
+
+        return Task.FromResult(SelectReply);
+    }
+
     public string? StopReply { get; set; }
 
     public Task<string?> StopHeld(string session)

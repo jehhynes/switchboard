@@ -53,6 +53,12 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
             return Older;
         }
 
+        // A hosted conversation opens its host's window, which shows it once the hub stored it as that window's selection.
+        if (window.Hosted && await hub.Select(row.Key) is { } unselected)
+        {
+            return cancel.IsCancellationRequested ? null : unselected;
+        }
+
         var open = row.Open;
 
         if (open is { Type: "question", WorkItemId: { } workItemId, SessionId: { } question })

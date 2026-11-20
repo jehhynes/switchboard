@@ -127,7 +127,7 @@ describe('the hub process', () => {
     assert.strictEqual(JSON.parse(refused.body).error, 'Unknown work item 1.');
   });
 
-  it('claims a session left for this folder once, and opens it in the Claude tab', async () => {
+  it('claims no open left for another window or for none, since a folder window has no binding (architecture.md § Window scope)', async () => {
     const extension = await api();
     await until(() => extension.hub(), 'not connected');
 
@@ -137,21 +137,21 @@ describe('the hub process', () => {
 
     try {
       const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
-
-      // Another window's Open leaves a pending open for this folder; this window claims it.
       const hub = extension.hub();
-      const recorded = await call(hub.port, '/open', hub.token, 'POST', { sessionId: 'there-native', cwd: folder });
+      // An open names its destination window; one the hub cannot place is refused, and a folder window claims none left for an item window.
+      const nowhere = await call(hub.port, '/open', hub.token, 'POST', { sessionId: 'there-native', cwd: folder });
 
-      assert.strictEqual(recorded.status, 200);
-      assert.strictEqual(await vscode.commands.executeCommand('switchboard.claim'), 'there-native');
+      assert.strictEqual(nowhere.status, 409);
+      assert.strictEqual(JSON.parse(nowhere.body).error, 'The session has no window to open it in.');
+      assert.strictEqual((await call(hub.port, '/open', hub.token, 'POST', { sessionId: 'there-native', cwd: folder, workspace: join(process.env.SWITCHBOARD_TEST_HOME, 'other.code-workspace') })).status, 200);
       assert.strictEqual(await vscode.commands.executeCommand('switchboard.claim'), null);
-      assert.deepStrictEqual(opened, ['there-native']);
+      assert.deepStrictEqual(opened, []);
     } finally {
       fake.dispose();
     }
   });
 
-  it('opens a session in the Claude sidebar when claudeCode.preferredLocation is sidebar', async () => {
+  it('opens a claimed session in the Claude sidebar when claudeCode.preferredLocation is sidebar', async () => {
     const extension = await api();
     await until(() => extension.hub(), 'not connected');
 
@@ -163,20 +163,29 @@ describe('the hub process', () => {
       vscode.commands.registerCommand('claude-vscode.primaryEditor.open', (sessionId) => tabs.push(sessionId)),
       vscode.commands.registerCommand('claude-vscode.editor.open', (...args) => sidebar.push(args)),
     ];
+    // A stand-in hub that hands this window the session, as the hub does for the window an open names.
+    const stand = require('node:http').createServer((request, response) => {
+      request.resume();
+      request.on('end', () => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ sessionId: 'claimed-native', provider: 'claude', commands: [] }));
+      });
+    });
+
+    await new Promise((done) => stand.listen(0, '127.0.0.1', done));
 
     try {
       mkdirSync(dirname(settings), { recursive: true });
       writeFileSync(settings, JSON.stringify({ 'claudeCode.preferredLocation': 'sidebar' }));
       await until(() => vscode.workspace.getConfiguration('claudeCode').get('preferredLocation') === 'sidebar', 'setting not read');
 
-      const hub = extension.hub();
-      await call(hub.port, '/open', hub.token, 'POST', { sessionId: 'claimed-native', cwd: folder });
-      assert.strictEqual(await vscode.commands.executeCommand('switchboard.claim'), 'claimed-native');
+      assert.strictEqual(await extension.claim({ ...extension.hub(), port: stand.address().port, token: 'stub-token' }), 'claimed-native');
 
       const honor = [undefined, undefined, undefined, undefined, { programmatic: 'honor-preferred-location' }];
       assert.deepStrictEqual(sidebar, [['claimed-native', ...honor]]);
       assert.deepStrictEqual(tabs, []);
     } finally {
+      stand.close();
       rmSync(dirname(settings), { recursive: true, force: true });
       await until(() => vscode.workspace.getConfiguration('claudeCode').get('preferredLocation') === undefined, 'setting not cleared');
       fakes.forEach((fake) => fake.dispose());

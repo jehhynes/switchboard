@@ -25,6 +25,12 @@ public interface IHub
     /// </summary>
     Task<string?> Open(string sessionId, string cwd, string workspace);
 
+    /// <summary>
+    /// Makes a hosted conversation's row the selection of its host window, so the window shows it when the click brings it forward
+    /// (architecture.md § Dock).
+    /// </summary>
+    Task<string?> Select(string rowKey);
+
     /// <summary>Stops a held session by its Switchboard session ID (PRD R94).</summary>
     Task<string?> StopHeld(string session);
 

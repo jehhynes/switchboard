@@ -20,6 +20,20 @@ public sealed class DockViewTests
     }
 
     [Fact]
+    public void Parse_HostedWindow_ReadsItsHostedMark()
+    {
+        var json = JsonNode.Parse(Fixtures.DockJson)!;
+        var row = json["groups"]![0]!["rows"]![0]!;
+
+        row["window"]!["hosted"] = true;
+
+        var parsed = DockView.Parse(json.ToJsonString()).Groups[0].Rows[0];
+
+        Assert.True(parsed.Window!.Hosted);
+        Assert.False(Fixtures.View.Groups[0].Rows[0].Window!.Hosted);
+    }
+
+    [Fact]
     public void Parse_RecordedMessage_ReadsEveryRowField()
     {
         var finished = Fixtures.Row("item:7");

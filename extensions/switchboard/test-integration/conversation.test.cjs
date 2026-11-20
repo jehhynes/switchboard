@@ -32,19 +32,29 @@ describe('the Conversation view', () => {
 
     assert.ok(commands.includes('workbench.view.extension.switchboard-conversation'), 'VS Code registered no command for the secondary side bar container');
     assert.ok(commands.includes('switchboard.conversation.focus'), 'VS Code registered no focus command for the view');
+    assert.ok(commands.includes('switchboard.newSession'), 'the extension registered no Switchboard: New Session command');
     await vscode.commands.executeCommand('switchboard.conversation.focus');
     // The suite's window is a folder window, which has no work item, so the hub's hello gives it no scope.
     await until(() => extension.conversation().connected, 'the view never received its hello');
     assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0 });
     assert.strictEqual(extension.conversationBadge(), undefined);
 
-    // The current session's unread count is the view's badge, gone at 0 (architecture.md § Unread).
+    // The badge is every conversation's unread count together, gone at 0 (architecture.md § Unread).
     // The window may have connected earlier in the suite, before the focus command resolved the view, so the badge shows once it has.
-    extension.receiveConversation({ type: 'unread', count: 2 });
+    const entry = (workItemId, primary) => ({ workItemId, title: `Conversation ${workItemId}`, primary, sessionId: `s${workItemId}`, state: 'idle', conversation: 'full', unread: 0 });
+    const scope = { kind: 'item', key: 'k', folder: 'D:/w', title: 'Conversation 5', scopeGen: 1, conversations: [entry(5, true), entry(6, false)], workItemId: 5, cwd: 'D:/w', sessionId: 's5' };
+
+    extension.receiveConversation({ type: 'hello', scope, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+    extension.receiveConversation({ type: 'unread', workItemId: 5, count: 2 });
     await until(() => extension.conversationBadge() !== undefined, 'the view never showed its badge');
     assert.deepStrictEqual(extension.conversationBadge(), { value: 2, tooltip: '2 unread replies and statuses' });
-    extension.receiveConversation({ type: 'unread', count: 0 });
+    extension.receiveConversation({ type: 'unread', workItemId: 6, count: 1 });
+    assert.deepStrictEqual(extension.conversationBadge(), { value: 3, tooltip: '3 unread replies and statuses' });
+    extension.receiveConversation({ type: 'unread', workItemId: 5, count: 0 });
+    extension.receiveConversation({ type: 'unread', workItemId: 6, count: 0 });
     assert.strictEqual(extension.conversationBadge(), undefined);
+    // Back to this window's own state, which has no scope, for the tests after it.
+    extension.receiveConversation({ type: 'hello', scope: null, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [], unread: 0 });
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 

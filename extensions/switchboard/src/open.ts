@@ -148,8 +148,14 @@ export async function openTerminal(record: HubRecord | null, command: TerminalCo
       return;
     }
 
+    // The hub handed this window the command, so a session of its folder opens here; one of another folder goes through the hub's open.
     if (active) {
-      await openSession(record, sessionId, cwd, provider);
+      if (here(cwd)) {
+        await showSession(sessionId, provider);
+      } else {
+        await openSession(record, sessionId, cwd, provider);
+      }
+
       return;
     }
 
@@ -244,19 +250,31 @@ export async function newClaudeTab(): Promise<void> {
 /**
  * Resumes or focuses a session in its provider's view, from a History link (PRD R59). Claude's tab lists only sessions of its window's first folder,
  * and opening another session there starts an empty one (GC M6, M7, M52); a Codex thread opens in any window, but runs in the window of its folder
- * as Claude's do. A session from another folder is therefore left with the hub as a pending open, and that folder is opened in its own window,
- * which claims it.
+ * as Claude's do. A session from another folder is therefore left with the hub as a pending open for its own window, which the hub names and this
+ * window opens, and which claims it.
  */
-export async function openSession(record: HubRecord | null, sessionId: string, cwd: string, provider: Provider = 'claude'): Promise<'opened' | 'other-folder'> {
-  if (here(cwd)) {
-    await showSession(sessionId, provider);
-    return 'opened';
+export async function openSession(
+  record: HubRecord | null,
+  sessionId: string,
+  cwd: string,
+  provider: Provider = 'claude',
+  run: (command: WindowCommand) => Promise<unknown> = async () => {},
+): Promise<'opened' | 'other-folder' | 'refused'> {
+  // The hub answers the session's own window, which claims the open, even for a session of this window's folder, since another work item can share
+  // it, as Support's do; a folder window has no binding to claim it (architecture.md § Window scope).
+  const destination = await leave(record, sessionId, cwd);
+
+  if (destination === null || record === null) {
+    return 'refused';
   }
 
-  if (await leave(record, sessionId, cwd)) {
-    await openFolder(cwd);
+  const mine = workspaceFile();
+
+  if (mine !== null && samePath(mine, destination)) {
+    return (await claim(record, run)).answered ? 'opened' : 'refused';
   }
 
+  await openFolder(destination);
   return 'other-folder';
 }
 
@@ -266,11 +284,17 @@ export async function openSession(record: HubRecord | null, sessionId: string, c
  * and runs it with `run`; otherwise the window of that folder claims it when it comes forward.
  */
 export async function openAttach(record: HubRecord | null, sessionId: string, cwd: string, run: (command: WindowCommand) => Promise<unknown>): Promise<'opened' | 'other-folder' | 'refused'> {
-  if (!(await leave(record, sessionId, cwd)) || record === null) {
+  const destination = await leave(record, sessionId, cwd);
+
+  if (destination === null || record === null) {
     return 'refused';
   }
 
-  if (here(cwd)) {
+  // The hub names the window the open waits for: this one for its own conversations, else the session's own window (architecture.md § Window scope).
+  // A folder window has no binding, so it claims no open and opens the session's window instead.
+  const mine = workspaceFile();
+
+  if (mine !== null && samePath(mine, destination)) {
     if (!(await claim(record, run)).answered) {
       void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
       return 'refused';
@@ -279,7 +303,7 @@ export async function openAttach(record: HubRecord | null, sessionId: string, cw
     return 'opened';
   }
 
-  await openFolder(cwd);
+  await openFolder(destination);
   return 'other-folder';
 }
 
@@ -290,19 +314,22 @@ function here(cwd: string): boolean {
   return folder !== undefined && samePath(folder, cwd);
 }
 
-/** Leaves the session with the hub for the window of `cwd`; false, after saying so, when the hub did not answer. */
-async function leave(record: HubRecord | null, sessionId: string, cwd: string): Promise<boolean> {
-  if (record === null || (await postToHub(record, '/open', { sessionId, cwd }, ACTION_TIMEOUT_MS))?.status !== 200) {
-    void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
-    return false;
+/** Leaves the session with the hub for its destination window, which the hub answers; null, after saying why, when the hub refused or did not answer. */
+async function leave(record: HubRecord | null, sessionId: string, cwd: string): Promise<string | null> {
+  const reply = record === null ? null : await postToHub(record, '/open', { sessionId, cwd, ...(windowKey === null ? {} : { window: windowKey }) }, ACTION_TIMEOUT_MS);
+  const workspace = (reply?.body as { workspace?: unknown } | null | undefined)?.workspace;
+
+  if (reply?.status !== 200 || typeof workspace !== 'string') {
+    void vscode.window.showErrorMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    return null;
   }
 
-  return true;
+  return workspace;
 }
 
-/** Opens the folder's window; VS Code focuses a window that already has the folder instead of opening another. */
-async function openFolder(cwd: string): Promise<void> {
-  await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(cwd), { forceNewWindow: true });
+/** Opens a folder's or a workspace file's window; VS Code focuses a window that already has it instead of opening another. */
+async function openFolder(path: string): Promise<void> {
+  await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path), { forceNewWindow: true });
 }
 
 /** This window's `.code-workspace` file, or null for a folder window. */
@@ -459,11 +486,19 @@ async function click(context: OpenContext, key: string, replaced: () => boolean,
     return 'url';
   }
 
-  try {
-    writeWorkspaceFile(row.window);
-  } catch (error) {
-    void vscode.window.showErrorMessage(`Switchboard: the workspace file for ${row.window.name} could not be written: ${(error as Error).message}`);
-    return 'failed';
+  // A hosted conversation's window is its host's, whose file the host's primary work item writes (architecture.md § Hosted conversations).
+  if (row.window.hosted !== true) {
+    try {
+      writeWorkspaceFile(row.window);
+    } catch (error) {
+      void vscode.window.showErrorMessage(`Switchboard: the workspace file for ${row.window.name} could not be written: ${(error as Error).message}`);
+      return 'failed';
+    }
+  }
+
+  // As the dock's click: a hosted conversation becomes its host window's selection, so the window shows it when it comes forward.
+  if (context.record !== null && row.window.hosted === true) {
+    await postToHub(context.record, '/dock/select', { rowKey: key }, ACTION_TIMEOUT_MS);
   }
 
   let open = row.open;
