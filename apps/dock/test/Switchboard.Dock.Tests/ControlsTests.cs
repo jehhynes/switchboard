@@ -22,7 +22,7 @@ public sealed class ControlsTests
     {
         var model = new DockViewModel(new DockSettings(), (_) => { }, time);
         var window = new MainWindow(model, null, hub, actions, docked: false, config) { Height = 1200 };
-        window.PickProvider = (_, preferred) => Task.FromResult<string?>(preferred);
+        window.PickProvider = (_, preferred, _) => Task.FromResult<string?>(preferred);
 
         model.Show(view ?? Fixtures.View);
         window.Show();
@@ -97,10 +97,10 @@ public sealed class ControlsTests
         hub.DefaultProvider = "codex";
         var (window, _) = Open();
         window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
-        window.PickProvider = (_, preferred) => { Assert.Equal("codex", preferred); return Task.FromResult<string?>(null); };
+        window.PickProvider = (_, preferred, _) => { Assert.Equal("codex", preferred); return Task.FromResult<string?>(null); };
         Choose(window, "New Session in a Folder…");
         Assert.Empty(hub.Calls);
-        window.PickProvider = (_, _) => Task.FromResult<string?>("claude");
+        window.PickProvider = (_, _, _) => Task.FromResult<string?>("claude");
         hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:/git/support"));
         Choose(window, "New Session in a Folder…");
         Assert.Matches("^new-conversation D:/git/support [0-9a-f-]{36} claude$", Assert.Single(hub.Calls));
@@ -853,21 +853,127 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void Adhoc_ProviderLookupFails_KeepsSchedulesAvailableAndRefusesTypedPrompts()
+    public void Adhoc_ProviderLookupFails_FallsBackToTheDefaultWithTheReasonBesideTheProvider()
     {
         hub.ProviderError = "Provider lookup failed.";
         var (window, _) = Open();
         Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
+        var reason = Named<TextBlock>(dialog, "AdhocProviderError");
+
+        Assert.True(Named<ComboBox>(dialog, "AdhocProvider").IsEnabled);
+        Assert.True(reason.IsVisible);
+        Assert.Equal("Provider lookup failed. Using Claude.", reason.Text);
+        Assert.Contains(reason, Named<StackPanel>(dialog, "AdhocProviderField").Children);
+        Assert.False(Named<TextBlock>(dialog, "AdhocError").IsVisible);
+
         Named<TextBox>(dialog, "AdhocPromptBox").Text = "Work";
-        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
-        Assert.Equal("Provider lookup failed.", Named<TextBlock>(dialog, "AdhocError").Text);
-        Assert.Empty(hub.Calls);
-        Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex = 1;
         Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
         hub.ActReplies.Enqueue(null);
         Click(Named<Button>(dialog, "AdhocCreate"));
-        Assert.Equal(["act {\"type\":\"run-schedule\",\"name\":\"self-review\"}"], hub.Calls);
+        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Work\",\"repoRoot\":\"D:/git/widgets\",\"start\":false,\"provider\":\"claude\"}"], hub.Calls);
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_ProviderLookupFailsAfterItNamedCodex_FallsBackToCodexAsTheDefault()
+    {
+        hub.DefaultProvider = "codex";
+        var (window, _) = Open();
+        Choose(window, "New Ad-hoc Session…");
+        Click(Named<Button>(DialogOf(window), "AdhocCancel"));
+
+        hub.ProviderError = "Provider lookup failed.";
+        Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
+
+        Assert.Equal("codex", ((ProviderDialog.Option)Named<ComboBox>(dialog, "AdhocProvider").SelectedItem!).Id);
+        Assert.Equal("Provider lookup failed. Using Codex, the default.", Named<TextBlock>(dialog, "AdhocProviderError").Text);
+        Click(Named<Button>(dialog, "AdhocCancel"));
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_ProviderLookupFailsAfterNewSessionNamedCodex_FallsBackToCodex()
+    {
+        hub.DefaultProvider = "codex";
+        var (window, _) = Open();
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/scratch");
+        window.PickProvider = (_, _, _) => Task.FromResult<string?>(null);
+        window.NewSession().GetAwaiter().GetResult();
+
+        hub.ProviderError = "Provider lookup failed.";
+        Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
+
+        Assert.Equal("Provider lookup failed. Using Codex, the default.", Named<TextBlock>(dialog, "AdhocProviderError").Text);
+        Click(Named<Button>(dialog, "AdhocCancel"));
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_Opened_FocusesTheFirstFieldThatShows()
+    {
+        var (window, _) = Open();
+        Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
+
+        Assert.Same(Named<ComboBox>(dialog, "AdhocRunBox"), dialog.FocusManager!.GetFocusedElement());
+        Click(Named<Button>(dialog, "AdhocCancel"));
+
+        var (other, _) = Open(Fixtures.View with { Schedules = [] });
+        Choose(other, "New Ad-hoc Session…");
+        var plain = DialogOf(other);
+
+        Assert.Same(Named<ComboBox>(plain, "AdhocRepoBox"), plain.FocusManager!.GetFocusedElement());
+        Click(Named<Button>(plain, "AdhocCancel"));
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_Fields_AreLabelledRunRepositoryProviderAndPrompt()
+    {
+        var (window, _) = Open();
+        Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
+        string? LabelOf(string field) => Named<StackPanel>(dialog, field).Children.OfType<TextBlock>().First().Text;
+
+        Assert.Equal(["Run", "Repository", "Provider", "Prompt"], new[] { "AdhocRunField", "AdhocRepoField", "AdhocProviderField", "AdhocPromptField" }.Select(LabelOf));
+        Click(Named<Button>(dialog, "AdhocCancel"));
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_ChooseAFolder_PicksAnyFolderPostsItAndOffersItAgain()
+    {
+        var (window, model) = Open();
+        string? picked = "D:/scratch/tool";
+        window.PickFolder = (_) => Task.FromResult<string?>(picked);
+
+        Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
+        var repos = Named<ComboBox>(dialog, "AdhocRepoBox");
+
+        Assert.Equal(["D:/git/widgets", "D:/git/support", AdhocDialog.ChooseFolder], repos.ItemsSource!.Cast<string>());
+
+        // A cancelled picker keeps the folder that was selected.
+        picked = null;
+        repos.SelectedItem = AdhocDialog.ChooseFolder;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("D:/git/widgets", repos.SelectedItem);
+
+        picked = "D:/scratch/tool";
+        repos.SelectedItem = AdhocDialog.ChooseFolder;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("D:/scratch/tool", repos.SelectedItem);
+        Assert.Equal(["D:/scratch/tool"], model.Settings.RecentFolders);
+
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the tool";
+        hub.ActReplies.Enqueue(null);
+        Click(Named<Button>(dialog, "AdhocCreate"));
+        Assert.Contains("\"repoRoot\":\"D:/scratch/tool\"", Assert.Single(hub.Calls));
+
+        Choose(window, "New Ad-hoc Session…");
+        var again = DialogOf(window);
+
+        Assert.Equal(["D:/git/widgets", "D:/git/support", "D:/scratch/tool", AdhocDialog.ChooseFolder], Named<ComboBox>(again, "AdhocRepoBox").ItemsSource!.Cast<string>());
+        Assert.Equal("D:/scratch/tool", Named<ComboBox>(again, "AdhocRepoBox").SelectedItem);
+        Click(Named<Button>(again, "AdhocCancel"));
     }
 
     [AvaloniaFact]
@@ -885,8 +991,8 @@ public sealed class ControlsTests
         run.SelectedIndex = 1;
         Dispatcher.UIThread.RunJobs();
 
-        Assert.False(Named<TextBox>(dialog, "AdhocPromptBox").IsVisible);
-        Assert.False(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
+        Assert.False(Named<StackPanel>(dialog, "AdhocPromptField").IsVisible);
+        Assert.False(Named<StackPanel>(dialog, "AdhocRepoField").IsVisible);
         Assert.False(Named<CheckBox>(dialog, "AdhocStartAutomatically").IsVisible);
         Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
         Assert.Equal("Run", Named<Button>(dialog, "AdhocCreate").Content);
@@ -930,14 +1036,17 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void Adhoc_NoRepoRootsOrSchedules_SaysToSetARepoRoot()
+    public void Adhoc_NoRepoRootsOrSchedules_OffersOnlyChooseAFolder()
     {
-        var (window, model) = Open(Fixtures.View with { RepoRoots = [], Schedules = [] });
+        var (window, _) = Open(Fixtures.View with { RepoRoots = [], Schedules = [] });
 
         Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
 
-        Assert.Empty(window.OwnedWindows);
-        Assert.Equal("Set a repoRoot on a source to start an ad-hoc session.", model.Status);
+        Assert.Equal([AdhocDialog.ChooseFolder], Named<ComboBox>(dialog, "AdhocRepoBox").ItemsSource!.Cast<string>());
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check the log";
+        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+        Click(Named<Button>(dialog, "AdhocCancel"));
     }
 
     [AvaloniaFact]
@@ -978,15 +1087,17 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void Adhoc_OneRepoRoot_AsksOnlyForThePrompt()
+    public void Adhoc_OneRepoRoot_SelectsItAndStillOffersChooseAFolder()
     {
         var (window, _) = Open(Fixtures.View with { RepoRoots = ["D:/git/widgets"] });
 
         Choose(window, "New Ad-hoc Session…");
         var dialog = DialogOf(window);
 
-        Assert.False(Named<ComboBox>(dialog, "AdhocRepoBox").IsVisible);
+        Assert.True(Named<ComboBox>(dialog, "AdhocRepoBox").IsEffectivelyVisible);
         Assert.Equal("D:/git/widgets", Named<ComboBox>(dialog, "AdhocRepoBox").SelectedItem);
+        Assert.Equal(["D:/git/widgets", AdhocDialog.ChooseFolder], Named<ComboBox>(dialog, "AdhocRepoBox").ItemsSource!.Cast<string>());
+        Click(Named<Button>(dialog, "AdhocCancel"));
     }
 
     [AvaloniaFact]

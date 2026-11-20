@@ -30,6 +30,12 @@ public sealed class DockSettings
     [System.Text.Json.Serialization.JsonIgnore]
     public Platform.DockEdge DockEdge => Edge == "right" ? Platform.DockEdge.Right : Platform.DockEdge.Left;
 
+    /// <summary>The folders, newest first, that New Ad-hoc Session's Choose a folder… picked outside the repo roots, which its list offers again.</summary>
+    public List<string> RecentFolders { get; set; } = [];
+
+    /// <summary>How many chosen folders <see cref="RecentFolders"/> keeps.</summary>
+    public const int RecentFolderCount = 5;
+
     /// <summary>Groups the operator opened or closed, by key; the others take their default (PRD R27).</summary>
     public Dictionary<string, bool> Groups { get; set; } = [];
 
@@ -54,6 +60,7 @@ public sealed class DockSettings
         settings.Groups = (settings.Groups ?? []).Where((entry) => !entry.Key.Contains(':', StringComparison.Ordinal)).ToDictionary();
         settings.Edge = settings.Edge == "right" ? "right" : "left";
         settings.Theme = settings.Theme is "light" or "dark" or "vscode" ? settings.Theme : "system";
+        settings.RecentFolders = (settings.RecentFolders ?? []).Where((folder) => !string.IsNullOrWhiteSpace(folder)).Distinct(StringComparer.OrdinalIgnoreCase).Take(RecentFolderCount).ToList();
 
         return settings;
     }

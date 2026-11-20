@@ -15,6 +15,9 @@
           <SolidColorBrush x:Key="DockBorder" Color="#E5E5E5" />
           <SolidColorBrush x:Key="DockWarning" Color="#BF8803" />
           <SolidColorBrush x:Key="DockError" Color="#E51400" />
+          <SolidColorBrush x:Key="DockDanger" Color="#C42B1C" />
+          <SolidColorBrush x:Key="DockDangerHover" Color="#A4262C" />
+          <SolidColorBrush x:Key="DockDialogFooter" Color="#F0F0F0" />
           <SolidColorBrush x:Key="DockPriority" Color="#E8820C" />
           <SolidColorBrush x:Key="DockKeyGithub" Color="#1F2328" />
           <SolidColorBrush x:Key="DockKeyGithubFill" Color="#2E1F2328" />
@@ -75,6 +78,9 @@
           <SolidColorBrush x:Key="DockBorder" Color="#2B2B2B" />
           <SolidColorBrush x:Key="DockWarning" Color="#CCA700" />
           <SolidColorBrush x:Key="DockError" Color="#F14C4C" />
+          <SolidColorBrush x:Key="DockDanger" Color="#C42B1C" />
+          <SolidColorBrush x:Key="DockDangerHover" Color="#D13438" />
+          <SolidColorBrush x:Key="DockDialogFooter" Color="#1F1F1F" />
           <SolidColorBrush x:Key="DockPriority" Color="#E8820C" />
           <SolidColorBrush x:Key="DockKeyGithub" Color="#F0F6FC" />
           <SolidColorBrush x:Key="DockKeyGithubFill" Color="#2EF0F6FC" />
@@ -154,6 +160,27 @@
       <Setter Property="Padding" Value="10,3" />
       <Setter Property="MinHeight" Value="0" />
       <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <!-- Dialog buttons (DialogShell): one size, the main action in the accent colour and a destructive one in the error colour. -->
+    <Style Selector="Button.dialog">
+      <Setter Property="MinWidth" Value="84" />
+      <Setter Property="Padding" Value="14,5" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    <Style Selector="Button.danger /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DockDanger}" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter, Button.danger:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DockDangerHover}" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+    </Style>
+    <Style Selector="Window.dialog TextBox, Window.dialog ComboBox, Window.dialog CalendarDatePicker">
+      <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    <Style Selector="Window.dialog ComboBox">
+      <Setter Property="MinHeight" Value="30" />
     </Style>
     <Style Selector="Button.link">
       <Setter Property="Padding" Value="0" />

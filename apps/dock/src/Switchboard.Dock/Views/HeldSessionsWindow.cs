@@ -23,7 +23,7 @@ public sealed class HeldSessionsWindow : Window
     readonly Dictionary<string, HeldRow> shown = [];
     readonly StackPanel header = Row();
     readonly TextBlock none = new() { Text = "No held sessions.", Classes = { "muted" } };
-    readonly TextBlock status = new() { Name = "HeldStatus", TextWrapping = TextWrapping.Wrap };
+    readonly TextBlock status = new() { Name = "HeldStatus", TextWrapping = TextWrapping.Wrap, IsVisible = false };
 
     /// <summary>Asks before Stop; tests replace it, as a modal dialog would wait for a click.</summary>
     internal Func<Window, string, string, string, Task<bool>> Confirm { get; set; } = ConfirmDialog.Ask;
@@ -39,13 +39,25 @@ public sealed class HeldSessionsWindow : Window
         FontSize = 13;
         this.Bind(BackgroundProperty, this.GetResourceObservable("DockBackground"));
         this.Bind(ForegroundProperty, this.GetResourceObservable("DockForeground"));
-        var page = new StackPanel { Margin = new Thickness(16), Spacing = 12 };
+        var page = new StackPanel { Margin = new Thickness(20, 18, 20, 20), Spacing = 12 };
+        var about = new TextBlock { Text = "Code Mode sessions the terminal holder keeps alive, with or without a work item. Stop ends a session's process.", TextWrapping = TextWrapping.Wrap };
+
+        about.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("DockMuted"));
+        page.Children.Add(new TextBlock { Text = "Held Sessions", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        page.Children.Add(about);
         page.Children.Add(status);
         page.Children.Add(rows);
         Content = new ScrollViewer { Content = page, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
         model.PropertyChanged += Follow;
         Closed += (_, _) => model.PropertyChanged -= Follow;
         Fill();
+    }
+
+    /// <summary>Shows the result of the last button, or hides the line when there is none.</summary>
+    void ShowResult(string? text)
+    {
+        status.Text = text;
+        status.IsVisible = text is not null;
     }
 
     void Follow(object? sender, PropertyChangedEventArgs e)
@@ -63,7 +75,10 @@ public sealed class HeldSessionsWindow : Window
         {
             foreach (var (label, width) in Columns)
             {
-                header.Children.Add(Cell(label, width, FontWeight.SemiBold));
+                var cell = Cell(label, width, FontWeight.SemiBold);
+
+                cell.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("DockMuted"));
+                header.Children.Add(cell);
             }
         }
 
@@ -127,7 +142,7 @@ public sealed class HeldSessionsWindow : Window
             {
                 if (held?.Terminal is { } terminal)
                 {
-                    window.status.Text = await window.actions.Terminal(null, terminal, CancellationToken.None);
+                    window.ShowResult(await window.actions.Terminal(null, terminal, CancellationToken.None));
                 }
             };
             stop.Click += async (_, _) =>
@@ -138,7 +153,7 @@ public sealed class HeldSessionsWindow : Window
                     return;
                 }
 
-                window.status.Text = await window.hub.StopHeld(session) ?? $"Stopped held session {session}.";
+                window.ShowResult(await window.hub.StopHeld(session) ?? $"Stopped held session {session}.");
             };
 
             foreach (var cell in cells)

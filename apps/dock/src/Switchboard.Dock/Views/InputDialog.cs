@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -10,24 +9,34 @@ namespace Switchboard.Dock.Views;
 sealed record InputAnswer(string Text, string? Choice);
 
 /// <summary>
-/// A small modal window that asks for a text, which starts as <c>initial</c>, and with a choice, for a value from <c>InputChoice</c>; <c>InputAction</c> returns them and
-/// <c>InputCancel</c> returns null. The action needs a text, or with a choice, a text or a changed choice.
+/// A small modal window that asks for a text, which starts as &lt;c&gt;initial&lt;/c&gt;, and with a choice, for a value from &lt;c&gt;InputChoice&lt;/c&gt;; &lt;c&gt;InputAction&lt;/c&gt; returns them and
+/// &lt;c&gt;InputCancel&lt;/c&gt; returns null. The action needs a text, or with a choice, a text or a changed choice. The box takes several lines, so
+/// Ctrl+Enter runs the action.
 /// </summary>
 static class InputDialog
 {
     public static Task<InputAnswer?> Ask(Window owner, string question, string detail, string action, DockChoice? choice = null, string? initial = null)
     {
-        var dialog = new Window { Title = question, Width = 630, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var shell = new DialogShell(owner, question, 600, detail);
         var text = new TextBox { Name = "InputText", Text = initial, CaretIndex = initial?.Length ?? 0, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
         // A prompt to edit, such as Start with prompt…'s, gets a taller box than new text.
         (text.MinHeight, text.MaxHeight) = initial is null ? (90, 300) : (150, 400);
         var values = new ComboBox { Name = "InputChoice", ItemsSource = choice?.Values, SelectedItem = choice?.Value, HorizontalAlignment = HorizontalAlignment.Stretch };
-        var go = new Button { Name = "InputAction", Content = action, IsEnabled = false };
-        var cancel = new Button { Name = "InputCancel", Content = "Cancel", IsCancel = true };
         string? Chosen() => choice is not null && values.SelectedItem is string value && value != choice.Value ? value : null;
+
+        if (choice is not null)
+        {
+            shell.Body.Children.Add(DialogShell.Field(choice.Label, values));
+        }
+
+        shell.Body.Children.Add(text);
+        shell.Body.Children.Add(shell.Note("Ctrl+Enter to " + action.ToLowerInvariant().TrimEnd('…') + "."));
+        shell.Add("InputCancel", "Cancel", DialogButton.Cancel).Click += (_, _) => shell.Window.Close(null);
+
+        var go = shell.Add("InputAction", action, DialogButton.Primary);
+
         void Update() => go.IsEnabled = !string.IsNullOrWhiteSpace(text.Text) || Chosen() is not null;
 
-        go.Classes.Add("accent");
         Update();
         text.PropertyChanged += (_, e) =>
         {
@@ -37,25 +46,14 @@ static class InputDialog
             }
         };
         values.SelectionChanged += (_, _) => Update();
-        go.Click += (_, _) => dialog.Close(new InputAnswer(text.Text?.Trim() ?? "", Chosen()));
-        cancel.Click += (_, _) => dialog.Close(null);
-        dialog.Opened += (_, _) => text.Focus();
-        dialog.Bind(Window.BackgroundProperty, owner.GetResourceObservable("DockBackground"));
-
-        var content = new StackPanel { Margin = new Thickness(16), Spacing = 12 };
-
-        content.Children.Add(new TextBlock { Text = question, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
-
-        if (choice is not null)
+        go.Click += (_, _) =>
         {
-            content.Children.Add(new StackPanel { Spacing = 4, Children = { new TextBlock { Text = choice.Label }, values } });
-        }
+            if (go.IsEnabled)
+            {
+                shell.Window.Close(new InputAnswer(text.Text?.Trim() ?? "", Chosen()));
+            }
+        };
 
-        content.Children.Add(new TextBlock { Text = detail, TextWrapping = TextWrapping.Wrap });
-        content.Children.Add(text);
-        content.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancel, go } });
-        dialog.Content = content;
-
-        return dialog.ShowDialog<InputAnswer?>(owner);
+        return shell.Window.ShowDialog<InputAnswer?>(owner);
     }
 }

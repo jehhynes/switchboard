@@ -417,6 +417,13 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
     }
 
+    /// <summary>Keeps a folder New Ad-hoc Session's Choose a folder… picked, newest first, so its list offers it again.</summary>
+    public void RememberFolder(string folder)
+    {
+        settings.RecentFolders = [folder, .. settings.RecentFolders.Where((kept) => !string.Equals(kept, folder, StringComparison.OrdinalIgnoreCase)).Take(DockSettings.RecentFolderCount - 1)];
+        SaveSettings();
+    }
+
     /// <summary>The repo the New Ad-hoc Session window offers first: the last one used, else the first repo root.</summary>
     public string? AdhocRepo
     {
@@ -561,7 +568,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
                 RepoRoots.Add(repo);
             }
 
-            AdhocRepo = RepoRoots.Contains(AdhocRepo ?? "") ? AdhocRepo : RepoRoots.FirstOrDefault();
+            AdhocRepo = RepoRoots.Contains(AdhocRepo ?? "") || settings.RecentFolders.Contains(AdhocRepo ?? "") ? AdhocRepo : RepoRoots.FirstOrDefault();
         }
 
         if (!Notes.SequenceEqual(view.Notes))

@@ -173,7 +173,7 @@ public sealed class SettingsWindow : Window
 
         try
         {
-            var answer = await Choose("Save changes to settings?", "Your changes are lost if you don't save them.", [("CloseSave", "Save", true), ("CloseDiscard", "Discard", false), ("CloseKeep", "Keep editing", false)]);
+            var answer = await Choose("Save changes to settings?", "Your changes are lost if you don't save them.", [("CloseDiscard", "Discard", DialogButton.Secondary), ("CloseKeep", "Keep editing", DialogButton.Cancel), ("CloseSave", "Save", DialogButton.Primary)]);
 
             if (answer is null or "CloseKeep" || (answer == "CloseSave" && !await Save()))
             {
@@ -231,43 +231,23 @@ public sealed class SettingsWindow : Window
         }
     }
 
-    /// <summary>Asks before a delete in a small modal window; <paramref name="action"/> labels the button that goes ahead.</summary>
+    /// <summary>Asks before a delete in a small modal window; &lt;paramref name="action"/&gt; labels the button that goes ahead, drawn as destructive.</summary>
     async Task<bool> Ask(string question, string detail, string action) =>
-        await Choose(question, detail, [("ConfirmCancel", "Cancel", false), ("ConfirmAction", action, true)]) == "ConfirmAction";
+        await Choose(question, detail, [("ConfirmCancel", "Cancel", DialogButton.Cancel), ("ConfirmAction", action, DialogButton.Danger)]) == "ConfirmAction";
 
-    /// <summary>Asks in a small modal window with one button per choice, by name, label and whether it is the accent; the chosen name, or null when closed.</summary>
-    async Task<string?> Choose(string question, string detail, IReadOnlyList<(string Name, string Label, bool Accent)> choices)
+    /// <summary>Asks in a small modal window with one button per choice, by name, label and kind; the chosen name, or null when closed.</summary>
+    async Task<string?> Choose(string question, string detail, IReadOnlyList<(string Name, string Label, DialogButton Kind)> choices)
     {
-        var dialog = new Window { Title = question, Width = 400, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right };
+        var shell = new DialogShell(this, question, 420);
 
-        foreach (var (name, label, accent) in choices)
+        shell.Body.Children.Add(new TextBlock { Text = detail, TextWrapping = TextWrapping.Wrap });
+
+        foreach (var (name, label, kind) in choices)
         {
-            var button = new Button { Name = name, Content = label };
-
-            if (accent)
-            {
-                button.Classes.Add("accent");
-            }
-
-            button.Click += (_, _) => dialog.Close(name);
-            row.Children.Add(button);
+            shell.Add(name, label, kind).Click += (_, _) => shell.Window.Close(name);
         }
 
-        dialog.Bind(BackgroundProperty, this.GetResourceObservable("DockBackground"));
-        dialog.Content = new StackPanel
-        {
-            Margin = new Thickness(16),
-            Spacing = 12,
-            Children =
-            {
-                new TextBlock { Text = question, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap },
-                new TextBlock { Text = detail, TextWrapping = TextWrapping.Wrap },
-                row,
-            },
-        };
-
-        return await dialog.ShowDialog<string?>(this);
+        return await shell.Window.ShowDialog<string?>(this);
     }
 
     /// <summary>Draws the page again, keeping focus and the caret in the same field, as a reload after a save or an edit on disk redraws it.</summary>

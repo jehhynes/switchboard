@@ -35,9 +35,13 @@ public sealed class VolumeWindow : Window
         var refresh = new Button { Content = "Refresh", Name = "RefreshVolume" };
         refresh.Click += async (_, _) => await Load();
         source.SelectionChanged += async (_, _) => await Load();
-        var page = new StackPanel { Margin = new Thickness(16), Spacing = 12, Width = 1100, HorizontalAlignment = HorizontalAlignment.Left };
+        var page = new StackPanel { Margin = new Thickness(20, 18, 20, 20), Spacing = 12, Width = 1100, HorizontalAlignment = HorizontalAlignment.Left };
+        var hint = new TextBlock { Text = "Observed active queue, Monday to Sunday. Select a count to list its tickets." };
+
+        hint.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("DockMuted"));
+        page.Children.Add(new TextBlock { Text = "Ticket Volume Report", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        page.Children.Add(hint);
         page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { source, refresh } });
-        page.Children.Add(new TextBlock { Text = "Observed active queue · Monday–Sunday · select a count for tickets", FontSize = 18 });
         page.Children.Add(status);
         page.Children.Add(new TextBlock { Text = "Left does not mean resolved: Deferred and other deferrals can leave and return. Worked means a task started in Switchboard. Week-end counts use the last observed state; activity between polls or while Switchboard is off can be missed.", TextWrapping = TextWrapping.Wrap });
         page.Children.Add(weeks);

@@ -1925,7 +1925,8 @@ public sealed partial class MainWindow : Window
 
             var settings = await hub.SessionProvider();
             if (settings.Error is not null) { model.Status = settings.Error; return; }
-            if (await PickProvider(ShownForDialog(), settings.DefaultProvider!) is not { } provider) return;
+            knownProvider = settings.DefaultProvider;
+            if (await PickProvider(ShownForDialog(), settings.DefaultProvider!, folder) is not { } provider) return;
 
             // Run as a click is, so a row clicked while the hub answers replaces it and its window is not opened over that row's.
             await Running(async (cancel) =>
@@ -1960,7 +1961,7 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Asks for a folder to start a session in, or null when the operator cancels; tests replace it, as the headless platform has no picker.</summary>
     internal Func<Window, Task<string?>> PickFolder { get; set; } = AskFolder;
-    internal Func<Window, string, Task<string?>> PickProvider { get; set; } = ProviderDialog.Ask;
+    internal Func<Window, string, string, Task<string?>> PickProvider { get; set; } = (owner, preferred, folder) => ProviderDialog.Ask(owner, preferred, folder);
 
     static async Task<string?> AskFolder(Window owner)
     {
@@ -1969,31 +1970,37 @@ public sealed partial class MainWindow : Window
         return picked.Count == 0 ? null : picked[0].TryGetLocalPath();
     }
 
-    /// <summary>Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked.</summary>
+    /// <summary>
+    /// Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked. Its Repository list offers the
+    /// repo roots, the folders chosen before and Choose a folder…, which picks any folder and keeps it among the recent ones.
+    /// </summary>
     async Task NewAdhoc()
     {
-        // A schedule names its own repo root, so Run now needs no source's.
-        if ((model.RepoRoots.Count == 0 || model.AdhocRepo is null) && model.Schedules.Count == 0)
-        {
-            model.Status = "Set a repoRoot on a source to start an ad-hoc session.";
-            return;
-        }
-
         var repo = model.AdhocRepo;
 
         model.Status = null;
 
         var settings = await hub.SessionProvider();
 
+        // A failed lookup falls back to the default the hub named last, or Claude when it never named one.
+        if (settings.DefaultProvider is { } named)
+        {
+            knownProvider = named;
+        }
+
         var created = await AdhocDialog.Ask(ShownForDialog(), [.. model.RepoRoots], repo, (prompt, repoRoot, start, provider) =>
             hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start, ["provider"] = provider }),
-            model.Schedules, (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }), settings.DefaultProvider ?? "claude", settings.Error);
+            model.Schedules, (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }), settings.DefaultProvider ?? knownProvider ?? "claude", settings.Error,
+            model.Settings.RecentFolders, PickFolder, model.RememberFolder, defaultKnown: settings.DefaultProvider is not null || knownProvider is not null);
 
         if (created is not null)
         {
             model.AdhocRepo = created;
         }
     }
+
+    /// <summary>The default provider the hub named last, which New Ad-hoc Session falls back to when the hub cannot list the providers.</summary>
+    string? knownProvider;
 
     /// <summary>Opens the Settings window (PRD R54), or brings the open one forward.</summary>
     async Task OpenSettings()

@@ -20,21 +20,19 @@ static class ProviderDialog
         HorizontalAlignment = HorizontalAlignment.Stretch,
     };
 
-    public static Task<string?> Ask(Window owner, string preferred)
+    /// <summary>
+    /// Asks which provider a new conversation starts in, with &lt;paramref name="preferred"/&gt; selected, naming &lt;paramref name="folder"/&gt; when given, as
+    /// New Session in a Folder does; returns the provider, or null on Cancel.
+    /// </summary>
+    public static Task<string?> Ask(Window owner, string preferred, string? folder = null)
     {
-        var dialog = new Window { Title = "New session", Width = 340, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var shell = new DialogShell(owner, "New Session in a Folder", 420, folder);
         var choice = Box(preferred, "SessionProvider");
-        var create = new Button { Name = "SessionCreate", Content = "Create", IsDefault = true };
-        var cancel = new Button { Name = "SessionCancel", Content = "Cancel", IsCancel = true };
-        create.Classes.Add("accent");
-        create.Click += (_, _) => dialog.Close((choice.SelectedItem as Option)?.Id);
-        cancel.Click += (_, _) => dialog.Close(null);
-        dialog.Bind(Window.BackgroundProperty, owner.GetResourceObservable("DockBackground"));
-        dialog.Content = new StackPanel
-        {
-            Margin = new Thickness(16), Spacing = 12,
-            Children = { new TextBlock { Text = "Provider" }, choice, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancel, create } } },
-        };
-        return dialog.ShowDialog<string?>(owner);
+
+        shell.Body.Children.Add(DialogShell.Field("Provider", choice));
+        shell.Add("SessionCancel", "Cancel", DialogButton.Cancel).Click += (_, _) => shell.Window.Close(null);
+        shell.Add("SessionCreate", "Create", DialogButton.Primary).Click += (_, _) => shell.Window.Close((choice.SelectedItem as Option)?.Id);
+
+        return shell.Window.ShowDialog<string?>(owner);
     }
 }

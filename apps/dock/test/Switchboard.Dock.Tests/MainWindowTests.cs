@@ -1139,7 +1139,7 @@ public sealed class MainWindowTests
         guided.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal(["Start with guidance", "Playbook", "dev:develop", "Switchboard adds your guidance to the end of the session's prompt."], VisibleTexts(Dialog()).Take(4));
+        Assert.Equal(["Start with guidance", "Switchboard adds your guidance to the end of the session's prompt.", "Playbook", "dev:develop"], VisibleTexts(Dialog()).Take(4));
         Assert.False(DialogButton("InputAction").IsEnabled);
         Assert.Equal((90, 300), (Text().MinHeight, Text().MaxHeight));
 
@@ -1180,7 +1180,7 @@ public sealed class MainWindowTests
         prompted.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal(630, Dialog().Width);
+        Assert.Equal(600, Dialog().Width);
         Assert.Equal((150, 400), (Text().MinHeight, Text().MaxHeight));
         Assert.Equal("Write hello.txt", Text().Text);
         Assert.True(Go().IsEnabled);
