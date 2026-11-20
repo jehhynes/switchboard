@@ -322,6 +322,8 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
 
   // Half-duplex capture (architecture.md § Dictation) does not listen while the voice speaks.
   const halfDuplex = voice.halfDuplex === undefined ? '' : ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.`;
+  // The room hold (architecture.md § Voice check and barge-in).
+  const sends = voice.roomHold === true ? ROOM_HOLD_TIP : 'Dictation sends when you stop talking.';
 
   if (voice.speaking !== null) {
     return { text: '$(unmute) Speaking', tooltip: `${halfDuplex.trim()} Click to stop speaking.`.trim(), command: 'switchboard.stopSpeaking', warning: false };
@@ -331,7 +333,7 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
   switch (voice.mic) {
     case 'listening':
     case 'hearing':
-      return { text: '$(mic-filled) Listening', tooltip: `Dictation sends when you stop talking.${halfDuplex} Click to turn the mic off.`, command: 'switchboard.toggleMicrophone', warning: false };
+      return { text: voice.roomHold === true ? '$(mic-filled) Listening (held)' : '$(mic-filled) Listening', tooltip: `${sends}${halfDuplex} Click to turn the mic off.`, command: 'switchboard.toggleMicrophone', warning: false };
     case 'typing':
       return { text: '$(mic-filled) Typing', tooltip: 'Dictation pauses while the composer has the focus. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false };
     case 'starting':
@@ -342,6 +344,9 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
       return { text: '$(mic) Mic off', tooltip: voice.mic === 'idle-off' ? 'The mic stopped after a quiet spell. Click to turn it on.' : 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false };
   }
 }
+
+/** The mic's tooltips during a room hold. */
+export const ROOM_HOLD_TIP = 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter.';
 
 /**
  * Whether the mic is on in this window, so Toggle Microphone turns it off; an idle stop counts as off, so the toggle starts it again, and so does

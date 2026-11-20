@@ -27,10 +27,16 @@ export interface VoiceView {
   halfDuplex?: string;
   /** Where speech recognition runs, here once the recogniser loaded, else null (architecture.md § Dictation). */
   recognizer: 'gpu' | 'cpu' | null;
+  /** Only while the voice is here and a room hold runs: dictated turns stay in the composer (architecture.md § Voice check and barge-in). */
+  roomHold?: true;
 }
 
 /** Why the voice process turned the mic off, as the hub's log says it. */
 const MIC_OFF_TEXT: Record<AwayReason, string> = { locked: 'computer locked', asleep: 'computer going to sleep', disconnected: 'session disconnected' };
+
+/** What the composer shows when a dictated turn is held, while the room hold runs and after it. */
+export const HELD_NOTE = 'Held: someone else is talking in the room — press Enter to send';
+export const HELD_AFTER_NOTE = 'Held: someone else was talking in the room — press Enter to send';
 
 /** The key dictation uses for the target's session terminal window, which no window key can equal (architecture.md § Voice). */
 const TERMINAL = '\0terminal';
@@ -51,6 +57,8 @@ interface Composer {
   pieces: Piece[];
   /** The reply the dictation in the draft spoke over, which the message that sends it names; null with none. */
   interrupted: Interruption | null;
+  /** A room hold kept a spoken turn in the draft: no turn's end or `[partial]` sends it until the operator sends or empties it. */
+  held: boolean;
 }
 
 /**
@@ -76,7 +84,7 @@ interface Heard {
 
 /** What one line of the fragments log records (architecture.md § Dictation). */
 export interface Fragment {
-  event: 'heard' | 'dropped' | 'submitted' | 'sent' | 'not-sent' | 'refused';
+  event: 'heard' | 'dropped' | 'submitted' | 'sent' | 'not-sent' | 'refused' | 'held';
   sessionId: string;
   utteranceId: string | null;
   pieceId: string | null;
@@ -184,6 +192,8 @@ export class VoiceControl {
   #halfDuplex: string | null = null;
   /** Where speech recognition runs, as the process last said. */
   #recognizer: 'gpu' | 'cpu' | null = null;
+  /** When the room hold ends, as the process last said; null with none. */
+  #roomHoldUntil: number | null = null;
   readonly #composers = new Map<string, Composer>();
   readonly #heard = new Map<string, Heard>();
   /** The window the voice last moved to by its own command, which hears dictation when no focused window shows the target. */
@@ -236,7 +246,13 @@ export class VoiceControl {
       error: here && this.#mic === 'unavailable' ? this.#audioError : null,
       recognizer: here ? this.#recognizer : null,
       ...(here && this.#halfDuplex !== null ? { halfDuplex: this.#halfDuplex } : {}),
+      ...(here && this.#roomHeld() ? { roomHold: true as const } : {}),
     };
+  }
+
+  /** Whether a room hold runs: the voice process heard someone else within `voice.roomHoldSeconds`. */
+  #roomHeld(): boolean {
+    return this.#roomHoldUntil !== null && this.#roomHoldUntil > this.deps.now();
   }
 
   /** Sends each window its voice state when it changed. */
@@ -494,6 +510,7 @@ export class VoiceControl {
     if (draft.trim() === '') {
       composer.pieces = [];
       composer.interrupted = null;
+      composer.held = false;
     }
 
     this.#syncTyping();
@@ -514,6 +531,7 @@ export class VoiceControl {
 
     composer.pieces = [];
     composer.draft = '';
+    composer.held = false;
     return pieces;
   }
 
@@ -604,7 +622,7 @@ export class VoiceControl {
     let composer = this.#composers.get(composerKey(key, sessionId));
 
     if (composer === undefined) {
-      composer = { focused: false, draft: '', pieces: [], interrupted: null };
+      composer = { focused: false, draft: '', pieces: [], interrupted: null, held: false };
       this.#composers.set(composerKey(key, sessionId), composer);
     }
 
@@ -735,7 +753,35 @@ export class VoiceControl {
       return;
     }
 
+    if (this.#roomHeld() || composer.held) {
+      this.#hold(heard, composer);
+      return;
+    }
+
     this.#submit(heard, composer, false);
+  }
+
+  /**
+   * The room hold (architecture.md § Voice check and barge-in): a spoken turn's end sends nothing while someone else is talking in the room, or
+   * while the draft holds a turn kept that way. Its words stay in the draft and the window says so; in a terminal, with no composer to keep
+   * them, they are dropped, so they are never typed later with another turn.
+   */
+  #hold(heard: Heard, composer: Composer): void {
+    for (const piece of composer.pieces) {
+      this.#fragment({ event: 'held', sessionId: heard.sessionId, utteranceId: null, pieceId: null, messageId: null, text: piece.text });
+    }
+
+    if (heard.key === TERMINAL) {
+      this.deps.log(`voice: a spoken turn for the terminal of session ${heard.sessionId} was not typed: someone else is talking in the room`);
+      composer.draft = '';
+      composer.pieces = [];
+      composer.interrupted = null;
+      return;
+    }
+
+    this.deps.log(`voice: a spoken turn for session ${heard.sessionId} stays in the composer: someone else ${this.#roomHeld() ? 'is' : 'was'} talking in the room`);
+    composer.held = true;
+    this.#notify(heard.key, 'held', { sessionId: heard.sessionId, note: this.#roomHeld() ? HELD_NOTE : HELD_AFTER_NOTE });
   }
 
   /** Types the window's draft as a dictated message or a `[partial]` part, and empties the draft once it was taken; false when refused. */
@@ -779,6 +825,7 @@ export class VoiceControl {
 
     composer.draft = kept?.text ?? '';
     composer.pieces = kept === undefined ? [] : [kept];
+    composer.held = false;
 
     if (!partial) {
       composer.interrupted = null;
@@ -822,6 +869,8 @@ export class VoiceControl {
       if (
         composer === undefined ||
         composer.focused ||
+        composer.held ||
+        this.#roomHeld() ||
         this.#mic === 'paused-other-app' ||
         heard.gen !== this.#target.gen ||
         this.deps.busy?.(heard.sessionId) !== true ||
@@ -1124,10 +1173,11 @@ export class VoiceControl {
         this.viewsChanged();
         return;
       case 'audio':
-        if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || message.recognizer !== this.#recognizer) {
+        if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || message.recognizer !== this.#recognizer || (message.roomHold ?? null) !== this.#roomHoldUntil) {
           this.#mic = message.mic;
           this.#halfDuplex = message.halfDuplex ?? null;
           this.#recognizer = message.recognizer;
+          this.#roomHoldUntil = message.roomHold ?? null;
           this.viewsChanged();
         }
 
@@ -1267,6 +1317,7 @@ export class VoiceControl {
     this.#mic = 'off';
     this.#halfDuplex = null;
     this.#recognizer = null;
+    this.#roomHoldUntil = null;
     this.#target = { gen: this.#target.gen, sessionId: null };
     this.viewsChanged();
   }

@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 import { providerMark } from '@switchboard/conversation/providerIcons';
-import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
+import { artifactIcon, awaitingReply, ROOM_HOLD_TIP, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answersIn, answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
@@ -258,12 +258,14 @@ export function renderMicButton(voice: VoiceView | null): string {
   // Where recognition runs, once the recogniser loaded, and half-duplex capture, which does not listen while the voice speaks (architecture.md § Dictation).
   const where = voice.recognizer === null ? '' : ` Speech recognition runs on the ${voice.recognizer === 'gpu' ? 'GPU' : 'CPU'}.`;
   const halfDuplex = voice.halfDuplex === undefined ? '' : ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.`;
+  // The room hold (architecture.md § Voice check and barge-in): spoken turns stay in the box.
+  const held = voice.roomHold === true ? ` ${ROOM_HOLD_TIP}` : '';
 
   switch (voice.mic) {
     case 'listening':
-      return button('on', `Mic on: listening. Dictation sends when you stop talking.${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
+      return button('on', `Mic on: listening. ${held === '' ? 'Dictation sends when you stop talking.' : ROOM_HOLD_TIP}${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
     case 'hearing':
-      return button('filled', `Mic on: hearing you.${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
+      return button('filled', `Mic on: hearing you.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
     case 'typing':
       return button('paused', `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused');
     case 'starting':

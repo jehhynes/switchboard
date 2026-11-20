@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, Interruption, Piece, VoiceSettings } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
-import { FRAGMENT_FLUSH_MS, VoiceControl } from '../src/voice.js';
+import { FRAGMENT_FLUSH_MS, HELD_AFTER_NOTE, HELD_NOTE, VoiceControl } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -543,5 +543,67 @@ describe('VoiceControl enrolment', () => {
     running.control.settingsChanged();
     expect(running.connection.sent.filter((one) => one.type === 'enroll').at(-1)).toEqual({ type: 'enroll', action: 'cancel' });
     expect(running.docks()).toBeGreaterThan(0);
+  });
+  it('keeps a spoken turn in the draft during a room hold, says so in its window and the mic, sends no [partial], and holds it after the hold until sent or emptied', async () => {
+    const { control, connection, notified, dictated, busy, piece, end, fragments, advance } = await setup();
+    const audio = (roomHold?: number): void => connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null, ...(roomHold === undefined ? {} : { roomHold }) });
+
+    control.composer('k1', false, '');
+    audio(Date.UTC(2026, 10, 20, 12, 1));
+    expect(control.view('k1')).toMatchObject({ here: true, roomHold: true });
+    expect(control.view('k2')).not.toHaveProperty('roomHold');
+    busy.add('s1');
+    piece('honey the oven');
+    piece('is on');
+    advance(FRAGMENT_FLUSH_MS + 1_000);
+    expect(dictated).toEqual([]);
+    end();
+    expect(dictated).toEqual([]);
+    expect(events(notified, 'held')).toEqual([['k1', { sessionId: 's1', note: HELD_NOTE }]]);
+    expect(events(notified, 'draft').at(-1)).toEqual(['k1', { text: 'honey the oven is on', sessionId: 's1' }]);
+    expect(fragments().filter((one) => one.event === 'held').map((one) => one.text)).toEqual(['honey the oven', 'is on']);
+
+    // The hold lapses: a later turn joins the held draft, which still waits for Enter.
+    audio();
+    expect(control.view('k1')).not.toHaveProperty('roomHold');
+    piece('run the tests', 'u2');
+    end(true, 'u2');
+    expect(dictated).toEqual([]);
+    expect(events(notified, 'held').at(-1)).toEqual(['k1', { sessionId: 's1', note: HELD_AFTER_NOTE }]);
+    expect(control.dictated('k1', 's1')).toHaveLength(3);
+
+    // Sent by Enter, the draft is free again: the next turn sends on its own.
+    piece('and lint', 'u3');
+    end(true, 'u3');
+    expect(dictated.map((one) => one.text)).toEqual(['and lint']);
+  });
+
+  it('frees a held draft the operator empties, and drops a held turn for a terminal', async () => {
+    const { control, connection, dictated, piece, end, focus } = await setup();
+
+    control.composer('k1', false, '');
+    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null, roomHold: Date.UTC(2026, 10, 20, 12, 1) });
+    piece('not for you');
+    end();
+    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null });
+    control.composer('k1', false, '');
+    piece('fix it', 'u2');
+    end(true, 'u2');
+    expect(dictated.map((one) => one.text)).toEqual(['fix it']);
+
+    // An expired hold the process has not ended yet holds nothing.
+    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null, roomHold: Date.UTC(2026, 10, 20, 11) });
+    expect(control.view('k1')).not.toHaveProperty('roomHold');
+
+    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null, roomHold: Date.UTC(2026, 10, 20, 12, 1) });
+    focus(null);
+    control.terminalFocused('s1', 1);
+    piece('talk to you later', 'u3');
+    end(true, 'u3');
+    expect(dictated.map((one) => one.text)).toEqual(['fix it']);
+    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null });
+    piece('run it', 'u4');
+    end(true, 'u4');
+    expect(dictated.map((one) => [one.key, one.text])).toEqual([['k1', 'fix it'], [null, 'run it']]);
   });
 });

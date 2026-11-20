@@ -122,6 +122,8 @@ describe('the conversation state', () => {
     const halfDuplex = { ...voice, mic: 'listening' as const, halfDuplex: 'no echo cancellation on Remote Audio' };
     expect(voiceStatus(halfDuplex)).toMatchObject({ tooltip: 'Dictation sends when you stop talking. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off.' });
     expect(voiceStatus({ ...halfDuplex, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', tooltip: 'Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to stop speaking.' });
+    // A room hold: spoken turns stay in the box.
+    expect(voiceStatus({ ...voice, mic: 'listening', roomHold: true })).toEqual({ text: '$(mic-filled) Listening (held)', tooltip: 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false });
     expect(micOn({ ...voice, mic: 'listening' })).toBe(true);
     expect(micOn({ ...voice, mic: 'paused-other-app' })).toBe(true);
     expect(micOn({ ...voice, mic: 'idle-off' })).toBe(false);
@@ -907,6 +909,9 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(renderMicButton({ ...VOICE, mic: 'listening', recognizer: 'gpu' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Speech recognition runs on the GPU. Click to turn the mic off."');
     expect(renderMicButton({ ...VOICE, mic: 'hearing', recognizer: 'cpu' })).toContain('Speech recognition runs on the CPU.');
     expect(renderMicButton({ ...VOICE, mic: 'listening' })).not.toContain('Speech recognition');
+    // A room hold says spoken turns stay in the box.
+    expect(renderMicButton({ ...VOICE, mic: 'listening', roomHold: true })).toContain('title="Mic on: listening. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');
+    expect(renderMicButton({ ...VOICE, mic: 'hearing', roomHold: true })).toContain('title="Mic on: hearing you. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');
   });
 });
 

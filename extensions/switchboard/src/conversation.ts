@@ -229,6 +229,15 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       return;
     }
 
+    // A room hold kept a spoken turn in the draft (architecture.md § Voice check and barge-in): the note shows above the composer, as a refusal does.
+    if (event.type === 'held') {
+      const sessionId = (event as { sessionId?: unknown }).sessionId;
+      const owner = this.#state.scope?.conversations.find((entry) => entry.sessionId === sessionId)?.workItemId;
+
+      this.#post({ type: 'refused', error: String((event as { note?: unknown }).note ?? ''), workItemId: owner ?? this.#state.scope?.workItemId ?? null });
+      return;
+    }
+
     if (message?.type === 'message' && message.delivery === 'refused') {
       this.#post({ type: 'refused', error: message.error ?? 'The message was not sent.', workItemId: message.workItemId });
       return;
