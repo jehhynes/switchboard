@@ -266,6 +266,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@switchboard/conversation": "*",
     "@switchboard/core": "*",
     "@switchboard/holder": "*",
     "@switchboard/hub": "*"

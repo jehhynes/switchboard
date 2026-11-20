@@ -10,7 +10,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       exclude: ['src/webview/mermaidPreviewMain.ts'],
-      include: ['src/webview/**/*.ts', 'src/changes.ts', 'src/search.ts', 'src/tabs.ts', 'src/claims.ts', 'src/hubLog.ts', 'src/paneModel.ts', 'src/sideBars.ts', 'src/conversationModel.ts', 'src/composerModel.ts', 'src/pastedImages.ts', 'src/links.ts', 'src/artifactModel.ts', 'src/markdownMermaid.ts', 'src/terminalKeys.ts', 'src/questionModel.ts'],
+      include: ['src/webview/**/*.ts', 'src/changes.ts', 'src/search.ts', 'src/tabs.ts', 'src/claims.ts', 'src/hubLog.ts', 'src/paneModel.ts', 'src/sideBars.ts', 'src/conversationModel.ts', 'src/composerModel.ts', 'src/pastedImages.ts', 'src/links.ts', 'src/artifactModel.ts', 'src/markdownMermaid.ts', 'src/terminalKeys.ts'],
       thresholds: { lines: 85, branches: 85, functions: 85, statements: 85 },
     },
   },

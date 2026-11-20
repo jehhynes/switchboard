@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
-import { answerText, answersIn, complete, parseQuestions } from '../src/questions.js';
+import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { artifactUrl, newView, renderArtifactView, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { startPage } from '../src/main.js';

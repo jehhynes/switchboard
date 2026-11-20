@@ -1,6 +1,8 @@
 /**
  * Structured questions (architecture.md § Conversation view, voice-design § 5): numbered questions with lettered options, each option on a line of
- * its own, which a reply or a status asks in its Markdown. The view draws them as a card whose Submit sends an ordinary message such as "1A, 2B".
+ * its own, which a reply or a status asks in its Markdown. The view and the web page draw them as a card whose Submit sends an ordinary message
+ * such as "1A, 2B", and the hub reads them to tell when a turn ends waiting on the operator's answer (PRD R103). Imports nothing, so a browser
+ * bundle takes it through `@switchboard/conversation/questions`.
  */
 
 /** One lettered option, its letter in capitals. */
@@ -152,6 +154,11 @@ export function parseQuestions(markdown: string): Question[] {
 export interface QuestionChoice {
   letters: string[];
   other: string;
+}
+
+/** Whether every question has a pick or Other text, as Claude Code's form asks before Submit, since any later message answers the whole card. */
+export function complete(questions: readonly Question[], choices: ReadonlyMap<number, QuestionChoice>): boolean {
+  return questions.every((_question, index) => (choices.get(index)?.letters.length ?? 0) > 0 || (choices.get(index)?.other.trim() ?? '') !== '');
 }
 
 /**

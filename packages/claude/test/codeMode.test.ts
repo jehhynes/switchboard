@@ -92,7 +92,7 @@ describe('Code Mode command', () => {
   });
 
   it('explains the question shape the view draws as a card, and asks in a reply rather than with AskUserQuestion, with why (voice-design § 5)', () => {
-    // The shape the Conversation view's parser reads (extensions/switchboard/src/questionModel.ts), and the message its card sends.
+    // The shape the Conversation view's parser reads (packages/conversation/src/questions.ts), and the message its card sends.
     expect(RULES).toContain('each question is numbered and each of its options starts with a capital letter on its own line, as a nested list item under its question');
     expect(RULES).toContain('  ```markdown\n  1. Which port?\n     - A) 8765 (recommended)\n     - B) 8799\n  ```\n');
     expect(RULES).toContain('The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"');

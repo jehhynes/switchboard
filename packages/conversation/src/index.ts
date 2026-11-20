@@ -9,4 +9,5 @@ export * from './tags.js';
 export * from './transcript.js';
 
 export * from './log.js';
+export * from './questions.js';
 export * from './rules.js';

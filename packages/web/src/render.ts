@@ -1,8 +1,8 @@
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
-import { answersIn, answerText, complete, parseQuestions } from './questions.js';
-import type { Choice, Question } from './questions.js';
+import { answersIn, answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
+import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import type { ArtifactView, MessageView, NativeRequest, PageGroup, ReplyView, StatusView, VoiceView } from './types.js';
 
 export type Tab = 'conversation' | 'status' | 'artifacts';
@@ -14,7 +14,7 @@ export const TABS: Array<{ tab: Tab; label: string }> = [
 
 /** A question card's choices and the answer on its way, kept by the page until the answer shows in the conversation. */
 export interface CardDraft {
-  choices: Map<number, Choice>;
+  choices: Map<number, QuestionChoice>;
   sent: string | null;
   /** The message the answer became, once the hub took it. */
   sentId?: string | null;
@@ -159,7 +159,7 @@ function artifactRow(artifact: ArtifactView): string {
 /** A question card: each question with its options as radio or checkbox rows, an Other field, and Submit; greyed with its picks once answered. */
 export function questionCard(key: string, questions: readonly Question[], draft: CardDraft | undefined, answer: string | null, canAnswer: boolean): string {
   const answered = answer !== null;
-  const choices = answered ? answersIn(answer, questions) : (draft?.choices ?? new Map<number, Choice>());
+  const choices = answered ? answersIn(answer, questions) : (draft?.choices ?? new Map<number, QuestionChoice>());
   const locked = answered || !canAnswer || draft?.sending === true || draft?.sent != null;
   const blocks = questions.map((question, index) => {
     const choice = choices.get(index);

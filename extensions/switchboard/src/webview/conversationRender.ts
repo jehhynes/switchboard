@@ -2,8 +2,8 @@ import MarkdownIt from 'markdown-it';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
-import { answersIn, answerText, parseQuestions } from '../questionModel.js';
-import type { Question, QuestionChoice } from '../questionModel.js';
+import { answersIn, answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
+import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 
 /** What the page posts to the extension. */
 export type ConversationMessage =
@@ -318,11 +318,6 @@ export interface CardDraft {
 /** A card's key: the reply or the status that asks its questions. */
 export function cardKey(kind: 'reply' | 'status', id: string): string {
   return `${kind}:${id}`;
-}
-
-/** Whether every question has a pick or Other text, as Claude Code's form asks before Submit, since any later message answers the whole card. */
-export function complete(questions: readonly Question[], choices: ReadonlyMap<number, QuestionChoice>): boolean {
-  return questions.every((_question, index) => (choices.get(index)?.letters.length ?? 0) > 0 || (choices.get(index)?.other.trim() ?? '') !== '');
 }
 
 /** Inline Markdown, as a reply's, for a question or an option. */

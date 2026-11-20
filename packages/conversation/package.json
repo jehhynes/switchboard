@@ -3,13 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode.",
+  "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions` imports nothing, for browser bundles.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./questions": {
+      "types": "./dist/questions.d.ts",
+      "default": "./dist/questions.js"
     }
   },
   "scripts": {

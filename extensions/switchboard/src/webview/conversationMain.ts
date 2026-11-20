@@ -1,8 +1,8 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, complete, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS } from './conversationRender.js';
+import { ago, moreKey, PICKER, renderConversation, renderMicButton, renderVoiceControls, replyText, TABS } from './conversationRender.js';
 import type { CardDraft } from './conversationRender.js';
-import { answerText, parseQuestions } from '../questionModel.js';
+import { answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { selectedEntry, statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 import { startComposerExtras } from './composerExtras.js';

@@ -1,0 +1,99 @@
+import { describe, expect, it } from 'vitest';
+import { answersIn, answerText, complete, parseQuestions } from '../src/questions.js';
+import type { QuestionChoice } from '../src/questions.js';
+
+/** The shape the conversation rules show, with a second question. */
+const ASKED = 'Two things before I start:\n\n1. Which port?\n   - A) 8765 (recommended)\n   - B) 8799\n2. **Keep the old route?**\n   - A) Yes\n   - B) No, remove it\n   - C) Keep it behind a flag\n\nSay if neither fits.';
+const choices = (entries: Array<[number, Partial<QuestionChoice>]>): Map<number, QuestionChoice> => new Map(entries.map(([index, choice]) => [index, { letters: [], other: '', ...choice }]));
+
+describe('parsing lettered questions', () => {
+  it('reads numbered questions with options lettered from A, each on its own line, as the conversation rules show them', () => {
+    expect(parseQuestions(ASKED)).toEqual([
+      { number: 1, text: 'Which port?', multi: false, options: [{ letter: 'A', text: '8765 (recommended)' }, { letter: 'B', text: '8799' }] },
+      { number: 2, text: 'Keep the old route?', multi: false, options: [{ letter: 'A', text: 'Yes' }, { letter: 'B', text: 'No, remove it' }, { letter: 'C', text: 'Keep it behind a flag' }] },
+    ]);
+  });
+
+  it('takes the option shapes Claude writes, a bold or parenthesised letter, a lower-case one, and a line that continues an option or a question', () => {
+    const questions = parseQuestions('1) Scope\n   for this run\n**A)** Only the inbox\n(b) Everything\n  including the dock\nc) Nothing\n\n2. Name?\n   A. Short\n   B: Long');
+
+    expect(questions.map((question) => [question.number, question.text, question.options.map((option) => `${option.letter} ${option.text}`)])).toEqual([
+      [1, 'Scope for this run', ['A Only the inbox', 'B Everything including the dock', 'C Nothing']],
+      [2, 'Name?', ['A Short', 'B Long']],
+    ]);
+  });
+
+  it('reads a lone question with lettered options and no number, answered by its letter alone', () => {
+    const questions = parseQuestions('Which one should I keep?\n\n- A) The first\n- B) The second');
+
+    expect(questions).toEqual([{ number: null, text: 'Which one should I keep?', multi: false, options: [{ letter: 'A', text: 'The first' }, { letter: 'B', text: 'The second' }] }]);
+    expect(answerText(questions, choices([[0, { letters: ['B'] }]]))).toBe('B');
+    expect(answerText(questions, choices([[0, { other: 'neither' }]]))).toBe('Other: neither');
+    expect(answersIn('b', questions).get(0)?.letters).toEqual(['B']);
+    // Several picks of a lone question read back as they were sent.
+    const several = parseQuestions('Which should run? Pick any that apply.\n\n- A) Lint\n- B) Tests');
+
+    expect(answerText(several, choices([[0, { letters: ['A', 'B'] }]]))).toBe('A, B');
+    expect(answersIn('A, B', several).get(0)?.letters).toEqual(['A', 'B']);
+  });
+
+  it('marks a question that says it takes several options', () => {
+    expect(parseQuestions('1. Which checks should run? Pick any that apply.\n   - A) Lint\n   - B) Tests')[0]?.multi).toBe(true);
+    expect(parseQuestions('1. Which one? Choose one or more.\n   - A) Lint\n   - B) Tests')[0]?.multi).toBe(true);
+    expect(parseQuestions(ASKED)[0]?.multi).toBe(false);
+  });
+
+  it('finds no question in lists, prose, code or shapes whose answers could not be told apart', () => {
+    // A numbered list with no options, one option alone, letters out of order or not from A, and initials.
+    expect(parseQuestions('1. Build\n2. Test\n3. Ship')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - A) Only one')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - B) One\n   - C) Two')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - A) One\n   - C) Two')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - A) One\n   - B) Two\n   - D) Four')).toEqual([]);
+    expect(parseQuestions('Asked J. Smith and\nK. Jones about it.')).toEqual([]);
+    // Options inside a fenced block are code.
+    expect(parseQuestions('```\n1. Which?\n   - A) One\n   - B) Two\n```')).toEqual([]);
+    // A paragraph after the question's line ends it.
+    expect(parseQuestions('1. Which?\nI think so.\n- A) One\n- B) Two').map((question) => question.number)).toEqual([null]);
+    // A number used twice, or a lone run beside numbered questions.
+    expect(parseQuestions('1. One?\n   - A) x\n   - B) y\n1. Again?\n   - A) x\n   - B) y')).toEqual([]);
+    expect(parseQuestions('1. One?\n   - A) x\n   - B) y\n\nAlso:\n\n- A) p\n- B) q')).toEqual([]);
+    expect(parseQuestions('- A) p\n- B) q')).toEqual([]);
+  });
+});
+
+describe('the answer a card sends', () => {
+  const questions = parseQuestions(ASKED);
+
+  it('names each answered question by number and letter, an Other answer by its text, and leaves out unanswered ones', () => {
+    expect(answerText(questions, choices([[0, { letters: ['A'] }], [1, { letters: ['B'] }]]))).toBe('1A, 2B');
+    expect(answerText(questions, choices([[0, { letters: ['A'] }], [1, { other: '  use   port 8800 ' }]]))).toBe('1A, 2 Other: use port 8800');
+    expect(answerText(questions, choices([[1, { letters: ['C', 'A'] }]]))).toBe('2A, 2C');
+    expect(answerText(questions, choices([[0, { other: '   ' }]]))).toBe('');
+    // A comma in an Other text puts each answer on its own line.
+    expect(answerText(questions, choices([[0, { other: 'both, in turn' }], [1, { letters: ['A'] }]]))).toBe('1 Other: both, in turn\n2A');
+  });
+
+  it('reads the choices back from the message, sent by a card or typed', () => {
+    expect(answersIn('1A, 2 Other: use port 8800', questions)).toEqual(choices([[0, { letters: ['A'] }], [1, { other: 'use port 8800' }]]));
+    expect(answersIn('1 Other: both, in turn\n2A', questions)).toEqual(choices([[0, { other: 'both, in turn' }], [1, { letters: ['A'] }]]));
+    expect(answersIn('1B and 2 C please', questions)).toEqual(choices([[0, { letters: ['B'] }], [1, { letters: ['C'] }]]));
+    // A lone Other answer keeps its commas, and Other text is never read for picks.
+    expect(answerText(questions.slice(0, 1), choices([[0, { other: 'both, in turn' }]]))).toBe('1 Other: both, in turn');
+    expect(answersIn('1 Other: both, in turn', questions)).toEqual(choices([[0, { other: 'both, in turn' }]]));
+    expect(answersIn('1 Other: neither; use 2B later\n2A', questions)).toEqual(choices([[0, { other: 'neither; use 2B later' }], [1, { letters: ['A'] }]]));
+    expect(answersIn('1A, 2 Other: none', questions)).toEqual(choices([[0, { letters: ['A'] }], [1, { other: 'none' }]]));
+    // A letter a question does not have, or a number no question has, is no answer.
+    expect(answersIn('1C, 3A, port 8765A', questions)).toEqual(new Map());
+  });
+});
+
+describe('a complete card', () => {
+  it('needs a pick or Other text for every question before Submit', () => {
+    const questions = parseQuestions(ASKED);
+
+    expect(complete(questions, choices([[0, { letters: ['A'] }], [1, { other: 'later' }]]))).toBe(true);
+    expect(complete(questions, choices([[0, { letters: ['A'] }]]))).toBe(false);
+    expect(complete(questions, choices([[0, { letters: ['A'] }], [1, { other: '   ' }]]))).toBe(false);
+  });
+});
