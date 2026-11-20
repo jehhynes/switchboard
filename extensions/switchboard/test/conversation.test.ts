@@ -31,10 +31,15 @@ describe('the conversation state', () => {
     const root = document.createElement('div');
     const first = applyEvent(EMPTY_CONVERSATION, hello([], { sessions: [{ ...SESSION, provider: 'codex' }] }));
     root.innerHTML = renderConversation(first);
-    expect(root.querySelector('.header .provider')?.textContent).toBe('Codex');
+    // The provider's own mark in the text colour, its name as the tooltip and the accessible name.
+    expect(root.querySelector('.header > .provider')?.getAttribute('aria-label')).toBe('Codex');
+    expect(root.querySelector('.header > .provider')?.getAttribute('title')).toBe('Codex');
+    expect(root.querySelector('.header > .provider svg path')?.getAttribute('fill')).toBe('currentColor');
+    const codexMark = root.querySelector('.header > .provider svg path')?.getAttribute('d');
     const next = applyEvent(first, hello([], { sessions: [{ ...SESSION, id: 'claude-session', provider: 'claude' }] }));
     root.innerHTML = renderConversation(next);
-    expect(root.querySelector('.header .provider')?.textContent).toBe('Claude');
+    expect(root.querySelector('.header > .provider')?.getAttribute('aria-label')).toBe('Claude');
+    expect(root.querySelector('.header > .provider svg path')?.getAttribute('d')).not.toBe(codexMark);
     root.innerHTML = renderConversation(applyEvent(next, hello([], { sessions: [] })));
     expect(root.querySelector('.provider')).toBeNull();
   });
@@ -1628,6 +1633,18 @@ describe('several conversations in a window (architecture.md § Conversation vie
     expect(opened).toContain('<li role="option" aria-selected="true"><button type="button" data-action="select" data-work-item="9" class="selected">');
     expect(opened).toContain('<span class="count" title="2 unread">2</span>');
     expect(opened).toContain('codicon-check');
+
+    // Each option shows its session's provider mark after its title; an entry with no provider shows none.
+    const marked = renderConversation(base({ scope: { ...TWO, conversations: [{ ...SCOPE.conversations[0]!, provider: 'claude' }, { ...HOSTED, provider: 'codex' }] } }), new Set([PICKER]), T0);
+    const list = document.createElement('div');
+
+    list.innerHTML = marked;
+    expect([...list.querySelectorAll('.conversation-list button')].map((button) => [...button.children].map((child) => child.getAttribute('aria-label') ?? child.className))).toEqual([
+      ['Working', 'title', 'Claude'],
+      [expect.any(String), 'title', 'Codex', 'count'],
+    ]);
+    list.innerHTML = opened;
+    expect(list.querySelector('.conversation-list .provider')).toBeNull();
   });
 
   it('draws a folder window with no conversation as its folder name, the plus and a note, with no composer', () => {

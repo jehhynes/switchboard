@@ -122,6 +122,12 @@ describe('drawing', () => {
     root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView());
     expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin', 'title', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
+    // The session's provider as its mark beside the button, and on each option that names one.
+    root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, provider: 'codex' }] }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true });
+    expect(root.querySelector('.header > .provider')?.getAttribute('aria-label')).toBe('Codex');
+    expect(root.querySelector('.conversation-list .provider')?.getAttribute('aria-label')).toBe('Codex');
+    root.innerHTML = renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView());
+    expect(root.querySelector('.provider')).toBeNull();
   });
 
   it("shows only the page's own voice state, with Talk here when the voice is elsewhere", () => {

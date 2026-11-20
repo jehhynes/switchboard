@@ -37,6 +37,7 @@ export interface ConversationEntry {
   state: SessionState | null;
   conversation: SessionView['conversation'] | null;
   unread: number;
+  provider?: string;
 }
 
 export interface ScopeView {

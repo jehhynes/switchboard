@@ -6,7 +6,8 @@ body { display: flex; flex-direction: column; margin: 0; padding: 0; color: var(
 /* Claude Code's header: 6 px around, the title in the chat font with 6 px of its own, a hairline in the side bar's top border colour. */
 .header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-sideBarActivityBarTop-border, var(--vscode-panel-border, transparent)); user-select: none; }
 .header .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px; font-size: var(--vscode-chat-font-size, 13px); font-weight: 500; }
-.header .provider { flex: none; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.provider { flex: none; display: inline-flex; align-items: center; white-space: nowrap; color: var(--vscode-foreground); font-size: 16px; }
+.header > .provider { padding: 0 4px; }
 button.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 2px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; }
 button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }

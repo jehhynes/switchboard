@@ -1,5 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
+import { providerMark } from '@switchboard/conversation/providerIcons';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answersIn, answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
@@ -512,7 +513,7 @@ function picker(state: ConversationState, open: boolean): string {
       const unread = entry.unread > 0 ? `<span class="count" title="${entry.unread} unread">${entry.unread}</span>` : '';
       const icon = codicon(stateIcon(entry.state === null ? null : ({ state: entry.state, waitingFor: null } as never)));
 
-      return `<li role="option" aria-selected="${selected}"><button type="button" data-action="select" data-work-item="${entry.workItemId}"${selected ? ' class="selected"' : ''}>${icon}<span class="title">${escape(entry.title)}</span>${unread}</button></li>`;
+      return `<li role="option" aria-selected="${selected}"><button type="button" data-action="select" data-work-item="${entry.workItemId}"${selected ? ' class="selected"' : ''}>${icon}<span class="title">${escape(entry.title)}</span>${providerMark(entry.provider)}${unread}</button></li>`;
     })
     .join('');
 
@@ -549,7 +550,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return `<header class="header"><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${plus}</header><p class="empty">No Switchboard session in this folder yet.</p>`;
   }
 
-  const provider = state.session?.provider === undefined ? '' : `<span class="provider" title="Session provider">${state.session.provider === 'codex' ? 'Codex' : 'Claude'}</span>`;
+  const provider = providerMark(state.session?.provider);
   const header = `<header class="header">${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   const notes = state.session?.reason == null ? [] : [state.session.reason];
   const shown = timeline(state.items, state.artifacts);

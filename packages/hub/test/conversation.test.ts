@@ -195,7 +195,7 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
     const mine = open(view.file);
     const theirs = open(view.otherFile);
 
-    expect(mine.frames[0]).toMatchObject({ type: 'hello', scope: { workItemId: 2, sessionId: 's2', conversations: [{ workItemId: 2, primary: true, title: 'Issue <1>' }, { workItemId: mineHosted, primary: false, title: 'New session', sessionId: 'h1', state: 'idle', conversation: 'full', unread: 0 }] } });
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', scope: { workItemId: 2, sessionId: 's2', conversations: [{ workItemId: 2, primary: true, title: 'Issue <1>' }, { workItemId: mineHosted, primary: false, title: 'New session', sessionId: 'h1', state: 'idle', conversation: 'full', unread: 0, provider: 'claude' }] } });
     expect((mine.frames[0]!['scope'] as { conversations: unknown[] }).conversations).toHaveLength(2);
     expect(scopes.scope(theirs.key)?.conversations).toEqual([{ workItemId: 3, primary: true }, { workItemId: theirsHosted, primary: false }]);
     expect(scopes.scoped(mine.key, view.view).workItems.map((item) => item.id)).toEqual([2]);

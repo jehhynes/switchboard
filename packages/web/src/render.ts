@@ -1,3 +1,4 @@
+import { providerMark } from '@switchboard/conversation/providerIcons';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
@@ -79,7 +80,7 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
   return `<ul class="work-list" aria-label="Work items">${html.join('')}</ul>`;
 }
 
-/** The header: the dropdown of the selected work item's conversations, showing the session's state as its options do, and its persona. */
+/** The header: the dropdown of the selected work item's conversations, showing the session's state as its options do, its provider, and its persona. */
 export function renderHeader(state: PageState, view: View): string {
   const scope = state.scope!;
   const title = selectedEntry(state)?.title ?? scope.title;
@@ -88,7 +89,7 @@ export function renderHeader(state: PageState, view: View): string {
       const selected = entry.workItemId === scope.workItemId;
       const unread = entry.unread > 0 ? `<span class="count">${entry.unread}</span>` : '';
 
-      return `<li role="option" aria-selected="${selected}"><button type="button" data-action="select" data-work-item="${entry.workItemId}"${selected ? ' class="selected"' : ''}>${codicon(stateIcon(entry.state))}<span class="title">${escape(entry.title)}</span>${unread}</button></li>`;
+      return `<li role="option" aria-selected="${selected}"><button type="button" data-action="select" data-work-item="${entry.workItemId}"${selected ? ' class="selected"' : ''}>${codicon(stateIcon(entry.state))}<span class="title">${escape(entry.title)}</span>${providerMark(entry.provider)}${unread}</button></li>`;
     })
     .join('');
   const persona = state.session?.persona;
@@ -98,7 +99,7 @@ export function renderHeader(state: PageState, view: View): string {
       : `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" title="${escape(`Persona: ${persona.name}${persona.pinned ? ', pinned' : ''}. Click to choose another.`)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
   const picker = `<button type="button" class="picker" data-action="picker" aria-haspopup="listbox" aria-expanded="${view.picker}" title="${escape(title)}">${codicon(stateIcon(state.session?.state, state.session?.waitingFor))}<span class="title">${escape(title)}</span><span class="codicon codicon-chevron-down" aria-hidden="true"></span></button>${view.picker ? `<ul class="conversation-list" role="listbox" aria-label="Conversations">${options}</ul>` : ''}`;
 
-  return `<header class="header">${picker}${personaButton}</header>`;
+  return `<header class="header">${picker}${providerMark(state.session?.provider)}${personaButton}</header>`;
 }
 
 export function renderTabs(view: View, state: PageState): string {

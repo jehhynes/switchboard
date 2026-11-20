@@ -167,6 +167,8 @@ export interface ConversationEntry {
   state: SessionView['state'] | null;
   conversation: SessionView['conversation'] | null;
   unread: number;
+  /** The current session's provider; left out with no session or from an older session record. */
+  provider?: 'claude' | 'codex';
 }
 
 /** The scope a window is sent: its conversations as dropdown entries. */
@@ -447,7 +449,7 @@ export class ConversationService {
     }
   }
 
-  /** The dropdown's entries of a window's conversations: each one's title, current session's state and unread count. */
+  /** The dropdown's entries of a window's conversations: each one's title, current session's state and provider, and unread count. */
   entries(refs: ConversationRef[]): ConversationEntry[] {
     return refs.flatMap((ref) => {
       const item = this.deps.store.workItem(ref.workItemId);
@@ -460,7 +462,7 @@ export class ConversationService {
       const session = this.deps.store.sessionsFor(item.id).at(-1) ?? null;
       const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
 
-      return [{ workItemId: item.id, title: ticket.title, primary: ref.primary, sessionId: session?.id ?? null, state: view?.state ?? null, conversation: view?.conversation ?? null, unread: session === null ? 0 : this.deps.store.unreadCount(session.id) }];
+      return [{ workItemId: item.id, title: ticket.title, primary: ref.primary, sessionId: session?.id ?? null, state: view?.state ?? null, conversation: view?.conversation ?? null, unread: session === null ? 0 : this.deps.store.unreadCount(session.id), ...(view?.provider === undefined ? {} : { provider: view.provider }) }];
     });
   }
 

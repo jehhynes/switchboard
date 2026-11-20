@@ -35,6 +35,8 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 button.picker { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 6px 4px; border-radius: 4px; cursor: pointer; text-align: left; font-weight: 500; }
 button.picker:hover, button.persona:hover, button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button.picker .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider { flex: none; display: inline-flex; align-items: center; color: var(--vscode-foreground); font-size: 16px; }
+.header > .provider { padding: 0 4px; }
 button.persona { display: flex; align-items: center; gap: 4px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
 button.persona.pending .name { font-style: italic; }
 button.icon, a.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 3px; border-radius: 4px; cursor: pointer; }
