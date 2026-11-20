@@ -157,7 +157,7 @@ describe('spawnDetached', () => {
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it('starts a process with its output in files and the arguments unchanged', async () => {
@@ -167,9 +167,11 @@ describe('spawnDetached', () => {
 
     expect(spawned.error).toBeNull();
     expect(spawned.pid).toBeGreaterThan(0);
-    await vi.waitFor(() => expect(readFileSync(stderr, 'utf8').trim()).toBe('yes'));
+    // Its output is whole once it exits, and its folder can then be removed; starting Node can take seconds on a busy machine.
+    await vi.waitFor(() => expect(pidAlive(spawned.pid!)).toBe(false), { timeout: 15_000, interval: 50 });
+    expect(readFileSync(stderr, 'utf8').trim()).toBe('yes');
     expect(readFileSync(stdout, 'utf8').trim()).toBe('/sb-plan "1"');
-  });
+  }, 20_000);
 
   it('does not call a missing working directory a missing executable', async () => {
     const spawned = await spawnDetached(process.execPath, [], { cwd: join(dir, 'gone'), stdout: join(dir, 'o'), stderr: join(dir, 'e') });
