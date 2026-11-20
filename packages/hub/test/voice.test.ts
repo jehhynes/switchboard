@@ -137,6 +137,24 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
 }
 
 describe('VoiceControl', () => {
+  it('sends the focused window\'s session as a target again once it is live again, as after a resume', async () => {
+    const { control, connections, windows, full, settle, focus } = setup();
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    focus('k1');
+    control.update();
+    await settle();
+    full.delete('s1');
+    control.update();
+    full.add('s1');
+    control.update();
+    expect(connections[0]!.sent.filter((message) => message.type === 'targets')).toEqual([
+      { type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: null }], focus: { sessionId: 's1', via: 'window' } },
+      { type: 'targets', targets: [], focus: { sessionId: 's1', via: 'window' } },
+      { type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: null }], focus: { sessionId: 's1', via: 'window' } },
+    ]);
+  });
+
   it('starts the voice process while a scoped window is connected, sends it the settings, the targets and the focus, and stops it 10 minutes after', async () => {
     const { control, connections, windows, advance, settle, stops, focus } = setup();
 

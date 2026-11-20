@@ -96,4 +96,26 @@ describe('Router', () => {
     expect(changes).toEqual(['1 a focus', '2 none gone', '3 a focus']);
     router.close();
   });
+
+  it('takes the focused session back after the debounce when it becomes a target again, as when it resumes', () => {
+    const { clock, changes, router, targets } = setup();
+
+    router.update(targets, { sessionId: 'a', via: 'window' });
+    clock.advance(FOCUS_DEBOUNCE_MS);
+    // The session ended, so the hub no longer lists it; the focus stays on its window.
+    router.update([targets[1]!], { sessionId: 'a', via: 'window' });
+    expect(changes).toEqual(['1 a focus', '2 none gone']);
+    clock.advance(FOCUS_DEBOUNCE_MS * 4);
+    expect(router.target).toBeNull();
+    // An unrelated change while it is not a target starts nothing.
+    router.update([targets[1]!], { sessionId: 'a', via: 'window' });
+    clock.advance(FOCUS_DEBOUNCE_MS);
+    expect(changes).toHaveLength(2);
+
+    router.update(targets, { sessionId: 'a', via: 'window' });
+    clock.advance(FOCUS_DEBOUNCE_MS - 1);
+    expect(router.target).toBeNull();
+    clock.advance(1);
+    expect(changes).toEqual(['1 a focus', '2 none gone', '3 a focus']);
+  });
 });
