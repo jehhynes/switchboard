@@ -197,56 +197,77 @@ function passageHtml(item: ReplyView, passage: string): string {
 }
 
 /**
- * The composer footer's voice controls (architecture.md § Voice): Speak replies, Stop while this window's session speaks, and the voice's state,
- * which in a window that is not here offers Talk here; nothing while voice is off.
+ * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer: Speak replies as a speaker
+ * toggle, Stop while this window's session speaks, and Talk here only in a window the voice is not in whose session it can speak for (`live`).
+ * Nothing while voice is off.
  */
-export function renderVoiceControls(voice: VoiceView | null): string {
+export function renderVoiceControls(voice: VoiceView | null, live = true): string {
   if (voice === null || !voice.enabled) {
     return '';
   }
 
-  const speakReplies = `<button class="ghost" type="button" data-voice="speak-replies" aria-pressed="${voice.speakReplies}" title="Speak replies: ${voice.speakReplies ? 'on' : 'off'}"><span class="codicon codicon-${voice.speakReplies ? 'unmute' : 'mute'}" aria-hidden="true"></span><span>Speak replies</span></button>`;
-  const stop = voice.here && voice.speaking !== null ? '<button class="ghost" type="button" data-voice="stop" title="Stop speaking (Escape)"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span>Stop</span></button>' : '';
-  const where = voice.here
-    ? `<span class="voice-state">${voice.error === null ? 'Voice here' : escape(`Voice: ${voice.error}`)}</span>`
-    : '<button class="ghost voice-elsewhere" type="button" data-voice="talk-here" title="Voice is not in this window. Click to talk here."><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span>Voice is not in this window</span></button>';
+  const icon = (name: string, title: string, data: string, extra = ''): string =>
+    `<button class="ghost icon" type="button" data-voice="${data}" title="${escape(title)}" aria-label="${escape(title)}"${extra}><span class="codicon codicon-${name}" aria-hidden="true"></span></button>`;
+  const speakReplies = icon(
+    voice.speakReplies ? 'unmute' : 'mute',
+    voice.speakReplies ? 'Speak replies: on. Click to stop speaking replies.' : 'Speak replies: off. Click to speak replies.',
+    'speak-replies',
+    ` aria-pressed="${voice.speakReplies}"`,
+  );
+  const stop = voice.here && voice.speaking !== null ? icon('debug-stop', 'Stop speaking (Escape)', 'stop') : '';
+  const talkHere =
+    !voice.here && live
+      ? '<button class="ghost talk-here" type="button" data-voice="talk-here" title="The voice is not in this window. Click to move it here.">Talk here</button>'
+      : '';
 
-  return `${speakReplies}${stop}${where}`;
+  return `${speakReplies}${stop}${talkHere}`;
+}
+
+/** A mic glyph: plain, filled, with a slash for off, or with a pause badge. */
+function micGlyph(kind: 'on' | 'filled' | 'off' | 'paused'): string {
+  const mic = `<span class="codicon codicon-${kind === 'filled' ? 'mic-filled' : 'mic'}" aria-hidden="true"></span>`;
+
+  return kind === 'paused'
+    ? `<span class="mic-glyph paused">${mic}<span class="codicon codicon-debug-pause mic-badge" aria-hidden="true"></span></span>`
+    : `<span class="mic-glyph ${kind}">${mic}</span>`;
 }
 
 /**
- * The composer's mic button (architecture.md § Dictation): `mic` off, `mic-filled` while listening, pulsing while it hears, dimmed while the
- * composer has the focus; in a window the voice is not in, `circle-slash`, and a click talks here. Empty with voice off.
+ * The composer's one mic button (architecture.md § Dictation), whose glyph and tooltip carry the mic's state: a mic with a slash while off, after
+ * the idle timeout, unavailable or in a window the voice is not in, whose click talks here and turns the mic on; a plain mic while it listens; a
+ * filled, pulsing mic while it hears; a mic with a pause badge while the composer has the focus or another app records. While the mic is on, in
+ * any state, a click turns it off. Empty with voice off.
  */
 export function renderMicButton(voice: VoiceView | null): string {
   if (voice === null || !voice.enabled) {
     return '';
   }
 
-  const button = (icon: string, title: string, on: boolean, kind: string): string =>
-    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}"><span class="codicon codicon-${icon}" aria-hidden="true"></span></button>`;
+  const button = (glyph: Parameters<typeof micGlyph>[0], title: string, on: boolean, kind: string): string =>
+    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}">${micGlyph(glyph)}</button>`;
 
   if (!voice.here) {
-    return button('circle-slash', 'Voice is not in this window. Click to talk here.', true, 'elsewhere');
+    return button('off', 'Mic off: the voice is not in this window. Click to talk here with the mic on.', true, 'elsewhere');
   }
 
   switch (voice.mic) {
     case 'listening':
-      return button('mic-filled', 'Listening: dictation sends when you stop talking. Click to turn the mic off.', false, 'listening');
+      return button('on', 'Mic on: listening. Dictation sends when you stop talking. Click to turn the mic off.', false, 'listening');
     case 'hearing':
-      return button('mic-filled', 'Hearing you. Click to turn the mic off.', false, 'hearing');
+      return button('filled', 'Mic on: hearing you. Click to turn the mic off.', false, 'hearing');
     case 'typing':
-      return button('mic-filled', 'Typing: dictation pauses while the box has the focus, and goes on when you send or leave it. Click to turn the mic off.', false, 'typing');
+      return button('paused', 'Mic paused while you type: dictation goes on when you send or leave the box. Click to turn the mic off.', false, 'paused');
     case 'starting':
-      return button('mic-filled', 'The mic is starting. Click to turn it off.', false, 'starting');
+      return button('on', 'Mic starting. Click to turn it off.', false, 'starting');
     case 'paused-other-app':
-      return button('mic', 'Paused: another app is using the microphone. Click to turn the mic off.', false, 'paused');
+      return button('paused', 'Mic paused: another app is using the microphone. Click to turn the mic off.', false, 'paused');
     case 'unavailable':
-      return button('mic', `The mic cannot run: ${voice.error ?? 'unknown error'} Click to try again.`, true, 'unavailable');
+      // The mic is on but cannot run: a click turns it off, and turning it on again tries again.
+      return button('off', `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable');
     case 'idle-off':
-      return button('mic', 'The mic stopped after a quiet spell. Click to turn it on.', true, 'off');
+      return button('off', 'Mic off after a quiet spell. Click to turn it on (Ctrl+Alt+M).', true, 'off');
     default:
-      return button('mic', 'Turn the mic on (Ctrl+Alt+M).', true, 'off');
+      return button('off', 'Mic off. Click to turn it on (Ctrl+Alt+M).', true, 'off');
   }
 }
 

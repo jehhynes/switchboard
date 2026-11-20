@@ -59,6 +59,14 @@ export function shortTitle(title: string): string {
   return (space > PLACEHOLDER_TITLE_CHARS / 2 ? cut.slice(0, space) : cut.slice(0, PLACEHOLDER_TITLE_CHARS)).trimEnd();
 }
 
+/** Sets an element's HTML only when it changed, so a button under the pointer survives a redraw with the same state. */
+function redraw(element: HTMLElement, html: string): void {
+  if (element.dataset['html'] !== html) {
+    element.dataset['html'] = html;
+    element.innerHTML = html;
+  }
+}
+
 /**
  * The composer (architecture.md § Conversation view): a box that grows with its text, Enter to send and Shift+Enter for a new line. It is
  * enabled only for a session the view can talk to, keeps its text until the hub took the message, takes back the text of a message that was
@@ -215,7 +223,7 @@ function startComposer(
     grow();
     refresh();
   }, (text) => showError(text));
-  // The voice's controls on the footer's left (architecture.md § Voice): Speak replies, Stop while speaking, and where the voice is.
+  // The voice's controls on the footer's left (architecture.md § Voice): Speak replies, Stop while speaking, and Talk here while the voice is elsewhere.
   const voiceControls = document.createElement('div');
 
   voiceControls.className = 'voice-controls';
@@ -291,8 +299,9 @@ function startComposer(
       host.hidden = state.scope === null || state.scope.workItemId === null;
       input.disabled = !enabled;
       input.placeholder = enabled ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
-      voiceControls.innerHTML = renderVoiceControls(state.voice);
-      micSlot.innerHTML = enabled ? renderMicButton(state.voice) : '';
+      // Redrawn only when they change, so a state event between a press and its release does not swallow the click.
+      redraw(voiceControls, renderVoiceControls(state.voice, enabled));
+      redraw(micSlot, enabled ? renderMicButton(state.voice) : '');
       speaking = state.voice?.here === true && state.voice.speaking !== null;
       const wasHere = voiceHere;
 

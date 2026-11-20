@@ -247,6 +247,9 @@ describe('Dictation', () => {
     expect(missing.dictation.state).toBe('unavailable');
     expect(missing.dictation.error).toBe('No speech recognition model in m.');
     expect(missing.capture.opens).toBe(0);
+    // The mic button turns an unavailable mic off.
+    missing.dictation.mic(false);
+    expect(missing.dictation.state).toBe('off');
 
     const broken = setup();
 

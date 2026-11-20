@@ -755,7 +755,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(spoken('queued')).not.toContain('class="spoken');
   });
 
-  it('offers Speak replies, Stop while speaking and Talk here in the composer, R to replay a reply and Escape to stop', () => {
+  it('offers Speak replies and Stop as icon buttons, Talk here only while the voice is elsewhere, R to replay a reply and Escape to stop', () => {
     const { root, host, posted, show } = page();
     const controls = () => host.querySelector<HTMLElement>('.voice-controls')!;
 
@@ -763,13 +763,30 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(controls().innerHTML).toBe('');
 
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, here: false } }));
-    expect(controls().textContent).toBe('Speak repliesVoice is not in this window');
+    // Talk here is the only text; Speak replies is a speaker toggle that says its state in its tooltip.
+    expect(controls().textContent).toBe('Talk here');
+    expect(controls().querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe('Speak replies: on. Click to stop speaking replies.');
+    expect(controls().querySelector('[data-voice="speak-replies"]')!.getAttribute('aria-pressed')).toBe('true');
+    expect(controls().querySelector('[data-voice="speak-replies"] .codicon-unmute')).not.toBeNull();
+    expect(controls().querySelector('.codicon-circle-slash')).toBeNull();
+    // One mic control: the mic button, with a slash, whose tooltip says why.
+    expect(host.querySelectorAll('[data-voice="mic"]')).toHaveLength(1);
+    expect(host.querySelector('.mic-slot .mic-glyph.off')).not.toBeNull();
     controls().querySelector<HTMLButtonElement>('[data-voice="talk-here"]')!.click();
     controls().querySelector<HTMLButtonElement>('[data-voice="speak-replies"]')!.click();
 
+    // A session the voice cannot speak for, such as an ended one, offers no Talk here, which the hub would refuse.
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { session: { ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended.' }, voice: { ...VOICE, here: false } }));
+    expect(controls().querySelector('[data-voice="talk-here"]')).toBeNull();
+    expect(controls().querySelector('[data-voice="speak-replies"]')).not.toBeNull();
+    expect(host.querySelector('[data-voice="mic"]')).toBeNull();
+
     show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, speaking: 'r1', speakReplies: false } }));
-    expect(controls().textContent).toBe('Speak repliesStopVoice here');
+    expect(controls().textContent).toBe('');
+    expect(controls().querySelector('[data-voice="talk-here"]')).toBeNull();
+    expect(controls().querySelector('[data-voice="stop"]')!.getAttribute('title')).toBe('Stop speaking (Escape)');
     expect(controls().querySelector('[data-voice="speak-replies"] .codicon-mute')).not.toBeNull();
+    expect(controls().querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe('Speak replies: off. Click to speak replies.');
     controls().querySelector<HTMLButtonElement>('[data-voice="stop"]')!.click();
     controls().querySelector<HTMLButtonElement>('[data-voice="speak-replies"]')!.click();
 
@@ -788,7 +805,8 @@ describe('speech in the view (architecture.md § Voice)', () => {
       { type: 'stop-speaking' },
       { type: 'stop-speaking' },
     ]);
-    expect(renderVoiceControls({ ...VOICE, error: 'no <device>' })).toContain('Voice: no &#60;device&#62;');
+    // Capture's error is the mic button's tooltip, not text in the footer.
+    expect(renderVoiceControls({ ...VOICE, mic: 'unavailable', error: 'no <device>' })).not.toContain('device');
   });
 
   it('marks a dictated message with the mic glyph, "partial" for a part sent while it was spoken, and its pieces in the tooltip', () => {
@@ -810,19 +828,35 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(html.match(/voice-line/g)).toHaveLength(2);
   });
 
-  it('draws the mic button by the mic state, the not-here button elsewhere and nothing with voice off (architecture.md § Dictation)', () => {
+  it('draws one mic button whose glyph and tooltip carry the mic state, and nothing with voice off (architecture.md § Dictation)', () => {
+    const glyph = (voice: VoiceView): string => /<span class="mic-glyph ([a-z]+)">(.*)<\/span><\/button>$/.exec(renderMicButton(voice))!.slice(1).join(' ');
+
     expect(renderMicButton(null)).toBe('');
     expect(renderMicButton({ ...VOICE, enabled: false })).toBe('');
-    expect(renderMicButton({ ...VOICE, here: false })).toContain('codicon-circle-slash');
+    // Off, after the idle timeout, unavailable and elsewhere: a mic with a slash, never a bare ban icon.
+    expect(renderMicButton({ ...VOICE, here: false })).not.toContain('circle-slash');
+    expect(glyph({ ...VOICE, here: false })).toMatch(/^off .*codicon-mic"/);
     expect(renderMicButton({ ...VOICE, here: false })).toContain('data-on="true"');
-    expect(renderMicButton(VOICE)).toMatch(/class="mic off".*data-on="true".*aria-pressed="false".*codicon-mic"/);
-    expect(renderMicButton({ ...VOICE, mic: 'listening' })).toMatch(/class="mic listening".*data-on="false".*codicon-mic-filled/);
+    expect(renderMicButton({ ...VOICE, here: false })).toContain('title="Mic off: the voice is not in this window. Click to talk here with the mic on."');
+    expect(renderMicButton(VOICE)).toMatch(/class="mic off".*data-on="true".*aria-pressed="false"/);
+    expect(glyph(VOICE)).toMatch(/^off /);
+    expect(glyph({ ...VOICE, mic: 'idle-off' })).toMatch(/^off /);
+    expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('Mic off after a quiet spell.');
+    expect(glyph({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toMatch(/^off /);
+    // The mic is on but cannot run: the click turns it off, never only tries again.
+    expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toContain('Mic on but unavailable: No &#60;model&#62;. Click to turn the mic off.');
+    expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toContain('data-on="false"');
+    // On and waiting: a plain mic; hearing: filled, pulsing by its class.
+    expect(renderMicButton({ ...VOICE, mic: 'listening' })).toMatch(/class="mic listening".*data-on="false".*aria-pressed="true"/);
+    expect(glyph({ ...VOICE, mic: 'listening' })).toMatch(/^on .*codicon-mic"/);
     expect(renderMicButton({ ...VOICE, mic: 'hearing' })).toContain('class="mic hearing"');
-    expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('Typing: dictation pauses');
+    expect(glyph({ ...VOICE, mic: 'hearing' })).toMatch(/^filled .*codicon-mic-filled"/);
     expect(renderMicButton({ ...VOICE, mic: 'starting' })).toContain('class="mic starting"');
-    expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('Paused: another app is using the microphone.');
-    expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('stopped after a quiet spell');
-    expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toContain('The mic cannot run: No &#60;model&#62;.');
+    // Typing and another app recording: a mic with a pause badge.
+    expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('Mic paused while you type');
+    expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('<span class="mic-glyph paused"><span class="codicon codicon-mic" aria-hidden="true"></span><span class="codicon codicon-debug-pause mic-badge"');
+    expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('Mic paused: another app is using the microphone.');
+    expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('class="mic paused"');
   });
 });
 
@@ -869,8 +903,18 @@ describe('the composer', () => {
 
       show({ ...state(), voice });
       expect(host.querySelector('.mic-slot button.mic.listening')).not.toBeNull();
+      // A state event with the same voice keeps the button under the pointer, so a click that straddles it still lands.
+      const micButton = host.querySelector<HTMLButtonElement>('.mic-slot button')!;
+
+      show({ ...state(), voice });
+      expect(host.querySelector('.mic-slot button')).toBe(micButton);
+      micButton.click();
+      expect(posted.at(-1)).toEqual({ type: 'mic', on: false });
+      // With capture unavailable, as with no recognition model, the click still turns the mic off.
+      show({ ...state(), voice: { ...voice, mic: 'unavailable', error: 'No speech recognition model in m.' } });
       host.querySelector<HTMLButtonElement>('.mic-slot button')!.click();
       expect(posted.at(-1)).toEqual({ type: 'mic', on: false });
+      show({ ...state(), voice });
 
       // The hub's draft fills the box; live words show dimmed under it.
       post({ type: 'draft', text: 'fix the login', workItemId: 2 });
