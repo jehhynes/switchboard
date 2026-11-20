@@ -5,6 +5,7 @@ import type { Session, WindowBinding, WorkItem } from '@switchboard/core';
 import { hostKey, isFolderHost } from '@switchboard/core';
 import { needsYou } from '@switchboard/core/group';
 import { windowItems, windowOf } from './dock.js';
+import { pageGroups } from './page.js';
 import type { Snapshot } from './snapshot.js';
 
 /** One of a window's conversations (architecture.md § Window scope): its primary work item, or an ad hoc conversation it hosts. */
@@ -15,8 +16,11 @@ export interface ConversationRef {
 
 /** What a window may see: its conversations, and of the selected one its work item and current session (architecture.md § Window scope). */
 export interface WindowScope {
-  /** An item window, opened from a workspace file, or a folder window, opened on a plain folder (architecture.md § Window scope). */
-  kind: 'item' | 'folder';
+  /**
+   * An item window, opened from a workspace file, a folder window, opened on a plain folder (architecture.md § Window scope), or the web page,
+   * bound to the work item it selected (architecture.md § Web page).
+   */
+  kind: 'item' | 'folder' | 'page';
   /** The window key, which every conversation route names. */
   key: string;
   /** The window's first folder, or a folder window's canonical folder, where a new conversation runs; null before it is known. */
@@ -72,6 +76,10 @@ interface Window {
   cwd: string | null;
   /** Tickets this window may read the History of beyond its own, from History commands the dock left for it. */
   granted: Set<number>;
+  /** The web page's stream, which no workspace file or folder binds: its one binding is the work item it selected. */
+  page: boolean;
+  /** A page's conversations: its selected work item's group in the page's list, the group's own work item first when it has one. */
+  group: { ids: number[]; head: boolean };
 }
 
 /**
@@ -83,6 +91,8 @@ interface Window {
  */
 export class WindowScopes {
   readonly #windows = new Map<string, Window>();
+  /** The latest snapshot, which a page's `select` reads its work item's window and group from. */
+  #snapshot: Snapshot | null = null;
 
   constructor(private readonly deps: WindowScopesDeps) {}
 
@@ -110,8 +120,11 @@ export class WindowScopes {
       sessionId: stored?.selectedSessionId ?? null,
       cwd: null,
       granted: new Set(),
+      page: false,
+      group: { ids: [], head: false },
     };
 
+    this.#snapshot = snapshot ?? this.#snapshot;
     this.#windows.set(key, window);
 
     if (host !== null) {
@@ -119,6 +132,22 @@ export class WindowScopes {
     }
 
     return key;
+  }
+
+  /**
+   * Registers the web page's conversation stream and returns its page key (architecture.md § Web page): bound to nothing until it sends `select`,
+   * and never kept in the store, so a reload starts unbound.
+   */
+  openPage(): string {
+    const key = this.deps.newKey?.() ?? randomBytes(24).toString('hex');
+
+    this.#windows.set(key, { key, file: null, host: null, workItemId: null, ticketId: null, title: '', folder: null, scopeGen: 0, selected: null, sessionId: null, cwd: null, granted: new Set(), page: true, group: { ids: [], head: false } });
+    return key;
+  }
+
+  /** Whether the key is a web page's. */
+  isPage(key: string): boolean {
+    return this.#windows.get(key)?.page === true;
   }
 
   close(key: string): void {
@@ -131,7 +160,51 @@ export class WindowScopes {
 
   /** Binds every window again in a new snapshot; returns the keys whose selected conversation or its current session changed. */
   update(snapshot: Snapshot): string[] {
-    return [...this.#windows.values()].filter((window) => window.host !== null && this.#bind(window, snapshot)).map((window) => window.key);
+    this.#snapshot = snapshot;
+
+    return [...this.#windows.values()].filter((window) => (window.page ? this.#bindPage(window) : window.host !== null && this.#bind(window, snapshot))).map((window) => window.key);
+  }
+
+  /** A page's selected work item again: its title, folder, group and current session; true when its selection or session changed. */
+  #bindPage(window: Window): boolean {
+    const before = { selected: window.selected, sessionId: window.sessionId };
+
+    if (window.selected !== null && this.deps.store.workItem(window.selected) === null) {
+      window.selected = null;
+    }
+
+    this.#placePage(window);
+    this.#follow(window);
+
+    const changed = window.selected !== before.selected || window.sessionId !== before.sessionId;
+
+    if (changed) {
+      window.scopeGen++;
+    }
+
+    return changed;
+  }
+
+  /** A page's work item's title, the folder its window works in, and its group in the page's list. */
+  #placePage(window: Window): void {
+    const id = window.selected;
+
+    window.workItemId = id;
+
+    if (id === null) {
+      window.group = { ids: [], head: false };
+      return;
+    }
+
+    const item = this.deps.store.workItem(id);
+    const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
+    const shown = this.#snapshot?.workItems.find((one) => one.id === id);
+    const group = this.#snapshot === null ? undefined : pageGroups(this.#snapshot, this.deps.windows, id).find((one) => one.ids.includes(id));
+
+    window.ticketId = item?.ticketId ?? null;
+    window.title = ticket?.title ?? window.title;
+    window.folder = (shown === undefined ? null : (windowOf(shown, this.deps.windows)?.folders[0] ?? null)) ?? ticket?.repoRoot ?? null;
+    window.group = group === undefined ? { ids: [id], head: false } : { ids: group.ids, head: group.kind === 'item' };
   }
 
   #binding(host: string): WindowBinding | null {
@@ -209,6 +282,12 @@ export class WindowScopes {
    * and the selected one even when it is done, until another is selected.
    */
   #listed(window: Window): ConversationRef[] {
+    if (window.page) {
+      const ids = window.selected === null ? [] : window.group.ids.includes(window.selected) ? window.group.ids : [window.selected];
+
+      return ids.filter((id) => this.deps.store.workItem(id) !== null).map((id, index) => ({ workItemId: id, primary: window.group.head && index === 0 && ids === window.group.ids }));
+    }
+
     if (window.host === null) {
       return [];
     }
@@ -228,6 +307,10 @@ export class WindowScopes {
    */
   scope(key: string): WindowScope | null {
     const window = this.#windows.get(key);
+
+    if (window?.page === true) {
+      return window.selected === null ? null : { kind: 'page', key, folder: window.folder, title: window.title, scopeGen: window.scopeGen, conversations: this.#listed(window), workItemId: window.selected, cwd: window.cwd, sessionId: window.sessionId };
+    }
 
     if (window === undefined || window.host === null || (window.file !== null && window.selected === null)) {
       return null;
@@ -274,6 +357,19 @@ export class WindowScopes {
    */
   select(key: string, workItemId: number): boolean {
     const window = this.#windows.get(key);
+
+    // A page selects any work item the store knows (architecture.md § Web page); the scope rule then holds it to that work item's group.
+    if (window?.page === true) {
+      if (this.deps.store.workItem(workItemId) === null) {
+        return false;
+      }
+
+      window.selected = workItemId;
+      this.#placePage(window);
+      this.#follow(window);
+      window.scopeGen++;
+      return true;
+    }
 
     if (window === undefined || !this.holds(key, workItemId)) {
       return false;

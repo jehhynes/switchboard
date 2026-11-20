@@ -215,16 +215,37 @@ function holder(home: string, argv: readonly string[]): Promise<number> {
   });
 }
 
+/** Prints a one-time link to the web page (architecture.md § Web page). Exit codes: 0 printed, 2 no hub, 3 refused. */
+async function web(home: string): Promise<number> {
+  const hub = await findHub(home, REPORT_TIMEOUT_MS);
+  const reply = hub === null ? null : await postToHub(hub, '/page/link', {}, REPORT_TIMEOUT_MS);
+
+  if (reply === null) {
+    process.stderr.write(`${noHub(home)}.\n`);
+    return 2;
+  }
+
+  const url = (reply.body as { url?: unknown } | null)?.url;
+
+  if (reply.status !== 200 || typeof url !== 'string') {
+    process.stderr.write(`Refused: ${reply.error ?? `status ${reply.status}`}\n`);
+    return 3;
+  }
+
+  process.stdout.write(`Open this link in a browser on this machine within two minutes; it works once:\n${url}\n`);
+  return 0;
+}
+
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
   const bundle = process.argv[1];
 
-  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder') {
+  if (argv[0] === 'report' || argv[0] === 'register' || argv[0] === 'attach' || argv[0] === 'holder' || argv[0] === 'web') {
     // A session runs `<home>/.switchboard/hub.js report …`, so the bundle's location names its home; the extension's own bundle names none.
     const home = flag(argv, 'home') || bundleHome(bundle, homedir());
     const rest = argv.slice(1).filter((argument) => !argument.startsWith('--home'));
 
-    const commands = { report, register, attach, holder };
+    const commands = { report, register, attach, holder, web: (one: string) => web(one) };
 
     return commands[argv[0] as keyof typeof commands](home, rest);
   }

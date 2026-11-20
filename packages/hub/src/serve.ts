@@ -7,7 +7,7 @@ import type { SnoozeByUrl, UnsnoozeByUrl } from './browserSnooze.js';
 import { findHub, readHubRecord } from './discover.js';
 import { holdLock, releaseLock } from './lock.js';
 import { listenHub } from './server.js';
-import type { Reply } from './server.js';
+import type { PageRoutes, Reply } from './server.js';
 
 /** What the hub serves beyond its lifecycle: the snapshot and the dock view, requests, and the sessions that keep it running. */
 export interface HubApp {
@@ -23,6 +23,8 @@ export interface HubApp {
   conversation?(key: string, write: (frame: string) => void): { close(): void } | null;
   /** The window in front changed: its key, or null. */
   windowFocused?(key: string | null): void;
+  /** The web page's routes (architecture.md § Web page). */
+  page?: PageRoutes;
   /** The dock view (PRD R71). */
   dock(): object;
   /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
@@ -130,6 +132,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
           ...(app.windowClosed === undefined ? {} : { windowClosed: (key: string) => app.windowClosed!(key) }),
           ...(app.conversation === undefined ? {} : { conversation: (key: string, write: (frame: string) => void) => app.conversation!(key, write) }),
           ...(app.windowFocused === undefined ? {} : { focusChanged: (key: string | null) => app.windowFocused!(key) }),
+          ...(app.page === undefined ? {} : { page: app.page }),
         }),
   });
 

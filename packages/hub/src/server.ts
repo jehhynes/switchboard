@@ -1,7 +1,11 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
+import { pipeline } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
+import { ARTIFACT_CSP, loopbackHost, PAGE_COOKIE, PAGE_CSP } from './page.js';
+import type { PageAccess } from './page.js';
 
 export interface Reply {
   status: number;
@@ -36,9 +40,29 @@ export interface HubServerOptions {
   dock?: () => object;
   /** The window in front changed: its key, or null while no window with a key has the focus (architecture.md § Voice). */
   focusChanged?: (key: string | null) => void;
+  /** The web page (architecture.md § Web page); without it the hub serves none. */
+  page?: PageRoutes;
   heartbeatMs?: number;
   now?: () => number;
 }
+
+/** What the web page's routes read (architecture.md § Web page). */
+export interface PageRoutes {
+  access: PageAccess;
+  /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
+  asset(name: string): { mime: string; body: Buffer | string } | null;
+  /** Registers a page's conversation stream and returns its page key. */
+  opened(): string;
+  isPage(key: string): boolean;
+  list(): unknown;
+  /** The `@` picker's files for a page key, or null with no selection. */
+  files(key: string, query: string): Promise<unknown>;
+  /** An artifact's file for a page key, or null outside its scope. */
+  artifact(key: string, name: string): { path: string; mime: string; sandboxed: boolean } | null;
+}
+
+/** The conversation commands a page may post with its cookie; never `new-conversation`, since a page hosts none. */
+export const PAGE_COMMANDS = new Set(['send', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus']);
 
 export interface HubServer {
   port: number;
@@ -340,9 +364,158 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     });
   };
 
+  // The web page's port, known once the server listens; its Host and Origin must name it.
+  let ownPort = 0;
+  const page = options.page;
+
+  /** The web page's routes (architecture.md § Web page); false for any other request. */
+  const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
+    const path = url.pathname;
+    const isPageRoute = path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files';
+    const bearer = request.headers.authorization !== undefined;
+    const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && request.headers.cookie !== undefined;
+
+    if (page === undefined || (!isPageRoute && !cookiePost) || (path === '/page/link' && request.method === 'POST')) {
+      return false;
+    }
+
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+
+    // Another name for this machine, as a DNS rebinding attack uses, never reaches the page.
+    if (!loopbackHost(request.headers.host, ownPort)) {
+      json(response, 403, { error: 'The page is served only as 127.0.0.1 or localhost.' });
+      return true;
+    }
+
+    // An artifact's own files, which its sandboxed frame loads without the cookie, are read by the page key in their path.
+    if (request.method === 'GET' && path.startsWith('/v1/conversation/artifact/')) {
+      const [key = '', ...rest] = path.slice('/v1/conversation/artifact/'.length).split('/');
+      let name = '';
+
+      try {
+        name = rest.map(decodeURIComponent).join('/');
+      } catch {
+        // A malformed name is not found.
+      }
+
+      const file = page.isPage(key) ? page.artifact(key, name) : null;
+
+      if (file === null) {
+        json(response, 404, { error: 'No such artifact here.' });
+        return true;
+      }
+
+      response.writeHead(200, { 'Content-Type': file.mime, 'Cache-Control': 'no-cache', ...(file.sandboxed ? { 'Content-Security-Policy': ARTIFACT_CSP } : {}) });
+      pipeline(createReadStream(file.path), response, () => {});
+      return true;
+    }
+
+    if (request.method === 'GET' && path === '/page') {
+      const cookie = page.access.exchange(url.searchParams.get('t') ?? '');
+
+      if (cookie === null) {
+        response.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        response.end('This link was used or has expired. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.\n');
+        return true;
+      }
+
+      response.writeHead(303, { 'Set-Cookie': `${PAGE_COOKIE}=${cookie}; HttpOnly; SameSite=Strict; Path=/`, Location: '/page/', 'Cache-Control': 'no-store' });
+      response.end();
+      return true;
+    }
+
+    if (!page.access.allows(request.headers.cookie)) {
+      json(response, 401, { error: 'unauthorized' });
+      return true;
+    }
+
+    if (request.method === 'GET' && path.startsWith('/page/')) {
+      const asset = page.asset(path === '/page/' ? 'index.html' : path.slice('/page/'.length));
+
+      if (asset === null) {
+        json(response, 404, { error: 'not found' });
+        return true;
+      }
+
+      response.writeHead(200, { 'Content-Type': asset.mime, 'Cache-Control': 'no-cache', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': PAGE_CSP });
+      response.end(asset.body);
+      return true;
+    }
+
+    if (request.method === 'GET' && path === '/v1/conversation/events') {
+      let key: string | null = page.opened();
+
+      openConversation(request, response, key);
+      request.on('close', () => {
+        if (key !== null) {
+          options.windowClosed?.(key);
+          key = null;
+        }
+      });
+      return true;
+    }
+
+    if (request.method === 'GET' && path === '/v1/page/list') {
+      json(response, 200, { groups: page.list() });
+      return true;
+    }
+
+    const window = url.searchParams.get('window') ?? '';
+
+    if (request.method === 'GET' && path === '/v1/conversation/files') {
+      if (!page.isPage(window)) {
+        json(response, 403, { error: 'Not in this window.' });
+        return true;
+      }
+
+      void page.files(window, url.searchParams.get('q') ?? '').then(
+        (files) => json(response, files === null ? 403 : 200, files === null ? { error: 'Not in this window.' } : { files }),
+        (error: unknown) => json(response, 500, { error: String(error) }),
+      );
+      return true;
+    }
+
+    // A command a page posts: from the page's own origin, naming a page key, and only a conversation command.
+    const command = path.slice('/v1/conversation/'.length);
+    const handler = options.post?.[path];
+
+    if (request.method !== 'POST' || !PAGE_COMMANDS.has(command) || handler === undefined) {
+      json(response, 404, { error: 'not found' });
+      return true;
+    }
+
+    if (request.headers.origin !== `http://${request.headers.host}`) {
+      json(response, 403, { error: 'The page posts only from its own origin.' });
+      return true;
+    }
+
+    readJson(request).then(
+      (body) => {
+        const key = (body as { window?: unknown } | null)?.window;
+
+        if (typeof key !== 'string' || !page.isPage(key)) {
+          json(response, 403, { error: 'Not in this window.' });
+          return;
+        }
+
+        handler(body).then(
+          (reply) => json(response, reply.status, reply.body),
+          (error: unknown) => json(response, 500, { error: String(error) }),
+        );
+      },
+      (error: Error) => json(response, 400, { error: error.message }),
+    );
+    return true;
+  };
+
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     const path = url.pathname;
+
+    if (servePage(request, response, url)) {
+      return;
+    }
 
     if (request.method === 'GET' && path === '/hub') {
       json(response, 200, options.identity);
@@ -401,6 +574,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         },
         (error: Error) => json(response, 400, { error: error.message }),
       );
+    } else if (request.method === 'POST' && path === '/page/link' && page !== undefined) {
+      // A one-time link to the web page, which VS Code's Open Web Page and `hub.js web` hand out (architecture.md § Web page).
+      json(response, 200, { url: `http://127.0.0.1:${ownPort}/page?t=${page.access.token()}` });
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();
@@ -451,6 +627,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
       const port = typeof address === 'object' && address !== null ? address.port : 0;
+
+      ownPort = port;
 
       resolve({
         port,

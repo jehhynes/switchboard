@@ -33,6 +33,8 @@ import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
+import { PageAccess, pageGroups } from './page.js';
+import { pageAsset } from './pageAssets.js';
 import { needsMessage, newlyNeeding, rowFor, targetForUrl } from './needs.js';
 import { volumeReply } from './volume.js';
 
@@ -420,6 +422,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
     },
+    pageGroups: () => pageGroups(views().snapshot, windows),
+    // A focused, visible page counts as a focused window for the voice (architecture.md § Web page).
+    pageFocused: (key, focused) => {
+      if (focused) {
+        focusedWindow = key;
+      } else if (focusedWindow === key) {
+        focusedWindow = null;
+      }
+
+      voice.update();
+    },
     // A hosted conversation is titled by its first message (architecture.md § Hosted conversations).
     messageAdded: (workItemId, text) => {
       const item = store.workItem(workItemId);
@@ -723,6 +736,7 @@ const dockWithRuns = () => {
       '/v1/conversation/speak-replies': async (body) => (isRecord(body) ? conversation.voiceCommand('speak-replies', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
       '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
+      '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/composer': async (body) => (isRecord(body) ? conversation.voiceCommand('composer', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } }),
@@ -937,17 +951,39 @@ const dockWithRuns = () => {
       return key;
     },
     windowFocused: (key) => {
-      focusedWindow = key;
+      // VS Code reports a blur when the browser takes the focus, which may arrive after the page reported it has it.
+      if (key !== null || focusedWindow === null || !scopes.isPage(focusedWindow)) {
+        focusedWindow = key;
+      }
+
       voice.update();
     },
     windowFolder: (key) => scopes.folderOf(key),
     windowClosed: (key) => {
+      if (focusedWindow === key) {
+        focusedWindow = null;
+      }
+
       scopes.close(key);
       conversation.windowClosed();
       voice.windowClosed(key);
     },
     windowState: (key) => scopes.scoped(key, views().snapshot),
     conversation: (key, write) => conversation.open(key, write),
+    page: {
+      access: new PageAccess(deps.now),
+      asset: (name) => pageAsset(name, home),
+      opened: () => {
+        const key = scopes.openPage();
+
+        setImmediate(() => voice.update());
+        return key;
+      },
+      isPage: (key) => scopes.isPage(key),
+      list: () => conversation.pageList(),
+      files: (key, query) => conversation.files(key, query),
+      artifact: (key, name) => conversation.artifactFile(key, name),
+    },
     dock: () => dockWithRuns(),
     attachDock: (send) => {
       sendDock = send;

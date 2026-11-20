@@ -9,6 +9,7 @@ import { ConversationService, sessionView } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import { windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
+import { pageGroups } from '../src/page.js';
 import { NOW, item, session, snapshot } from './views.js';
 
 let dir: string;
@@ -1487,5 +1488,141 @@ describe('ConversationService artifacts', () => {
     service.windowClosed();
     expect(service.watching()).toEqual([]);
     service.stop();
+  });
+});
+
+describe('the web page in the window scope rule (architecture.md § Web page)', () => {
+  function setup() {
+    const store = Store.open(':memory:');
+    const view = world();
+    let keys = 0;
+    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const held = new FakeHeld();
+    const focus: Array<[string, boolean]> = [];
+    let id = 0;
+    const service = new ConversationService({
+      store,
+      windows: scopes,
+      projectsDir: join(dir, 'projects'),
+      claudeConfig: join(dir, '.claude.json'),
+      screen: async (session) => held.screen(session),
+      input: held,
+      hooks: () => true,
+      now: () => NOW,
+      newId: () => String(++id),
+      pageGroups: () => pageGroups(view.view, WINDOWS),
+      pageFocused: (key, focused) => focus.push([key, focused]),
+      log: () => {},
+    });
+
+    stored(store, view);
+    scopes.update(view.view);
+
+    const openPage = () => {
+      const key = scopes.openPage();
+      const frames: Array<{ type: string; [field: string]: unknown }> = [];
+
+      service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+
+      return { key, frames };
+    };
+
+    return { store, view, scopes, service, openPage, focus };
+  }
+
+  it('starts a page unbound with its key and list, binds it to any work item it selects, and holds it to that work item', () => {
+    const { scopes, service, openPage, view } = setup();
+    const page = openPage();
+
+    expect(scopes.isPage(page.key)).toBe(true);
+    expect(page.frames[0]).toMatchObject({ type: 'hello', scope: null, key: page.key, groups: [{ kind: 'item', title: 'Issue <3>', conversations: [{ workItemId: 3 }] }, { kind: 'item', conversations: [{ workItemId: 2 }] }] });
+    expect(service.send({ window: page.key, scopeGen: 0, opId: 'o', sessionId: 's2', launch: null, text: 'hi' }).status).toBe(403);
+
+    // Any work item, where a window may select only its own conversations.
+    expect(service.select({ window: page.key, opId: 'o1', workItemId: 3 })).toEqual({ status: 200, body: { scopeGen: 1 } });
+    expect(scopes.scope(page.key)).toMatchObject({ kind: 'page', workItemId: 3, sessionId: 's3', cwd: 'D:/w3', conversations: [{ workItemId: 3, primary: true }] });
+    expect(page.frames.map((frame) => frame.type)).toEqual(['hello', 'scope', 'hello']);
+    expect(page.frames[2]).toMatchObject({ scope: { kind: 'page', workItemId: 3 }, key: page.key });
+
+    // From then on the scope rule holds: another work item's session is refused.
+    expect(service.history({ window: page.key, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null }).status).toBe(403);
+    expect(service.history({ window: page.key, scopeGen: 1, opId: 'o2', sessionId: 's3', before: null }).status).toBe(200);
+    expect(service.select({ window: page.key, opId: 'o3', workItemId: 99 }).status).toBe(403);
+    // A page hosts nothing, and its binding is never stored.
+    expect(service.newConversation({ window: page.key, opId: 'o4' }).status).toBe(403);
+    expect(scopes.hostOf(page.key)).toBeNull();
+    expect(view.view.workItems).toHaveLength(3);
+  });
+
+  it('lists a hosted conversation with its host, and gives the page the host group as its conversations', () => {
+    const { store, scopes, service, openPage, view } = setup();
+    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: 'h', ref: '#h', sourceId: null, title: 'Side chat', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: NOW, lastPolledAt: null, repoRoot: 'D:/w12', hostWindow: view.file });
+    const hosted = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: NOW } as never);
+    const snap = snapshot([...view.view.workItems, item(hosted.id, { ticketId: ticket.id, ticket: { ...view.current.ticket, id: ticket.id, title: 'Side chat', hostWindow: view.file } })]);
+
+    view.view = snap;
+    scopes.update(snap);
+
+    const page = openPage();
+
+    expect(service.pageList().find((group) => group.conversations.some((entry) => entry.workItemId === 2))?.conversations.map((entry) => entry.workItemId)).toEqual([2, hosted.id]);
+    service.select({ window: page.key, opId: 'o', workItemId: hosted.id });
+    expect(scopes.scope(page.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: hosted.id, primary: false }]);
+    // Done while selected, it stays in its host's group.
+    const done = snapshot([...view.view.workItems.filter((one) => one.id !== hosted.id), item(hosted.id, { ticketId: ticket.id, status: 'done', ticket: { ...view.current.ticket, id: ticket.id, title: 'Side chat', hostWindow: view.file } })]);
+
+    store.updateWorkItem(hosted.id, { status: 'done' });
+    view.view = done;
+    scopes.update(done);
+    expect(scopes.scope(page.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: hosted.id, primary: false }]);
+    expect(service.pageList().flatMap((group) => group.conversations.map((entry) => entry.workItemId))).not.toContain(hosted.id);
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 2 }).status).toBe(200);
+    expect(scopes.scope(page.key)).toMatchObject({ workItemId: 2, scopeGen: 2 });
+  });
+
+  it("reports a page's focus only for a page key, and ends the page's key with its stream", () => {
+    const { scopes, service, openPage, view, focus } = setup();
+    const page = openPage();
+    const window = scopes.open(view.file, view.view);
+
+    expect(service.pageFocus({ window: page.key, focused: true })).toEqual({ status: 200, body: { focused: true } });
+    expect(service.pageFocus({ window, focused: true }).status).toBe(403);
+    expect(service.pageFocus({ window: page.key }).status).toBe(400);
+    expect(focus).toEqual([[page.key, true]]);
+
+    scopes.close(page.key);
+    expect(scopes.isPage(page.key)).toBe(false);
+    expect(service.select({ window: page.key, opId: 'o', workItemId: 2 }).status).toBe(403);
+  });
+
+  it("unbinds a page whose work item was deleted, raising its scope generation", () => {
+    const { store, scopes, service, openPage, view } = setup();
+    const page = openPage();
+
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+    store.deleteWorkItem(3);
+    expect(scopes.update(view.view)).toContain(page.key);
+    expect(scopes.scope(page.key)).toBeNull();
+  });
+
+  it("serves a page only its selected work item's artifacts and files", async () => {
+    const { service, openPage, store } = setup();
+    const page = openPage();
+    const folder = join(dir, 'w3');
+
+    mkdirSync(join(folder, '.wip', 'artifacts', 'w3', 'chat'), { recursive: true });
+    mkdirSync(join(folder, '.wip', 'artifacts', 'w2', 'chat'), { recursive: true });
+    writeFileSync(join(folder, '.wip', 'artifacts', 'w3', 'chat', 'plan.md'), '# Plan');
+    writeFileSync(join(folder, '.wip', 'artifacts', 'w2', 'chat', 'other.md'), '# Other');
+    writeFileSync(join(folder, 'readme.md'), '');
+    store.insertSession(session({ id: 's3b', workItemId: 3, cwd: folder, codeMode: true }) as StoredSession);
+
+    expect(service.artifactFile(page.key, 'chat/plan.md')).toBeNull();
+    expect(await service.files(page.key, '')).toBeNull();
+    service.select({ window: page.key, opId: 'o', workItemId: 3 });
+    expect(service.artifactFile(page.key, 'chat/plan.md')).toMatchObject({ mime: 'text/markdown; charset=utf-8' });
+    expect(service.artifactFile(page.key, 'chat/other.md')).toBeNull();
+    expect(service.artifactFile(page.key, '../w2/chat/other.md')).toBeNull();
+    expect(await service.files(page.key, 'readme')).toEqual([{ path: 'readme.md', dir: false }]);
   });
 });

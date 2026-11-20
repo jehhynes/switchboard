@@ -6,6 +6,8 @@ import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, messageTags, pasteText }
 import type { Artifact, ConversationChange, HeardTag, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
+import { artifactFile, findFiles } from './page.js';
+import type { PageFile, PageGroup } from './page.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
@@ -204,6 +206,10 @@ export interface ConversationServiceDeps {
   personas?(): PersonaView;
   /** Pins a persona to a session, or clears its pin with null; why not, or null. */
   pinPersona?(sessionId: string, personaId: string | null): string | null;
+  /** The web page's list, grouped by host (architecture.md § Web page); without it a page lists nothing. */
+  pageGroups?(): PageGroup[];
+  /** A page's focus changed: a focused, visible page counts as a focused window for the voice. */
+  pageFocused?(key: string, focused: boolean): void;
   log(line: string): void;
 }
 
@@ -439,6 +445,72 @@ export class ConversationService {
 
   /** The dropdown each window was last sent. */
   readonly #conversationsShown = new Map<string, string>();
+  /** The list each page was last sent. */
+  readonly #listShown = new Map<string, string>();
+
+  /**
+   * The web page's list (architecture.md § Web page): each group's title and kind and, of each work item in it, only its title, its current
+   * session's state and its unread count.
+   */
+  pageList(): Array<{ kind: PageGroup['kind']; title: string; conversations: Array<{ workItemId: number; title: string; state: SessionView['state'] | null; unread: number }> }> {
+    return (this.deps.pageGroups?.() ?? []).map((group) => ({
+      kind: group.kind,
+      title: group.title,
+      conversations: this.entries(group.ids.map((id) => ({ workItemId: id, primary: false }))).map(({ workItemId, title, state, unread }) => ({ workItemId, title, state, unread })),
+    }));
+  }
+
+  /** Sends each page its list when it changed. */
+  #listChanged(): void {
+    const pages = [...this.#streams.keys()].filter((key) => this.deps.windows.isPage(key));
+
+    if (pages.length === 0) {
+      return;
+    }
+
+    const groups = this.pageList();
+    const text = JSON.stringify(groups);
+
+    for (const key of pages) {
+      if (this.#listShown.get(key) !== text) {
+        this.#listShown.set(key, text);
+        this.#send(key, 'list', { groups });
+      }
+    }
+  }
+
+  /** `page-focus {window, focused}`: a page's focus and visibility, for the voice (architecture.md § Web page); 403 for a key that is not a page's. */
+  pageFocus(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, focused } = body;
+
+    if (typeof window !== 'string' || typeof focused !== 'boolean') {
+      return { status: 400, body: { error: 'Expected {window, focused}.' } };
+    }
+
+    if (!this.deps.windows.isPage(window)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    this.deps.pageFocused?.(window, focused);
+    return { status: 200, body: { focused } };
+  }
+
+  /**
+   * An artifact's file, or a file an artifact uses, of the page's selected conversation (architecture.md § Web page), resolved by real path
+   * inside its artifact folder; null outside it or with no selection.
+   */
+  artifactFile(key: string, name: string): ReturnType<typeof artifactFile> {
+    const scope = this.deps.windows.scope(key);
+
+    return scope?.cwd == null || scope.workItemId === null ? null : artifactFile(artifactsDir(scope.cwd, scope.workItemId), name);
+  }
+
+  /** The `@` picker's files under the selected conversation's folder (architecture.md § Web page); null with no selection. */
+  async files(key: string, query: string): Promise<PageFile[] | null> {
+    const scope = this.deps.windows.scope(key);
+
+    return scope?.cwd == null ? null : findFiles(scope.cwd, query);
+  }
 
   /** Sends each window its dropdown when an entry changed while its selection did not: a conversation added or done, a title, state or count. */
   conversationsChanged(): void {
@@ -457,6 +529,8 @@ export class ConversationService {
         this.#send(key, 'conversations', { conversations });
       }
     }
+
+    this.#listChanged();
   }
 
   /** Sends an event to a window's conversation streams, as the voice's `voice`, `progress` and `settings`. */
@@ -534,6 +608,7 @@ export class ConversationService {
           this.#streams.delete(key);
           this.#statusShown.delete(key);
           this.#conversationsShown.delete(key);
+          this.#listShown.delete(key);
 
           for (const shown of [...this.#unreadShown.keys()].filter((one) => one.startsWith(`${key} `))) {
             this.#unreadShown.delete(shown);
@@ -548,11 +623,13 @@ export class ConversationService {
   /** The window's scope, its work item's sessions, and its current session's newest items. */
   hello(key: string): Record<string, unknown> {
     const scope = this.deps.windows.scope(key);
+    // A page learns its key, which its commands name, and its list from its own stream (architecture.md § Web page).
+    const pageHello = this.deps.windows.isPage(key) ? this.#pageHello(key) : {};
 
     if (scope === null) {
       this.#statusShown.delete(key);
       this.#conversationsShown.delete(key);
-      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, unread: 0, artifactsDir: null, artifacts: [], ...this.#voiceHello(key) };
+      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, unread: 0, artifactsDir: null, artifacts: [], ...this.#voiceHello(key), ...pageHello };
     }
 
     const current = scope.sessionId === null ? null : this.deps.store.session(scope.sessionId);
@@ -586,7 +663,15 @@ export class ConversationService {
       artifactsDir: folder?.dir ?? null,
       artifacts: folder?.list() ?? [],
       ...this.#voiceHello(key),
+      ...pageHello,
     };
+  }
+
+  #pageHello(key: string): Record<string, unknown> {
+    const groups = this.pageList();
+
+    this.#listShown.set(key, JSON.stringify(groups));
+    return { key, groups };
   }
 
   /** The voice state and the setting the view reads, which a `hello` carries with voice (architecture.md § Voice). */

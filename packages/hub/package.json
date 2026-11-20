@@ -35,7 +35,8 @@
     "@switchboard/github": "*",
     "@switchboard/holder": "*",
     "@switchboard/voice": "*",
-    "@switchboard/zoho": "*"
+    "@switchboard/zoho": "*",
+    "@switchboard/web": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
