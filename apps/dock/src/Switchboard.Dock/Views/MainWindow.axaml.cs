@@ -279,6 +279,38 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Puts the keyboard focus back on the row with <paramref name="key"/> when a view moved it to another group or band, whose new controls do
+    /// not have the focus; a row the view kept keeps it on its own.
+    /// </summary>
+    /// <summary>The key of the row that holds the keyboard focus, on the row itself or on one of its buttons or pills, or null.</summary>
+    internal string? FocusedRow() =>
+        (FocusManager?.GetFocusedElement() as Visual)?.GetSelfAndVisualAncestors().OfType<Border>().FirstOrDefault((border) => border.Classes.Contains("row"))?.DataContext is RowViewModel row ? row.Key : null;
+
+    internal void RestoreFocus(string? key)
+    {
+        if (key is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (FocusManager?.GetFocusedElement() is Visual focused && TopLevel.GetTopLevel(focused) == this)
+            {
+                return;
+            }
+
+            var stops = ListStops();
+
+            // A row moved into a closed group or band, or out of the search's matches, leaves the focus on its group's heading.
+            var target = stops.FirstOrDefault((border) => border.DataContext is RowViewModel row && row.Key == key)
+                ?? stops.FirstOrDefault((border) => border.Classes.Contains("group") && border.DataContext is GroupViewModel group && group.AllRows.Any((row) => row.Key == key));
+
+            target?.Focus(NavigationMethod.Directional);
+        }, DispatcherPriority.Loaded);
+    }
+
     /// <summary>Runs the click VS Code forwarded, as the operator's click on the row would.</summary>
     internal async void ClickForwarded(string key)
     {
@@ -299,7 +331,10 @@ public sealed partial class MainWindow : Window
     {
         if (stream is { Connection: Connection.Connected, View: { } view })
         {
+            var focused = FocusedRow();
+
             model.Show(view);
+            RestoreFocus(focused);
         }
         else if (stream is not null)
         {
@@ -961,6 +996,11 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
             CancelDrag();
         }
+        else if (FocusManager?.GetFocusedElement() is Border { IsEffectivelyEnabled: true } focused && ListKey(focused, e) is { } run)
+        {
+            e.Handled = true;
+            await run();
+        }
         else if (e.Key == Key.F8 && (e.KeyModifiers & ~KeyModifiers.Shift) == KeyModifiers.None && model.IsLive)
         {
             e.Handled = true;
@@ -971,6 +1011,97 @@ public sealed partial class MainWindow : Window
         {
             e.Handled = true;
             await Act(move.Action);
+        }
+    }
+
+    /// <summary>
+    /// The list's keys (PRD R71) on the focused row, group or band heading, or link pill: Up and Down move the focus to the previous or next row
+    /// or heading, which selects a row; Enter runs a row's click, or Enter and Space open or close a heading or open a pill's link; the Menu key
+    /// and Shift+F10 open a row's menu at its corner. Null for any other key, which the focused control handles.
+    /// </summary>
+    Func<Task>? ListKey(Border focused, KeyEventArgs e)
+    {
+        var plain = e.KeyModifiers == KeyModifiers.None;
+
+        if (focused.Classes.Contains("pill"))
+        {
+            return plain && e.Key is Key.Enter or Key.Space && focused.Tag is string { Length: > 0 } url ? () =>
+            {
+                model.Status = actions.OpenUrl(url);
+                return Task.CompletedTask;
+            } : null;
+        }
+
+        if (!focused.Classes.Contains("row") && !focused.Classes.Contains("group") && !focused.Classes.Contains("band"))
+        {
+            return null;
+        }
+
+        if (plain && e.Key is Key.Up or Key.Down)
+        {
+            return () =>
+            {
+                MoveFocus(focused, e.Key == Key.Down);
+                return Task.CompletedTask;
+            };
+        }
+
+        if (focused.DataContext is RowViewModel row)
+        {
+            if (plain && e.Key == Key.Enter)
+            {
+                return () => Open(row);
+            }
+
+            if ((plain && e.Key == Key.Apps) || (e.KeyModifiers == KeyModifiers.Shift && e.Key == Key.F10))
+            {
+                return () =>
+                {
+                    model.Selected = row.Key;
+                    RowMenu(MenuOf(row.Row), model.GripOnLeft, focused.TranslatePoint(default, this) ?? default).Open(this);
+                    return Task.CompletedTask;
+                };
+            }
+
+            return null;
+        }
+
+        if (plain && e.Key is Key.Enter or Key.Space)
+        {
+            return () =>
+            {
+                (focused.DataContext as GroupViewModel)?.Toggle();
+                (focused.DataContext as BandViewModel)?.Toggle();
+                return Task.CompletedTask;
+            };
+        }
+
+        return null;
+    }
+
+    /// <summary>The list's rows and group and band headings that show, in list order.</summary>
+    List<Border> ListStops() =>
+        GroupList.GetVisualDescendants().OfType<Border>().Where((border) => (border.Classes.Contains("row") || border.Classes.Contains("group") || border.Classes.Contains("band")) && border.IsEffectivelyVisible).ToList();
+
+    /// <summary>Moves the keyboard focus to the row or heading after or before <paramref name="from"/>, staying put at either end.</summary>
+    void MoveFocus(Border from, bool down)
+    {
+        var stops = ListStops();
+        var at = stops.IndexOf(from) + (down ? 1 : -1);
+
+        if (at >= 0 && at < stops.Count)
+        {
+            stops[at].Focus(NavigationMethod.Directional);
+        }
+    }
+
+    /// <summary>A row the keyboard reaches is selected, so its buttons show and Tab reaches them, and is scrolled into view.</summary>
+    void OnRowGotFocus(object? sender, FocusChangedEventArgs e)
+    {
+        if (e.NavigationMethod != NavigationMethod.Pointer && sender is Border { DataContext: RowViewModel row } border && e.Source == border)
+        {
+            model.Selected = row.Key;
+            border.BringIntoView();
         }
     }
 

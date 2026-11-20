@@ -320,6 +320,19 @@
       <Setter Property="TextElement.Foreground" Value="{DynamicResource DockWarning}" />
       <Setter Property="Cursor" Value="Arrow" />
     </Style>
+    <!-- Rows, group and band headings and link pills take the keyboard focus; a keyboard focus shows as a ring in the focus blue. After the row
+         rules, so it wins over the first row's missing rule. -->
+    <Style Selector="Border.row:focus-visible, Border.group:focus-visible, Border.band:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockFocus}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="ContentPresenter:nth-child(1) &gt; Border.row:focus-visible">
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.pill:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource DockFocus}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
     <Style Selector="TextBlock.spin">
       <Setter Property="RenderTransform" Value="rotate(0deg)" />
       <Style.Animations>
@@ -431,7 +444,7 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="views:GroupViewModel">
                 <StackPanel IsVisible="{Binding IsShown}" Margin="0,0,0,8">
-                  <Border Classes="group" PointerPressed="OnHeaderPressed" Tapped="OnGroupTapped" DoubleTapped="OnGroupTapped">
+                  <Border Classes="group" Focusable="True" PointerPressed="OnHeaderPressed" Tapped="OnGroupTapped" DoubleTapped="OnGroupTapped">
                     <Grid ColumnDefinitions="Auto,Auto,*,Auto">
                       <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
                       <TextBlock Grid.Column="1" Classes="icon group-icon" Text="{Binding Glyph}" Margin="0,0,6,0" />
@@ -448,7 +461,7 @@
                         <DataTemplate x:DataType="views:BandViewModel">
                           <StackPanel>
                             <!-- Done's date bands (PRD R27); other groups have one band with no heading. -->
-                            <Border Classes="band" IsVisible="{Binding HasTitle}" PointerPressed="OnHeaderPressed" Tapped="OnBandTapped" DoubleTapped="OnBandTapped">
+                            <Border Classes="band" Focusable="True" IsVisible="{Binding HasTitle}" PointerPressed="OnHeaderPressed" Tapped="OnBandTapped" DoubleTapped="OnBandTapped">
                               <Grid ColumnDefinitions="Auto,Auto,Auto,*">
                                 <TextBlock Classes="icon" Text="{Binding Chevron}" Margin="0,0,4,0" />
                                 <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -459,7 +472,7 @@
                     <ItemsControl Classes="band-rows" Classes.done="{Binding InDone}" ItemsSource="{Binding Shown}" IsVisible="{Binding ShowsRows}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="views:RowViewModel">
-                          <Border Classes="row" Classes.selected="{Binding IsSelected}" Classes.dim="{Binding IsDim}" Tapped="OnRowTapped" ContextRequested="OnRowContext">
+                          <Border Classes="row" Focusable="True" Classes.selected="{Binding IsSelected}" Classes.dim="{Binding IsDim}" Tapped="OnRowTapped" ContextRequested="OnRowContext" GotFocus="OnRowGotFocus">
                             <Grid ColumnDefinitions="3,*">
                               <Border Classes="stripe" Classes.warning="{Binding StripeWarning}" Classes.error="{Binding StripeError}" Classes.turn="{Binding StripeTurn}" />
                               <!-- The row's buttons sit beside lines 2 and 3, so they never shorten the title or hide the time. -->
@@ -486,7 +499,7 @@
                                     <Run Text="{Binding Namespace}" Foreground="{DynamicResource DockMuted}" /><Run Text="{Binding Name}" />
                                   </TextBlock>
                                   <Border Classes="pill" Classes.github="{Binding IsGithub}" Classes.zoho="{Binding IsZoho}" Classes.forum="{Binding IsForum}"
-                                          Tag="{Binding Url}" ToolTip.Tip="{Binding Url}" Tapped="OnPillTapped">
+                                          Tag="{Binding Url}" ToolTip.Tip="{Binding Url}" Tapped="OnPillTapped" Focusable="{Binding Url, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                                     <TextBlock Text="{Binding Ticket}" />
                                   </Border>
                                   <ItemsControl ItemsSource="{Binding Links}">
@@ -498,7 +511,7 @@
                                     <ItemsControl.ItemTemplate>
                                       <DataTemplate x:DataType="hub:DockLink">
                                         <Border Classes="pill" Classes.pr="{Binding IsPullRequest}" Classes.github="{Binding IsIssue}" Classes.mentioned="{Binding Mentioned}" Tag="{Binding Url}"
-                                                ToolTip.Tip="{Binding Tooltip}" Tapped="OnPillTapped">
+                                                ToolTip.Tip="{Binding Tooltip}" Tapped="OnPillTapped" Focusable="True">
                                           <StackPanel Orientation="Horizontal" Spacing="3">
                                             <TextBlock Classes="icon pill-icon" Text="{Binding Glyph}" IsVisible="{Binding HasGlyph}" />
                                             <TextBlock Text="{Binding Text}" />
