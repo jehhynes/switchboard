@@ -545,7 +545,7 @@ describe('SessionConversation', () => {
     const [, reply] = items() as Array<{ id: string; opening: string }>;
 
     expect(reply).toMatchObject({ opening: 'Fixed.', source: 'transcript' });
-    expect(store.latestStatus('s1')).toEqual({ id: `st-${reply!.id}`, sessionId: 's1', workItemId: 7, replyId: reply!.id, at: T0 + 100, markdown: '## Where it stands\n- All green.' });
+    expect(store.latestStatus('s1')).toEqual({ id: `st-${reply!.id}`, sessionId: 's1', workItemId: 7, replyId: reply!.id, at: T0 + 100, markdown: '## Where it stands\n- All green.', seenAt: null });
     expect(changes.filter((change) => change.type === 'status')).toHaveLength(1);
 
     // A reply that is only a status has no text, and as a rewrite replaces nothing.

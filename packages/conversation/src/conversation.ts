@@ -24,7 +24,7 @@ export interface ConversationStore {
   /** A session's typed messages that were pasted and that no transcript line has confirmed yet. */
   typedAwaitingTranscript(sessionId: string): ConversationMessage[];
   placeLast(id: string): void;
-  addReply(reply: Omit<ConversationReply, 'ord'>): void;
+  addReply(reply: Omit<ConversationReply, 'ord' | 'seenAt'>): void;
   updateReply(id: string, patch: Partial<Omit<ConversationReply, 'id' | 'sessionId' | 'workItemId' | 'ord'>>): void;
   reply(id: string): ConversationReply | null;
   /** Newest first; with `before`, only those before that reply in the conversation's order. */
@@ -34,7 +34,7 @@ export interface ConversationStore {
   checkpoint(sessionId: string): TranscriptCheckpoint | null;
   setCheckpoint(checkpoint: TranscriptCheckpoint): void;
   /** Adds a status, or updates the one with its ID in place. */
-  setStatus(status: ConversationStatus): void;
+  setStatus(status: Omit<ConversationStatus, 'seenAt'>): void;
   status(id: string): ConversationStatus | null;
 }
 
@@ -490,7 +490,7 @@ export class SessionConversation {
       return existing.id;
     }
 
-    const reply: Omit<ConversationReply, 'ord'> = {
+    const reply: Omit<ConversationReply, 'ord' | 'seenAt'> = {
       id: `r-${this.deps.newId()}`,
       sessionId: this.sessionId,
       workItemId: this.workItemId,

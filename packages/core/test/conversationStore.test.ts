@@ -13,7 +13,7 @@ afterEach(() => {
   }
 });
 
-const reply = (id: string, at: number, patch: Partial<ConversationReply> = {}): Omit<ConversationReply, 'ord'> => ({
+const reply = (id: string, at: number, patch: Partial<ConversationReply> = {}): Omit<ConversationReply, 'ord' | 'seenAt'> => ({
   id, sessionId: 's1', workItemId: 1, at, kind: 'reply', answers: null, opening: id, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: null, ...patch,
 });
 
@@ -30,7 +30,7 @@ describe('conversation store', () => {
     // A later line of the same reply updates its status and keeps its place.
     status('a', 's1', 'a, longer');
 
-    expect(store.status('a')).toEqual({ id: 'a', sessionId: 's1', workItemId: 1, replyId: 'r-a', at: 10, markdown: 'a, longer' });
+    expect(store.status('a')).toEqual({ id: 'a', sessionId: 's1', workItemId: 1, replyId: 'r-a', at: 10, markdown: 'a, longer', seenAt: null });
     expect(store.latestStatus('s1')?.id).toBe('c');
     expect(store.statuses('s1', null, 2)).toMatchObject({ statuses: [{ id: 'c' }, { id: 'b' }], more: true });
     expect(store.statuses('s1', 'b', 5)).toMatchObject({ statuses: [{ id: 'a' }], more: false });
@@ -58,9 +58,9 @@ describe('conversation store', () => {
 
     expect(store.conversation('s1', null, 10)).toEqual({
       items: [
-        { type: 'reply', ...reply('r1', 30), ord: 1 },
+        { type: 'reply', ...reply('r1', 30), ord: 1, seenAt: null },
         { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null, ord: 2 },
-        { type: 'reply', ...reply('r2', 20, { withdrawn: true }), ord: 3 },
+        { type: 'reply', ...reply('r2', 20, { withdrawn: true }), ord: 3, seenAt: null },
       ],
       more: false,
     });
@@ -203,6 +203,75 @@ describe('conversation store', () => {
     expect(store.settleOpenMessages('Switchboard restarted.').map((one) => [one.id, one.delivery])).toEqual([['m1', 'uncertain'], ['m5', 'uncertain'], ['m6', 'uncertain']]);
     expect(store.message('m1')).toMatchObject({ delivery: 'uncertain', error: 'Switchboard restarted.', provisional: false });
     expect(store.settleOpenMessages('again')).toEqual([]);
+  });
+
+  it('counts unread replies the timeline shows and the latest status, and marks each seen on its own', () => {
+    const store = Store.open(':memory:');
+
+    store.addReply(reply('r1', 1));
+    store.addReply(reply('r2', 2));
+    // Neither a withdrawn screen copy, a rewritten reply, a status-only reply, a note nor another session's reply counts.
+    store.addReply(reply('gone', 3, { source: 'screen', withdrawn: true }));
+    store.addReply(reply('old', 4, { rewrittenBy: 'new' }));
+    store.addReply(reply('new', 5, { replaces: 'old' }));
+    store.addReply(reply('only-status', 6, { opening: '' }));
+    store.addReply(reply('note', 7, { kind: 'note' }));
+    store.addReply(reply('aside', 8, { kind: 'aside' }));
+    store.addReply(reply('theirs', 9, { sessionId: 's2' }));
+    expect(store.unreadCount('s1')).toBe(4);
+    expect(store.reply('r1')?.seenAt).toBeNull();
+
+    // Only the latest status counts; one that a newer status replaced no longer shows.
+    store.setStatus({ id: 'st1', sessionId: 's1', workItemId: 1, replyId: 'r1', at: 1, markdown: 'one' });
+    store.setStatus({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, markdown: 'two' });
+    expect(store.unreadCount('s1')).toBe(5);
+
+    // Marking one leaves the earlier ones unread, and a second mark keeps the first time.
+    expect(store.markSeen('s1', ['r2', 'st2', 'r2'], 50)).toEqual({ replies: ['r2'], statuses: ['st2'] });
+    expect(store.reply('r2')?.seenAt).toBe(50);
+    expect(store.reply('r1')?.seenAt).toBeNull();
+    expect(store.status('st2')?.seenAt).toBe(50);
+    expect(store.unreadCount('s1')).toBe(3);
+    expect(store.markSeen('s1', ['r2'], 60)).toEqual({ replies: [], statuses: [] });
+    expect(store.reply('r2')?.seenAt).toBe(50);
+    // A later line of the seen status keeps it seen.
+    store.setStatus({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, markdown: 'two, longer' });
+    expect(store.status('st2')).toMatchObject({ markdown: 'two, longer', seenAt: 50 });
+
+    // Another session's item, or an unknown ID, marks nothing.
+    expect(store.markSeen('s1', ['r1', 'theirs'], 70)).toBeNull();
+    expect(store.markSeen('s1', ['r1', 'nope'], 70)).toBeNull();
+    expect(store.reply('r1')?.seenAt).toBeNull();
+    expect(store.markSeen('s1', [], 70)).toEqual({ replies: [], statuses: [] });
+    expect(store.unreadCount('nobody')).toBe(0);
+  });
+
+  it('counts the replies and statuses from before unread was kept as seen', () => {
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'store-seen-'));
+
+    dirs.push(dir);
+
+    const path = join(dir, 'switchboard.db');
+    const db = new DatabaseSync(path);
+
+    // The schema as it was before seenAt, with a reply and a status.
+    db.exec('BEGIN');
+    for (const migration of MIGRATIONS.slice(0, -1)) {
+      db.exec(migration);
+    }
+    db.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    db.exec("INSERT INTO replies (ord, id, sessionId, workItemId, at, kind, answers, opening, source, replaces, rewrittenBy, withdrawn, transcriptUuid) VALUES (1, 'r1', 's1', 1, 10, 'reply', NULL, 'Old.', 'transcript', NULL, NULL, 0, NULL)");
+    db.exec("INSERT INTO statuses (id, sessionId, workItemId, replyId, at, markdown) VALUES ('st1', 's1', 1, 'r1', 10, 'Old.')");
+    db.exec('COMMIT');
+    db.close();
+
+    const store = Store.open(path);
+
+    expect(store.reply('r1')?.seenAt).toBe(10);
+    expect(store.status('st1')?.seenAt).toBe(10);
+    expect(store.unreadCount('s1')).toBe(0);
+    store.close();
   });
 
   it('keeps window bindings by file', () => {

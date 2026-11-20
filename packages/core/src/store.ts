@@ -413,6 +413,11 @@ export const MIGRATIONS = [
     markdown TEXT NOT NULL
   );
   CREATE INDEX statusesBySession ON statuses (sessionId, seq);`,
+  // When the operator saw each reply and status (architecture.md § Unread); those from before count as seen.
+  `ALTER TABLE replies ADD COLUMN seenAt INTEGER;
+  ALTER TABLE statuses ADD COLUMN seenAt INTEGER;
+  UPDATE replies SET seenAt = at;
+  UPDATE statuses SET seenAt = at;`,
 ];
 
 /**
@@ -421,6 +426,8 @@ export const MIGRATIONS = [
  */
 const MESSAGE_PLACE = '(provisional = 1 AND withdrawn = 0)';
 const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
+/** A reply that counts as unread (`countsUnread`) and was not seen. */
+const UNREAD_REPLY = "seenAt IS NULL AND withdrawn = 0 AND rewrittenBy IS NULL AND kind <> 'note' AND opening <> ''";
 
 const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode']);
 /** Stored as comma-separated text. */
@@ -1355,7 +1362,7 @@ export class Store {
   }
 
   /** Adds a reply to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
-  addReply(reply: Omit<ConversationReply, 'ord'>): void {
+  addReply(reply: Omit<ConversationReply, 'ord' | 'seenAt'>): void {
     this.#db
       .prepare('INSERT INTO replies (ord, id, sessionId, workItemId, at, kind, answers, opening, source, replaces, rewrittenBy, withdrawn, transcriptUuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(this.#nextOrd(), reply.id, reply.sessionId, reply.workItemId, reply.at, reply.kind, reply.answers, reply.opening, reply.source, reply.replaces, reply.rewrittenBy, reply.withdrawn ? 1 : 0, reply.transcriptUuid);
@@ -1447,7 +1454,7 @@ export class Store {
    * Adds a session's status, or updates the one with its ID in place, keeping its place; keeps the newest `CONVERSATION_RETENTION` statuses of
    * the session.
    */
-  setStatus(status: ConversationStatus): void {
+  setStatus(status: Omit<ConversationStatus, 'seenAt'>): void {
     this.#db
       .prepare('INSERT INTO statuses (id, sessionId, workItemId, replyId, at, markdown) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET at = excluded.at, markdown = excluded.markdown')
       .run(status.id, status.sessionId, status.workItemId, status.replyId, status.at, status.markdown);
@@ -1479,6 +1486,46 @@ export class Store {
     const rows = this.#statusRows('SELECT * FROM statuses WHERE sessionId = ? AND seq < ? ORDER BY seq DESC LIMIT ?', sessionId, cursor, limit + 1);
 
     return { statuses: rows.slice(0, limit), more: rows.length > limit };
+  }
+
+  /**
+   * How many items of a session are unread (architecture.md § Unread): its replies that `countsUnread` and that were not seen, and its latest
+   * status when it was not seen.
+   */
+  unreadCount(sessionId: string): number {
+    const row = this.#db
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM replies WHERE sessionId = :id AND ${UNREAD_REPLY}) + COALESCE((SELECT seenAt IS NULL FROM statuses WHERE sessionId = :id ORDER BY seq DESC LIMIT 1), 0) AS unread`,
+      )
+      .get({ id: sessionId }) as { unread: number };
+
+    return row.unread;
+  }
+
+  /**
+   * Marks a session's replies and statuses seen at `at`, each on its own; one already seen keeps its time. Returns the IDs it marked, or null, marking
+   * nothing, when an ID is not a reply or status of the session.
+   */
+  markSeen(sessionId: string, ids: readonly string[], at: number): { replies: string[]; statuses: string[] } | null {
+    const wanted = [...new Set(ids)];
+    const known = (table: 'replies' | 'statuses'): Array<{ id: string; seenAt: number | null }> =>
+      wanted.length === 0 ? [] : (this.#db.prepare(`SELECT id, seenAt FROM ${table} WHERE sessionId = ? AND id IN (${wanted.map(() => '?').join(', ')})`).all(sessionId, ...wanted) as Array<{ id: string; seenAt: number | null }>);
+    const replies = known('replies');
+    const statuses = known('statuses');
+
+    if (replies.length + statuses.length !== wanted.length) {
+      return null;
+    }
+
+    const marked = { replies: replies.filter((one) => one.seenAt === null).map((one) => one.id), statuses: statuses.filter((one) => one.seenAt === null).map((one) => one.id) };
+
+    for (const [table, list] of [['replies', marked.replies], ['statuses', marked.statuses]] as const) {
+      for (const id of list) {
+        this.#db.prepare(`UPDATE ${table} SET seenAt = ? WHERE id = ? AND seenAt IS NULL`).run(at, id);
+      }
+    }
+
+    return marked;
   }
 
   #statusRows(sql: string, ...params: SQLInputValue[]): ConversationStatus[] {

@@ -61,6 +61,16 @@ export interface ConversationReply {
   transcriptUuid: string | null;
   /** Its place in the conversation, which the store sets. */
   ord: number;
+  /** When the operator saw it in the Conversation view (architecture.md § Unread); null while unread. */
+  seenAt: number | null;
+}
+
+/**
+ * Whether a reply counts as unread until it is seen (architecture.md § Unread): one the timeline shows on its own, so not a withdrawn screen copy,
+ * a reply a rewrite replaced, a reply that is only a status or a note Switchboard added.
+ */
+export function countsUnread(reply: Pick<ConversationReply, 'kind' | 'opening' | 'withdrawn' | 'rewrittenBy'>): boolean {
+  return !reply.withdrawn && reply.rewrittenBy === null && reply.kind !== 'note' && reply.opening !== '';
 }
 
 /**
@@ -85,6 +95,8 @@ export interface ConversationStatus {
   replyId: string;
   at: number;
   markdown: string;
+  /** When the operator saw it in the status row (architecture.md § Unread); null while unread. Only the latest status counts as unread. */
+  seenAt: number | null;
 }
 
 /** Where the transcript reader of a session stopped, so a hub restart resumes there. */
