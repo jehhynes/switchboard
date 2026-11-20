@@ -118,6 +118,11 @@ export interface VoiceControlDeps {
 interface Offered {
   gen: number;
   sessionId: string;
+  /** The voice it was offered in, for the log. */
+  voice: string;
+  /** How far it played, from its last progress or speech report, for the log. */
+  atMs: number | null;
+  said: number | null;
 }
 
 const FINAL: ReadonlySet<SpokenState> = new Set(['played', 'interrupted', 'skipped', 'stopped-moved', 'failed']);
@@ -864,7 +869,9 @@ export class VoiceControl {
     // The persona is read at each offer, so a pin changes the voice from the next spoken reply.
     const persona = this.deps.persona?.(reply.sessionId) ?? null;
 
-    this.#offered.set(reply.id, { gen, sessionId: reply.sessionId });
+    const voice = persona?.voice ?? settings.voice;
+
+    this.#offered.set(reply.id, { gen, sessionId: reply.sessionId, voice, atMs: null, said: null });
     this.#client!.send({
       type: 'speak',
       gen,
@@ -873,7 +880,7 @@ export class VoiceControl {
       text: spokenText(reply.speak!),
       tone: reply.tone ?? null,
       turn,
-      voice: persona?.voice ?? settings.voice,
+      voice,
       style: persona?.style ?? settings.style,
       personality: persona === null || persona.personality === '' ? null : persona.personality,
     });
@@ -900,9 +907,13 @@ export class VoiceControl {
         if (moved) {
           for (const [replyId, offered] of [...this.#offered]) {
             if (offered.gen !== message.gen) {
+              const atMs = offered.atMs ?? this.deps.store.reply(replyId)?.spokenAtMs ?? null;
+              const said = offered.said ?? this.deps.store.reply(replyId)?.saidChars ?? null;
+
               this.#offered.delete(replyId);
               this.#playing.delete(offered.sessionId);
-              this.#setState(replyId, 'stopped-moved', this.deps.store.reply(replyId)?.spokenAtMs ?? null, this.deps.store.reply(replyId)?.saidChars ?? null);
+              this.#logSpeech(replyId, offered, 'stopped: voice moved', atMs, said);
+              this.#setState(replyId, 'stopped-moved', atMs, said);
             }
           }
         }
@@ -946,6 +957,9 @@ export class VoiceControl {
         if (message.state === 'playing') {
           this.#playing.set(message.sessionId, message.replyId);
         } else if (FINAL.has(message.state)) {
+          const offered = this.#offered.get(message.replyId)!;
+
+          this.#logSpeech(message.replyId, offered, message.state, message.atMs ?? offered.atMs, message.said ?? offered.said);
           this.#offered.delete(message.replyId);
 
           if (this.#playing.get(message.sessionId) === message.replyId) {
@@ -965,9 +979,14 @@ export class VoiceControl {
         return;
       }
       case 'progress': {
-        if (message.gen !== this.#target.gen || !this.#offered.has(message.replyId)) {
+        const offered = this.#offered.get(message.replyId);
+
+        if (message.gen !== this.#target.gen || offered === undefined) {
           return;
         }
+
+        offered.atMs = message.atMs;
+        offered.said = message.chars;
 
         for (const key of this.deps.windows.keys()) {
           if (this.deps.windows.scope(key)?.sessionId === message.sessionId) {
@@ -1092,7 +1111,8 @@ export class VoiceControl {
 
   /** The process is gone, so nothing it was speaking will play. */
   #lost(): void {
-    for (const replyId of [...this.#offered.keys()]) {
+    for (const [replyId, offered] of this.#offered) {
+      this.#logSpeech(replyId, offered, 'failed: the voice process stopped', offered.atMs, offered.said);
       this.#setState(replyId, 'failed', null, null);
     }
 
@@ -1104,6 +1124,11 @@ export class VoiceControl {
     this.#mic = 'off';
     this.#target = { gen: this.#target.gen, sessionId: null };
     this.viewsChanged();
+  }
+
+  /** What became of an offered reply's speech, in the hub log beside the voice process's own line in voice.log. */
+  #logSpeech(replyId: string, offered: Offered, outcome: string, atMs: number | null, said: number | null): void {
+    this.deps.log(`voice: reply ${replyId} of session ${offered.sessionId} ${outcome}, voice ${offered.voice}, ${atMs ?? 0} ms played, ${said ?? 0} characters said`);
   }
 
   #timer(run: () => void, ms: number): unknown {

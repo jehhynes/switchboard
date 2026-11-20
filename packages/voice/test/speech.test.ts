@@ -11,15 +11,45 @@ function setup() {
   const output = new FakeOutput();
   const reports: VoiceMessage[] = [];
   const failures: Array<string | null> = [];
-  const speech = new Speech({ tts, output, device: () => 'Speakers', report: (message) => reports.push(message), failed: (error) => failures.push(error), now: clock.now, log: () => undefined, every: clock.every });
+  const logs: string[] = [];
+  const speech = new Speech({ tts, output, device: () => 'Speakers', report: (message) => reports.push(message), failed: (error) => failures.push(error), now: clock.now, log: (line) => logs.push(line), every: clock.every });
   const states = (): string[] => reports.filter((one) => one.type === 'speech').map((one) => `${(one as { replyId: string }).replyId} ${(one as { state: string }).state}`);
 
-  return { clock, tts, output, reports, failures, speech, states };
+  return { clock, tts, output, reports, failures, speech, states, logs };
 }
 
 const item = (replyId: string, turn: string | null = 'm1', text = 'Fixed the badge.'): SpeechItem => ({ gen: 3, replyId, sessionId: 's1', text, tone: null, turn });
 
 describe('Speech', () => {
+  it('logs each reply whose speech ended: played, cut off, skipped, failed or stopped by a move, with its session, voice and duration', async () => {
+    const { clock, tts, speech, logs } = setup();
+    const said = (line: string): boolean => line.startsWith('speech: ');
+
+    speech.speak({ ...item('r1', 'm1', 'x'.repeat(100)), as: { voice: 'marin', style: 'none', personality: null } });
+    await settle();
+    tts.requests[0]!.audio(48_000);
+    tts.requests[0]!.finish();
+    await settle();
+    speech.speak(item('r2', 'm2', 'x'.repeat(10)));
+    speech.speak(item('r3', 'm2'));
+    await settle();
+    tts.requests[1]!.audio(48_000);
+    await settle();
+    clock.advance(400);
+    speech.stop();
+    speech.speak(item('r4', 'm3'));
+    speech.speak(item('r5', 'm3'));
+    await settle();
+    speech.halt();
+    expect(logs.filter(said)).toEqual([
+      'speech: reply r1 of session s1 played, voice marin, 1000 ms played, 100 of 100 characters',
+      'speech: reply r2 of session s1 interrupted, voice default, 400 ms played, 4 of 10 characters',
+      'speech: reply r3 of session s1 skipped, voice default, 0 ms played, 0 of 16 characters',
+      'speech: reply r4 of session s1 stopped: voice moved, voice default, 0 ms played, 0 of 16 characters',
+      'speech: reply r5 of session s1 stopped: voice moved, voice default, 0 ms played, 0 of 16 characters',
+    ]);
+  });
+
   it('plays a reply as its audio comes, reports its position every 150 ms, and reports it played once drained', async () => {
     const { clock, tts, output, reports, failures, speech, states } = setup();
 

@@ -90,7 +90,7 @@ export class Speech {
     if (at !== -1) {
       const [item] = this.#queue.splice(at, 1);
 
-      this.#report(item!, 'skipped', null, null);
+      this.#unplayed(item!, 'skipped');
     }
   }
 
@@ -105,7 +105,7 @@ export class Speech {
     }
 
     for (const item of this.#queue.splice(0)) {
-      this.#report(item, 'skipped', null, null);
+      this.#unplayed(item, 'skipped');
     }
 
     this.#next();
@@ -119,7 +119,10 @@ export class Speech {
       this.#end(current, null);
     }
 
-    this.#queue.splice(0);
+    for (const item of this.#queue.splice(0)) {
+      this.#logEnd(item, 'stopped-moved', 0, 0);
+    }
+
     this.#next();
   }
 
@@ -148,7 +151,7 @@ export class Speech {
 
     // A reply of a newer turn is waiting: this one's moment has passed.
     if (this.#queue.some((later) => later.turn !== item.turn)) {
-      this.#report(item, 'skipped', null, null);
+      this.#unplayed(item, 'skipped');
       this.#next();
       return;
     }
@@ -259,8 +262,11 @@ export class Speech {
     this.deps.report({ type: 'progress', gen: current.item.gen, replyId: current.item.replyId, sessionId: current.item.sessionId, chars: said, atMs });
   }
 
-  /** Ends the current reply, stopping its speech and playback; reports `state` unless it is null. */
+  /** Ends the current reply, stopping its speech and playback; reports `state` unless it is null, which a move's stop is. */
   #end(current: Current, state: SpeechState | null, atMs: number | null = null, said: number | null = null): void {
+    const at = this.#position(current);
+
+    this.#logEnd(current.item, state ?? 'stopped-moved', atMs ?? at.atMs, said ?? at.said);
     current.ended = true;
     current.ticker?.stop();
     current.speaking?.cancel();
@@ -273,6 +279,19 @@ export class Speech {
     if (state !== null) {
       this.#report(current.item, state, atMs, said);
     }
+  }
+
+  /** A waiting reply dropped before it played. */
+  #unplayed(item: SpeechItem, state: SpeechState): void {
+    this.#logEnd(item, state, 0, 0);
+    this.#report(item, state, null, null);
+  }
+
+  /** One line in the voice log for each reply whose speech ended, so the operator can see what was spoken, cut off, skipped or failed. */
+  #logEnd(item: SpeechItem, state: SpeechState | 'stopped-moved', playedMs: number, said: number): void {
+    const outcome = state === 'stopped-moved' ? 'stopped: voice moved' : state;
+
+    this.deps.log(`speech: reply ${item.replyId} of session ${item.sessionId} ${outcome}, voice ${item.as?.voice ?? 'default'}, ${playedMs} ms played, ${said} of ${item.text.length} characters`);
   }
 
   #report(item: SpeechItem, state: SpeechState, atMs: number | null, said: number | null): void {

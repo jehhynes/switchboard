@@ -58,6 +58,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
   const seen: string[] = [];
   let focused: string | null = null;
   let dockChanges = 0;
+  const logs: string[] = [];
   const control = new VoiceControl({
     link: {
       find: async () => {
@@ -88,7 +89,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     notify: (key, type, payload) => void notified.push({ key, type, payload }),
     dockChanged: () => void dockChanges++,
     now: () => t,
-    log: () => undefined,
+    log: (line) => void logs.push(line),
     setTimer: (run, ms) => {
       const timer = { run, at: t + ms, cleared: false };
 
@@ -130,6 +131,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     advance,
     settle,
     stops: () => stops,
+    logs,
     dockChanges: () => dockChanges,
     focus: (key: string | null) => (focused = key),
     setFound: (one: FakeConnection | { error: string } | null) => (found = one),
@@ -392,6 +394,39 @@ describe('VoiceControl', () => {
     connections[0]!.receive({ type: 'speech', gen: 2, replyId: 'r2', sessionId: 's1', state: 'played', atMs: 500, said: 10 });
     expect(seen).toEqual(['r2']);
     expect(changedReplies).toEqual(['r1 queued', 'r1 playing', 'r1 played', 'r2 queued', 'r2 played', 'r2 played']);
+  });
+
+  it("logs what became of each offered reply's speech, with its session, voice and duration", async () => {
+    const { control, connections, windows, reply, settle, logs } = setup();
+    const speech = (): string[] => logs.filter((line) => line.startsWith('voice: reply '));
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
+    control.replyChanged(reply('r1'));
+    control.replyChanged(reply('r2'));
+    control.replyChanged(reply('r3'));
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r1', sessionId: 's1', state: 'playing', atMs: 0, said: 0 });
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r1', sessionId: 's1', state: 'played', atMs: 1200, said: 5 });
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r2', sessionId: 's1', state: 'playing', atMs: 0, said: 0 });
+    connections[0]!.receive({ type: 'progress', gen: 1, replyId: 'r2', sessionId: 's1', chars: 3, atMs: 450 });
+    // A cancel reports no position; the last progress says how far it played.
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r2', sessionId: 's1', state: 'skipped', atMs: null, said: null });
+    connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r3', sessionId: 's1', state: 'playing', atMs: 0, said: 0 });
+    connections[0]!.receive({ type: 'progress', gen: 1, replyId: 'r3', sessionId: 's1', chars: 2, atMs: 300 });
+    // A report of another generation is no outcome.
+    connections[0]!.receive({ type: 'speech', gen: 0, replyId: 'r3', sessionId: 's1', state: 'failed', atMs: null, said: null });
+    connections[0]!.receive({ type: 'active', gen: 2, sessionId: null, reason: 'focus' });
+    connections[0]!.receive({ type: 'active', gen: 3, sessionId: 's1', reason: 'focus' });
+    control.replyChanged(reply('r4'));
+    connections[0]!.drop();
+    expect(speech()).toEqual([
+      'voice: reply r1 of session s1 played, voice marin, 1200 ms played, 5 characters said',
+      'voice: reply r2 of session s1 skipped, voice marin, 450 ms played, 3 characters said',
+      'voice: reply r3 of session s1 stopped: voice moved, voice marin, 300 ms played, 2 characters said',
+      'voice: reply r4 of session s1 failed: the voice process stopped, voice marin, 0 ms played, 0 characters said',
+    ]);
   });
 
   it('marks what was offered stopped by a move, cancels a rewritten reply, and cancels all on Speak replies off', async () => {
