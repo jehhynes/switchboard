@@ -16,10 +16,11 @@ public sealed class ControlsTests
     readonly FakeHub hub = new();
     readonly FakeActions actions = new();
     readonly FakeConfigHub config = new();
+    readonly FakeTime time = new();
 
     (MainWindow Window, DockViewModel Model) Open(DockView? view = null)
     {
-        var model = new DockViewModel(new DockSettings(), (_) => { });
+        var model = new DockViewModel(new DockSettings(), (_) => { }, time);
         var window = new MainWindow(model, null, hub, actions, docked: false, config) { Height = 1200 };
         window.PickProvider = (_, preferred) => Task.FromResult<string?>(preferred);
 
@@ -427,12 +428,10 @@ public sealed class ControlsTests
         var (window, model) = Open();
 
         Click(window.FindControl<Button>("SearchButton")!);
-        window.FindControl<TextBox>("SearchBox")!.Text = "branch 108";
-        Dispatcher.UIThread.RunJobs();
+        Search(window, "branch 108");
         Assert.Empty(VisibleTitles(window));
 
-        window.FindControl<TextBox>("SearchBox")!.Text = "gh 10";
-        Dispatcher.UIThread.RunJobs();
+        Search(window, "gh 10");
         Assert.Equal(["Issue <7>", "Issue <10>", "Issue <8>", "Issue <9>", "Issue <4>"], VisibleTitles(window));
 
         model.Filter = "107-fix";
@@ -458,8 +457,7 @@ public sealed class ControlsTests
 
         Click(window.FindControl<Button>("SearchButton")!);
         Assert.True(box.IsVisible);
-        box.Text = "107-fix";
-        Dispatcher.UIThread.RunJobs();
+        Search(window, "107-fix");
         Assert.Equal(["Issue <7>"], VisibleTitles(window));
 
         Click(window.FindControl<Button>("SearchButton")!);
@@ -475,8 +473,7 @@ public sealed class ControlsTests
         var box = window.FindControl<TextBox>("SearchBox")!;
 
         Click(window.FindControl<Button>("SearchButton")!);
-        box.Text = "107-fix";
-        Dispatcher.UIThread.RunJobs();
+        Search(window, "107-fix");
         Assert.Equal(["Issue <7>"], VisibleTitles(window));
 
         Click(window.FindControl<Button>("ClearSearchButton")!);
@@ -485,6 +482,224 @@ public sealed class ControlsTests
         Assert.Equal(8, VisibleTitles(window).Count);
         Assert.Equal("", box.Text);
         Assert.True(box.IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void Search_UnderThreeCharacters_ShowsEveryRow()
+    {
+        var (window, _) = Open();
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        Search(window, "Is");
+
+        Assert.Equal(8, VisibleTitles(window).Count);
+        Assert.False(window.FindControl<StackPanel>("SearchEnd")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void Search_ThreeCharacters_WaitsForTheLastKeyBeforeSearching()
+    {
+        var (window, model) = Open();
+        var box = window.FindControl<TextBox>("SearchBox")!;
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        box.Text = "107-f";
+        time.Advance(DockViewModel.SearchDelay - TimeSpan.FromMilliseconds(1));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(8, VisibleTitles(window).Count);
+
+        // Another key restarts the wait, so the earlier text is never searched.
+        box.Text = "107-fix";
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("", model.Filter);
+        Assert.Equal(8, VisibleTitles(window).Count);
+
+        time.Advance(DockViewModel.SearchDelay);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("107-fix", model.Filter);
+        Assert.Equal(["Issue <7>"], VisibleTitles(window));
+    }
+
+    [AvaloniaTheory]
+    [InlineData("107")]
+    [InlineData("gh 107")]
+    [InlineData("#107")]
+    [InlineData("PR #19002")]
+    [InlineData("19002")]
+    public void Search_TicketOrLinkKey_SearchesAtOnce(string key)
+    {
+        var (window, _) = Open();
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        window.FindControl<TextBox>("SearchBox")!.Text = key;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["Issue <7>"], VisibleTitles(window));
+    }
+
+    static DockRow Older(string key, string title, string band) => Fixtures.Row("item:12") with { Key = key, Title = title, Search = $"{title} · Done", Band = band, Window = null };
+
+    [AvaloniaFact]
+    public void SearchRange_LastMonth_AsksTheHubAndShowsItsRowsUnderTheirMonth()
+    {
+        var (window, model) = Open();
+        var range = window.FindControl<Button>("SearchRangeButton")!;
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        Assert.True(range.IsVisible);
+        Assert.Equal("Last 2 weeks", model.RangeText);
+        Search(window, "rotate key");
+        Assert.Empty(hub.Searches);
+        Assert.True(window.FindControl<Button>("SearchFurtherButton")!.IsVisible);
+
+        Click(range);
+        range.ContextMenu!.Items.OfType<MenuItem>().Single((item) => (string)item.Header! == "Last month").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal([("rotate key", time.Now.AddMonths(-1).ToUnixTimeMilliseconds())], hub.Searches);
+        Assert.Equal("Searching…", model.SearchNote);
+        Assert.False(model.NoMatches);
+        hub.AnswerSearch(new SearchReply(null, [Older("item:70", "Rotate the signing key", "October 2026")]));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["Rotate the signing key"], VisibleTitles(window));
+        Assert.Equal(["October 2026"], model.Groups.Single((group) => group.Key == "done").Bands.Select((band) => band.Title));
+        Assert.Null(model.SearchNote);
+        // Not yet all time, so the end of the results still offers more.
+        Assert.True(window.FindControl<Button>("SearchFurtherButton")!.IsVisible);
+
+        // A new view keeps the rows while their search lasts; ending the search drops them and the range.
+        model.Show(Fixtures.View with { Notes = ["changed"] });
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["Rotate the signing key"], VisibleTitles(window));
+        model.SearchOpen = false;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Last 2 weeks", model.RangeText);
+        Assert.DoesNotContain("Rotate the signing key", model.Groups.SelectMany((group) => group.AllRows).Select((row) => row.Title));
+    }
+
+    [AvaloniaFact]
+    public void SearchRange_AnswerAfterANewerSearch_IsDropped()
+    {
+        var (window, model) = Open();
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        model.Range = 3;
+        Search(window, "rotate");
+        Search(window, "rotate key");
+
+        Assert.Equal([("rotate", 0L), ("rotate key", 0L)], hub.Searches);
+        hub.AnswerSearch(new SearchReply(null, [Older("item:70", "Rotate stale", "October 2026")]));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(VisibleTitles(window));
+        Assert.Equal("Searching…", model.SearchNote);
+
+        hub.AnswerSearch(new SearchReply(null, [Older("item:71", "Rotate the signing key", "October 2026")], More: true));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["Rotate the signing key"], VisibleTitles(window));
+        Assert.Equal("Showing the newest 1 matches from before the last 2 weeks. Add words to narrow the search.", model.SearchNote);
+        Assert.False(window.FindControl<Button>("SearchFurtherButton")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void Search_NothingFound_SaysWhereAndOffersFurtherBackAndAllTime()
+    {
+        var (window, model) = Open();
+        var noMatch = window.FindControl<TextBlock>("NoMatchLine")!;
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        Search(window, "zzznothing");
+
+        Assert.True(noMatch.IsVisible);
+        Assert.Equal("No matches for “zzznothing” in the last 2 weeks.", noMatch.Text);
+        Assert.True(window.FindControl<Button>("SearchFurtherButton")!.IsVisible);
+        Click(window.FindControl<Button>("SearchAllTimeButton")!);
+
+        Assert.Equal("All time", model.RangeText);
+        Assert.Equal([("zzznothing", 0L)], hub.Searches);
+        Assert.False(noMatch.IsVisible);
+        hub.AnswerSearch(new SearchReply(null, []));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("No matches for “zzznothing”.", noMatch.Text);
+        Assert.True(noMatch.IsVisible);
+        Assert.False(window.FindControl<Button>("SearchFurtherButton")!.IsVisible);
+        Assert.False(window.FindControl<Button>("SearchAllTimeButton")!.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void Search_HubRefuses_SaysSoAndKeepsTheListedMatches()
+    {
+        var (window, model) = Open();
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        Search(window, "107-fix");
+        Click(window.FindControl<Button>("SearchFurtherButton")!);
+        hub.AnswerSearch(new SearchReply("Switchboard is not running.", []));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("Last month", model.RangeText);
+        Assert.Equal(["Issue <7>"], VisibleTitles(window));
+        Assert.Equal("The hub could not search further back: Switchboard is not running.", window.FindControl<TextBlock>("SearchNoteLine")!.Text);
+    }
+
+    [AvaloniaFact]
+    public void Search_KeyRetypedWhileAnEarlierWaitFired_WaitsItsOwnDelay()
+    {
+        var (window, model) = Open();
+        var box = window.FindControl<TextBox>("SearchBox")!;
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        box.Text = "107-fix";
+        // The wait ends and queues its search, but other keys come before the dock runs it.
+        time.Advance(DockViewModel.SearchDelay);
+        box.Text = "107-fi";
+        box.Text = "107-fix";
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("", model.Filter);
+        time.Advance(DockViewModel.SearchDelay);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("107-fix", model.Filter);
+    }
+
+    [AvaloniaFact]
+    public void Search_NumberOfNoListedRow_SearchesTheHubAtOnce()
+    {
+        var (window, model) = Open();
+
+        Click(window.FindControl<Button>("SearchButton")!);
+        model.Range = 3;
+        window.FindControl<TextBox>("SearchBox")!.Text = "#42";
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("42", model.Filter);
+        Assert.Equal([("42", 0L)], hub.Searches);
+    }
+
+    [Fact]
+    public void Sync_NarrowWidenOrReorder_ListsTheItemsInOrderKeepingThoseItCan()
+    {
+        var items = Enumerable.Range(0, 300).Select((index) => new object()).ToList();
+        var target = new System.Collections.ObjectModel.ObservableCollection<object>(items);
+        var first = items[0];
+        var events = 0;
+
+        target.CollectionChanged += (_, _) => events++;
+        Lists.Sync(target, [items[0], items[2], items[3]]);
+        Assert.Equal([items[0], items[2], items[3]], target);
+        Assert.Same(first, target[0]);
+
+        events = 0;
+        Lists.Sync(target, [items[0], items[1], items[2], items[3]]);
+        Assert.Equal(1, events);
+        Assert.Equal(items.Take(4), target);
+
+        Lists.Sync(target, items);
+        Assert.Equal(items, target);
+
+        Lists.Sync(target, [items[3], items[1]]);
+        Assert.Equal([items[3], items[1]], target);
     }
 
     [AvaloniaFact]
@@ -567,6 +782,14 @@ public sealed class ControlsTests
         Dispatcher.UIThread.RunJobs();
         Assert.DoesNotContain("Finished thing", VisibleTitles(window));
         Assert.False(model.Groups.Single((group) => group.Key == "done").IsOpen);
+    }
+
+    /// <summary>Types into the search box and waits out the search delay.</summary>
+    void Search(Window window, string text)
+    {
+        window.FindControl<TextBox>("SearchBox")!.Text = text;
+        time.Advance(DockViewModel.SearchDelay);
+        Dispatcher.UIThread.RunJobs();
     }
 
     static Window DialogOf(Window window) => Assert.Single(window.OwnedWindows);

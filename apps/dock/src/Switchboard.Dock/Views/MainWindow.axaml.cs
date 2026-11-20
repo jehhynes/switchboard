@@ -111,6 +111,7 @@ public sealed partial class MainWindow : Window
         this.actions = actions;
         this.docked = docked;
         DataContext = model;
+        model.SearchHub ??= hub.Search;
         InitializeComponent();
         ApplyTheme();
         model.PropertyChanged += (_, e) =>
@@ -1890,6 +1891,24 @@ public sealed partial class MainWindow : Window
         SearchBox.Focus();
     }
 
+    void OnSearchFurtherClicked(object? sender, RoutedEventArgs e) => model.SearchFurther();
+
+    void OnSearchAllTimeClicked(object? sender, RoutedEventArgs e) => model.Range = DockViewModel.Ranges.Count - 1;
+
+    /// <summary>The searched time range's menu, below its button (PRD R63).</summary>
+    void OnSearchRangeClicked(object? sender, RoutedEventArgs e)
+    {
+        var items = DockViewModel.Ranges.Select((label, index) => (Control)Checked(label, model.Range == index, () =>
+        {
+            model.Range = index;
+            return Task.CompletedTask;
+        })).ToList();
+        var menu = RowMenu(items, model.GripOnLeft, new Point(0, SearchRangeButton.Bounds.Height));
+
+        SearchRangeButton.ContextMenu = menu;
+        menu.Open(SearchRangeButton);
+    }
+
     void OnSearchClicked(object? sender, RoutedEventArgs e)
     {
         model.SearchOpen = !model.SearchOpen;
@@ -1998,6 +2017,8 @@ public sealed partial class MainWindow : Window
     sealed class NoHub : IHub
     {
         public Task<string?> Act(JsonObject action) => Task.FromResult<string?>(null);
+
+        public Task<SearchReply> Search(string text, long since) => Task.FromResult(new SearchReply(null, []));
 
         public Task<WindowReply> Window(JsonObject command, string? workspace) => Task.FromResult(new WindowReply(null, null));
 

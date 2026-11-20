@@ -12,7 +12,16 @@ public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGro
     static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 
     public static DockView Parse(string json) => JsonSerializer.Deserialize<DockView>(json, Options) ?? throw new JsonException("The dock view is null.");
+
+    /// <summary>Reads the hub's answer to a search before the Done list (PRD R63).</summary>
+    public static SearchReply ParseSearch(JsonNode body) => body.Deserialize<SearchReply>(Options) ?? throw new JsonException("The search answer is null.");
 }
+
+/// <summary>
+/// The hub's answer to a search before the Done list (PRD R63): the refusal or failure, or the matching Done rows, newest first, and whether more
+/// matched than it sent.
+/// </summary>
+public sealed record SearchReply(string? Error, IReadOnlyList<DockRow> Rows, bool More = false);
 
 /// <summary>
 /// The VS Code windows connected to the hub: each item window's workspace file, the one in front, and how many windows there are, item windows or not.

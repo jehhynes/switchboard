@@ -293,6 +293,20 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
 
     public Task<string?> Focus(string? sessionId, long at) => Post("/dock/focus", new JsonObject { ["sessionId"] = sessionId, ["at"] = at });
 
+    public async Task<SearchReply> Search(string text, long since)
+    {
+        var (error, body) = await PostFor("/dock/search", new JsonObject { ["text"] = text, ["since"] = since });
+
+        try
+        {
+            return error is null && body is not null ? DockView.ParseSearch(body) with { Error = null } : new SearchReply(error ?? "The hub answered no rows.", []);
+        }
+        catch (JsonException parse)
+        {
+            return new SearchReply($"The hub's answer could not be read: {parse.Message}", []);
+        }
+    }
+
     public Task<string?> StopHeld(string session) => Post("/holder/stop", new JsonObject { ["id"] = session });
 
     public async Task<WindowReply> Open(string sessionId, string cwd, string workspace)

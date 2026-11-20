@@ -49,6 +49,12 @@ public interface IHub
     /// </summary>
     Task<string?> Focus(string? sessionId, long at);
 
+    /// <summary>
+    /// The Done rows of work done from &lt;paramref name="since"/&gt;, in epoch milliseconds, up to the start of the Done list, whose search text holds every
+    /// word of &lt;paramref name="text"/&gt; (PRD R63).
+    /// </summary>
+    Task<SearchReply> Search(string text, long since);
+
     /// <summary>Stops a held session by its Switchboard session ID (PRD R94).</summary>
     Task<string?> StopHeld(string session);
 

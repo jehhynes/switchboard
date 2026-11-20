@@ -373,13 +373,21 @@
             <TextBlock Classes="icon" Text="&#xEA76;" />
           </Button>
         </Grid>
-        <TextBox Name="SearchBox" Text="{Binding Filter}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,8" FontSize="13">
+        <TextBox Name="SearchBox" Text="{Binding Query}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,8" FontSize="13">
           <TextBox.InnerRightContent>
             <Button Name="ClearSearchButton" Classes="header" Click="OnClearSearchClicked" ToolTip.Tip="Clear search" AutomationProperties.Name="Clear search">
               <TextBlock Classes="icon" Text="&#xEA76;" />
             </Button>
           </TextBox.InnerRightContent>
         </TextBox>
+        <!-- The searched time range (PRD R63), always shown with the search box. -->
+        <Button Name="SearchRangeButton" Classes="link" IsVisible="{Binding SearchOpen}" Click="OnSearchRangeClicked" Margin="8,0,8,8" HorizontalAlignment="Left"
+                ToolTip.Tip="Choose how far back to search" AutomationProperties.Name="{Binding RangeText, StringFormat='Search range: {0}'}">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="{Binding RangeText}" VerticalAlignment="Center" />
+            <TextBlock Classes="icon" Text="&#xEAB4;" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
       </StackPanel>
       <Border Name="StatusToast" DockPanel.Dock="Bottom" Classes="toast" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}">
         <Grid ColumnDefinitions="*,Auto">
@@ -544,6 +552,15 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          <!-- The end of a search's results (PRD R63): what was not found, and how to search further back. -->
+          <StackPanel Name="SearchEnd" IsVisible="{Binding ShowsSearchEnd}" Margin="8,0,8,8" Spacing="4">
+            <TextBlock Name="NoMatchLine" Text="{Binding NoMatchText}" IsVisible="{Binding NoMatches}" TextWrapping="Wrap" Classes="muted" />
+            <TextBlock Name="SearchNoteLine" Text="{Binding SearchNote}" IsVisible="{Binding SearchNote, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" Classes="muted" />
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Button Name="SearchFurtherButton" Classes="link" Content="Search further back" IsVisible="{Binding CanSearchFurther}" Click="OnSearchFurtherClicked" />
+              <Button Name="SearchAllTimeButton" Classes="link" Content="All time" IsVisible="{Binding OffersAllTime}" Click="OnSearchAllTimeClicked" />
+            </StackPanel>
+          </StackPanel>
         </StackPanel>
         <Canvas Name="DropLayer" IsHitTestVisible="False">
           <Border Name="DropLine" IsVisible="False" />

@@ -25,8 +25,18 @@ public abstract class Observable : INotifyPropertyChanged
 }
 
 /// <summary>The dock's list: the hub's groups and rows, the groups the operator opened or closed, the selected row, and the status line.</summary>
-public sealed class DockViewModel(DockSettings settings, Action<DockSettings> save) : Observable
+public sealed class DockViewModel(DockSettings settings, Action<DockSettings> save, TimeProvider? time = null) : Observable
 {
+    /// <summary>How long the search box waits after a key before it searches, and the fewest characters it searches for (PRD R63).</summary>
+    public static readonly TimeSpan SearchDelay = TimeSpan.FromMilliseconds(250);
+
+    public const int SearchMinimum = 3;
+
+    /// <summary>The searched time ranges, from the Done list's two weeks to all time (PRD R63).</summary>
+    public static readonly IReadOnlyList<string> Ranges = ["Last 2 weeks", "Last month", "Last 3 months", "All time"];
+
+    readonly TimeProvider clock = time ?? TimeProvider.System;
+
     /// <summary>Blocked on you, Ready for review, In progress and Unstarted start open; Done and Snoozed start closed (PRD R27).</summary>
     // Done's older date bands start closed each run, so the recent ones show first (PRD R27).
     static readonly HashSet<string> OpenByDefault = ["blocked", "review", "progress", "unstarted", "done:Today", "done:Yesterday"];
@@ -42,6 +52,16 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     string? connection = "Connecting to Switchboard…";
     string? selected;
     string filter = "";
+    string query = "";
+    ITimer? searchTimer;
+    int typedRun;
+    int range;
+    int searchRun;
+    bool searchPending;
+    string? searchError;
+    IReadOnlyList<DockRow> older = [];
+    bool olderMore;
+    DockGroup? doneGroup;
     bool searchOpen;
     string? adhocRepo;
     JsonNode? groupContent;
@@ -151,23 +171,235 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         private set => Set(ref heldNote, value);
     }
 
-    /// <summary>The search box's text: only rows whose search text holds every word show, and every group with one shows open (PRD R71).</summary>
+    /// <summary>
+    /// The search applied: only rows whose search text holds every word show, and every group with one shows open (PRD R63). Setting it applies it
+    /// at once and puts it in the search box.
+    /// </summary>
     public string Filter
     {
         get => filter;
         set
         {
-            Set(ref filter, value ?? "");
-
-            foreach (var group in Groups)
-            {
-                group.Filter(filter);
-            }
-
+            CancelTimer();
+            Set(ref query, value ?? "", nameof(Query));
+            Apply(value ?? "");
         }
     }
 
-    /// <summary>Whether the search box shows; hiding it clears the search.</summary>
+    /// <summary>
+    /// The search box's text. It searches 250 ms after the last key once it has 3 characters, and at once when it is a listed row's ticket or link
+    /// key, such as &lt;c&gt;18941&lt;/c&gt;, &lt;c&gt;gh 18941&lt;/c&gt; or &lt;c&gt;PR #19002&lt;/c&gt;; shorter text shows every row (PRD R63).
+    /// </summary>
+    public string Query
+    {
+        get => query;
+        set
+        {
+            Set(ref query, value ?? "");
+            CancelTimer();
+            var text = query.Trim();
+
+            if (text == "")
+            {
+                Apply("");
+            }
+            // A key's number, so `#107` finds the row whose key is `gh 107`.
+            else if (IsKey(text))
+            {
+                Apply(BareKey(text));
+            }
+            else if (text.Length < SearchMinimum)
+            {
+                Apply("");
+            }
+            else
+            {
+                var typed = query;
+                var run = typedRun;
+
+                searchTimer = clock.CreateTimer((_) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    // A key since, even one that typed the same text again, waits its own delay.
+                    if (run == typedRun)
+                    {
+                        Apply(typed);
+                    }
+                }), null, SearchDelay, Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    void CancelTimer()
+    {
+        typedRun++;
+        searchTimer?.Dispose();
+        searchTimer = null;
+    }
+
+    /// <summary>Whether the text is a number, or a listed row's ticket key or a link's key, with or without &lt;c&gt;gh&lt;/c&gt;, &lt;c&gt;PR&lt;/c&gt; or &lt;c&gt;#&lt;/c&gt;.</summary>
+    bool IsKey(string text)
+    {
+        var bare = BareKey(text);
+
+        // A ticket or pull request number, listed or not, such as older work's (PRD R63).
+        if (bare != "" && bare.All(char.IsAsciiDigit))
+        {
+            return true;
+        }
+
+        return Groups.SelectMany((group) => group.AllRows).Any((row) => BareKey(row.Ticket) == bare || row.Links.Any((link) => BareKey(link.Label) == bare));
+    }
+
+    static string BareKey(string key)
+    {
+        var bare = key.Trim().ToLowerInvariant();
+
+        foreach (var prefix in new[] { "gh ", "pr " })
+        {
+            if (bare.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                bare = bare[prefix.Length..].TrimStart();
+            }
+        }
+
+        return bare.TrimStart('#');
+    }
+
+    void Apply(string text)
+    {
+        if (filter == text)
+        {
+            return;
+        }
+
+        Set(ref filter, text, nameof(Filter));
+        DropOlder();
+
+        foreach (var group in Groups)
+        {
+            group.Filter(filter);
+        }
+
+        SearchOlder();
+        SearchChanged();
+    }
+
+    /// <summary>The searched time range, an index of &lt;see cref="Ranges"/&gt;: 0 is the Done list's two weeks, which the dock has; the others ask the hub.</summary>
+    public int Range
+    {
+        get => range;
+        set
+        {
+            var next = Math.Clamp(value, 0, Ranges.Count - 1);
+
+            if (range == next)
+            {
+                return;
+            }
+
+            range = next;
+            Changed(nameof(Range));
+            Changed(nameof(RangeText));
+            DropOlder();
+            SearchOlder();
+            SearchChanged();
+        }
+    }
+
+    public string RangeText => Ranges[range];
+
+    /// <summary>Widens the searched range by one step (PRD R63).</summary>
+    public void SearchFurther() => Range = range + 1;
+
+    /// <summary>Asks the hub for the Done rows before the Done list (PRD R63); a newer search or range drops an answer that comes after it.</summary>
+    public Func<string, long, Task<SearchReply>>? SearchHub { get; set; }
+
+    bool Filtering => filter.Trim() != "";
+
+    async void SearchOlder()
+    {
+        if (!Filtering || range == 0 || SearchHub is null)
+        {
+            return;
+        }
+
+        var run = ++searchRun;
+        var now = clock.GetLocalNow();
+        var since = range switch { 1 => now.AddMonths(-1).ToUnixTimeMilliseconds(), 2 => now.AddMonths(-3).ToUnixTimeMilliseconds(), _ => 0 };
+
+        searchPending = true;
+        SearchChanged();
+        var reply = await SearchHub(filter.Trim(), since);
+
+        if (run != searchRun)
+        {
+            return;
+        }
+
+        searchPending = false;
+        searchError = reply.Error is null ? null : $"The hub could not search further back: {reply.Error}";
+        older = reply.Rows;
+        olderMore = reply.More;
+        ShowDone();
+        SearchChanged();
+    }
+
+    /// <summary>Drops the rows of the last search before the Done list, and any answer still to come.</summary>
+    void DropOlder()
+    {
+        searchRun++;
+        searchPending = false;
+        searchError = null;
+        olderMore = false;
+
+        if (older.Count > 0)
+        {
+            older = [];
+            ShowDone();
+        }
+    }
+
+    /// <summary>Shows Done's rows from the view and, after them, those the hub found before the Done list.</summary>
+    void ShowDone()
+    {
+        if (doneGroup is not null && Groups.FirstOrDefault((group) => group.Key == "done") is { } done)
+        {
+            var listed = doneGroup.Rows.Select((row) => row.Key).ToHashSet();
+
+            done.Show(doneGroup with { Rows = [.. doneGroup.Rows, .. older.Where((row) => !listed.Contains(row.Key))] }, selected, filter);
+        }
+    }
+
+    /// <summary>Whether the search box shows the end of its results: what was searched and how to search further back.</summary>
+    public bool ShowsSearchEnd => searchOpen && Filtering;
+
+    public bool IsSearchPending => searchPending;
+
+    /// <summary>Nothing matched in the range searched, once the hub answered.</summary>
+    public bool NoMatches => Filtering && !searchPending && Groups.All((group) => group.Rows.Count == 0);
+
+    public string NoMatchText => range == Ranges.Count - 1 ? $"No matches for “{filter.Trim()}”." : $"No matches for “{filter.Trim()}” in the {Ranges[range].ToLowerInvariant()}.";
+
+    /// <summary>Search further back: at the end of the results whenever the range is not all time, however many rows match.</summary>
+    public bool CanSearchFurther => Filtering && range < Ranges.Count - 1;
+
+    /// <summary>All time, beside Search further back when nothing matched and one step back is not already all time.</summary>
+    public bool OffersAllTime => NoMatches && range < Ranges.Count - 2;
+
+    public string? SearchNote => searchError ?? (searchPending ? "Searching…" : olderMore ? $"Showing the newest {older.Count} matches from before the last 2 weeks. Add words to narrow the search." : null);
+
+    void SearchChanged()
+    {
+        Changed(nameof(ShowsSearchEnd));
+        Changed(nameof(IsSearchPending));
+        Changed(nameof(NoMatches));
+        Changed(nameof(NoMatchText));
+        Changed(nameof(CanSearchFurther));
+        Changed(nameof(OffersAllTime));
+        Changed(nameof(SearchNote));
+    }
+
+    /// <summary>Whether the search box shows; hiding it clears the search and its range.</summary>
     public bool SearchOpen
     {
         get => searchOpen;
@@ -177,8 +409,11 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
             if (!value)
             {
+                Range = 0;
                 Filter = "";
             }
+
+            SearchChanged();
         }
     }
 
@@ -324,6 +559,8 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
         Groups.Clear();
 
+        doneGroup = view.Groups.FirstOrDefault((group) => group.Key == "done");
+
         foreach (var group in view.Groups)
         {
             var model = kept.GetValueOrDefault(group.Key) ?? new GroupViewModel(group.Key, IsOpen(group.Key), Toggled, IsBandOpen, BandToggled);
@@ -331,6 +568,14 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
             model.Show(group, selected, filter);
             Groups.Add(model);
         }
+
+        // The rows the hub found before the Done list stay while their search does.
+        if (older.Count > 0)
+        {
+            ShowDone();
+        }
+
+        SearchChanged();
 
     }
 

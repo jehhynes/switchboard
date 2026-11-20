@@ -253,6 +253,25 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task Search_HubAnswersRefusesOrSendsJunk_ReturnsTheRowsOrWhy()
+    {
+        var row = System.Text.Json.Nodes.JsonNode.Parse(Fixtures.DockJson)!["groups"]![0]!["rows"]![0]!.ToJsonString();
+        var answer = $"{{\"rows\":[{row}],\"more\":true}}";
+        using var server = new LoopbackHub((_, body, stream) => body.Contains("\"nope\"", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 400, "{\"error\":\"Expected {text, since}.\"}") : LoopbackHub.Reply(stream, 200, answer));
+        using var client = new HubClient(HomeFor(server));
+
+        var found = await client.Search("rotate key", 1700000000000);
+
+        Assert.Null(found.Error);
+        Assert.True(found.More);
+        Assert.Equal(Fixtures.View.Groups[0].Rows[0].Key, Assert.Single(found.Rows).Key);
+        Assert.Contains("POST /dock/search HTTP/1.1 {\"text\":\"rotate key\",\"since\":1700000000000}", server.Requests);
+        Assert.Equal(new SearchReply("Expected {text, since}.", []), await client.Search("nope", 0) with { Rows = [] });
+        answer = "{\"rows\":7}";
+        Assert.StartsWith("The hub's answer could not be read", (await client.Search("rotate", 0)).Error);
+    }
+
+    [Fact]
     public async Task Focus_SessionOrNone_PostsTheSessionIdOrNullAndReturnsTheRefusal()
     {
         using var server = new LoopbackHub((_, body, stream) => body.Contains("\"nope\"", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 404, "{\"error\":\"No session has that ID.\"}") : LoopbackHub.Reply(stream, 200, "{\"focus\":null}"));

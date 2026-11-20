@@ -138,6 +138,27 @@ sealed class FakeHub : IHub
         return Task.FromResult<string?>(null);
     }
 
+    /// <summary>Each search's text and start, in order.</summary>
+    public List<(string Text, long Since)> Searches { get; } = [];
+
+    /// <summary>The answers to searches, in order; a search with none waits until one is queued with &lt;see cref="AnswerSearch"/&gt;.</summary>
+    readonly Queue<TaskCompletionSource<SearchReply>> searchReplies = new();
+
+    public Task<SearchReply> Search(string text, long since)
+    {
+        Searches.Add((text, since));
+        var reply = new TaskCompletionSource<SearchReply>();
+
+        searchReplies.Enqueue(reply);
+
+        return reply.Task;
+    }
+
+    /// <summary>Answers the oldest search not answered yet.</summary>
+    public void AnswerSearch(SearchReply reply) => searchReplies.Dequeue().SetResult(reply);
+
+    public int PendingSearches => searchReplies.Count;
+
     public string? StopReply { get; set; }
 
     public Task<string?> StopHeld(string session)
@@ -604,5 +625,58 @@ sealed class FakeX11Edge : Switchboard.Dock.Platform.IX11Edge
 
     public void Dispose()
     {
+    }
+}
+
+/// <summary>A clock the test moves; its timers fire when &lt;see cref="Advance"/&gt; passes their time.</summary>
+sealed class FakeTime : TimeProvider
+{
+    readonly List<Timer> timers = [];
+
+    public DateTimeOffset Now { get; private set; } = new(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
+
+    public override DateTimeOffset GetUtcNow() => Now;
+
+    public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        var timer = new Timer(callback, state, Now + dueTime);
+
+        timers.Add(timer);
+
+        return timer;
+    }
+
+    public void Advance(TimeSpan by)
+    {
+        Now += by;
+
+        foreach (var timer in timers.Where((timer) => !timer.Disposed && timer.Due <= Now).ToList())
+        {
+            timer.Disposed = true;
+            timer.Callback(timer.State);
+        }
+    }
+
+    sealed class Timer(TimerCallback callback, object? state, DateTimeOffset due) : ITimer
+    {
+        public TimerCallback Callback => callback;
+
+        public object? State => state;
+
+        public DateTimeOffset Due { get; private set; } = due;
+
+        public bool Disposed { get; set; }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period) => throw new NotSupportedException();
+
+        public void Dispose() => Disposed = true;
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 }
