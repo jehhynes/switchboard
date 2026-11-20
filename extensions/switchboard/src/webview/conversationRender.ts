@@ -13,7 +13,11 @@ export type ConversationMessage =
   | { type: 'copy'; id: number; text: string }
   | { type: 'status-open' }
   | { type: 'statuses' }
-  | { type: 'artifact'; path: string };
+  | { type: 'artifact'; path: string }
+  | { type: 'seen'; ids: string[]; target: SeenTarget };
+
+/** The scope generation and session the page showed the items in; the hub marks them only there. */
+export type SeenTarget = Omit<SendTarget, 'launch'>;
 
 /** The session the page showed when Enter was pressed; the message goes there or is refused. */
 export interface SendTarget {
@@ -125,7 +129,11 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   // A reply read off the screen has no copy button until its transcript copy replaces it, as Claude Code's has none while it streams.
   const actions = item.provisional ? '' : `<div class="actions">${copyButton('copy-reply', 'Copy response')}</div>`;
 
-  return `<li class="reply ${item.kind}" data-id="${escape(item.id)}" tabindex="-1">${stamp(item.at)}<span class="dot"></span><div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
+  // An unread reply's dot takes the badge colour until the view has shown it in a focused window for a second (architecture.md § Unread).
+  const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
+  const dot = item.unread ? '<span class="dot" title="Unread"><span class="unread-label">Unread</span></span>' : '<span class="dot"></span>';
+
+  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}" tabindex="-1">${stamp(item.at)}${dot}<div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
 }
 
 /** An artifact as a one-line row where it was written: it opens, it does not expand (architecture.md § Conversation view). */
@@ -163,7 +171,9 @@ export function renderStatus(status: StatusView | null, open: ReadonlySet<string
       '<button class="icon" type="button" data-action="statuses" title="Earlier statuses" aria-label="Earlier statuses"><span class="codicon codicon-history" aria-hidden="true"></span></button></span>';
   const summary = `<summary title="${escape(title)}"><span class="codicon codicon-chevron-right status-chevron" aria-hidden="true"></span><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">Status</span><span class="status-dot" aria-hidden="true">·</span>${age}${mark}<span class="status-first">${escape(statusLine(status.markdown))}</span></summary>`;
 
-  return `<details class="status-row${status.fallback ? ' fallback' : ''}${fresh ? ' fresh' : ''}" data-fold="status" aria-label="Status"${open.has('status') ? ' open' : ''}>${summary}<div class="status-body body">${renderMarkdown(status.markdown)}</div></details>${actions === '' ? '' : `<div class="status-tools">${actions}</div>`}`;
+  const unread = status.unread && !status.fallback ? ` unread" data-unread="${escape(status.id)}` : '';
+
+  return `<details class="status-row${status.fallback ? ' fallback' : ''}${fresh ? ' fresh' : ''}${unread}" data-fold="status" aria-label="${unread === '' ? 'Status' : 'Status, unread'}"${open.has('status') ? ' open' : ''}>${summary}<div class="status-body body">${renderMarkdown(status.markdown)}</div></details>${actions === '' ? '' : `<div class="status-tools">${actions}</div>`}`;
 }
 
 /** The view's HTML: the header with the session's state, the status row, a note when the view cannot talk to the session, and the timeline. */

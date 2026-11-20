@@ -13,11 +13,11 @@ const SCOPE: WindowScope = { kind: 'item', workItemId: 2, key: 'k1', title: 'Fix
 const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'running', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null, rules: 'current' };
 
 // Each item's ord is its time unless a test gives it another.
-const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, ...patch });
+const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false, ...patch });
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent' | 'uncertain', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
-const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[] }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], ...patch });
+const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 /** A timeline entry's ID: an item's, or an artifact's path. */
 const idOf = (entry: Entry): string => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id);
 
@@ -39,7 +39,17 @@ describe('the conversation state', () => {
 
     const moved = applyEvent(applyEvent(state, { type: 'scope', scope: { ...SCOPE, workItemId: 3, sessionId: null } }), hello([], { scope: { ...SCOPE, workItemId: 3, sessionId: null }, sessions: [] }));
 
-    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [] });
+    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+  });
+
+  it("takes the unread count from the hello and each unread event, and drops it when the window's session moves", () => {
+    let state = applyEvent(EMPTY_CONVERSATION, hello([], { unread: 2 }));
+
+    expect(state.unread).toBe(2);
+    state = applyEvent(state, { type: 'unread', count: 3 });
+    expect(state.unread).toBe(3);
+    expect(applyEvent(state, { type: 'scope', scope: { ...SCOPE, title: 'Renamed' } }).unread).toBe(3);
+    expect(applyEvent(state, { type: 'scope', scope: { ...SCOPE, sessionId: 's9' } }).unread).toBe(0);
   });
 
   it("keeps items in the transcript's order, by ord and not by time, with a sent message and a screen copy after them until their lines are read", () => {
@@ -136,7 +146,7 @@ describe('the conversation state', () => {
 });
 
 describe('the Conversation view page', () => {
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 
   it('draws the header, messages as boxes, replies whole, asides, notes and rewrites, escaping every text', () => {
     const html = renderConversation(
@@ -365,8 +375,162 @@ describe('the Conversation view page', () => {
   });
 });
 
+describe('unread replies and statuses', () => {
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+  const status = (id: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown: 'Done.', fallback: false, unread: true, ...patch });
+
+  it("marks an unread reply's dot and the unread status row, and never a seen one, a note or the stage", () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state([reply('r1', T0, { unread: true }), reply('r2', T0 + 1), reply('n1', T0 + 2, { kind: 'note', unread: true })], { status: status('st1') }), new Set(), T0);
+    expect([...root.querySelectorAll<HTMLElement>('[data-unread]')].map((one) => one.dataset['unread'])).toEqual(['st1', 'r1']);
+    expect(root.querySelector('li[data-id="r1"]')?.className).toBe('reply reply unread');
+    expect(root.querySelector('li[data-id="r1"] .dot')?.getAttribute('title')).toBe('Unread');
+    expect(root.querySelector('li[data-id="r2"] .dot')?.textContent).toBe('');
+    expect(root.querySelector('details.status-row')?.getAttribute('aria-label')).toBe('Status, unread');
+
+    root.innerHTML = renderConversation(state([], { status: status('stage-2', { fallback: true, unread: true }) }), new Set(), T0);
+    expect(root.querySelector('[data-unread]')).toBeNull();
+    expect(root.querySelector('details.status-row')?.getAttribute('aria-label')).toBe('Status');
+  });
+
+  it('reports each unread item seen once it was visible in a focused window for a second, leaving those outside the timeline unread', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    // Where each unread item sits, against a timeline 100 px tall at the top of the view.
+    const boxes = new Map<string, [number, number]>([['r1', [-200, -140]], ['r2', [20, 80]]]);
+    const rect = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const box = boxes.get((this as HTMLElement).dataset['unread'] ?? '');
+
+      return this.classList.contains('scroll') ? rect(0, 100) : box === undefined ? rect(0, 0) : rect(...box);
+    });
+
+    const send = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
+    const seen = () => posted.filter((message) => message.type === 'seen');
+    const items = [reply('r1', T0, { unread: true }), reply('r2', T0 + 1, { unread: true })];
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    send({ type: 'state', state: state(items, { status: status('st1'), unread: 3 }) });
+
+    // Nothing counts while the window has no focus.
+    vi.advanceTimersByTime(5_000);
+    expect(seen()).toEqual([]);
+
+    send({ type: 'focus', focused: true });
+    vi.advanceTimersByTime(999);
+    expect(seen()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    // The pinned status row and the reply in view; the reply scrolled above the timeline stays unread.
+    expect(seen()).toEqual([{ type: 'seen', ids: ['st1', 'r2'], target: { scopeGen: 1, sessionId: 's2' } }]);
+
+    // A redraw before the hub's answer does not report them again.
+    send({ type: 'state', state: state(items, { status: status('st1'), unread: 3 }) });
+    vi.advanceTimersByTime(5_000);
+    expect(seen()).toHaveLength(1);
+
+    // Less than half of r1 in view does not count; scrolled half in, it counts after a second in view, restarted when the focus leaves.
+    boxes.set('r1', [-35, 25]);
+    root.querySelector('.scroll')!.dispatchEvent(new Event('scroll'));
+    vi.advanceTimersByTime(2_000);
+    expect(seen()).toHaveLength(1);
+    boxes.set('r1', [-30, 30]);
+    root.querySelector('.scroll')!.dispatchEvent(new Event('scroll'));
+    vi.advanceTimersByTime(600);
+    send({ type: 'focus', focused: false });
+    vi.advanceTimersByTime(2_000);
+    expect(seen()).toHaveLength(1);
+    send({ type: 'focus', focused: true });
+    vi.advanceTimersByTime(1_000);
+    expect(seen().at(-1)).toEqual({ type: 'seen', ids: ['r1'], target: { scopeGen: 1, sessionId: 's2' } });
+
+    // The window's next session starts over: its own unread items are reported for it.
+    send({ type: 'state', state: state([reply('r2', T0 + 1, { sessionId: 's5', unread: true })], { scope: { ...SCOPE, sessionId: 's5', scopeGen: 2 }, session: { ...SESSION, id: 's5' } }) });
+    vi.advanceTimersByTime(1_000);
+    expect(seen().at(-1)).toEqual({ type: 'seen', ids: ['r2'], target: { scopeGen: 2, sessionId: 's5' } });
+    expect(seen()).toHaveLength(3);
+
+    // One the hub did not take is reported again after another second in view.
+    send({ type: 'seen-failed', ids: ['r2'] });
+    vi.advanceTimersByTime(999);
+    expect(seen()).toHaveLength(3);
+    vi.advanceTimersByTime(1);
+    expect(seen().at(-1)).toEqual({ type: 'seen', ids: ['r2'], target: { scopeGen: 2, sessionId: 's5' } });
+
+    // So is one reported while the stream was down, once it is back.
+    const s5 = (connected: boolean) => state([reply('r2', T0 + 1, { sessionId: 's5', unread: true })], { scope: { ...SCOPE, sessionId: 's5', scopeGen: 2 }, session: { ...SESSION, id: 's5' }, connected });
+
+    send({ type: 'state', state: s5(false) });
+    vi.advanceTimersByTime(2_000);
+    expect(seen()).toHaveLength(4);
+    send({ type: 'state', state: s5(true) });
+    vi.advanceTimersByTime(1_000);
+    expect(seen()).toHaveLength(5);
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('starts the second over for an item hidden and shown again without a scroll, and checks when the status row folds', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+    let box: [number, number] = [20, 80];
+    const rect = (top: number, bottom: number) => ({ top, bottom, height: bottom - top, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return this.classList.contains('scroll') ? rect(0, 100) : (this as HTMLElement).dataset['unread'] === 'r1' ? rect(...box) : rect(0, 0);
+    });
+
+    const send = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
+    const seen = () => posted.filter((message) => message.type === 'seen');
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, vscode);
+    send({ type: 'focus', focused: true });
+    send({ type: 'state', state: state([reply('r1', T0, { unread: true })], { status: status('st1', { unread: false }) }) });
+
+    // Hidden by a layout change between two checks, then shown again: the second starts over.
+    vi.advanceTimersByTime(300);
+    box = [200, 260];
+    vi.advanceTimersByTime(300);
+    box = [20, 80];
+    vi.advanceTimersByTime(700);
+    expect(seen()).toEqual([]);
+    vi.advanceTimersByTime(600);
+    expect(seen()).toEqual([{ type: 'seen', ids: ['r1'], target: { scopeGen: 1, sessionId: 's2' } }]);
+
+    // Folding the status row shows more of the timeline, which is checked at once.
+    send({ type: 'state', state: state([reply('r1', T0), reply('r2', T0 + 1, { unread: true })], { status: status('st1', { unread: false }) }) });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return this.classList.contains('scroll') ? rect(0, 100) : (this as HTMLElement).dataset['unread'] === 'r2' ? rect(...box) : rect(0, 0);
+    });
+    box = [200, 260];
+    vi.advanceTimersByTime(5_000);
+    box = [20, 80];
+    const row = root.querySelector<HTMLDetailsElement>('details.status-row')!;
+
+    row.open = true;
+    row.dispatchEvent(new Event('toggle'));
+    vi.advanceTimersByTime(1_000);
+    expect(seen().at(-1)).toMatchObject({ ids: ['r2'] });
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+});
+
 describe('the composer', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 
   function page() {
     // Pages of earlier tests still listen on the window, and jsdom has no CSS.escape for the one that kept a focused item.
@@ -621,8 +785,8 @@ describe('reply links and the secondary side bar', () => {
 });
 
 describe('the status row', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], ...patch });
-  const status = (id: string, markdown: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown, fallback: false, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+  const status = (id: string, markdown: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown, fallback: false, unread: false, ...patch });
 
   it("takes the hello's status and each status of the window's session or work item, and drops another session's", () => {
     let current = applyEvent(EMPTY_CONVERSATION, hello([], { status: status('stage-2', 'Reading', { fallback: true }) }));

@@ -42,7 +42,7 @@ describe('artifacts', () => {
   });
 
   after(async () => {
-    extension.receiveConversation({ type: 'hello', scope: null, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [] });
+    extension.receiveConversation({ type: 'hello', scope: null, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [], unread: 0 });
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     // The closed preview and panel can hold the folder for a moment on Windows.
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });

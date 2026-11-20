@@ -35,7 +35,16 @@ describe('the Conversation view', () => {
     await vscode.commands.executeCommand('switchboard.conversation.focus');
     // The suite's window is a folder window, which has no work item, so the hub's hello gives it no scope.
     await until(() => extension.conversation().connected, 'the view never received its hello');
-    assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [] });
+    assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+    assert.strictEqual(extension.conversationBadge(), undefined);
+
+    // The current session's unread count is the view's badge, gone at 0 (architecture.md § Unread).
+    // The window may have connected earlier in the suite, before the focus command resolved the view, so the badge shows once it has.
+    extension.receiveConversation({ type: 'unread', count: 2 });
+    await until(() => extension.conversationBadge() !== undefined, 'the view never showed its badge');
+    assert.deepStrictEqual(extension.conversationBadge(), { value: 2, tooltip: '2 unread replies and statuses' });
+    extension.receiveConversation({ type: 'unread', count: 0 });
+    assert.strictEqual(extension.conversationBadge(), undefined);
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 

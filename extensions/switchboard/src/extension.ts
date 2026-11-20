@@ -72,6 +72,8 @@ export interface SwitchboardApi {
   conversation(): ConversationState;
   /** Handles a conversation stream event as if the hub sent it, for the integration suite, whose window has no work item. */
   receiveConversation(event: ConversationEvent): void;
+  /** The Conversation view's badge, its current session's unread count (architecture.md § Unread); undefined while none is unread or the view is not resolved. */
+  conversationBadge(): vscode.ViewBadge | undefined;
   /** What the Artifacts view lists, its badge and the HTML artifact panels open (architecture.md § Artifacts view). */
   artifacts(): ReturnType<ArtifactsView['shown']>;
   /** Turns ```mermaid fences into diagrams in the Markdown preview (architecture.md § Artifacts), which VS Code's Markdown extension calls. */
@@ -560,6 +562,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     pane: () => pane.shown(),
     conversation: () => conversation.state(),
     receiveConversation: (event) => conversation.receive(event),
+    conversationBadge: () => conversation.badge(),
     artifacts: () => artifacts.shown(),
     extendMarkdownIt,
     windowKey: () => windowKey,

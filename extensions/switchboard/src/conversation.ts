@@ -6,7 +6,7 @@ import { openConversation, postToHub } from '@switchboard/hub';
 import type { EventStream, ItemView, StatusView } from '@switchboard/hub';
 import { applyEvent, EMPTY_CONVERSATION, statusLine, withEarlier } from './conversationModel.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
-import type { ConversationMessage, SendTarget } from './webview/conversationRender.js';
+import type { ConversationMessage, SeenTarget, SendTarget } from './webview/conversationRender.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
 
 /**
@@ -48,6 +48,11 @@ export interface ConversationViewDeps {
   /** Hears each new state, as the Artifacts view does. */
   changed?(state: ConversationState): void;
   log(line: string): void;
+}
+
+/** The view's badge for the current session's unread replies and statuses; none at 0 (architecture.md § Unread). */
+export function unreadBadge(unread: number): vscode.ViewBadge | undefined {
+  return unread > 0 ? { value: unread, tooltip: unread === 1 ? '1 unread reply or status' : `${unread} unread replies and statuses` } : undefined;
 }
 
 /** A status's time in the earlier statuses list: "Thu, Nov 19, 1:46 PM". */
@@ -100,6 +105,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     return vscode.Disposable.from(
       ...CONVERSATION_VIEWS.map((id) => vscode.window.registerWebviewViewProvider(id, this)),
       vscode.workspace.registerTextDocumentContentProvider(STATUS_SCHEME, this),
+      // The page counts an unread item as seen only while this window has the focus (architecture.md § Unread).
+      vscode.window.onDidChangeWindowState((state) => this.#post({ type: 'focus', focused: state.focused })),
       this.#statusChanged,
       { dispose: () => this.disconnect() },
     );
@@ -108,6 +115,11 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   /** What the view shows now, for the integration suite. */
   state(): ConversationState {
     return this.#state;
+  }
+
+  /** The badge of a resolved view, for the integration suite. */
+  badge(): vscode.ViewBadge | undefined {
+    return [...this.#views.values()][0]?.badge;
   }
 
   /** Follows the conversation stream of the window key a hub's `/events` hello gave; a new hello replaces it. */
@@ -356,7 +368,37 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   #set(state: ConversationState): void {
     this.#state = state;
     this.#post({ type: 'state', state });
+
+    for (const view of this.#views.values()) {
+      view.badge = unreadBadge(state.unread);
+    }
+
     this.deps.changed?.(state);
+  }
+
+  /**
+   * Tells the hub which unread items the page showed in a focused window for a second (architecture.md § Unread), for the scope generation and
+   * session it showed them in; a refusal, as after the scope moved, leaves them unread.
+   */
+  async seen(ids: string[], shown: SeenTarget): Promise<void> {
+    const target = this.#target;
+
+    if (target === null) {
+      this.#post({ type: 'seen-failed', ids });
+      return;
+    }
+
+    if (ids.length === 0) {
+      return;
+    }
+
+    const reply = await postToHub(target.record, '/v1/conversation/seen', { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, ids }, HISTORY_TIMEOUT_MS);
+
+    if (reply?.status !== 200) {
+      this.deps.log(`seen not recorded: ${reply?.error ?? 'the hub did not answer'}`);
+      // The page reports them again; a refusal for a session the window no longer shows starts over with its next state anyway.
+      this.#post({ type: 'seen-failed', ids });
+    }
   }
 
   /** Loads the items before the oldest the view shows. */
@@ -462,7 +504,11 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       const run = (): Promise<unknown> => {
         switch (message.type) {
           case 'ready':
-            return Promise.resolve(view.webview.postMessage({ type: 'state', state: this.#state })).then(() => this.#giveBack());
+            return Promise.resolve(view.webview.postMessage({ type: 'state', state: this.#state }))
+              .then(() => view.webview.postMessage({ type: 'focus', focused: vscode.window.state.focused }))
+              .then(() => this.#giveBack());
+          case 'seen':
+            return this.seen(Array.isArray(message.ids) ? message.ids.map(String) : [], message.target);
           case 'earlier':
             return this.earlier();
           case 'open':
@@ -490,6 +536,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       void run().catch((error: unknown) => void vscode.window.showErrorMessage(`Switchboard: ${error instanceof Error ? error.message : String(error)}`));
     });
     view.onDidDispose(() => this.#views.delete(view.viewType));
+    view.badge = unreadBadge(this.#state.unread);
     this.#views.set(view.viewType, view);
   }
 }

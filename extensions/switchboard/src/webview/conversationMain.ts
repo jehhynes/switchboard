@@ -20,6 +20,10 @@ interface PageState {
 
 /** How long a copy button shows its check. */
 const COPIED_MS = 2_000;
+/** How long an unread reply or status must be visible in a focused window before it counts as seen (architecture.md § Unread). */
+export const SEEN_MS = 1_000;
+/** How often the page checks again while an unread item is on its way to seen, so one hidden and shown again in between starts over. */
+const SEEN_CHECK_MS = 250;
 /** How long a status that replaced the one before is marked New, unless the operator opens it first. */
 export const STATUS_NEW_MS = 60_000;
 /** How often the status row's age is redrawn. */
@@ -176,6 +180,91 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   let nextCopy = 1;
   // The status the row last showed, and until when a status that replaced it is marked New.
   let shownStatus: { sessionId: string | null; id: string; markdown: string } | null = null;
+  // Whether this VS Code window has the focus, which the extension says; unread items count as seen only then.
+  let windowFocused = false;
+  // Unread items visible since when, and those already reported seen, for the session the page shows.
+  const visibleSince = new Map<string, number>();
+  const reported = new Set<string>();
+  let reportedFor: string | null = null;
+  let seenTimer: ReturnType<typeof setTimeout> | undefined;
+  let wasConnected = false;
+  // The timeline's size changes without a window resize when the status row folds or the composer grows.
+  const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => checkSeen()) : null;
+  /**
+   * The unread items on screen: the status row, which is pinned, and the replies at least half in the timeline's viewport, or filling half of it.
+   * None while the window has no focus or the page is hidden.
+   */
+  const visibleUnread = (): string[] => {
+    const scroller = root.querySelector<HTMLElement>('.scroll');
+
+    if (!windowFocused || document.visibilityState === 'hidden' || scroller === null) {
+      return [];
+    }
+
+    const view = scroller.getBoundingClientRect();
+
+    return [...root.querySelectorAll<HTMLElement>('[data-unread]')]
+      .filter((element) => {
+        if (!scroller.contains(element)) {
+          return true;
+        }
+
+        const box = element.getBoundingClientRect();
+        const shown = Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top);
+
+        return shown > 0 && shown >= Math.min(box.height, view.height) / 2;
+      })
+      .map((element) => element.dataset['unread']!)
+      .filter((id) => !reported.has(id));
+  };
+  /** Reports each unread item that stayed visible for `SEEN_MS`, each once, and checks again when the next one is due. */
+  const checkSeen = (): void => {
+    clearTimeout(seenTimer);
+
+    const target = state.scope === null || state.session === null ? null : { scopeGen: state.scope.scopeGen, sessionId: state.session.id };
+    const key = target === null ? null : `${target.scopeGen} ${target.sessionId}`;
+
+    if (key !== reportedFor) {
+      reportedFor = key;
+      reported.clear();
+      visibleSince.clear();
+    }
+
+    if (target === null || !root.isConnected) {
+      return;
+    }
+
+    const now = Date.now();
+    const visible = new Set(visibleUnread());
+
+    for (const id of [...visibleSince.keys()].filter((one) => !visible.has(one))) {
+      visibleSince.delete(id);
+    }
+
+    for (const id of visible) {
+      if (!visibleSince.has(id)) {
+        visibleSince.set(id, now);
+      }
+    }
+
+    const due = [...visibleSince].filter(([, since]) => now - since >= SEEN_MS).map(([id]) => id);
+
+    if (due.length > 0) {
+      for (const id of due) {
+        visibleSince.delete(id);
+        reported.add(id);
+      }
+
+      vscode.postMessage({ type: 'seen', ids: due, target });
+    }
+
+    // While an unread item is on the page of a focused window, a layout change can show or hide it without an event, so it is checked again.
+    const waiting = windowFocused && [...root.querySelectorAll<HTMLElement>('[data-unread]')].some((element) => !reported.has(element.dataset['unread']!));
+
+    if (visibleSince.size > 0 || waiting) {
+      seenTimer = setTimeout(checkSeen, visibleSince.size === 0 ? SEEN_CHECK_MS : Math.min(SEEN_CHECK_MS, Math.max(0, SEEN_MS - (now - Math.min(...visibleSince.values())))));
+    }
+  };
   let freshUntil = 0;
   let freshTimer: ReturnType<typeof setTimeout> | undefined;
   const seenStatus = (): void => {
@@ -271,6 +360,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         }
       }
 
+      resized?.disconnect();
+      resized?.observe(scroller);
       scroller.addEventListener('scroll', () => {
         if (atEnd(scroller)) {
           unseenBelow = false;
@@ -278,6 +369,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         }
 
         save();
+        checkSeen();
       });
     }
 
@@ -293,6 +385,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     if (focused !== null && timelineFocused) {
       root.querySelector<HTMLElement>(`li[data-id="${CSS.escape(focused)}"]`)?.focus();
     }
+
+    checkSeen();
   };
 
   root.addEventListener('click', (event) => {
@@ -348,6 +442,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
         }
 
         save();
+        checkSeen();
       }
     },
     true,
@@ -393,9 +488,29 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> }>) => {
-    if (event.data.type === 'state') {
+  window.addEventListener('resize', checkSeen);
+  document.addEventListener('visibilitychange', checkSeen);
+
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> }>) => {
+    if (event.data.type === 'focus') {
+      windowFocused = event.data.focused;
+      checkSeen();
+    } else if (event.data.type === 'seen-failed') {
+      // The hub did not take them, so they are reported again once they have been visible for another second.
+      for (const id of event.data.ids) {
+        reported.delete(id);
+      }
+
+      checkSeen();
+    } else if (event.data.type === 'state') {
       state = event.data.state;
+
+      // A reconnect starts from the hub's state: items reported while the stream was down are reported again if still unread.
+      if (state.connected && !wasConnected) {
+        reported.clear();
+      }
+
+      wasConnected = state.connected;
       noteStatus();
       draw();
       composer?.update(state);

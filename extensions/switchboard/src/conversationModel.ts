@@ -17,19 +17,22 @@ export interface ConversationState {
   artifactsDir: string | null;
   /** The work item's artifacts, newest first (architecture.md § Artifacts). */
   artifacts: ArtifactView[];
+  /** How many replies and statuses of the current session the operator has not seen, which the view's badge shows (architecture.md § Unread). */
+  unread: number;
 }
 
-export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [] };
+export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [], unread: 0 };
 
 /** An event of the conversation stream, as parsed from its data line. */
 export type ConversationEvent =
-  | { type: 'hello'; scope: WindowScope | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[] }
+  | { type: 'hello'; scope: WindowScope | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number }
   | { type: 'scope'; scope: WindowScope | null }
   | { type: 'session'; session: SessionView }
   | { type: 'message'; message: ItemView }
   | { type: 'reply'; reply: ItemView }
   | { type: 'status'; status: StatusView | null }
   | { type: 'artifact'; artifact: ArtifactView | { path: string }; removed?: true }
+  | { type: 'unread'; count: number }
   | { type: string };
 
 /**
@@ -73,6 +76,8 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
         status: hello.status ?? null,
         artifactsDir: hello.artifactsDir,
         artifacts: newestFirst(hello.artifacts),
+        // A hub from before unread counts sends none.
+        unread: hello.unread ?? 0,
       };
     }
     case 'scope': {
@@ -83,7 +88,7 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
       // brings the new ones.
       const left = scope?.workItemId !== state.scope?.workItemId;
 
-      return { ...state, scope, status: moved ? null : state.status, artifacts: left ? [] : state.artifacts, artifactsDir: left ? null : state.artifactsDir };
+      return { ...state, scope, status: moved ? null : state.status, unread: moved ? 0 : state.unread, artifacts: left ? [] : state.artifacts, artifactsDir: left ? null : state.artifactsDir };
     }
     case 'session': {
       const { session } = event as Extract<ConversationEvent, { type: 'session' }>;
@@ -104,6 +109,8 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
       // A status of a session the window no longer shows, sent before its scope moved, is dropped.
       return status === null || status.sessionId === state.scope?.sessionId || (status.fallback && status.id === `stage-${state.scope?.workItemId}`) ? { ...state, status } : state;
     }
+    case 'unread':
+      return { ...state, unread: (event as Extract<ConversationEvent, { type: 'unread' }>).count };
     case 'artifact': {
       const { artifact, removed } = event as Extract<ConversationEvent, { type: 'artifact' }>;
       const rest = state.artifacts.filter((one) => one.path !== artifact.path);
