@@ -1,16 +1,23 @@
 import type { VoiceSettings } from '@switchboard/core/settings';
-import { pcmToSamples, Transcriber } from './asr.js';
+import { ASR_RATE, pcmToSamples, Transcriber } from './asr.js';
+import { BargeIn, gate } from './barge.js';
 import type { AsrEngine } from './asr.js';
 import type { MicUse } from './micUse.js';
 import type { Capture, CaptureStream } from './output.js';
 import { ENROLL_SECONDS } from './protocol.js';
-import type { MicState, VoiceMessage } from './protocol.js';
+import type { Interrupted, MicState, VoiceMessage } from './protocol.js';
 import { pauseWait, textWait } from './turn.js';
 import type { TurnModel } from './turn.js';
+import { loudness } from './voiceprint.js';
 import type { Voiceprint } from './voiceprint.js';
 
 /** How often an open message is checked for its end. */
 export const TURN_TICK_MS = 100;
+/** A barge-in's words are recognised again from this long before the voice that passed the check. */
+const BARGE_PREROLL = 0.3 * ASR_RATE;
+/** After a reply ends, audio still this loud in its last 0.6 s keeps the words held and checked for up to `TAIL_HOLD_MS`. */
+const TAIL_KEEP = 0.6 * ASR_RATE;
+const TAIL_HOLD_MS = 1_500;
 
 export interface DictationDeps {
   capture: Capture;
@@ -23,6 +30,10 @@ export interface DictationDeps {
   settings(): VoiceSettings;
   /** The voice check and enrolment; without it every piece passes unscored and enrolment fails. */
   voiceprint?: Voiceprint | null;
+  /** The reply being played, its spoken passage and voice, for barge-in; null while none plays. */
+  playing?(): { replyId: string; text: string; voice: string } | null;
+  /** Barge-in: stops the reply playing, and says how much of its passage was heard; null when none was playing. */
+  interrupt?(): Interrupted | null;
   /** `words`, `piece`, `utterance` and `enrollment` to the hub. */
   send(message: Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' }>): void;
   /** The mic state or the capture error changed. */
@@ -55,6 +66,19 @@ interface Utterance {
   waitMs: number;
   /** Words shown and not settled yet. */
   words: string;
+  /** The reply it spoke over, when a barge-in opened it. */
+  interrupted: Interrupted | null;
+}
+
+/** A reply being played while capture runs: words heard then are held back, since they may be its echo, until barge-in says they are the operator's. */
+interface Playback {
+  replyId: string;
+  barge: BargeIn;
+  barged: boolean;
+  /** When it stopped playing, while its tail is still checked. */
+  endedAt: number | null;
+  /** The pieces held back as its possible echo. */
+  held: string;
 }
 
 /**
@@ -87,6 +111,7 @@ export class Dictation {
   #reported = '';
   /** Voiceprint enrolment's recording, while one runs: capture goes to it instead of the recogniser. */
   #enrollment: { chunks: Float32Array[]; timer: unknown } | null = null;
+  #playback: Playback | null = null;
 
   constructor(private readonly deps: DictationDeps) {}
 
@@ -379,13 +404,19 @@ export class Dictation {
     this.#transcriber = new Transcriber(engine, {
       onWords: (text) => this.#words(text),
       onPiece: (text, audio) => this.#piece(text, audio),
-      onQuiet: () => void this.#checkTurn(),
+      onQuiet: () => {
+        if (!this.#holding()) {
+          void this.#checkTurn();
+        }
+      },
     });
     return true;
   }
 
   async #startCapture(): Promise<void> {
-    if (this.#enrollment === null && !this.#loadEngine()) {
+    const forEnrollment = this.#enrollment !== null;
+
+    if (!forEnrollment && !this.#loadEngine()) {
       this.#report();
       return;
     }
@@ -409,8 +440,8 @@ export class Dictation {
 
     this.#opening = false;
 
-    // The state moved on while the device opened.
-    if (!this.#wanted()) {
+    // The state moved on while the device opened, or it opened for enrolment, with no recogniser, and dictation now wants it.
+    if (!this.#wanted() || forEnrollment !== (this.#enrollment !== null)) {
       stream.stop();
       this.#sync();
       return;
@@ -439,7 +470,92 @@ export class Dictation {
       return;
     }
 
+    this.#trackPlayback();
     this.#transcriber?.feed(samples);
+
+    if (this.#holding()) {
+      this.#checkBarge();
+    }
+  }
+
+  /** Words are held back while a reply plays and no utterance is open: until barge-in fires, they may be its echo. */
+  #holding(): boolean {
+    return this.#playback !== null && !this.#playback.barged && this.#utterance === null;
+  }
+
+  /** Follows the reply being played; after it ends, its tail is checked while the audio stays loud, then the words held over it are dropped. */
+  #trackPlayback(): void {
+    const playing = this.deps.playing?.() ?? null;
+    const playback = this.#playback;
+
+    if (playing !== null) {
+      if (playback?.replyId !== playing.replyId) {
+        // A reply played straight after another keeps the words held so far.
+        this.#playback = { replyId: playing.replyId, barge: new BargeIn(this.deps.voiceprint ?? null, playing.text, playing.voice), barged: false, endedAt: null, held: playback?.held ?? '' };
+      }
+
+      return;
+    }
+
+    if (playback === null) {
+      return;
+    }
+
+    const transcriber = this.#transcriber;
+
+    if (!playback.barged && this.#utterance === null && transcriber !== null) {
+      playback.endedAt ??= this.deps.now();
+
+      const loud = transcriber.total >= TAIL_KEEP && loudness(transcriber.samples(transcriber.total - TAIL_KEEP)) >= gate(this.deps.voiceprint?.level ?? 0);
+
+      if (loud && this.deps.now() - playback.endedAt < TAIL_HOLD_MS) {
+        return;
+      }
+
+      const rest = transcriber.take();
+      const dropped = [playback.held, rest?.text ?? ''].filter((text) => text !== '').join(' ');
+
+      if (dropped !== '') {
+        this.deps.log(`words heard over reply ${playback.replyId} dropped as its echo: ${dropped}`);
+      }
+
+      transcriber.end(false);
+    }
+
+    this.#playback = null;
+  }
+
+  /**
+   * Barge-in (architecture.md § Voice check and barge-in): once the operator's voice is confirmed over the reply, the reply stops, recognition
+   * starts again from just before that voice, and an utterance opens that names the reply it spoke over.
+   */
+  #checkBarge(): void {
+    const playback = this.#playback!;
+    const transcriber = this.#transcriber!;
+    const barge = playback.barge.check({ total: transcriber.total, samples: (from) => transcriber.samples(from), words: transcriber.words }, this.deps.settings());
+
+    if (barge === null) {
+      return;
+    }
+
+    playback.barged = true;
+
+    const interrupted = this.deps.interrupt?.() ?? null;
+
+    this.deps.log(`barge-in on reply ${playback.replyId} (${barge.trigger}, score ${barge.score ?? 'none'}, reply voice ${barge.ttsScore ?? 'none'}): ${barge.words}`);
+    transcriber.restartFrom(barge.from - BARGE_PREROLL);
+    this.#spoke();
+
+    const utterance = this.#utterance;
+
+    if (utterance !== null) {
+      utterance.interrupted = interrupted;
+      utterance.lastActivity = this.deps.now();
+
+      if (transcriber.words !== '') {
+        this.#words(transcriber.words);
+      }
+    }
   }
 
   #failed(error: Error): void {
@@ -459,6 +575,10 @@ export class Dictation {
   }
 
   #words(text: string): void {
+    if (this.#holding()) {
+      return;
+    }
+
     if (text !== '') {
       this.#spoke();
     }
@@ -483,11 +603,16 @@ export class Dictation {
    * A piece settled: the voice check judges its audio (architecture.md § Voice check and barge-in), and only a piece that passes joins the
    * utterance, so someone else's words neither reach the session nor end the operator's turn.
    */
-  #piece(text: string, audio: Float32Array): void {
+  #piece(text: string, audio: Float32Array): boolean {
+    if (this.#holding()) {
+      this.#playback!.held = [this.#playback!.held, text].filter((one) => one !== '').join(' ');
+      return false;
+    }
+
     const utterance = this.#open();
 
     if (utterance === null) {
-      return;
+      return false;
     }
 
     const check = this.deps.voiceprint?.check(audio, text, this.deps.settings()) ?? { score: null, f0: null, dropped: false, reason: null };
@@ -503,11 +628,12 @@ export class Dictation {
         void this.#checkTurn();
       }
 
-      return;
+      return false;
     }
 
     utterance.pieces.push(text);
     this.deps.vocabulary.used(text);
+    return true;
   }
 
   /** Speech came: the open utterance, opened now if none is; null with no target to hear it for. */
@@ -519,7 +645,7 @@ export class Dictation {
 
   #open(): Utterance | null {
     if (this.#utterance === null && this.#target !== null) {
-      this.#utterance = { id: this.deps.newId(), gen: this.#target.gen, sessionId: this.#target.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, words: '' };
+      this.#utterance = { id: this.deps.newId(), gen: this.#target.gen, sessionId: this.#target.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, words: '', interrupted: null };
       this.#report();
     }
 
@@ -573,6 +699,19 @@ export class Dictation {
     const quiet = this.deps.now() - utterance.lastActivity;
 
     if (utterance.completeAt === utterance.lastActivity && quiet >= utterance.waitMs) {
+      // The words the turn model judged finished are checked first: when they fail the voice check, the turn is judged again without them.
+      const rest = this.#transcriber?.take() ?? null;
+      const kept = rest === null || this.#piece(rest.text, rest.audio);
+
+      if (rest !== null && utterance.words !== '') {
+        utterance.words = '';
+        this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
+      }
+
+      if (!kept) {
+        return;
+      }
+
       this.#close(true);
     } else if (quiet >= pauseWait(this.#said(), this.deps.settings().endPauseMs)) {
       this.#close(true);
@@ -602,9 +741,8 @@ export class Dictation {
         this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
       }
 
-      if (utterance.pieces.length > 0 || !final) {
-        this.deps.send({ type: 'utterance', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: utterance.pieces.join(' '), final, interrupted: null });
-      }
+      // An utterance that kept nothing, all of it dropped by the voice check, ends as cut, so the hub sends nothing and forgets it.
+      this.deps.send({ type: 'utterance', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: utterance.pieces.join(' '), final: final && utterance.pieces.length > 0, interrupted: utterance.interrupted });
     }
 
     transcriber?.end(!drain);
@@ -631,7 +769,7 @@ export class Dictation {
         this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
       }
 
-      this.deps.send({ type: 'utterance', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: utterance.pieces.join(' '), final: false, interrupted: null });
+      this.deps.send({ type: 'utterance', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: utterance.pieces.join(' '), final: false, interrupted: utterance.interrupted });
     }
 
     this.#transcriber?.end(false);

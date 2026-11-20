@@ -46,6 +46,8 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
   const used: string[] = [];
   let spoke = 0;
   let changed = 0;
+  /** The reply the fake speech plays, and what a barge-in's stop answers. */
+  const speech: { playing: { replyId: string; text: string; voice: string } | null; interrupts: number; heard: { said: string; rest: string } } = { playing: null, interrupts: 0, heard: { said: '', rest: '' } };
   let id = 0;
   const watch: { changed: ((busy: boolean, apps: string[]) => void) | null; failed: (() => void) | null; closed: number } = { changed: null, failed: null, closed: 0 };
   const settings: VoiceSettings = { ...DEFAULT_SETTINGS.voice, enabled: true, ...options.settings };
@@ -84,6 +86,14 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     },
     settings: () => settings,
     ...(options.voiceprint === undefined ? {} : { voiceprint: options.voiceprint as unknown as Voiceprint }),
+    playing: () => speech.playing,
+    interrupt: () => {
+      const playing = speech.playing;
+
+      speech.interrupts++;
+      speech.playing = null;
+      return playing === null ? null : { replyId: playing.replyId, ...speech.heard };
+    },
     send: (message) => sent.push(message),
     changed: () => void changed++,
     spoke: () => void spoke++,
@@ -104,6 +114,15 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     }
   };
   const quiet = (ms: number): void => say(engine.text, ms);
+  /** As `say`, with audio loud enough for barge-in to check. */
+  const loud = (text: string, ms = 100): void => {
+    engine.text = text;
+
+    for (let at = 0; at < ms; at += 100) {
+      capture.tone(100, 200);
+      clock.advance(100);
+    }
+  };
   /** Mic on with the watcher saying no other app records, and a target. */
   const listening = async (): Promise<void> => {
     dictation.target(1, 's1', 'acme/app');
@@ -112,7 +131,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     await settle();
   };
 
-  return { clock, capture, engine, sent, logs, chats, termsAsked, loads, used, watch, settings, dictation, say, quiet, listening, spoke: () => spoke, changed: () => changed };
+  return { clock, capture, engine, sent, logs, chats, termsAsked, loads, used, watch, settings, dictation, say, quiet, loud, listening, speech, spoke: () => spoke, changed: () => changed };
 }
 
 const kinds = (sent: Sent[]): string[] =>
@@ -358,7 +377,7 @@ describe('Dictation', () => {
     dictation.close();
     expect(capture.stream!.stopped).toBe(true);
   });
-  it('drops a piece that fails the voice check: reported with its score, kept out of the utterance, and nothing sent for an utterance of dropped pieces only', async () => {
+  it('drops a piece that fails the voice check: reported with its score, kept out of the utterance, and an utterance of dropped pieces only ending cut', async () => {
     const voiceprint = fakeVoiceprint({ verdict: (text) => (text.includes('someone') ? { score: 0.31, f0: 240, dropped: true, reason: 'score' } : null) });
     const { say, quiet, sent, used, logs, listening } = setup({ voiceprint });
 
@@ -379,7 +398,8 @@ describe('Dictation', () => {
 
     say('someone talking', 100);
     quiet(PHRASE_SILENCE_MS + 3_000);
-    expect(kinds(sent).slice(-3)).toEqual(['words "someone talking"', 'piece "someone talking" dropped', 'words ""']);
+    // Nothing kept: it ends as cut, so the hub sends nothing and forgets it.
+    expect(kinds(sent).slice(-4)).toEqual(['words "someone talking"', 'piece "someone talking" dropped', 'words ""', 'utterance "" cut']);
   });
 
   it('judges the end of a turn again without a dropped piece, so someone else\'s words do not end the operator\'s turn', async () => {
@@ -480,5 +500,106 @@ describe('Dictation', () => {
     await settle();
     expect(sent.at(-1)).toEqual({ type: 'enrollment', state: 'failed', error: 'The microphone failed: device gone' });
     expect(voiceprint.enrolls).toEqual([]);
+  });
+  it('holds the words heard while a reply plays as its possible echo, and drops them once it ends and the audio is quiet', async () => {
+    const { say, loud, sent, logs, speech, listening } = setup();
+
+    await listening();
+    speech.playing = { replyId: 'r1', text: 'The session token is refreshed in two places.', voice: 'marin' };
+    loud('the session token is', 1_500);
+    expect(sent).toEqual([]);
+    speech.playing = null;
+    // Still loud: the tail is checked for up to 1.5 s.
+    loud('the session token is refreshed', 1_000);
+    expect(sent).toEqual([]);
+    say('the session token is refreshed', 1_000);
+    expect(sent).toEqual([]);
+    expect(logs).toContain('words heard over reply r1 dropped as its echo: the session token is refreshed');
+    expect(speech.interrupts).toBe(0);
+    say('fix it', 100);
+    expect(kinds(sent)).toEqual(['words "fix it"']);
+  });
+
+  it('barges in when the operator talks over a reply: stops it, recognises again from the onset, and the utterance names the reply and what was heard', async () => {
+    const { engine, say, quiet, loud, sent, logs, speech, listening } = setup();
+
+    await listening();
+    speech.playing = { replyId: 'r1', text: 'The session token is refreshed in two places.', voice: 'marin' };
+    speech.heard = { said: 'The session token', rest: 'is refreshed in two places.' };
+    loud('hold on wait', 300);
+    expect(speech.interrupts).toBe(0);
+    loud('hold on wait', 200);
+    expect(speech.interrupts).toBe(1);
+    expect(engine.streams).toBe(2);
+    expect(logs).toContain('barge-in on reply r1 (strong, score none, reply voice none): hold on wait');
+    say('hold on wait', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent)).toEqual(['words "hold on wait"', 'piece "hold on wait"', 'words ""', 'utterance "hold on wait" final']);
+    expect(sent.at(-1)).toMatchObject({ interrupted: { replyId: 'r1', said: 'The session token', rest: 'is refreshed in two places.' } });
+  });
+
+  it('checks the tail of a reply that just ended, and opens an utterance naming no reply when a barge-in fires there', async () => {
+    const { say, quiet, loud, sent, speech, listening } = setup();
+
+    await listening();
+    speech.playing = { replyId: 'r1', text: 'Done.', voice: 'marin' };
+    loud('', 1_000);
+    speech.playing = null;
+    loud('stop that please', 600);
+    expect(speech.interrupts).toBe(1);
+    say('stop that please', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(sent.at(-1)).toMatchObject({ type: 'utterance', text: 'stop that please', final: true, interrupted: null });
+  });
+
+  it('lets the words of an utterance already open when a reply starts through, with no barge-in check', async () => {
+    const { say, loud, sent, speech, listening } = setup();
+
+    await listening();
+    say('about the', 200);
+    speech.playing = { replyId: 'r1', text: 'Done.', voice: 'marin' };
+    loud('about the other thing', 1_000);
+    expect(kinds(sent)).toEqual(['words "about the"', 'words "about the other thing"']);
+    expect(speech.interrupts).toBe(0);
+  });
+  it('checks the words an early end was judged on before closing, and judges again without them when they fail', async () => {
+    const voiceprint = fakeVoiceprint({ verdict: (text) => (text.includes('go ahead') ? { score: 0.2, f0: 120, dropped: true, reason: 'score' } : null) });
+    const { say, quiet, sent, chats, listening } = setup({ voiceprint, turn: (chat) => (chat[1]!.content.includes('go ahead') ? 0.9 : 0.0001) });
+
+    await listening();
+    say('change the login', 100);
+    quiet(PHRASE_SILENCE_MS);
+    say('change the login go ahead', 100);
+    quiet(400);
+    await settle();
+    // 0.9 earned a 0.5 s wait; the words are checked then, fail, and the turn stays open.
+    quiet(300);
+    await settle();
+    expect(kinds(sent).slice(-2)).toEqual(['piece "go ahead" dropped', 'words ""']);
+    expect(chats.map((chat) => chat[1]!.content)).toEqual(['change the login', 'change the login go ahead', 'change the login']);
+    expect(sent.some((one) => one.type === 'utterance')).toBe(false);
+    quiet(2_500);
+    expect(kinds(sent).at(-1)).toBe('utterance "change the login" final');
+  });
+
+  it('opens capture again for dictation when an enrolment it opened for ends before the device answers', async () => {
+    const voiceprint = fakeVoiceprint();
+    const { dictation, capture, loads, listening, say, sent } = setup({ voiceprint });
+    let release!: () => void;
+
+    capture.hold = new Promise((resolve) => (release = resolve));
+    dictation.enroll('start');
+    await settle();
+    dictation.enroll('cancel');
+    capture.hold = null;
+    await listening();
+    release();
+    await settle();
+    await settle();
+    expect(loads).toHaveLength(1);
+    expect(capture.opens).toBe(2);
+    expect(dictation.state).toBe('listening');
+    say('fix it', 100);
+    expect(kinds(sent).at(-1)).toBe('words "fix it"');
   });
 });

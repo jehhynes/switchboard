@@ -179,4 +179,30 @@ describe('Speech', () => {
     expect(states()).toEqual(['r1 failed', 'r2 failed', 'r3 failed']);
     expect(failures).toEqual(['No OpenAI key', 'no device', 'speech connection closed', 'no device']);
   });
+  it('stops the playing reply on a barge-in with how much of it played, skips the rest of its turn, and plays the next turn\'s replies', async () => {
+    const { clock, tts, speech, states } = setup();
+
+    speech.speak(item('r1', 'm1', 'x'.repeat(100)));
+    speech.speak(item('r2', 'm1'));
+    await settle();
+    tts.requests[0]!.audio(48_000);
+    await settle();
+    clock.advance(400);
+
+    const stopped = speech.interrupt();
+
+    // 400 ms of a passage whose audio is still coming, at 65 ms a character at least.
+    expect(stopped).toMatchObject({ item: { replyId: 'r1' }, atMs: 400, said: 6 });
+    expect(states()).toEqual(['r1 playing', 'r1 interrupted', 'r2 skipped']);
+    expect(tts.requests[0]!.cancelled).toBe(true);
+    // A later reply of the turn spoken over is not heard; the answer to the interrupting message is.
+    speech.speak(item('r3', 'm1'));
+    expect(states().at(-1)).toBe('r3 skipped');
+    speech.speak(item('r4', 'm2'));
+    expect(speech.playing?.replyId).toBe('r4');
+    speech.speak(item('r5', 'm1'));
+    expect(speech.queued.map((one) => one.replyId)).toEqual(['r5']);
+    expect(speech.interrupt()).toMatchObject({ item: { replyId: 'r4' } });
+    expect(speech.interrupt()).toBeNull();
+  });
 });

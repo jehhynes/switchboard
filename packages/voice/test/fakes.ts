@@ -192,9 +192,13 @@ export class FakeCapture implements Capture {
   opens = 0;
   fail: Error | null = null;
 
+  /** When set, an open waits for it before answering. */
+  hold: Promise<void> | null = null;
+
   async open(device: string | null, onPcm: (pcm: Buffer) => void, onError: (error: Error) => void): Promise<CaptureStream> {
     this.devices.push(device);
     this.opens++;
+    await this.hold;
 
     if (this.fail !== null) {
       throw this.fail;

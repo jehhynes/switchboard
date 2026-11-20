@@ -1,17 +1,31 @@
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
+import { pcm24to16, splitSaid } from './barge.js';
 import type { Dictation } from './dictation.js';
 import type { Output } from './output.js';
-import type { HubMessage, VoiceMessage, VoiceTarget } from './protocol.js';
+import type { HubMessage, Interrupted, VoiceMessage, VoiceTarget } from './protocol.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
+import { BYTES_PER_MS } from './tts.js';
 import type { Speaking, SpeechVoice, TtsVoiceSettings } from './tts.js';
+import type { Voiceprint } from './voiceprint.js';
+
+/** The first 3 s of each reply's audio teach barge-in that reply voice's print. */
+const LEARN_BYTES = 3_000 * BYTES_PER_MS;
 
 export interface VoiceServiceDeps {
   tts: { configure(settings: TtsVoiceSettings): void; warm(): void; speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void, as?: SpeechVoice): Speaking; close(): void };
   output: Output;
   /** Dictation (architecture.md § Dictation), made with the service's hooks; without it the mic stays off. */
-  dictation?: (hooks: { changed(): void; spoke(): void; send(message: VoiceMessage): void }) => Dictation;
+  dictation?: (hooks: {
+    changed(): void;
+    spoke(): void;
+    send(message: VoiceMessage): void;
+    playing(): { replyId: string; text: string; voice: string } | null;
+    interrupt(): Interrupted | null;
+  }) => Dictation;
+  /** Learns the reply voices' prints from the audio played, for barge-in; none when left out. */
+  voiceprint?: Voiceprint;
   /** A reply's heard tag, for the glossary. */
   heard?(heard: string, meant: string): void;
   send(message: VoiceMessage): void;
@@ -33,6 +47,8 @@ export class VoiceService {
   readonly #speech: Speech;
   readonly #dictation: Dictation | null;
   #targets = new Map<string, VoiceTarget>();
+  /** The audio of the reply playing, kept until there is enough to learn its voice from. */
+  #learning: { replyId: string; voice: string; chunks: Buffer[]; bytes: number } | null = null;
 
   constructor(private readonly deps: VoiceServiceDeps) {
     this.#dictation =
@@ -40,6 +56,16 @@ export class VoiceService {
         changed: () => deps.send(this.#audio()),
         spoke: () => this.#router.spoke(),
         send: (message) => deps.send(message),
+        playing: () => {
+          const item = this.#speech.playing;
+
+          return item === null ? null : { replyId: item.replyId, text: item.text, voice: item.as?.voice ?? this.#settings.voice };
+        },
+        interrupt: () => {
+          const stopped = this.#speech.interrupt();
+
+          return stopped === null ? null : { replyId: stopped.item.replyId, ...splitSaid(stopped.item.text, stopped.said) };
+        },
       }) ?? null;
     // What plays is also the echo canceller's reference, so a reply played aloud is not heard as the operator.
     const output: Output = {
@@ -50,6 +76,7 @@ export class VoiceService {
         return {
           write: (pcm) => {
             this.#dictation?.reference(pcm);
+            this.#learn(pcm);
             return playback.write(pcm);
           },
           drain: () => playback.drain(),
@@ -170,6 +197,33 @@ export class VoiceService {
     this.#router.close();
     this.#speech.halt();
     this.deps.tts.close();
+  }
+
+  /** Collects the first 3 s of the playing reply's audio, then learns its voice's print from it. */
+  #learn(pcm: Buffer): void {
+    const item = this.#speech.playing;
+
+    if (this.deps.voiceprint === undefined || item === null) {
+      return;
+    }
+
+    if (this.#learning?.replyId !== item.replyId) {
+      this.#learning = { replyId: item.replyId, voice: item.as?.voice ?? this.#settings.voice, chunks: [], bytes: 0 };
+    }
+
+    const learning = this.#learning;
+
+    if (learning.bytes >= LEARN_BYTES) {
+      return;
+    }
+
+    learning.chunks.push(pcm);
+    learning.bytes += pcm.length;
+
+    if (learning.bytes >= LEARN_BYTES) {
+      this.deps.voiceprint.learnVoice(learning.voice, pcm24to16(Buffer.concat(learning.chunks).subarray(0, LEARN_BYTES)));
+      learning.chunks = [];
+    }
   }
 
   #failed(error: string | null): void {

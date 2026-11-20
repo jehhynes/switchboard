@@ -21,6 +21,8 @@ describe('voice protocol', () => {
     expect(parseHubMessage('{"type":"context","sessionId":"","lastReply":"Done."}')).toEqual({ error: 'Invalid context message.' });
     expect(parseHubMessage('{"type":"heard","heard":"a llama","meant":"Ollama"}')).toEqual({ type: 'heard', heard: 'a llama', meant: 'Ollama' });
     expect(parseHubMessage('{"type":"heard","heard":" ","meant":"Ollama"}')).toEqual({ error: 'Invalid heard message.' });
+    expect(parseHubMessage('{"type":"enroll","action":"start"}')).toEqual({ type: 'enroll', action: 'start' });
+    expect(parseHubMessage('{"type":"enroll","action":"finish"}')).toEqual({ error: 'Invalid enroll message.' });
     expect(parseHubMessage('{"type":"targets","targets":[{"sessionId":"s1","workItemId":1,"repo":"acme/app"},{"sessionId":"s2","workItemId":2}],"focus":null}')).toEqual({
       type: 'targets',
       targets: [

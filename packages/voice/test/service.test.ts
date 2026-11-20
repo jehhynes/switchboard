@@ -154,4 +154,73 @@ describe('VoiceService', () => {
     await settle();
     expect(sent.filter((one) => one.type === 'audio').map((one) => (one as { error: string | null }).error)).toEqual(['no device', null]);
   });
+  it('gives dictation the reply playing and stops it for a barge-in with the words heard, and learns each reply voice from its first 3 s of audio', async () => {
+    const clock = new Clock();
+    const tts = new FakeTts();
+    const output = new FakeOutput();
+    const sent: VoiceMessage[] = [];
+    const learnt: Array<{ voice: string; samples: number }> = [];
+    let hooks!: Parameters<NonNullable<ConstructorParameters<typeof VoiceService>[0]['dictation']>>[0];
+    const service = new VoiceService({
+      tts,
+      output,
+      send: (message) => sent.push(message),
+      voiceprint: { learnVoice: (voice: string, samples: Float32Array) => learnt.push({ voice, samples: samples.length }) } as unknown as import('../src/voiceprint.js').Voiceprint,
+      dictation: (given) => {
+        hooks = given;
+        return { state: 'off', error: null, target: () => undefined, reference: () => undefined, settingsChanged: () => undefined, close: () => undefined } as unknown as import('../src/dictation.js').Dictation;
+      },
+      now: clock.now,
+      log: () => undefined,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      every: clock.every,
+    });
+
+    service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: true } });
+    service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1 }], focus: null });
+    service.receive({ type: 'talk-here', sessionId: 's1' });
+    expect(hooks.playing()).toBeNull();
+    expect(hooks.interrupt()).toBeNull();
+    service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'Fixed the login flow.', tone: null, turn: 'm1', voice: 'cedar', style: 'none', personality: null });
+    expect(hooks.playing()).toEqual({ replyId: 'r1', text: 'Fixed the login flow.', voice: 'cedar' });
+    await settle();
+    tts.requests[0]!.audio(96_000);
+    await settle();
+    expect(learnt).toEqual([]);
+    tts.requests[0]!.audio(96_000);
+    await settle();
+    // 3 s of 24 kHz audio, as 16 kHz samples, once per reply.
+    expect(learnt).toEqual([{ voice: 'cedar', samples: 48_000 }]);
+    tts.requests[0]!.audio(96_000);
+    await settle();
+    expect(learnt).toHaveLength(1);
+    // 5 s of the 6 s written: 18 of the passage's 21 characters, the cut word not heard.
+    clock.advance(5_000);
+    expect(hooks.interrupt()).toEqual({ replyId: 'r1', said: 'Fixed the login', rest: 'flow.' });
+    expect(sent.filter((one) => one.type === 'speech').map((one) => (one as { state: string }).state)).toEqual(['playing', 'interrupted']);
+    expect(hooks.playing()).toBeNull();
+  });
+
+  it('passes enrol commands to dictation, and fails a start without capture', () => {
+    const { service, sent } = setup();
+
+    service.receive({ type: 'enroll', action: 'cancel' });
+    service.receive({ type: 'enroll', action: 'start' });
+    expect(sent).toEqual([{ type: 'enrollment', state: 'failed', error: 'Capture is not available.' }]);
+
+    const calls: string[] = [];
+    const withCapture = new VoiceService({
+      tts: new FakeTts(),
+      output: new FakeOutput(),
+      send: () => undefined,
+      dictation: () => ({ state: 'off', error: null, enroll: (action: string) => calls.push(action), close: () => undefined }) as unknown as import('../src/dictation.js').Dictation,
+      now: () => 0,
+      log: () => undefined,
+    });
+
+    withCapture.receive({ type: 'enroll', action: 'start' });
+    withCapture.receive({ type: 'enroll', action: 'cancel' });
+    expect(calls).toEqual(['start', 'cancel']);
+  });
 });

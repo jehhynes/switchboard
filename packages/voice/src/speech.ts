@@ -57,6 +57,8 @@ export class Speech {
   #current: Current | null = null;
   #chimePending = false;
   #chiming = false;
+  /** The turn whose reply the operator spoke over: its later replies are skipped, so only the answer to what they said is heard. */
+  #bargedTurn: string | null = null;
 
   constructor(private readonly deps: SpeechDeps) {}
 
@@ -71,6 +73,12 @@ export class Speech {
   }
 
   speak(item: SpeechItem): void {
+    if (this.#bargedTurn !== null && item.turn === this.#bargedTurn) {
+      this.#report(item, 'skipped', null, null);
+      return;
+    }
+
+    this.#bargedTurn = null;
     this.#queue.push(item);
     this.#next();
   }
@@ -96,11 +104,28 @@ export class Speech {
 
   /** Stop speaking: the playing reply is `interrupted` where it stopped, and the waiting ones `skipped`. */
   stop(): void {
+    this.#stop();
+  }
+
+  /**
+   * Barge-in (architecture.md § Voice check and barge-in): stops as Stop speaking does, and skips the later replies of the turn spoken over, so
+   * only the answer to what the operator said is heard. The playing reply and how much of its passage played, or null with none playing.
+   */
+  interrupt(): { item: SpeechItem; atMs: number; said: number } | null {
+    const stopped = this.#stop();
+
+    this.#bargedTurn = stopped?.item.turn ?? null;
+    return stopped;
+  }
+
+  #stop(): { item: SpeechItem; atMs: number; said: number } | null {
     const current = this.#current;
+    let stopped: { item: SpeechItem; atMs: number; said: number } | null = null;
 
     if (current !== null) {
       const { atMs, said } = this.#position(current);
 
+      stopped = { item: current.item, atMs, said };
       this.#end(current, 'interrupted', atMs, said);
     }
 
@@ -109,11 +134,14 @@ export class Speech {
     }
 
     this.#next();
+    return stopped;
   }
 
   /** The voice target moved: everything stops and is dropped unreported; the hub marks it stopped by the move. */
   halt(): void {
     const current = this.#current;
+
+    this.#bargedTurn = null;
 
     if (current !== null) {
       this.#end(current, null);

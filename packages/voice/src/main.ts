@@ -112,6 +112,7 @@ async function main(): Promise<void> {
     output: await decibriOutput(SAMPLE_RATE),
     send: (message) => server.send(message),
     heard: (heard, meant) => void vocabulary.heard(heard, meant),
+    voiceprint,
     dictation: (hooks) =>
       new Dictation({
         capture,
@@ -126,6 +127,8 @@ async function main(): Promise<void> {
         settings: () => service.settings,
         voiceprint,
         send: hooks.send,
+        playing: hooks.playing,
+        interrupt: hooks.interrupt,
         changed: hooks.changed,
         spoke: hooks.spoke,
         newId: () => randomUUID(),
