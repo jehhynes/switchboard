@@ -138,7 +138,7 @@ describe('WindowScopes after a restart', () => {
 });
 
 describe('hosted conversations in a window (architecture.md § Window scope)', () => {
-  function setup(made?: (hostWindow: string, folder: string) => { workItemId: number } | { refused: string }) {
+  function setup(made?: (hostWindow: string, folder: string, provider?: 'claude' | 'codex') => { workItemId: number } | { refused: string }) {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
@@ -233,6 +233,19 @@ describe('hosted conversations in a window (architecture.md § Window scope)', (
     expect(mine.frames.filter((frame) => frame.type === 'conversations').at(-1)).toMatchObject({ conversations: [{ workItemId: 2, unread: 0 }, { workItemId: hosted, unread: 1 }] });
     expect(mine.frames.filter((frame) => frame.type === 'scope')).toEqual([]);
     expect(theirs.frames.filter((frame) => frame.type === 'unread' || frame.type === 'conversations')).toEqual([]);
+  });
+
+  it('passes a chosen provider once, validates it, and keeps the first choice on retry', () => {
+    const calls: unknown[][] = [];
+    const context = setup((host, folder, provider) => { calls.push([host, folder, provider]); return { workItemId: context.host(host, 'chosen') }; });
+    const mine = context.open(context.view.file);
+    for (const provider of [null, 'other', 7]) expect(context.service.newConversation({ window: mine.key, opId: 'invalid', provider }).status).toBe(400);
+    const result = context.service.newConversation({ window: mine.key, opId: 'chosen', provider: 'codex' });
+    expect(result.status).toBe(200);
+    expect(calls).toEqual([[context.view.file, 'D:/w12', 'codex']]);
+    expect(context.service.newConversation({ window: mine.key, opId: 'chosen', provider: 'claude' })).toEqual(result);
+    expect(calls).toHaveLength(1);
+    expect(context.service.newConversation({ window: 'other', opId: 'forged', provider: 'codex' }).status).toBe(403);
   });
 
   it('makes a conversation once per opId, selects it in the window that made it, and passes a refusal on', () => {
@@ -375,7 +388,7 @@ class FakeHeld {
 }
 
 describe('folder-hosted conversations (architecture.md § Window scope)', () => {
-  function setup(made?: (hostWindow: string, folder: string) => { workItemId: number } | { refused: string }) {
+  function setup(made?: (hostWindow: string, folder: string, provider?: 'claude' | 'codex') => { workItemId: number } | { refused: string }) {
     const store = Store.open(':memory:');
     let keys = 0;
     const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
@@ -553,6 +566,18 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     expect(scopes.selectFor(newer, support)).toEqual({ keys: [], selected: true });
     expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
     expect(scopes.scope(scopes.open(null, view, link))).toMatchObject({ kind: 'folder', workItemId: newer, scopeGen: 3 });
+  });
+
+  it('validates and passes the dock provider, retaining the first result on a changed-provider retry', () => {
+    const calls: unknown[][] = [];
+    const context = setup((host, folder, provider) => { calls.push([host, folder, provider]); return { workItemId: context.host(host, 'dock-provider', folder) }; });
+    const { service, support, link } = context;
+    for (const provider of [null, 'other', 7]) expect(service.dockConversation({ folder: support, opId: 'invalid', provider }).status).toBe(400);
+    const result = service.dockConversation({ folder: link, opId: 'chosen', provider: 'codex' });
+    expect(result.status).toBe(200);
+    expect(calls).toEqual([[support, support, 'codex']]);
+    expect(service.dockConversation({ folder: support, opId: 'chosen', provider: 'claude' })).toEqual(result);
+    expect(calls).toHaveLength(1);
   });
 
   it('makes a dock conversation once per opId with no window open, selects it in the folder window that then opens, and never in an item window on that folder', () => {

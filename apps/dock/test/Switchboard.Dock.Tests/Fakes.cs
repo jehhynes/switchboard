@@ -116,9 +116,13 @@ sealed class FakeHub : IHub
     /// <summary>When set, New session waits for it and answers with it.</summary>
     public TaskCompletionSource<NewConversationReply>? HoldNewConversation { get; set; }
 
-    public Task<NewConversationReply> NewConversation(string folder, string opId)
+    public string DefaultProvider { get; set; } = "claude";
+    public string? ProviderError { get; set; }
+    public Task<SessionProviderReply> SessionProvider() => Task.FromResult(new SessionProviderReply(ProviderError, ProviderError is null ? DefaultProvider : null));
+
+    public Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null)
     {
-        Calls.Add($"new-conversation {folder} {opId}");
+        Calls.Add($"new-conversation {folder} {opId}{(provider is null ? "" : $" {provider}")}");
 
         return HoldNewConversation is { } held ? held.Task : Task.FromResult(NewConversationReplies.Count > 0 ? NewConversationReplies.Dequeue() : new NewConversationReply("Switchboard is not running.", null, null));
     }

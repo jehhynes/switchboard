@@ -215,12 +215,12 @@ export type FlowEvent =
   | { type: 'stop-failed'; sessionId: string; reason: StopReason; message: string; shortId?: string | null; leftovers?: true }
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   /** `start` queues the work item to run now; otherwise it waits `unstarted` for Start (PRD R6). */
-  | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean }
+  | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean; provider?: Provider }
   /**
    * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item hosted by the window binding `hostWindow`, run in
    * `folder`, whose session starts at once with no prompt.
    */
-  | { type: 'new-conversation'; hostWindow: string; folder: string }
+  | { type: 'new-conversation'; hostWindow: string; folder: string; provider?: Provider }
   /** A hosted conversation's first message, whose first line titles it while it is still titled `NEW_CONVERSATION_TITLE`. */
   | { type: 'conversation-title'; workItemId: number; text: string }
   /** The operator pins a persona to a Code Mode session, or clears its pin with null (architecture.md § Personas). */
@@ -672,9 +672,9 @@ class Flow {
       case 'worktree-found':
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
-        return this.adhoc(event.prompt, event.repoRoot, event.start === true);
+        return this.adhoc(event.prompt, event.repoRoot, event.start === true, event.provider);
       case 'new-conversation':
-        return this.newConversation(event.hostWindow, event.folder);
+        return this.newConversation(event.hostWindow, event.folder, event.provider);
       case 'conversation-title':
         return this.conversationTitle(event.workItemId, event.text);
       case 'persona':
@@ -950,7 +950,8 @@ class Flow {
     }
   }
 
-  private adhoc(prompt: string, repoRoot: string, start: boolean): void {
+  private adhoc(prompt: string, repoRoot: string, start: boolean, provider?: Provider): void {
+    this.checkProvider(provider);
     const title = firstLine(prompt);
 
     if (title === '') {
@@ -961,21 +962,23 @@ class Flow {
       throw new Refusal('Choose a repo for the prompt.');
     }
 
-    this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted');
+    this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted', null, provider);
   }
 
   /**
    * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item in the window's folder, hosted by its window binding,
    * whose session starts at once at an empty prompt, without waiting for a free slot, since the operator is there to use it.
    */
-  private newConversation(hostWindow: string, folder: string): void {
+  private newConversation(hostWindow: string, folder: string, provider?: Provider): void {
+    this.checkProvider(provider);
     const sessions = this.context.settings.sessions;
+    const chosen = provider ?? sessions.provider;
 
-    if (sessions.provider !== 'codex' && !sessions.codeMode) {
+    if (chosen !== 'codex' && !sessions.codeMode) {
       throw new Refusal(NEEDS_CODE_MODE);
     }
 
-    if (sessions.provider !== 'codex' && !sessions.installHooks) {
+    if (chosen !== 'codex' && !sessions.installHooks) {
       throw new Refusal('Code Mode sessions need sessions.installHooks.');
     }
 
@@ -983,7 +986,11 @@ class Flow {
       throw new Refusal('The window has no folder.');
     }
 
-    this.startSession(this.insertAdhoc(null, NEW_CONVERSATION_TITLE, folder, null, 'running', hostWindow));
+    this.startSession(this.insertAdhoc(null, NEW_CONVERSATION_TITLE, folder, null, 'running', hostWindow, provider));
+  }
+
+  private checkProvider(provider: Provider | undefined): void {
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') throw new Refusal('Choose Claude or Codex.');
   }
 
   /** Titles a hosted conversation by its first message's first line, as an ad-hoc work item is by its prompt's (PRD R6). */
@@ -1146,7 +1153,7 @@ class Flow {
    * An ad-hoc ticket and work item: queued when the operator chose Start automatically, otherwise unstarted, and running, with no
    * prompt, for a registered session (PRD R6, R68, R81).
    */
-  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', hostWindow: string | null = null): WorkItem {
+  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', hostWindow: string | null = null, provider?: Provider): WorkItem {
     const keys = this.store.adhocKeys().map(Number);
     const sourceKey = String(Math.max(0, ...keys) + 1);
     // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R76).
@@ -1160,6 +1167,7 @@ class Flow {
     return this.store.insertWorkItem({
       ticketId: ticket.id,
       playbook: null,
+      ...(provider === undefined ? {} : { provider }),
       status,
       stage: null,
       stageAt: null,
@@ -2886,9 +2894,10 @@ class Flow {
       prompt = rendered.text;
     }
 
-    // Setup and approved sessions keep the playbook's provider. Hosted conversations use the default provider and offer no done or approval report.
+    // A playbook runs its sessions in its own provider, else sessions.provider, the one its permission mode and model were checked against
+    // (playbook.ts); an explicit choice applies only while the work item has no playbook, through queued starts and retries.
     const hosted = ticket.hostWindow != null;
-    const provider = playbook?.provider ?? sessions.provider;
+    const provider = playbook === null ? (item.provider ?? sessions.provider) : (playbook.provider ?? sessions.provider);
     const reports = sessionReports(kind, approved, playbook, provider).filter((report) => !hosted || (report !== 'done' && report !== 'approval'));
     // The setting applies at the start; resumes keep the session's mode (PRD R93). The Claude session ID and launch are stored before the
     // start, so a hub restarted during it finds the process in the holder.

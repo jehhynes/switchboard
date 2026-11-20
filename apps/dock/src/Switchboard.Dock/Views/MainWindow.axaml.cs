@@ -1726,6 +1726,10 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
+            var settings = await hub.SessionProvider();
+            if (settings.Error is not null) { model.Status = settings.Error; return; }
+            if (await PickProvider(ShownForDialog(), settings.DefaultProvider!) is not { } provider) return;
+
             // Run as a click is, so a row clicked while the hub answers replaces it and its window is not opened over that row's.
             await Running(async (cancel) =>
             {
@@ -1733,7 +1737,7 @@ public sealed partial class MainWindow : Window
 
                 try
                 {
-                    reply = await hub.NewConversation(folder, Guid.NewGuid().ToString());
+                    reply = await hub.NewConversation(folder, Guid.NewGuid().ToString(), provider);
                 }
                 finally
                 {
@@ -1759,6 +1763,7 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Asks for a folder to start a session in, or null when the operator cancels; tests replace it, as the headless platform has no picker.</summary>
     internal Func<Window, Task<string?>> PickFolder { get; set; } = AskFolder;
+    internal Func<Window, string, Task<string?>> PickProvider { get; set; } = ProviderDialog.Ask;
 
     static async Task<string?> AskFolder(Window owner)
     {
@@ -1781,9 +1786,11 @@ public sealed partial class MainWindow : Window
 
         model.Status = null;
 
-        var created = await AdhocDialog.Ask(ShownForDialog(), [.. model.RepoRoots], repo, (prompt, repoRoot, start) =>
-            hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start }),
-            model.Schedules, (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }));
+        var settings = await hub.SessionProvider();
+
+        var created = await AdhocDialog.Ask(ShownForDialog(), [.. model.RepoRoots], repo, (prompt, repoRoot, start, provider) =>
+            hub.Act(new JsonObject { ["type"] = "adhoc", ["prompt"] = prompt, ["repoRoot"] = repoRoot, ["start"] = start, ["provider"] = provider }),
+            model.Schedules, (name) => hub.Act(new JsonObject { ["type"] = "run-schedule", ["name"] = name }), settings.DefaultProvider ?? "claude", settings.Error);
 
         if (created is not null)
         {
@@ -1999,7 +2006,8 @@ public sealed partial class MainWindow : Window
 
         public Task<string?> Focus(string? sessionId, long at) => Task.FromResult<string?>(null);
 
-        public Task<NewConversationReply> NewConversation(string folder, string opId) => Task.FromResult(new NewConversationReply(null, null, folder));
+        public Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null) => Task.FromResult(new NewConversationReply(null, null, folder));
+        public Task<SessionProviderReply> SessionProvider() => Task.FromResult(new SessionProviderReply(null, "claude"));
 
         public Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within) => Task.FromResult<DockView?>(null);
     }

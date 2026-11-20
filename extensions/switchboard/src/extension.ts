@@ -77,6 +77,8 @@ export interface SwitchboardApi {
   conversation(): ConversationState;
   /** Handles a conversation stream event as if the hub sent it, for the integration suite, whose window has no work item. */
   receiveConversation(event: ConversationEvent): void;
+  /** Connects the conversation to an isolated protocol peer in the integration suite. */
+  connectConversation(record: HubRecord, key: string): void;
   /** The Conversation view's badge, its current session's unread count (architecture.md § Unread); undefined while none is unread or the view is not resolved. */
   conversationBadge(): vscode.ViewBadge | undefined;
   /** The composer's file picker for a query (architecture.md § Conversation view), as the page asks for it. */
@@ -610,6 +612,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     pane: () => pane.shown(),
     conversation: () => conversation.state(),
     receiveConversation: (event) => conversation.receive(event),
+    connectConversation: (record, key) => conversation.connect(record, key),
     conversationBadge: () => conversation.badge(),
     conversationFiles: (query) => conversation.files(query),
     artifacts: () => artifacts.shown(),

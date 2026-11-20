@@ -18,7 +18,7 @@ static class AdhocDialog
     /// </summary>
     /// <param name="create">Sends the prompt, repo and Start automatically; returns the hub's refusal, or null.</param>
     /// <param name="run">Runs the named schedule now; returns the hub's refusal, or null.</param>
-    public static Task<string?> Ask(Window owner, IReadOnlyList<string> repos, string? repo, Func<string, string, bool, Task<string?>> create, IReadOnlyList<ScheduleEntry>? schedules = null, Func<string, Task<string?>>? run = null)
+    public static Task<string?> Ask(Window owner, IReadOnlyList<string> repos, string? repo, Func<string, string, bool, string, Task<string?>> create, IReadOnlyList<ScheduleEntry>? schedules = null, Func<string, Task<string?>>? run = null, string defaultProvider = "claude", string? providerError = null)
     {
         var dialog = new Window { Title = "New Ad-hoc Session", Width = 480, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var choices = schedules ?? [];
@@ -31,6 +31,9 @@ static class AdhocDialog
             IsVisible = choices.Count > 0 && run is not null,
         };
         var repoBox = new ComboBox { Name = "AdhocRepoBox", ItemsSource = repos, SelectedItem = repo, HorizontalAlignment = HorizontalAlignment.Stretch, IsVisible = repos.Count > 1 };
+        var provider = ProviderDialog.Box(defaultProvider, "AdhocProvider");
+        provider.IsEnabled = providerError is null;
+        var providerField = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = "Provider" }, provider } };
         var prompt = new TextBox { Name = "AdhocPromptBox", PlaceholderText = "Prompt for a new session", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 120, MaxHeight = 400 };
         var start = new CheckBox { Name = "AdhocStartAutomatically", Content = "Start automatically", IsChecked = false };
         var error = new TextBlock { Name = "AdhocError", TextWrapping = TextWrapping.Wrap, IsVisible = false };
@@ -40,7 +43,7 @@ static class AdhocDialog
 
         ScheduleEntry? Chosen() => runBox.SelectedIndex > 0 ? choices[runBox.SelectedIndex - 1] : null;
 
-        void Enable() => go.IsEnabled = !busy && (Chosen() is not null || (repoBox.SelectedItem is string && !string.IsNullOrWhiteSpace(prompt.Text)));
+        void Enable() => go.IsEnabled = !busy && (Chosen() is not null || (providerError is null && repoBox.SelectedItem is string && !string.IsNullOrWhiteSpace(prompt.Text)));
 
         // A schedule's run takes its playbook's prompt and the schedule's repo, and starts at once.
         void Show()
@@ -49,9 +52,11 @@ static class AdhocDialog
 
             repoBox.IsVisible = typed && repos.Count > 1;
             prompt.IsVisible = typed;
+            providerField.IsVisible = typed;
             start.IsVisible = typed;
             go.Content = typed ? "Create" : "Run";
-            error.IsVisible = false;
+            error.Text = typed ? providerError : null;
+            error.IsVisible = typed && providerError is not null;
             Enable();
         }
 
@@ -71,7 +76,7 @@ static class AdhocDialog
 
             var chosen = repoBox.SelectedItem as string;
 
-            if (busy || (schedule is null && (string.IsNullOrWhiteSpace(prompt.Text) || chosen is null)))
+            if (busy || (schedule is null && (providerError is not null || string.IsNullOrWhiteSpace(prompt.Text) || chosen is null)))
             {
                 return;
             }
@@ -80,7 +85,7 @@ static class AdhocDialog
             cancel.IsEnabled = false;
             Enable();
 
-            var refused = schedule is null ? await create(prompt.Text!, chosen!, start.IsChecked == true) : await run!(schedule.Name);
+            var refused = schedule is null ? await create(prompt.Text!, chosen!, start.IsChecked == true, ((ProviderDialog.Option)provider.SelectedItem!).Id) : await run!(schedule.Name);
 
             busy = false;
             cancel.IsEnabled = true;
@@ -111,6 +116,7 @@ static class AdhocDialog
                 new TextBlock { Text = "New Ad-hoc Session", FontWeight = FontWeight.SemiBold },
                 runBox,
                 repoBox,
+                providerField,
                 prompt,
                 start,
                 error,

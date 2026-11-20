@@ -545,7 +545,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return `<header class="header"><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${plus}</header><p class="empty">No Switchboard session in this folder yet.</p>`;
   }
 
-  const header = `<header class="header">${codicon(stateIcon(state.session))}${picker(state, open.has(PICKER))}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
+  const provider = state.session?.provider === undefined ? '' : `<span class="provider" title="Session provider">${state.session.provider === 'codex' ? 'Codex' : 'Claude'}</span>`;
+  const header = `<header class="header">${codicon(stateIcon(state.session))}${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   const notes = state.session?.reason == null ? [] : [state.session.reason];
   const shown = timeline(state.items, state.artifacts);
   // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).

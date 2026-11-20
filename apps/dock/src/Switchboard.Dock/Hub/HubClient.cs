@@ -256,9 +256,17 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
 
     public Task<string?> Select(string rowKey) => Post("/dock/select", new JsonObject { ["rowKey"] = rowKey });
 
-    public async Task<NewConversationReply> NewConversation(string folder, string opId)
+    public async Task<SessionProviderReply> SessionProvider()
+    {
+        var (error, body) = await PostFor("/v1/conversation/providers", new JsonObject());
+        var provider = body?["defaultProvider"] is JsonValue value && value.TryGetValue<string>(out var named) ? named : null;
+        return error is not null ? new(error, null) : provider is "claude" or "codex" ? new(null, provider) : new("The hub did not provide the session providers. Reload VS Code to update it.", null);
+    }
+
+    public async Task<NewConversationReply> NewConversation(string folder, string opId, string? provider = null)
     {
         var body = new JsonObject { ["folder"] = folder, ["opId"] = opId };
+        if (provider is not null) body["provider"] = provider;
         var (status, reply, failure) = await Send("/dock/new-conversation", body);
 
         // A request whose answer was lost is sent once more with the same opId, which the hub answers with the conversation it made, not a second.

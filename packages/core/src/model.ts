@@ -86,6 +86,8 @@ export interface TicketBlocker {
 }
 
 export interface WorkItem {
+  /** Provider chosen when this ad-hoc work item was created, used while it has no playbook; absent keeps the configured default. */
+  provider?: Provider | null;
   id: number;
   ticketId: number;
   /** Null for an ad-hoc work item and before triage chooses one. */

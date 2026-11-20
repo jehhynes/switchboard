@@ -424,8 +424,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     // The dock's rows count each work item's unread items, so a change builds the views again.
     unreadChanged: () => builder.schedule(),
     resume: (sessionId) => runtime.resumeThread(sessionId),
-    newConversation: (hostWindow, folder) => {
-      const { refused } = runtime.send({ type: 'new-conversation', hostWindow, folder });
+    newConversation: (hostWindow, folder, provider) => {
+      const { refused } = runtime.send({ type: 'new-conversation', hostWindow, folder, ...(provider === undefined ? {} : { provider }) });
       const made = refused === null ? store.hostedWorkItems(hostWindow)[0] : undefined;
 
       return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
@@ -739,6 +739,7 @@ const dockWithRuns = () => {
       },
       '/volume': async (body) => volumeReply(store, deps.now(), body),
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
+      '/v1/conversation/providers': async () => ({ status: 200, body: { defaultProvider: config.settings.sessions.provider } }),
         '/v1/conversation/answer': async (body) => isRecord(body) ? conversation.answer(body) : { status: 400, body: { error: 'Expected a request answer.' } },
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),

@@ -21,6 +21,7 @@ public sealed class ControlsTests
     {
         var model = new DockViewModel(new DockSettings(), (_) => { });
         var window = new MainWindow(model, null, hub, actions, docked: false, config) { Height = 1200 };
+        window.PickProvider = (_, preferred) => Task.FromResult<string?>(preferred);
 
         model.Show(view ?? Fixtures.View);
         window.Show();
@@ -84,9 +85,25 @@ public sealed class ControlsTests
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(1, asked);
-        Assert.Matches("^new-conversation d:/git/support [0-9a-f-]{36}$", Assert.Single(hub.Calls));
+        Assert.Matches("^new-conversation d:/git/support [0-9a-f-]{36} claude$", Assert.Single(hub.Calls));
         Assert.Equal(["D:\\git\\support"], actions.Folders);
         Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void NewSessionInAFolder_ProviderChosenOrCancelled_PostsOnlyTheExplicitChoice()
+    {
+        hub.DefaultProvider = "codex";
+        var (window, _) = Open();
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
+        window.PickProvider = (_, preferred) => { Assert.Equal("codex", preferred); return Task.FromResult<string?>(null); };
+        Choose(window, "New Session in a Folder…");
+        Assert.Empty(hub.Calls);
+        window.PickProvider = (_, _) => Task.FromResult<string?>("claude");
+        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:/git/support"));
+        Choose(window, "New Session in a Folder…");
+        Assert.Matches("^new-conversation D:/git/support [0-9a-f-]{36} claude$", Assert.Single(hub.Calls));
+        Assert.Equal("codex", hub.DefaultProvider);
     }
 
     [AvaloniaFact]
@@ -508,7 +525,7 @@ public sealed class ControlsTests
         hub.ActReplies.Enqueue(null);
         Click(Named<Button>(dialog, "AdhocCreate"));
 
-        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/support\",\"start\":false}"], hub.Calls);
+        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/support\",\"start\":false,\"provider\":\"claude\"}"], hub.Calls);
         Assert.Empty(window.OwnedWindows);
         Assert.Equal("D:/git/support", model.AdhocRepo);
     }
@@ -526,8 +543,43 @@ public sealed class ControlsTests
         hub.ActReplies.Enqueue(null);
         Click(Named<Button>(dialog, "AdhocCreate"));
 
-        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/widgets\",\"start\":true}"], hub.Calls);
+        Assert.Equal(["act {\"type\":\"adhoc\",\"prompt\":\"Check the log\",\"repoRoot\":\"D:/git/widgets\",\"start\":true,\"provider\":\"claude\"}"], hub.Calls);
         Assert.Empty(window.OwnedWindows);
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_ProviderChanged_PostsTheChoiceWithoutChangingTheDefault()
+    {
+        hub.DefaultProvider = "codex";
+        var (window, _) = Open();
+        Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
+        var provider = Named<ComboBox>(dialog, "AdhocProvider");
+        Assert.Equal("codex", ((ProviderDialog.Option)provider.SelectedItem!).Id);
+        provider.SelectedIndex = 0;
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Check";
+        hub.ActReplies.Enqueue(null);
+        Click(Named<Button>(dialog, "AdhocCreate"));
+        Assert.Contains("\"provider\":\"claude\"", Assert.Single(hub.Calls));
+        Assert.Equal("codex", hub.DefaultProvider);
+    }
+
+    [AvaloniaFact]
+    public void Adhoc_ProviderLookupFails_KeepsSchedulesAvailableAndRefusesTypedPrompts()
+    {
+        hub.ProviderError = "Provider lookup failed.";
+        var (window, _) = Open();
+        Choose(window, "New Ad-hoc Session…");
+        var dialog = DialogOf(window);
+        Named<TextBox>(dialog, "AdhocPromptBox").Text = "Work";
+        Assert.False(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+        Assert.Equal("Provider lookup failed.", Named<TextBlock>(dialog, "AdhocError").Text);
+        Assert.Empty(hub.Calls);
+        Named<ComboBox>(dialog, "AdhocRunBox").SelectedIndex = 1;
+        Assert.True(Named<Button>(dialog, "AdhocCreate").IsEnabled);
+        hub.ActReplies.Enqueue(null);
+        Click(Named<Button>(dialog, "AdhocCreate"));
+        Assert.Equal(["act {\"type\":\"run-schedule\",\"name\":\"self-review\"}"], hub.Calls);
     }
 
     [AvaloniaFact]

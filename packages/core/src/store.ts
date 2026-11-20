@@ -456,6 +456,7 @@ export const MIGRATIONS = [
   `ALTER TABLE messages ADD COLUMN interruptedReplyId TEXT;
   ALTER TABLE messages ADD COLUMN interruptedSaid TEXT;
   ALTER TABLE messages ADD COLUMN interruptedRest TEXT;`,
+  `ALTER TABLE workItems ADD COLUMN provider TEXT;`,
 ];
 
 /**

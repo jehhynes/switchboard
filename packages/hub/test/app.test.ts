@@ -233,6 +233,18 @@ describe('parseReport and reportBody', () => {
   });
 });
 
+describe('session provider metadata', () => {
+  it('returns the configured provider without starting a session or changing settings', async () => {
+    writeSettings({ sessions: { provider: 'codex', installHooks: false } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+    closers.push(() => app.close());
+    expect(await app.post['/v1/conversation/providers']!({})).toEqual({ status: 200, body: { defaultProvider: 'codex' } });
+    const before = readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8');
+    expect(await app.post['/v1/conversation/providers']!({})).toMatchObject({ body: { defaultProvider: 'codex' } });
+    expect(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).toBe(before);
+  });
+});
+
 describe('loadConfig', () => {
   it('uses defaults without a settings file, keeps the previous settings on an invalid file, and lists playbook errors', () => {
     const fresh = loadConfig(join(temp.home, '.switchboard'));

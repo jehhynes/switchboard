@@ -27,6 +27,17 @@ const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null;
 const idOf = (entry: Entry): string => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id);
 
 describe('the conversation state', () => {
+  it('labels the current provider and updates it when the conversation changes', () => {
+    const root = document.createElement('div');
+    const first = applyEvent(EMPTY_CONVERSATION, hello([], { sessions: [{ ...SESSION, provider: 'codex' }] }));
+    root.innerHTML = renderConversation(first);
+    expect(root.querySelector('.header .provider')?.textContent).toBe('Codex');
+    const next = applyEvent(first, hello([], { sessions: [{ ...SESSION, id: 'claude-session', provider: 'claude' }] }));
+    root.innerHTML = renderConversation(next);
+    expect(root.querySelector('.header .provider')?.textContent).toBe('Claude');
+    root.innerHTML = renderConversation(applyEvent(next, hello([], { sessions: [] })));
+    expect(root.querySelector('.provider')).toBeNull();
+  });
   it('renders native Codex requests and unknown delivery without exposing a request as a chat answer', () => {
     const uncertain = message('m-unknown', T0, 'Check delivery', { origin: 'typed', delivery: 'uncertain', error: 'Check the terminal before resending.' });
     const native = { ...SESSION, provider: 'codex' as const, state: 'waiting' as const, waitingFor: 'question' as const, requests: [{id:'1:0',kind:'question' as const,title:'Choose <red> or blue',questions:[{id:'color',question:'Which color?',options:['Red','Blue']}],decisions:[]}] };

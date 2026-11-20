@@ -1,5 +1,5 @@
 import { countsUnread, inTranscript } from '@switchboard/core';
-import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Session, SpokenState, Store } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion } from '@switchboard/core';
 import type { PersonaSettings } from '@switchboard/core';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
@@ -104,6 +104,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
           : null;
 
   return {
+    provider: session.provider,
     id: session.id,
     kind: session.kind,
     title: `${session.kind === 'setup' ? 'Setup' : 'Task'} session ${session.shortId ?? session.id}`,
@@ -199,7 +200,7 @@ export interface ConversationServiceDeps {
    * Makes a hosted conversation (architecture.md § Hosted conversations) for the window binding `hostWindow` in `folder` and starts its session;
    * its work item, or why it was refused.
    */
-  newConversation?(hostWindow: string, folder: string): { workItemId: number } | { refused: string };
+  newConversation?(hostWindow: string, folder: string, provider?: Provider): { workItemId: number } | { refused: string };
   /** A message was added to a work item's conversation, whose first titles a hosted conversation. */
   messageAdded?(workItemId: number, text: string): void;
   /** Resumes an ended Codex app-server session before a message typed to it is sent (PRD R107); why not, or null. */
@@ -1328,11 +1329,12 @@ export class ConversationService {
    * `opId` answers the first work item and makes none.
    */
   newConversation(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, opId } = body;
+    const { window, opId, provider } = body;
 
     if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || opId.length > 200) {
       return { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } };
     }
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return { status: 400, body: { error: 'Choose Claude or Codex.' } };
 
     // The window's binding hosts it: an item window's workspace file, or a folder window's canonical folder.
     const file = this.deps.windows.hostOf(window);
@@ -1349,7 +1351,7 @@ export class ConversationService {
       return { status: 200, body: { workItemId: earlier } };
     }
 
-    const made = this.deps.newConversation(file, scope.folder ?? '');
+    const made = provider === undefined ? this.deps.newConversation(file, scope.folder ?? '') : this.deps.newConversation(file, scope.folder ?? '', provider);
 
     if ('refused' in made) {
       return { status: 409, body: { error: made.refused } };
@@ -1371,11 +1373,12 @@ export class ConversationService {
    * the dock opens. A repeated `opId` answers the first work item and makes none. 400 for a path that is not a folder, 409 with the refusal.
    */
   dockConversation(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { folder, opId } = body;
+    const { folder, opId, provider } = body;
 
     if (typeof folder !== 'string' || folder === '' || typeof opId !== 'string' || opId === '' || opId.length > 200) {
       return { status: 400, body: { error: 'Expected {folder, opId}.' } };
     }
+    if (provider !== undefined && provider !== 'claude' && provider !== 'codex') return { status: 400, body: { error: 'Choose Claude or Codex.' } };
 
     const host = canonicalFolder(folder);
 
@@ -1395,7 +1398,7 @@ export class ConversationService {
       return { status: 200, body: { workItemId: earlier, folder: host } };
     }
 
-    const made = this.deps.newConversation(host, host);
+    const made = provider === undefined ? this.deps.newConversation(host, host) : this.deps.newConversation(host, host, provider);
 
     if ('refused' in made) {
       return { status: 409, body: { error: made.refused } };

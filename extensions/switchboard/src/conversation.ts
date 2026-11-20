@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import type { HubRecord } from '@switchboard/core';
+import type { HubRecord, Provider } from '@switchboard/core';
 import { openConversation, postToHub } from '@switchboard/hub';
 import type { EventStream, ItemView, StatusView } from '@switchboard/hub';
 import { applyEvent, EMPTY_CONVERSATION, lastSpokenReply, micOn, statusLine, totalUnread, voiceStatus, withEarlier } from './conversationModel.js';
@@ -739,11 +739,14 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
   }
 
+  #creatingConversation = false;
+
   /**
    * Starts a new conversation hosted by this window (architecture.md § Hosted conversations), the view's plus button and Switchboard: New Session.
    * A command that got no answer is posted once more with the same `opId`, which the hub answers with the conversation it already made.
    */
   async newConversation(): Promise<void> {
+    if (this.#creatingConversation) return;
     const target = this.#target;
     const scope = this.#state.scope;
 
@@ -752,11 +755,22 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       return;
     }
 
-    const body = { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID() };
-    const reply = (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS)) ?? (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS));
-
-    if (reply?.status !== 200) {
-      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    this.#creatingConversation = true;
+    try {
+      const settings = await postToHub(target.record, '/v1/conversation/providers', {}, SEND_TIMEOUT_MS);
+      const preferred = (settings?.body as { defaultProvider?: unknown } | null)?.defaultProvider;
+      if (settings?.status !== 200 || (preferred !== 'claude' && preferred !== 'codex')) {
+        void vscode.window.showWarningMessage(`Switchboard: ${settings?.error ?? 'The hub did not provide the session providers. Reload VS Code to update it.'}`);
+        return;
+      }
+      const choices: Array<vscode.QuickPickItem & { provider: Provider }> = ([preferred, preferred === 'claude' ? 'codex' : 'claude'] as Provider[]).map(provider => ({ label: provider === 'claude' ? 'Claude' : 'Codex', description: provider === preferred ? 'Default' : '', provider, picked: provider === preferred }));
+      const chosen = await vscode.window.showQuickPick(choices, { title: 'New session', placeHolder: 'Choose a provider', ignoreFocusOut: true });
+      if (chosen === undefined || this.#target !== target) return;
+      const body = { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), provider: chosen.provider };
+      const reply = (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS)) ?? (await postToHub(target.record, '/v1/conversation/new-conversation', body, SEND_TIMEOUT_MS));
+      if (reply?.status !== 200) void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    } finally {
+      this.#creatingConversation = false;
     }
   }
 
