@@ -85,6 +85,9 @@ describe('Code Mode command', () => {
     expect(RULES.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]', '[status]']);
     expect(RULES).toContain('they do not change how you write');
     expect(RULES).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
+    // A turn may write several replies between tool calls; the rules give only the reason text before a tool call is lost (decision 24).
+    expect(RULES).not.toMatch(/end of (your|the) turn/i);
+    expect(RULES).toContain('Text written directly before a tool call in the same response can be saved only as thinking, so it never reaches the view.');
     expect(PROMPT.endsWith(RULES)).toBe(true);
   });
 
