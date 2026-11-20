@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 import { providerMark } from '@switchboard/conversation/providerIcons';
-import { artifactIcon, awaitingReply, ROOM_HOLD_TIP, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
+import { artifactIcon, awaitingReply, PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answersIn, answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
@@ -272,6 +272,9 @@ export function renderMicButton(voice: VoiceView | null): string {
       return button('on', 'Mic starting. Click to turn it off.', false, 'starting');
     case 'paused-other-app':
       return button('paused', `Mic paused: another app is using the microphone.${where} Click to turn the mic off.`, false, 'paused');
+    case 'paused-by-voice':
+      // Only "start listening" is heard: a click listens again rather than turning the mic off.
+      return button('paused', `Mic ${PAUSED_BY_VOICE_TIP.charAt(0).toLowerCase()}${PAUSED_BY_VOICE_TIP.slice(1)}`, true, 'paused');
     case 'unavailable':
       // The mic is on but cannot run: a click turns it off, and turning it on again tries again.
       return button('off', `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable');

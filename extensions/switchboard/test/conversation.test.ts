@@ -124,6 +124,9 @@ describe('the conversation state', () => {
     expect(voiceStatus({ ...halfDuplex, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', tooltip: 'Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to stop speaking.' });
     // A room hold: spoken turns stay in the box.
     expect(voiceStatus({ ...voice, mic: 'listening', roomHold: true })).toEqual({ text: '$(mic-filled) Listening (held)', tooltip: 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false });
+    // Paused by "stop listening": the toggle listens again.
+    expect(voiceStatus({ ...voice, mic: 'paused-by-voice' })).toEqual({ text: '$(mic) Mic paused', tooltip: 'Paused: you said "stop listening". Say "start listening", or click to listen again.', command: 'switchboard.toggleMicrophone', warning: false });
+    expect(micOn({ ...voice, mic: 'paused-by-voice' })).toBe(false);
     expect(micOn({ ...voice, mic: 'listening' })).toBe(true);
     expect(micOn({ ...voice, mic: 'paused-other-app' })).toBe(true);
     expect(micOn({ ...voice, mic: 'idle-off' })).toBe(false);
@@ -909,6 +912,9 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(renderMicButton({ ...VOICE, mic: 'listening', recognizer: 'gpu' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Speech recognition runs on the GPU. Click to turn the mic off."');
     expect(renderMicButton({ ...VOICE, mic: 'hearing', recognizer: 'cpu' })).toContain('Speech recognition runs on the CPU.');
     expect(renderMicButton({ ...VOICE, mic: 'listening' })).not.toContain('Speech recognition');
+    // Paused by "stop listening": a pause badge, and a click listens again.
+    expect(renderMicButton({ ...VOICE, mic: 'paused-by-voice' })).toContain('title="Mic paused: you said &#34;stop listening&#34;. Say &#34;start listening&#34;, or click to listen again."');
+    expect(renderMicButton({ ...VOICE, mic: 'paused-by-voice' })).toMatch(/class="mic paused".*data-on="true"/);
     // A room hold says spoken turns stay in the box.
     expect(renderMicButton({ ...VOICE, mic: 'listening', roomHold: true })).toContain('title="Mic on: listening. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');
     expect(renderMicButton({ ...VOICE, mic: 'hearing', roomHold: true })).toContain('title="Mic on: hearing you. Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off."');

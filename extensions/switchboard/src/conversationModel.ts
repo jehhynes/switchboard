@@ -340,20 +340,25 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
       return { text: '$(mic-filled) Mic starting', tooltip: 'The mic is starting. Click to turn it off.', command: 'switchboard.toggleMicrophone', warning: false };
     case 'paused-other-app':
       return { text: '$(mic) Mic paused', tooltip: 'Paused: another app is using the microphone.', command: null, warning: false };
+    case 'paused-by-voice':
+      return { text: '$(mic) Mic paused', tooltip: PAUSED_BY_VOICE_TIP, command: 'switchboard.toggleMicrophone', warning: false };
     default:
       return { text: '$(mic) Mic off', tooltip: voice.mic === 'idle-off' ? 'The mic stopped after a quiet spell. Click to turn it on.' : 'Click to turn the mic on.', command: 'switchboard.toggleMicrophone', warning: false };
   }
 }
+
+/** The mic's tooltips while "stop listening" paused it. */
+export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to listen again.';
 
 /** The mic's tooltips during a room hold. */
 export const ROOM_HOLD_TIP = 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter.';
 
 /**
  * Whether the mic is on in this window, so Toggle Microphone turns it off; an idle stop counts as off, so the toggle starts it again, and so does
- * a mic that cannot run, so the toggle tries again.
+ * a mic that cannot run, so the toggle tries again, and one "stop listening" paused, so the toggle listens again.
  */
 export function micOn(voice: VoiceView | null): boolean {
-  return voice?.here === true && voice.mic !== 'off' && voice.mic !== 'idle-off' && voice.mic !== 'unavailable';
+  return voice?.here === true && voice.mic !== 'off' && voice.mic !== 'idle-off' && voice.mic !== 'unavailable' && voice.mic !== 'paused-by-voice';
 }
 
 /** The header's codicon for the session's state (architecture.md § Conversation view). */

@@ -84,7 +84,7 @@ interface Heard {
 
 /** What one line of the fragments log records (architecture.md § Dictation). */
 export interface Fragment {
-  event: 'heard' | 'dropped' | 'submitted' | 'sent' | 'not-sent' | 'refused' | 'held';
+  event: 'heard' | 'dropped' | 'submitted' | 'sent' | 'not-sent' | 'refused' | 'held' | 'command';
   sessionId: string;
   utteranceId: string | null;
   pieceId: string | null;
@@ -1171,6 +1171,11 @@ export class VoiceControl {
         this.#micOn = false;
         this.deps.log(`voice: mic off: ${MIC_OFF_TEXT[message.reason]}`);
         this.viewsChanged();
+        return;
+      case 'command':
+        // A spoken command goes to no session: it is only logged (architecture.md § Dictation).
+        this.deps.log(`voice: spoken command ${message.command} ("${message.text}")`);
+        this.#fragment({ event: 'command', sessionId: message.sessionId ?? '', utteranceId: message.utteranceId, pieceId: null, messageId: null, text: message.text, score: message.score, f0: message.f0 });
         return;
       case 'audio':
         if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || message.recognizer !== this.#recognizer || (message.roomHold ?? null) !== this.#roomHoldUntil) {

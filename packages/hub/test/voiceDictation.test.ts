@@ -578,6 +578,20 @@ describe('VoiceControl enrolment', () => {
     expect(dictated.map((one) => one.text)).toEqual(['and lint']);
   });
 
+  it('logs a spoken command in the hub log and the fragments log, and sends it nowhere', async () => {
+    const { connection, notified, dictated, fragments } = await setup();
+    const sent = notified.length;
+
+    connection.receive({ type: 'command', command: 'stop-listening', text: 'stop listening', sessionId: 's1', utteranceId: 'u1', score: 0.8, f0: 110 });
+    connection.receive({ type: 'command', command: 'start-listening', text: 'start listening', sessionId: null, utteranceId: null, score: null, f0: null });
+    expect(dictated).toEqual([]);
+    expect(notified.slice(sent)).toEqual([]);
+    expect(fragments()).toEqual([
+      expect.objectContaining({ event: 'command', sessionId: 's1', utteranceId: 'u1', text: 'stop listening', score: 0.8, f0: 110 }),
+      expect.objectContaining({ event: 'command', sessionId: '', utteranceId: null, text: 'start listening' }),
+    ]);
+  });
+
   it('frees a held draft the operator empties, and drops a held turn for a terminal', async () => {
     const { control, connection, dictated, piece, end, focus } = await setup();
 
