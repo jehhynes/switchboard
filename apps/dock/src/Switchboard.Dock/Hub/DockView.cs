@@ -218,9 +218,10 @@ public sealed record DockHandoff(int WorkItemId, string SessionId);
 
 /// <summary>
 /// A hub control in the row's menu, with the action posted to <c>/action</c> as the hub sent it, after <paramref name="Confirm"/> when set, or with
-/// the text <paramref name="Input"/> asks for.
+/// the text <paramref name="Input"/> asks for. Controls with the same <paramref name="Group"/>, such as <c>Persona</c>, are a submenu of that name,
+/// with <paramref name="Checked"/> ones checked (architecture.md § Personas).
 /// </summary>
-public sealed record DockControl(string Label, JsonObject Action, string Glyph = "", DockConfirm? Confirm = null, DockInput? Input = null);
+public sealed record DockControl(string Label, JsonObject Action, string Glyph = "", DockConfirm? Confirm = null, DockInput? Input = null, string? Group = null, bool Checked = false);
 
 /// <summary>
 /// A text the dock asks for before it posts a control's action, set as the action's <paramref name="Field"/>, such as Start's guidance (PRD R77),

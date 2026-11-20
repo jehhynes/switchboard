@@ -1281,9 +1281,15 @@ public sealed partial class MainWindow : Window
             items.Add(Item(row.Main ?? "Open", () => Open(shown), row.MainGlyph));
         }
 
-        foreach (var control in row.Controls.Where((control) => control.Confirm is null))
+        foreach (var control in row.Controls.Where((control) => control.Confirm is null && control.Group is null))
         {
             items.Add(Item(control.Label, control.Action["type"]?.GetValue<string>() == "snooze" ? () => Snooze(row, control) : () => Act(control), control.Glyph));
+        }
+
+        // Controls that share a group, such as Persona, are its submenu, the checked ones marked (architecture.md § Personas).
+        foreach (var group in row.Controls.Where((control) => control.Confirm is null && control.Group is not null).GroupBy((control) => control.Group!))
+        {
+            items.Add(new MenuItem { Header = group.Key, ItemsSource = group.Select((control) => Checked(control.Label, control.Checked, () => Act(control))).ToList() });
         }
 
         if (row.Pastes.Count == 1)
@@ -1348,6 +1354,16 @@ public sealed partial class MainWindow : Window
     const string OutputGlyph = "\uEB9D";
     const string RefreshGlyph = "\uEB37";
     const string GraphGlyph = "\uEB03";
+
+    /// <summary>A submenu's choice, checked when it is the current one.</summary>
+    static MenuItem Checked(string header, bool isChecked, Func<Task> run)
+    {
+        var item = new MenuItem { Header = header, ToggleType = MenuItemToggleType.CheckBox, IsChecked = isChecked };
+
+        item.Click += async (_, _) => await run();
+
+        return item;
+    }
 
     static MenuItem Item(string header, Func<Task> run, string? glyph = null)
     {

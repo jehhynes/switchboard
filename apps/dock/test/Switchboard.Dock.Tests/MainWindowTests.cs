@@ -1014,6 +1014,28 @@ public sealed class MainWindowTests
     }
 
     [AvaloniaFact]
+    public void MenuOf_GroupedControls_ListsThemInASubmenuWithTheCheckedOneMarked()
+    {
+        var (window, _) = Open();
+        DockControl Persona(string label, string? id, bool isChecked) =>
+            new(label, new System.Text.Json.Nodes.JsonObject { ["type"] = "persona", ["sessionId"] = "s7", ["personaId"] = id }, Group: "Persona", Checked: isChecked);
+        var row = Fixtures.Row("item:7") with { Controls = [Persona("Nova", "nova", false), Persona("Orion (pinned)", "orion", true), Persona("Clear pin", null, false)], Commands = [], Url = "", Links = [] };
+
+        var menu = window.MenuOf(row);
+        var persona = Assert.IsType<MenuItem>(Assert.Single(menu));
+        var choices = ((IEnumerable<object>)persona.ItemsSource!).Cast<MenuItem>().ToList();
+
+        Assert.Equal("Persona", persona.Header);
+        Assert.Equal([("Nova", false), ("Orion (pinned)", true), ("Clear pin", false)], choices.Select((item) => ((string)item.Header!, item.IsChecked)));
+
+        hub.ActReplies.Enqueue(null);
+        choices[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["act {\"type\":\"persona\",\"sessionId\":\"s7\",\"personaId\":\"nova\"}"], hub.Calls);
+    }
+
+    [AvaloniaFact]
     public void MenuItem_Clicked_PostsItsActionOrOpensTheTicket()
     {
         var (window, model) = Open();
