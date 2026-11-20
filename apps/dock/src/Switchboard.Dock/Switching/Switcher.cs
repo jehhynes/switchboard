@@ -59,6 +59,12 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
             return cancel.IsCancellationRequested ? null : unselected;
         }
 
+        // A click replaced while the hub selected leaves no open, which could replace the newer click's for the same window.
+        if (cancel.IsCancellationRequested)
+        {
+            return null;
+        }
+
         var open = row.Open;
 
         if (open is { Type: "question", WorkItemId: { } workItemId, SessionId: { } question })
@@ -96,17 +102,37 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
     /// </summary>
     async Task<string?> FolderWindow(string folder, DockOpen? open, CancellationToken cancel)
     {
-        if (open is { Type: "session", SessionId: { } sessionId, Cwd: { } cwd } && await hub.Open(sessionId, cwd, folder) is { } refused)
-        {
-            return cancel.IsCancellationRequested ? null : refused;
-        }
-
         if (cancel.IsCancellationRequested)
         {
             return null;
         }
 
-        var failure = Launch(folder) ?? await Reached(folder, cancel);
+        var left = await LeaveOpen(open, folder);
+
+        if (left.Error is { } refused)
+        {
+            return cancel.IsCancellationRequested ? null : refused;
+        }
+
+        var failure = cancel.IsCancellationRequested ? null : Launch(folder) ?? await Reached(folder, cancel);
+
+        return await OpenWithdrawn(left, failure, cancel);
+    }
+
+    /// <summary>Leaves a &lt;c&gt;session&lt;/c&gt; open for the destination window; a reply with no ID for any other open, which leaves nothing.</summary>
+    Task<WindowReply> LeaveOpen(DockOpen? open, string destination) =>
+        open is { Type: "session", SessionId: { } sessionId, Cwd: { } cwd } ? hub.Open(sessionId, cwd, destination) : Task.FromResult(new WindowReply(null, null));
+
+    /// <summary>
+    /// After a cancelled or failed click, withdraws the session it left, so its window does not open it when it connects or gains focus later;
+    /// returns the failure, or null for a click that worked or was cancelled.
+    /// </summary>
+    async Task<string?> OpenWithdrawn(WindowReply left, string? failure, CancellationToken cancel)
+    {
+        if ((failure is not null || cancel.IsCancellationRequested) && left.Id is { } id)
+        {
+            await hub.WithdrawOpen(id);
+        }
 
         return cancel.IsCancellationRequested ? null : failure;
     }
@@ -158,21 +184,28 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
             return Older;
         }
 
-        if (open is { Type: "session", SessionId: { } sessionId, Cwd: { } cwd } && await hub.Open(sessionId, cwd, file) is { } refused)
+        if (cancel.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        var left = await LeaveOpen(open, file);
+
+        if (left.Error is { } refused)
         {
             return cancel.IsCancellationRequested ? null : refused;
         }
 
         if (cancel.IsCancellationRequested)
         {
-            return null;
+            return await OpenWithdrawn(left, null, cancel);
         }
 
         var handle = windows.Find(window.Name);
 
         if (handle != 0)
         {
-            return await BringForward(window, handle, cancel);
+            return await OpenWithdrawn(left, await BringForward(window, handle, cancel), cancel);
         }
 
         // A window the click opens shows the ticket, its links and its report in tabs (PRD R72); a hub that refuses only leaves them out.
@@ -181,11 +214,12 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
         if (cancel.IsCancellationRequested || failure is not null)
         {
-            return await Withdrawn(tabs, failure, cancel);
+            return await OpenWithdrawn(left, await Withdrawn(tabs, failure, cancel), cancel);
         }
 
-        // VS Code has started, so the window it opens claims the tabs, even when a later click replaces this one or it appears after the wait.
-        return await BringForward(window, handle, cancel);
+        // VS Code has started, so the window it opens claims the tabs, even when a later click replaces this one or it appears after the wait; the
+        // session is withdrawn when the click is cancelled or its window does not come forward.
+        return await OpenWithdrawn(left, await BringForward(window, handle, cancel), cancel);
     }
 
     /// <summary>

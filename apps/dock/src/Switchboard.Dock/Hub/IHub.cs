@@ -21,9 +21,12 @@ public interface IHub
 
     /// <summary>
     /// Leaves a session for the window on <paramref name="cwd"/> opened from <paramref name="workspace"/> to open when it gains focus or connects;
-    /// no other window claims it (architecture.md § Claude Code runner).
+    /// no other window claims it (architecture.md § Claude Code runner). Returns the refusal or failure, or the open's ID for withdrawing it.
     /// </summary>
-    Task<string?> Open(string sessionId, string cwd, string workspace);
+    Task<WindowReply> Open(string sessionId, string cwd, string workspace);
+
+    /// <summary>Drops a session left for a window the click did not reach, so the window does not open it when it connects later.</summary>
+    Task<string?> WithdrawOpen(int id);
 
     /// <summary>
     /// Makes a hosted conversation's row the selection of its host window, so the window shows it when the click brings it forward

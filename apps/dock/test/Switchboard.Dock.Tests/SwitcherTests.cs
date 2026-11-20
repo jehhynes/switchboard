@@ -113,6 +113,66 @@ public sealed class SwitcherTests
     }
 
     [Fact]
+    public async Task Click_FolderRowCancelledWhileWaitingOrNeverReached_WithdrawsTheSessionItLeft()
+    {
+        var row = Fixtures.Row("item:7") with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };
+        using var cancel = new CancellationTokenSource();
+
+        // A later click cancels this one while the folder window is still opening.
+        hub.HoldUntil = new TaskCompletionSource();
+        hub.OnUntil = cancel.Cancel;
+
+        Assert.Null(await Switcher().Click(row, cancel.Token));
+        Assert.Equal(["select item:7", "open aaaa1111-native D:/git/widgets/.worktrees/107-fix support", "until 20s", "withdraw open 32"], hub.Calls);
+
+        // No folder window connects within the wait.
+        hub.Calls.Clear();
+        hub.HoldUntil = null;
+        hub.OnUntil = null;
+        Assert.Equal("VS Code did not open a window on D:/git/support within 20 seconds.", await Switcher().Click(row, TestContext.Current.CancellationToken));
+        Assert.Equal("withdraw open 32", hub.Calls[^1]);
+
+        // VS Code does not start.
+        hub.Calls.Clear();
+        vsCode.Fails = new FileNotFoundException("Code.exe was not found beside code on PATH.");
+        Assert.Equal("VS Code did not start: Code.exe was not found beside code on PATH.", await Switcher().Click(row, TestContext.Current.CancellationToken));
+        Assert.Equal("withdraw open 32", hub.Calls[^1]);
+    }
+
+    [Fact]
+    public async Task Click_HostedRowReplacedWhileTheHubSelects_LeavesNoOpenForItsWindow()
+    {
+        var row = Fixtures.Row("item:7");
+        using var cancel = new CancellationTokenSource();
+
+        // A newer click's open for the same window must not be replaced by this one's.
+        windows.Open["gh-107-58c609"] = (42, 0);
+        hub.OnSelect = cancel.Cancel;
+
+        Assert.Null(await Switcher().Click(row with { Window = row.Window! with { Hosted = true } }, cancel.Token));
+        Assert.Equal(["select item:7"], hub.Calls);
+
+        hub.Calls.Clear();
+        Assert.Null(await Switcher().Click(row with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") }, cancel.Token));
+        Assert.Equal(["select item:7"], hub.Calls);
+        Assert.Empty(windows.Calls);
+        Assert.Empty(vsCode.Calls);
+    }
+
+    [Fact]
+    public async Task Click_CancelledAfterLeavingTheSession_WithdrawsItBeforeSwitching()
+    {
+        using var cancel = new CancellationTokenSource();
+
+        windows.Open["gh-107-58c609"] = (42, 0);
+        hub.OnOpen = cancel.Cancel;
+
+        Assert.Null(await Switcher().Click(Fixtures.Row("item:7"), cancel.Token));
+        Assert.Equal(["open aaaa1111-native D:/git/widgets/.worktrees/107-fix gh-107-58c609.code-workspace", "withdraw open 31"], hub.Calls);
+        Assert.Empty(windows.Calls);
+    }
+
+    [Fact]
     public async Task Run_FolderHostedRow_LeavesTheCommandForTheFolderAndOpensIt()
     {
         var row = Fixtures.Row("item:7") with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };
@@ -215,7 +275,8 @@ public sealed class SwitcherTests
         Assert.Equal("VS Code did not open the window for gh-107-58c609 within 20 seconds.", status);
         Assert.Equal(200, waits.Count);
         Assert.Empty(windows.Calls);
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));
+        // The window VS Code still opens gets its tabs, but not the session the click left, so it does not open a terminal the operator gave up on.
+        Assert.Equal(["withdraw open 31"], hub.Calls.Where((call) => call.StartsWith("withdraw")));
     }
 
     [Fact]
@@ -224,7 +285,7 @@ public sealed class SwitcherTests
         vsCode.Fails = new FileNotFoundException("Code.exe was not found beside code on PATH.");
 
         Assert.Equal("VS Code did not start: Code.exe was not found beside code on PATH.", await Switcher().Click(Fixtures.Row("item:7"), TestContext.Current.CancellationToken));
-        Assert.Equal("withdraw 42", hub.Calls[^1]);
+        Assert.Equal(["withdraw 42", "withdraw open 31"], hub.Calls[^2..]);
     }
 
     [Fact]
@@ -235,7 +296,7 @@ public sealed class SwitcherTests
         hub.OnWindow = (_) => cancel.Cancel();
 
         Assert.Null(await Switcher().Click(Fixtures.Row("item:7"), cancel.Token));
-        Assert.Equal("withdraw 42", hub.Calls[^1]);
+        Assert.Equal(["withdraw 42", "withdraw open 31"], hub.Calls[^2..]);
         Assert.Empty(vsCode.Calls);
     }
 
@@ -422,9 +483,9 @@ public sealed class SwitcherTests
 
         Assert.Null(await switcher.Click(Fixtures.Row("item:7"), cancel.Token));
         Assert.Equal(1, windows.Finds("gh-107-58c609"));
-        // VS Code still opens the window, which claims the session and needs its tabs.
+        // VS Code still opens the window, which needs its tabs; the session the replaced click left is withdrawn.
         Assert.Equal(["open gh-107-58c609.code-workspace"], vsCode.Calls);
-        Assert.DoesNotContain(hub.Calls, (call) => call.StartsWith("withdraw"));
+        Assert.Equal(["withdraw open 31"], hub.Calls.Where((call) => call.StartsWith("withdraw")));
     }
 
     [Fact]

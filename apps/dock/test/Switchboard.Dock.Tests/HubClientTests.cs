@@ -188,16 +188,18 @@ public sealed class HubClientTests
 
         Assert.Equal("Nothing to approve.", await client.Act(new JsonObject { ["type"] = "approve", ["workItemId"] = 3 }));
         Assert.Contains("POST /action HTTP/1.1 {\"type\":\"approve\",\"workItemId\":3}", server.Requests);
-        Assert.Equal("The hub answered 500.", await client.Open("s1", "D:/x", "C:/h/w.code-workspace"));
+        Assert.Equal(new WindowReply("The hub answered 500.", null), await client.Open("s1", "D:/x", "C:/h/w.code-workspace"));
     }
 
     [Fact]
-    public async Task Open_HubAccepts_ReturnsNullAndPostsTheSession()
+    public async Task Open_HubAccepts_ReturnsItsIdPostsTheSessionAndWithdrawsIt()
     {
-        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, "{\"recorded\":true}"));
+        using var server = new LoopbackHub((start, _, stream) => LoopbackHub.Reply(stream, 200, start.StartsWith("POST /open/withdraw") ? "{\"withdrawn\":true}" : "{\"recorded\":true,\"id\":9}"));
         using var client = new HubClient(HomeFor(server));
 
-        Assert.Null(await client.Open("s1", "D:/git/widgets", "C:/h/windows/gh-7.code-workspace"));
+        Assert.Equal(new WindowReply(null, 9), await client.Open("s1", "D:/git/widgets", "C:/h/windows/gh-7.code-workspace"));
+        Assert.Null(await client.WithdrawOpen(9));
+        Assert.Contains("POST /open/withdraw HTTP/1.1 {\"id\":9}", server.Requests);
         Assert.Contains("POST /open HTTP/1.1 {\"sessionId\":\"s1\",\"cwd\":\"D:/git/widgets\",\"workspace\":\"C:/h/windows/gh-7.code-workspace\"}", server.Requests);
     }
 

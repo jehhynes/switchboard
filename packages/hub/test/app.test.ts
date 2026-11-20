@@ -782,15 +782,23 @@ describe('createHubApp', () => {
     const folder = app.windowOpened!(null, process.platform === 'win32' ? support.toUpperCase() : support);
 
     // Asked from the item window, the open waits for the folder window, and only its streams hear the nudge.
-    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, window: item })).toEqual({ status: 200, body: { recorded: true, workspace: host, here: false } });
+    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, window: item })).toEqual({ status: 200, body: { recorded: true, id: expect.any(Number), workspace: host, here: false } });
     expect(nudged).toEqual([[folder]]);
     expect(await app.post['/claim']!({ folder: host, workspace: itemFile, focused: true, window: item })).toMatchObject({ body: { sessionId: null } });
     expect(await app.post['/claim']!({ folder: host, focused: true, window: folder })).toMatchObject({ body: { sessionId: 'f-native' } });
 
     // Asked from the folder window, the open is its own, and an item window named as the destination is refused.
-    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, window: folder })).toEqual({ status: 200, body: { recorded: true, workspace: host, here: true } });
+    expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, window: folder })).toEqual({ status: 200, body: { recorded: true, id: expect.any(Number), workspace: host, here: true } });
     expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, workspace: itemFile })).toEqual({ status: 409, body: { error: 'The session opens only in its own window.' } });
     expect(await app.post['/open']!({ sessionId: 'f-native', cwd: host, workspace: support })).toMatchObject({ status: 200, body: { workspace: host, here: false } });
+
+    // A dock click that did not reach the folder window withdraws its open, so a folder window that connects later opens nothing.
+    const left = (await app.post['/open']!({ sessionId: 'f-native', cwd: host, workspace: support })).body as { id: number };
+
+    expect(await app.post['/open/withdraw']!({ id: left.id })).toEqual({ status: 200, body: { withdrawn: true } });
+    expect(await app.post['/open/withdraw']!({ id: left.id })).toEqual({ status: 200, body: { withdrawn: false } });
+    expect(await app.post['/open/withdraw']!({ id: 'x' })).toEqual({ status: 400, body: { error: 'Expected {id}.' } });
+    expect(await app.post['/claim']!({ folder: host, focused: true, window: folder })).toMatchObject({ body: { sessionId: null } });
   });
 
   it('keeps the session and commands the dock left for a window when another hub replaces this one', async () => {
@@ -929,7 +937,7 @@ describe('createHubApp', () => {
     expect(logs).toContain(`session held-1 claimed by ${file} as its attach terminal`);
     // Another window's file is no destination for this session, and a window holding no conversation of it gets its own window named.
     expect(await app.post['/open']!({ sessionId: 'held-1', cwd: 'D:/scratch', workspace: 'C:/h/windows/zoho-2.code-workspace' })).toEqual({ status: 409, body: { error: 'The session opens only in its own window.' } });
-    expect(await app.post['/open']!({ sessionId: 'held-1', cwd: 'D:/scratch', window: app.windowOpened!('C:/h/windows/zoho-2.code-workspace') })).toEqual({ status: 200, body: { recorded: true, workspace: file, here: false } });
+    expect(await app.post['/open']!({ sessionId: 'held-1', cwd: 'D:/scratch', window: app.windowOpened!('C:/h/windows/zoho-2.code-workspace') })).toEqual({ status: 200, body: { recorded: true, id: expect.any(Number), workspace: file, here: false } });
     expect(await app.post['/claim']!({ folder: 'D:/scratch', window: app.windowOpened!('C:/h/windows/zoho-2.code-workspace') })).toMatchObject({ body: { sessionId: null, commands: [] } });
     expect(await app.post['/claim']!({ folder: 'D:/scratch', window })).toMatchObject({ body: { commands: [expect.objectContaining(attach)] } });
 

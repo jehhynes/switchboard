@@ -540,7 +540,9 @@ const dockWithRuns = () => {
           return { status: 409, body: { error: 'The session has no window to open it in.' } };
         }
 
-        if (!windowQueue.recordOpen(sessionId, body['cwd'], workspace)) {
+        const id = windowQueue.recordOpen(sessionId, body['cwd'], workspace);
+
+        if (id === null) {
           return { status: 500, body: { error: 'The hub could not save the open; see its log.' } };
         }
 
@@ -550,7 +552,7 @@ const dockWithRuns = () => {
         // `here`: the destination is the asking window, which then claims at once, since it gains no focus; a folder window cannot tell from the path.
         const mine = window === null ? null : scopes.hostOf(window);
 
-        return { status: 200, body: { recorded: true, workspace, here: mine !== null && hostKey(mine) === hostKey(workspace) } };
+        return { status: 200, body: { recorded: true, id, workspace, here: mine !== null && hostKey(mine) === hostKey(workspace) } };
       },
       '/history': async (body) => {
         if (!isRecord(body) || !Number.isInteger(body['ticketId']) || typeof body['window'] !== 'string') {
@@ -638,6 +640,20 @@ const dockWithRuns = () => {
         askToClaim(body['workspace'] ?? null);
 
         return { status: 200, body: { id } };
+      },
+      // The dock withdraws a session it left for a window its click did not reach, so no window opens it later (architecture.md § Dock).
+      '/open/withdraw': async (body) => {
+        if (!isRecord(body) || !Number.isInteger(body['id'])) {
+          return { status: 400, body: { error: 'Expected {id}.' } };
+        }
+
+        const withdrawn = windowQueue.withdrawOpen(body['id'] as number);
+
+        if (withdrawn) {
+          deps.log(`open ${body['id']} withdrawn`);
+        }
+
+        return { status: 200, body: { withdrawn } };
       },
       '/window/withdraw': async (body) => {
         if (!isRecord(body) || !Number.isInteger(body['id'])) {

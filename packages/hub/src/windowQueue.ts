@@ -5,6 +5,8 @@ import { hostKey } from '@switchboard/core';
 export const OPEN_CLAIM_MS = 2 * 60_000;
 
 interface PendingOpen {
+  /** Names the open for `withdrawOpen`, from the same counter as commands' IDs; absent in a queue an older hub saved. */
+  id?: number;
   /** `folderKey` of the session's directory. */
   folder: string;
   sessionId: string;
@@ -60,13 +62,26 @@ export class WindowQueue {
   /**
    * Records that a window or the dock asked to open a session, run in `cwd`, in the window opened from `workspace`, which only a window bound to
    * that file claims when it connects or gains focus, because item windows share folders (architecture.md § Window scope). It replaces an
-   * earlier open for that window. False when the queue could not be saved, so nothing was recorded.
+   * earlier open for that window. Returns its ID, or null when the queue could not be saved, so nothing was recorded.
    */
-  recordOpen(sessionId: string, cwd: string, workspace: string): boolean {
+  recordOpen(sessionId: string, cwd: string, workspace: string): number | null {
     const folder = folderKey(cwd);
-    const opens = [...this.queued.opens.filter((open) => !sameWorkspace(open.workspace, workspace)), { folder, sessionId, at: this.now(), workspace }];
+    const id = this.queued.nextId;
+    const opens = [...this.queued.opens.filter((open) => !sameWorkspace(open.workspace, workspace)), { id, folder, sessionId, at: this.now(), workspace }];
 
-    return this.commit({ ...this.queued, opens });
+    return this.commit({ ...this.queued, opens, nextId: id + 1 }) ? id : null;
+  }
+
+  /** Drops an open no window has claimed yet, because the dock's click was cancelled or did not reach its window; false when it is gone already. */
+  withdrawOpen(id: number): boolean {
+    const opens = this.queued.opens.filter((open) => open.id !== id);
+
+    if (opens.length === this.queued.opens.length) {
+      return false;
+    }
+
+    this.update({ ...this.queued, opens });
+    return true;
   }
 
   /** The session the window opened from `workspace` should open, if one is pending and recent; none for a window with no workspace file. Claiming removes it. */
@@ -159,7 +174,7 @@ export class WindowQueue {
 function isOpen(value: unknown): value is PendingOpen {
   const open = value as PendingOpen | null;
 
-  return typeof open?.folder === 'string' && typeof open.sessionId === 'string' && Number.isFinite(open.at) && typeof open.workspace === 'string';
+  return (open?.id === undefined || Number.isInteger(open.id)) && typeof open?.folder === 'string' && typeof open.sessionId === 'string' && Number.isFinite(open.at) && typeof open.workspace === 'string';
 }
 
 function isCommand(value: unknown): value is PendingCommand {

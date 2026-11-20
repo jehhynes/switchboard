@@ -35,6 +35,23 @@ describe('WindowQueue', () => {
     expect(queue.claimOpen(seven)).toBeNull();
   });
 
+  it('withdraws an open by the ID it was recorded under, leaving a newer open for the same window and the commands alone', () => {
+    const queue = WindowQueue.load(null, () => T0);
+    const seven = 'C:/h/windows/gh-7-000001.code-workspace';
+    const first = queue.recordOpen('a-native', 'D:/git/widgets-wt/7-fix', seven)!;
+    const command = queue.recordCommand({ type: 'openTabs' }, seven)!;
+    const second = queue.recordOpen('b-native', 'D:/git/widgets-wt/7-fix', seven)!;
+
+    // One counter names opens and commands, so no two share an ID.
+    expect(new Set([first, command, second]).size).toBe(3);
+    // The first open was replaced by the second, so withdrawing it leaves the second.
+    expect(queue.withdrawOpen(first)).toBe(false);
+    expect(queue.withdrawOpen(command)).toBe(false);
+    expect(queue.withdrawOpen(second)).toBe(true);
+    expect(queue.claimOpen(seven)).toBeNull();
+    expect(queue.claimCommands(seven, false)).toEqual([{ type: 'openTabs' }]);
+  });
+
   it('hands commands the dock left to the window on their workspace file, or to the first window for any, within two minutes (PRD R71)', () => {
     let now = T0;
     const queue = WindowQueue.load(null, () => now);
@@ -148,7 +165,7 @@ describe('WindowQueue', () => {
     // A folder where the temporary file should be makes every write fail.
     mkdirSync(`${path}.tmp`);
     expect(first.recordCommand({ type: 'history', ticketId: 3, key: 'gh 3' }, null)).toBeNull();
-    expect(first.recordOpen('a-native', 'D:/git/widgets', 'w-a')).toBe(false);
+    expect(first.recordOpen('a-native', 'D:/git/widgets', 'w-a')).toBeNull();
     expect(first.claimOpen('w-a')).toBeNull();
     expect(logs).toHaveLength(2);
     expect(logs[0]).toMatch(/^window queue not saved to .*window-queue\.json: /);

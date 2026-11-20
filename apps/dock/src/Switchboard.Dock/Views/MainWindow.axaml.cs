@@ -1959,7 +1959,9 @@ public sealed partial class MainWindow : Window
 
         public Task<string?> Poll() => Task.FromResult<string?>(null);
 
-        public Task<string?> Open(string sessionId, string cwd, string workspace) => Task.FromResult<string?>(null);
+        public Task<WindowReply> Open(string sessionId, string cwd, string workspace) => Task.FromResult(new WindowReply(null, null));
+
+        public Task<string?> WithdrawOpen(int id) => Task.FromResult<string?>(null);
 
         public Task<string?> Select(string rowKey) => Task.FromResult<string?>(null);
 

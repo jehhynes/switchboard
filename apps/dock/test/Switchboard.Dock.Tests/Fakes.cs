@@ -16,6 +16,9 @@ sealed class FakeHub : IHub
 
     public string? OpenReply { get; set; }
 
+    /// <summary>Runs when the hub receives an open, such as to cancel the click that sent it.</summary>
+    public Action? OnOpen { get; set; }
+
     public DockView? Ended { get; set; }
 
     public async Task<string?> Act(JsonObject action)
@@ -79,11 +82,19 @@ sealed class FakeHub : IHub
         return Task.FromResult(PollReply);
     }
 
-    public Task<string?> Open(string sessionId, string cwd, string workspace)
+    public Task<WindowReply> Open(string sessionId, string cwd, string workspace)
     {
         Calls.Add($"open {sessionId} {cwd} {Paths.FileName(workspace)}");
+        OnOpen?.Invoke();
 
-        return Task.FromResult(OpenReply);
+        return Task.FromResult(OpenReply is null ? new WindowReply(null, 30 + Calls.Count) : new WindowReply(OpenReply, null));
+    }
+
+    public Task<string?> WithdrawOpen(int id)
+    {
+        Calls.Add($"withdraw open {id}");
+
+        return Task.FromResult<string?>(null);
     }
 
     public string? SelectReply { get; set; }
