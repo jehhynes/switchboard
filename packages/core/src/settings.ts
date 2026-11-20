@@ -170,6 +170,10 @@ export interface VoiceSettings {
   pitchLowFactor: number;
   /** The least share of low frames a piece needs to pass the pitch check. */
   pitchMinLowShare: number;
+  /** The room hold: after the voice check hears a voice that is not the operator's, dictated turns stay in the composer unsent for a while. */
+  roomHold: boolean;
+  /** How long the room hold lasts after the latest voice that is not the operator's, in seconds. */
+  roomHoldSeconds: number;
   /** The persona roster; empty, the default, leaves every session with `voice` and `style` and no tone section. */
   personas: Persona[];
   /** A persona ID by playbook name, which that playbook's sessions take unless one is pinned. */
@@ -192,7 +196,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
-  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, personas: [], playbookPersonas: {} },
+  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {} },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -469,7 +473,7 @@ export function parseSettings(text: string): SettingsResult {
   };
 
   const voiceIn = read.section(root, 'voice', 'voice');
-  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'personas', 'playbookPersonas'], 'voice');
+  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas'], 'voice');
   const voice: VoiceSettings = {
     enabled: read.boolean(voiceIn, 'enabled', 'voice', defaults.voice.enabled),
     voice: read.choice(voiceIn, 'voice', 'voice', TTS_VOICES, defaults.voice.voice),
@@ -487,6 +491,8 @@ export function parseSettings(text: string): SettingsResult {
     matchThreshold: read.number(voiceIn, 'matchThreshold', 'voice', defaults.voice.matchThreshold, 0, 1),
     pitchLowFactor: read.number(voiceIn, 'pitchLowFactor', 'voice', defaults.voice.pitchLowFactor, 1, 3),
     pitchMinLowShare: read.number(voiceIn, 'pitchMinLowShare', 'voice', defaults.voice.pitchMinLowShare, 0, 1),
+    roomHold: read.boolean(voiceIn, 'roomHold', 'voice', defaults.voice.roomHold),
+    roomHoldSeconds: read.integer(voiceIn, 'roomHoldSeconds', 'voice', defaults.voice.roomHoldSeconds, 1, 3600),
     personas: [],
     playbookPersonas: {},
   };

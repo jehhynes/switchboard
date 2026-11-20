@@ -434,6 +434,8 @@ public static partial class SettingsFields
                 new Field("voice.matchThreshold", "Voice match", FieldKind.Number, "0 to 1. A dictated piece that matches your enrolled voice less than this is dropped as someone else’s; one or two words get 0.15 less.", "0.6"),
                 new Field("voice.pitchLowFactor", "Low pitch factor", FieldKind.Number, "1 to 3. A voiced moment at or under this many times your enrolled voice’s 90th-percentile pitch counts as low.", "1.22"),
                 new Field("voice.pitchMinLowShare", "Least low share", FieldKind.Number, "0 to 1. A piece with a smaller share of low moments is dropped as someone else’s; 0 turns the pitch check off.", "0.2"),
+                new Field("voice.roomHold", "Room hold", FieldKind.Boolean, "After the voice check hears someone else in the room, keep dictated messages in the composer until you press Enter. Turn it off where other voices are always around.", Fallback: true),
+                new Field("voice.roomHoldSeconds", "Room hold (seconds)", FieldKind.Integer, "1 to 3600. How long the room hold lasts after someone else was last heard.", "60"),
             ], Advanced: true),
             new Section("Playbook personas",
                 assigned.Select((playbook) => new Field($"voice.playbookPersonas.{playbook}", playbooks.Contains(playbook) ? playbook : $"{playbook} (missing)", FieldKind.Select, "",

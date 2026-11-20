@@ -539,8 +539,20 @@ public sealed class VoiceSettingsTests
         Assert.True(check.Advanced);
         Assert.Equal(
             [("voice.matchThreshold", FieldKind.Number, "0.6"), ("voice.pitchLowFactor", FieldKind.Number, "1.22"), ("voice.pitchMinLowShare", FieldKind.Number, "0.2")],
-            check.Fields.Select((field) => (field.Path, field.Kind, field.Placeholder)));
+            check.Fields.Take(3).Select((field) => (field.Path, field.Kind, field.Placeholder)));
         Assert.All(SettingsFields.VoiceFields(SettingsConfigs.State()).Where((section) => section.Heading != "Voice check"), (section) => Assert.False(section.Advanced));
+    }
+
+    [Fact]
+    public void VoiceFields_RoomHold_FollowsTheThresholdsAsAToggleOnByDefaultAndItsSeconds()
+    {
+        var check = SettingsFields.VoiceFields(SettingsConfigs.State()).Single((section) => section.Heading == "Voice check");
+
+        Assert.Equal(5, check.Fields.Count);
+        Assert.Equal(("voice.roomHold", FieldKind.Boolean), (check.Fields[3].Path, check.Fields[3].Kind));
+        Assert.True(SettingsPages.FieldViewOf(check.Fields[3], null, []).Checked);
+        Assert.False(SettingsPages.FieldViewOf(check.Fields[3], false, []).Checked);
+        Assert.Equal(("voice.roomHoldSeconds", FieldKind.Integer, "60"), (check.Fields[4].Path, check.Fields[4].Kind, check.Fields[4].Placeholder));
     }
 
     [Fact]
