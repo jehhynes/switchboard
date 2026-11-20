@@ -7,11 +7,16 @@ namespace Switchboard.Dock.Settings;
 /// Save. <see cref="Changed"/> says whether the window must draw the page again (true) or only update its navigation, bar, notes and errors (false),
 /// so the field being typed in keeps focus.
 /// </summary>
-public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>? checkDelay = null)
+public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>? checkDelay = null, Func<Task>? enrollPoll = null)
 {
     public static readonly TimeSpan CheckDelay = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>How often the window asks how a running enrolment stands.</summary>
+    public static readonly TimeSpan EnrollPoll = TimeSpan.FromSeconds(1);
+
     readonly Func<CancellationToken, Task> delay = checkDelay ?? ((cancel) => Task.Delay(CheckDelay, cancel));
+    readonly Func<Task> poll = enrollPoll ?? (() => Task.Delay(EnrollPoll));
+    bool polling;
     int seq;
     int loads;
     CancellationTokenSource? pending;
@@ -30,6 +35,59 @@ public sealed class SettingsEditor(IConfigHub hub, Func<CancellationToken, Task>
     public string? Notice { get; private set; }
 
     public event Action<bool>? Changed;
+
+    /// <summary>Voiceprint enrolment as the hub last said, or null before the Voice page asked (architecture.md § Voice check and barge-in).</summary>
+    public Enrollment? Enrollment { get; private set; }
+
+    /// <summary>Why the last enrolment request was refused or failed, or null.</summary>
+    public string? EnrollmentError { get; private set; }
+
+    public event Action? EnrollmentChanged;
+
+    /// <summary>
+    /// Enroll my voice on the Voice page: <c>start</c>, <c>cancel</c> or <c>status</c>; while enrolment starts or records, asks again every
+    /// <see cref="EnrollPoll"/> until it ends.
+    /// </summary>
+    public async Task Enroll(string action)
+    {
+        var reply = await hub.Enroll(action);
+
+        EnrollmentError = reply.Error;
+        Enrollment = reply.Enrollment ?? Enrollment;
+        EnrollmentChanged?.Invoke();
+
+        if (polling || Enrollment is not { Active: true })
+        {
+            return;
+        }
+
+        polling = true;
+
+        try
+        {
+            while (Enrollment is { Active: true })
+            {
+                await poll();
+
+                var status = await hub.Enroll("status");
+
+                // A hub that stopped answering leaves the last state shown, with why.
+                if (status.Enrollment is null)
+                {
+                    EnrollmentError = status.Error;
+                    EnrollmentChanged?.Invoke();
+                    break;
+                }
+
+                Enrollment = status.Enrollment;
+                EnrollmentChanged?.Invoke();
+            }
+        }
+        finally
+        {
+            polling = false;
+        }
+    }
 
     /// <summary>Asks before a delete, with a question, a detail and the action's button label; true to go ahead.</summary>
     public Func<string, string, string, Task<bool>>? Confirm { get; set; }

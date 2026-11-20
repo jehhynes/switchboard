@@ -52,6 +52,10 @@ public sealed class SettingsWindow : Window
     string? tableShape;
     readonly Dictionary<string, Action<TableCell>> cells = [];
     readonly Dictionary<string, (TextBlock Dot, StackPanel Errors)> tableRows = [];
+    // The Voice page's enrolment row, which a poll updates in place.
+    TextBlock? enrollStatus;
+    Button? enrollButton;
+    StackPanel? enrollSentences;
 
     public SettingsWindow(SettingsEditor editor, IDockActions actions, DockViewModel dock)
     {
@@ -95,6 +99,7 @@ public sealed class SettingsWindow : Window
         root.Children.Add(main);
         Content = root;
 
+        editor.EnrollmentChanged += () => Dispatcher.UIThread.Post(UpdateEnrollment);
         editor.Changed += (redraw) => Dispatcher.UIThread.Post(() =>
         {
             if (redraw)
@@ -463,7 +468,64 @@ public sealed class SettingsWindow : Window
             page.Children.Add(AssignRow(assign));
         }
 
+        enrollStatus = null;
+        enrollButton = null;
+        enrollSentences = null;
+
+        if (state.Page == "voice" && view.Message is null)
+        {
+            page.Children.Add(EnrollRow());
+
+            if (editor.Enrollment is null)
+            {
+                _ = editor.Enroll("status");
+            }
+        }
+
         Update();
+    }
+
+    /// <summary>The Voice page's enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read.</summary>
+    Control EnrollRow()
+    {
+        enrollStatus = new TextBlock { Name = "EnrollStatus", TextWrapping = TextWrapping.Wrap };
+        enrollButton = new Button { Name = "Enroll", Tag = "enroll", HorizontalAlignment = HorizontalAlignment.Left };
+        enrollSentences = new StackPanel { Name = "EnrollSentences", Spacing = 4, Margin = new Thickness(12, 4, 0, 0) };
+        ToolTip.SetTip(enrollButton, "Records a minute of your speech through the voice process; nothing of it reaches a session.");
+        enrollButton.Click += async (_, _) => await editor.Enroll(SettingsPages.EnrollmentRow(editor.Enrollment, editor.EnrollmentError, DateTimeOffset.Now).Command);
+        UpdateEnrollment();
+
+        return new StackPanel
+        {
+            Spacing = 6,
+            Margin = new Thickness(0, 12, 0, 0),
+            Children =
+            {
+                new TextBlock { Text = "Your voice", FontSize = 15, FontWeight = FontWeight.SemiBold },
+                enrollStatus,
+                enrollButton,
+                enrollSentences,
+            },
+        };
+    }
+
+    void UpdateEnrollment()
+    {
+        if (enrollStatus is null || enrollButton is null || enrollSentences is null)
+        {
+            return;
+        }
+
+        var row = SettingsPages.EnrollmentRow(editor.Enrollment, editor.EnrollmentError, DateTimeOffset.Now);
+
+        enrollStatus.Text = row.Status;
+        enrollButton.Content = row.Button;
+        enrollSentences.Children.Clear();
+
+        foreach (var sentence in row.Sentences)
+        {
+            enrollSentences.Children.Add(new TextBlock { Text = sentence, TextWrapping = TextWrapping.Wrap, FontSize = 14 });
+        }
     }
 
     /// <summary>The Voice page's row that gives a task playbook a persona, or a line saying why it cannot.</summary>

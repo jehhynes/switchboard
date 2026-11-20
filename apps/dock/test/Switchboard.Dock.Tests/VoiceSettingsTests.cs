@@ -64,12 +64,12 @@ public sealed class VoiceSettingsTests
     {
         var sections = SettingsFields.VoiceFields(SettingsConfigs.State());
 
-        Assert.Equal(["Speech", "Dictation", "Playbook personas"], sections.Select((section) => section.Heading));
+        Assert.Equal(["Speech", "Dictation", "Voice check", "Playbook personas"], sections.Select((section) => section.Heading));
         Assert.Equal(
             ["voice.enabled", "voice.voice", "voice.style", "voice.speed", "voice.expressive", "voice.expandReplies", "voice.awayMinutes", "voice.needsYouSound", "voice.outputDevice"],
             sections[0].Fields.Select((field) => field.Path));
         Assert.Equal(["voice.micIdleMinutes", "voice.endPauseMs", "voice.inputDevice"], sections[1].Fields.Select((field) => field.Path));
-        Assert.Empty(sections[2].Fields);
+        Assert.Empty(sections[3].Fields);
 
         var fields = sections[0].Fields.ToDictionary((field) => field.Path);
 
@@ -529,5 +529,111 @@ public sealed class VoiceSettingsTests
 
         Assert.Equal("voice", editor.State.Page);
         Assert.Equal(2, editor.State.PersonaCount);
+    }
+    [Fact]
+    public void VoiceFields_VoiceCheck_IsAnAdvancedGroupOfTheThreeThresholdsWithTheirDefaults()
+    {
+        var check = SettingsFields.VoiceFields(SettingsConfigs.State()).Single((section) => section.Heading == "Voice check");
+
+        Assert.True(check.Advanced);
+        Assert.Equal(
+            [("voice.matchThreshold", FieldKind.Number, "0.6"), ("voice.pitchLowFactor", FieldKind.Number, "1.22"), ("voice.pitchMinLowShare", FieldKind.Number, "0.2")],
+            check.Fields.Select((field) => (field.Path, field.Kind, field.Placeholder)));
+        Assert.All(SettingsFields.VoiceFields(SettingsConfigs.State()).Where((section) => section.Heading != "Voice check"), (section) => Assert.False(section.Advanced));
+    }
+
+    [Fact]
+    public void EnrollmentRow_EachState_SaysHowItStandsAndOffersItsAction()
+    {
+        var now = DateTimeOffset.FromUnixTimeMilliseconds(1_000_000);
+        var row = (Enrollment? enrollment, string? error = null) => SettingsPages.EnrollmentRow(enrollment, error, now);
+        var enrolled = row(new Enrollment("idle", null, null, "2026-11-20T10:00:00.000Z"));
+
+        Assert.Equal(("Reading whether your voice is enrolled…", "Enroll my voice", "start"), (row(null).Status, row(null).Button, row(null).Command));
+        Assert.StartsWith("Not enrolled. Until you enrol, every dictated piece passes the voice check", row(new Enrollment("idle", null, null, null)).Status);
+        Assert.Equal(("Enroll again", "start"), (enrolled.Button, enrolled.Command));
+        Assert.StartsWith($"Enrolled {DateTimeOffset.Parse("2026-11-20T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture).ToLocalTime():yyyy-MM-dd HH:mm}.", enrolled.Status);
+        Assert.Empty(enrolled.Sentences);
+        Assert.Equal(("Starting the voice process…", "Cancel", "cancel"), (row(new Enrollment("starting", null, null, null)).Status, row(new Enrollment("starting", null, null, null)).Button, row(new Enrollment("starting", null, null, null)).Command));
+
+        var recording = row(new Enrollment("recording", 1_041_500, null, null));
+
+        Assert.Equal("Recording. Read these sentences aloud in your usual voice, then keep talking: 42 s left.", recording.Status);
+        Assert.Equal(("Cancel", "cancel"), (recording.Button, recording.Command));
+        Assert.Equal(SettingsPages.EnrollSentences, recording.Sentences);
+        Assert.StartsWith("Enrolment failed: The recording was too short: speak for at least 9 seconds. Not enrolled.", row(new Enrollment("failed", null, "The recording was too short: speak for at least 9 seconds.", null)).Status);
+        Assert.StartsWith("Enrolment cancelled. Enrolled ", row(new Enrollment("cancelled", null, null, "2026-11-20T10:00:00.000Z")).Status);
+        Assert.StartsWith("Voice is off (voice.enabled). Not enrolled.", row(new Enrollment("idle", null, null, null), "Voice is off (voice.enabled).").Status);
+    }
+
+    [Fact]
+    public async Task Editor_Enroll_AsksAgainUntilTheRecordingEnds()
+    {
+        hub.EnrollReplies.Enqueue(new EnrollReply(null, new Enrollment("starting", null, null, null)));
+        hub.EnrollReplies.Enqueue(new EnrollReply(null, new Enrollment("recording", 61_000, null, null)));
+        hub.EnrollReplies.Enqueue(new EnrollReply(null, new Enrollment("enrolled", null, null, "2026-11-20T10:00:00.000Z")));
+
+        var editor = new SettingsEditor(hub, (_) => Task.CompletedTask, () => Task.CompletedTask);
+        var changes = 0;
+
+        editor.EnrollmentChanged += () => changes++;
+        await editor.Enroll("start");
+
+        Assert.Equal(["enroll start", "enroll status", "enroll status"], hub.Calls);
+        Assert.Equal(("enrolled", 3), (editor.Enrollment!.State, changes));
+        Assert.Null(editor.EnrollmentError);
+    }
+
+    [Fact]
+    public async Task Editor_Enroll_RefusalKeepsTheLastStateAndAHubThatStopsEndsTheAsking()
+    {
+        var editor = new SettingsEditor(hub, (_) => Task.CompletedTask, () => Task.CompletedTask);
+
+        await editor.Enroll("status");
+        hub.EnrollReplies.Enqueue(new EnrollReply("Voice is off (voice.enabled).", null));
+        await editor.Enroll("start");
+
+        Assert.Equal(("idle", "Voice is off (voice.enabled)."), (editor.Enrollment!.State, editor.EnrollmentError));
+
+        hub.EnrollReplies.Enqueue(new EnrollReply(null, new Enrollment("recording", 61_000, null, null)));
+        hub.EnrollReplies.Enqueue(new EnrollReply("Switchboard is not running.", null));
+        await editor.Enroll("start");
+
+        Assert.Equal(("recording", "Switchboard is not running."), (editor.Enrollment!.State, editor.EnrollmentError));
+        Assert.Equal(["enroll status", "enroll start", "enroll start", "enroll status"], hub.Calls);
+    }
+
+    [AvaloniaFact]
+    public void Window_VoicePage_EnrollsAndShowsTheSentencesOnlyWhileRecording()
+    {
+        hub.Config = WithRoster();
+
+        var gate = new TaskCompletionSource();
+        var editor = new SettingsEditor(hub, (_) => Task.CompletedTask, () => gate.Task);
+        var window = new SettingsWindow(editor, new FakeActions(), new DockViewModel(new DockSettings(), _ => { }));
+
+        window.Show();
+        editor.Load().GetAwaiter().GetResult();
+        Settle();
+        Click(window.GetVisualDescendants().OfType<Button>().Single((button) => button.Classes.Contains("nav") && (string?)button.Tag == "voice"));
+
+        Assert.StartsWith("Not enrolled.", Named<TextBlock>(window, "EnrollStatus").Text);
+        Assert.Equal("Enroll my voice", Named<Button>(window, "Enroll").Content);
+
+        hub.EnrollReplies.Enqueue(new EnrollReply(null, new Enrollment("recording", DateTimeOffset.Now.ToUnixTimeMilliseconds() + 60_000, null, null)));
+        hub.EnrollReplies.Enqueue(new EnrollReply(null, new Enrollment("enrolled", null, null, "2026-11-20T10:00:00.000Z")));
+        Click(Tagged(window, "enroll"));
+
+        Assert.StartsWith("Recording.", Named<TextBlock>(window, "EnrollStatus").Text);
+        Assert.Equal("Cancel", Named<Button>(window, "Enroll").Content);
+        Assert.Equal(SettingsPages.EnrollSentences, Named<StackPanel>(window, "EnrollSentences").Children.OfType<TextBlock>().Select((text) => text.Text));
+
+        gate.SetResult();
+        Settle();
+
+        Assert.StartsWith("Enrolled ", Named<TextBlock>(window, "EnrollStatus").Text);
+        Assert.Equal("Enroll again", Named<Button>(window, "Enroll").Content);
+        Assert.Empty(Named<StackPanel>(window, "EnrollSentences").Children);
+        Assert.Contains("enroll start", hub.Calls);
     }
 }

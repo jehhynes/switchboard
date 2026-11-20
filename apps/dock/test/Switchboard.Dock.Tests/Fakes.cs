@@ -431,6 +431,16 @@ sealed class FakeConfigHub : Switchboard.Dock.Settings.IConfigHub
     /// <summary>When set, checks get no answer, as when the hub stopped.</summary>
     public bool Silent { get; set; }
 
+    /// <summary>Each enrolment request's reply; an empty queue answers an idle enrolment with no voiceprint.</summary>
+    public Queue<Switchboard.Dock.Settings.EnrollReply> EnrollReplies { get; } = new();
+
+    public Task<Switchboard.Dock.Settings.EnrollReply> Enroll(string action)
+    {
+        Calls.Add($"enroll {action}");
+
+        return Task.FromResult(EnrollReplies.Count > 0 ? EnrollReplies.Dequeue() : new Switchboard.Dock.Settings.EnrollReply(null, new Switchboard.Dock.Settings.Enrollment("idle", null, null, null)));
+    }
+
     public async Task<IReadOnlyList<string>?> CheckConfig(JsonObject settings)
     {
         Calls.Add($"check {settings.ToJsonString()}");

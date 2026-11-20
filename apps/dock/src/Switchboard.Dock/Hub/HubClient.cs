@@ -319,6 +319,20 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
         return new SaveReply(errors, reply?["version"] is JsonValue written && written.TryGetValue<string>(out var text) ? text : null);
     }
 
+    public async Task<EnrollReply> Enroll(string action)
+    {
+        var (status, reply, failure) = await Send("/config/voice-enroll", new JsonObject { ["action"] = action });
+
+        if (failure is not null)
+        {
+            return new EnrollReply(failure, null);
+        }
+
+        var enrollment = Enrollment.Parse(reply?["enrollment"]);
+
+        return status == HttpStatusCode.OK ? new EnrollReply(null, enrollment) : new EnrollReply(RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", enrollment);
+    }
+
     /// <summary>A write's refusal: the <c>errors</c> of a 409, else the failure; empty, with the reply, when the hub wrote the file.</summary>
     async Task<(IReadOnlyList<string> Errors, JsonNode? Reply)> Written(string path, JsonObject body)
     {

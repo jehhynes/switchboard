@@ -327,6 +327,21 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task Enroll_HubAnswersOrRefuses_ReturnsTheEnrollmentAndWhy()
+    {
+        using var server = new LoopbackHub((start, body, stream) =>
+            body.Contains("\"start\"", StringComparison.Ordinal)
+                ? LoopbackHub.Reply(stream, 409, "{\"error\":\"Voice is off (voice.enabled).\",\"enrollment\":{\"state\":\"idle\",\"endsAt\":null,\"error\":null,\"enrolledAt\":null}}")
+                : LoopbackHub.Reply(stream, 200, "{\"enrollment\":{\"state\":\"recording\",\"endsAt\":61000,\"error\":null,\"enrolledAt\":\"2026-11-20T10:00:00.000Z\"}}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(new EnrollReply(null, new Enrollment("recording", 61_000, null, "2026-11-20T10:00:00.000Z")), await client.Enroll("status"));
+        Assert.Equal(new EnrollReply("Voice is off (voice.enabled).", new Enrollment("idle", null, null, null)), await client.Enroll("start"));
+        Assert.Contains("POST /config/voice-enroll HTTP/1.1 {\"action\":\"status\"}", server.Requests);
+        Assert.Equal(new EnrollReply("Switchboard is not running.", null), await new HubClient(Fixtures.TempFolder()).Enroll("start"));
+    }
+
+    [Fact]
     public async Task SaveConfig_HubWrites_ReturnsTheVersionWritten()
     {
         using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 200, "{\"saved\":true,\"version\":\"abc\"}"));

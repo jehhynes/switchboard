@@ -261,6 +261,31 @@ public sealed record EditorConfig(
 /// <summary>A save's refusal, or no errors and the written file's version, null from a hub that does not send it.</summary>
 public sealed record SaveReply(IReadOnlyList<string> Errors, string? Version);
 
+/// <summary>
+/// Voiceprint enrolment as the hub reports it (architecture.md § Voice check and barge-in): <c>idle</c>, <c>starting</c>, <c>recording</c>,
+/// <c>enrolled</c>, <c>failed</c> or <c>cancelled</c>; when a recording ends, in epoch milliseconds; why it failed; and when the saved voiceprint was made.
+/// </summary>
+public sealed record Enrollment(string State, long? EndsAt, string? Error, string? EnrolledAt)
+{
+    /// <summary>Starting or recording, while the window asks again how it stands.</summary>
+    public bool Active => State is "starting" or "recording";
+
+    public static Enrollment? Parse(JsonNode? node)
+    {
+        if (node is not JsonObject value)
+        {
+            return null;
+        }
+
+        string? Text(string key) => value[key] is JsonValue text && text.TryGetValue<string>(out var read) ? read : null;
+
+        return new Enrollment(Text("state") ?? "idle", value["endsAt"] is JsonValue at && at.TryGetValue<long>(out var ends) ? ends : null, Text("error"), Text("enrolledAt"));
+    }
+}
+
+/// <summary>An enrolment request's refusal or failure, or null, and how enrolment stands when the hub said.</summary>
+public sealed record EnrollReply(string? Error, Enrollment? Enrollment);
+
 /// <summary>The hub's config requests for the Settings window (PRD R54).</summary>
 public interface IConfigHub
 {
@@ -272,4 +297,7 @@ public interface IConfigHub
 
     /// <summary>Writes settings.json if it is still at <paramref name="version"/>; returns the refusal's errors, or none and the version written.</summary>
     Task<SaveReply> SaveConfig(JsonObject value, string? version, string configDir);
+
+    /// <summary>Voiceprint enrolment: <c>start</c>, <c>cancel</c> or <c>status</c>; a hub without it answers a refusal.</summary>
+    Task<EnrollReply> Enroll(string action) => Task.FromResult(new EnrollReply("This hub cannot enrol a voice; restart Switchboard.", null));
 }

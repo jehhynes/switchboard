@@ -31,6 +31,9 @@ public sealed record PageView(
     PlaybookTable? Table = null,
     AssignView? Assign = null);
 
+/// <summary>The Voice page's enrolment row: what it says, its button's label and command, and the sentences to read while it records.</summary>
+public sealed record EnrollView(string Status, string Button, string Command, IReadOnlyList<string> Sentences);
+
 /// <summary>The Voice page's Assign row: the task playbooks with no persona yet and the roster's personas, or none when either list is empty.</summary>
 public sealed record AssignView(IReadOnlyList<string> Playbooks, IReadOnlyList<FieldOption> Personas);
 
@@ -56,6 +59,44 @@ public sealed record NewNameView(string Namespace, string Name, IReadOnlyList<st
 /// <summary>What each page of the Settings window and its bar show, from the editor state alone (PRD R54).</summary>
 public static class SettingsPages
 {
+    /// <summary>What enrolment asks the operator to read first; any speech in their usual voice serves, so they keep talking after.</summary>
+    public static readonly IReadOnlyList<string> EnrollSentences =
+    [
+        "Switchboard listens for my voice, so that only what I say reaches my sessions.",
+        "I usually ask for a review, a fix or a status update, and sometimes I think out loud.",
+        "When a reply is read aloud and I start talking over it, the reply should stop.",
+        "The quick brown fox jumps over the lazy dog, and five boxing wizards jump quickly.",
+        "Now keep talking about anything, in your usual voice, until the minute is up.",
+    ];
+
+    /// <summary>
+    /// The enrolment row (architecture.md § Voice check and barge-in): how enrolment stands, with a refusal first, and Enroll my voice, Enroll
+    /// again or Cancel; the sentences show only while it records.
+    /// </summary>
+    public static EnrollView EnrollmentRow(Enrollment? enrollment, string? error, DateTimeOffset now)
+    {
+        var enrolled = enrollment?.EnrolledAt is { } at && DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var when)
+            ? $"Enrolled {when.ToLocalTime():yyyy-MM-dd HH:mm}. Dictated speech that does not match it is dropped, and talking over a reply stops it."
+            : "Not enrolled. Until you enrol, every dictated piece passes the voice check, and talking over a reply stops it only with two words that are not the reply’s.";
+        var status = enrollment switch
+        {
+            null => "Reading whether your voice is enrolled…",
+            { State: "starting" } => "Starting the voice process…",
+            { State: "recording", EndsAt: { } ends } => $"Recording. Read these sentences aloud in your usual voice, then keep talking: {Math.Max(0, (int)Math.Ceiling((ends - now.ToUnixTimeMilliseconds()) / 1000.0))} s left.",
+            { State: "recording" } => "Recording. Read these sentences aloud in your usual voice, then keep talking.",
+            { State: "failed" } => $"Enrolment failed: {enrollment.Error ?? "unknown error"} {enrolled}",
+            { State: "cancelled" } => $"Enrolment cancelled. {enrolled}",
+            _ => enrolled,
+        };
+        var active = enrollment is { Active: true };
+
+        return new EnrollView(
+            error is null ? status : $"{error} {status}",
+            active ? "Cancel" : enrollment?.EnrolledAt is not null ? "Enroll again" : "Enroll my voice",
+            active ? "cancel" : "start",
+            enrollment is { State: "recording" } ? EnrollSentences : []);
+    }
+
     const string FixByHand = "Fix the file in an editor; the window reads it again when it changes.";
     const string FixEntry = "Fix this entry in settings.json in an editor, or delete it.";
 
