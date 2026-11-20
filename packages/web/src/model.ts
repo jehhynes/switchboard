@@ -1,0 +1,249 @@
+import type { ArtifactView, ConversationEntry, ItemView, PageGroup, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from './types.js';
+
+/** What the page shows, kept from its conversation stream (architecture.md § Web page). */
+export interface PageState {
+  /** The page key the hub gave in `hello`, which every command names. */
+  key: string | null;
+  connected: boolean;
+  groups: PageGroup[];
+  /** The selected work item's group, its current session and what it shows; null before the page selected one. */
+  scope: ScopeView | null;
+  session: SessionView | null;
+  items: ItemView[];
+  more: boolean;
+  status: StatusView | null;
+  artifacts: ArtifactView[];
+  unread: number;
+  voice: VoiceView | null;
+  expandReplies: boolean;
+}
+
+export const EMPTY: PageState = { key: null, connected: false, groups: [], scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, expandReplies: false };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Event = { type: string } & Record<string, any>;
+
+/** In the transcript first, in its line order; then what is not in it yet, in the order first seen. */
+function place(item: ItemView): [number, number] {
+  return [item.provisional ? 1 : 0, item.ord];
+}
+
+function upsert(items: ItemView[], item: ItemView): ItemView[] {
+  const rest = items.filter((other) => other.id !== item.id);
+  const [group, ord] = place(item);
+  const at = rest.findIndex((other) => {
+    const [otherGroup, otherOrd] = place(other);
+
+    return otherGroup > group || (otherGroup === group && otherOrd > ord);
+  });
+
+  return at === -1 ? [...rest, item] : [...rest.slice(0, at), item, ...rest.slice(at)];
+}
+
+const notSent = (item: ItemView): boolean => item.type === 'message' && item.delivery === 'not-sent';
+
+const newestFirst = (artifacts: ArtifactView[]): ArtifactView[] => [...artifacts].sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
+
+/** The state after one event of the stream; `hello` starts the conversation from empty. */
+export function applyEvent(state: PageState, event: Event): PageState {
+  switch (event.type) {
+    case 'hello':
+      return {
+        ...state,
+        key: event['key'] ?? state.key,
+        connected: true,
+        groups: event['groups'] ?? state.groups,
+        scope: event['scope'] ?? null,
+        session: (event['sessions'] as SessionView[] | undefined)?.find((one) => one.current) ?? null,
+        items: ((event['items'] as ItemView[] | undefined) ?? []).filter((item) => !notSent(item)),
+        more: event['more'] === true,
+        status: event['status'] ?? null,
+        artifacts: newestFirst(event['artifacts'] ?? []),
+        unread: event['unread'] ?? 0,
+        voice: event['voice'] ?? null,
+        expandReplies: event['settings']?.expandReplies ?? state.expandReplies,
+      };
+    case 'list':
+      return { ...state, groups: event['groups'] };
+    case 'scope':
+      return { ...state, scope: event['scope'] ?? null };
+    case 'conversations':
+      return state.scope === null ? state : { ...state, scope: { ...state.scope, conversations: event['conversations'] as ConversationEntry[] } };
+    case 'session':
+      return event['session'].id === state.scope?.sessionId ? { ...state, session: event['session'] } : state;
+    case 'message':
+      return { ...state, items: notSent(event['message']) ? state.items.filter((item) => item.id !== event['message'].id) : upsert(state.items, event['message']) };
+    case 'reply':
+      return { ...state, items: upsert(state.items, event['reply']) };
+    case 'status': {
+      const status = event['status'] as StatusView | null;
+
+      return status === null || status.sessionId === state.scope?.sessionId || (status.fallback && status.id === `stage-${state.scope?.workItemId}`) ? { ...state, status } : state;
+    }
+    case 'artifact': {
+      const rest = state.artifacts.filter((one) => one.path !== event['artifact'].path);
+
+      return { ...state, artifacts: event['removed'] === true ? rest : newestFirst([...rest, event['artifact']]) };
+    }
+    case 'unread': {
+      const scope = state.scope === null ? null : { ...state.scope, conversations: state.scope.conversations.map((entry) => (entry.workItemId === event['workItemId'] ? { ...entry, unread: event['count'] } : entry)) };
+
+      return { ...state, scope, unread: event['workItemId'] === state.scope?.workItemId ? event['count'] : state.unread };
+    }
+    case 'voice':
+      return { ...state, voice: event['voice'] };
+    case 'settings':
+      return { ...state, expandReplies: event['settings']?.expandReplies === true };
+    case 'progress':
+      return { ...state, items: state.items.map((item) => (item.id === event['replyId'] && item.type === 'reply' ? { ...item, spoken: { state: 'playing', atMs: event['atMs'], saidChars: event['chars'] } } : item)) };
+    default:
+      return state;
+  }
+}
+
+/** Older items a `history` page brought, before those shown. */
+export function withEarlier(state: PageState, items: ItemView[], more: boolean): PageState {
+  const known = new Set(state.items.map((item) => item.id));
+
+  return { ...state, items: [...items.filter((item) => !known.has(item.id) && !notSent(item)), ...state.items], more };
+}
+
+/** A row of the timeline: a message, a reply with the reply it rewrote, or an artifact where it was last written. */
+export type Entry = { type: 'message'; item: Extract<ItemView, { type: 'message' }> } | { type: 'reply'; item: ReplyView; earlier: ReplyView | null } | { type: 'artifact'; artifact: ArtifactView };
+
+/**
+ * The timeline: withdrawn items and replies that are only a status left out, a rewrite in the place of the reply it rewrote, and each artifact
+ * written since the oldest item shown after the last item from no later than its write.
+ */
+export function timeline(items: ItemView[], artifacts: readonly ArtifactView[]): Entry[] {
+  const replies = new Map(items.filter((item): item is ReplyView => item.type === 'reply' && !item.withdrawn).map((reply) => [reply.id, reply]));
+  const placed = new Set<string>();
+  const entries: Entry[] = [];
+
+  for (const item of items) {
+    if (item.type === 'message') {
+      if (!item.withdrawn) {
+        entries.push({ type: 'message', item });
+      }
+
+      continue;
+    }
+
+    if (item.withdrawn || placed.has(item.id) || (item.kind === 'reply' && item.opening.trim() === '' && item.rewrittenBy === null)) {
+      continue;
+    }
+
+    let shown = item;
+    let earlier: ReplyView | null = null;
+
+    for (let next = replies.get(shown.rewrittenBy ?? ''); next !== undefined && !placed.has(next.id); next = replies.get(shown.rewrittenBy ?? '')) {
+      earlier = shown;
+      shown = next;
+      placed.add(next.id);
+    }
+
+    entries.push({ type: 'reply', item: shown, earlier });
+  }
+
+  const atOf = (entry: Entry): number => (entry.type === 'artifact' ? entry.artifact.updatedAt : entry.item.at);
+  const oldest = entries[0] === undefined ? null : atOf(entries[0]);
+
+  if (oldest !== null) {
+    for (const artifact of [...artifacts].filter((one) => one.updatedAt >= oldest).sort((a, b) => a.updatedAt - b.updatedAt)) {
+      let at = entries.length;
+
+      while (at > 0 && atOf(entries[at - 1]!) > artifact.updatedAt) {
+        at--;
+      }
+
+      entries.splice(at, 0, { type: 'artifact', artifact });
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * The index of the operator's latest message in `entries` while the session is in a turn and no reply answers it or a later one, where the
+ * spinner shows; -1 otherwise.
+ */
+export function awaitingReply(items: readonly ItemView[], entries: readonly Entry[], session: SessionView | null): number {
+  if (session === null || (session.state !== 'starting' && session.state !== 'running' && session.state !== 'waiting')) {
+    return -1;
+  }
+
+  const lastIndex = <T,>(list: readonly T[], test: (one: T) => boolean): number => list.reduce((found, one, index) => (test(one) ? index : found), -1);
+  const latest = lastIndex(items, (item) => item.type === 'message' && !item.withdrawn);
+  const at = new Map(items.map((item, index) => [item.id, index]));
+  const replied = items.some((item, index) => item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && (item.answers === null ? index > latest : (at.get(item.answers) ?? -1) >= latest));
+
+  return latest === -1 || replied ? -1 : lastIndex(entries, (entry) => entry.type === 'message');
+}
+
+/** The session state's codicon and its words. */
+export function stateIcon(state: SessionView['state'] | null | undefined, waitingFor: SessionView['waitingFor'] = null): { icon: string; text: string } {
+  switch (state) {
+    case 'starting':
+      return { icon: 'sync~spin', text: 'Starting' };
+    case 'running':
+      return { icon: 'sync~spin', text: 'Working' };
+    case 'waiting':
+      return waitingFor === 'permission' ? { icon: 'shield', text: 'Waiting for permission' } : { icon: 'question', text: 'Waiting for your answer' };
+    case 'idle':
+      return { icon: 'check', text: 'Idle' };
+    case 'ended':
+      return { icon: 'circle-slash', text: 'Ended' };
+    default:
+      return { icon: 'circle-outline', text: 'No session' };
+  }
+}
+
+/** An artifact type's codicon. */
+export function artifactIcon(type: ArtifactView['type']): string {
+  return { markdown: 'markdown', html: 'globe', image: 'file-media', audio: 'unmute', video: 'device-camera-video', file: 'file' }[type];
+}
+
+/** The selected conversation's dropdown entry, or null. */
+export function selectedEntry(state: PageState): ConversationEntry | null {
+  return state.scope?.conversations.find((entry) => entry.workItemId === state.scope?.workItemId) ?? null;
+}
+
+/** A title for the composer's placeholder: without leading tags such as "[Feedback]", cut at a word after 40 characters. */
+export function shortTitle(title: string): string {
+  const bare = title.replace(/^(\s*\[[^\]]*\])+\s*/, '').trim() || title.trim();
+
+  if (bare.length <= 40) {
+    return bare;
+  }
+
+  const cut = bare.slice(0, 41);
+  const space = cut.lastIndexOf(' ');
+
+  return (space > 20 ? cut.slice(0, space) : cut.slice(0, 40)).trimEnd();
+}
+
+/** The typed messages of the session, oldest first, which Up and Down walk. */
+export function sentTexts(items: readonly ItemView[]): string[] {
+  return items.flatMap((item) => (item.type === 'message' && !item.withdrawn && item.origin !== 'terminal' ? [item.text] : []));
+}
+
+/** The mention of a path as Claude Code writes it: `@path`, or `@"path"` for one with a space or a colon or an odd end; null for one with a quote. */
+export function mentionOf(path: string): string | null {
+  if (path === '' || /["\r\n]/.test(path)) {
+    return null;
+  }
+
+  return !/[\s:]/.test(path) && /\w$/.test(path.replace(/\/+$/, '')) ? `@${path}` : `@"${path}"`;
+}
+
+/** The `@` query that ends the text before the caret, with where it starts; null for none. */
+export function mentionQuery(before: string): { start: number; query: string } | null {
+  const match = /(^|\s)@("[^"\n]*|[^\s"]*)$/.exec(before);
+
+  return match === null ? null : { start: match.index + match[1]!.length, query: match[2]!.replace(/^"/, '') };
+}
+
+/** The command query when the text before the caret is a slash and one word; null otherwise. */
+export function commandQuery(before: string): string | null {
+  return /^\/([^\s/]*)$/.exec(before)?.[1] ?? null;
+}

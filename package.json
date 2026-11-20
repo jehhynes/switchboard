@@ -16,6 +16,7 @@
     "packages/voice",
     "packages/claude",
     "packages/codex",
+    "packages/web",
     "packages/hub",
     "apps/hub",
     "apps/dock",
