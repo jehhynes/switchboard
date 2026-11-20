@@ -763,7 +763,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void Show_RecordedView_ListsOpenGroupsWithCountsAndRows()
     {
-        var (window, _) = Open();
+        var (window, _) = Open(new DockSettings { Width = 800 });
         var texts = VisibleTexts(window);
 
         string[] headers = ["Blocked on you", "Ready for review", "In progress", "Unstarted", "Done", "0", "2", "3"];
@@ -1794,17 +1794,16 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void TapPill_KeyAndPullRequest_OpenTheirLinksWithoutTheRowClick()
     {
-        var (window, _) = Open();
+        var (window, _) = Open(new DockSettings { Width = 800 });
         var pills = RowNamed(window, "Issue <7>").GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("pill") && border.IsEffectivelyVisible).ToList();
 
         Assert.Equal(["gh 107", "19002", "gh 20087", "2"], pills.Select((pill) => pill.GetVisualDescendants().OfType<TextBlock>().Last().Text));
         Assert.Contains("pr", pills[1].Classes);
         Assert.Equal("\uEAE2", pills[3].GetVisualDescendants().OfType<TextBlock>().First().Text);
-        Assert.StartsWith("Returned:", Assert.IsType<string>(ToolTip.GetTip(pills[3])));
+        Assert.StartsWith("Returned 2:", Assert.IsType<string>(ToolTip.GetTip(pills[3])));
 
         Tap(window, pills[0]);
         Tap(window, pills[1]);
-        Tap(window, pills[3]);
 
         Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
         Assert.Empty(actions.Clicked);
@@ -1813,7 +1812,7 @@ public sealed class MainWindowTests
     [AvaloniaFact]
     public void LinkPill_Mentioned_IsGreyWithItsTooltipWhileTheWorkLinkKeepsItsColour()
     {
-        var (window, _) = Open(new DockSettings { Edge = "right", Width = 480 });
+        var (window, _) = Open(new DockSettings { Edge = "right", Width = 800 });
         var pills = RowNamed(window, "Issue <7>").GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("pill") && border.IsEffectivelyVisible).ToList();
         var muted = window.FindResource(window.ActualThemeVariant, "DockMuted");
         var mentioned = pills[2];
@@ -1821,9 +1820,9 @@ public sealed class MainWindowTests
         Assert.Equal(muted, mentioned.BorderBrush);
         Assert.Equal(window.FindResource(window.ActualThemeVariant, "DockPillFill"), mentioned.Background);
         Assert.Equal(muted, mentioned.GetVisualDescendants().OfType<TextBlock>().Last().Foreground);
-        Assert.Equal("Named in the ticket: https://github.com/o/r/issues/20087", ToolTip.GetTip(mentioned));
+        Assert.Equal("gh 20087, named in the ticket\nhttps://github.com/o/r/issues/20087", ToolTip.GetTip(mentioned));
         Assert.Equal(window.FindResource(window.ActualThemeVariant, "DockPullRequest"), pills[1].BorderBrush);
-        Assert.Equal("https://github.com/o/r/pull/19002", ToolTip.GetTip(pills[1]));
+        Assert.Equal("PR #19002\nhttps://github.com/o/r/pull/19002", ToolTip.GetTip(pills[1]));
 
         Tap(window, mentioned);
 

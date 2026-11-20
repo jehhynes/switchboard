@@ -273,6 +273,21 @@
     <Style Selector="TextBlock.pill-icon">
       <Setter Property="Padding" Value="0" />
     </Style>
+    <!-- A compact pill shows only its icon, with its text in its tooltip; a pill shows an icon it has only for that, such as the ticket's source
+         logo, only while compact. -->
+    <Style Selector="Border.pill.compact TextBlock.pill-text">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Border.pill:not(.compact) :is(Control).compact-only">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Border.pill.absent, Border.pill.overflow">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Path.pill-logo">
+      <Setter Property="MaxWidth" Value="12" />
+      <Setter Property="MaxHeight" Value="12" />
+    </Style>
     <Style Selector="Border.pill:pointerover">
       <Setter Property="Background" Value="{DynamicResource DockPillFillHover}" />
     </Style>
@@ -492,15 +507,24 @@
                                   <TextBlock Grid.Column="4" Text="{Binding Time}" ToolTip.Tip="{Binding TimeTitle}" Classes="muted" Margin="8,0,0,0" />
                                 </Grid>
                                 <StackPanel Grid.Row="1" Margin="0,3,0,0" Spacing="3">
-                                <StackPanel Orientation="Horizontal" Spacing="6" ClipToBounds="True">
-                                  <!-- First, because line 2 clips its end on a narrow dock or after a long playbook name (PRD R87). -->
+                                <!-- Line 2's pills shrink to their icon rather than being cut, longest first and Returned last (PillLine). -->
+                                <views:PillLine Spacing="6" ClipToBounds="True">
                                   <TextBlock Name="CommentIcon" Classes="icon muted" Text="{Binding CommentGlyph}" IsVisible="{Binding HasComment}" ToolTip.Tip="{Binding CommentTitle}" VerticalAlignment="Center" />
-                                  <TextBlock VerticalAlignment="Center">
+                                  <TextBlock Classes="fill" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Row.Playbook}">
                                     <Run Text="{Binding Namespace}" Foreground="{DynamicResource DockMuted}" /><Run Text="{Binding Name}" />
                                   </TextBlock>
                                   <Border Classes="pill" Classes.github="{Binding IsGithub}" Classes.zoho="{Binding IsZoho}" Classes.forum="{Binding IsForum}"
-                                          Tag="{Binding Url}" ToolTip.Tip="{Binding Url}" Tapped="OnPillTapped" Focusable="{Binding Url, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                                    <TextBlock Text="{Binding Ticket}" />
+                                          Tag="{Binding Url}" ToolTip.Tip="{Binding TicketTip}" Tapped="OnPillTapped" Focusable="True"
+                                          AutomationProperties.Name="{Binding Ticket}">
+                                    <StackPanel Orientation="Horizontal" Spacing="3">
+                                      <Panel Classes="compact-only" Width="12" Height="12" VerticalAlignment="Center">
+                                        <Path Classes="source github pill-logo" IsVisible="{Binding IsGithub}" Data="{StaticResource SourceGithub}" />
+                                        <Path Classes="source zoho pill-logo" IsVisible="{Binding IsZoho}" Data="{StaticResource SourceZoho}" />
+                                        <Path Classes="source forum pill-logo" IsVisible="{Binding IsForum}" Data="{StaticResource SourceForum}" />
+                                        <TextBlock Classes="icon pill-icon" Text="&#xEA66;" IsVisible="{Binding !HasSourceLogo}" FontSize="12" />
+                                      </Panel>
+                                      <TextBlock Classes="pill-text" Text="{Binding Ticket}" />
+                                    </StackPanel>
                                   </Border>
                                   <ItemsControl ItemsSource="{Binding Links}">
                                     <ItemsControl.ItemsPanel>
@@ -511,22 +535,22 @@
                                     <ItemsControl.ItemTemplate>
                                       <DataTemplate x:DataType="hub:DockLink">
                                         <Border Classes="pill" Classes.pr="{Binding IsPullRequest}" Classes.github="{Binding IsIssue}" Classes.mentioned="{Binding Mentioned}" Tag="{Binding Url}"
-                                                ToolTip.Tip="{Binding Tooltip}" Tapped="OnPillTapped" Focusable="True">
+                                                ToolTip.Tip="{Binding Tooltip}" Tapped="OnPillTapped" Focusable="True" AutomationProperties.Name="{Binding Label}">
                                           <StackPanel Orientation="Horizontal" Spacing="3">
-                                            <TextBlock Classes="icon pill-icon" Text="{Binding Glyph}" IsVisible="{Binding HasGlyph}" />
-                                            <TextBlock Text="{Binding Text}" />
+                                            <TextBlock Classes="icon pill-icon" Classes.compact-only="{Binding !HasGlyph}" Text="{Binding IconGlyph}" />
+                                            <TextBlock Classes="pill-text" Text="{Binding Text}" />
                                           </StackPanel>
                                         </Border>
                                       </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                   </ItemsControl>
-                                  <Border Classes="pill returned" IsVisible="{Binding HasReturned}" ToolTip.Tip="Returned: earlier work items with this playbook, or one it is a return of, were done for this ticket" AutomationProperties.Name="Returned">
+                                  <Border Classes="pill returned" Classes.absent="{Binding !HasReturned}" Focusable="True" ToolTip.Tip="{Binding ReturnedTitle}" AutomationProperties.Name="{Binding ReturnedTitle}">
                                     <StackPanel Orientation="Horizontal" Spacing="3">
                                       <TextBlock Classes="icon pill-icon" Text="&#xEAE2;" />
-                                      <TextBlock Text="{Binding ReturnedText}" />
+                                      <TextBlock Classes="pill-text" Text="{Binding ReturnedText}" />
                                     </StackPanel>
                                   </Border>
-                                </StackPanel>
+                                </views:PillLine>
                                 <!-- The last detail takes the remaining width and ends in an ellipsis. -->
                                 <DockPanel IsVisible="{Binding HasThirdLine}" ClipToBounds="True">
                                   <TextBlock DockPanel.Dock="Left" Classes="icon" Classes.failed="{Binding MarkFailed}" Classes.spin="{Binding MarkSpins}" Text="{Binding MarkGlyph}"

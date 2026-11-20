@@ -121,8 +121,13 @@ public sealed record DockLink(string Label, string Url, string Kind = "url", str
     [JsonIgnore]
     public string Text => Badge ?? Label;
 
+    /// <summary>The pill's icon: its glyph, or for a compact pill without one an issue's or a link's icon.</summary>
     [JsonIgnore]
-    public string Tooltip => Mentioned ? $"Named in the ticket: {Url}" : Url;
+    public string IconGlyph => Glyph ?? (IsIssue ? "\uEB0C" : "\uEB14");
+
+    /// <summary>The pill's tooltip: its name, which a compact pill does not show, and its URL.</summary>
+    [JsonIgnore]
+    public string Tooltip => Mentioned ? $"{Label}, named in the ticket\n{Url}" : $"{Label}\n{Url}";
 }
 
 /// <summary>A drafted text Copy puts on the clipboard (PRD R60).</summary>

@@ -1152,6 +1152,15 @@ public sealed class RowViewModel(DockRow row) : Observable
 
     public string? CommentTitle => row.Comment?.Title;
 
+    /// <summary>The ticket key pill's tooltip: the key, which a compact pill does not show, and the URL it opens.</summary>
+    public string TicketTip => row.Url == "" ? row.Ticket : $"{row.Ticket}\n{row.Url}";
+
+    /// <summary>The ticket's source has a logo, which its compact key pill shows; another, such as ad hoc, shows a tag.</summary>
+    public bool HasSourceLogo => IsGithub || IsZoho || IsForum;
+
+    /// <summary>Returned's tooltip and accessible name, with its count, which a compact pill does not show.</summary>
+    public string ReturnedTitle => $"Returned {row.Returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket";
+
     /// <summary>The ticket's URL, which its key pill opens; empty for an ad-hoc ticket.</summary>
     public string Url => row.Url;
 
