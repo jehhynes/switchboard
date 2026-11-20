@@ -89,7 +89,7 @@ function startComposer(
   host.innerHTML =
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span>' +
     '<button class="dismiss" type="button" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>' +
-    '<div class="composer"><textarea rows="1" aria-label="Message"></textarea><div class="live-words" aria-live="polite" hidden></div><div class="composer-footer"><div class="composer-controls"></div>' +
+    '<div class="composer"><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls"></div>' +
     '<span class="mic-slot"></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button></div></div>';
 
   const input = host.querySelector('textarea')!;
@@ -97,6 +97,8 @@ function startComposer(
   const error = host.querySelector<HTMLElement>('.composer-error')!;
   const errorText = host.querySelector<HTMLElement>('.composer-error-text')!;
   const liveWords = host.querySelector<HTMLElement>('.live-words')!;
+  const mirror = host.querySelector<HTMLElement>('.live-mirror')!;
+  const mirrorText = host.querySelector<HTMLElement>('.mirror-text')!;
   const micSlot = host.querySelector<HTMLElement>('.mic-slot')!;
   // The voice in this window, and a draft the hub changed while the box held a message being sent, which takes the box once the hub answered.
   let voiceHere = false;
@@ -188,9 +190,41 @@ function startComposer(
       tellHub();
     }
   };
+  /**
+   * Live words show dimmed right after the box's text, on its line, from a copy of the text laid out under the box with the same font, padding and
+   * wrapping (architecture.md § Dictation); when they settle, the hub's draft takes them in place.
+   */
+  const syncLive = (): void => {
+    const shown = !liveWords.hidden;
+
+    mirrorText.textContent = shown ? input.value : '';
+    liveWords.dataset['lead'] = shown && input.value !== '' && !/\s$/.test(input.value) ? ' ' : '';
+    mirror.scrollTop = input.scrollTop;
+    host.classList.toggle('live-showing', shown);
+  };
   const grow = (): void => {
+    syncLive();
+    input.style.paddingBottom = '';
     input.style.height = 'auto';
+
+    // Live words that wrap past the text add their height below it, so the box's scroll range and the copy's match at any height.
+    const extra = liveWords.hidden ? 0 : Math.max(0, mirror.scrollHeight - input.scrollHeight);
+
+    if (extra > 0) {
+      input.style.paddingBottom = `${10 + extra}px`;
+    }
+
     input.style.height = `${Math.min(input.scrollHeight, COMPOSER_MAX_PX)}px`;
+    mirror.scrollTop = input.scrollTop;
+  };
+  /** New live words scroll into view at the end of the box. */
+  const showLive = (): void => {
+    grow();
+
+    if (!liveWords.hidden) {
+      input.scrollTop = input.scrollHeight;
+      mirror.scrollTop = input.scrollTop;
+    }
   };
   const canSend = (): boolean => enabled && target !== null && sending === null && input.value.trim() !== '';
   const refresh = (): void => {
@@ -248,6 +282,7 @@ function startComposer(
       vscode.postMessage({ type: 'mic', on: button.dataset['on'] === 'true' });
     }
   });
+  input.addEventListener('scroll', () => void (mirror.scrollTop = input.scrollTop));
   input.addEventListener('focus', tellHub);
   input.addEventListener('blur', tellHub);
   input.addEventListener('input', () => {
@@ -314,8 +349,9 @@ function startComposer(
       micListening = voiceHere && state.voice!.mic !== 'off' && state.voice!.mic !== 'idle-off';
       host.classList.toggle('dictating', micListening);
 
-      if (!voiceHere) {
+      if (!voiceHere && !liveWords.hidden) {
         liveWords.hidden = true;
+        grow();
       }
 
       refresh();
@@ -349,6 +385,7 @@ function startComposer(
     words: (text) => {
       liveWords.textContent = text;
       liveWords.hidden = text === '';
+      showLive();
     },
     refused: (why, workItemId) => {
       if (workItemId !== null && workItemId !== current) {

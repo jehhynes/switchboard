@@ -60,7 +60,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // ---- The composer ----
   composerHost.innerHTML =
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span><button class="dismiss" type="button" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>' +
-    '<div class="composer"><div class="composer-menu" role="listbox" hidden></div><textarea rows="1" aria-label="Message"></textarea><div class="live-words" aria-live="polite" hidden></div><div class="composer-footer"><div class="composer-controls">' +
+    '<div class="composer"><div class="composer-menu" role="listbox" hidden></div><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls">' +
     '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button><div class="voice-controls"></div></div>' +
     // The microphone's place, for dictation in a later slice.
     '<span class="composer-mic" hidden></span><button class="send" type="button" title="Send (Enter)" aria-label="Send" disabled><span class="codicon codicon-arrow-up"></span></button></div></div>';
@@ -71,6 +71,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const menu = composerHost.querySelector<HTMLElement>('.composer-menu')!;
   const voiceControls = composerHost.querySelector<HTMLElement>('.voice-controls')!;
   const liveWords = composerHost.querySelector<HTMLElement>('.live-words')!;
+  const mirror = composerHost.querySelector<HTMLElement>('.live-mirror')!;
+  const mirrorText = composerHost.querySelector<HTMLElement>('.mirror-text')!;
   // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it, and one that came
   // while a message was being sent, which fills the box once the send answered.
   const hubDrafts = new Map<string, string>();
@@ -137,9 +139,37 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     errorBox.querySelector('.composer-error-text')!.textContent = text ?? '';
     errorBox.hidden = text === null;
   };
+  /** Live words show dimmed right after the box's text, on its line, from a copy of the text laid out under the box (architecture.md § Web page). */
+  const syncLive = (): void => {
+    const shown = !liveWords.hidden;
+
+    mirrorText.textContent = shown ? input.value : '';
+    liveWords.dataset['lead'] = shown && input.value !== '' && !/\s$/.test(input.value) ? ' ' : '';
+    composerHost.classList.toggle('live-showing', shown);
+  };
   const grow = (): void => {
+    syncLive();
+    input.style.paddingBottom = '';
     input.style.height = 'auto';
+
+    // Live words that wrap past the text add their height below it, so the box's scroll range and the copy's match at any height.
+    const extra = liveWords.hidden ? 0 : Math.max(0, mirror.scrollHeight - input.scrollHeight);
+
+    if (extra > 0) {
+      input.style.paddingBottom = `${10 + extra}px`;
+    }
+
     input.style.height = `${Math.min(input.scrollHeight, COMPOSER_MAX_PX)}px`;
+    mirror.scrollTop = input.scrollTop;
+  };
+  /** New live words scroll into view at the end of the box. */
+  const showLive = (): void => {
+    grow();
+
+    if (!liveWords.hidden) {
+      input.scrollTop = input.scrollHeight;
+      mirror.scrollTop = input.scrollTop;
+    }
   };
   const canSend = (): boolean => state.connected && state.session?.conversation === 'full' && !sending && input.value.trim() !== '';
   const refresh = (): void => {
@@ -318,6 +348,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     errors.set(workItemId, error);
   };
 
+  input.addEventListener('scroll', () => void (mirror.scrollTop = input.scrollTop));
   input.addEventListener('input', () => {
     walk = null;
     grow();
@@ -941,10 +972,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         reconcile();
       }
 
-      // Dictation (architecture.md § Dictation): live words show dimmed under the box; the hub's draft fills the box unless the operator typed over it.
+      // Dictation (architecture.md § Dictation): live words show dimmed after the box's text; the hub's draft fills the box unless the operator typed over it.
       if (type === 'words') {
         liveWords.textContent = String(data['text'] ?? '');
         liveWords.hidden = liveWords.textContent === '';
+        showLive();
       } else if (type === 'draft' && typeof data['sessionId'] === 'string') {
         takeHubDraft(data['sessionId'], String(data['text'] ?? ''));
       }

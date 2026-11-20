@@ -138,7 +138,15 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .composer .send .codicon { font-size: 16px; }
 .sending .composer { opacity: 0.7; }
 /* Dictation (architecture.md § Dictation): live words dimmed under the text, and the mic button beside Send. */
-.composer .live-words { padding: 0 14px 8px; color: var(--vscode-descriptionForeground); font-style: italic; overflow-wrap: break-word; }
+/* Live words sit dimmed right after the text: a copy of the text, laid out as the text area lays it out, lies under the transparent text area with
+   the live words after it, so they continue the text's line and settle in place. */
+.composer-input { position: relative; }
+.composer .live-mirror { position: absolute; inset: 0; box-sizing: border-box; padding: 10px 14px; overflow: hidden; scrollbar-gutter: stable; font: inherit; line-height: 1.5; white-space: pre-wrap; overflow-wrap: break-word; pointer-events: none; }
+.composer .mirror-text { color: transparent; }
+.composer .live-words { color: var(--vscode-descriptionForeground); font-style: italic; }
+.composer .live-words::before { content: attr(data-lead); }
+.composer .composer-input textarea { position: relative; }
+.live-showing .composer textarea::placeholder { color: transparent; }
 /* One mic button, a ghost icon whose glyph is its state: a slash while off, plain while listening, filled and pulsing while hearing, a pause
    badge while paused. The slash and the badge are cut out of the glyph with the input's background, as a codicon mic-off would be. */
 .composer .mic { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 5px; cursor: pointer; color: var(--vscode-foreground); background: transparent; }

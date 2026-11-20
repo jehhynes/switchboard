@@ -216,7 +216,7 @@ describe('the page', () => {
     page.close();
   });
 
-  it("shows dictation's live words under the box and the hub's draft in it, never over text typed after it (architecture.md § Dictation)", () => {
+  it("shows dictation's live words dimmed after the box's text and the hub's draft in it, never over text typed after it (architecture.md § Dictation)", () => {
     const { page, source } = start();
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
@@ -228,6 +228,14 @@ describe('the page', () => {
     source.emit('words', { messageId: 'u1', text: 'fix the' });
     expect(live.hidden).toBe(false);
     expect(live.textContent).toBe('fix the');
+    // With an empty box they start the line, with no space before them.
+    expect(live.dataset['lead']).toBe('');
+    source.emit('draft', { text: 'fix the', sessionId: 's' });
+    source.emit('words', { messageId: 'u1', text: 'login' });
+    // Then they continue the draft's line, after a space, in the layer under the box.
+    expect(root.querySelector('.live-mirror')!.contains(live)).toBe(true);
+    expect(root.querySelector('.mirror-text')!.textContent).toBe('fix the');
+    expect(live.dataset['lead']).toBe(' ');
     source.emit('draft', { text: 'fix the login', sessionId: 's' });
     source.emit('words', { messageId: 'u1', text: '' });
     expect(live.hidden).toBe(true);

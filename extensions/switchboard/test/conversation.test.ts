@@ -955,10 +955,35 @@ describe('the composer', () => {
       expect(input.value).toBe('fix the login');
       expect(input.value).toBe('fix the login');
       post({ type: 'words', text: 'flow' });
+      // Live words continue the draft's line: they follow a copy of its text in the layer under the box, after a space, not on a line of their own.
       expect(host.querySelector<HTMLElement>('.live-words')!.hidden).toBe(false);
       expect(host.querySelector('.live-words')!.textContent).toBe('flow');
+      expect(host.querySelector('.live-mirror')!.contains(host.querySelector('.live-words'))).toBe(true);
+      expect(host.querySelector('.composer-input')!.contains(input)).toBe(true);
+      expect(host.querySelector('.mirror-text')!.textContent).toBe('fix the login');
+      expect(host.querySelector<HTMLElement>('.live-words')!.dataset['lead']).toBe(' ');
+      expect(host.classList.contains('live-showing')).toBe(true);
+      // Live words that wrap past a full box pad its end by their height, so the box scrolls as far as its copy and they stay reachable.
+      const mirror = host.querySelector<HTMLElement>('.live-mirror')!;
+
+      Object.defineProperty(mirror, 'scrollHeight', { configurable: true, get: () => 260 });
+      Object.defineProperty(input, 'scrollHeight', { configurable: true, get: () => 230 + (input.style.paddingBottom === '' ? 0 : Number.parseInt(input.style.paddingBottom, 10) - 10) });
+      post({ type: 'words', text: 'flow and the rest' });
+      expect(input.style.paddingBottom).toBe('40px');
+      expect(input.style.height).toBe('200px');
+      delete (mirror as unknown as Record<string, unknown>)['scrollHeight'];
+      delete (input as unknown as Record<string, unknown>)['scrollHeight'];
+      post({ type: 'words', text: 'flow' });
+      expect(input.style.paddingBottom).toBe('');
+
+      // Settling: the draft takes the words and the live words clear, so they stay in place.
+      post({ type: 'draft', text: 'fix the login flow', workItemId: 2 });
       post({ type: 'words', text: '' });
+      expect(input.value).toBe('fix the login flow');
       expect(host.querySelector<HTMLElement>('.live-words')!.hidden).toBe(true);
+      expect(host.querySelector('.mirror-text')!.textContent).toBe('');
+      expect(host.classList.contains('live-showing')).toBe(false);
+      post({ type: 'draft', text: 'fix the login', workItemId: 2 });
       post({ type: 'refused', error: 'The session has ended.', workItemId: 2 });
       expect(host.querySelector('.composer-error-text')!.textContent).toBe('The session has ended.');
 
@@ -1044,7 +1069,7 @@ describe('the composer', () => {
     };
 
     // The left side holds the attach and slash command buttons (test/composer.test.ts), and later slices' controls after them.
-    expect([...host.querySelectorAll('.composer > textarea ~ .composer-footer > .composer-controls > button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Attach files', 'Show slash commands']);
+    expect([...host.querySelectorAll('.composer > .composer-input:has(> textarea) ~ .composer-footer > .composer-controls > button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Attach files', 'Show slash commands']);
     expect(send.querySelector('.codicon')?.className).toBe('codicon codicon-arrow-up');
     expect(send.getAttribute('aria-label')).toBe('Send');
     show(state());
