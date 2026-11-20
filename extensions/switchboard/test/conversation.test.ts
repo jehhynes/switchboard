@@ -7,7 +7,7 @@ import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenRep
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
-import { ago, linkAllowed, PICKER, renderConversation, renderMarkdown, renderVoiceControls } from '../src/webview/conversationRender.js';
+import { ago, linkAllowed, personaButton, PICKER, renderConversation, renderMarkdown, renderVoiceControls } from '../src/webview/conversationRender.js';
 import type { Tab } from '../src/webview/conversationRender.js';
 
 /** The page's extras for a tab. */
@@ -215,6 +215,29 @@ describe('the Conversation view page', () => {
     // Raw HTML in a reply stays text.
     expect(root.querySelector('script')).toBeNull();
     expect(root.querySelector('.reply.aside')?.textContent).toContain('<script>');
+  });
+
+  it("shows the session's persona in the header, pinned or with its tone change pending, and nothing without one (architecture.md § Personas)", () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state([], { session: { ...SESSION, persona: { id: 'nova', name: 'Nova <N>', pinned: false, tonePending: false } } }));
+
+    const button = root.querySelector<HTMLButtonElement>('header button.persona')!;
+
+    expect(button.dataset['action']).toBe('persona');
+    expect(button.textContent).toBe('Nova <N>');
+    expect(button.title).toBe('Persona: Nova <N>. Click to choose another.');
+    expect(button.querySelector('.codicon-person')).not.toBeNull();
+    // After the conversation dropdown, before the plus.
+    expect(button.previousElementSibling?.classList.contains('picker')).toBe(true);
+
+    const pinned = personaButton({ id: 'nova', name: 'Nova', pinned: true, tonePending: true });
+
+    expect(pinned).toContain('class="persona pending"');
+    expect(pinned).toContain('codicon-pinned');
+    expect(pinned).toContain('title="Persona: Nova, pinned to this session. Its tone changes when the session next resumes or compacts. Click to choose another."');
+    expect(personaButton(null)).toBe('');
+    expect(renderConversation(state([]))).not.toContain('class="persona');
   });
 
   it('says why the view cannot talk to a session, and when there is nothing to show', () => {

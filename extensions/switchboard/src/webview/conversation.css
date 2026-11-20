@@ -185,6 +185,11 @@ body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
 button.picker { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; border: none; background: transparent; color: inherit; padding: 0; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
 button.picker:hover { background: var(--vscode-toolbar-hoverBackground); }
 button.picker .title { flex: 0 1 auto; }
+/* The session's persona (architecture.md § Personas); dimmed while its tone change waits for a resume or compaction. */
+button.persona { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 2px 6px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; font: inherit; font-size: 12px; }
+button.persona:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+button.persona .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.persona.pending .name { font-style: italic; }
 .conversation-list { position: absolute; top: 100%; left: 6px; right: 6px; z-index: 2; margin: 0; padding: 4px 0; list-style: none; max-height: 50vh; overflow-y: auto; background: var(--vscode-quickInput-background, var(--vscode-editorWidget-background)); color: var(--vscode-quickInput-foreground, var(--vscode-foreground)); border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); border-radius: 6px; box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3)); }
 .conversation-list button { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: transparent; color: inherit; padding: 4px 10px; font: inherit; text-align: left; cursor: pointer; }
 .conversation-list button:hover, .conversation-list button:focus-visible { background: var(--vscode-list-hoverBackground); }

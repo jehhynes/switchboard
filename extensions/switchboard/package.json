@@ -143,6 +143,11 @@
         "category": "Switchboard"
       },
       {
+        "command": "switchboard.choosePersona",
+        "title": "Choose Persona…",
+        "category": "Switchboard"
+      },
+      {
         "command": "switchboard.stopSpeaking",
         "title": "Stop Speaking",
         "category": "Switchboard"

@@ -458,6 +458,54 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
   }
 
+  /**
+   * Choose Persona… and the header's persona button (architecture.md § Personas): lists the roster from the hub's `personas`, and pins the one
+   * picked to this window's selected conversation's session, or clears its pin.
+   */
+  async choosePersona(): Promise<void> {
+    const target = this.#target;
+    const scope = this.#state.scope;
+    const session = this.#state.session;
+
+    if (target === null || scope === null || scope.sessionId === null || session === null) {
+      void vscode.window.showWarningMessage('Switchboard: this window has no session to give a persona.');
+      return;
+    }
+
+    const listed = await postToHub(target.record, '/v1/conversation/personas', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID() }, HISTORY_TIMEOUT_MS);
+
+    if (listed?.status !== 200) {
+      void vscode.window.showWarningMessage(`Switchboard: ${listed?.error ?? 'the hub did not answer.'}`);
+      return;
+    }
+
+    const { personas } = listed.body as { personas: Array<{ id: string; name: string }> };
+
+    if (personas.length === 0) {
+      void vscode.window.showInformationMessage('Switchboard: no personas. Add them to voice.personas in settings.json, with voice.enabled on.');
+      return;
+    }
+
+    type PersonaPick = vscode.QuickPickItem & { personaId: string | null };
+    const current = session.persona;
+    const picks: PersonaPick[] = [
+      ...personas.map((persona) => ({ label: persona.name, description: current?.id === persona.id ? (current.pinned ? 'pinned' : 'current') : '', personaId: persona.id })),
+      ...(current?.pinned === true ? [{ label: '$(pinned-dirty) Clear pin', description: "Use the playbook's persona or a free one", personaId: null }] : []),
+    ];
+    const chosen = await vscode.window.showQuickPick<PersonaPick>(picks, { title: 'Persona', placeHolder: 'Pin a persona to this session' });
+
+    // The window may have moved to another session while the list was open.
+    if (chosen === undefined || this.#target !== target || this.#state.scope?.sessionId !== scope.sessionId) {
+      return;
+    }
+
+    const reply = await postToHub(target.record, '/v1/conversation/persona', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), sessionId: scope.sessionId, personaId: chosen.personaId }, HISTORY_TIMEOUT_MS);
+
+    if (reply?.status !== 200) {
+      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    }
+  }
+
   /** Talk here: the voice moves to this window's selected conversation's session. */
   talkHere(): Promise<void> {
     return this.#voiceCommand('talk-here');
@@ -693,6 +741,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
             return this.replay(String(message.replyId));
           case 'new':
             return this.newConversation();
+          case 'persona':
+            return this.choosePersona();
           case 'status-open':
             return this.#state.status === null ? Promise.resolve() : this.openStatus(this.#state.status);
           case 'statuses':

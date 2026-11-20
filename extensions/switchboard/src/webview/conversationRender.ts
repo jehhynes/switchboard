@@ -1,5 +1,5 @@
 import MarkdownIt from 'markdown-it';
-import type { ArtifactView, ItemView, MessageView, ReplyView, StatusView, VoiceView } from '@switchboard/hub';
+import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answersIn, answerText, parseQuestions } from '../questionModel.js';
@@ -17,6 +17,7 @@ export type ConversationMessage =
   | { type: 'speak-replies'; on: boolean }
   | { type: 'replay'; replyId: string }
   | { type: 'new' }
+  | { type: 'persona' }
   | { type: 'send'; id: number; text: string; target: SendTarget; command?: true }
   | { type: 'files'; id: number; query: string }
   | { type: 'commands'; id: number }
@@ -446,6 +447,20 @@ function picker(state: ConversationState, open: boolean): string {
 }
 
 /**
+ * The header's persona button (architecture.md § Personas): the session's persona's name, which opens the list to pin another; nothing for a
+ * session with none.
+ */
+export function personaButton(persona: SessionView['persona'] | undefined): string {
+  if (persona == null) {
+    return '';
+  }
+
+  const title = [`Persona: ${persona.name}${persona.pinned ? ', pinned to this session' : ''}.`, persona.tonePending ? 'Its tone changes when the session next resumes or compacts.' : '', 'Click to choose another.'].filter((part) => part !== '').join(' ');
+
+  return `<button type="button" class="persona${persona.tonePending ? ' pending' : ''}" data-action="persona" title="${escape(title)}" aria-label="${escape(title)}"><span class="codicon codicon-${persona.pinned ? 'pinned' : 'person'}" aria-hidden="true"></span><span class="name">${escape(persona.name)}</span></button>`;
+}
+
+/**
  * The view's HTML: the header with the session's state, the tab strip, and the selected tab: the conversation, with a note when the view cannot
  * talk to the session, and the timeline; the status; or the artifacts.
  */
@@ -461,7 +476,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return `<header class="header"><span class="title" title="${escape(state.scope.title)}">${escape(state.scope.title)}</span>${plus}</header><p class="empty">No Switchboard session in this folder yet.</p>`;
   }
 
-  const header = `<header class="header">${codicon(stateIcon(state.session))}${picker(state, open.has(PICKER))}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
+  const header = `<header class="header">${codicon(stateIcon(state.session))}${picker(state, open.has(PICKER))}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   const notes = state.session?.reason == null ? [] : [state.session.reason];
   const shown = timeline(state.items, state.artifacts);
   // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).
