@@ -127,7 +127,7 @@ describe('the hub process', () => {
     assert.strictEqual(JSON.parse(refused.body).error, 'Unknown work item 1.');
   });
 
-  it('claims no open left for another window or for none, since a folder window has no binding (architecture.md § Window scope)', async () => {
+  it("claims no open left for an item window or for none, since a folder window claims only its own folder's (architecture.md § Window scope)", async () => {
     const extension = await api();
     await until(() => extension.hub(), 'not connected');
 

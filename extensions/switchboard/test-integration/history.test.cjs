@@ -229,7 +229,7 @@ describe('a row\'s History', () => {
       vscode.window.showErrorMessage = realError;
     });
 
-    it("opens the session's own item window, which claims its attach terminal, since this folder window claims no open (architecture.md § Window scope)", async () => {
+    it("opens the session's own item window, which claims its attach terminal, since this folder window claims no item window's open (architecture.md § Window scope)", async () => {
       const folder = vscode.workspace.workspaceFolders[0].uri.fsPath;
 
       assert.strictEqual(await extension.historyLink({ type: 'open', sessionId: 'hist-cm', cwd: folder, provider: 'claude', codeMode: true }), 'other-folder');

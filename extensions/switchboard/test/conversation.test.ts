@@ -1217,6 +1217,37 @@ describe('several conversations in a window (architecture.md § Conversation vie
     expect(opened).toContain('codicon-check');
   });
 
+  it('draws a folder window with no conversation as its folder name, the plus and a note, with no composer', () => {
+    if (typeof CSS === 'undefined') {
+      vi.stubGlobal('CSS', { escape: (value: string) => value });
+    }
+
+    const empty = base({ scope: { ...SCOPE, kind: 'folder', title: 'support<3>', workItemId: null, sessionId: null, cwd: null, conversations: [] }, session: null });
+    const html = renderConversation(empty, new Set(), T0);
+
+    expect(html).toContain('<span class="title" title="support&#60;3&#62;">support&#60;3&#62;</span>');
+    expect(html).toContain('data-action="new"');
+    expect(html).toContain('No Switchboard session in this folder yet.');
+    expect(html).not.toContain('data-action="picker"');
+    expect(html).not.toContain('data-action="terminal"');
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const host = document.createElement('div');
+    const posted: Array<{ type: string }> = [];
+
+    document.body.replaceChildren(root, host, live);
+    startConversation(root, live, { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => {} }, host);
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: empty } }));
+    expect(host.hidden).toBe(true);
+    root.querySelector<HTMLButtonElement>('button[data-action="new"]')!.click();
+    expect(posted.filter((message) => message.type === 'new')).toEqual([{ type: 'new' }]);
+
+    // Once it has a conversation, the composer comes back.
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: base({ scope: { ...TWO, kind: 'folder' } }) } }));
+    expect(host.hidden).toBe(false);
+  });
+
   it('posts a choice from the list and the plus, and keeps a draft and a late refusal for each conversation', () => {
     if (typeof CSS === 'undefined') {
       vi.stubGlobal('CSS', { escape: (value: string) => value });

@@ -22,7 +22,7 @@ async function until(what, why, within = 30_000) {
  * Code accepts the container, resolves the view in it and that the view follows this window's conversation stream.
  */
 describe('the Conversation view', () => {
-  it("is in the secondary side bar on this VS Code, resolves there, and shows that this window has no Switchboard session", async () => {
+  it("is in the secondary side bar on this VS Code, resolves there, and shows this folder window's empty folder scope", async () => {
     const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
     const [major, minor] = vscode.version.split('.').map(Number);
 
@@ -34,9 +34,14 @@ describe('the Conversation view', () => {
     assert.ok(commands.includes('switchboard.conversation.focus'), 'VS Code registered no focus command for the view');
     assert.ok(commands.includes('switchboard.newSession'), 'the extension registered no Switchboard: New Session command');
     await vscode.commands.executeCommand('switchboard.conversation.focus');
-    // The suite's window is a folder window, which has no work item, so the hub's hello gives it no scope.
+    // The suite's window is a folder window: the hub binds it to its folder's real path, with no work item and no conversation yet.
     await until(() => extension.conversation().connected, 'the view never received its hello');
-    assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+
+    const own = extension.conversation().scope;
+    const folder = require('node:fs').realpathSync.native(vscode.workspace.workspaceFolders[0].uri.fsPath);
+
+    assert.deepStrictEqual({ ...extension.conversation(), scope: null }, { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+    assert.deepStrictEqual({ ...own, key: 'k' }, { kind: 'folder', key: 'k', folder, title: require('node:path').basename(folder), scopeGen: 0, conversations: [], workItemId: null, cwd: null, sessionId: null });
     assert.strictEqual(extension.conversationBadge(), undefined);
 
     // The badge is every conversation's unread count together, gone at 0 (architecture.md § Unread).
@@ -53,8 +58,8 @@ describe('the Conversation view', () => {
     extension.receiveConversation({ type: 'unread', workItemId: 5, count: 0 });
     extension.receiveConversation({ type: 'unread', workItemId: 6, count: 0 });
     assert.strictEqual(extension.conversationBadge(), undefined);
-    // Back to this window's own state, which has no scope, for the tests after it.
-    extension.receiveConversation({ type: 'hello', scope: null, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+    // Back to this window's own state, its empty folder scope, for the tests after it.
+    extension.receiveConversation({ type: 'hello', scope: own, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [], unread: 0 });
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 

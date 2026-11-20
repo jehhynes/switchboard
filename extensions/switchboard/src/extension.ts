@@ -15,7 +15,7 @@ import type { HistoryMessage } from './historyPanel.js';
 import { LogTail } from './hubLog.js';
 import { startHub } from './hubProcess.js';
 import { claimIsFor } from './claims.js';
-import { act, claimOpen, setTerminalState, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
+import { act, claimOpen, setTerminalState, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, windowFolder, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
 import { Artifacts } from './artifacts.js';
@@ -417,7 +417,8 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
     // The dock follows the window in front through the hub where it cannot see other apps' windows (architecture.md § Dock).
     if (record !== null) {
-      void postToHub(record, '/window/focus', { workspace: workspaceFile(), focused, at: Date.now() }, 5_000);
+      // By the window's key, so two folder windows, which have no workspace file, are told apart (architecture.md § Window scope).
+      void postToHub(record, '/window/focus', { ...(windowKey === null ? {} : { window: windowKey }), workspace: workspaceFile(), focused, at: Date.now() }, 5_000);
       if (focused) {
         reportTheme(record);
       }
@@ -517,8 +518,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         if (event === 'state') {
           void stateReceived(data);
         } else if (event === 'claim') {
-          // The dock left something for this window, which may already be in front, so no focus change would claim it (PRD R71).
-          if (claimIsFor(data, workspaceFile())) {
+          // The dock left something for this window, which may already be in front, so no focus change would claim it (PRD R71). The hub
+          // sends it only to the destination window's streams; a folder window has no workspace file to check it against.
+          if (workspaceFile() === null || claimIsFor(data, workspaceFile())) {
             void claimOpen(record, runCommand).catch(() => {});
           }
         } else if (event === 'hello') {
@@ -539,7 +541,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
           void claimOpen(record, runCommand).catch(() => {});
           history.connected(record);
         }
-      }, { workspace: workspaceFile() ?? '', focused: vscode.window.state.focused ? '1' : '0', at: String(Date.now()) }),
+      }, { workspace: workspaceFile() ?? '', ...(windowFolder() === null ? {} : { folder: windowFolder()! }), focused: vscode.window.state.focused ? '1' : '0', at: String(Date.now()) }),
     now: Date.now,
     sleep,
     onFailed: (message) => void vscode.window.showErrorMessage(`Switchboard: ${message}`),

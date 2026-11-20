@@ -204,7 +204,8 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
       enabled = state.connected && state.session?.conversation === 'full';
       extras.update(state);
       target = state.scope === null || state.session === null ? null : { scopeGen: state.scope.scopeGen, sessionId: state.session.id, launch: state.session.launch };
-      host.hidden = state.scope === null;
+      // A window with no selected conversation, such as a folder window before its first, has no composer.
+      host.hidden = state.scope === null || state.scope.workItemId === null;
       input.disabled = !enabled;
       input.placeholder = enabled ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
       refresh();
