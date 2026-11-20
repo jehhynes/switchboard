@@ -627,6 +627,19 @@ describe('createHubApp', () => {
     await until(() => (sent.includes('config') ? true : null));
   });
 
+  it('answers the Voice page\'s Enroll my voice with how enrolment stands, refusing a start while voice is off (architecture.md § Voice check and barge-in)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
+    mkdirSync(join(temp.home, '.switchboard', 'voice'), { recursive: true });
+    writeFileSync(join(temp.home, '.switchboard', 'voice', 'voiceprint.json'), JSON.stringify({ at: '2026-11-20T10:00:00.000Z', windows: 20, vector: [1, 0], pitch: null }));
+    const app = await start();
+    const idle = { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-11-20T10:00:00.000Z' };
+
+    expect(await app.post['/config/voice-enroll']!({ action: 'status' })).toEqual({ status: 200, body: { enrollment: idle } });
+    expect(await app.post['/config/voice-enroll']!({ action: 'start' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).', enrollment: idle } });
+    expect(await app.post['/config/voice-enroll']!({ action: 'cancel' })).toEqual({ status: 200, body: { enrollment: idle } });
+    expect(await app.post['/config/voice-enroll']!({ action: 'finish' })).toEqual({ status: 400, body: { error: "Expected {action: 'start' | 'cancel' | 'status'}." } });
+  });
+
   it('reads, checks and saves settings.json with its playbooks for the Settings window, refusing a stale version', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();

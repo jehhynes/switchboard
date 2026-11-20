@@ -53,6 +53,17 @@ describe('conversation store', () => {
     expect(store.typedAwaitingTranscript('s1').map((message) => message.id)).toEqual(['v1', 'v2', 't1']);
   });
 
+  it('keeps the reply a dictated message spoke over with what was heard of it, and leaves it out of other messages', () => {
+    const store = Store.open(':memory:');
+    const interrupted = { replyId: 'r1', said: 'The session token', rest: 'is refreshed in two places.' };
+
+    store.addMessage({ id: 'v1', sessionId: 's1', workItemId: 1, at: 10, origin: 'voice', text: 'hold on', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: null, interrupted });
+    store.addMessage({ id: 'v2', sessionId: 's1', workItemId: 1, at: 11, origin: 'voice', text: 'and then', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'p', pastedAt: null });
+
+    expect(store.message('v1')?.interrupted).toEqual(interrupted);
+    expect(store.message('v2')).not.toHaveProperty('interrupted');
+  });
+
   it("keeps a session's statuses in the order read, updates one in place, pages them newest first and keeps the newest CONVERSATION_RETENTION", () => {
     const store = Store.open(':memory:');
     const status = (id: string, sessionId = 's1', markdown = id) => store.setStatus({ id, sessionId, workItemId: 1, replyId: `r-${id}`, at: 10, markdown });

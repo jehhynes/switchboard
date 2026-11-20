@@ -27,7 +27,7 @@ import { CodexConversationAdapter } from './codexConversation.js';
 import { runAppServerDebrief } from '@switchboard/codex';
 import { VoiceControl } from './voice.js';
 import { VoiceLink } from './voiceLink.js';
-import { parseRemote } from '@switchboard/voice';
+import { enrolledAt, parseRemote } from '@switchboard/voice';
 import { buildSnapshot } from './snapshot.js';
 import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
@@ -382,7 +382,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return result.code === 0 ? parseRemote(result.stdout) : null;
     },
-    dictate: (key, sessionId, text, pieces, partial) => conversation.dictate(key, sessionId, text, pieces, partial),
+    dictate: (key, sessionId, text, pieces, partial, interrupted) => conversation.dictate(key, sessionId, text, pieces, partial, interrupted ?? null),
+    enrolledAt: () => enrolledAt(home),
     fragmentsDir: join(home, 'voice'),
     // The dock's mic mark and voice note are added to its view as it is sent.
     dockChanged: builtNow,
@@ -406,6 +407,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       selected: (key) => voice.selected(key),
       expressive: () => config.settings.voice.expressive,
       dictated: (key, sessionId) => voice.dictated(key, sessionId),
+      interruption: (key, sessionId) => voice.interruption(key, sessionId),
       heard: (tags) => voice.heard(tags),
       delivered: (message) => voice.delivered(message),
       mic: (key, on) => voice.mic(key, on),
@@ -941,6 +943,18 @@ const dockWithRuns = () => {
           enabled: Object.fromEntries(Object.keys(config.settings.sources).map((name) => [name, runtime.enabledSources().has(name)])),
         },
       }),
+      // The Voice page's Enroll my voice (architecture.md § Voice check and barge-in): starts or cancels enrolment, or reads how it stands.
+      '/config/voice-enroll': async (body) => {
+        const action = isRecord(body) ? body['action'] : undefined;
+
+        if (action !== 'start' && action !== 'cancel' && action !== 'status') {
+          return { status: 400, body: { error: "Expected {action: 'start' | 'cancel' | 'status'}." } };
+        }
+
+        const refused = action === 'status' ? null : voice.enroll(action);
+
+        return refused === null ? { status: 200, body: { enrollment: voice.enrollment() } } : { status: 409, body: { error: refused, enrollment: voice.enrollment() } };
+      },
       '/config/check': async (body) =>
         isRecord(body) && 'settings' in body ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos()) } } : { status: 400, body: { error: 'Expected {settings}.' } },
       '/config/save': async (body) => {

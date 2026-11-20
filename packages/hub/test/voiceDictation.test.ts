@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
-import type { ConversationMessage, ConversationReply, Piece, VoiceSettings } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, Interruption, Piece, VoiceSettings } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
 import { FRAGMENT_FLUSH_MS, VoiceControl } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
@@ -61,7 +61,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
     ['k2', scope('k2', 2, 's2', 'D:/other')],
   ]);
   const notified: Array<{ key: string; type: string; payload: Record<string, unknown> }> = [];
-  const dictated: Array<{ key: string | null; sessionId: string; text: string; pieces: Piece[]; partial: boolean }> = [];
+  const dictated: Array<{ key: string | null; sessionId: string; text: string; pieces: Piece[]; partial: boolean; interrupted?: Interruption }> = [];
   const busy = new Set<string>();
   let refuse: string | null = null;
   let focused: string | null = 'k1';
@@ -77,8 +77,8 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
     busy: (sessionId) => busy.has(sessionId),
     lastReply: () => lastReply,
     originRepo: async (cwd) => (cwd === 'D:/w' ? 'acme/app' : null),
-    dictate: (key, sessionId, text, pieces, partial) => {
-      dictated.push({ key, sessionId, text, pieces, partial });
+    dictate: (key, sessionId, text, pieces, partial, interrupted) => {
+      dictated.push({ key, sessionId, text, pieces, partial, ...(interrupted == null ? {} : { interrupted }) });
       return refuse === null ? { message: { id: `m${dictated.length}` } as ConversationMessage } : { refused: refuse };
     },
     fragmentsDir: dir,
@@ -133,7 +133,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
 
   const piece = (text: string, utteranceId = 'u1', gen = 1): void =>
     connection.receive({ type: 'piece', gen, utteranceId, sessionId: 's1', pieceId: `p-${text}`, text, score: null, f0: null, dropped: false });
-  const end = (final = true, utteranceId = 'u1', gen = 1): void => connection.receive({ type: 'utterance', gen, utteranceId, sessionId: 's1', text: '', final, interrupted: null });
+  const end = (final = true, utteranceId = 'u1', gen = 1, interrupted: Interruption | null = null): void => connection.receive({ type: 'utterance', gen, utteranceId, sessionId: 's1', text: '', final, interrupted });
   const fragments = (): Array<Record<string, unknown>> =>
     readdirSync(dir)
       .flatMap((file) => readFileSync(join(dir, file), 'utf8').trim().split('\n'))
@@ -364,5 +364,138 @@ describe('VoiceControl dictation', () => {
     end();
     expect(notified.filter((one) => one.type !== 'voice')).toEqual([]);
     expect(fragments().filter((one) => one.event === 'refused')).toMatchObject([{ text: 'hello', error: 'The session ended.' }]);
+  });
+
+  it('sends the reply a spoken turn spoke over with its message, and keeps it with a draft left unsent until Enter sends it', async () => {
+    const { control, dictated, piece, end } = await setup();
+    const interrupted = { replyId: 'r1', said: 'The session token', rest: 'is refreshed in two places.' };
+
+    control.composer('k1', false, '');
+    piece('hold on');
+    end(true, 'u1', 1, interrupted);
+    expect(dictated).toEqual([{ key: 'k1', sessionId: 's1', text: 'hold on', partial: false, pieces: [expect.objectContaining({ text: 'hold on' })], interrupted }]);
+    expect(control.interruption('k1', 's1')).toBeNull();
+
+    // Cut short by the composer taking the focus: Enter sends it, naming the reply once.
+    piece('wait', 'u2');
+    control.composer('k1', true, 'wait');
+    end(false, 'u2', 1, interrupted);
+    expect(dictated).toHaveLength(1);
+    expect(control.dictated('k1', 's1')).toMatchObject([{ text: 'wait' }]);
+    expect(control.interruption('k1', 's1')).toEqual(interrupted);
+    expect(control.interruption('k1', 's1')).toBeNull();
+
+    // An emptied draft no longer names it; an utterance that kept nothing names nothing.
+    piece('again', 'u3');
+    end(false, 'u3', 1, interrupted);
+    control.composer('k1', false, '');
+    expect(control.interruption('k1', 's1')).toBeNull();
+    end(false, 'u4', 1, interrupted);
+    expect(control.interruption('k1', 's1')).toBeNull();
+  });
+});
+
+describe('VoiceControl enrolment', () => {
+  async function enrolSetup(windows: number) {
+    const settings: VoiceSettings = { ...DEFAULT_SETTINGS.voice, enabled: true };
+    const connection = new FakeConnection();
+    const logs: string[] = [];
+    let docks = 0;
+    let finds = 0;
+    let found: VoiceConnection | { error: string } = connection;
+    const control = new VoiceControl({
+      link: {
+        find: async () => {
+          finds++;
+          return found;
+        },
+        connected: () => connection,
+        stop: () => undefined,
+      },
+      settings: () => settings,
+      store: { reply: () => null, updateReply: () => undefined, message: () => null, markSeen: () => undefined },
+      windows: { keys: () => (windows > 0 ? ['k1'] : []), scope: (key) => (windows > 0 && key === 'k1' ? scope('k1', 1, 's1') : null) },
+      focusedWindow: () => null,
+      full: () => true,
+      enrolledAt: () => '2026-11-20T10:00:00.000Z',
+      replyChanged: () => undefined,
+      notify: () => undefined,
+      dockChanged: () => void docks++,
+      now: () => 1_000,
+      log: (line) => void logs.push(line),
+    });
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+    control.update();
+    await settle();
+    return { control, connection, settings, logs, settle, docks: () => docks, finds: () => finds, fail: (error: string) => (found = { error }) };
+  }
+
+  it('starts the voice process for an enrolment with no window open, has it record, and shows the recording until it ends', async () => {
+    const { control, connection, settle, finds, logs } = await enrolSetup(0);
+
+    expect(finds()).toBe(0);
+    expect(control.enrollment()).toEqual({ state: 'idle', endsAt: null, error: null, enrolledAt: '2026-11-20T10:00:00.000Z' });
+    expect(control.enroll('start')).toBeNull();
+    expect(control.enrollment().state).toBe('starting');
+    await settle();
+    expect(finds()).toBe(1);
+    expect(connection.sent.filter((one) => one.type === 'enroll')).toEqual([{ type: 'enroll', action: 'start' }]);
+    connection.receive({ type: 'enrollment', state: 'recording', error: null });
+    expect(control.enrollment()).toMatchObject({ state: 'recording', endsAt: 61_000 });
+    // A second start while recording changes nothing.
+    expect(control.enroll('start')).toBeNull();
+    expect(connection.sent.filter((one) => one.type === 'enroll')).toHaveLength(1);
+    control.enroll('cancel');
+    expect(connection.sent.at(-1)).toEqual({ type: 'enroll', action: 'cancel' });
+    connection.receive({ type: 'enrollment', state: 'cancelled', error: null });
+    expect(control.enrollment()).toMatchObject({ state: 'cancelled', endsAt: null });
+    connection.receive({ type: 'enrollment', state: 'failed', error: 'The recording was too short: speak for at least 9 seconds.' });
+    expect(control.enrollment()).toMatchObject({ state: 'failed', error: 'The recording was too short: speak for at least 9 seconds.' });
+    expect(logs).toContain('voice: enrolment failed: The recording was too short: speak for at least 9 seconds.');
+  });
+
+  it('refuses an enrolment with voice off, cancels one still starting, fails one whose process cannot start, and cancels one when voice is turned off', async () => {
+    const off = await enrolSetup(1);
+
+    off.settings.enabled = false;
+    expect(off.control.enroll('start')).toBe('Voice is off (voice.enabled).');
+    off.settings.enabled = true;
+
+    const starting = await enrolSetup(0);
+
+    starting.fail('The voice process is not installed.');
+    starting.control.enroll('start');
+    starting.control.enroll('cancel');
+    expect(starting.control.enrollment().state).toBe('cancelled');
+
+    const failing = await enrolSetup(0);
+
+    failing.fail('The voice process is not installed.');
+    failing.control.enroll('start');
+    await failing.settle();
+    expect(failing.control.enrollment()).toMatchObject({ state: 'failed', error: 'The voice process is not installed.' });
+
+    const connected = await enrolSetup(1);
+
+    connected.control.enroll('start');
+    connected.control.enroll('cancel');
+    expect(connected.connection.sent.filter((one) => one.type === 'enroll')).toEqual([
+      { type: 'enroll', action: 'start' },
+      { type: 'enroll', action: 'cancel' },
+    ]);
+    connected.connection.receive({ type: 'enrollment', state: 'recording', error: null });
+    connected.connection.receive({ type: 'enrollment', state: 'cancelled', error: null });
+    expect(connected.control.enrollment().state).toBe('cancelled');
+
+    const running = await enrolSetup(1);
+
+    running.control.enroll('start');
+    expect(running.connection.sent.at(-1)).toEqual({ type: 'enroll', action: 'start' });
+    running.connection.receive({ type: 'enrollment', state: 'recording', error: null });
+    running.settings.enabled = false;
+    running.control.settingsChanged();
+    expect(running.connection.sent.filter((one) => one.type === 'enroll').at(-1)).toEqual({ type: 'enroll', action: 'cancel' });
+    expect(running.docks()).toBeGreaterThan(0);
   });
 });

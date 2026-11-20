@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PERMISSION_PROMPT, Store, toneSection, toneVersion, windowFileKey } from '@switchboard/core';
-import type { Session as StoredSession } from '@switchboard/core';
+import type { Interruption, Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
-import { ConversationService, sessionView } from '../src/conversation.js';
+import { ConversationService, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import { windowOf } from '../src/dock.js';
 import { canonicalFolder, WindowScopes } from '../src/windows.js';
@@ -1102,6 +1102,46 @@ describe('ConversationService send', () => {
     ]);
     expect(store.conversation('s3', null, 10).items).toEqual([]);
     expect(service.voiceCommand('composer', { window: mine.key, scopeGen: 1, opId: 'o', focused: 'yes', draft: '' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } });
+  });
+
+  it('types a dictated message that spoke over a reply with its interruption note after the tags, stores the reply, and retypes it the same (architecture.md § Voice check and barge-in)', async () => {
+    const { voice } = fakeVoice({ spoken: true, expressive: false });
+    const pieces = [{ text: 'hold on', score: 0.9, f0: 110, dropped: false }];
+    const interrupted = { replyId: 'r1', said: 'The session token', rest: 'is refreshed in two places.' };
+    let held: Interruption | null = interrupted;
+
+    voice.dictated = () => pieces;
+    voice.interruption = () => {
+      const taken = held;
+
+      held = null;
+      return taken;
+    };
+
+    const { service, held: holder, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
+    const mine = open(view.file);
+
+    expect(service.send(body(mine.key, { text: 'hold on' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', interrupted } } });
+    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    expect(holder.writes[0]).toBe('\u001b[200~[spoken] [voice] [heard all of your reply but: "is refreshed in two places."] hold on\u001b[201~');
+    expect(store.message('m-1')).toMatchObject({ text: 'hold on', interrupted });
+    expect(typedText(store.message('m-1')!, false, true)).toBe('[spoken] [voice] [heard all of your reply but: "is refreshed in two places."] hold on');
+
+    // The voice's own turn names the reply it spoke over; a [partial] part never does.
+    const part = service.dictate(mine.key, 's2', 'wait', pieces, true, interrupted);
+
+    expect(part).toMatchObject({ message: { partial: true } });
+    expect(part).not.toHaveProperty('message.interrupted');
+    expect(service.dictate(mine.key, 's2', 'stop', pieces, false, { replyId: 'r2', said: '', rest: 'Done.' })).toMatchObject({ message: { interrupted: { replyId: 'r2' } } });
+    await vi.waitFor(() => expect(holder.writes.some((write) => write.includes('[voice] [interrupted your reply before its first words] stop'))).toBe(true));
+    // A typed message holds no dictation, and so names no reply.
+    voice.dictated = () => null;
+    held = interrupted;
+    const typed = service.send(body(mine.key, { text: 'typed', opId: 'o-typed' }));
+
+    expect(typed).toMatchObject({ status: 200, body: { message: { origin: 'typed', text: 'typed' } } });
+    expect(typed).not.toHaveProperty('body.message.interrupted');
+    expect(held).toEqual(interrupted);
   });
 
   it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {

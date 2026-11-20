@@ -125,6 +125,7 @@ describe('Code Mode command', () => {
     expect(voiced.indexOf('## Dictated messages')).toBeLessThan(voiced.indexOf('## Artifacts'));
     expect(voiced).toContain('A message from the operator that starts with `[voice]` was dictated');
     expect(voiced).toContain("A message tagged `[voice] [partial]` is the next part of a long message the operator is still speaking while you work. Don't answer or acknowledge it");
+    expect(voiced).toContain('`[heard all of your reply but: "…"]` or `[interrupted your reply before its first words]` was spoken over your reply while it was read aloud, which stopped it there.');
     expect(voiced).toContain('carries the rest; answer the parts together as one message.');
     expect(voiced).toContain('add `<!--heard:what came through=what was meant-->` to your reply, for example `<!--heard:a llama=Ollama-->`');
   });

@@ -1,8 +1,8 @@
 import { countsUnread, inTranscript } from '@switchboard/core';
-import type { ConversationMessage, ConversationReply, ConversationStatus, Piece, Session, SpokenState, Store } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, hostKey, PERMISSION_PROMPT, personaById, sessionTone, START_PROMPT, toneVersion } from '@switchboard/core';
 import type { PersonaSettings } from '@switchboard/core';
-import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, messageTags, pasteText } from '@switchboard/conversation';
+import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, interruptNote, messageTags, pasteText } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, HeardTag, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { canonicalFolder } from './windows.js';
@@ -237,6 +237,8 @@ export interface ConversationVoice {
   expressive(): boolean;
   /** The pieces of the dictation the window's draft holds, taken as it is sent, or null for a draft with none (architecture.md § Dictation). */
   dictated?(key: string, sessionId: string): Piece[] | null;
+  /** The reply the window's dictation spoke over, taken as its draft is sent, or null (architecture.md § Voice check and barge-in). */
+  interruption?(key: string, sessionId: string): Interruption | null;
   /** A reply's heard tags, for the glossary. */
   heard?(tags: HeardTag[]): void;
   /** A dictated message settled, for the fragments log. */
@@ -933,16 +935,24 @@ export class ConversationService {
 
     // A draft that holds dictation goes as a [voice] message with its pieces, however it was sent (architecture.md § Dictation); a command never.
     const pieces = command === true ? null : (this.deps.voice?.dictated?.(window, session.id) ?? null);
-    const message = this.#type(session, window, launch, text, { opId, command: command === true, pieces, partial: false });
+    const interrupted = pieces === null ? null : (this.deps.voice?.interruption?.(window, session.id) ?? null);
+    const message = this.#type(session, window, launch, text, { opId, command: command === true, pieces, partial: false, interrupted });
 
     return { status: 200, body: { message: itemView({ type: 'message', ...message }) } };
   }
 
   /**
    * Stores a message `open` and queues its typing in the session's input: `[spoken]` when its reply will be heard (architecture.md § Voice), never
-   * for a slash command or a `[partial]` part, and `[voice]` or `[voice] [partial]` with dictation (architecture.md § Dictation).
+   * for a slash command or a `[partial]` part, and `[voice]` or `[voice] [partial]` with dictation (architecture.md § Dictation), followed by the
+   * interruption note of a reply it spoke over (architecture.md § Voice check and barge-in).
    */
-  #type(session: Session, window: string | null, launch: string | null, text: string, options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean }): ConversationMessage {
+  #type(
+    session: Session,
+    window: string | null,
+    launch: string | null,
+    text: string,
+    options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean; interrupted?: Interruption | null },
+  ): ConversationMessage {
     const sessionId = session.id;
     const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial) ?? { spoken: false, expressive: false };
     const dictated = options.pieces === null ? null : options.partial ? 'partial' : 'voice';
@@ -965,8 +975,10 @@ export class ConversationService {
       spokenRequested: spoken,
       ...(options.pieces === null ? {} : { pieces: options.pieces }),
       ...(options.partial ? { partial: true } : {}),
+      ...(dictated !== 'voice' || options.interrupted == null ? {} : { interrupted: options.interrupted }),
     };
-    const typed = spoken || dictated !== null ? `${messageTags(spoken, expressive, dictated)}${session.codeMode === true ? pasteText(text) : text}` : text;
+    const note = dictated !== 'voice' || options.interrupted == null ? null : interruptNote(options.interrupted);
+    const typed = spoken || dictated !== null ? `${messageTags(spoken, expressive, dictated, note)}${session.codeMode === true ? pasteText(text) : text}` : text;
 
     this.deps.store.addMessage(added);
     // A message dictated into a terminal has no window waiting on it.
@@ -1015,7 +1027,7 @@ export class ConversationService {
    * take a message or a holder that cannot type; the window then gets a `message` event with delivery `refused` and why, and its draft keeps
    * the text.
    */
-  dictate(key: string | null, sessionId: string, text: string, pieces: Piece[], partial: boolean): { message: ConversationMessage } | { refused: string } {
+  dictate(key: string | null, sessionId: string, text: string, pieces: Piece[], partial: boolean, interrupted: Interruption | null = null): { message: ConversationMessage } | { refused: string } {
     const scope = key === null ? null : this.deps.windows.scope(key);
     const session = this.deps.store.session(sessionId);
     const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
@@ -1046,7 +1058,7 @@ export class ConversationService {
       return { refused: why };
     }
 
-    return { message: this.#type(session, key, session.launchId ?? null, text, { opId: `voice-${this.deps.newId()}`, command: false, pieces, partial, auto: true, olderToo: key === null }) };
+    return { message: this.#type(session, key, session.launchId ?? null, text, { opId: `voice-${this.deps.newId()}`, command: false, pieces, partial, auto: true, olderToo: key === null, interrupted }) };
   }
 
   /**
@@ -1478,8 +1490,9 @@ export class ConversationService {
 export function typedText(message: ConversationMessage, expressive: boolean, codeMode: boolean): string {
   const dictated = message.origin !== 'voice' ? null : message.partial === true ? 'partial' : 'voice';
   const spoken = message.spokenRequested === true;
+  const note = dictated === null || message.interrupted === undefined ? null : interruptNote(message.interrupted);
 
-  return spoken || dictated !== null ? `${messageTags(spoken, spoken && expressive, dictated)}${codeMode ? pasteText(message.text) : message.text}` : message.text;
+  return spoken || dictated !== null ? `${messageTags(spoken, spoken && expressive, dictated, note)}${codeMode ? pasteText(message.text) : message.text}` : message.text;
 }
 
 /** Why a command for a conversation the window no longer shows is refused. */

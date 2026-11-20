@@ -41,8 +41,8 @@ The operator may hear some replies read aloud. A message from the operator that 
 - \`[spoken]\` and \`[expressive]\` are Switchboard's tags, not the operator's words.`;
 
 /**
- * How to read a dictated message (architecture.md § Dictation), from claude-collab's `instructions/live-collaboration.md`: what `[voice]` and
- * `[partial]` mean and the heard tag, never how to write the reply.
+ * How to read a dictated message (architecture.md § Dictation), from claude-collab's `instructions/live-collaboration.md`: what `[voice]`,
+ * `[partial]` and the interruption notes (architecture.md § Voice check and barge-in) mean and the heard tag, never how to write the reply.
  */
 export const DICTATION_RULES = `## Dictated messages
 A message from the operator that starts with \`[voice]\` was dictated: its words come from speech-to-text.
@@ -50,7 +50,8 @@ A message from the operator that starts with \`[voice]\` was dictated: its words
 - Speech-to-text makes mistakes ("cloud code" means Claude Code). Read the words loosely, and ask only when two readings would lead to different work.
 - A message tagged \`[voice] [partial]\` is the next part of a long message the operator is still speaking while you work. Don't answer or acknowledge it: read, search and prepare, and write nothing unless it changes what you are doing. The message that ends it, tagged \`[voice]\` without \`[partial]\`, carries the rest; answer the parts together as one message.
 - When you read a misheard word or phrase as a proper noun or a technical term, such as a product, tool, model or project name or jargon like worktree or autosquash, add \`<!--heard:what came through=what was meant-->\` to your reply, for example \`<!--heard:a llama=Ollama-->\`. Don't tag a mishearing of an ordinary word or phrase. Switchboard boosts the tagged terms in the speech-to-text, so the same mistake stops recurring. Tag each mishearing once; the view hides the tag.
-- \`[voice]\` and \`[partial]\` are Switchboard's tags, not the operator's words.`;
+- A dictated message that starts, after its tags, with \`[interrupted your reply after: "…"; unspoken: "…"]\`, \`[heard all of your reply but: "…"]\` or \`[interrupted your reply before its first words]\` was spoken over your reply while it was read aloud, which stopped it there. The quoted words are the last ones the operator heard, or the part they did not hear. Don't repeat what they heard. Answer the message; bring up anything from the unspoken part only if it still matters after what they said, in a line.
+- \`[voice]\`, \`[partial]\` and the interruption notes are Switchboard's tags, not the operator's words.`;
 
 /** Where and how to write an artifact, from claude-collab's `instructions/artifacts.md`, without its rules on when to write one or how to reply. */
 function artifactRules(dir: string): string {

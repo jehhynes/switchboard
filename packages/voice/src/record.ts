@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join, resolve, win32 } from 'node:path';
 
 /** Contents of `voice.json` in the Switchboard home: how the hub reaches the running voice process. */
@@ -12,6 +13,17 @@ export interface VoiceRecord {
 }
 
 export const RECORD_FILE = 'voice.json';
+
+/** When the operator's voice was enrolled, from the voice process's `<home>/voice/voiceprint.json`, or null when it was not. */
+export function enrolledAt(home: string): string | null {
+  try {
+    const at = (JSON.parse(readFileSync(join(home, 'voice', 'voiceprint.json'), 'utf8')) as { at?: unknown }).at;
+
+    return typeof at === 'string' ? at : null;
+  } catch {
+    return null;
+  }
+}
 export const LOG_FILE = 'voice.log';
 
 export function voiceRecordPath(home: string): string {

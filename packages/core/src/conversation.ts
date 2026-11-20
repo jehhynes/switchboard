@@ -42,9 +42,21 @@ export interface ConversationMessage {
   partial?: boolean;
   /** The recognised pieces of a dictated message, in order; empty when left out. */
   pieces?: Piece[];
+  /**
+   * The reply a dictated message spoke over (barge-in): the part of its spoken passage heard and the part not heard, from which its interruption
+   * note is typed (architecture.md § Voice check and barge-in); left out for any other message.
+   */
+  interrupted?: Interruption;
 }
 
-/** One recognised segment of a dictated message, with its voice check results; the check comes in a later slice, so both are null for now. */
+/** A reply an utterance spoke over, as the voice process reports it. */
+export interface Interruption {
+  replyId: string;
+  said: string;
+  rest: string;
+}
+
+/** One recognised segment of a dictated message, with its voice check: its match score and median pitch, null when not judged, and whether it failed. */
 export interface Piece {
   text: string;
   score: number | null;

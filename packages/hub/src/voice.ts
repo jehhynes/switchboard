@@ -1,9 +1,10 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ConversationMessage, ConversationReply, Persona, Piece, SpokenState, VoiceSettings } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, SpokenState, VoiceSettings } from '@switchboard/core';
 import { spokenText } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
-import type { HubMessage, MicState, VoiceMessage, VoiceTarget } from '@switchboard/voice';
+import { ENROLL_SECONDS } from '@switchboard/voice';
+import type { EnrollmentState, HubMessage, MicState, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
 import type { WindowScope } from './windows.js';
 
@@ -38,6 +39,19 @@ interface Composer {
   draft: string;
   /** The pieces dictated into the draft since it was last sent or emptied; empty while it holds no dictation. */
   pieces: Piece[];
+  /** The reply the dictation in the draft spoke over, which the message that sends it names; null with none. */
+  interrupted: Interruption | null;
+}
+
+/**
+ * Voiceprint enrolment as the dock's Voice page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
+ * while the voice process starts, `recording` until `endsAt`, then how it ended; `enrolledAt` when the saved voiceprint was made, or null.
+ */
+export interface EnrollmentView {
+  state: 'idle' | 'starting' | EnrollmentState;
+  endsAt: number | null;
+  error: string | null;
+  enrolledAt: string | null;
 }
 
 /** An utterance the voice process is hearing, and the window whose draft it goes into. */
@@ -99,7 +113,9 @@ export interface VoiceControlDeps {
    * Types dictated text into the window's selected conversation's session, or with a null key into the session through its terminal, as a
    * `[voice]` message, or a `[partial]` part (architecture.md § Dictation): the message, or why it was refused.
    */
-  dictate?(key: string | null, sessionId: string, text: string, pieces: Piece[], partial: boolean): { message: ConversationMessage } | { refused: string };
+  dictate?(key: string | null, sessionId: string, text: string, pieces: Piece[], partial: boolean, interrupted?: Interruption | null): { message: ConversationMessage } | { refused: string };
+  /** When the saved voiceprint was made, from `<home>/voice/voiceprint.json`, or null. */
+  enrolledAt?(): string | null;
   /** Where the fragments log goes, `<home>/voice`; none when left out. */
   fragmentsDir?: string;
   /** A reply's speech changed; the windows showing its session get it again. */
@@ -168,6 +184,7 @@ export class VoiceControl {
   #focusAt = -Infinity;
   /** The live sessions whose terminal window the dock has reported in front, which stay targets while the focus is in another app. */
   readonly #terminals = new Set<string>();
+  #enrollment: Omit<EnrollmentView, 'enrolledAt'> = { state: 'idle', endsAt: null, error: null };
 
   constructor(private readonly deps: VoiceControlDeps) {}
 
@@ -284,7 +301,7 @@ export class VoiceControl {
       return scope === null ? [] : [{ key, scope }];
     });
     const terminals = this.#terminalTargets();
-    const wanted = settings.enabled && (scopes.length > 0 || this.#terminalFocus !== null || (this.#target.sessionId !== null && terminals.has(this.#target.sessionId)));
+    const wanted = settings.enabled && (scopes.length > 0 || this.#enrolling() || this.#terminalFocus !== null || (this.#target.sessionId !== null && terminals.has(this.#target.sessionId)));
 
     this.#demand(wanted);
     this.viewsChanged();
@@ -371,6 +388,10 @@ export class VoiceControl {
     if (!this.deps.settings().enabled) {
       this.#client?.send({ type: 'stop' });
       this.#micOn = false;
+
+      if (this.#enrolling()) {
+        this.enroll('cancel');
+      }
     }
 
     for (const key of this.deps.windows.keys()) {
@@ -456,6 +477,7 @@ export class VoiceControl {
 
     if (draft.trim() === '') {
       composer.pieces = [];
+      composer.interrupted = null;
     }
 
     this.#syncTyping();
@@ -477,6 +499,71 @@ export class VoiceControl {
     composer.pieces = [];
     composer.draft = '';
     return pieces;
+  }
+
+  /** The reply the dictation in a window's draft spoke over, taken as the window sends the draft; null with none. */
+  interruption(key: string, sessionId: string): Interruption | null {
+    const composer = this.#composers.get(composerKey(key, sessionId));
+    const interrupted = composer?.interrupted ?? null;
+
+    if (composer !== undefined) {
+      composer.interrupted = null;
+    }
+
+    return interrupted;
+  }
+
+  /**
+   * Voiceprint enrolment from the dock's Voice page (architecture.md § Voice check and barge-in): `start` starts the voice process if it is not
+   * running and has it record; `cancel` stops a recording. Why not, or null.
+   */
+  enroll(action: 'start' | 'cancel'): string | null {
+    if (action === 'cancel') {
+      if (this.#enrolling() && this.#client !== null) {
+        // The start may have reached the process: it records until told to stop, and reports the cancel after its recording.
+        this.#client.send({ type: 'enroll', action: 'cancel' });
+      } else if (this.#enrollment.state === 'starting') {
+        this.#enrollment = { state: 'cancelled', endsAt: null, error: null };
+        this.deps.dockChanged();
+        this.update();
+      }
+
+      return null;
+    }
+
+    if (!this.deps.settings().enabled) {
+      return 'Voice is off (voice.enabled).';
+    }
+
+    if (this.#enrolling()) {
+      return null;
+    }
+
+    this.#enrollment = { state: 'starting', endsAt: null, error: null };
+
+    if (this.#client !== null) {
+      this.#client.send({ type: 'enroll', action: 'start' });
+    } else {
+      this.update();
+    }
+
+    this.deps.dockChanged();
+    return null;
+  }
+
+  enrollment(): EnrollmentView {
+    return { ...this.#enrollment, enrolledAt: this.deps.enrolledAt?.() ?? null };
+  }
+
+  #enrolling(): boolean {
+    return this.#enrollment.state === 'starting' || this.#enrollment.state === 'recording';
+  }
+
+  #enrollmentChanged(state: EnrollmentState, error: string | null): void {
+    this.#enrollment = { state, endsAt: state === 'recording' ? this.deps.now() + ENROLL_SECONDS * 1000 : null, error };
+    this.deps.log(`voice: enrolment ${state}${error === null ? '' : `: ${error}`}`);
+    this.deps.dockChanged();
+    this.update();
   }
 
   /** A reply's heard tags go to the glossary (architecture.md § Dictation). */
@@ -501,7 +588,7 @@ export class VoiceControl {
     let composer = this.#composers.get(composerKey(key, sessionId));
 
     if (composer === undefined) {
-      composer = { focused: false, draft: '', pieces: [] };
+      composer = { focused: false, draft: '', pieces: [], interrupted: null };
       this.#composers.set(composerKey(key, sessionId), composer);
     }
 
@@ -604,24 +691,31 @@ export class VoiceControl {
       return;
     }
 
-    if (!message.final || message.gen !== this.#target.gen) {
-      if (heard.key === TERMINAL) {
-        const composer = this.#composer(heard.key, heard.sessionId);
+    if (heard.key === TERMINAL && (!message.final || message.gen !== this.#target.gen)) {
+      const composer = this.#composer(heard.key, heard.sessionId);
 
-        if (composer.draft.trim() !== '') {
-          this.deps.log(`voice: utterance ${message.utteranceId} for the terminal of session ${heard.sessionId} was cut off; its words were not typed`);
-        }
-
-        composer.draft = '';
-        composer.pieces = [];
+      if (composer.draft.trim() !== '') {
+        this.deps.log(`voice: utterance ${message.utteranceId} for the terminal of session ${heard.sessionId} was cut off; its words were not typed`);
       }
 
+      composer.draft = '';
+      composer.pieces = [];
+      composer.interrupted = null;
+      return;
+    }
+
+    if (message.gen !== this.#target.gen) {
       return;
     }
 
     const composer = this.#composer(heard.key, heard.sessionId);
 
-    if (composer.focused) {
+    // The reply it spoke over goes with the message that sends this dictation, by voice or by Enter.
+    if (message.interrupted !== null && composer.pieces.length > 0) {
+      composer.interrupted = message.interrupted;
+    }
+
+    if (!message.final || composer.focused) {
       return;
     }
 
@@ -650,7 +744,7 @@ export class VoiceControl {
       return false;
     }
 
-    const sent = this.deps.dictate(heard.key === TERMINAL ? null : heard.key, heard.sessionId, text, pieces, partial);
+    const sent = this.deps.dictate(heard.key === TERMINAL ? null : heard.key, heard.sessionId, text, pieces, partial, partial ? null : composer.interrupted);
 
     if ('refused' in sent) {
       this.deps.log(`voice: dictated message refused: ${sent.refused}`);
@@ -669,6 +763,11 @@ export class VoiceControl {
 
     composer.draft = kept?.text ?? '';
     composer.pieces = kept === undefined ? [] : [kept];
+
+    if (!partial) {
+      composer.interrupted = null;
+    }
+
     this.#notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
     return true;
   }
@@ -999,6 +1098,9 @@ export class VoiceControl {
 
         return;
       }
+      case 'enrollment':
+        this.#enrollmentChanged(message.state, message.error);
+        return;
       case 'audio':
         if (message.mic !== this.#mic) {
           this.#mic = message.mic;
@@ -1074,6 +1176,11 @@ export class VoiceControl {
     }
 
     if ('error' in found) {
+      if (this.#enrollment.state === 'starting') {
+        this.#enrollment = { state: 'failed', endsAt: null, error: found.error };
+        this.deps.dockChanged();
+      }
+
       if (this.#processError !== found.error) {
         this.#processError = found.error;
         this.deps.log(`voice: ${found.error}`);
@@ -1108,12 +1215,20 @@ export class VoiceControl {
       found.send({ type: 'mic', on: true });
     }
 
+    if (this.#enrollment.state === 'starting') {
+      found.send({ type: 'enroll', action: 'start' });
+    }
+
     this.deps.dockChanged();
     this.update();
   }
 
   /** The process is gone, so nothing it was speaking will play. */
   #lost(): void {
+    if (this.#enrolling()) {
+      this.#enrollment = { state: 'failed', endsAt: null, error: 'The voice process stopped.' };
+    }
+
     for (const [replyId, offered] of this.#offered) {
       this.#logSpeech(replyId, offered, 'failed: the voice process stopped', offered.atMs, offered.said);
       this.#setState(replyId, 'failed', null, null);

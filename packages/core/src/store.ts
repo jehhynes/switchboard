@@ -452,6 +452,10 @@ export const MIGRATIONS = [
   // Dictation (architecture.md § Dictation): a message's recognised pieces, and whether it is a [partial] part of one still being spoken.
   `ALTER TABLE messages ADD COLUMN pieces TEXT;
   ALTER TABLE messages ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;`,
+  // Barge-in (architecture.md § Voice check and barge-in): the reply a dictated message spoke over, and what of its passage was heard and not.
+  `ALTER TABLE messages ADD COLUMN interruptedReplyId TEXT;
+  ALTER TABLE messages ADD COLUMN interruptedSaid TEXT;
+  ALTER TABLE messages ADD COLUMN interruptedRest TEXT;`,
 ];
 
 /**
@@ -1318,7 +1322,7 @@ export class Store {
   /** Adds a message to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
   addMessage(message: Omit<ConversationMessage, 'ord'>): void {
     this.#db
-      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch, spokenRequested, pieces, partial) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch, spokenRequested, pieces, partial, interruptedReplyId, interruptedSaid, interruptedRest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         this.#nextOrd(),
         message.id,
@@ -1338,6 +1342,9 @@ export class Store {
         message.spokenRequested === true ? 1 : 0,
         message.pieces === undefined || message.pieces.length === 0 ? null : JSON.stringify(message.pieces),
         message.partial === true ? 1 : 0,
+        message.interrupted?.replyId ?? null,
+        message.interrupted?.said ?? null,
+        message.interrupted?.rest ?? null,
       );
     this.#prune(message.sessionId);
   }
@@ -1614,8 +1621,18 @@ export class Store {
 
   #messageRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationMessage[] {
     return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<
-        Omit<ConversationMessage, 'provisional' | 'withdrawn' | 'spokenRequested' | 'pieces' | 'partial'> & { seq: number; provisional: number; withdrawn: number; spokenRequested: number; pieces: string | null; partial: number }
-      >).map(({ seq: _seq, pieces, partial, ...message }) => ({
+        Omit<ConversationMessage, 'provisional' | 'withdrawn' | 'spokenRequested' | 'pieces' | 'partial' | 'interrupted'> & {
+          seq: number;
+          provisional: number;
+          withdrawn: number;
+          spokenRequested: number;
+          pieces: string | null;
+          partial: number;
+          interruptedReplyId: string | null;
+          interruptedSaid: string | null;
+          interruptedRest: string | null;
+        }
+      >).map(({ seq: _seq, pieces, partial, interruptedReplyId, interruptedSaid, interruptedRest, ...message }) => ({
       ...message,
       provisional: message.provisional === 1,
       withdrawn: message.withdrawn === 1,
@@ -1623,6 +1640,7 @@ export class Store {
       // Left out unless set, as on a message that holds no dictation.
       ...(partial === 1 ? { partial: true } : {}),
       ...(pieces === null ? {} : { pieces: JSON.parse(pieces) as Piece[] }),
+      ...(interruptedReplyId === null ? {} : { interrupted: { replyId: interruptedReplyId, said: interruptedSaid ?? '', rest: interruptedRest ?? '' } }),
     }));
   }
 

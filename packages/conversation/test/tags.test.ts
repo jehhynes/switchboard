@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endsInOpenTag, keyOf, messageTags, parseReply, splitHeard, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
+import { endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, splitHeard, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
 import { typedText } from '../src/transcript.js';
 
 describe('reply tags', () => {
@@ -61,6 +61,32 @@ describe('reply tags', () => {
     expect(stripMessageTags('[voice] [partial] fix the')).toBe('fix the');
     expect(stripMessageTags('fix the [voice] tag')).toBe('fix the [voice] tag');
     expect(typedText('[voice] [partial] fix the')).toBe('fix the');
+  });
+
+  it('writes the interruption note from what was heard of the reply, types it after the tags, and untags it only there', () => {
+    const long = 'is refreshed in two places, and the second one runs after the redirect, so the old token wins.';
+
+    expect(interruptNote({ said: '', rest: 'Fixed the login flow.' })).toBe('[interrupted your reply before its first words]');
+    expect(interruptNote({ said: 'Fixed the login flow.', rest: '' })).toBeNull();
+    expect(interruptNote({ said: 'Fixed the login', rest: 'flow, and the build passes.' })).toBe('[heard all of your reply but: "flow, and the build passes."]');
+    expect(interruptNote({ said: 'So I looked at the whole login flow today. The session token', rest: long })).toBe('[interrupted your reply after: "…looked at the whole login flow today. The session token"; unspoken: "is refreshed in two places, and…"]');
+    expect(interruptNote({ said: 'The session token', rest: long })).toBe('[interrupted your reply after: "The session token"; unspoken: "is refreshed in two places, and…"]');
+
+    const note = '[heard all of your reply but: "flow]."]';
+
+    expect(messageTags(true, false, 'voice', note)).toBe(`[spoken] [voice] ${note} `);
+    expect(messageTags(false, false, null, note)).toBe('');
+    expect(stripMessageTags(`[voice] ${note} hold on`)).toBe('hold on');
+    expect(stripMessageTags('[spoken] [voice] [interrupted your reply after: "a b"; unspoken: "c d"] wait')).toBe('wait');
+    expect(stripMessageTags('[voice] [interrupted your reply before its first words] stop')).toBe('stop');
+    expect(stripMessageTags('[interrupted your reply before its first words] stop')).toBe('[interrupted your reply before its first words] stop');
+    expect(typedText('[voice] [heard all of your reply but: "the rest."] go on')).toBe('go on');
+
+    // Quotes in the reply's words cannot end the note early.
+    const quoted = interruptNote({ said: 'Set', rest: 'config["voice"] to false.' })!;
+
+    expect(quoted).toBe('[heard all of your reply but: "config[\'voice\'] to false."]');
+    expect(stripMessageTags(`[voice] ${quoted} wait`)).toBe('wait');
   });
 
   it('reads heard tags, leaves them out of the text the view shows, and ignores one in code', () => {

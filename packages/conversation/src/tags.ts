@@ -245,9 +245,9 @@ export function parseReply(text: string): ParsedReply {
  * The tags Switchboard puts before a message it types (architecture.md § Voice, § Dictation): its reply will be heard and read expressively, it
  * was dictated, and it is a part of a message still being spoken.
  */
-const MESSAGE_TAGS = /^\s*(?:\[(?:spoken|expressive|voice|partial)\][ \t]*)+/i;
+const MESSAGE_TAGS = /^\s*(?:\[(?:spoken|expressive|voice|partial)\][ \t]*)+(?:\[(?:interrupted your reply (?:before its first words|after: "[^"]*"(?:; unspoken: "[^"]*")?)|heard all of your reply but: "[^"]*")\][ \t]*)?/i;
 
-/** A message's text without the tags Switchboard typed before it. */
+/** A message's text without the tags Switchboard typed before it, and the interruption note after them. */
 export function stripMessageTags(text: string): string {
   return text.replace(MESSAGE_TAGS, '').trim();
 }
@@ -256,10 +256,46 @@ export function stripMessageTags(text: string): string {
  * The tags Switchboard types before a message: `[spoken]` when its reply will be heard, with `[expressive]` while `voice.expressive` is on, then
  * `[voice]` for a dictated message and `[voice] [partial]` for a part of one still being spoken (architecture.md § Dictation).
  */
-export function messageTags(spoken: boolean, expressive: boolean, dictated: 'voice' | 'partial' | null = null): string {
+export function messageTags(spoken: boolean, expressive: boolean, dictated: 'voice' | 'partial' | null = null, note: string | null = null): string {
   const reply = spoken ? (expressive ? '[spoken] [expressive] ' : '[spoken] ') : '';
 
-  return reply + (dictated === 'voice' ? '[voice] ' : dictated === 'partial' ? '[voice] [partial] ' : '');
+  return reply + (dictated === 'voice' ? '[voice] ' : dictated === 'partial' ? '[voice] [partial] ' : '') + (dictated !== null && note !== null ? `${note} ` : '');
+}
+
+const tail = (text: string, count: number): string => {
+  const words = text.split(/\s+/).filter(Boolean);
+
+  return (words.length > count ? '…' : '') + words.slice(-count).join(' ');
+};
+const head = (text: string, count: number): string => {
+  const words = text.split(/\s+/).filter(Boolean);
+
+  return words.slice(0, count).join(' ') + (words.length > count ? '…' : '');
+};
+
+/**
+ * The note a dictated message that spoke over a reply is typed with, after its tags (claude-collab `barge.js` `interruptNote`): the last words
+ * of the reply heard, or the part not heard when it is short, and the first words not heard. Null when the whole passage was heard.
+ */
+export function interruptNote(interrupted: { said: string; rest: string }): string | null {
+  // Double quotes in the quoted words become single ones, so the note's own quotes end it and it can be read back off the message.
+  const said = interrupted.said.trim().replaceAll('"', "'");
+  const rest = interrupted.rest.trim().replaceAll('"', "'");
+  const left = rest.split(/\s+/).filter(Boolean).length;
+
+  if (said === '') {
+    return '[interrupted your reply before its first words]';
+  }
+
+  if (left === 0) {
+    return null;
+  }
+
+  if (left <= 12) {
+    return `[heard all of your reply but: "${rest}"]`;
+  }
+
+  return `[interrupted your reply after: "${tail(said, 10)}"; unspoken: "${head(rest, 6)}"]`;
 }
 
 /**
