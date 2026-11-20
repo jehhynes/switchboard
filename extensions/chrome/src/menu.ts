@@ -43,8 +43,27 @@ function icon(doc: Document, path: string): SVGElement {
   return svg;
 }
 
+/** What each Switchboard item runs, kept apart from the item so an update can change it in place. */
+const runs = new WeakMap<Element, () => void>();
+
+/** Sets an item's label, icon and action, changing only what differs, so an item that keeps its meaning keeps its focus. */
+function setItem(item: Element, label: string, iconPath: string, run: () => void): void {
+  runs.set(item, run);
+
+  if (item.getAttribute('aria-label') !== label) {
+    item.setAttribute('aria-label', label);
+    item.querySelector('[data-component="ActionList.Item.Label"]')!.textContent = label;
+  }
+
+  const visual = item.querySelector('[data-component="ActionList.LeadingVisual"]');
+
+  if (visual !== null && visual.querySelector('path')?.getAttribute('d') !== iconPath) {
+    visual.replaceChildren(icon(item.ownerDocument, iconPath));
+  }
+}
+
 /** A Switchboard item made from a copy of one of GitHub's plain items, so it keeps GitHub's current styling. */
-function menuItem(template: Element, label: string, iconPath: string, run: () => void): Element {
+function menuItem(template: Element, slot: string, label: string, iconPath: string, run: () => void): Element {
   const item = template.cloneNode(true) as Element;
 
   for (const attribute of ['id', 'aria-labelledby', 'aria-keyshortcuts', 'aria-disabled', 'data-is-disabled', 'data-variant']) {
@@ -57,25 +76,20 @@ function menuItem(template: Element, label: string, iconPath: string, run: () =>
 
   item.querySelector('[data-component="ActionList.TrailingVisual"]')?.remove();
   item.classList.add(ITEM);
+  item.setAttribute('data-switchboard-slot', slot);
   item.setAttribute('tabindex', '-1');
-  item.setAttribute('aria-label', label);
-  item.querySelector('[data-component="ActionList.Item.Label"]')!.textContent = label;
-
-  const visual = item.querySelector('[data-component="ActionList.LeadingVisual"]');
-
-  if (visual !== null) {
-    visual.replaceChildren(icon(template.ownerDocument, iconPath));
-  }
+  item.querySelector('[data-component="ActionList.LeadingVisual"]')?.replaceChildren();
+  setItem(item, label, iconPath, run);
 
   item.addEventListener('click', (event) => {
     event.stopPropagation();
-    run();
+    runs.get(item)?.();
   });
   item.addEventListener('keydown', (event) => {
     if ((event as KeyboardEvent).key === 'Enter' || (event as KeyboardEvent).key === ' ') {
       event.preventDefault();
       event.stopPropagation();
-      run();
+      runs.get(item)?.();
     }
   });
 
@@ -100,13 +114,13 @@ export function addMenuItems(doc: Document, list: Element, card: (url: string) =
     return;
   }
 
-  for (const element of list.querySelectorAll(`:scope > .${ITEM}, :scope > .${ITEM}-divider`)) {
-    element.remove();
-  }
-
   list.setAttribute('data-switchboard-items', wanted);
 
   if (target === null) {
+    for (const element of list.querySelectorAll(`:scope > .${ITEM}, :scope > .${ITEM}-divider`)) {
+      element.remove();
+    }
+
     return;
   }
 
@@ -114,30 +128,45 @@ export function addMenuItems(doc: Document, list: Element, card: (url: string) =
 
   // GitHub's menu closes on Escape and returns focus to its button, under which a snooze popup opens.
   const closeGitHubMenu = (): void => void list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  const divider = list.querySelector(':scope > li[data-component="ActionList.Divider"]')?.cloneNode(true) as Element | undefined;
-  const items: Element[] = [
-    menuItem(target.template, 'Open in Switchboard', VSCODE, () => {
-      closeGitHubMenu();
-      open(openUri(target.url));
-    }),
-  ];
+  const slot = (name: string): Element | null => list.querySelector(`:scope > .${ITEM}[data-switchboard-slot="${name}"]`);
+  const openRun = (): void => {
+    closeGitHubMenu();
+    open(openUri(target.url));
+  };
+  // A change of state, such as a snooze from the dock while the menu is open, updates the items in place, so focus stays.
+  let openItem = slot('open');
 
-  if (target.found.group !== 'done') {
-    items.push(
-      target.found.snoozed
-        ? menuItem(target.template, 'Unsnooze in Switchboard', DEBUG_RESTART, () => {
-            closeGitHubMenu();
-            snooze.unsnooze(target.url, button);
-          })
-        : menuItem(target.template, 'Snooze in Switchboard…', CLOCKFACE, () => {
-            closeGitHubMenu();
-            snooze.choose(target.url, button);
-          }),
-    );
+  if (openItem === null) {
+    const divider = list.querySelector(':scope > li[data-component="ActionList.Divider"]')?.cloneNode(true) as Element | undefined;
+
+    divider?.classList.add(`${ITEM}-divider`);
+    openItem = menuItem(target.template, 'open', 'Open in Switchboard', VSCODE, openRun);
+    list.append(...(divider === undefined ? [] : [divider]), openItem);
+  } else {
+    setItem(openItem, 'Open in Switchboard', VSCODE, openRun);
   }
 
-  divider?.classList.add(`${ITEM}-divider`);
-  list.append(...(divider === undefined ? [] : [divider]), ...items);
+  let stateItem = slot('state');
+
+  if (target.found.group === 'done') {
+    stateItem?.remove();
+    return;
+  }
+
+  const [label, path, run] = target.found.snoozed
+    ? ['Unsnooze in Switchboard', DEBUG_RESTART, () => snooze.unsnooze(target.url, button)]
+    : ['Snooze in Switchboard…', CLOCKFACE, () => snooze.choose(target.url, button)];
+  const stateRun = (): void => {
+    closeGitHubMenu();
+    run();
+  };
+
+  if (stateItem === null) {
+    stateItem = menuItem(target.template, 'state', label, path, stateRun);
+    openItem.after(stateItem);
+  } else {
+    setItem(stateItem, label, path, stateRun);
+  }
 }
 
 /** Watches for GitHub opening a card's or table row's actions menu in its portal and adds Switchboard's items before it paints. */

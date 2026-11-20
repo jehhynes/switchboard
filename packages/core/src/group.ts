@@ -252,6 +252,8 @@ export interface Card {
   /** The row's mark (PRD R27), or null when the row shows none. A hub older than this field sends none. */
   mark?: Mark | null;
   snoozed: boolean;
+  /** The dock row's stripe (PRD R27), which colours the pill: null when the row has none. A hub older than this field sends none. */
+  stripe?: 'error' | 'warning' | 'turn' | null;
   /** The URLs of the ticket's links (PRD R52), so a pull request page finds its ticket (PRD R69). A hub older than R69 sends none. */
   links?: string[];
 }

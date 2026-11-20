@@ -76,6 +76,38 @@ describe('watchCardMenus', () => {
     ]);
   });
 
+  it('updates the items in place when the card is snoozed while the menu is open, so the focused item keeps its focus', async () => {
+    let found = card('blocked');
+
+    watch = watchCardMenus(document, () => found, snooze as unknown as SnoozeMenus, (uri) => opened.push(uri));
+    await openMenu();
+
+    const open = item('Open in Switchboard');
+    const state = item('Snooze in Switchboard…');
+
+    state.focus();
+    found = card('blocked', true);
+    // Any change to the page runs the watch again.
+    document.body.append(document.createElement('div'));
+    await new Promise((done) => setTimeout(done, 0));
+
+    expect(labels().slice(-3)).toEqual(['---', 'Open in Switchboard', 'Unsnooze in Switchboard']);
+    expect(item('Open in Switchboard')).toBe(open);
+    expect(item('Unsnooze in Switchboard')).toBe(state);
+    expect(document.activeElement).toBe(state);
+    expect(state.getAttribute('aria-label')).toBe('Unsnooze in Switchboard');
+
+    state.click();
+    expect(snooze.unsnooze).toHaveBeenCalledExactlyOnceWith(ISSUE, kebab());
+    expect(snooze.choose).not.toHaveBeenCalled();
+
+    found = card('done');
+    document.body.append(document.createElement('div'));
+    await new Promise((done) => setTimeout(done, 0));
+    expect(labels().slice(-3)).toEqual(['Remove from project', '---', 'Open in Switchboard']);
+    expect(item('Open in Switchboard')).toBe(open);
+  });
+
   it('offers Unsnooze on a snoozed card, only Open in Switchboard on a Done card, and nothing on a card the hub does not list', async () => {
     start(card('unstarted', true));
     await openMenu();

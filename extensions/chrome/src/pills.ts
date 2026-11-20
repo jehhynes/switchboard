@@ -7,8 +7,7 @@ export const CARDS_URL = `http://127.0.0.1:${BROWSER_PORT}/cards`;
 
 export const PILL = 'switchboard-pill';
 const GROUPS: Record<Group, string> = { blocked: 'Blocked on you', review: 'Ready for review', progress: 'In progress', unstarted: 'Unstarted', done: 'Done' };
-/** The marks of work on the operator's turn in Ready for review: review, approval, a question, a block or a failure (PRD R27). */
-const TURN_MARKS: ReadonlySet<string> = new Set(['send', 'review', 'finished', 'question', 'permission', 'blocked', 'failed']);
+const STRIPES: ReadonlySet<unknown> = new Set(['error', 'warning', 'turn']);
 
 function isCard(value: unknown): value is Card {
   if (typeof value !== 'object' || value === null) {
@@ -17,7 +16,7 @@ function isCard(value: unknown): value is Card {
 
   const card = value as Record<string, unknown>;
 
-  return typeof card['url'] === 'string' && (card['playbook'] === null || typeof card['playbook'] === 'string') && typeof card['group'] === 'string' && Object.hasOwn(GROUPS, card['group']) && typeof card['snoozed'] === 'boolean' && isMark(card['mark']);
+  return typeof card['url'] === 'string' && (card['playbook'] === null || typeof card['playbook'] === 'string') && typeof card['group'] === 'string' && Object.hasOwn(GROUPS, card['group']) && typeof card['snoozed'] === 'boolean' && isMark(card['mark']) && (card['stripe'] == null || STRIPES.has(card['stripe']));
 }
 
 // A hub older than the mark sends none.
@@ -64,11 +63,17 @@ function pill(doc: Document, card: Card): HTMLElement {
   element.setAttribute('role', 'link');
   element.dataset['switchboardGroup'] = card.snoozed ? 'snoozed' : card.group;
 
-  // The warning colour marks a card waiting on the operator, as the status bar counts them (PRD R64, R67).
-  if (!card.snoozed && (card.group === 'blocked' || (card.group === 'review' && TURN_MARKS.has(card.mark ?? '')))) {
-    element.dataset['switchboardYours'] = '';
+  // The dock row's stripe colour: error, warning or turn (PRD R27, R67).
+  if (card.stripe != null) {
+    element.dataset['switchboardTone'] = card.stripe;
   }
-  element.title = `Switchboard: ${card.snoozed ? 'Snoozed' : GROUPS[card.group]}${card.mark == null ? '' : ` · ${MARK_TITLES[card.mark]}`}. Click to open in VS Code.`;
+
+  const group = card.snoozed ? 'Snoozed' : GROUPS[card.group];
+  const mark = card.mark == null ? null : MARK_TITLES[card.mark];
+
+  element.title = `Switchboard: ${group}${mark === null ? '' : ` · ${mark}`}. Click to open in VS Code.`;
+  // Screen readers often skip the title, so the name says the group and the mark too.
+  element.setAttribute('aria-label', [...new Set([label, group]), ...(mark === null ? [] : [mark]), 'open in VS Code'].join(', '));
   namespace.className = 'switchboard-namespace';
   namespace.textContent = label.slice(0, colon + 1);
 
@@ -87,10 +92,69 @@ function pill(doc: Document, card: Card): HTMLElement {
   return element;
 }
 
+/** Gives `element` the attributes of `wanted`, changing only those that differ. */
+function syncAttributes(element: Element, wanted: Element): void {
+  for (const { name } of [...element.attributes]) {
+    if (!wanted.hasAttribute(name)) {
+      element.removeAttribute(name);
+    }
+  }
+
+  for (const { name, value } of wanted.attributes) {
+    if (element.getAttribute(name) !== value) {
+      element.setAttribute(name, value);
+    }
+  }
+}
+
+/**
+ * Makes `pill` match `wanted` in place: its mark, namespace and label are matched by kind and only what differs changes, so a
+ * focused pill keeps its focus and a selection in an unchanged part stays.
+ */
+function update(pill: Element, wanted: Element): void {
+  const kind = (node: Node): string => (node.nodeType === Node.TEXT_NODE ? '#text' : (node as Element).className);
+  const old = [...pill.childNodes];
+  const pairs = [...wanted.childNodes].map((node) => {
+    const at = old.findIndex((child) => kind(child) === kind(node));
+
+    return { node, match: at < 0 ? null : old.splice(at, 1)[0]! };
+  });
+
+  syncAttributes(pill, wanted);
+
+  // Removed first, so the parts that stay are not moved past them, which would clear a selection in them.
+  for (const child of old) {
+    child.remove();
+  }
+
+  pairs.forEach(({ node, match }, index) => {
+    if (match === null) {
+      pill.insertBefore(node, pill.childNodes[index] ?? null);
+      return;
+    }
+
+    if (match.nodeType === Node.TEXT_NODE) {
+      if (match.nodeValue !== node.nodeValue) {
+        match.nodeValue = node.nodeValue;
+      }
+    } else {
+      syncAttributes(match as Element, node as Element);
+
+      if (match.textContent !== node.textContent) {
+        match.textContent = node.textContent;
+      }
+    }
+
+    if (pill.childNodes[index] !== match) {
+      pill.insertBefore(match, pill.childNodes[index] ?? null);
+    }
+  });
+}
+
 /**
  * Puts a pill after the issue reference in each loaded card's header and each table row's title, with the dock row's mark and
- * the playbook Switchboard chose, coloured by the dock's group (PRD R67). A pill that matches its card is left alone, so a pass
- * that changes nothing makes no mutation.
+ * the playbook Switchboard chose, coloured as the dock row's stripe (PRD R67). A pill that matches its card is left alone, so a
+ * pass that changes nothing makes no mutation, and one whose card changed is updated in place.
  */
 export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): void {
   const items = [
@@ -120,7 +184,11 @@ export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): 
 
     const wanted = pill(element.ownerDocument, card);
 
-    if (existing === null || !existing.isEqualNode(wanted) || existing.previousElementSibling !== header) {
+    if (existing !== null && existing.previousElementSibling === header) {
+      if (!existing.isEqualNode(wanted)) {
+        update(existing, wanted);
+      }
+    } else {
       existing?.remove();
       header.after(wanted);
     }

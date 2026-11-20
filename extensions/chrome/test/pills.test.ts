@@ -47,10 +47,11 @@ describe('readCards', () => {
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, url: 2 }] })))).toBeNull();
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, mark: 'toString' }] })))).toBeNull();
     expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, mark: 'waiting' }] })))).toBeNull();
+    expect(await readCards(reply(200, JSON.stringify({ cards: [{ ...needs, stripe: 'agent' }] })))).toBeNull();
   });
 
-  it('accepts a mark, a null mark and a card without one', async () => {
-    const cards = [{ ...needs, mark: 'question' }, { ...working, mark: null }, needs];
+  it('accepts a mark and a stripe, null ones and a card without them', async () => {
+    const cards = [{ ...needs, mark: 'question', stripe: 'warning' }, { ...working, mark: null, stripe: null }, needs];
 
     expect(await readCards(reply(200, JSON.stringify({ cards })))).toEqual(cards);
   });
@@ -94,7 +95,7 @@ describe('applyPills', () => {
     document.body.innerHTML = COLUMN;
   });
 
-  it('puts a pill after the issue reference of each matching card, warning-coloured only for Blocked on you', () => {
+  it('puts a pill after the issue reference of each matching card, with its group', () => {
     applyPills(document, cardsByIssue([needs, working, { url: 'https://github.com/github/roadmap/issues/1153', playbook: null, group: 'unstarted', snoozed: true }]));
 
     expect(pills()).toEqual([
@@ -104,27 +105,69 @@ describe('applyPills', () => {
     ]);
   });
 
-  it("colours a Blocked on you pill and a Ready for review pill awaiting the operator with content.css, and leaves others the default colour", () => {
+  it("colours a pill as the dock row's stripe with content.css, and leaves one without a stripe the default colour", () => {
     document.head.innerHTML = `<style>${readFileSync(join(import.meta.dirname, '..', 'src', 'content.css'), 'utf8')}</style>`;
-    const ready: Card = { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:review-pr', group: 'review', mark: 'send', snoozed: false };
-    applyPills(document, cardsByIssue([needs, working, ready]));
+    const ready: Card = { url: 'https://github.com/github/roadmap/issues/1153', playbook: 'dev:review-pr', group: 'review', mark: 'send', snoozed: false, stripe: 'turn' };
+    applyPills(document, cardsByIssue([{ ...needs, stripe: 'warning' }, working, ready]));
 
     const colour = (id: string) => getComputedStyle(card(id).querySelector('.switchboard-pill')!).color;
 
     expect(colour('88050488')).toBe('var(--fgColor-attention, #9a6700)');
     expect(colour('94970044')).toBe('var(--fgColor-default, #1f2328)');
-    expect(colour('126571572')).toBe('var(--fgColor-attention, #9a6700)');
+    expect(colour('126571572')).toBe('var(--fgColor-accent, #0969da)');
 
-    applyPills(document, cardsByIssue([{ ...ready, mark: 'running' }, { ...needs, snoozed: true }]));
+    applyPills(document, cardsByIssue([{ ...needs, mark: 'failed', stripe: 'error' }, { ...ready, stripe: null }]));
+    expect(colour('88050488')).toBe('var(--fgColor-danger, #d1242f)');
     expect(colour('126571572')).toBe('var(--fgColor-default, #1f2328)');
-    expect(colour('88050488')).toBe('var(--fgColor-default, #1f2328)');
 
-    // A ready work item that asks a question, blocks or fails stays in Ready for review, on the operator's turn.
-    for (const mark of ['question', 'blocked', 'failed'] as const) {
-      applyPills(document, cardsByIssue([{ ...ready, mark }]));
-      expect(colour('126571572')).toBe('var(--fgColor-attention, #9a6700)');
-    }
+    // A hub older than the stripe sends none.
+    applyPills(document, cardsByIssue([needs]));
+    expect(colour('88050488')).toBe('var(--fgColor-default, #1f2328)');
     document.head.innerHTML = '';
+  });
+
+  it('names the pill by its playbook, group and mark, and what a click does', () => {
+    applyPills(document, cardsByIssue([
+      { ...needs, playbook: 'dev:develop', mark: 'failed', stripe: 'error' },
+      working,
+      { url: 'https://github.com/github/roadmap/issues/1153', playbook: null, group: 'unstarted', mark: 'triaging', snoozed: true },
+    ]));
+
+    expect([...document.querySelectorAll('.switchboard-pill')].map((pill) => pill.getAttribute('aria-label'))).toEqual([
+      'dev:develop, Blocked on you, Failed, open in VS Code',
+      'dev:new-dev, In progress, open in VS Code',
+      'Unstarted, Snoozed, Triaging, open in VS Code',
+    ]);
+  });
+
+  it('updates a changed pill in place, so a focused pill keeps its focus', () => {
+    applyPills(document, cardsByIssue([{ ...needs, mark: 'question', stripe: 'warning' }]));
+    const pill = card('88050488').querySelector<HTMLElement>('.switchboard-pill')!;
+
+    pill.focus();
+    applyPills(document, cardsByIssue([{ ...needs, mark: 'failed', stripe: 'error' }]));
+
+    expect(card('88050488').querySelector('.switchboard-pill')).toBe(pill);
+    expect(document.activeElement).toBe(pill);
+    expect(pill.dataset['switchboardTone']).toBe('error');
+    expect(pill.querySelector('.switchboard-mark')!.getAttribute('data-switchboard-mark')).toBe('failed');
+    expect(pill.getAttribute('aria-label')).toBe('dev:review-pr, Blocked on you, Failed, open in VS Code');
+
+    // A selection in the label that did not change stays.
+    const label = pill.lastChild!;
+    const selection = document.getSelection()!;
+
+    selection.setBaseAndExtent(label, 0, label, 3);
+    applyPills(document, cardsByIssue([{ ...needs, mark: 'question', stripe: 'warning' }]));
+    expect(pill.lastChild).toBe(label);
+    expect(selection.toString()).toBe('rev');
+    expect(pill.textContent).toBe('\u{eb32}dev:review-pr');
+
+    applyPills(document, cardsByIssue([needs]));
+    expect(pill.hasAttribute('data-switchboard-tone')).toBe(false);
+    expect(pill.querySelector('.switchboard-mark')).toBeNull();
+    expect(pill.lastChild).toBe(label);
+    expect(selection.toString()).toBe('rev');
   });
 
   it('puts the panel row\'s mark before the playbook and names it in the tooltip', () => {
