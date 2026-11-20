@@ -66,6 +66,8 @@ export interface DockWindow {
   folders: string[];
   /** The window's `.code-workspace` file, `<Switchboard home>/windows/<name>.code-workspace`. */
   file: string;
+  /** A hosted conversation's host window (architecture.md § Hosted conversations), whose file its primary work item writes, not this row. */
+  hosted?: true;
 }
 
 /** Where the item windows' workspace files are, `<Switchboard home>/windows`. */
@@ -512,6 +514,15 @@ function progress(item: WorkItemView, now: number): DockText[] {
  */
 export function windowOf(item: WorkItemView, windows: string): DockWindow | null {
   const latest = item.sessions.at(-1);
+  const host = item.ticket.hostWindow ?? null;
+
+  // A hosted conversation has no window of its own: it opens its host's (architecture.md § Hosted conversations).
+  if (host !== null) {
+    const name = (host.split(/[\\/]/).pop() ?? host).replace(/\.code-workspace$/i, '');
+
+    return { name, title: item.ticket.title, folders: [latest?.cwd ?? item.ticket.repoRoot], file: host, hosted: true };
+  }
+
   const first = latest?.cwd ?? item.worktree?.path ?? null;
 
   // A registered session lives in the operator's own window until it ends; an item window would open it again as a copy (PRD R81).
@@ -531,13 +542,18 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   return { name, title: item.ticket.title, folders: worktree === null || inWorktree ? [first] : [first, worktree], file: join(windows, `${name}.code-workspace`) };
 }
 
-/** The work items whose window is the one opened from `file` (PRD R72, R76). */
+/** The work items whose window is the one opened from `file` (PRD R72, R76), without the conversations it hosts. */
 export function windowItems(snapshot: Snapshot, file: string, windows: string): WorkItemView[] {
   return snapshot.workItems.filter((item) => {
     const window = windowOf(item, windows);
 
-    return window !== null && samePath(window.file, file);
+    return window !== null && window.hosted !== true && samePath(window.file, file);
   });
+}
+
+/** The hosted conversations of the window opened from `file` (architecture.md § Hosted conversations). */
+export function hostedItems(snapshot: Snapshot, file: string): WorkItemView[] {
+  return snapshot.workItems.filter((item) => item.ticket.hostWindow != null && samePath(item.ticket.hostWindow, file));
 }
 
 /**

@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
+import { windowFileKey } from '@switchboard/core';
 
 export interface Reply {
   status: number;
@@ -44,8 +45,8 @@ export interface HubServer {
   update(): void;
   /** Sends an event to every `/dock/events` stream, such as `show` or `config`; returns how many streams it reached. */
   notifyDock(event: string, data: unknown): number;
-  /** Sends an event to every `/events` stream, such as `claim`; returns how many streams it reached. */
-  notifyWindows(event: string, data: unknown): number;
+  /** Sends an event to every `/events` stream, or with `workspace` only to that window's, such as `claim`; returns how many streams it reached. */
+  notifyWindows(event: string, data: unknown, workspace?: string): number;
   /**
    * Sends a `click` event to the newest `/dock/events` stream opened with `?click=1`, so one dock runs a click VS Code forwards (PRD R65, R69);
    * returns whether one was open.
@@ -362,11 +363,13 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
   });
 
-  const notify = (to: View, event: string, data: unknown): number => {
+  const notify = (to: View, event: string, data: unknown, workspace?: string): number => {
     let sent = 0;
 
     for (const [stream, view] of streams) {
-      if (view === to) {
+      const file = workspaces.get(stream) ?? null;
+
+      if (view === to && (workspace === undefined || (file !== null && windowFileKey(file) === windowFileKey(workspace)))) {
         stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         sent++;
       }
@@ -415,7 +418,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
           }
         },
         notifyDock: (event, data) => notify('dock', event, data),
-        notifyWindows: (event, data) => notify('window', event, data),
+        notifyWindows: (event, data, workspace) => notify('window', event, data, workspace),
         clickDock: (data) => {
           const stream = clickStreams.at(-1);
 

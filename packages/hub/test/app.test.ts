@@ -730,6 +730,27 @@ describe('createHubApp', () => {
     expect(clicks).toHaveLength(1);
   });
 
+  it('refuses a conversation from a window with no work item or while the flow refuses it, and selects a dock row (architecture.md § Hosted conversations)', async () => {
+    writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const app = await start(() => {});
+
+    // A window with no work item has no conversation to host one.
+    expect(await app.post['/v1/conversation/new-conversation']!({ window: app.windowOpened!(join(temp.home, 'w.code-workspace')), scopeGen: 0, opId: 'n0' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
+    await app.runtime.settled();
+
+    const row = (app.dock() as { groups: { rows: { key: string; window: { file: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!;
+    const window = app.windowOpened!(row.window!.file);
+
+    // Code Mode sessions need hooks: the flow's refusal comes back on the command, and nothing is made.
+    expect(await app.post['/v1/conversation/new-conversation']!({ window, scopeGen: 1, opId: 'n1' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need sessions.installHooks.' } });
+    expect(app.runtime.snapshot().workItems).toHaveLength(1);
+    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true } });
+    expect(await app.post['/dock/select']!({})).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
+    expect(await app.post['/dock/select']!({ rowKey: 'nope' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
+  });
+
   it('keeps the session and commands the dock left for a window when another hub replaces this one', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const logs: string[] = [];
@@ -741,9 +762,10 @@ describe('createHubApp', () => {
     first.close();
 
     const second = await start((line) => logs.push(line));
+    const window = second.windowOpened!(file);
 
-    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: 'w-native', provider: 'claude', commands: [{ type: 'openTabs' }] } });
-    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true, window })).toEqual({ status: 200, body: { sessionId: 'w-native', provider: 'claude', commands: [{ type: 'openTabs' }] } });
+    expect(await second.post['/claim']!({ folder: 'D:/git/widgets-wt/7-fix', workspace: file, focused: true, window })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [] } });
     expect(logs.filter((line) => /claimed/.test(line))).toEqual([`session w-native claimed by ${file}`, `window commands claimed by ${file}: openTabs`]);
 
     // An open or command the hub cannot save is refused, so the dock reports it instead of a window waiting for it.
@@ -849,21 +871,30 @@ describe('createHubApp', () => {
       id: 'held-1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/scratch', state: 'idle', stateAt: 0, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false,
       question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, nativeSessionId: 'n-native', shortId: 'n-native', codeMode: true, launchId: 'l',
     });
-    const file = 'C:/h/windows/adhoc-1.code-workspace';
+    // The session opens only in its own window, whose file the dock's row names.
+    const file = (app.dock() as { groups: { rows: { window: { file: string } | null }[] }[] }).groups.flatMap((group) => group.rows)[0]!.window!.file;
     const run = { executable: '/opt/node/bin/node', args: [join(temp.home, '.switchboard', 'hub.js'), 'attach', 'held-1'] };
     const attach = { type: 'terminal', provider: 'claude', sessionId: 'held-1', cwd: 'D:/scratch', shortId: 'n-native', active: false, codeMode: true, ...run };
 
     // The dock's click names the Switchboard session ID, and a Claude session ID, as History's link would send, finds the same session.
+    const window = app.windowOpened!(file);
+
     for (const sessionId of ['held-1', 'n-native']) {
       expect(await app.post['/open']!({ sessionId, cwd: 'D:/scratch', workspace: file })).toMatchObject({ status: 200 });
-      expect(await app.post['/claim']!({ folder: 'D:/scratch', workspace: file })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [expect.objectContaining(attach)] } });
+      expect(await app.post['/claim']!({ folder: 'D:/scratch', workspace: file, window })).toEqual({ status: 200, body: { sessionId: null, provider: null, commands: [expect.objectContaining(attach)] } });
     }
 
     expect(logs).toContain(`session held-1 claimed by ${file} as its attach terminal`);
+    // Another window's file is no destination for this session, and a window holding no conversation of it gets its own window named.
+    expect(await app.post['/open']!({ sessionId: 'held-1', cwd: 'D:/scratch', workspace: 'C:/h/windows/zoho-2.code-workspace' })).toEqual({ status: 409, body: { error: 'The session opens only in its own window.' } });
+    expect(await app.post['/open']!({ sessionId: 'held-1', cwd: 'D:/scratch', window: app.windowOpened!('C:/h/windows/zoho-2.code-workspace') })).toEqual({ status: 200, body: { recorded: true, workspace: file } });
+    expect(await app.post['/claim']!({ folder: 'D:/scratch', window: app.windowOpened!('C:/h/windows/zoho-2.code-workspace') })).toMatchObject({ body: { sessionId: null, commands: [] } });
+    expect(await app.post['/claim']!({ folder: 'D:/scratch', window })).toMatchObject({ body: { commands: [expect.objectContaining(attach)] } });
 
     // A window command the dock left gets the same run.
     expect(await app.post['/window']!({ workspace: file, command: { type: 'terminal', provider: 'claude', sessionId: 'held-1', cwd: 'D:/scratch', name: 'adhoc 1', shortId: 'n-native', active: false, codeMode: true } })).toMatchObject({ status: 200 });
-    expect(await app.post['/claim']!({ folder: 'D:/elsewhere', workspace: file })).toMatchObject({ body: { commands: [expect.objectContaining(run)] } });
+    expect(await app.post['/claim']!({ folder: 'D:/elsewhere', workspace: file })).toMatchObject({ body: { commands: [] } });
+    expect(await app.post['/claim']!({ folder: 'D:/elsewhere', workspace: file, window })).toMatchObject({ body: { commands: [expect.objectContaining(run)] } });
 
     await app.post['/holder/list']!({});
     const view = app.dock() as { groups: { rows: { terminal: Record<string, unknown> | null }[] }[]; held?: { terminal: Record<string, unknown> | null }[] };
@@ -878,7 +909,7 @@ describe('createHubApp', () => {
     const app = await start((line) => logs.push(line));
     const claims: unknown[] = [];
 
-    app.attachWindows?.((event, data) => claims.push({ event, data }));
+    app.attachWindows?.((event, data, workspace) => claims.push({ event, data, workspace }));
     const server = await listenHub({ identity: { hub: 'switchboard', protocol: 1, version: 't', pid: 1 }, onShutdown: () => {}, post: app.post, snapshot: () => app.snapshot() });
     closers.push(() => server.close());
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
@@ -886,14 +917,14 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/action', { type: 'mark-done', workItemId: 1 }, 5000)).toMatchObject({ status: 409, error: 'Unknown work item 1.' });
     expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' });
 
-    expect(await postToHub(record, '/open', { sessionId: 'abc-native', cwd: 'D:\\git\\widgets-wt\\7-fix' }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix/' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'abc-native', provider: 'claude', commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets-wt/7-fix' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/open', { sessionId: 'w-native', cwd: 'D:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: null }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
-    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'w-native', provider: 'claude', commands: [] } });
-    expect(await postToHub(record, '/open', { sessionId: 1 }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, cwd, workspace?}.' });
+    // An open names its destination window; one the hub cannot place is refused, and a folder or a workspace a claim names is no destination.
+    expect(await postToHub(record, '/open', { sessionId: 'abc-native', cwd: 'D:\\git\\widgets-wt\\7-fix' }, 5000)).toMatchObject({ status: 409, error: 'The session has no window to open it in.' });
+    expect(await postToHub(record, '/open', { sessionId: 'w-native', cwd: 'D:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toMatchObject({ status: 200, body: { recorded: true, workspace: 'C:/h/windows/gh-7.code-workspace' } });
+    expect(claims).toEqual([{ event: 'claim', data: { workspace: 'C:/h/windows/gh-7.code-workspace' }, workspace: 'C:/h/windows/gh-7.code-workspace' }]);
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: 'C:/h/windows/gh-7.code-workspace', window: app.windowOpened!('C:/h/windows/gh-8.code-workspace') }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'd:/git/widgets', workspace: null, window: app.windowOpened!('c:\\h\\windows\\GH-7.code-workspace') }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: 'w-native', provider: 'claude', commands: [] } });
+    expect(await postToHub(record, '/open', { sessionId: 1 }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, cwd, workspace?, window?}.' });
     expect(await postToHub(record, '/open', { sessionId: 'x', cwd: 'D:/x', workspace: 3 }, 5000)).toMatchObject({ status: 400 });
     expect(await postToHub(record, '/claim', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {folder, workspace?, focused?, window?}.' });
     expect(await postToHub(record, '/claim', { folder: '', focused: 'yes' }, 5000)).toMatchObject({ status: 400 });
@@ -910,21 +941,26 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'log' }] } });
     expect(await postToHub(record, '/claim', { folder: '', workspace: null, focused: true, window: app.windowOpened!(null) }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [{ type: 'history', ticketId: 3, key: 'gh 3' }] } });
     expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({
+    // Commands left for a window go only to the window its key binds, never to one that only names the workspace.
+    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace', window: app.windowOpened!(null) }, 5000)).toEqual({ status: 200, error: null, body: { sessionId: null, provider: null, commands: [] } });
+    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: null, window: app.windowOpened!('C:/h/w.code-workspace') }, 5000)).toEqual({
       status: 200,
       error: null,
       body: { sessionId: null, provider: null, commands: [{ type: 'changes', path: 'D:/wt', key: 'gh 7', title: 'T' }, { type: 'openTabs' }] },
     });
+    const bound = app.windowOpened!('C:/h/w.code-workspace');
+
     for (const [shortId, active] of [['abcd0007', false], [null, true]]) {
       const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId, active };
 
       expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: terminal }, 5000)).toMatchObject({ status: 200 });
       // The claim adds the agent's CLI from the settings: Claude's for a command that names no provider.
-      expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toMatchObject({ body: { commands: [{ ...terminal, executable: '/opt/claude/bin/claude' }] } });
+      expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace', window: bound }, 5000)).toMatchObject({ body: { commands: [{ ...terminal, executable: '/opt/claude/bin/claude' }] } });
     }
     const codexTerminal = { type: 'terminal', provider: 'codex', sessionId: 'thread-1', cwd: 'D:/wt', name: 'gh 7', shortId: null, active: false };
     expect(await postToHub(record, '/window', { workspace: 'C:/h/w.code-workspace', command: codexTerminal }, 5000)).toMatchObject({ status: 200 });
-    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace' }, 5000)).toMatchObject({ body: { commands: [{ ...codexTerminal, executable: '/opt/codex/bin/codex' }] } });
+    expect(await postToHub(record, '/claim', { folder: 'D:/wt', workspace: 'C:/h/w.code-workspace', window: bound }, 5000)).toMatchObject({ body: { commands: [{ ...codexTerminal, executable: '/opt/codex/bin/codex' }] } });
     // Only the item window opens its tabs (PRD R72).
     expect(await postToHub(record, '/window', { workspace: null, command: { type: 'openTabs' } }, 5000)).toMatchObject({ status: 400, error: 'Expected {workspace, command} with a changes, terminal, history, log or openUrl command, or openTabs for a workspace.' });
     const terminal = { type: 'terminal', sessionId: 'abc-native', cwd: 'D:/wt', name: 'gh 7', shortId: null, active: false };
@@ -950,10 +986,8 @@ describe('createHubApp', () => {
     expect(await postToHub({ ...record, port: 1 }, '/action', {}, 1000)).toBeNull();
     // The log shows each command left, withdrawn and claimed, and no claim that took nothing.
     expect(logs.filter((line) => line.startsWith('session'))).toEqual([
-      'session abc-native left for D:\\git\\widgets-wt\\7-fix',
-      'session abc-native claimed by d:/git/widgets-wt/7-fix/',
       'session w-native left for C:/h/windows/gh-7.code-workspace',
-      'session w-native claimed by C:/h/windows/gh-7.code-workspace',
+      'session w-native claimed by c:\\h\\windows\\GH-7.code-workspace',
     ]);
     expect(logs.filter((line) => line.startsWith('window')).map((line) => line.replace(/\d+/, 'N'))).toEqual([
       'window command N openUrl left for any window',
@@ -973,9 +1007,10 @@ describe('createHubApp', () => {
       'window commands claimed by C:/h/w.code-workspace: terminal',
     ]);
     // A window that is already in front gets no focus change, so each open and command left for a workspace tells that window to claim.
+    // Each nudge goes only to its destination window's streams.
     expect(claims).toEqual([
-      { event: 'claim', data: { workspace: 'C:/h/windows/gh-7.code-workspace' } },
-      ...Array.from({ length: 5 }, () => ({ event: 'claim', data: { workspace: 'C:/h/w.code-workspace' } })),
+      { event: 'claim', data: { workspace: 'C:/h/windows/gh-7.code-workspace' }, workspace: 'C:/h/windows/gh-7.code-workspace' },
+      ...Array.from({ length: 5 }, () => ({ event: 'claim', data: { workspace: 'C:/h/w.code-workspace' }, workspace: 'C:/h/w.code-workspace' })),
     ]);
   });
 });

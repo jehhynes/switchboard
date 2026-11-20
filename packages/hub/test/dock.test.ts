@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { MESSAGES, PERMISSION_PROMPT } from '@switchboard/core';
 import { wakeText } from '@switchboard/core/snooze';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dockView, sourceGroups, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
+import { dockView, hostedItems, sourceGroups, windowItems, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
 import type { DockRow } from '../src/dock.js';
 import { CONTROL_GLYPHS } from '../src/rows.js';
 import type { HeldSession } from '../src/held.js';
@@ -727,6 +727,20 @@ describe('CONTROL_GLYPHS', () => {
 });
 
 describe('windowOf', () => {
+  it('opens a hosted conversation in its host window, which is not its own, and leaves it out of the window items (architecture.md § Hosted conversations)', () => {
+    const host = 'C:/sb/windows/GH-7-widgets-655280.code-workspace';
+    const hosted = item(9, { ticket: { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: host }, focus: null, sessions: [session({ cwd: 'D:/git/support' })] });
+    const primary = item(7, { sessions: [session({ cwd: 'D:/git/support' })] });
+    const view = snapshot([primary, hosted]);
+    const file = windowOf(primary, W)!.file;
+
+    expect(windowOf(hosted, W)).toEqual({ name: 'GH-7-widgets-655280', title: hosted.ticket.title, folders: ['D:/git/support'], file: host, hosted: true });
+    expect(windowItems(view, file, W).map((one) => one.id)).toEqual([7]);
+    expect(windowItems(view, host, W).map((one) => one.id)).toEqual([]);
+    expect(hostedItems(view, 'c:\\sb\\windows\\gh-7-widgets-655280.code-workspace').map((one) => one.id)).toEqual([9]);
+    expect(hostedItems(view, file)).toEqual([]);
+  });
+
   it('opens the latest session folder first, with the worktree second when the session ran elsewhere', () => {
     expect(windowOf(item(7, { worktree, sessions: [session({ cwd: 'D:\\git\\widgets\\.worktrees\\107-fix\\' })] }), W)).toEqual({
       name: 'gh-107-58c609',

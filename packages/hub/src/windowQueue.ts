@@ -8,7 +8,8 @@ interface PendingOpen {
   folder: string;
   sessionId: string;
   at: number;
-  workspace: string | null;
+  /** The destination window's workspace file; only a window bound to it claims the open. */
+  workspace: string;
 }
 
 interface PendingCommand {
@@ -56,21 +57,20 @@ export class WindowQueue {
   }
 
   /**
-   * Records that a window or the dock asked to open a session in a window on `cwd`, which that window claims when it connects or gains focus,
-   * replacing an earlier open for that folder and workspace. With `workspace`, the dock's item window file, only a window on that file claims
-   * it, because item windows share folders. False when the queue could not be saved, so nothing was recorded.
+   * Records that a window or the dock asked to open a session, run in `cwd`, in the window opened from `workspace`, which only a window bound to
+   * that file claims when it connects or gains focus, because item windows share folders (architecture.md § Window scope). It replaces an
+   * earlier open for that window. False when the queue could not be saved, so nothing was recorded.
    */
-  recordOpen(sessionId: string, cwd: string, workspace: string | null = null): boolean {
+  recordOpen(sessionId: string, cwd: string, workspace: string): boolean {
     const folder = folderKey(cwd);
-    const opens = [...this.queued.opens.filter((open) => !(open.folder === folder && sameWorkspace(open.workspace, workspace))), { folder, sessionId, at: this.now(), workspace }];
+    const opens = [...this.queued.opens.filter((open) => !sameWorkspace(open.workspace, workspace)), { folder, sessionId, at: this.now(), workspace }];
 
     return this.commit({ ...this.queued, opens });
   }
 
-  /** The session a window on `folder`, opened from `workspace` if any, should open, if one is pending and recent. Claiming removes it. */
-  claimOpen(folder: string, workspace: string | null = null): string | null {
-    const key = folderKey(folder);
-    const pending = this.queued.opens.find((open) => open.folder === key && (open.workspace === null || sameWorkspace(open.workspace, workspace)));
+  /** The session the window opened from `workspace` should open, if one is pending and recent; none for a window with no workspace file. Claiming removes it. */
+  claimOpen(workspace: string | null): string | null {
+    const pending = workspace === null ? undefined : this.queued.opens.find((open) => sameWorkspace(open.workspace, workspace));
 
     if (pending === undefined) {
       return null;
@@ -158,7 +158,7 @@ export class WindowQueue {
 function isOpen(value: unknown): value is PendingOpen {
   const open = value as PendingOpen | null;
 
-  return typeof open?.folder === 'string' && typeof open.sessionId === 'string' && Number.isFinite(open.at) && (open.workspace === null || typeof open.workspace === 'string');
+  return typeof open?.folder === 'string' && typeof open.sessionId === 'string' && Number.isFinite(open.at) && typeof open.workspace === 'string';
 }
 
 function isCommand(value: unknown): value is PendingCommand {

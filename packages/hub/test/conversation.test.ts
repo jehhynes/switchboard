@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PERMISSION_PROMPT, Store } from '@switchboard/core';
+import { PERMISSION_PROMPT, Store, windowFileKey } from '@switchboard/core';
 import type { Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView } from '../src/conversation.js';
@@ -50,10 +50,14 @@ describe('WindowScopes', () => {
   it("binds a window to its file's newest work item that is not done, and shows it alone with an unnamed needs count", () => {
     const store = Store.open(':memory:');
     const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => 'k1' });
-    const { file, view } = world();
+    const all = world();
+    const { file, view } = all;
+
+    stored(store, all);
+
     const key = scopes.open(file, view);
 
-    expect(scopes.scope(key)).toEqual({ kind: 'item', workItemId: 2, key: 'k1', title: 'Issue <1>', cwd: 'D:/w12', scopeGen: 1, sessionId: 's2' });
+    expect(scopes.scope(key)).toEqual({ kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w12', title: 'Issue <1>', cwd: 'D:/w12', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, primary: true }] });
 
     const scoped = scopes.scoped(key, { ...view, held: [] });
 
@@ -67,16 +71,23 @@ describe('WindowScopes', () => {
 
     expect(noted).not.toHaveProperty('notes');
     expect(noted.errors.sources).toEqual({});
-    expect(store.windowBinding(file)).toMatchObject({ file, workItemId: 2, since: NOW, scopeGen: 1 });
+    expect(store.windowBinding(windowFileKey(file))).toEqual({ file: windowFileKey(file), workItemId: 2, since: NOW, scopeGen: 1, selectedWorkItemId: 2, selectedSessionId: 's2', ticketId: 1, title: 'Issue <1>' });
   });
 
   it("moves a window to a new work item of its ticket, raising its scope generation, and keeps it across a reload", () => {
     const store = Store.open(':memory:');
     let keys = 0;
     const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
-    const { file, view, current } = world();
+    const all = world();
+    const { file, view, current } = all;
+
+    stored(store, all);
+
     const key = scopes.open(file, view);
     const next = item(4, { ticketId: 1, ticket: { ...current.ticket }, worktree: worktree('D:/w12'), sessions: [session({ id: 's4', workItemId: 4, cwd: 'D:/w12' })] });
+
+    store.insertWorkItem({ ticketId: 1, playbook: null, status: 'running', createdAt: NOW } as never);
+    store.insertSession(next.sessions[0] as StoredSession);
 
     expect(scopes.update(view)).toEqual([]);
     expect(scopes.update(snapshot([...view.workItems, next]))).toEqual([key]);
@@ -114,13 +125,196 @@ describe('WindowScopes after a restart', () => {
     const ticket = store.insertTicket({ ...current.ticket, adhocKey: null } as never);
     const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'done', createdAt: NOW } as never);
 
-    store.setWindowBinding({ file, workItemId: workItem.id, since: NOW, scopeGen: 3 });
+    store.setWindowBinding({ file, workItemId: workItem.id, since: NOW, scopeGen: 3, selectedWorkItemId: workItem.id, selectedSessionId: null });
 
     const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => 'k1' });
     const key = scopes.open(file, snapshot([]));
 
     expect(scopes.allowsTicket(key, ticket.id, snapshot([]))).toBe(true);
     expect(scopes.scope(key)).toMatchObject({ workItemId: workItem.id, scopeGen: 3 });
+  });
+});
+
+describe('hosted conversations in a window (architecture.md § Window scope)', () => {
+  function setup(made?: (hostWindow: string, folder: string) => { workItemId: number } | { refused: string }) {
+    const store = Store.open(':memory:');
+    const view = world();
+    let keys = 0;
+    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const projects = join(dir, 'projects');
+    const held = new FakeHeld();
+    let id = 0;
+    const service = new ConversationService({
+      store,
+      windows: scopes,
+      projectsDir: projects,
+      claudeConfig: join(dir, '.claude.json'),
+      screen: async (session) => held.screen(session),
+      input: held,
+      hooks: () => true,
+      now: () => NOW,
+      newId: () => String(++id),
+      ...(made === undefined ? {} : { newConversation: made }),
+      log: () => {},
+    });
+
+    stored(store, view);
+
+    /** An ad hoc conversation hosted by `file`, as the flow makes one, with its Code Mode session. */
+    const host = (file: string, sessionId: string, status = 'running') => {
+      const ticket = store.insertTicket({ source: 'adhoc', sourceKey: sessionId, ref: `#${sessionId}`, sourceId: null, title: 'New session', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: NOW, lastPolledAt: null, repoRoot: 'D:/w12', hostWindow: file });
+      const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status, createdAt: NOW } as never);
+
+      store.insertSession(session({ id: sessionId, workItemId: workItem.id, cwd: 'D:/w12', codeMode: true, nativeSessionId: `n-${sessionId}`, state: 'idle' }) as StoredSession);
+
+      return workItem.id;
+    };
+    const open = (file: string) => {
+      const key = scopes.open(file, view.view);
+      const frames: Array<{ type: string; [field: string]: unknown }> = [];
+
+      service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+
+      return { key, frames };
+    };
+    const transcript = (native: string, lines: string[]): void => {
+      mkdirSync(join(projects, projectSlug('D:/w12')), { recursive: true });
+      writeFileSync(join(projects, projectSlug('D:/w12'), `${native}.jsonl`), lines.map((line) => `${line}\n`).join(''));
+    };
+
+    return { store, view, scopes, service, host, open, transcript };
+  }
+
+  it("lists only the conversations its binding hosts, even for windows on one folder, and refuses the other window's", () => {
+    const { view, scopes, service, host, open } = setup();
+    // Both windows run in D:/w12, as Support work items share one folder; only the host link decides.
+    const mineHosted = host(view.file, 'h1');
+    const theirsHosted = host(view.otherFile, 'h2');
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', scope: { workItemId: 2, sessionId: 's2', conversations: [{ workItemId: 2, primary: true, title: 'Issue <1>' }, { workItemId: mineHosted, primary: false, title: 'New session', sessionId: 'h1', state: 'idle', conversation: 'full', unread: 0 }] } });
+    expect((mine.frames[0]!['scope'] as { conversations: unknown[] }).conversations).toHaveLength(2);
+    expect(scopes.scope(theirs.key)?.conversations).toEqual([{ workItemId: 3, primary: true }, { workItemId: theirsHosted, primary: false }]);
+    expect(scopes.scoped(mine.key, view.view).workItems.map((item) => item.id)).toEqual([2]);
+
+    // Selecting another window's conversation is refused and changes nothing.
+    expect(service.select({ window: mine.key, scopeGen: 1, opId: 'o1', workItemId: theirsHosted })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.select({ window: mine.key, scopeGen: 1, opId: 'o2', workItemId: 3 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(scopes.scope(mine.key)).toMatchObject({ workItemId: 2, scopeGen: 1 });
+
+    // Selecting its own raises the scope generation, and the window starts from that conversation's hello.
+    expect(service.select({ window: mine.key, scopeGen: 0, opId: 'o3', workItemId: mineHosted })).toEqual({ status: 200, body: { scopeGen: 2 } });
+    expect(mine.frames.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: mineHosted, sessionId: 'h1', scopeGen: 2 } }, { type: 'hello', sessions: [{ id: 'h1' }], scope: { workItemId: mineHosted } }]);
+    expect(theirs.frames.filter((frame) => frame.type === 'scope')).toEqual([]);
+
+    // Commands name the selected conversation's session only; the other window's, or the earlier selection's, are refused.
+    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o4', sessionId: 'h2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: mine.key, scopeGen: 1, opId: 'o6', sessionId: 'h1', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o7', sessionId: 'h1', ids: [] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.send({ window: theirs.key, scopeGen: 1, opId: 'o8', sessionId: 'h1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+  });
+
+  it('counts each conversation unread on its own and sends the dropdown when it changes, without moving the selection', async () => {
+    const { view, service, host, open, transcript } = setup();
+    const hosted = host(view.file, 'h1');
+    const mine = open(view.file);
+    const theirs = open(view.otherFile);
+
+    transcript('n-h1', [JSON.stringify({ type: 'assistant', uuid: 'x1', timestamp: new Date(NOW).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'Hosted reply.' }] } })]);
+    await service.poll();
+
+    expect(mine.frames.filter((frame) => frame.type === 'reply')).toEqual([]);
+    expect(mine.frames.filter((frame) => frame.type === 'unread')).toEqual([expect.objectContaining({ workItemId: hosted, count: 1 })]);
+    service.conversationsChanged();
+    expect(mine.frames.filter((frame) => frame.type === 'conversations').at(-1)).toMatchObject({ conversations: [{ workItemId: 2, unread: 0 }, { workItemId: hosted, unread: 1 }] });
+    expect(mine.frames.filter((frame) => frame.type === 'scope')).toEqual([]);
+    expect(theirs.frames.filter((frame) => frame.type === 'unread' || frame.type === 'conversations')).toEqual([]);
+  });
+
+  it('makes a conversation once per opId, selects it in the window that made it, and passes a refusal on', () => {
+    const calls: Array<[string, string]> = [];
+    let refused: string | null = null;
+    const made = (hostWindow: string, folder: string) => {
+      calls.push([hostWindow, folder]);
+
+      return refused !== null ? { refused } : { workItemId: context.host(hostWindow, `n${calls.length}`) };
+    };
+    const context = setup(made);
+    const mine = context.open(context.view.file);
+    const theirs = context.open(context.view.otherFile);
+    const answer = context.service.newConversation({ window: mine.key, scopeGen: 1, opId: 'new-1' });
+
+    expect(answer).toEqual({ status: 200, body: { workItemId: 4 } });
+    expect(calls).toEqual([[context.view.file, 'D:/w12']]);
+    expect(context.scopes.scope(mine.key)).toMatchObject({ workItemId: 4, sessionId: 'n1', scopeGen: 2 });
+    expect(mine.frames.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 4 } }, { type: 'hello', sessions: [{ id: 'n1' }] }]);
+    expect(context.service.newConversation({ window: mine.key, scopeGen: 2, opId: 'new-1' })).toEqual({ status: 200, body: { workItemId: 4 } });
+    expect(calls).toHaveLength(1);
+    expect(context.scopes.holds(theirs.key, 4)).toBe(false);
+
+    refused = 'New sessions need Code Mode (sessions.codeMode).';
+    expect(context.service.newConversation({ window: mine.key, scopeGen: 2, opId: 'new-2' })).toEqual({ status: 409, body: { error: refused } });
+    expect(context.service.newConversation({ window: 'forged', scopeGen: 2, opId: 'new-3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(context.service.newConversation({ window: mine.key, opId: 7 }).status).toBe(400);
+  });
+
+  it("keeps a dock row's selection for a window not open yet, and moves an open window to it", () => {
+    const { view, scopes, store, host } = setup();
+    const hosted = host(view.file, 'h1');
+
+    scopes.open(view.file, view.view);
+    scopes.close(scopes.keys()[0]!);
+    expect(scopes.selectFor(hosted, view.file)).toEqual({ keys: [], selected: true });
+    expect(store.windowBinding(windowFileKey(view.file))).toMatchObject({ selectedWorkItemId: hosted, selectedSessionId: 'h1', scopeGen: 2 });
+
+    const key = scopes.open(view.file, view.view);
+
+    expect(scopes.scope(key)).toMatchObject({ workItemId: hosted, sessionId: 'h1', scopeGen: 2 });
+    expect(scopes.selectFor(2, null)).toEqual({ keys: [key], selected: true });
+    expect(scopes.scope(key)).toMatchObject({ workItemId: 2, scopeGen: 3 });
+    expect(scopes.selectFor(hosted, view.file)).toEqual({ keys: [key], selected: true });
+    expect(scopes.scope(key)).toMatchObject({ workItemId: hosted, scopeGen: 4 });
+
+    // A done conversation's row is selected too, and listed while selected; another window's conversation is not.
+    const done = host(view.file, 'h3', 'done');
+    const theirs = host(view.otherFile, 'h4');
+
+    expect(scopes.selectFor(done, view.file)).toEqual({ keys: [key], selected: true });
+    expect(scopes.scope(key)).toMatchObject({ workItemId: done, sessionId: 'h3' });
+    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toContain(done);
+    expect(scopes.selectFor(theirs, view.file)).toEqual({ keys: [], selected: false });
+    expect(scopes.scope(key)).toMatchObject({ workItemId: done });
+  });
+
+  it('keeps a done conversation while it is selected, and the hosted ones when the primary is deleted', () => {
+    const { view, scopes, store, host } = setup();
+    const hosted = host(view.file, 'h1');
+    const done = host(view.file, 'h2', 'done');
+    const key = scopes.open(view.file, view.view);
+
+    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toEqual([2, hosted]);
+    expect(scopes.select(key, done)).toBe(false);
+    expect(scopes.select(key, hosted)).toBe(true);
+    store.updateWorkItem(hosted, { status: 'done' });
+    expect(scopes.update(view.view)).toEqual([]);
+    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toEqual([2, hosted]);
+    expect(scopes.select(key, 2)).toBe(true);
+    expect(scopes.scope(key)?.conversations.map((ref) => ref.workItemId)).toEqual([2]);
+
+    store.updateWorkItem(hosted, { status: 'running' });
+    store.deleteWorkItem(2);
+    expect(scopes.update(view.view)).toEqual([key]);
+    expect(scopes.scope(key)).toMatchObject({ workItemId: hosted, title: 'Issue <1>', conversations: [{ workItemId: hosted, primary: false }] });
+
+    // With no conversation left the window has no scope, but its binding keeps the ticket for History.
+    store.updateWorkItem(hosted, { status: 'done' });
+    expect(scopes.select(key, hosted)).toBe(true);
+    store.deleteWorkItem(hosted);
+    scopes.update(view.view);
+    expect(scopes.scope(key)).toBeNull();
+    expect(scopes.allowsTicket(key, 1)).toBe(true);
   });
 });
 
@@ -252,7 +446,7 @@ describe('ConversationService', () => {
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o2', sessionId: 's2', ids: ['forged'] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o3', sessionId: 's3', ids: [] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o4', sessionId: 's2', ids: [two] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.seen({ window: mine.key, scopeGen: 0, opId: 'o5', sessionId: 's2', ids: [two] })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.seen({ window: mine.key, scopeGen: 0, opId: 'o5', sessionId: 's2', ids: [two] })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o6', sessionId: 's2', ids: 'x' }).status).toBe(400);
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o7', sessionId: 's2', ids: Array.from({ length: 201 }, () => two) }).status).toBe(400);
     expect(store.unreadCount('s2')).toBe(3);
@@ -325,7 +519,7 @@ describe('ConversationService', () => {
     expect(service.history({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.history({ window: other, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.history({ window: 'forged', scopeGen: 1, opId: 'o3', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: key, scopeGen: 0, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.history({ window: key, scopeGen: 0, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.history({ window: key, scopeGen: 1, sessionId: 's2' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } });
 
     const page = service.history({ window: key, scopeGen: 1, opId: 'o5', sessionId: 's2', before: null, limit: 1 });
@@ -390,7 +584,7 @@ describe('ConversationService', () => {
     expect(service.statuses({ window: key, scopeGen: 1, opId: 'o3', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.statuses({ window: other, scopeGen: 1, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.statuses({ window: 'forged', scopeGen: 1, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.statuses({ window: key, scopeGen: 0, opId: 'o6', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.statuses({ window: key, scopeGen: 0, opId: 'o6', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.statuses({ window: key, scopeGen: 1, sessionId: 's2', before: 3 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } });
     // Another session's status as the cursor has nothing before it.
     const theirs = service.statuses({ window: other, scopeGen: 1, opId: 'o7', sessionId: 's3', before: null }) as { body: { statuses: Array<{ id: string }> } };
@@ -425,7 +619,7 @@ describe('ConversationService', () => {
     expect(service.commands({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.commands({ window: other, scopeGen: 1, opId: 'o3', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(service.commands({ window: 'forged', scopeGen: 1, opId: 'o4', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.commands({ window: key, scopeGen: 0, opId: 'o5', sessionId: 's2' })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.commands({ window: key, scopeGen: 0, opId: 'o5', sessionId: 's2' })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.commands({ window: key, scopeGen: 1, sessionId: 7 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } });
   });
 
@@ -441,6 +635,7 @@ describe('ConversationService', () => {
 
     const next = item(4, { ticketId: 1, ticket: { ...view.current.ticket }, worktree: worktree('D:/w12'), sessions: [] });
 
+    store.insertWorkItem({ ticketId: 1, playbook: null, status: 'queued', createdAt: NOW } as never);
     service.scopesChanged(scopes.update(snapshot([...view.view.workItems, next])));
     expect(frames.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 4, scopeGen: 2, sessionId: null } }, { type: 'hello', scope: { key, workItemId: 4 }, sessions: [], items: [] }]);
   });
@@ -533,7 +728,7 @@ describe('ConversationService send', () => {
     expect(refused({}, 'forged')).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(refused({ sessionId: 's3', launch: 'launch-3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(refused({}, other)).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(refused({ scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(refused({ scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(refused({ text: '  \n ' })).toEqual({ status: 400, body: { error: 'The message is empty.' } });
     expect(refused({ text: 'x'.repeat(10_001) })).toEqual({ status: 400, body: { error: 'The message is longer than 10,000 characters.' } });
     expect(refused({ launch: 'launch-0' })).toEqual({ status: 409, body: { error: 'The session was resumed since the view showed it; send the message again.' } });
@@ -615,7 +810,7 @@ describe('ConversationService send', () => {
 
     // A message an earlier session of the work item got with this opId.
     store.addMessage({ id: 'm-earlier', sessionId: 's1', workItemId: 2, at: NOW, origin: 'typed', text: 'old', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'sent', error: null, opId: 'op-1', pastedAt: NOW });
-    expect(service.send(body(key, { scopeGen: 0 }))).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.send(body(key, { scopeGen: 0 }))).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.send(body(key))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: 'Fix the build' } } });
     // The same command again answers the current session's message, not the earlier session's, and adds none.
     expect(service.send(body(key))).toMatchObject({ status: 200, body: { message: { id: 'm-1' } } });

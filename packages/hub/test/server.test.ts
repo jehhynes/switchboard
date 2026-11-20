@@ -252,6 +252,28 @@ describe('listenHub routes and state', () => {
     docked.close();
   });
 
+  it('sends a window event named for a workspace file only to the streams of that window, by any spelling of the file', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}) });
+
+    const chunks: Record<string, string[]> = { a: [], b: [] };
+
+    for (const [name, file] of [['a', 'C:/h/windows/zoho-1.code-workspace'], ['b', 'C:/h/windows/zoho-2.code-workspace']] as const) {
+      const outbound = request({ host: '127.0.0.1', port: server.port, path: `/events?workspace=${encodeURIComponent(file)}`, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => chunks[name]!.push(chunk));
+      });
+
+      outbound.on('error', () => {});
+      outbound.end();
+    }
+
+    await until(() => (server.clients() === 2 ? true : null));
+    expect(server.notifyWindows('claim', { workspace: 'one' }, 'c:\\h\\windows\\ZOHO-1.code-workspace')).toBe(1);
+    await until(() => (chunks['a']!.join('').includes('event: claim') ? true : null));
+    expect(chunks['b']!.join('')).not.toContain('event: claim');
+    expect(server.notifyWindows('claim', { workspace: 'none' }, 'C:/h/windows/zoho-3.code-workspace')).toBe(0);
+  });
+
   it('sends a window event to the /events streams only, and counts them', async () => {
     server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}) });
 

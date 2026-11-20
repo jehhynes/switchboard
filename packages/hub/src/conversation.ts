@@ -2,12 +2,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
-import { artifactsDir, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
+import { artifactsDir, PERMISSION_PROMPT, START_PROMPT, windowFileKey } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
-import type { WindowScope, WindowScopes } from './windows.js';
+import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 
 /** Conversation API version (architecture.md § Conversation API). */
 export const CONVERSATION_PROTOCOL = 1;
@@ -34,7 +34,8 @@ export interface SessionView {
   reason: string | null;
 }
 
-export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'workItemId' | 'transcriptUuid' | 'opId' | 'pastedAt'>;
+/** A message names its work item, so a window that hears one was not sent puts it back in that conversation's draft only. */
+export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'transcriptUuid' | 'opId' | 'pastedAt'>;
 /**
  * `provisional`: not in the transcript yet, so placed by when it was first seen (`inTranscript`); `unread`: it counts as unread and the operator
  * has not seen it (architecture.md § Unread).
@@ -90,7 +91,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean):
 }
 
 export function itemView(item: ({ type: 'message' } & ConversationMessage) | ({ type: 'reply' } & ConversationReply)): ItemView {
-  const { workItemId: _workItemId, transcriptUuid: _transcriptUuid, ...view } = item;
+  const { transcriptUuid: _transcriptUuid, ...view } = item;
 
   if (view.type === 'message') {
     delete (view as { opId?: unknown }).opId;
@@ -99,7 +100,7 @@ export function itemView(item: ({ type: 'message' } & ConversationMessage) | ({ 
     return { ...view, provisional: !inTranscript(item) } as ItemView;
   }
 
-  const { seenAt, ...reply } = view;
+  const { seenAt, workItemId: _workItemId, ...reply } = view;
 
   return { ...reply, provisional: !inTranscript(item), unread: seenAt === null && countsUnread(reply) };
 }
@@ -114,6 +115,20 @@ export interface HeldInput {
   /** Why the holder cannot take `write`, as one from an older build cannot; null when it can. */
   cannotType(): string | null;
 }
+
+/** One entry of the view's dropdown (architecture.md § Window scope): a conversation of the window, by its current session. */
+export interface ConversationEntry {
+  workItemId: number;
+  title: string;
+  primary: boolean;
+  sessionId: string | null;
+  state: SessionView['state'] | null;
+  conversation: SessionView['conversation'] | null;
+  unread: number;
+}
+
+/** The scope a window is sent: its conversations as dropdown entries. */
+export type ScopeView = Omit<WindowScope, 'conversations'> & { conversations: ConversationEntry[] };
 
 /** Why a message waiting to be typed is no longer typed into its session. */
 export const NEWER_SESSION = 'A newer session of this work item started; the message was not sent.';
@@ -137,6 +152,13 @@ export interface ConversationServiceDeps {
   newId(): string;
   /** A session's unread count changed, which the dock's rows show; the hub builds its views again. */
   unreadChanged?(): void;
+  /**
+   * Makes a hosted conversation (architecture.md § Hosted conversations) for the window binding `hostWindow` in `folder` and starts its session;
+   * its work item, or why it was refused.
+   */
+  newConversation?(hostWindow: string, folder: string): { workItemId: number } | { refused: string };
+  /** A message was added to a work item's conversation, whose first titles a hosted conversation. */
+  messageAdded?(workItemId: number, text: string): void;
   log(line: string): void;
 }
 
@@ -313,6 +335,10 @@ export class ConversationService {
     const item = change.type === 'message' ? itemView({ type: 'message', ...change.message }) : itemView({ type: 'reply', ...change.reply });
     const keys = new Set(this.deps.windows.showing(sessionId));
 
+    if (change.type === 'message' && change.message.delivery !== 'not-sent' && !change.message.withdrawn && change.message.workItemId !== null) {
+      this.deps.messageAdded?.(change.message.workItemId, change.message.text);
+    }
+
     if (also !== undefined) {
       keys.add(also);
     }
@@ -327,23 +353,75 @@ export class ConversationService {
 
   /** Each session's unread count when it last changed, so the dock hears of a change once. */
   readonly #unread = new Map<string, number>();
-  /** The unread count each window was last sent. */
+  /** The unread count each window was last sent, by window key and work item. */
   readonly #unreadShown = new Map<string, number>();
 
-  /** Sends the windows showing the session its unread count when it changed, and tells the hub when the session's count changed. */
+  /**
+   * Sends each window that lists the session's work item, while it is that work item's current session, its unread count when it changed, and
+   * tells the hub when the session's count changed.
+   */
   #unreadChanged(sessionId: string): void {
     const count = this.deps.store.unreadCount(sessionId);
+    const session = this.deps.store.session(sessionId);
 
-    for (const key of this.deps.windows.showing(sessionId)) {
-      if (this.#streams.has(key) && this.#unreadShown.get(key) !== count) {
-        this.#unreadShown.set(key, count);
-        this.#send(key, 'unread', { count });
+    if (session !== null && this.deps.store.sessionsFor(session.workItemId).at(-1)?.id === sessionId) {
+      for (const key of this.deps.windows.listing(session.workItemId)) {
+        const shown = `${key} ${session.workItemId}`;
+
+        if (this.#streams.has(key) && this.#unreadShown.get(shown) !== count) {
+          this.#unreadShown.set(shown, count);
+          this.#send(key, 'unread', { workItemId: session.workItemId, count });
+        }
       }
     }
 
     if (this.#unread.get(sessionId) !== count) {
       this.#unread.set(sessionId, count);
       this.deps.unreadChanged?.();
+    }
+  }
+
+  /** The dropdown's entries of a window's conversations: each one's title, current session's state and unread count. */
+  entries(refs: ConversationRef[]): ConversationEntry[] {
+    return refs.flatMap((ref) => {
+      const item = this.deps.store.workItem(ref.workItemId);
+      const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
+
+      if (item === null || ticket === null) {
+        return [];
+      }
+
+      const session = this.deps.store.sessionsFor(item.id).at(-1) ?? null;
+      const view = session === null ? null : sessionView(session, true, this.deps.hooks());
+
+      return [{ workItemId: item.id, title: ticket.title, primary: ref.primary, sessionId: session?.id ?? null, state: view?.state ?? null, conversation: view?.conversation ?? null, unread: session === null ? 0 : this.deps.store.unreadCount(session.id) }];
+    });
+  }
+
+  /** The scope as the window is sent it, with its conversations as dropdown entries. */
+  scopeView(scope: WindowScope | null): ScopeView | null {
+    return scope === null ? null : { ...scope, conversations: this.entries(scope.conversations) };
+  }
+
+  /** The dropdown each window was last sent. */
+  readonly #conversationsShown = new Map<string, string>();
+
+  /** Sends each window its dropdown when an entry changed while its selection did not: a conversation added or done, a title, state or count. */
+  conversationsChanged(): void {
+    for (const key of this.#streams.keys()) {
+      const scope = this.deps.windows.scope(key);
+
+      if (scope === null) {
+        continue;
+      }
+
+      const conversations = this.entries(scope.conversations);
+      const text = JSON.stringify(conversations);
+
+      if (this.#conversationsShown.get(key) !== text) {
+        this.#conversationsShown.set(key, text);
+        this.#send(key, 'conversations', { conversations });
+      }
     }
   }
 
@@ -381,7 +459,12 @@ export class ConversationService {
         if (streams.size === 0) {
           this.#streams.delete(key);
           this.#statusShown.delete(key);
-          this.#unreadShown.delete(key);
+          this.#conversationsShown.delete(key);
+
+          for (const shown of [...this.#unreadShown.keys()].filter((one) => one.startsWith(`${key} `))) {
+            this.#unreadShown.delete(shown);
+          }
+
           this.#followArtifacts();
         }
       },
@@ -394,7 +477,7 @@ export class ConversationService {
 
     if (scope === null) {
       this.#statusShown.delete(key);
-      this.#unreadShown.set(key, 0);
+      this.#conversationsShown.delete(key);
       return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, unread: 0, artifactsDir: null, artifacts: [] };
     }
 
@@ -415,14 +498,19 @@ export class ConversationService {
     this.#statusShown.set(key, JSON.stringify(status));
 
     const unread = scope.sessionId === null ? 0 : this.deps.store.unreadCount(scope.sessionId);
+    const view = this.scopeView(scope)!;
 
-    this.#unreadShown.set(key, unread);
+    this.#conversationsShown.set(key, JSON.stringify(view.conversations));
+
+    for (const entry of view.conversations) {
+      this.#unreadShown.set(`${key} ${entry.workItemId}`, entry.unread);
+    }
 
     const folder = this.#artifactFolder(scope, key);
 
     return {
       protocol: CONVERSATION_PROTOCOL,
-      scope,
+      scope: view,
       sessions: current === null ? [] : [sessionView(current, true, this.deps.hooks())],
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
@@ -546,7 +634,7 @@ export class ConversationService {
   /** Tells each window whose work item or current session changed, which then starts from empty with a fresh `hello`. */
   scopesChanged(keys: string[]): void {
     for (const key of keys) {
-      this.#send(key, 'scope', { scope: this.deps.windows.scope(key) });
+      this.#send(key, 'scope', { scope: this.scopeView(this.deps.windows.scope(key)) });
       this.#send(key, 'hello', this.hello(key));
     }
 
@@ -582,6 +670,7 @@ export class ConversationService {
 
     // A stage reported before the session's first status.
     this.#statusChanged(this.#streams.keys());
+    this.conversationsChanged();
   }
 
   /**
@@ -801,6 +890,75 @@ export class ConversationService {
     return { status: 200, body: { unread: this.deps.store.unreadCount(sessionId) } };
   }
 
+  /** The conversations made by `new-conversation`, by window file and `opId`, so a repeated command answers the first work item. */
+  readonly #created = new Map<string, number>();
+
+  /**
+   * `select` (architecture.md § Window scope): selects one of the window's conversations, raising its `scopeGen`; the window gets `scope` and a
+   * fresh `hello`. 403 for a work item that is not one of them. Not refused for a stale `scopeGen`, since it names its whole target.
+   */
+  select(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, opId, workItemId } = body;
+
+    if (typeof window !== 'string' || typeof opId !== 'string' || !Number.isInteger(workItemId)) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } };
+    }
+
+    if (!this.deps.windows.select(window, workItemId as number)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    this.scopesChanged([window]);
+
+    return { status: 200, body: { scopeGen: this.deps.windows.scope(window)?.scopeGen ?? null } };
+  }
+
+  /**
+   * `new-conversation` (architecture.md § Hosted conversations): makes an ad hoc work item hosted by the window in its folder, starts its Code
+   * Mode session at an empty prompt, selects it and answers `{workItemId}`; 409 with the refusal, such as while Code Mode is off. A repeated
+   * `opId` answers the first work item and makes none.
+   */
+  newConversation(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, opId } = body;
+
+    if (typeof window !== 'string' || typeof opId !== 'string' || opId === '' || opId.length > 200) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } };
+    }
+
+    const file = this.deps.windows.fileOf(window);
+    const scope = this.deps.windows.scope(window);
+
+    if (file === null || scope === null || this.deps.newConversation === undefined) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    const done = `${windowFileKey(file)} ${opId}`;
+    const earlier = this.#created.get(done);
+
+    if (earlier !== undefined) {
+      return { status: 200, body: { workItemId: earlier } };
+    }
+
+    const made = this.deps.newConversation(file, scope.folder ?? '');
+
+    if ('refused' in made) {
+      return { status: 409, body: { error: made.refused } };
+    }
+
+    this.#created.set(done, made.workItemId);
+
+    for (const key of [...this.#created.keys()].slice(0, -UNSENT_KEPT)) {
+      this.#created.delete(key);
+    }
+
+    // Every window of the binding lists it; the one that made it selects it.
+    this.deps.windows.select(window, made.workItemId);
+    this.scopesChanged([window]);
+    this.conversationsChanged();
+
+    return { status: 200, body: { workItemId: made.workItemId } };
+  }
+
   /**
    * Older items of the window's current session: refused with 403 for a key no window holds or a session that is not the window's current one,
    * and with 409 when the window's work item changed since `scopeGen`.
@@ -876,6 +1034,9 @@ export class ConversationService {
   }
 }
 
+/** Why a command for a conversation the window no longer shows is refused. */
+export const CONVERSATION_CHANGED = "The window's conversation changed.";
+
 /** How many not-sent `opId`s the service remembers, for a `send` repeated after its message left the conversation. */
 const UNSENT_KEPT = 100;
 
@@ -907,7 +1068,7 @@ export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: 
     return { status: 403, body: { error: 'Not in this window.' } };
   }
 
-  return scope.scopeGen === scopeGen ? null : { status: 409, body: { error: "The window's work item changed." } };
+  return scope.scopeGen === scopeGen ? null : { status: 409, body: { error: CONVERSATION_CHANGED } };
 }
 
 /** Whether Claude Code draws in one of its ANSI themes, from the global config the session reads (claude-collab `session.js`). */

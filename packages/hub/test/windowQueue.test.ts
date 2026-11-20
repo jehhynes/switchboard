@@ -15,22 +15,24 @@ beforeEach(() => {
 afterEach(() => temp.remove());
 
 describe('WindowQueue', () => {
-  it('hands a pending open to the first window on its folder within two minutes', () => {
+  it('hands a pending open to its destination window within two minutes, the newest for that window, and none to a window with no file', () => {
     let now = T0;
     const queue = WindowQueue.load(null, () => now);
+    const seven = 'C:/h/windows/gh-7-000001.code-workspace';
 
-    queue.recordOpen('a-native', 'D:/git/widgets-wt/7-fix');
+    queue.recordOpen('a-native', 'D:/git/widgets-wt/7-fix', seven);
     now += 2 * 60_000;
-    expect(queue.claimOpen('D:\\git\\widgets-wt\\7-fix')).toBe('a-native');
+    expect(queue.claimOpen(null)).toBeNull();
+    expect(queue.claimOpen('c:\\h\\windows\\GH-7-000001.code-workspace')).toBe('a-native');
 
-    queue.recordOpen('b-native', 'D:/git/widgets-wt/8-fix');
+    queue.recordOpen('b-native', 'D:/git/widgets-wt/7-fix', seven);
     now += 2 * 60_000 + 1;
-    expect(queue.claimOpen('D:/git/widgets-wt/8-fix')).toBeNull();
+    expect(queue.claimOpen(seven)).toBeNull();
 
-    queue.recordOpen('c-native', 'D:/git/widgets-wt/9-fix');
-    queue.recordOpen('d-native', 'D:/git/widgets-wt/9-fix/');
-    expect(queue.claimOpen('D:/git/widgets-wt/9-fix')).toBe('d-native');
-    expect(queue.claimOpen('D:/git/widgets-wt/9-fix')).toBeNull();
+    queue.recordOpen('c-native', 'D:/git/widgets-wt/7-fix', seven);
+    queue.recordOpen('d-native', 'D:/git/widgets-wt/7-fix/', seven);
+    expect(queue.claimOpen(seven)).toBe('d-native');
+    expect(queue.claimOpen(seven)).toBeNull();
   });
 
   it('hands commands the dock left to the window on their workspace file, or to the first window for any, within two minutes (PRD R71)', () => {
@@ -63,10 +65,10 @@ describe('WindowQueue', () => {
     const file = 'C:/Users/me/.switchboard/windows/gh-7-widgets-655280.code-workspace';
 
     queue.recordOpen('a-native', 'D:/git/widgets', file);
-    expect(queue.claimOpen('D:/git/widgets')).toBeNull();
-    expect(queue.claimOpen('D:/git/widgets', 'C:/Users/me/.switchboard/windows/gh-8-widgets-655280.code-workspace')).toBeNull();
-    expect(queue.claimOpen('d:\\git\\widgets', 'c:\\users\\me\\.switchboard\\windows\\GH-7-widgets-655280.code-workspace')).toBe('a-native');
-    expect(queue.claimOpen('D:/git/widgets', file)).toBeNull();
+    expect(queue.claimOpen(null)).toBeNull();
+    expect(queue.claimOpen('C:/Users/me/.switchboard/windows/gh-8-widgets-655280.code-workspace')).toBeNull();
+    expect(queue.claimOpen('c:\\users\\me\\.switchboard\\windows\\GH-7-widgets-655280.code-workspace')).toBe('a-native');
+    expect(queue.claimOpen(file)).toBeNull();
   });
 
   it('keeps what no window claimed for the next queue loaded from its file, which drops what expired and continues the command IDs', () => {
@@ -75,7 +77,7 @@ describe('WindowQueue', () => {
     const file = 'C:/h/windows/gh-7-58c609.code-workspace';
     const first = WindowQueue.load(path, () => now);
 
-    first.recordOpen('old-native', 'D:/git/widgets-wt/6-fix');
+    first.recordOpen('old-native', 'D:/git/widgets-wt/6-fix', 'C:/h/windows/gh-6-000000.code-workspace');
     now += 60_000;
     first.recordOpen('a-native', 'D:/git/widgets-wt/7-fix', file);
     first.recordCommand({ type: 'openTabs' }, file);
@@ -88,8 +90,8 @@ describe('WindowQueue', () => {
     now += 60_000 + 1;
     const second = WindowQueue.load(path, () => now);
 
-    expect(second.claimOpen('D:/git/widgets-wt/6-fix')).toBeNull();
-    expect(second.claimOpen('D:/git/widgets-wt/7-fix', file)).toBe('a-native');
+    expect(second.claimOpen('C:/h/windows/gh-6-000000.code-workspace')).toBeNull();
+    expect(second.claimOpen(file)).toBe('a-native');
     // An ID the dock got from the earlier hub withdraws nothing it did not leave.
     expect(second.recordCommand({ type: 'settings' }, null)).toBe(claimed + 1);
     expect(second.withdrawCommand(changes)).toBe(false);
@@ -97,22 +99,20 @@ describe('WindowQueue', () => {
 
     const third = WindowQueue.load(path, () => now);
 
-    expect(third.claimOpen('D:/git/widgets-wt/7-fix', file)).toBeNull();
+    expect(third.claimOpen(file)).toBeNull();
     expect(third.claimCommands(file, true)).toEqual([{ type: 'settings' }]);
   });
 
-  it('keeps opens for two item windows on one folder apart, and lets a folder window take only an open left for no workspace', () => {
+  it('keeps opens for two item windows on one folder apart, as for two Support work items', () => {
     const queue = WindowQueue.load(null, () => T0);
-    const a = 'C:/h/windows/gh-7-000001.code-workspace';
-    const b = 'C:/h/windows/gh-8-000002.code-workspace';
+    const a = 'C:/h/windows/zoho-1-000001.code-workspace';
+    const b = 'C:/h/windows/zoho-2-000002.code-workspace';
 
-    queue.recordOpen('a-native', 'D:/git/widgets', a);
-    queue.recordOpen('b-native', 'D:/git/widgets', b);
-    queue.recordOpen('folder-native', 'D:/git/widgets');
-    expect(queue.claimOpen('D:/git/widgets', b)).toBe('b-native');
-    expect(queue.claimOpen('D:/git/widgets', a)).toBe('a-native');
-    expect(queue.claimOpen('D:/git/widgets')).toBe('folder-native');
-    expect(queue.claimOpen('D:/git/widgets')).toBeNull();
+    queue.recordOpen('a-native', 'D:/git/support', a);
+    queue.recordOpen('b-native', 'D:/git/support', b);
+    expect(queue.claimOpen(b)).toBe('b-native');
+    expect(queue.claimOpen(b)).toBeNull();
+    expect(queue.claimOpen(a)).toBe('a-native');
   });
 
   it('starts empty from a missing or unreadable file, and skips malformed entries', () => {
@@ -126,14 +126,16 @@ describe('WindowQueue', () => {
     expect(WindowQueue.load(path, () => T0).recordCommand({ type: 'settings' }, null)).toBe(1);
 
     writeFileSync(path, JSON.stringify({
-      opens: [null, { folder: 'd:/a', sessionId: 7, at: T0, workspace: null }, { folder: 'd:/b', sessionId: 'b-native', at: T0, workspace: null }],
+      opens: [null, { folder: 'd:/a', sessionId: 7, at: T0, workspace: 'w-a' }, { folder: 'd:/c', sessionId: 'c-native', at: T0, workspace: null }, { folder: 'd:/b', sessionId: 'b-native', at: T0, workspace: 'w-b' }],
       commands: [null, { id: 'x', command: {}, at: T0, workspace: null }, { id: 3, command: null, at: T0, workspace: null }, { id: 4, command: { type: 'settings' }, at: T0, workspace: null }],
       nextId: 5,
     }));
     const kept = WindowQueue.load(path, () => T0);
 
-    expect(kept.claimOpen('D:/a')).toBeNull();
-    expect(kept.claimOpen('D:/b')).toBe('b-native');
+    expect(kept.claimOpen('w-a')).toBeNull();
+    // An open with no destination window was a wildcard before; it is dropped.
+    expect(kept.claimOpen('w-c')).toBeNull();
+    expect(kept.claimOpen('w-b')).toBe('b-native');
     expect(kept.claimCommands(null, true)).toEqual([{ type: 'settings' }]);
   });
 
@@ -146,8 +148,8 @@ describe('WindowQueue', () => {
     // A folder where the temporary file should be makes every write fail.
     mkdirSync(`${path}.tmp`);
     expect(first.recordCommand({ type: 'history', ticketId: 3, key: 'gh 3' }, null)).toBeNull();
-    expect(first.recordOpen('a-native', 'D:/git/widgets')).toBe(false);
-    expect(first.claimOpen('D:/git/widgets')).toBeNull();
+    expect(first.recordOpen('a-native', 'D:/git/widgets', 'w-a')).toBe(false);
+    expect(first.claimOpen('w-a')).toBeNull();
     expect(logs).toHaveLength(2);
     expect(logs[0]).toMatch(/^window queue not saved to .*window-queue\.json: /);
     // A claim the file does not record still hands the command over once in this hub.

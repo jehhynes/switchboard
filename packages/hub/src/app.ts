@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { hubBundlePath, Store, switchboardHome } from '@switchboard/core';
+import { hubBundlePath, NEW_CONVERSATION_TITLE, Store, switchboardHome, windowFileKey } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -12,10 +12,10 @@ import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
-import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
+import { dockView, windowOf, windowsDir, writeWorkspaceFile } from './dock.js';
 import type { DockTerminal } from './dock.js';
 import { isPastePath } from './report.js';
-import { codeModeTerminal } from './rows.js';
+import { codeModeTerminal, rowKeyOf } from './rows.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
 import type { HubApp } from './serve.js';
@@ -24,7 +24,7 @@ import type { ReportBody, RuntimeDeps } from './runtime.js';
 import { WindowQueue } from './windowQueue.js';
 import { ConversationService, claudePaths } from './conversation.js';
 import { buildSnapshot } from './snapshot.js';
-import type { Snapshot } from './snapshot.js';
+import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { WindowScopes } from './windows.js';
@@ -235,7 +235,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   let sendDock: (event: string, data: unknown) => number = () => 0;
   let clickDock: (data: unknown) => boolean = () => false;
-  let sendWindows: (event: string, data: unknown) => number = () => 0;
+  let sendWindows: (event: string, data: unknown, workspace?: string) => number = () => 0;
   /**
    * Tells the window opened from `workspace` to claim what was left for it, because VS Code reports no focus change when the dock brings an open
    * window forward; a window claims on focus too. Nothing left for any window is announced, because only the window brought forward takes it.
@@ -254,6 +254,19 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     return { executable: terminal.provider === 'codex' ? sessions.codexPath : sessions.claudePath };
   };
 
+  /**
+   * The workspace file of a work item's window, its host's for a hosted conversation, from the store when the snapshot no longer lists it, as for
+   * a History link to a session done long ago; null for a work item with no window.
+   */
+  const itemWindowFile = (workItemId: number): string | null => {
+    const shown = views().snapshot.workItems.find((one) => one.id === workItemId);
+    const item = store.workItem(workItemId);
+    const ticket = item === null ? null : store.ticket(item.ticketId);
+    const view = shown ?? (item === null || ticket === null ? null : ({ ...item, ticket, sessions: store.sessionsFor(item.id), worktree: store.worktreeFor(ticket.id) } as unknown as WorkItemView));
+
+    return view === null ? null : (windowOf(view, windows)?.file ?? null);
+  };
+
   /** The attach terminal command for a claimed open of a Code Mode session, which the Claude view refuses (PRD R95); null for any other session. */
   const codeModeOpen = (sessionId: string): Record<string, unknown> | null => {
     const session = store.session(sessionId) ?? store.sessionByNativeId(sessionId);
@@ -263,9 +276,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     return session === null || ticket === null ? null : codeModeTerminal(ticket, session);
   };
 
+  // Only the destination window's streams hear the nudge (architecture.md § Window scope).
   const askToClaim = (workspace: string | null): void => {
     if (workspace !== null) {
-      sendWindows('claim', { workspace });
+      sendWindows('claim', { workspace }, workspace);
     }
   };
   /** Why a write from a Settings window that read another config folder is refused, or null; a body without `configDir` names none. */
@@ -314,6 +328,21 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     newId: randomUUID,
     // The dock's rows count each work item's unread items, so a change builds the views again.
     unreadChanged: () => builder.schedule(),
+    newConversation: (hostWindow, folder) => {
+      const { refused } = runtime.send({ type: 'new-conversation', hostWindow, folder });
+      const made = refused === null ? store.hostedWorkItems(hostWindow)[0] : undefined;
+
+      return made === undefined ? { refused: refused ?? 'The conversation was not made.' } : { workItemId: made.id };
+    },
+    // A hosted conversation is titled by its first message (architecture.md § Hosted conversations).
+    messageAdded: (workItemId, text) => {
+      const item = store.workItem(workItemId);
+      const ticket = item === null ? null : store.ticket(item.ticketId);
+
+      if (ticket?.hostWindow != null && ticket.title === NEW_CONVERSATION_TITLE) {
+        runtime.send({ type: 'conversation-title', workItemId, text });
+      }
+    },
     log: deps.log,
   });
   /** A finished build: windows bound to a new work item start from empty, and every stream gets the new views. */
@@ -347,7 +376,8 @@ const dockWithRuns = () => {
     const view = views().dock;
 
     // The dock opens a row's item window from its file, so the file is there before the view is.
-    for (const window of view.groups.flatMap((group) => group.rows.flatMap((row) => (row.window === null ? [] : [row.window])))) {
+    // A hosted conversation's row names its host's window, whose file the host's primary work item writes.
+    for (const window of view.groups.flatMap((group) => group.rows.flatMap((row) => (row.window === null || row.window.hosted === true ? [] : [row.window])))) {
       try {
         writeWorkspaceFile(window, written);
       } catch (error) {
@@ -484,18 +514,38 @@ const dockWithRuns = () => {
         return 'refused' in result ? { status: 409, body: { error: result.refused } } : { status: 200, body: result };
       },
       '/open': async (body) => {
-        if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace'])) {
-          return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?}.' } };
+        if (!isRecord(body) || typeof body['sessionId'] !== 'string' || typeof body['cwd'] !== 'string' || !optionalString(body['workspace']) || !optionalString(body['window'])) {
+          return { status: 400, body: { error: 'Expected {sessionId, cwd, workspace?, window?}.' } };
         }
 
-        if (!windowQueue.recordOpen(body['sessionId'], body['cwd'], body['workspace'] ?? null)) {
+        const sessionId = body['sessionId'];
+        const session = store.session(sessionId) ?? store.sessionByNativeId(sessionId);
+        const window = typeof body['window'] === 'string' ? body['window'] : null;
+        // The destination window (architecture.md § Window scope): the window that asked, for a session of its own conversations, else the
+        // session's own window, its host's for a hosted conversation. A workspace the caller names must be that window, so no caller can route
+        // another work item's session to a window of its choice; only a session the store does not know goes where the caller names.
+        const asker = window !== null && session !== null && scopes.holds(window, session.workItemId) ? scopes.fileOf(window) : null;
+        const own = session === null ? null : itemWindowFile(session.workItemId);
+        const named = body['workspace'] ?? null;
+
+        if (asker === null && session !== null && named !== null && (own === null || windowFileKey(named) !== windowFileKey(own))) {
+          return { status: 409, body: { error: 'The session opens only in its own window.' } };
+        }
+
+        const workspace = asker ?? (session === null ? named : own);
+
+        if (workspace === null) {
+          return { status: 409, body: { error: 'The session has no window to open it in.' } };
+        }
+
+        if (!windowQueue.recordOpen(sessionId, body['cwd'], workspace)) {
           return { status: 500, body: { error: 'The hub could not save the open; see its log.' } };
         }
 
-        deps.log(`session ${body['sessionId']} left for ${body['workspace'] ?? body['cwd']}`);
-        askToClaim(body['workspace'] ?? null);
+        deps.log(`session ${sessionId} left for ${workspace}`);
+        askToClaim(workspace);
 
-        return { status: 200, body: { recorded: true } };
+        return { status: 200, body: { recorded: true, workspace } };
       },
       '/history': async (body) => {
         if (!isRecord(body) || !Number.isInteger(body['ticketId']) || typeof body['window'] !== 'string') {
@@ -522,6 +572,8 @@ const dockWithRuns = () => {
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),
+      '/v1/conversation/select': async (body) => (isRecord(body) ? conversation.select(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } }),
+      '/v1/conversation/new-conversation': async (body) => (isRecord(body) ? conversation.newConversation(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/claim': async (body) => {
@@ -529,9 +581,12 @@ const dockWithRuns = () => {
           return { status: 400, body: { error: 'Expected {folder, workspace?, focused?, window?}.' } };
         }
 
-        const workspace = body['workspace'] ?? null;
         const keyed = typeof body['window'] === 'string' && scopes.has(body['window']);
-        const claimed = windowQueue.claimOpen(body['folder'], workspace);
+        // A window claims an open only by its key's binding, never by a workspace or folder it names (architecture.md § Window scope).
+        const bound = keyed ? scopes.fileOf(body['window'] as string) : null;
+        // Commands left for a workspace go only to the window its key binds; a claim with no binding takes only those left for any window.
+        const workspace = bound;
+        const claimed = windowQueue.claimOpen(bound);
         const attach = claimed === null ? null : codeModeOpen(claimed);
         const sessionId = attach === null ? claimed : null;
         // A History command the dock left lets the window that claims it, named by its key, read that ticket's History. A claim with no key a
@@ -635,6 +690,25 @@ const dockWithRuns = () => {
         }
 
         return clickDock({ rowKey: body['rowKey'] }) ? { status: 202, body: { sent: true } } : { status: 409, body: { error: 'The dock is not running.' } };
+      },
+      // A dock row's click (architecture.md § Dock): a hosted conversation becomes its host binding's selection, shown by the window the click opens.
+      '/dock/select': async (body) => {
+        if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
+          return { status: 400, body: { error: 'Expected {rowKey}.' } };
+        }
+
+        const item = views().snapshot.workItems.find((one) => rowKeyOf(one) === body['rowKey']);
+
+        if (item === undefined) {
+          return { status: 404, body: { error: 'No work item has that row.' } };
+        }
+
+        const { keys, selected } = scopes.selectFor(item.id, item.ticket.hostWindow ?? null);
+
+        conversation.scopesChanged(keys);
+        conversation.conversationsChanged();
+
+        return { status: 200, body: { selected } };
       },
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
