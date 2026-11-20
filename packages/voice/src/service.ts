@@ -4,10 +4,10 @@ import type { Output } from './output.js';
 import type { HubMessage, VoiceMessage } from './protocol.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
-import type { Speaking, TtsVoiceSettings } from './tts.js';
+import type { Speaking, SpeechVoice, TtsVoiceSettings } from './tts.js';
 
 export interface VoiceServiceDeps {
-  tts: { configure(settings: TtsVoiceSettings): void; warm(): void; speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void): Speaking; close(): void };
+  tts: { configure(settings: TtsVoiceSettings): void; warm(): void; speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void, as?: SpeechVoice): Speaking; close(): void };
   output: Output;
   send(message: VoiceMessage): void;
   now(): number;
@@ -83,7 +83,7 @@ export class VoiceService {
           return;
         }
 
-        this.#speech.speak({ gen: message.gen, replyId: message.replyId, sessionId: message.sessionId, text: message.text, tone: message.tone, turn: message.turn });
+        this.#speech.speak({ gen: message.gen, replyId: message.replyId, sessionId: message.sessionId, text: message.text, tone: message.tone, turn: message.turn, as: { voice: message.voice, style: message.style, personality: message.personality } });
         return;
       case 'cancel':
         this.#speech.cancel(message.replyId);

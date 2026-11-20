@@ -1,4 +1,5 @@
-import type { VoiceSettings } from '@switchboard/core/settings';
+import { SPEECH_STYLES, TTS_VOICES } from '@switchboard/core/settings';
+import type { SpeechStyle, TtsVoice, VoiceSettings } from '@switchboard/core/settings';
 
 /** The voice protocol (architecture.md § Voice): JSON lines in UTF-8 over loopback TCP, the hub its only client. */
 export const PROTOCOL = 1;
@@ -26,8 +27,11 @@ export type HubMessage =
   | { type: 'targets'; targets: VoiceTarget[]; focus: VoiceFocus }
   | { type: 'talk-here'; sessionId: string }
   | { type: 'settings'; settings: VoiceSettings }
-  /** A reply's passage to speak; `turn` names the message it answers, so the replies of one turn play in order (decision 24). */
-  | { type: 'speak'; gen: number; replyId: string; sessionId: string; text: string; tone: string | null; turn: string | null }
+  /**
+   * A reply's passage to speak; `turn` names the message it answers, so the replies of one turn play in order (decision 24). `voice`, `style`
+   * and `personality` are the session's persona's, or the settings' (architecture.md § Personas).
+   */
+  | { type: 'speak'; gen: number; replyId: string; sessionId: string; text: string; tone: string | null; turn: string | null; voice: TtsVoice; style: SpeechStyle; personality: string | null }
   /** Stop or drop an offered reply: it was rewritten, or Speak replies was turned off; reported `skipped`. */
   | { type: 'cancel'; replyId: string }
   /** Stop speaking: the playing reply is `interrupted` where it stopped, and the queued ones `skipped`. */
@@ -135,8 +139,16 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
     case 'settings':
       return isObject(m.settings) ? { type: 'settings', settings: m.settings as unknown as VoiceSettings } : invalid;
     case 'speak':
-      return isGen(m.gen) && isId(m.replyId) && isId(m.sessionId) && isText(m.text) && (m.tone === null || isText(m.tone)) && (m.turn === null || isId(m.turn))
-        ? { type: 'speak', gen: m.gen, replyId: m.replyId, sessionId: m.sessionId, text: m.text, tone: m.tone, turn: m.turn }
+      return isGen(m.gen) &&
+        isId(m.replyId) &&
+        isId(m.sessionId) &&
+        isText(m.text) &&
+        (m.tone === null || isText(m.tone)) &&
+        (m.turn === null || isId(m.turn)) &&
+        (TTS_VOICES as readonly unknown[]).includes(m.voice) &&
+        (SPEECH_STYLES as readonly unknown[]).includes(m.style) &&
+        (m.personality === null || isText(m.personality))
+        ? { type: 'speak', gen: m.gen, replyId: m.replyId, sessionId: m.sessionId, text: m.text, tone: m.tone, turn: m.turn, voice: m.voice as TtsVoice, style: m.style as SpeechStyle, personality: m.personality }
         : invalid;
     case 'cancel':
       return isId(m.replyId) ? { type: 'cancel', replyId: m.replyId } : invalid;

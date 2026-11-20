@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, Store, switchboardHome } from '@switchboard/core';
+import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, personaById, Store, switchboardHome } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -342,6 +342,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return session !== null && sessionView(session, true, config.settings.sessions.installHooks).conversation === 'full';
     },
+    persona: (sessionId) => personaById(config.settings.voice, store.session(sessionId)?.personaId),
     replyChanged: (replyId) => conversation.replyUpdated(replyId),
     notify: (key, type, payload) => conversation.notify(key, type, payload),
     // The dock's mic mark and voice note are added to its view as it is sent.

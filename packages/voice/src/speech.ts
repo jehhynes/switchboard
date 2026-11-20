@@ -2,7 +2,7 @@ import type { Output, Playback } from './output.js';
 import { needsYouChime } from './output.js';
 import type { SpeechState, VoiceMessage } from './protocol.js';
 import { BYTES_PER_MS } from './tts.js';
-import type { Speaking } from './tts.js';
+import type { Speaking, SpeechVoice } from './tts.js';
 
 /** How often a playing reply reports its position. */
 export const PROGRESS_MS = 150;
@@ -18,10 +18,12 @@ export interface SpeechItem {
   tone: string | null;
   /** The message it answers: the replies of one turn play in order, and a reply of a newer turn waiting skips the older ones (decision 24). */
   turn: string | null;
+  /** Its persona's voice, style and personality; the settings' when left out. */
+  as?: SpeechVoice;
 }
 
 export interface SpeechDeps {
-  tts: { speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void): Speaking };
+  tts: { speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void, as?: SpeechVoice): Speaking };
   output: Output;
   /** The playback device, read at each playback. */
   device(): string | null;
@@ -200,7 +202,7 @@ export class Speech {
             current.ticker = (this.deps.every ?? every)(() => this.#progress(current), PROGRESS_MS);
           }
         });
-      });
+      }, item.as);
     } catch (error) {
       this.#fail(current, error as Error);
       return;

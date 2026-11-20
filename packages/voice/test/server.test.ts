@@ -98,7 +98,21 @@ describe('voice protocol', () => {
       focus: { sessionId: 's1', via: 'window' },
     });
     expect(parseHubMessage('{"type":"targets","targets":[],"focus":null}')).toEqual({ type: 'targets', targets: [], focus: null });
-    expect(parseHubMessage('{"type":"speak","gen":2,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":"m"}')).toEqual({ type: 'speak', gen: 2, replyId: 'r', sessionId: 's', text: 'Hi.', tone: null, turn: 'm' });
+    expect(parseHubMessage('{"type":"speak","gen":2,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":"m","voice":"cedar","style":"pair","personality":"Warm."}')).toEqual({
+      type: 'speak',
+      gen: 2,
+      replyId: 'r',
+      sessionId: 's',
+      text: 'Hi.',
+      tone: null,
+      turn: 'm',
+      voice: 'cedar',
+      style: 'pair',
+      personality: 'Warm.',
+    });
+    // A voice or style the voice process does not know is refused.
+    expect(parseHubMessage('{"type":"speak","gen":2,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":"m","voice":"robot","style":"pair","personality":null}')).toEqual({ error: 'Invalid speak message.' });
+    expect(parseHubMessage('{"type":"speak","gen":2,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":"m","voice":"cedar","style":"loud","personality":null}')).toEqual({ error: 'Invalid speak message.' });
     expect(parseHubMessage('{"type":"cancel","replyId":"r"}')).toEqual({ type: 'cancel', replyId: 'r' });
     expect(parseHubMessage('{"type":"earcon","kind":"needs-you"}')).toEqual({ type: 'earcon', kind: 'needs-you' });
     expect(parseHubMessage('{"type":"settings","settings":{"enabled":true}}')).toMatchObject({ type: 'settings' });

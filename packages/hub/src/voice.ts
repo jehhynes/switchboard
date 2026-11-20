@@ -1,4 +1,4 @@
-import type { ConversationReply, SpokenState, VoiceSettings } from '@switchboard/core';
+import type { ConversationReply, Persona, SpokenState, VoiceSettings } from '@switchboard/core';
 import { spokenText } from '@switchboard/conversation';
 import type { HubMessage, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
@@ -40,6 +40,8 @@ export interface VoiceControlDeps {
   focusedWindow(): string | null;
   /** Whether the session is a live, observed Code Mode session (`full`), the only kind the voice speaks for. */
   full(sessionId: string): boolean;
+  /** The session's persona, whose voice, style and personality its replies are spoken with; null for the settings' (architecture.md § Personas). */
+  persona?(sessionId: string): Persona | null;
   /** A reply's speech changed; the windows showing its session get it again. */
   replyChanged(replyId: string): void;
   /** Sends a window's stream an event. */
@@ -331,8 +333,23 @@ export class VoiceControl {
   #offer(reply: ConversationReply, turn: string | null): void {
     const gen = this.#target.gen;
 
+    const settings = this.deps.settings();
+    // The persona is read at each offer, so a pin changes the voice from the next spoken reply.
+    const persona = this.deps.persona?.(reply.sessionId) ?? null;
+
     this.#offered.set(reply.id, { gen, sessionId: reply.sessionId });
-    this.#client!.send({ type: 'speak', gen, replyId: reply.id, sessionId: reply.sessionId, text: spokenText(reply.speak!), tone: reply.tone ?? null, turn });
+    this.#client!.send({
+      type: 'speak',
+      gen,
+      replyId: reply.id,
+      sessionId: reply.sessionId,
+      text: spokenText(reply.speak!),
+      tone: reply.tone ?? null,
+      turn,
+      voice: persona?.voice ?? settings.voice,
+      style: persona?.style ?? settings.style,
+      personality: persona === null || persona.personality === '' ? null : persona.personality,
+    });
     this.#setState(reply.id, 'queued', null, null);
   }
 

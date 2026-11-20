@@ -5,6 +5,9 @@ import { FOCUS_DEBOUNCE_MS } from '../src/routing.js';
 import { VoiceService } from '../src/service.js';
 import { Clock, FakeOutput, FakeTts, settle } from './fakes.js';
 
+/** The settings' voice, as the hub sends it for a session with no persona. */
+const VOICE = { voice: 'marin', style: 'none', personality: null } as const;
+
 function setup() {
   const clock = new Clock();
   const tts = new FakeTts();
@@ -37,14 +40,14 @@ describe('VoiceService', () => {
     expect(sent).toEqual([{ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' }]);
     expect(tts.warmed).toBe(1);
 
-    service.receive({ type: 'speak', gen: 0, replyId: 'old', sessionId: 's1', text: 'Old.', tone: null, turn: null });
-    service.receive({ type: 'speak', gen: 1, replyId: 'other', sessionId: 's2', text: 'Other.', tone: null, turn: null });
+    service.receive({ type: 'speak', gen: 0, replyId: 'old', sessionId: 's1', text: 'Old.', tone: null, turn: null, ...VOICE });
+    service.receive({ type: 'speak', gen: 1, replyId: 'other', sessionId: 's2', text: 'Other.', tone: null, turn: null, ...VOICE });
     expect(tts.requests).toEqual([]);
     expect(logs).toContain('reply old dropped: generation 0 is not 1');
 
-    service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'One.', tone: 'calm', turn: 'm1' });
-    service.receive({ type: 'speak', gen: 1, replyId: 'r2', sessionId: 's1', text: 'Two.', tone: null, turn: 'm1' });
-    expect(tts.requests.map((one) => [one.text, one.tone])).toEqual([['One.', 'calm']]);
+    service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'One.', tone: 'calm', turn: 'm1', voice: 'cedar', style: 'pair', personality: 'Warm.' });
+    service.receive({ type: 'speak', gen: 1, replyId: 'r2', sessionId: 's1', text: 'Two.', tone: null, turn: 'm1', ...VOICE });
+    expect(tts.requests.map((one) => [one.text, one.tone, one.as])).toEqual([['One.', 'calm', { voice: 'cedar', style: 'pair', personality: 'Warm.' }]]);
     service.receive({ type: 'cancel', replyId: 'r2' });
     service.receive({ type: 'stop' });
     expect(sent.filter((one) => one.type === 'speech').map((one) => `${(one as { replyId: string }).replyId} ${(one as { state: string }).state}`)).toEqual(['r2 skipped', 'r1 interrupted']);
@@ -66,12 +69,12 @@ describe('VoiceService', () => {
     service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1 }], focus: { sessionId: 's1', via: 'window' } });
     clock.advance(FOCUS_DEBOUNCE_MS);
     output.fail = new Error('no device');
-    service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'One.', tone: null, turn: null });
+    service.receive({ type: 'speak', gen: 1, replyId: 'r1', sessionId: 's1', text: 'One.', tone: null, turn: null, ...VOICE });
     await settle();
-    service.receive({ type: 'speak', gen: 1, replyId: 'r2', sessionId: 's1', text: 'Two.', tone: null, turn: null });
+    service.receive({ type: 'speak', gen: 1, replyId: 'r2', sessionId: 's1', text: 'Two.', tone: null, turn: null, ...VOICE });
     await settle();
     output.fail = null;
-    service.receive({ type: 'speak', gen: 1, replyId: 'r3', sessionId: 's1', text: 'Three.', tone: null, turn: null });
+    service.receive({ type: 'speak', gen: 1, replyId: 'r3', sessionId: 's1', text: 'Three.', tone: null, turn: null, ...VOICE });
     await settle();
     tts.requests.at(-1)!.finish();
     await settle();

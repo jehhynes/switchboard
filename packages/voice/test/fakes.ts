@@ -1,5 +1,5 @@
 import type { Output, Playback } from '../src/output.js';
-import type { SocketLike, Speaking } from '../src/tts.js';
+import type { SocketLike, Speaking, SpeechVoice } from '../src/tts.js';
 
 /** Timers run by hand, in time order. */
 export class Clock {
@@ -96,6 +96,7 @@ export class FakeOutput implements Output {
 export interface FakeSpeaking extends Speaking {
   text: string;
   tone: string | null;
+  as: SpeechVoice | undefined;
   audio(bytes: number): void;
   finish(): void;
   fail(error: Error): void;
@@ -121,7 +122,7 @@ export class FakeTts {
     this.closed = true;
   }
 
-  speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void): Speaking {
+  speak(text: string, tone: string | null, onAudio: (pcm: Buffer) => void, as?: SpeechVoice): Speaking {
     if (this.throws !== null) {
       throw this.throws;
     }
@@ -138,6 +139,7 @@ export class FakeTts {
     const request: FakeSpeaking = {
       text,
       tone,
+      as,
       done,
       cancelled: false,
       audio: (bytes) => onAudio(Buffer.alloc(bytes)),

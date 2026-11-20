@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
-import type { ConversationReply, VoiceSettings } from '@switchboard/core';
+import type { ConversationReply, Persona, VoiceSettings } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
 import { OPEN_ITS_WINDOW, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
@@ -52,6 +52,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
   const messages = new Map<string, { spokenRequested?: boolean }>();
   const windows = new Map<string, WindowScope | null>();
   const full = new Set<string>(['s1', 's2']);
+  const personas = new Map<string, Persona>();
   const notified: Array<{ key: string; type: string; payload: Record<string, unknown> }> = [];
   const changedReplies: string[] = [];
   const seen: string[] = [];
@@ -81,6 +82,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     windows: { keys: () => [...windows.keys()], scope: (key) => windows.get(key) ?? null },
     focusedWindow: () => focused,
     full: (sessionId) => full.has(sessionId),
+    persona: (sessionId) => personas.get(sessionId) ?? null,
     replyChanged: (id) => void changedReplies.push(`${id} ${replies.get(id)?.spokenState}`),
     notify: (key, type, payload) => void notified.push({ key, type, payload }),
     dockChanged: () => void dockChanges++,
@@ -118,6 +120,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     connections,
     windows,
     full,
+    personas,
     notified,
     changedReplies,
     seen,
@@ -243,7 +246,9 @@ describe('VoiceControl', () => {
 
     control.replyChanged(reply('r1', { speak: '**Done**, see [the plan](a.md).', tone: 'calm' }));
     control.replyChanged(replies.get('r1')!);
-    expect(connections[0]!.sent.filter((one) => one.type === 'speak')).toEqual([{ type: 'speak', gen: 2, replyId: 'r1', sessionId: 's1', text: 'Done, see the plan.', tone: 'calm', turn: 'm1' }]);
+    expect(connections[0]!.sent.filter((one) => one.type === 'speak')).toEqual([
+      { type: 'speak', gen: 2, replyId: 'r1', sessionId: 's1', text: 'Done, see the plan.', tone: 'calm', turn: 'm1', voice: 'marin', style: 'none', personality: null },
+    ]);
     expect(replies.get('r1')!.spokenState).toBe('queued');
 
     connections[0]!.receive({ type: 'speech', gen: 2, replyId: 'r1', sessionId: 's1', state: 'playing', atMs: 0, said: 0 });
@@ -384,5 +389,27 @@ describe('VoiceControl', () => {
     control.windowClosed('k2');
     control.close();
     expect(connections[1]!.closed).toBe(true);
+  });
+
+  it("speaks a reply in its session's persona's voice, style and personality, read at each offer (architecture.md § Personas)", async () => {
+    const { control, connections, windows, reply, personas, settle } = setup({ enabled: true, voice: 'sage', style: 'upbeat' });
+    const spoken = () => connections[0]!.sent.filter((one) => one.type === 'speak').map((one) => one.type === 'speak' && [one.voice, one.style, one.personality]);
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 2, sessionId: 's1', reason: 'talk-here' });
+
+    control.replyChanged(reply('r1'));
+    personas.set('s1', { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' });
+    control.replyChanged(reply('r2'));
+    personas.set('s1', { id: 'orion', name: 'Orion', voice: 'ash', style: 'deadpan', personality: '' });
+    control.replyChanged(reply('r3'));
+
+    expect(spoken()).toEqual([
+      ['sage', 'upbeat', null],
+      ['cedar', 'pair', 'Warm.'],
+      ['ash', 'deadpan', null],
+    ]);
   });
 });
