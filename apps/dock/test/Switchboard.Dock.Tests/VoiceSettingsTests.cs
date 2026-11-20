@@ -64,11 +64,12 @@ public sealed class VoiceSettingsTests
     {
         var sections = SettingsFields.VoiceFields(SettingsConfigs.State());
 
-        Assert.Equal(["Speech", "Playbook personas"], sections.Select((section) => section.Heading));
+        Assert.Equal(["Speech", "Dictation", "Playbook personas"], sections.Select((section) => section.Heading));
         Assert.Equal(
             ["voice.enabled", "voice.voice", "voice.style", "voice.speed", "voice.expressive", "voice.expandReplies", "voice.awayMinutes", "voice.needsYouSound", "voice.outputDevice"],
             sections[0].Fields.Select((field) => field.Path));
-        Assert.Empty(sections[1].Fields);
+        Assert.Equal(["voice.micIdleMinutes", "voice.endPauseMs", "voice.inputDevice"], sections[1].Fields.Select((field) => field.Path));
+        Assert.Empty(sections[2].Fields);
 
         var fields = sections[0].Fields.ToDictionary((field) => field.Path);
 
@@ -79,6 +80,12 @@ public sealed class VoiceSettingsTests
         Assert.Equal(["None", "Pair", "Upbeat", "Deadpan", "Expressive"], fields["voice.style"].Options!.Select((option) => option.Label));
         Assert.Equal((FieldKind.Number, "1"), (fields["voice.speed"].Kind, fields["voice.speed"].Placeholder));
         Assert.Equal((FieldKind.Integer, "2"), (fields["voice.awayMinutes"].Kind, fields["voice.awayMinutes"].Placeholder));
+
+        var dictation = sections[1].Fields.ToDictionary((field) => field.Path);
+
+        Assert.Equal((FieldKind.Integer, "10"), (dictation["voice.micIdleMinutes"].Kind, dictation["voice.micIdleMinutes"].Placeholder));
+        Assert.Equal((FieldKind.Integer, "3000"), (dictation["voice.endPauseMs"].Kind, dictation["voice.endPauseMs"].Placeholder));
+        Assert.Equal((FieldKind.Text, "System default"), (dictation["voice.inputDevice"].Kind, dictation["voice.inputDevice"].Placeholder));
         Assert.Equal("1.25", SettingsPages.FieldViewOf(fields["voice.speed"], 1.25, []).Text);
     }
 
@@ -146,12 +153,14 @@ public sealed class VoiceSettingsTests
             "voice.playbookPersonas.dev:review must name a persona in voice.personas.",
             "voice.personas[1].style must be one of none, pair, upbeat, deadpan or expressive.",
             "voice.mic is not a setting.",
+            "voice.endPauseMs must be a whole number from 500 to 20000.",
         ];
 
         var page = SettingsPages.Page(state);
         var fields = page.Sections.SelectMany((section) => section.Fields).ToDictionary((field) => field.Field.Path);
 
         Assert.Equal(["voice.speed must be a number from 0.25 to 1.5."], fields["voice.speed"].Errors);
+        Assert.Equal(["voice.endPauseMs must be a whole number from 500 to 20000."], fields["voice.endPauseMs"].Errors);
         Assert.Equal(["voice.playbookPersonas.dev:review must name a persona in voice.personas."], fields["voice.playbookPersonas.dev:review"].Errors);
         Assert.Equal(["voice.mic is not a setting."], page.Errors);
         Assert.Equal(["dev:develop"], page.Assign!.Playbooks);
@@ -425,6 +434,10 @@ public sealed class VoiceSettingsTests
         editor.Edit(FieldOf(fields, "voice.speed"), "1.25");
         editor.Edit(FieldOf(fields, "voice.needsYouSound"), "", false);
         editor.Edit(FieldOf(fields, "voice.outputDevice"), "Speakers");
+        editor.Edit(FieldOf(fields, "voice.micIdleMinutes"), "0");
+        editor.Edit(FieldOf(fields, "voice.endPauseMs"), "2500");
+        editor.Edit(FieldOf(fields, "voice.inputDevice"), "Headset");
+        editor.Edit(FieldOf(fields, "voice.inputDevice"), "");
 
         Assert.True(await editor.Save());
 
@@ -433,6 +446,8 @@ public sealed class VoiceSettingsTests
         Assert.Equal(1.25, saved["speed"]!.GetValue<double>());
         Assert.False(saved["needsYouSound"]!.GetValue<bool>());
         Assert.Equal("Speakers", saved["outputDevice"]!.GetValue<string>());
+        Assert.Equal((0, 2500), (saved["micIdleMinutes"]!.GetValue<int>(), saved["endPauseMs"]!.GetValue<int>()));
+        Assert.Null(saved["inputDevice"]);
         Assert.Equal(2, saved["personas"]!.AsArray().Count);
     }
 

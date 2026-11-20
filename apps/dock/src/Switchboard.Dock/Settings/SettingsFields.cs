@@ -422,6 +422,12 @@ public static partial class SettingsFields
                 new Field("voice.needsYouSound", "Needs-you sound", FieldKind.Boolean, "Play a short sound between spoken replies when another work item starts needing you.", Fallback: true),
                 new Field("voice.outputDevice", "Output device", FieldKind.Text, "Part of the playback device’s name, such as Speakers. Empty uses the system default.", "System default"),
             ]),
+            new Section("Dictation",
+            [
+                new Field("voice.micIdleMinutes", "Mic idle timeout (minutes)", FieldKind.Integer, "0 to 1440. After this many minutes of silence the mic stops listening, even with the voice here; 0 never stops it.", "10"),
+                new Field("voice.endPauseMs", "End-of-message pause (ms)", FieldKind.Integer, "500 to 20000. How long a pause ends a dictated message; turn detection shortens it when the words look finished.", "3000"),
+                new Field("voice.inputDevice", "Input device", FieldKind.Text, "Part of the capture device’s name, such as Headset. Empty uses the system default.", "System default"),
+            ]),
             new Section("Playbook personas",
                 assigned.Select((playbook) => new Field($"voice.playbookPersonas.{playbook}", playbooks.Contains(playbook) ? playbook : $"{playbook} (missing)", FieldKind.Select, "",
                     Options: WithCurrent([new FieldOption("", "None"), .. personas], GetAt(value, $"voice.playbookPersonas.{playbook}")))).ToList()),
