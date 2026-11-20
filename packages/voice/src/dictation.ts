@@ -1,6 +1,8 @@
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { ASR_RATE, pcmToSamples, Transcriber } from './asr.js';
 import { BargeIn, gate } from './barge.js';
+import { AutoDuplex } from './duplex.js';
+import { EchoCheck } from './echoCheck.js';
 import type { AsrEngine } from './asr.js';
 import type { AsrDevice } from './sherpa.js';
 import type { MicUse } from './micUse.js';
@@ -110,6 +112,8 @@ interface Utterance {
 /** A reply being played while capture runs: words heard then are held back, since they may be its echo, until barge-in says they are the operator's. */
 interface Playback {
   replyId: string;
+  /** Its spoken passage, which words heard over it are compared with. */
+  text: string;
   barge: BargeIn;
   barged: boolean;
   /** When it stopped playing, while its tail is still checked. */
@@ -153,6 +157,13 @@ export class Dictation {
   #deaf = false;
   /** Why the open capture is half-duplex, or null while it listens as the voice plays (`duplexMode`). */
   #halfDuplex: string | null = null;
+  /** Why the open capture listens while the voice plays though it cancels no echo; null otherwise. */
+  #fullDuplex: string | null = null;
+  /** Under `voice.duplex` `auto`, capture that cancels no echo checks whether the voice's playback reaches it. */
+  readonly #echo = new EchoCheck();
+  readonly #auto: AutoDuplex;
+  /** The capture path the echo check last measured: its reason, Remote Desktop and the devices; a change starts the check over. */
+  #echoPath: string | null = null;
   /** The capture mode last logged; undefined before the first open. */
   #loggedDuplex: string | undefined = undefined;
   /** When the room hold ends (epoch milliseconds), while one runs: the voice check heard someone else (`voice.roomHold`). */
@@ -163,7 +174,9 @@ export class Dictation {
   /** The pieces in the operator's voice heard while paused, until the words have been quiet for `voice.endPauseMs`; null with none. */
   #paused: { texts: string[]; checks: Array<{ score: number | null; f0: number | null }>; lastAt: number } | null = null;
 
-  constructor(private readonly deps: DictationDeps) {}
+  constructor(private readonly deps: DictationDeps) {
+    this.#auto = new AutoDuplex(deps.log);
+  }
 
   get state(): MicState {
     if (!this.#micOn) {
@@ -212,6 +225,11 @@ export class Dictation {
     return this.#roomHoldUntil;
   }
 
+  /** Why the open capture listens while the voice plays though it cancels no echo, such as "echo check: none heard"; null otherwise. */
+  get fullDuplex(): string | null {
+    return this.#stream === null ? null : this.#fullDuplex;
+  }
+
   /** Why capture or recognition cannot run; null while they can. */
   get error(): string | null {
     return this.#error;
@@ -249,6 +267,8 @@ export class Dictation {
       this.#idleOff = false;
       this.#error = null;
       this.#otherApp = null;
+      // The headphones may have come off since: the echo check starts over.
+      this.#auto.reset('the mic was turned on');
       this.#watch = this.deps.watchMicUse(
         (busy, apps) => this.#otherAppChanged(busy, apps),
         () => this.#otherAppChanged(false, []),
@@ -302,9 +322,13 @@ export class Dictation {
     this.#contexts.set(sessionId, lastReply);
   }
 
-  /** Audio being played, for echo cancellation. */
+  /** Audio being played, for echo cancellation and the echo check. */
   reference(pcm: Buffer): void {
     this.#stream?.reference(pcm);
+
+    if (this.#checking()) {
+      this.#echo.played(pcm, this.deps.now());
+    }
   }
 
   /** The settings were reloaded: the idle timeout starts again with its new length, and `voice.duplex` applies to the open capture. */
@@ -536,6 +560,7 @@ export class Dictation {
 
     this.#stream = stream;
     this.#deaf = false;
+    this.#echo.restart();
     this.#applyDuplex();
 
     this.#ticker = (this.deps.every ?? every)(() => this.#tick(), TURN_TICK_MS);
@@ -549,9 +574,24 @@ export class Dictation {
    */
   #applyDuplex(): void {
     const stream = this.#stream!;
-    const mode = duplexMode(this.deps.settings().duplex, stream);
+    const settings = this.deps.settings();
+
+    if (this.#enrollment === null && stream.halfDuplex !== null) {
+      const path = JSON.stringify([stream.halfDuplex, stream.remote === true, settings.inputDevice, settings.outputDevice]);
+
+      if (this.#echoPath !== null && path !== this.#echoPath) {
+        this.#auto.reset('the capture or playback device changed');
+      }
+
+      this.#echoPath = path;
+    }
+
+    this.#auto.context(null, stream.remote === true);
+
+    const mode = duplexMode(settings.duplex, stream, this.#auto);
 
     this.#halfDuplex = mode.halfDuplex;
+    this.#fullDuplex = mode.fullDuplex;
 
     if (mode.halfDuplex === null && this.#deaf) {
       this.#deaf = false;
@@ -584,6 +624,10 @@ export class Dictation {
     if (this.#enrollment !== null) {
       this.#enrollment.chunks.push(samples);
       return;
+    }
+
+    if (this.#checking()) {
+      this.#echo.captured(pcm, this.deps.now());
     }
 
     if (this.#halfDuplex !== null && this.#halfDuplexDeaf()) {
@@ -627,6 +671,20 @@ export class Dictation {
     return deaf;
   }
 
+  /** Under `voice.duplex` `auto`, whether the open capture, which cancels no echo, is checked for the voice's echo. */
+  #checking(): boolean {
+    const stream = this.#stream;
+
+    return stream !== null && this.#enrollment === null && stream.halfDuplex !== null && this.deps.settings().duplex[stream.remote === true ? 'remote' : 'local'] === 'auto';
+  }
+
+  /** Words held over the reply playing, on full-duplex capture that cancels no echo: the reply's own words are its echo, and half-duplex returns. */
+  #echoWords(words: string): void {
+    if (this.#checking() && this.#playback !== null && this.#auto.heardWhilePlaying(words, this.#playback.text)) {
+      this.#applyDuplex();
+    }
+  }
+
   /** Words are held back while a reply plays and no utterance is open: until barge-in fires, they may be its echo. */
   #holding(): boolean {
     return this.#playback !== null && !this.#playback.barged && this.#utterance === null;
@@ -640,7 +698,7 @@ export class Dictation {
     if (playing !== null) {
       if (playback?.replyId !== playing.replyId) {
         // A reply played straight after another keeps the words held so far.
-        this.#playback = { replyId: playing.replyId, barge: new BargeIn(this.deps.voiceprint ?? null, playing.text, playing.voice), barged: false, endedAt: null, held: playback?.held ?? '' };
+        this.#playback = { replyId: playing.replyId, text: playing.text, barge: new BargeIn(this.deps.voiceprint ?? null, playing.text, playing.voice), barged: false, endedAt: null, held: playback?.held ?? '' };
       }
 
       return;
@@ -725,6 +783,7 @@ export class Dictation {
 
   #words(text: string): void {
     if (this.#holding()) {
+      this.#echoWords(text);
       return;
     }
 
@@ -769,6 +828,7 @@ export class Dictation {
   #piece(text: string, audio: Float32Array): boolean {
     if (this.#holding()) {
       this.#playback!.held = [this.#playback!.held, text].filter((one) => one !== '').join(' ');
+      this.#echoWords(this.#playback!.held);
       return false;
     }
 
@@ -950,6 +1010,14 @@ export class Dictation {
 
   /** Closes the open utterance once its words have been quiet for the wait the turn model earned, or for the end-of-message pause. */
   #tick(): void {
+    if (this.#checking()) {
+      for (const measure of this.#echo.due(this.deps.now())) {
+        if (this.#auto.measured(measure)) {
+          this.#applyDuplex();
+        }
+      }
+    }
+
     // The voice may have started playing since the last audio came: an utterance open then is cut, never ended as final.
     if (this.#stream !== null && this.#halfDuplex !== null && this.#halfDuplexDeaf()) {
       return;
@@ -1156,22 +1224,33 @@ export class Dictation {
 
 /**
  * Whether capture listens while the voice plays (architecture.md § Dictation): `voice.duplex` for this computer or, when the capture runs in
- * a Remote Desktop session, for Remote Desktop, decides first; `auto` is half-duplex when the capture cancels no echo. `halfDuplex` is why
- * listening pauses, null when it does not; `why` says what decided it, for the voice log.
+ * a Remote Desktop session, for Remote Desktop, decides first. Under `auto`, capture that cancels the echo listens; capture that does not
+ * listens only once the echo check (`auto`) heard no echo. `halfDuplex` is why listening pauses, null when it does not; `fullDuplex` why
+ * capture that cancels no echo listens anyway, else null; `why` says what decided it, for the voice log.
  */
-export function duplexMode(setting: VoiceSettings['duplex'], stream: Pick<CaptureStream, 'halfDuplex' | 'remote'>): { halfDuplex: string | null; why: string } {
+export function duplexMode(
+  setting: VoiceSettings['duplex'],
+  stream: Pick<CaptureStream, 'halfDuplex' | 'remote'>,
+  auto: Pick<AutoDuplex, 'full' | 'reason'>,
+): { halfDuplex: string | null; fullDuplex: string | null; why: string } {
   const where = stream.remote === true ? 'over Remote Desktop' : 'on this computer';
   const mode = setting[stream.remote === true ? 'remote' : 'local'];
 
   if (mode === 'half') {
-    return { halfDuplex: `set to half duplex ${where}`, why: `set to half duplex ${where}` };
+    return { halfDuplex: `set to half duplex ${where}`, fullDuplex: null, why: `set to half duplex ${where}` };
+  }
+
+  if (stream.halfDuplex === null) {
+    return { halfDuplex: null, fullDuplex: null, why: 'echo cancelled' };
   }
 
   if (mode === 'full') {
-    return { halfDuplex: null, why: stream.halfDuplex === null ? 'echo cancelled' : `set to full duplex ${where}; ${stream.halfDuplex}` };
+    return { halfDuplex: null, fullDuplex: `set to full duplex ${where}`, why: `set to full duplex ${where}; ${stream.halfDuplex}` };
   }
 
-  return { halfDuplex: stream.halfDuplex, why: stream.halfDuplex ?? 'echo cancelled' };
+  return auto.full
+    ? { halfDuplex: null, fullDuplex: auto.reason, why: `${auto.reason}; ${stream.halfDuplex}` }
+    : { halfDuplex: `${stream.halfDuplex}; ${auto.reason}`, fullDuplex: null, why: `${stream.halfDuplex}; ${auto.reason}` };
 }
 
 function every(run: () => void, ms: number): { stop(): void } {

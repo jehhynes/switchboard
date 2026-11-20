@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import type { VoiceSettings } from '@switchboard/core/settings';
@@ -135,6 +136,45 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
   };
 
   return { clock, capture, engine, sent, logs, chats, termsAsked, loads, used, watch, settings, dictation, say, quiet, loud, listening, speech, spoke: () => spoke, changed: () => changed };
+}
+
+/** A WAV's PCM from `fixtures/echo`: real captures of a reply played aloud (README.md there). */
+const echoWav = (name: string): Buffer => readFileSync(new URL(`./fixtures/echo/${name}`, import.meta.url)).subarray(44);
+const PLAYED = echoWav('played.wav');
+const PLAYED_TEXT = 'Tests passed and the new build is ready';
+
+/**
+ * Plays `PLAYED` as reply `replyId` from 0.5 s into `captured`, handing the voice's audio over in 20 ms pieces as it plays, while the capture
+ * delivers `captured` in 100 ms chunks, as the saved captures were recorded; then 0.4 s of silence, so the echo check has measured. `during`
+ * runs at each chunk while the reply plays.
+ */
+function playOver(t: ReturnType<typeof setup>, captured: Buffer, replyId: string, during?: () => void): void {
+  const start = t.clock.t;
+  let played = 0;
+
+  for (let at = 0; at < captured.length + 4 * 3_200; at += 3_200) {
+    for (let step = 0; step < 5; step++) {
+      if (t.clock.t - start >= 500 && played < PLAYED.length) {
+        t.speech.playing = { replyId, text: PLAYED_TEXT, voice: 'marin' };
+        t.speech.until = Infinity;
+        t.dictation.reference(PLAYED.subarray(played, played + 960));
+        played += 960;
+
+        if (played >= PLAYED.length) {
+          t.speech.playing = null;
+          t.speech.until = t.clock.t + 20;
+        }
+      }
+
+      t.clock.advance(20);
+    }
+
+    if (t.speech.playing !== null) {
+      during?.();
+    }
+
+    t.capture.stream!.onPcm(at < captured.length ? captured.subarray(at, at + 3_200) : Buffer.alloc(3_200));
+  }
 }
 
 const kinds = (sent: Sent[]): string[] =>
@@ -575,8 +615,8 @@ describe('Dictation', () => {
 
     capture.halfDuplex = 'no echo cancellation on Remote Audio';
     await listening();
-    expect(dictation.halfDuplex).toBe('no echo cancellation on Remote Audio');
-    expect(logs).toContain('listening: half-duplex (no echo cancellation on Remote Audio)');
+    expect(dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: not measured yet');
+    expect(logs).toContain('listening: half-duplex (no echo cancellation on Remote Audio; echo check: not measured yet)');
     speech.playing = { replyId: 'r1', text: 'The session token is refreshed in two places.', voice: 'marin' };
     speech.until = Infinity;
     loud('hold on wait', 2_000);
@@ -611,7 +651,7 @@ describe('Dictation', () => {
     dictation.typing(false);
     await settle();
     expect(dictation.halfDuplex).toBeNull();
-    expect(logs.filter((line) => line.startsWith('listening: '))).toEqual(['listening: half-duplex (no echo cancellation on Remote Audio)', 'listening: full duplex (echo cancelled)']);
+    expect(logs.filter((line) => line.startsWith('listening: '))).toEqual(['listening: half-duplex (no echo cancellation on Remote Audio; echo check: not measured yet)', 'listening: full duplex (echo cancelled)']);
   });
 
   it('on half-duplex capture cuts the utterance open when the voice starts playing, keeping its words unsent, and follows voice.halfDuplexTailMs', async () => {
@@ -701,14 +741,90 @@ describe('Dictation', () => {
     dictation.typing(true);
     dictation.typing(false);
     await settle();
-    expect(dictation.halfDuplex).toBe('no echo cancellation on Remote Audio');
+    expect(dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: not measured yet');
     settings.duplex = { local: 'half', remote: 'full' };
     capture.halfDuplex = null;
     dictation.typing(true);
     dictation.typing(false);
     await settle();
     expect(dictation.halfDuplex).toBe('set to half duplex on this computer');
-    expect(logs.filter((line) => line.startsWith('listening: ')).slice(-2)).toEqual(['listening: half-duplex (no echo cancellation on Remote Audio)', 'listening: half-duplex (set to half duplex on this computer)']);
+    expect(logs.filter((line) => line.startsWith('listening: ')).slice(-2)).toEqual(['listening: half-duplex (no echo cancellation on Remote Audio; echo check: not measured yet)', 'listening: half-duplex (set to half duplex on this computer)']);
+  });
+
+  it('under auto, stays half-duplex on capture with no echo cancellation while the echo check hears the speakers', async () => {
+    const t = setup();
+
+    t.capture.halfDuplex = 'no echo cancellation on Remote Audio';
+    t.capture.remote = true;
+    await t.listening();
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: not measured yet');
+    expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Remote Audio; echo check: not measured yet)');
+    playOver(t, echoWav('echo-remote.wav'), 'r1');
+
+    const measured = t.logs.find((line) => line.startsWith('echo check: '));
+
+    expect(measured).toMatch(/^echo check: echo \(r 0\.\d+ at \d+ ms, level -\d+(\.\d)? dBFS, range \d+(\.\d)? dB, 1\.\d s played; hint: none over Remote Desktop, whose Remote Audio says nothing of headphones\)$/);
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: echo heard');
+    expect(t.dictation.fullDuplex).toBeNull();
+    expect(t.sent).toEqual([]);
+  });
+
+  it('under auto, listens while the voice plays once two echo checks in a row hear none, and is half-duplex again at the reply\'s own words', async () => {
+    const t = setup();
+
+    t.capture.halfDuplex = 'no echo cancellation on Microphone';
+    await t.listening();
+    playOver(t, echoWav('quiet.wav'), 'r1');
+    expect(t.logs.filter((line) => line.startsWith('echo check: '))).toEqual([expect.stringMatching(/^echo check: none \(r .*; hint: none; 1 of 2 in a row\)$/)]);
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: not measured yet');
+    playOver(t, echoWav('quiet.wav'), 'r2');
+    expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/2 of 2 in a row\)$/);
+    expect(t.logs.at(-1)).toBe('listening: full duplex (echo check: none heard; no echo cancellation on Microphone)');
+    expect([t.dictation.halfDuplex, t.dictation.fullDuplex]).toEqual([null, 'echo check: none heard']);
+
+    // Full duplex: a reply plays and its own words are heard over it, as when the headphones come off; half-duplex at once.
+    playOver(t, echoWav('quiet.wav'), 'r3', () => (t.engine.text = 'tests passed and the new'));
+    expect(t.logs).toContain('echo check: 5 of 5 words heard over the reply are its own (tests passed and the new): half-duplex again');
+    expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Microphone; echo check: echo heard)');
+    expect(t.sent.filter((one) => one.type === 'utterance' && one.final)).toEqual([]);
+  });
+
+  it('under auto, is half-duplex again when a check in full duplex hears echo, and starts over when the mic is turned on again', async () => {
+    const t = setup();
+
+    t.capture.halfDuplex = 'no echo cancellation on Microphone';
+    await t.listening();
+    playOver(t, echoWav('quiet.wav'), 'r1');
+    playOver(t, echoWav('quiet.wav'), 'r2');
+    expect(t.dictation.fullDuplex).toBe('echo check: none heard');
+    playOver(t, echoWav('echo-local.wav'), 'r3');
+    expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/^echo check: echo \(.*\): half-duplex again$/);
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: echo heard');
+
+    t.dictation.mic(false);
+    t.dictation.mic(true);
+    t.watch.changed?.(false, []);
+    await settle();
+    expect(t.logs).toContain('echo check starts over: the mic was turned on');
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: not measured yet');
+
+    // Another capture device starts it over too.
+    playOver(t, echoWav('quiet.wav'), 'r4');
+    t.settings.inputDevice = 'Headset';
+    t.dictation.settingsChanged();
+    expect(t.logs.at(-1)).toBe('echo check starts over: the capture or playback device changed');
+  });
+
+  it('runs no echo check when voice.duplex is set, or on capture that cancels the echo', async () => {
+    for (const [halfDuplex, duplex] of [['no echo cancellation on Microphone', { local: 'half', remote: 'auto' }], ['no echo cancellation on Microphone', { local: 'full', remote: 'auto' }], [null, { local: 'auto', remote: 'auto' }]] as const) {
+      const t = setup({ settings: { duplex } });
+
+      t.capture.halfDuplex = halfDuplex;
+      await t.listening();
+      playOver(t, echoWav('quiet.wav'), 'r1');
+      playOver(t, echoWav('quiet.wav'), 'r2');
+      expect(t.logs.filter((line) => line.startsWith('echo check'))).toEqual([]);
+    }
   });
 
   it('checks the words an early end was judged on before closing, and judges again without them when they fail', async () => {

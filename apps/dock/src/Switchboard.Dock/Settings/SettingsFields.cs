@@ -393,7 +393,7 @@ public static partial class SettingsFields
     /// <summary>The choices of <c>voice.duplex.local</c> and <c>voice.duplex.remote</c>, as core's <c>DUPLEX_MODES</c> lists them.</summary>
     static readonly IReadOnlyList<FieldOption> DuplexModes = [new FieldOption("auto", "Auto"), new FieldOption("full", "Full duplex"), new FieldOption("half", "Half duplex")];
 
-    const string DuplexInfo = "Whether the mic listens while the voice speaks. Auto listens when capture cancels the echo and otherwise pauses while a reply plays. Full duplex always listens, so talking over a reply stops it; choose it with headphones. Half duplex always pauses.";
+    const string DuplexInfo = "Whether the mic listens while the voice speaks. Auto listens when capture cancels the echo; otherwise it pauses while a reply plays until it measures that replies do not reach the mic, as with headphones. Full duplex always listens, so talking over a reply stops it; choose it with headphones. Half duplex always pauses.";
 
     static string Capitalized(string text) => text == "" ? text : char.ToUpperInvariant(text[0]) + text[1..];
 

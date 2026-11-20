@@ -12,7 +12,9 @@ export const ECHO_R = 0.5;
 const QUIET_DB = -60;
 const STEADY_DB = 6;
 /** A measurement needs at least this much of the reply's audio playing. */
-const MIN_ACTIVE_FRAMES = 100;
+export const MIN_ACTIVE_FRAMES = 100;
+/** A long playback is measured in stretches of at most this long, so talk in one part leaves the others measurable. */
+export const ECHO_STRETCH_MS = 6_000;
 /** Envelopes older than this are dropped. */
 const KEEP_MS = 30_000;
 /** The played audio's rate, 24 kHz 16-bit mono, and the capture's, 16 kHz. */
@@ -54,6 +56,8 @@ export class EchoCheck {
   #anchors: number[] = [];
   /** The capture covers the clock from here, since it opened. */
   #captureFrom = Infinity;
+  /** Stretches of playback not measured yet. */
+  #stretches: Array<{ from: number; to: number }> = [];
 
   /** The capture opened again: its sample count starts over. */
   restart(): void {
@@ -86,10 +90,39 @@ export class EchoCheck {
   /** Audio played, 24 kHz 16-bit mono, handed over at `atMs` as it starts to play. */
   played(pcm: Buffer, atMs: number): void {
     const startMs = this.#playCursor < atMs - 2 * ECHO_FRAME_MS ? atMs : this.#playCursor;
+    const endMs = startMs + pcm.length / 2 / PLAY_RATE;
+    const last = this.#stretches.at(-1);
 
-    this.#playCursor = startMs + pcm.length / 2 / PLAY_RATE;
+    if (last === undefined || last.to < startMs) {
+      this.#stretches.push({ from: startMs, to: endMs });
+    } else if (last.to - last.from >= ECHO_STRETCH_MS) {
+      this.#stretches.push({ from: last.to, to: endMs });
+    } else {
+      last.to = endMs;
+    }
+
+    this.#playCursor = endMs;
     add(this.#played, pcmToSamples(pcm), startMs, PLAY_RATE);
     this.#prune(atMs);
+  }
+
+  /**
+   * Measures each stretch of playback whose echo the capture has had time to cover by `nowMs`; a stretch the capture did not cover, as
+   * while it was closed, is dropped unmeasured.
+   */
+  due(nowMs: number): EchoMeasure[] {
+    const measures: EchoMeasure[] = [];
+
+    while (this.#stretches.length > 0 && this.readyAt(this.#stretches[0]!.to) <= nowMs) {
+      const stretch = this.#stretches.shift()!;
+      const measure = this.measure(stretch.from, stretch.to);
+
+      if (measure !== null) {
+        measures.push(measure);
+      }
+    }
+
+    return measures;
   }
 
   /** When the capture will have covered audio played until `toMs` with its echo: the time to measure it. */
