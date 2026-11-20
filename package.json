@@ -10,7 +10,6 @@
     "packages/core",
     "packages/github",
     "packages/zoho",
-    "packages/forum",
     "packages/holder",
     "packages/conversation",
     "packages/protocol",
