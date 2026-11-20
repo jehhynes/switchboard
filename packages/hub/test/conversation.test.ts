@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -561,5 +561,90 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot follow this session while sessions.installHooks is off.', rules: 'none' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
+  });
+});
+
+describe('ConversationService artifacts', () => {
+  /** World 2 and 3 as in `world`, with their sessions in this test's folder, so their artifact folders are real. */
+  function setup() {
+    const w12 = join(dir, 'w12');
+    const w3 = join(dir, 'w3');
+    const done = item(1, { status: 'done', worktree: worktree(w12), sessions: [session({ id: 's1', workItemId: 1, cwd: w12, state: 'ended' })] });
+    const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree(w12), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: w12, codeMode: true, nativeSessionId: 'n2', rulesVersion: CONVERSATION_RULES_VERSION })] });
+    const other = item(3, { worktree: worktree(w3), sessions: [session({ id: 's3', workItemId: 3, cwd: w3, codeMode: true, nativeSessionId: 'n3', rulesVersion: CONVERSATION_RULES_VERSION })] });
+    const view = { done, current, other, file: windowOf(current, WINDOWS)!.file, otherFile: windowOf(other, WINDOWS)!.file, view: snapshot([done, current, other]) };
+    const store = Store.open(':memory:');
+    let keys = 0;
+    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    const held = new FakeHeld();
+    const service = new ConversationService({ store, windows: scopes, projectsDir: join(dir, 'projects'), claudeConfig: join(dir, '.claude.json'), screen: async (one) => held.screen(one), input: held, hooks: () => true, now: () => NOW, newId: () => 'id', log: () => {} });
+
+    stored(store, view);
+
+    const open = (file: string | null) => {
+      const key = scopes.open(file, view.view);
+      const frames: Array<{ type: string; [field: string]: unknown }> = [];
+      const stream = service.open(key, (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }))!;
+
+      return { key, frames, stream };
+    };
+    const put = (cwd: string, workItemId: number, name: string, text: string, mtime: number) => {
+      const path = join(cwd, '.wip', 'artifacts', `w${workItemId}`, ...name.split('/'));
+
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, text);
+      utimesSync(path, mtime / 1000, mtime / 1000);
+
+      return path;
+    };
+
+    return { w12, w3, view, service, open, put, scopes };
+  }
+
+  it("lists the window's work item's artifacts in hello, sends its changes to its windows only, and stops watching when its last stream closes", async () => {
+    const { w12, w3, view, service, open, put } = setup();
+
+    put(w12, 2, 'chat/plan.md', '---\nkind: plan\ntitle: The plan\n---\n', 2_000_000);
+    // The earlier work item of the same worktree, and another work item, have their own folders.
+    put(w12, 1, 'chat/old.md', '# Old', 2_000_000);
+    put(w3, 3, 'chat/other.md', '# Other', 2_000_000);
+
+    const mine = open(view.file);
+    const other = open(view.otherFile);
+    const folder = open(null);
+
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', artifactsDir: join(w12, '.wip', 'artifacts', 'w2'), artifacts: [{ path: 'chat/plan.md', owner: 'chat', kind: 'plan', title: 'The plan', ext: 'md', type: 'markdown', updatedAt: 2_000_000 }] });
+    expect(other.frames[0]).toMatchObject({ type: 'hello', artifactsDir: join(w3, '.wip', 'artifacts', 'w3'), artifacts: [{ path: 'chat/other.md' }] });
+    expect(folder.frames[0]).toMatchObject({ type: 'hello', scope: null, artifactsDir: null, artifacts: [] });
+
+    put(w12, 2, 'chat/comparison-engines.md', '# Engines', 3_000_000);
+    await vi.waitFor(() => expect(mine.frames.filter((frame) => frame.type === 'artifact')).toEqual([expect.objectContaining({ artifact: expect.objectContaining({ path: 'chat/comparison-engines.md', title: 'Engines', updatedAt: 3_000_000 }) })]));
+    rmSync(join(w12, '.wip', 'artifacts', 'w2', 'chat', 'plan.md'));
+    await vi.waitFor(() => expect(mine.frames.at(-1)).toMatchObject({ type: 'artifact', artifact: { path: 'chat/plan.md' }, removed: true }));
+    expect(other.frames.filter((frame) => frame.type === 'artifact')).toEqual([]);
+    expect(folder.frames.filter((frame) => frame.type === 'artifact')).toEqual([]);
+
+    mine.stream.close();
+    expect(service.watching()).toEqual([3]);
+    put(w12, 2, 'chat/late.md', '# Late', 4_000_000);
+    await new Promise((done) => setTimeout(done, 400));
+    expect(mine.frames.filter((frame) => frame.type === 'artifact')).toHaveLength(2);
+
+    // A window that opens again lists what the folder holds now.
+    expect(open(view.file).frames[0]).toMatchObject({ artifacts: [{ path: 'chat/late.md' }, { path: 'chat/comparison-engines.md' }] });
+    expect(service.watching().sort()).toEqual([2, 3]);
+    service.stop();
+    expect(service.watching()).toEqual([]);
+  });
+
+  it("stops watching a work item's folder when its window's key closes, even while its conversation stream stays open", () => {
+    const { view, service, open, scopes } = setup();
+    const mine = open(view.file);
+
+    expect(service.watching()).toEqual([2]);
+    scopes.close(mine.key);
+    service.windowClosed();
+    expect(service.watching()).toEqual([]);
+    service.stop();
   });
 });

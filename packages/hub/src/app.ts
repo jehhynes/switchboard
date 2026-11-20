@@ -682,7 +682,10 @@ const dockWithRuns = () => {
     },
     snapshot: () => runtime.snapshot(),
     windowOpened: (workspace) => scopes.open(workspace, builder.latest()?.snapshot ?? null),
-    windowClosed: (key) => scopes.close(key),
+    windowClosed: (key) => {
+      scopes.close(key);
+      conversation.windowClosed();
+    },
     windowState: (key) => scopes.scoped(key, views().snapshot),
     conversation: (key, write) => conversation.open(key, write),
     dock: () => dockWithRuns(),

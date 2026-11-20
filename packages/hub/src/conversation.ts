@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
-import { CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
+import { artifactsDir, CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
-import { MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
-import type { ConversationChange, InputOutcome } from '@switchboard/conversation';
+import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
+import type { Artifact, ConversationChange, InputOutcome } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import type { WindowScope, WindowScopes } from './windows.js';
 
@@ -52,6 +52,9 @@ export interface StatusView {
   markdown: string;
   fallback: boolean;
 }
+
+/** An artifact of the window's work item (architecture.md § Artifacts); `path` is `<owner>/<file>` in the window's `artifactsDir`. */
+export type ArtifactView = Artifact;
 
 export function statusView(status: ConversationStatus): StatusView {
   return { id: status.id, sessionId: status.sessionId, at: status.at, markdown: status.markdown, fallback: false };
@@ -149,6 +152,8 @@ export class ConversationService {
   readonly #readers = new Map<string, Reader>();
   readonly #inputs = new Map<string, SessionInput>();
   readonly #streams = new Map<string, Set<Send>>();
+  /** The artifact folder each shown work item's windows follow, by work item. */
+  readonly #artifacts = new Map<number, ArtifactFolder>();
   #timer: NodeJS.Timeout | null = null;
   #polling = false;
   #seq = 0;
@@ -173,6 +178,12 @@ export class ConversationService {
       clearInterval(this.#timer);
       this.#timer = null;
     }
+
+    for (const folder of this.#artifacts.values()) {
+      folder.close();
+    }
+
+    this.#artifacts.clear();
   }
 
   /** One read of every live Code Mode session; a read still running skips the next. */
@@ -330,6 +341,7 @@ export class ConversationService {
         if (streams.size === 0) {
           this.#streams.delete(key);
           this.#statusShown.delete(key);
+          this.#followArtifacts();
         }
       },
     };
@@ -341,7 +353,7 @@ export class ConversationService {
 
     if (scope === null) {
       this.#statusShown.delete(key);
-      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null };
+      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, artifactsDir: null, artifacts: [] };
     }
 
     const current = scope.sessionId === null ? null : this.deps.store.session(scope.sessionId);
@@ -360,6 +372,8 @@ export class ConversationService {
 
     this.#statusShown.set(key, JSON.stringify(status));
 
+    const folder = this.#artifactFolder(scope, key);
+
     return {
       protocol: CONVERSATION_PROTOCOL,
       scope,
@@ -367,7 +381,67 @@ export class ConversationService {
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
       status,
+      artifactsDir: folder?.dir ?? null,
+      artifacts: folder?.list() ?? [],
     };
+  }
+
+  /**
+   * The artifact folder of a window's work item (architecture.md § Artifacts), in the folder of its current session, or of its worktree before
+   * the first: watched while a window that shows the work item has a stream, `key` included, which may be opening.
+   */
+  #artifactFolder(scope: WindowScope, key?: string): ArtifactFolder | null {
+    this.#followArtifacts(key);
+
+    return this.#artifacts.get(scope.workItemId) ?? null;
+  }
+
+  /** Watches the artifact folder of each work item a window with a stream shows, and stops watching the others. */
+  #followArtifacts(opening?: string): void {
+    const wanted = new Map<number, string>();
+
+    for (const key of new Set([...this.#streams.keys(), ...(opening === undefined ? [] : [opening])])) {
+      const scope = this.deps.windows.scope(key);
+
+      if (scope?.cwd != null) {
+        wanted.set(scope.workItemId, artifactsDir(scope.cwd, scope.workItemId));
+      }
+    }
+
+    for (const [workItemId, folder] of this.#artifacts) {
+      if (wanted.get(workItemId) !== folder.dir) {
+        folder.close();
+        this.#artifacts.delete(workItemId);
+      }
+    }
+
+    for (const [workItemId, dir] of wanted) {
+      if (!this.#artifacts.has(workItemId)) {
+        this.#artifacts.set(
+          workItemId,
+          new ArtifactFolder(dir, {
+            onChange: (change) => this.#artifactChanged(workItemId, dir, change),
+            now: this.deps.now,
+            log: (line) => this.deps.log(`work item ${workItemId}: ${line}`),
+          }),
+        );
+      }
+    }
+  }
+
+  /** Sends an artifact's change to the windows that show its work item and follow that folder. */
+  #artifactChanged(workItemId: number, dir: string, change: { artifact: Artifact } | { path: string; removed: true }): void {
+    if (this.#artifacts.get(workItemId)?.dir !== dir) {
+      return;
+    }
+
+    for (const key of this.#streams.keys()) {
+      const scope = this.deps.windows.scope(key);
+
+      if (scope?.workItemId === workItemId && scope.cwd !== null && artifactsDir(scope.cwd, workItemId) === dir) {
+        this.#send(key, 'artifact', 'artifact' in change ? { artifact: change.artifact } : { artifact: { path: change.path }, removed: true });
+      }
+    }
   }
 
   /**
@@ -412,11 +486,25 @@ export class ConversationService {
     }
   }
 
+  /** A window's key closed with its `/events` stream: a conversation stream still open under it no longer counts for watching artifacts. */
+  windowClosed(): void {
+    this.#followArtifacts();
+  }
+
+  /** The work items whose artifact folders are watched, for tests. */
+  watching(): number[] {
+    return [...this.#artifacts.keys()];
+  }
+
   /** Tells each window whose work item or current session changed, which then starts from empty with a fresh `hello`. */
   scopesChanged(keys: string[]): void {
     for (const key of keys) {
       this.#send(key, 'scope', { scope: this.deps.windows.scope(key) });
       this.#send(key, 'hello', this.hello(key));
+    }
+
+    if (keys.length > 0) {
+      this.#followArtifacts();
     }
   }
 
