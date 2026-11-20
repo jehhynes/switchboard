@@ -1306,80 +1306,113 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    /// <summary>The row's hub controls, Snooze… opening its dialog, then Open ticket (PRD R71).</summary>
+    /// <summary>The state controls, which change what the work item waits for rather than run its work (PRD R71).</summary>
+    static readonly HashSet<string> StateActions = ["mark-done", "reopen", "snooze", "restore"];
+
+    /// <summary>The order controls of a Ready for review row (PRD R73).</summary>
+    static readonly HashSet<string> OrderActions = ["move", "reset-position"];
+
+    /// <summary>
+    /// The row's menu (PRD R71), in groups with a separator between them: the row's main action; its work (Start, Approve, Retry, Stop and the
+    /// other hub controls); its state (Mark done or Reopen, Snooze… or Restore); its notes (Add comment…, Persona); its order in Ready for review;
+    /// what it opens (Copy, Open in terminal, the window commands, Open ticket and its links); and Delete, or any control that asks first, last.
+    /// </summary>
     internal List<Control> MenuOf(DockRow row)
     {
-        List<Control> items = [];
+        List<Control> main = [];
+        List<Control> work = [];
+        List<Control> state = [];
+        List<Control> notes = [];
+        List<Control> order = [];
+        List<Control> opens = [];
+        List<Control> asking = [];
+        DockControl? mainControl = null;
+        var terminalIsMain = false;
 
         // Open in Claude or Codex, or Answer in terminal, is the click itself on a row whose session waits on a question (PRD R70, R71).
         if (MainIsClick(row) && model.Row(row.Key) is { } shown)
         {
-            items.Add(Item(row.Main ?? "Open", () => Open(shown), row.MainGlyph));
+            main.Add(Item(row.Main ?? "Open", () => Open(shown), row.MainGlyph));
+        }
+        else if (row.Controls.FirstOrDefault((control) => control.Label == row.Main && control.Confirm is null && control.Group is null) is { } control)
+        {
+            mainControl = control;
+            main.Add(ControlItem(row, control));
+        }
+        // A prompt before start's Open in terminal (PRD R41).
+        else if (row.Main == "Open in terminal" && (row.Terminal is not null || row.Commands.Any(Switcher.IsTerminal)))
+        {
+            terminalIsMain = true;
+            main.Add(Item("Open in terminal", () => OpenInTerminal(row), TerminalGlyph));
         }
 
-        foreach (var control in row.Controls.Where((control) => control.Confirm is null && control.Group is null))
+        foreach (var control in row.Controls.Where((control) => control.Confirm is null && control.Group is null && control != mainControl))
         {
-            items.Add(Item(control.Label, control.Action["type"]?.GetValue<string>() == "snooze" ? () => Snooze(row, control) : () => Act(control), control.Glyph));
+            var type = control.Action["type"]?.GetValue<string>() ?? "";
+
+            (StateActions.Contains(type) ? state : OrderActions.Contains(type) ? order : type == "comment" ? notes : work).Add(ControlItem(row, control));
         }
 
         // Controls that share a group, such as Persona, are its submenu, the checked ones marked (architecture.md § Personas).
         foreach (var group in row.Controls.Where((control) => control.Confirm is null && control.Group is not null).GroupBy((control) => control.Group!))
         {
-            items.Add(new MenuItem { Header = group.Key, ItemsSource = group.Select((control) => Checked(control.Label, control.Checked, () => Act(control))).ToList() });
+            notes.Add(new MenuItem { Header = group.Key, ItemsSource = group.Select((control) => Checked(control.Label, control.Checked, () => Act(control))).ToList() });
         }
 
         if (row.Pastes.Count == 1)
         {
-            items.Add(Item($"Copy {row.Pastes[0].Label}", () => Copy(row.Pastes[0]), CopyGlyph));
+            opens.Add(Item($"Copy {row.Pastes[0].Label}", () => Copy(row.Pastes[0]), CopyGlyph));
         }
         else if (row.Pastes.Count > 1)
         {
-            items.Add(new MenuItem { Header = "Copy", Icon = Glyph(CopyGlyph), ItemsSource = row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() });
+            opens.Add(new MenuItem { Header = "Copy", Icon = Glyph(CopyGlyph), ItemsSource = row.Pastes.Select((paste) => Item(paste.Label, () => Copy(paste))).ToList() });
         }
 
         // One Open in terminal, which picks the item window or the terminal app when the row offers both (PRD R28).
-        if (row.Terminal is not null && !row.Commands.Any(Switcher.IsTerminal))
+        if (row.Terminal is not null && !terminalIsMain && !row.Commands.Any(Switcher.IsTerminal))
         {
-            items.Add(Item("Open in terminal", () => OpenInTerminal(row), TerminalGlyph));
+            opens.Add(Item("Open in terminal", () => OpenInTerminal(row), TerminalGlyph));
         }
 
-        foreach (var command in row.Commands)
+        foreach (var command in row.Commands.Where((command) => !(terminalIsMain && Switcher.IsTerminal(command))))
         {
-            items.Add(Switcher.IsTerminal(command) ? Item(command.Label, () => OpenInTerminal(row), command.Glyph) : Item(command.Label, () => Run(row, command.Command), command.Glyph));
-        }
-
-        // Controls that ask first, such as Delete, come last, apart from the rest.
-        var asking = row.Controls.Where((control) => control.Confirm is not null).ToList();
-
-        if (asking.Count > 0 && items.Count > 0)
-        {
-            items.Add(new Separator());
-        }
-
-        foreach (var control in asking)
-        {
-            items.Add(Item(control.Label, () => Act(control), control.Glyph));
+            opens.Add(Switcher.IsTerminal(command) ? Item(command.Label, () => OpenInTerminal(row), command.Glyph) : Item(command.Label, () => Run(row, command.Command), command.Glyph));
         }
 
         // The ticket, then its links, such as its pull request (PRD R52), open in the browser.
-        var opens = (row.Url == "" ? [] : new[] { ("Open ticket", row.Url) }).Concat(row.Links.Select((link) => ($"Open {link.Label}", link.Url))).ToList();
-
-        if (opens.Count > 0 && items.Count > 0)
+        foreach (var (label, url) in (row.Url == "" ? [] : new[] { ("Open ticket", row.Url) }).Concat(row.Links.Select((link) => ($"Open {link.Label}", link.Url))))
         {
-            items.Add(new Separator());
-        }
-
-        foreach (var (label, url) in opens)
-        {
-            items.Add(Item(label, () =>
+            opens.Add(Item(label, () =>
             {
                 model.Status = actions.OpenUrl(url);
                 return Task.CompletedTask;
             }, LinkGlyph));
         }
 
+        // Controls that ask first, such as Delete, come last, apart from the rest.
+        foreach (var control in row.Controls.Where((control) => control.Confirm is not null))
+        {
+            asking.Add(Item(control.Label, () => Act(control), control.Glyph));
+        }
+
+        List<Control> items = [];
+
+        foreach (var group in new[] { main, work, state, notes, order, opens, asking }.Where((group) => group.Count > 0))
+        {
+            if (items.Count > 0)
+            {
+                items.Add(new Separator());
+            }
+
+            items.AddRange(group);
+        }
+
         return items;
     }
+
+    /// <summary>A hub control's item: Snooze… opens its dialog; any other posts its action, asking for its text first when it has an input.</summary>
+    MenuItem ControlItem(DockRow row, DockControl control) =>
+        Item(control.Label, control.Action["type"]?.GetValue<string>() == "snooze" ? () => Snooze(row, control) : () => Act(control), control.Glyph);
 
     // Codicons the dock draws itself: copy, link-external, add, settings-gear and output.
     const string CopyGlyph = "\uEBCC";

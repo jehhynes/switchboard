@@ -17,6 +17,8 @@ namespace Switchboard.Dock.Tests;
 
 public sealed class MainWindowTests
 {
+    static MenuItem Entry(IEnumerable<Control> menu, string header) => menu.OfType<MenuItem>().Single((item) => (string?)item.Header == header);
+
     readonly FakeHub hub = new();
     readonly FakeActions actions = new();
     readonly List<string> saved = [];
@@ -1006,11 +1008,10 @@ public sealed class MainWindowTests
         var menu = window.MenuOf(Fixtures.Row("item:7"));
 
         Assert.Equal(
-            ["Mark done", "Snooze…", "Add comment…", "Move to top", "Move up", "Move down", "Open Changes", "Open in terminal", "History", "", "Delete", "", "Open ticket", "Open PR #19002", "Open gh 20087"],
+            ["Mark done", "Snooze…", "", "Add comment…", "", "Move to top", "Move up", "Move down", "", "Open Changes", "Open in terminal", "History", "Open ticket", "Open PR #19002", "Open gh 20087", "", "Delete"],
             menu.Select((item) => item is MenuItem named ? (string)named.Header! : ""));
-        Assert.IsType<Separator>(menu[9]);
-        Assert.IsType<Separator>(menu[11]);
-        Assert.Null(((MenuItem)menu[1]).ItemsSource);
+        Assert.All(menu.Where((item) => item is not MenuItem), (item) => Assert.IsType<Separator>(item));
+        Assert.Null(Entry(menu, "Snooze…").ItemsSource);
     }
 
     [AvaloniaFact]
@@ -1042,10 +1043,10 @@ public sealed class MainWindowTests
         var menu = window.MenuOf(Fixtures.Row("item:7"));
 
         hub.ActReplies.Enqueue(null);
-        ((MenuItem)menu[0]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Entry(menu, "Mark done").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         actions.UrlReply = "The browser did not open it.";
-        ((MenuItem)menu[12]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        ((MenuItem)menu[13]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Entry(menu, "Open ticket").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Entry(menu, "Open PR #19002").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(["act {\"type\":\"mark-done\",\"workItemId\":7}"], hub.Calls);
@@ -1053,9 +1054,9 @@ public sealed class MainWindowTests
         Assert.Equal(["https://github.com/o/r/issues/107", "https://github.com/o/r/pull/19002"], actions.Urls);
 
         actions.RunReply = "Open a VS Code window first; this runs in VS Code.";
-        ((MenuItem)menu[7]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Entry(menu, "Open in terminal").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
-        ((MenuItem)menu[8]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Entry(menu, "History").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
 
         // Open in terminal leaves the item window or terminal app to the switcher (PRD R28).
@@ -1078,8 +1079,9 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var menu = window.MenuOf(Fixtures.Row("item:7") with { Url = "" });
 
-        Assert.IsType<Separator>(menu[11]);
-        Assert.Equal(["Open PR #19002", "Open gh 20087"], menu.Skip(12).Select((item) => ((MenuItem)item).Header));
+        var history = menu.IndexOf(Entry(menu, "History"));
+
+        Assert.Equal(["Open PR #19002", "Open gh 20087"], menu.Skip(history + 1).Take(2).Select((item) => ((MenuItem)item).Header));
     }
 
     [AvaloniaFact]
@@ -1096,7 +1098,7 @@ public sealed class MainWindowTests
     public void Delete_Clicked_AsksInADialogAndPostsOnlyAfterDelete()
     {
         var (window, _) = Open();
-        var delete = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[10];
+        var delete = Entry(window.MenuOf(Fixtures.Row("item:7")), "Delete");
         Button DialogButton(string name) => Assert.Single(window.OwnedWindows).GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
 
         delete.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
@@ -1127,12 +1129,12 @@ public sealed class MainWindowTests
         var (window, _) = Open();
         var row = Fixtures.Row("item:9");
         var menu = window.MenuOf(row);
-        var guided = (MenuItem)menu[1];
+        var guided = Entry(menu, "Start with guidance…");
         Window Dialog() => Assert.Single(window.OwnedWindows);
         Button DialogButton(string name) => Dialog().GetVisualDescendants().OfType<Button>().Single((button) => button.Name == name);
         TextBox Text() => Dialog().GetVisualDescendants().OfType<TextBox>().Single((box) => box.Name == "InputText");
 
-        Assert.Equal(["Start", "Start with guidance…"], menu.Take(2).Select((item) => ((MenuItem)item).Header));
+        Assert.Equal(["Start", "Start with guidance…"], menu.OfType<MenuItem>().Take(2).Select((item) => item.Header));
 
         guided.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         Dispatcher.UIThread.RunJobs();
@@ -1195,7 +1197,7 @@ public sealed class MainWindowTests
     public void StartWithGuidance_PlaybookChosen_EnablesStartWithoutTextAndPostsThePlaybook()
     {
         var (window, _) = Open();
-        var guided = (MenuItem)window.MenuOf(Fixtures.Row("item:9"))[1];
+        var guided = Entry(window.MenuOf(Fixtures.Row("item:9")), "Start with guidance…");
         Window Dialog() => Assert.Single(window.OwnedWindows);
         Button Go() => Dialog().GetVisualDescendants().OfType<Button>().Single((button) => button.Name == "InputAction");
         ComboBox Choice() => Dialog().GetVisualDescendants().OfType<ComboBox>().Single((box) => box.Name == "InputChoice");
@@ -1309,7 +1311,7 @@ public sealed class MainWindowTests
     public void AddComment_Clicked_AsksForTextAndPostsItAsTheCommentText()
     {
         var (window, _) = Open();
-        var add = (MenuItem)window.MenuOf(Fixtures.Row("item:7"))[2];
+        var add = Entry(window.MenuOf(Fixtures.Row("item:7")), "Add comment…");
         Window Dialog() => Assert.Single(window.OwnedWindows);
 
         hub.ActReplies.Enqueue(null);

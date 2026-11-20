@@ -1072,11 +1072,11 @@ public sealed class ControlsTests
         var (window, _) = Open();
         var headers = (DockRow row) => window.MenuOf(row).Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList();
 
-        Assert.Equal(["Open in Claude", "Stop", "Mark done", "Snooze…", "Add comment…", "Open in terminal", "History", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:8")));
-        Assert.Equal(["Approve", "Mark done", "Snooze…", "Add comment…", "Move to top", "Move up", "Copy Customer reply", "Open in terminal", "History", "Open report", "", "Delete", "", "Open ticket"], headers(Fixtures.Row("item:10")));
+        Assert.Equal(["Open in Claude", "", "Stop", "", "Mark done", "Snooze…", "", "Add comment…", "", "Open in terminal", "History", "Open ticket", "", "Delete"], headers(Fixtures.Row("item:8")));
+        Assert.Equal(["Approve", "", "Mark done", "Snooze…", "", "Add comment…", "", "Move to top", "Move up", "", "Copy Customer reply", "Open in terminal", "History", "Open report", "Open ticket", "", "Delete"], headers(Fixtures.Row("item:10")));
 
         var two = Fixtures.Row("item:10") with { Pastes = [new DockPaste("Customer reply", "a.md"), new DockPaste("Private note", "b.md")] };
-        var copy = (MenuItem)window.MenuOf(two)[6];
+        var copy = window.MenuOf(two).OfType<MenuItem>().Single((item) => (string?)item.Header == "Copy");
 
         Assert.Equal("Copy", copy.Header);
         Assert.Equal(["Customer reply", "Private note"], copy.ItemsSource!.Cast<MenuItem>().Select((item) => (string)item.Header!));
@@ -1104,11 +1104,11 @@ public sealed class ControlsTests
         var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [review])] });
         var items = window.MenuOf(review);
 
-        Assert.Equal(["Answer in terminal", "Stop", "Mark done", "Snooze…", "Add comment…", "Open in terminal", "History", "", "Delete", "", "Open ticket"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
+        Assert.Equal(["Answer in terminal", "", "Stop", "", "Mark done", "Snooze…", "", "Add comment…", "", "Open in terminal", "History", "Open ticket", "", "Delete"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
 
         Click(ButtonIn(RowOf(window, "item:8"), "main"));
         ((MenuItem)items[0]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
-        ((MenuItem)items[5]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        items.OfType<MenuItem>().Single((item) => (string?)item.Header == "Open in terminal").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         await Task.Yield();
         Dispatcher.UIThread.RunJobs();
 
@@ -1126,14 +1126,28 @@ public sealed class ControlsTests
         var (window, _) = Open(Fixtures.View with { Groups = [new DockGroup("blocked", "Blocked on you", null, [auto])] });
         var items = window.MenuOf(auto);
 
-        Assert.Equal(["Open in Claude", "Stop", "Mark done", "Snooze…", "Add comment…", "Open in terminal", "History", "", "Delete", "", "Open ticket"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
+        Assert.Equal(["Open in Claude", "", "Stop", "", "Mark done", "Snooze…", "", "Add comment…", "", "Open in terminal", "History", "Open ticket", "", "Delete"], items.Select((item) => item is MenuItem named ? (string)named.Header! : "").ToList());
 
-        ((MenuItem)items[5]).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        items.OfType<MenuItem>().Single((item) => (string?)item.Header == "Open in terminal").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
         await Task.Yield();
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal([auto], actions.InTerminal);
         Assert.Empty(actions.Runs);
+    }
+
+    [AvaloniaFact]
+    public void MenuOf_MainControlAndPromptBeforeStart_PutsTheMainActionFirstOnce()
+    {
+        var (window, _) = Open();
+        string[] Headers(DockRow row) => window.MenuOf(row).Select((item) => item is MenuItem named ? (string)named.Header! : "").ToArray();
+        var approve = Headers(Fixtures.Row("item:10"));
+        var prompt = Headers(Fixtures.Row("item:8") with { Open = null, Main = "Open in terminal" });
+
+        Assert.Equal(["Approve", ""], approve.Take(2));
+        Assert.Single(approve, "Approve");
+        Assert.Equal(["Open in terminal", ""], prompt.Take(2));
+        Assert.Single(prompt, "Open in terminal");
     }
 
     [AvaloniaFact]
