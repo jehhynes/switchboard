@@ -59,13 +59,17 @@ export class EchoCheck {
   /** Stretches of playback not measured yet. */
   #stretches: Array<{ from: number; to: number }> = [];
 
-  /** The capture opened again: its sample count starts over. */
+  /** The capture opened again, or what was measured no longer counts: everything heard and played so far is dropped, unmeasured. */
   restart(): void {
     this.#samples = 0;
     this.#anchors = [];
     this.#captureFrom = Infinity;
-    this.#captured.sum.clear();
-    this.#captured.count.clear();
+    this.#stretches = [];
+
+    for (const frames of [this.#captured, this.#played]) {
+      frames.sum.clear();
+      frames.count.clear();
+    }
   }
 
   /** Audio captured, 16 kHz 16-bit mono, that arrived at `atMs`, its last sample then at the latest. */

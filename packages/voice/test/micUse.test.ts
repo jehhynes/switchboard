@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { pactlRecording, parseMicUseLine, watchMicUse } from '../src/micUse.js';
+import { pactlRecording, parseDevicesLine, parseMicUseLine, watchMicUse } from '../src/micUse.js';
 import { settle } from './fakes.js';
 
 class FakeChild extends EventEmitter {
@@ -33,6 +33,12 @@ describe('other apps recording', () => {
     expect(parseMicUseLine('{"busy":false}')).toEqual({ busy: false, apps: [] });
     expect(parseMicUseLine('Add-Type failed')).toBeNull();
     expect(parseMicUseLine('{"apps":[]}')).toBeNull();
+    expect(parseMicUseLine('{"devices":{"output":"Remote Audio","formFactor":"remote network device","input":"Remote Audio","remote":true}}')).toBeNull();
+    expect(parseDevicesLine('{"devices":{"output":"Remote Audio","outputId":"{0.0.0}.{a}","formFactor":"remote network device","input":"Remote Audio","inputId":"{0.0.1}.{b}","remote":true}}')).toEqual({ output: 'Remote Audio', outputId: '{0.0.0}.{a}', formFactor: 'remote network device', input: 'Remote Audio', inputId: '{0.0.1}.{b}', remote: true });
+    expect(parseDevicesLine('{"devices":{"output":"Headphones (WH-1000XM4)","remote":false}}')).toEqual({ output: 'Headphones (WH-1000XM4)', outputId: '', formFactor: 'unknown', input: '', inputId: '', remote: false });
+    expect(parseDevicesLine('{"devices":{"output":"Speakers"}}')).toBeNull();
+    expect(parseDevicesLine('{"busy":true,"apps":[]}')).toBeNull();
+    expect(parseDevicesLine('noise')).toBeNull();
     expect(
       pactlRecording(
         JSON.stringify([
@@ -54,14 +60,17 @@ describe('other apps recording', () => {
     const { runs, spawn } = fakeSpawn();
     const changes: string[] = [];
     let failed = 0;
-    const watch = watchMicUse({ script: 'C:/v/micuse.ps1', changed: (busy, apps) => changes.push(`${busy} ${apps.join(',')}`), failed: () => void failed++, log: () => undefined, spawn, platform: 'win32' })!;
+    const watch = watchMicUse({ script: 'C:/v/micuse.ps1', changed: (busy, apps) => changes.push(`${busy} ${apps.join(',')}`), devices: (devices) => changes.push(`devices ${devices.output} ${devices.remote}`), failed: () => void failed++, log: () => undefined, spawn, platform: 'win32' })!;
 
     expect(runs[0]!.command).toBe('powershell.exe');
     expect(runs[0]!.args).toEqual(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', 'C:/v/micuse.ps1', '-ExcludePid', String(process.pid)]);
-    runs[0]!.child.stdout.write('{"busy":false,"apps":[]}\nnoise\n{"busy":true,"apps":["Teams"]}\n');
+    runs[0]!.child.stdout.write('{"busy":false,"apps":[]}\nnoise\n{"devices":{"output":"LG","formFactor":"speakers","input":"BRIO","remote":false}}\n{"busy":true,"apps":["Teams"]}\n');
     await settle();
     await new Promise((resolve) => setImmediate(resolve));
-    expect(changes).toEqual(['false ', 'true Teams']);
+    expect(changes).toEqual(['false ', 'devices LG false', 'true Teams']);
+    // The playback device the voice uses is passed on.
+    watchMicUse({ script: 'C:/v/micuse.ps1', changed: () => undefined, failed: () => undefined, log: () => undefined, spawn, platform: 'win32', speakers: 'Headphones' });
+    expect(runs[1]!.args.slice(-2)).toEqual(['-Speakers', 'Headphones']);
     runs[0]!.child.emit('exit', 1);
     runs[0]!.child.emit('error', new Error('ENOENT'));
     expect(failed).toBe(2);

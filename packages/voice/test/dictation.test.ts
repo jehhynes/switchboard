@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { PHRASE_SILENCE_MS } from '../src/asr.js';
 import { Dictation } from '../src/dictation.js';
+import type { AudioDevices } from '../src/micUse.js';
 import type { VoiceMessage } from '../src/protocol.js';
 import type { ChatTurn } from '../src/turn.js';
 import type { PieceCheck, Voiceprint } from '../src/voiceprint.js';
@@ -52,7 +53,8 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
   /** The reply the fake speech plays, and what a barge-in's stop answers. */
   const speech: { playing: { replyId: string; text: string; voice: string } | null; until: number; interrupts: number; heard: { said: string; rest: string } } = { playing: null, until: -Infinity, interrupts: 0, heard: { said: '', rest: '' } };
   let id = 0;
-  const watch: { changed: ((busy: boolean, apps: string[]) => void) | null; failed: (() => void) | null; closed: number } = { changed: null, failed: null, closed: 0 };
+  /** `devices` takes endpoint IDs or makes them from the names. */
+  const watch: { changed: ((busy: boolean, apps: string[]) => void) | null; failed: (() => void) | null; devices: ((devices: Omit<AudioDevices, 'outputId' | 'inputId'> & Partial<AudioDevices>) => void) | null; closed: number } = { changed: null, failed: null, devices: null, closed: 0 };
   const settings: VoiceSettings = { ...DEFAULT_SETTINGS.voice, enabled: true, ...options.settings };
   const dictation = new Dictation({
     capture,
@@ -78,13 +80,14 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
             },
             close: () => undefined,
           },
-    watchMicUse: (onChanged, onFailed) => {
+    watchMicUse: (onChanged, onFailed, onDevices) => {
       if (options.watcher === 'none') {
         return null;
       }
 
       watch.changed = onChanged;
       watch.failed = onFailed;
+      watch.devices = (devices) => onDevices({ outputId: `${devices.output}#1`, inputId: `${devices.input}#1`, ...devices });
       return { close: () => void watch.closed++ };
     },
     settings: () => settings,
@@ -148,11 +151,11 @@ const PLAYED_TEXT = 'Tests passed and the new build is ready';
  * delivers `captured` in 100 ms chunks, as the saved captures were recorded; then 0.4 s of silence, so the echo check has measured. `during`
  * runs at each chunk while the reply plays.
  */
-function playOver(t: ReturnType<typeof setup>, captured: Buffer, replyId: string, during?: () => void): void {
+function playOver(t: ReturnType<typeof setup>, captured: Buffer, replyId: string, during?: () => void, tailChunks = 4): void {
   const start = t.clock.t;
   let played = 0;
 
-  for (let at = 0; at < captured.length + 4 * 3_200; at += 3_200) {
+  for (let at = 0; at < captured.length + tailChunks * 3_200; at += 3_200) {
     for (let step = 0; step < 5; step++) {
       if (t.clock.t - start >= 500 && played < PLAYED.length) {
         t.speech.playing = { replyId, text: PLAYED_TEXT, voice: 'marin' };
@@ -782,11 +785,16 @@ describe('Dictation', () => {
     expect(t.logs.at(-1)).toBe('listening: full duplex (echo check: none heard; no echo cancellation on Microphone)');
     expect([t.dictation.halfDuplex, t.dictation.fullDuplex]).toEqual([null, 'echo check: none heard']);
 
-    // Full duplex: a reply plays and its own words are heard over it, as when the headphones come off; half-duplex at once.
-    playOver(t, echoWav('quiet.wav'), 'r3', () => (t.engine.text = 'tests passed and the new'));
-    expect(t.logs).toContain('echo check: 5 of 5 words heard over the reply are its own (tests passed and the new): half-duplex again');
+    // Full duplex: a reply plays and its own words are heard over it, as when the headphones come off; half-duplex at once, and the words
+    // that are not the reply's neither barge in nor reach the session, though no voiceprint is enrolled.
+    playOver(t, echoWav('quiet.wav'), 'r3', () => (t.engine.text = 'tests passed and stop now'));
+    expect(t.logs).toContain('echo check: 3 of 5 words heard over the reply are its own (tests passed and stop now): half-duplex again');
     expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Microphone; echo check: echo heard)');
-    expect(t.sent.filter((one) => one.type === 'utterance' && one.final)).toEqual([]);
+    expect(t.logs).toContain('listening paused while the voice plays (half-duplex): words heard over the reply dropped as its echo: tests passed and stop now');
+    expect(t.speech.interrupts).toBe(0);
+    expect(t.sent).toEqual([]);
+    // Listening resumes after the reply, afresh.
+    expect(t.logs).toContain('listening resumes');
   });
 
   it('under auto, is half-duplex again when a check in full duplex hears echo, and starts over when the mic is turned on again', async () => {
@@ -808,11 +816,96 @@ describe('Dictation', () => {
     expect(t.logs).toContain('echo check starts over: the mic was turned on');
     expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: not measured yet');
 
+    // A measurement pending when the devices change is dropped: headphones now, and nothing measured on them yet.
+    playOver(t, echoWav('quiet.wav'), 'r4', undefined, 0);
+    t.watch.devices!({ output: 'Headphones (WH-1000XM4)', outputId: 'h#1', formFactor: 'headphones', input: 'Microphone (BRIO)', inputId: 'b#1', remote: false });
+    t.watch.devices!({ output: 'Headphones (WH-1000XM4)', outputId: 'h#2', formFactor: 'headphones', input: 'Microphone (BRIO)', inputId: 'b#1', remote: false });
+    t.quiet(1_000);
+    expect(t.logs.filter((line) => line.startsWith('echo check: '))).toHaveLength(3);
+    expect(t.dictation.fullDuplex).toBeNull();
+
     // Another capture device starts it over too.
     playOver(t, echoWav('quiet.wav'), 'r4');
     t.settings.inputDevice = 'Headset';
     t.dictation.settingsChanged();
-    expect(t.logs.at(-1)).toBe('echo check starts over: the capture or playback device changed');
+    expect(t.logs.slice(-2)).toEqual(['echo check starts over: the capture or playback device changed', 'listening: half-duplex (no echo cancellation on Microphone; echo check: not measured yet)']);
+  });
+
+  it('under auto, needs one check that hears none with headphones on this computer, and starts over when the devices change', async () => {
+    const t = setup();
+
+    t.capture.halfDuplex = 'no echo cancellation on Microphone';
+    await t.listening();
+    t.watch.devices!({ output: 'Headphones (WH-1000XM4)', outputId: 'Headphones (WH-1000XM4)#1', formFactor: 'headphones', input: 'Microphone (WH-1000XM4)', inputId: 'Microphone (WH-1000XM4)#1', remote: false });
+    expect(t.logs).toContain('devices: playback "Headphones (WH-1000XM4)" (headphones), capture "Microphone (WH-1000XM4)", on this computer');
+    playOver(t, echoWav('quiet.wav'), 'r1');
+    expect(t.logs.filter((line) => line.startsWith('echo check: '))).toEqual([expect.stringMatching(/hint: headphones \(form factor headphones of "Headphones \(WH-1000XM4\)"\); 1 of 1 in a row\)$/)]);
+    expect(t.dictation.fullDuplex).toBe('echo check: none heard');
+
+    // Speakers now: the check starts over, half-duplex, and two checks are needed again.
+    t.watch.devices!({ output: 'LG HDR 4K', outputId: 'LG HDR 4K#1', formFactor: 'speakers', input: 'Microphone (BRIO)', inputId: 'Microphone (BRIO)#1', remote: false });
+    expect(t.logs).toContain('echo check starts over: the playback or capture device changed');
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: not measured yet');
+    playOver(t, echoWav('quiet.wav'), 'r2');
+    expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/hint: no headphones \(form factor speakers of "LG HDR 4K"\); 1 of 2 in a row\)$/);
+
+    // A Remote Desktop session: its own start over, and the headphones hint is not used there.
+    t.watch.devices!({ output: 'Remote Audio', outputId: 'Remote Audio#1', formFactor: 'remote network device', input: 'Remote Audio', inputId: 'Remote Audio#1', remote: true });
+    expect(t.logs).toContain('echo check starts over: a Remote Desktop session started');
+    playOver(t, echoWav('quiet.wav'), 'r3');
+    expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/hint: none over Remote Desktop, whose Remote Audio says nothing of headphones; 1 of 2 in a row\)$/);
+  });
+
+  it('watches the playback device voice.outputDevice names, starting another watcher when it changes', async () => {
+    const t = setup();
+
+    t.capture.halfDuplex = 'no echo cancellation on Microphone';
+    await t.listening();
+    t.watch.devices!({ output: 'Speakers', outputId: 's#1', formFactor: 'speakers', input: 'Microphone (BRIO)', inputId: 'b#1', remote: false });
+    playOver(t, echoWav('quiet.wav'), 'r0');
+    t.dictation.settingsChanged();
+    expect(t.watch.closed).toBe(0);
+    const old = { changed: t.watch.changed!, devices: t.watch.devices! };
+
+    t.settings.outputDevice = 'LG';
+    t.dictation.settingsChanged();
+    expect(t.watch.closed).toBe(1);
+    // The closed watcher's late lines count for nothing: another app recording, as the new one says, keeps the mic paused.
+    t.watch.changed!(true, ['Teams']);
+    expect(t.dictation.state).toBe('paused-other-app');
+    old.changed(false, []);
+    old.devices({ output: 'Speakers', formFactor: 'speakers', input: 'Microphone (BRIO)', remote: true });
+    expect(t.dictation.state).toBe('paused-other-app');
+    expect(t.logs.filter((line) => line.startsWith('devices: '))).toHaveLength(1);
+    t.watch.changed!(false, []);
+    await settle();
+    // The old watcher's hint is gone, and the check starts over for the other device.
+    expect(t.logs).toContain('echo check starts over: the capture or playback device changed');
+    playOver(t, echoWav('quiet.wav'), 'r1');
+    expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/hint: none; 1 of 2 in a row\)$/);
+  });
+
+  it('keeps a Remote Desktop session it was told of when voice.outputDevice changes, until the new watcher says', async () => {
+    const t = setup({ settings: { duplex: { local: 'full', remote: 'half' } } });
+
+    t.capture.halfDuplex = 'no echo cancellation on Microphone';
+    await t.listening();
+    t.watch.devices!({ output: 'Remote Audio', formFactor: 'remote network device', input: 'Remote Audio', remote: true });
+    t.settings.outputDevice = 'Remote';
+    t.dictation.settingsChanged();
+    expect(t.dictation.halfDuplex).toBe('set to half duplex over Remote Desktop');
+  });
+
+  it('follows voice.duplex for the session the watcher reports, as the session switches between this computer and Remote Desktop', async () => {
+    const t = setup({ settings: { duplex: { local: 'full', remote: 'half' } } });
+
+    t.capture.halfDuplex = 'no echo cancellation on Microphone';
+    await t.listening();
+    expect(t.dictation.fullDuplex).toBe('set to full duplex on this computer');
+    t.watch.devices!({ output: 'Remote Audio', formFactor: 'remote network device', input: 'Remote Audio', remote: true });
+    expect([t.dictation.halfDuplex, t.logs.at(-1)]).toEqual(['set to half duplex over Remote Desktop', 'listening: half-duplex (set to half duplex over Remote Desktop)']);
+    t.watch.devices!({ output: 'LG HDR 4K', formFactor: 'speakers', input: 'Microphone (BRIO)', remote: false });
+    expect(t.dictation.fullDuplex).toBe('set to full duplex on this computer');
   });
 
   it('runs no echo check when voice.duplex is set, or on capture that cancels the echo', async () => {

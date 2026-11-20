@@ -128,7 +128,7 @@ async function main(): Promise<void> {
         recognizer: (terms) => sherpaRecognizer(sherpa, (modelDir) => writeHotwords(voiceHome, modelDir, terms), log),
         vocabulary,
         turn: turnModel(join(voiceHome, 'models', TURN_MODEL), join(scripts, 'turn.js'), log),
-        watchMicUse: (changed, failed) => watchMicUse({ script: join(scripts, 'micuse.ps1'), changed, failed, log }),
+        watchMicUse: (changed, failed, devices) => watchMicUse({ script: join(scripts, 'micuse.ps1'), changed, failed, devices, speakers: service.settings.outputDevice, log }),
         settings: () => service.settings,
         voiceprint,
         send: hooks.send,

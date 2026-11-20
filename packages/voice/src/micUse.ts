@@ -23,6 +23,37 @@ export function parseMicUseLine(line: string): { busy: boolean; apps: string[] }
   }
 }
 
+/** The devices the echo check depends on, from `micuse.ps1` on Windows (architecture.md § Dictation). */
+export interface AudioDevices {
+  /** The playback device's name and its form factor, such as `headphones`, `headset`, `speakers` or `remote network device`. */
+  output: string;
+  /** The endpoints' IDs: a device recreated under the same name, as at a Remote Desktop reconnect, gets another. */
+  outputId: string;
+  formFactor: string;
+  /** The default capture device's name. */
+  input: string;
+  inputId: string;
+  /** Whether the voice process runs in a Remote Desktop session. */
+  remote: boolean;
+}
+
+/** A devices line of `micuse.ps1`; null for a line that is not one. */
+export function parseDevicesLine(line: string): AudioDevices | null {
+  try {
+    const raw = (JSON.parse(line) as { devices?: Record<string, unknown> }).devices;
+
+    if (raw === undefined || typeof raw !== 'object' || raw === null || typeof raw['remote'] !== 'boolean') {
+      return null;
+    }
+
+    const text = (key: string): string => (typeof raw[key] === 'string' ? (raw[key] as string) : '');
+
+    return { output: text('output'), outputId: text('outputId'), formFactor: text('formFactor') || 'unknown', input: text('input'), inputId: text('inputId'), remote: raw['remote'] };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The apps recording, from `pactl -f json list source-outputs`: every stream not corked, other than this process's and a level meter's
  * (`pavucontrol`'s peak detection), which reads a source without recording it.
@@ -62,6 +93,10 @@ export interface MicUseDeps {
   /** `micuse.ps1` on Windows. */
   script: string;
   changed(busy: boolean, apps: string[]): void;
+  /** The playback and capture devices or the Remote Desktop session changed (Windows only); the first call says what they are. */
+  devices?(devices: AudioDevices): void;
+  /** The playback device the voice uses, part of its name; null for the default. */
+  speakers?: string | null;
   /** Watching cannot run, as when PowerShell or `pactl` is missing: the voice then listens as if no other app recorded. */
   failed(): void;
   log(line: string): void;
@@ -75,7 +110,8 @@ export function watchMicUse(deps: MicUseDeps): MicUse | null {
   const platform = deps.platform ?? process.platform;
 
   if (platform === 'win32') {
-    const child = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', deps.script, '-ExcludePid', String(process.pid)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const speakers = deps.speakers ?? null;
+    const child = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', deps.script, '-ExcludePid', String(process.pid), ...(speakers === null ? [] : ['-Speakers', speakers])], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
 
     follow(child, deps, (line) => parseMicUseLine(line));
     // The script exits when its stdin closes, as when this process exits.
@@ -158,6 +194,13 @@ function follow(child: ChildProcess, deps: MicUseDeps, parse: (line: string) => 
 
     if (state !== null) {
       deps.changed(state.busy, state.apps);
+      return;
+    }
+
+    const devices = parseDevicesLine(line);
+
+    if (devices !== null) {
+      deps.devices?.(devices);
     }
   });
 }

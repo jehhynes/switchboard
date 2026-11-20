@@ -2,10 +2,11 @@ import type { VoiceSettings } from '@switchboard/core/settings';
 import { ASR_RATE, pcmToSamples, Transcriber } from './asr.js';
 import { BargeIn, gate } from './barge.js';
 import { AutoDuplex } from './duplex.js';
+import type { OutputHint } from './duplex.js';
 import { EchoCheck } from './echoCheck.js';
 import type { AsrEngine } from './asr.js';
 import type { AsrDevice } from './sherpa.js';
-import type { MicUse } from './micUse.js';
+import type { AudioDevices, MicUse } from './micUse.js';
 import type { Capture, CaptureStream } from './output.js';
 import { ENROLL_SECONDS } from './protocol.js';
 import type { Interrupted, MicState, SpokenCommand, VoiceMessage } from './protocol.js';
@@ -60,8 +61,11 @@ export interface DictationDeps {
   recognizer(terms: string[]): AsrEngine | { error: string };
   vocabulary: { terms(repo: string | null): string[]; used(text: string): void };
   turn: TurnModel | null;
-  /** Starts watching other apps' recording; null where nothing can watch, and the voice never pauses for another app. */
-  watchMicUse(changed: (busy: boolean, apps: string[]) => void, failed: () => void): MicUse | null;
+  /**
+   * Starts watching other apps' recording, and on Windows the devices and the Remote Desktop session the echo check depends on; null where
+   * nothing can watch, and the voice never pauses for another app.
+   */
+  watchMicUse(changed: (busy: boolean, apps: string[]) => void, failed: () => void, devices: (devices: AudioDevices) => void): MicUse | null;
   settings(): VoiceSettings;
   /** The voice check and enrolment; without it every piece passes unscored and enrolment fails. */
   voiceprint?: Voiceprint | null;
@@ -164,6 +168,13 @@ export class Dictation {
   readonly #auto: AutoDuplex;
   /** The capture path the echo check last measured: its reason, Remote Desktop and the devices; a change starts the check over. */
   #echoPath: string | null = null;
+  /** The devices and the Remote Desktop session as the watcher last reported them; null until it does, and where it cannot. */
+  #devices: AudioDevices | null = null;
+  /** The playback device the watcher was started for, and its generation, which rises when it is replaced or closed. */
+  #watchOutput: string | null = null;
+  #watchGen = 0;
+  /** The echo check heard the reply's own words inside the recogniser's feed; the audio is dropped once it returns. */
+  #echoHeard = false;
   /** The capture mode last logged; undefined before the first open. */
   #loggedDuplex: string | undefined = undefined;
   /** When the room hold ends (epoch milliseconds), while one runs: the voice check heard someone else (`voice.roomHold`). */
@@ -268,20 +279,19 @@ export class Dictation {
       this.#error = null;
       this.#otherApp = null;
       // The headphones may have come off since: the echo check starts over.
-      this.#auto.reset('the mic was turned on');
-      this.#watch = this.deps.watchMicUse(
-        (busy, apps) => this.#otherAppChanged(busy, apps),
-        () => this.#otherAppChanged(false, []),
-      );
+      this.#resetEcho('the mic was turned on');
+      this.#startWatch();
 
       if (this.#watch === null) {
         this.#otherApp = false;
       }
     } else {
       this.#cut(true);
+      this.#watchGen++;
       this.#watch?.close();
       this.#watch = null;
       this.#otherApp = null;
+      this.#devices = null;
     }
 
     this.#sync();
@@ -333,6 +343,16 @@ export class Dictation {
 
   /** The settings were reloaded: the idle timeout starts again with its new length, and `voice.duplex` applies to the open capture. */
   settingsChanged(): void {
+    // The Windows watcher reports the playback device `voice.outputDevice` names, so another one needs another watcher; its hint is gone.
+    if (this.#watch !== null && this.deps.settings().outputDevice !== this.#watchOutput) {
+      const old = this.#watch;
+
+      // The old device's hint goes; whether this is a Remote Desktop session stays known until the new watcher says.
+      this.#devices = this.#devices === null ? null : { ...this.#devices, output: '', outputId: '', formFactor: 'unknown' };
+      this.#startWatch();
+      old.close();
+    }
+
     if (this.#stream !== null) {
       this.#armIdle();
       this.#applyDuplex();
@@ -422,6 +442,7 @@ export class Dictation {
     }
 
     this.#micOn = false;
+    this.#watchGen++;
     this.#watch?.close();
     this.#watch = null;
     this.#stopCapture();
@@ -576,19 +597,21 @@ export class Dictation {
     const stream = this.#stream!;
     const settings = this.deps.settings();
 
+    const remote = this.#remote(stream);
+
     if (this.#enrollment === null && stream.halfDuplex !== null) {
-      const path = JSON.stringify([stream.halfDuplex, stream.remote === true, settings.inputDevice, settings.outputDevice]);
+      const path = JSON.stringify([stream.halfDuplex, remote, settings.inputDevice, settings.outputDevice]);
 
       if (this.#echoPath !== null && path !== this.#echoPath) {
-        this.#auto.reset('the capture or playback device changed');
+        this.#resetEcho('the capture or playback device changed');
       }
 
       this.#echoPath = path;
     }
 
-    this.#auto.context(null, stream.remote === true);
+    this.#auto.context(outputHint(this.#devices), remote);
 
-    const mode = duplexMode(settings.duplex, stream, this.#auto);
+    const mode = duplexMode(settings.duplex, { halfDuplex: stream.halfDuplex, remote }, this.#auto);
 
     this.#halfDuplex = mode.halfDuplex;
     this.#fullDuplex = mode.fullDuplex;
@@ -637,10 +660,27 @@ export class Dictation {
     this.#trackPlayback();
     this.#transcriber?.feed(samples);
 
+    // The reply's own words were just heard over it: half-duplex again, and nothing of this audio, its words or a barge-in, goes on.
+    if (this.#echoHeard) {
+      this.#echoHeard = false;
+      this.#dropEcho();
+      return;
+    }
+
     // Paused by voice, a reply is not stopped by talking over it.
     if (this.#holding() && !this.#pausedByVoice) {
       this.#checkBarge();
     }
+  }
+
+  /** Drops the words held over the reply playing as its echo, and stops listening until the voice stops playing, as half-duplex capture does. */
+  #dropEcho(): void {
+    const held = [this.#playback?.held ?? '', this.#transcriber?.take()?.text ?? ''].filter((text) => text !== '').join(' ');
+
+    this.#transcriber?.end(false);
+    this.#playback = null;
+    this.#deaf = true;
+    this.deps.log(`listening paused while the voice plays (half-duplex): words heard over the reply dropped as its echo: ${held}`);
   }
 
   /**
@@ -675,14 +715,60 @@ export class Dictation {
   #checking(): boolean {
     const stream = this.#stream;
 
-    return stream !== null && this.#enrollment === null && stream.halfDuplex !== null && this.deps.settings().duplex[stream.remote === true ? 'remote' : 'local'] === 'auto';
+    return stream !== null && this.#enrollment === null && stream.halfDuplex !== null && this.deps.settings().duplex[this.#remote(stream) ? 'remote' : 'local'] === 'auto';
+  }
+
+  /** Whether the voice process runs in a Remote Desktop session: as the watcher last said, else as the capture said when it opened. */
+  #remote(stream: CaptureStream): boolean {
+    return this.#devices?.remote ?? stream.remote === true;
+  }
+
+  /**
+   * The devices or the Remote Desktop session changed: the echo check starts over, since the headphones or the speakers may be others now,
+   * and `voice.duplex` follows a session that switched between this computer and Remote Desktop.
+   */
+  #devicesChanged(devices: AudioDevices): void {
+    const was = this.#devices;
+
+    this.#devices = devices;
+    this.deps.log(`devices: playback "${devices.output}" (${devices.formFactor}), capture "${devices.input}", ${devices.remote ? 'over Remote Desktop' : 'on this computer'}`);
+
+    if (was !== null && JSON.stringify(was) !== JSON.stringify(devices)) {
+      this.#resetEcho(was.remote !== devices.remote ? (devices.remote ? 'a Remote Desktop session started' : 'the Remote Desktop session ended') : 'the playback or capture device changed');
+    }
+
+    if (this.#stream !== null) {
+      this.#applyDuplex();
+    }
   }
 
   /** Words held over the reply playing, on full-duplex capture that cancels no echo: the reply's own words are its echo, and half-duplex returns. */
   #echoWords(words: string): void {
     if (this.#checking() && this.#playback !== null && this.#auto.heardWhilePlaying(words, this.#playback.text)) {
+      // Heard inside the recogniser's feed: the audio's caller drops the words once the feed returns.
+      this.#echoHeard = true;
       this.#applyDuplex();
     }
+  }
+
+  /** Starts the echo check over, half-duplex, with nothing measured before kept: the devices or the path it measured may be others now. */
+  #resetEcho(why: string): void {
+    this.#auto.reset(why);
+    this.#echo.restart();
+  }
+
+  /** Starts watching other apps' recording and, on Windows, the devices, for the playback device the settings name now. */
+  #startWatch(): void {
+    // A watcher closed since may still deliver what it had buffered: only the current one counts.
+    const gen = ++this.#watchGen;
+    const current = (): boolean => gen === this.#watchGen;
+
+    this.#watchOutput = this.deps.settings().outputDevice;
+    this.#watch = this.deps.watchMicUse(
+      (busy, apps) => current() && this.#otherAppChanged(busy, apps),
+      () => current() && this.#otherAppChanged(false, []),
+      (devices) => current() && this.#devicesChanged(devices),
+    );
   }
 
   /** Words are held back while a reply plays and no utterance is open: until barge-in fires, they may be its echo. */
@@ -1251,6 +1337,15 @@ export function duplexMode(
   return auto.full
     ? { halfDuplex: null, fullDuplex: auto.reason, why: `${auto.reason}; ${stream.halfDuplex}` }
     : { halfDuplex: `${stream.halfDuplex}; ${auto.reason}`, fullDuplex: null, why: `${stream.halfDuplex}; ${auto.reason}` };
+}
+
+/** What the playback device's form factor hints of headphones; null when the watcher has not said or does not know. */
+function outputHint(devices: AudioDevices | null): OutputHint | null {
+  if (devices === null || devices.formFactor === 'unknown') {
+    return null;
+  }
+
+  return { headphones: devices.formFactor === 'headphones' || devices.formFactor === 'headset', why: `form factor ${devices.formFactor} of "${devices.output}"` };
 }
 
 function every(run: () => void, ms: number): { stop(): void } {

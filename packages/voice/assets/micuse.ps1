@@ -1,8 +1,11 @@
 # Reports whether any other process records from a microphone (voice-design § 2.3): one JSON line on stdout each time that changes,
 # {"busy": true|false, "apps": ["<process name>", ...]}. Core Audio session notifications on every active capture endpoint, re-attached when
 # the endpoints change; the excluded process (the voice process), the processes it started (its capture helper) and the system-sounds
-# session never count. Exits when stdin closes.
-param([int]$ExcludePid = 0)
+# session never count. Also, at the start and each time one changes, the devices the echo check depends on (architecture.md § Dictation):
+# {"devices": {"output": "<name>", "formFactor": "<form factor>", "input": "<name>", "remote": true|false}}, the playback device (the one whose
+# name contains -Speakers, else the default) with its form factor, the default capture device, and whether this is a Remote Desktop session,
+# read every second. Exits when stdin closes.
+param([int]$ExcludePid = 0, [string]$Speakers = '')
 $ErrorActionPreference = 'Stop'
 Add-Type -Language CSharp -TypeDefinition @'
 using System;
@@ -33,11 +36,18 @@ namespace SwitchboardMicUse {
   [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
   interface IMMDevice {
     void Activate(ref Guid iid, uint clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
-    void OpenPropertyStore(uint access, out IntPtr store);
+    void OpenPropertyStore(uint access, out IPropertyStore store);
     void GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
     void GetState(out uint state);
   }
   [StructLayout(LayoutKind.Sequential)] struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+  [StructLayout(LayoutKind.Sequential)] struct PROPVARIANT { public ushort vt; public ushort r1; public ushort r2; public ushort r3; public IntPtr p; public IntPtr p2; }
+  [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IPropertyStore {
+    [PreserveSig] int GetCount(out uint count);
+    [PreserveSig] int GetAt(uint index, out PROPERTYKEY key);
+    [PreserveSig] int GetValue(ref PROPERTYKEY key, out PROPVARIANT value);
+  }
   [StructLayout(LayoutKind.Sequential)] struct PROCESS_BASIC_INFORMATION {
     public IntPtr ExitStatus; public IntPtr PebBaseAddress; public IntPtr AffinityMask; public IntPtr BasePriority; public IntPtr UniqueProcessId; public IntPtr InheritedFromUniqueProcessId;
   }
@@ -46,6 +56,10 @@ namespace SwitchboardMicUse {
     [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+
+    // SM_REMOTESESSION: this session is a Remote Desktop one.
+    public static bool Remote() { return GetSystemMetrics(0x1000) != 0; }
 
     // When pid started, as a FILETIME, or 0 when it cannot be read.
     public static long StartOf(uint pid) {
@@ -178,8 +192,11 @@ namespace SwitchboardMicUse {
     readonly List<Session> sessions = new List<Session>();
     IMMDeviceEnumerator enumerator;
     string last = null;
+    string lastDevices = null;
+    readonly object devicesGate = new object();
+    readonly string speakers;
 
-    public Watch(uint excludePid) { exclude = excludePid; excludeStart = excludePid == 0 ? 0 : Native.StartOf(excludePid); }
+    public Watch(uint excludePid, string speakersName) { exclude = excludePid; excludeStart = excludePid == 0 ? 0 : Native.StartOf(excludePid); speakers = speakersName; }
 
     // COM registration happens on an MTA thread, as the spike found it must.
     public void Start() {
@@ -201,6 +218,70 @@ namespace SwitchboardMicUse {
       started.WaitOne();
       if (failed != null) throw failed;
       Report();
+      // A Remote Desktop connection or a return to the console sends no audio notification of its own when the devices stay.
+      var poll = new Thread(() => { while (true) { Thread.Sleep(1000); ReportDevices(); } });
+      poll.SetApartmentState(ApartmentState.MTA);
+      poll.IsBackground = true;
+      poll.Start();
+    }
+
+    static string Text(IMMDevice device, PROPERTYKEY key) {
+      try {
+        IPropertyStore store; device.OpenPropertyStore(0, out store);
+        PROPVARIANT value;
+        if (store.GetValue(ref key, out value) != 0) return null;
+        if (value.vt == 31) return Marshal.PtrToStringUni(value.p);
+        if (value.vt == 19) return ((uint)value.p.ToInt64()).ToString();
+        return null;
+      } catch { return null; }
+    }
+
+    static string Name(IMMDevice device) {
+      return Text(device, new PROPERTYKEY { fmtid = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), pid = 14 }) ?? "";
+    }
+
+    // PKEY_AudioEndpoint_FormFactor, an EndpointFormFactor.
+    static string FormFactor(IMMDevice device) {
+      string[] names = { "remote network device", "speakers", "line level", "headphones", "microphone", "headset", "handset", "digital passthrough", "spdif", "digital display", "unknown" };
+      string value = Text(device, new PROPERTYKEY { fmtid = new Guid("1da5d803-d492-4edd-8c23-e0c0ffee7f0e"), pid = 0 });
+      uint index;
+      return value != null && uint.TryParse(value, out index) && index < names.Length ? names[index] : "unknown";
+    }
+
+    static string Json(string text) {
+      return "\"" + (text ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+    }
+
+    // The playback device the voice uses and the default capture device, with whether this is a Remote Desktop session; one line when they change.
+    // Sampling, comparing and printing under one lock, so a slower report of older devices never prints after a newer one.
+    internal void ReportDevices() {
+      lock (devicesGate) {
+        string line;
+        try {
+          IMMDevice output = null;
+          if (speakers.Length > 0) {
+            IMMDeviceCollection outputs; enumerator.EnumAudioEndpoints(EDataFlow.eRender, 1, out outputs);
+            uint count; outputs.GetCount(out count);
+            for (uint i = 0; i < count && output == null; i++) {
+              IMMDevice one; outputs.Item(i, out one);
+              if (Name(one).IndexOf(speakers, StringComparison.OrdinalIgnoreCase) >= 0) output = one;
+            }
+          }
+          if (output == null) { try { enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eConsole, out output); } catch { output = null; } }
+          IMMDevice input = null;
+          try { enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture, ERole.eConsole, out input); } catch { input = null; }
+          line = "{\"devices\":{\"output\":" + Json(output == null ? "" : Name(output)) + ",\"outputId\":" + Json(Id(output)) + ",\"formFactor\":" + Json(output == null ? "unknown" : FormFactor(output)) + ",\"input\":" + Json(input == null ? "" : Name(input)) + ",\"inputId\":" + Json(Id(input)) + ",\"remote\":" + (Native.Remote() ? "true" : "false") + "}}";
+        } catch (Exception e) { Console.Error.WriteLine("devices failed: " + e.Message); return; }
+        if (line == lastDevices) return;
+        lastDevices = line;
+        lock (Console.Out) { Console.Out.WriteLine(line); Console.Out.Flush(); }
+      }
+    }
+
+    // The endpoint's ID, which a device recreated under the same name, as at a Remote Desktop reconnect, does not keep.
+    static string Id(IMMDevice device) {
+      if (device == null) return "";
+      try { string id; device.GetId(out id); return id ?? ""; } catch { return ""; }
     }
 
     // Watches every active capture endpoint not watched yet; sessions of an endpoint that is no longer active stop counting.
@@ -234,6 +315,7 @@ namespace SwitchboardMicUse {
           }
         } catch (Exception e) { Console.Error.WriteLine("rescan failed: " + e.Message); }
         Report();
+        ReportDevices();
       });
     }
 
@@ -274,6 +356,6 @@ namespace SwitchboardMicUse {
   }
 }
 '@
-$watch = New-Object SwitchboardMicUse.Watch ([uint32]$ExcludePid)
+$watch = New-Object SwitchboardMicUse.Watch ([uint32]$ExcludePid), $Speakers
 $watch.Start()
 while ($null -ne [Console]::In.ReadLine()) { }
