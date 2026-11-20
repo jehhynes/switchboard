@@ -121,6 +121,23 @@ export type SpeechStyle = (typeof SPEECH_STYLES)[number];
 /** Speech speed, 1 the voice's own pace (OpenAI's realtime `speed`). */
 export const SPEECH_SPEED = { min: 0.25, max: 1.5 } as const;
 
+/**
+ * A persona (architecture.md § Personas): a name, a personality and a voice with its speaking style. The personality sets the speaking style's
+ * delivery and the tone section of a Code Mode session's prompt; `id` names it in `playbookPersonas`, a pin and the store.
+ */
+export interface Persona {
+  id: string;
+  name: string;
+  voice: TtsVoice;
+  style: SpeechStyle;
+  /** How the persona sounds and writes, in a few words or sentences; empty for none. */
+  personality: string;
+}
+
+/** A persona's longest name and personality. */
+export const PERSONA_NAME_MAX = 40;
+export const PERSONALITY_MAX = 600;
+
 /** Speech out (architecture.md § Voice): machine-wide, off by default. */
 export interface VoiceSettings {
   /** The central voice setting: no voice process, no spoken replies and no voice controls while off. */
@@ -139,6 +156,10 @@ export interface VoiceSettings {
   needsYouSound: boolean;
   /** The playback device, a case-insensitive part of its name; null for the system default. */
   outputDevice: string | null;
+  /** The persona roster; empty, the default, leaves every session with `voice` and `style` and no tone section. */
+  personas: Persona[];
+  /** A persona ID by playbook name, which that playbook's sessions take unless one is pinned. */
+  playbookPersonas: Record<string, string>;
 }
 
 export interface Settings {
@@ -157,7 +178,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
-  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null },
+  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, personas: [], playbookPersonas: {} },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -434,7 +455,7 @@ export function parseSettings(text: string): SettingsResult {
   };
 
   const voiceIn = read.section(root, 'voice', 'voice');
-  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice'], 'voice');
+  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'personas', 'playbookPersonas'], 'voice');
   const voice: VoiceSettings = {
     enabled: read.boolean(voiceIn, 'enabled', 'voice', defaults.voice.enabled),
     voice: read.choice(voiceIn, 'voice', 'voice', TTS_VOICES, defaults.voice.voice),
@@ -445,9 +466,86 @@ export function parseSettings(text: string): SettingsResult {
     awayMinutes: read.integer(voiceIn, 'awayMinutes', 'voice', defaults.voice.awayMinutes, 1, 1440),
     needsYouSound: read.boolean(voiceIn, 'needsYouSound', 'voice', defaults.voice.needsYouSound),
     outputDevice: read.optionalName(voiceIn, 'outputDevice', 'voice'),
+    personas: [],
+    playbookPersonas: {},
   };
 
+  voice.personas = parsePersonas(read, voiceIn['personas'], voice);
+  voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
+
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, voice } };
+}
+
+/** `voice.personas`: each persona's ID unique, its voice and style defaulting to the section's. */
+function parsePersonas(read: Reader, value: unknown, voice: Pick<VoiceSettings, 'voice' | 'style'>): Persona[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    read.errors.push('voice.personas must be a list.');
+    return [];
+  }
+
+  const personas: Persona[] = [];
+
+  value.forEach((entry: unknown, index) => {
+    const path = `voice.personas[${index}]`;
+
+    if (!isObject(entry)) {
+      read.errors.push(`${path} must be an object.`);
+      return;
+    }
+
+    read.unknown(entry, ['id', 'name', 'voice', 'style', 'personality'], path);
+
+    const id = read.string(entry, 'id', path, '');
+    const name = read.string(entry, 'name', path, '').trim();
+    const personality = read.string(entry, 'personality', path, '').trim();
+
+    if (!NAME.test(id)) {
+      read.errors.push(`${path}.id must be lowercase letters, digits and hyphens.`);
+    } else if (personas.some((other) => other.id === id)) {
+      read.errors.push(`${path}.id ${id} is used by another persona.`);
+    }
+
+    if (name === '' || name.length > PERSONA_NAME_MAX) {
+      read.errors.push(`${path}.name must be 1 to ${PERSONA_NAME_MAX} characters.`);
+    }
+
+    if (personality.length > PERSONALITY_MAX) {
+      read.errors.push(`${path}.personality must be at most ${PERSONALITY_MAX} characters.`);
+    }
+
+    personas.push({ id, name, voice: read.choice(entry, 'voice', path, TTS_VOICES, voice.voice), style: read.choice(entry, 'style', path, SPEECH_STYLES, voice.style), personality });
+  });
+
+  return personas;
+}
+
+/** `voice.playbookPersonas`: playbook names to IDs of the roster's personas. Playbooks are read on their own, so a name is not checked. */
+function parsePlaybookPersonas(read: Reader, value: unknown, personas: readonly Persona[]): Record<string, string> {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isObject(value)) {
+    read.errors.push('voice.playbookPersonas must be an object.');
+    return {};
+  }
+
+  const assigned: Record<string, string> = {};
+
+  for (const [playbook, id] of Object.entries(value)) {
+    if (typeof id !== 'string' || !personas.some((persona) => persona.id === id)) {
+      read.errors.push(`voice.playbookPersonas.${playbook} must name a persona in voice.personas.`);
+      continue;
+    }
+
+    assigned[playbook] = id;
+  }
+
+  return assigned;
 }
 
 /** Why a source's repo root is not a usable pattern: `{name}` and `{owner}` each at most once, and `{owner}` only with `{name}` (PRD R16). */

@@ -232,6 +232,12 @@ export interface Session {
   lastTree?: Array<{ pid: number; created: string }> | null;
   /** A Code Mode session started with no prompt, as a hosted conversation's is, so its `SessionStart` `startup` reads as idle (mechanics M87). */
   promptless?: boolean;
+  /** A Code Mode session's persona (architecture.md § Personas), resolved at its start or pinned; null for none. Absent reads as none. */
+  personaId?: string | null;
+  /** `toneVersion` of the tone section its prompt last got, at start, resume or compaction; null for none. */
+  personaVersion?: string | null;
+  /** The operator pinned `personaId` to this session. */
+  personaPinned?: boolean;
 }
 
 /**

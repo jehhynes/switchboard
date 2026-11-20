@@ -440,6 +440,10 @@ export const MIGRATIONS = [
   ALTER TABLE replies ADD COLUMN spokenState TEXT NOT NULL DEFAULT 'none';
   ALTER TABLE replies ADD COLUMN spokenAtMs INTEGER;
   ALTER TABLE replies ADD COLUMN saidChars INTEGER;`,
+  // Personas (architecture.md § Personas): a Code Mode session's persona, the version of the tone section its prompt got, and whether it is pinned.
+  `ALTER TABLE sessions ADD COLUMN personaId TEXT;
+  ALTER TABLE sessions ADD COLUMN personaVersion TEXT;
+  ALTER TABLE sessions ADD COLUMN personaPinned INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /**
@@ -451,7 +455,7 @@ const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
 /** A reply that counts as unread (`countsUnread`) and was not seen. */
 const UNREAD_REPLY = "seenAt IS NULL AND withdrawn = 0 AND rewrittenBy IS NULL AND kind <> 'note' AND opening <> ''";
 
-const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless']);
+const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -601,7 +605,8 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The register event names an external session, and its end already shows when it was cleared.
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless']),
+  // The persona event names a pin; the version of the tone section a prompt got is bookkeeping (architecture.md § Personas).
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

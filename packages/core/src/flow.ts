@@ -10,6 +10,7 @@ import { focusUrl } from './focus.js';
 import type { Anchor, SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionContract, sessionPrompt, triagePrompt } from './template.js';
+import { personaById, resolvePersona, sessionTone, toneVersion } from './persona.js';
 import type { PlaybookChoice, TemplateVariable } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
@@ -218,6 +219,10 @@ export type FlowEvent =
   | { type: 'new-conversation'; hostWindow: string; folder: string }
   /** A hosted conversation's first message, whose first line titles it while it is still titled `NEW_CONVERSATION_TITLE`. */
   | { type: 'conversation-title'; workItemId: number; text: string }
+  /** The operator pins a persona to a Code Mode session, or clears its pin with null (architecture.md § Personas). */
+  | { type: 'persona'; sessionId: string; personaId: string | null }
+  /** The contract hook gave a Code Mode session's prompt its tone section as the settings have it now (architecture.md § Personas). */
+  | { type: 'persona-delivered'; sessionId: string }
   /** A live Claude session the operator started outside Switchboard, as the roster lists it (PRD R81). */
   | { type: 'register'; nativeSessionId: string; shortId: string; cwd: string; title: string }
   /**
@@ -298,6 +303,8 @@ export type FlowAction =
       launchId?: string;
       /** Runs in Code Mode in the terminal holder (PRD R93). */
       codeMode?: true;
+      /** A Code Mode session's tone section, appended after its conversation rules (architecture.md § Personas). */
+      tone?: string;
     }
   /**
    * The provider travels with the action, because Delete removes the session's row before its stop runs. `leftovers`: ends the processes of an ended
@@ -373,7 +380,7 @@ function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-conversation', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-conversation', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -465,6 +472,8 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { repoRoot: event.repoRoot, start: event.start === true };
     case 'new-conversation':
       return { folder: event.folder };
+    case 'persona':
+      return { personaId: event.personaId };
     case 'register':
       return { cwd: event.cwd };
     case 'session-resumed':
@@ -654,6 +663,10 @@ class Flow {
         return this.newConversation(event.hostWindow, event.folder);
       case 'conversation-title':
         return this.conversationTitle(event.workItemId, event.text);
+      case 'persona':
+        return this.pinPersona(event.sessionId, event.personaId);
+      case 'persona-delivered':
+        return this.personaDelivered(event.sessionId);
       case 'register':
         return this.register(event);
       case 'ticket':
@@ -1892,7 +1905,55 @@ class Flow {
     const session = this.store.session(sessionId);
 
     if (session?.codeMode === true && session.state === 'ended') {
-      this.store.updateSession(sessionId, { launchId });
+      // The resume's prompt carries the tone section as the settings have it now.
+      this.store.updateSession(sessionId, { launchId, personaVersion: toneVersion(sessionTone(this.context.settings.voice, session)) });
+    }
+  }
+
+  /** The persona IDs of the live Code Mode sessions other than `except`, one per session, for the pool (architecture.md § Personas). */
+  private livePersonas(except: string | null): Array<string | null | undefined> {
+    return this.store
+      .activeSessions()
+      .filter((session) => session.codeMode === true && session.id !== except)
+      .map((session) => session.personaId);
+  }
+
+  /**
+   * Pins a persona to a Code Mode session, or clears its pin, which gives it the persona a start would resolve now (architecture.md § Personas).
+   * Its voice changes from the next spoken reply; its tone section waits for the next resume or compaction.
+   */
+  private pinPersona(sessionId: string, personaId: string | null): void {
+    const session = this.session(sessionId);
+    const voice = this.context.settings.voice;
+
+    if (session.codeMode !== true) {
+      throw new Refusal('Only a Code Mode session has a persona.');
+    }
+
+    // Personas are part of voice, so a dock menu shown before voice was turned off pins nothing.
+    if (!voice.enabled) {
+      throw new Refusal('Voice is off (voice.enabled).');
+    }
+
+    if (personaId !== null) {
+      if (personaById(voice, personaId) === null) {
+        throw new Refusal(`No persona ${personaId} in voice.personas.`);
+      }
+
+      this.store.updateSession(sessionId, { personaId, personaPinned: true });
+      return;
+    }
+
+    const item = this.store.workItem(session.workItemId);
+
+    this.store.updateSession(sessionId, { personaId: resolvePersona(voice, item?.playbook ?? null, this.livePersonas(sessionId))?.id ?? null, personaPinned: false });
+  }
+
+  private personaDelivered(sessionId: string): void {
+    const session = this.store.session(sessionId);
+
+    if (session?.codeMode === true) {
+      this.store.updateSession(sessionId, { personaVersion: toneVersion(sessionTone(this.context.settings.voice, session)) });
     }
   }
 
@@ -2785,6 +2846,9 @@ class Flow {
     // The guidance waits through a setup session and a failed start for the task session, and an approved prompt does not take it (PRD R77).
     const guided = kind === 'task' && !approved;
     const full = sessionPrompt(prompt, id, guided ? item.guidance : null);
+    // A Code Mode session's persona is resolved once, here, and kept for its life (architecture.md § Personas).
+    const persona = held === null ? null : resolvePersona(this.context.settings.voice, item.playbook, this.livePersonas(null));
+    const tone = held === null ? null : sessionTone(this.context.settings.voice, { personaId: persona?.id ?? null });
 
     if (kind === 'task' && playbook !== null) {
       this.store.updateWorkItem(item.id, { taskPrompt: full });
@@ -2818,6 +2882,9 @@ class Flow {
       codeMode: held !== null,
       launchId: held?.launchId ?? null,
       promptless: hosted,
+      personaId: persona?.id ?? null,
+      personaVersion: toneVersion(tone),
+      personaPinned: false,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     // Rows open only the latest session, so an older held one ends (PRD R95).
@@ -2835,6 +2902,7 @@ class Flow {
       name: sessionName(kind, item, ticket),
       ...launchOptions(this.context.settings, playbook, kind, provider),
       ...(held ?? {}),
+      ...(tone === null ? {} : { tone }),
     });
   }
 

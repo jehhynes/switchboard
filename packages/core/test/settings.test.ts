@@ -10,7 +10,7 @@ describe('parseSettings', () => {
         sources: {},
         schedules: {},
         dock: { openVSCode: 'always', openTerminal: 'vscode' },
-        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null },
+        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, personas: [], playbookPersonas: {} },
       },
     });
   });
@@ -45,7 +45,7 @@ describe('parseSettings', () => {
         },
         schedules: {},
         dock: { openVSCode: 'review', openTerminal: 'auto' },
-        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers' },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', personas: [], playbookPersonas: {} },
       },
     });
   });
