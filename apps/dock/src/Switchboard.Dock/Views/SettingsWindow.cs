@@ -588,11 +588,27 @@ public sealed class SettingsWindow : Window
 
         DrawNav(state);
         UpdateBar(SettingsPages.Bar(state));
-        buttons.Children.Clear();
 
-        foreach (var button in view.Buttons)
+        // The same buttons are updated in place, so one with the focus keeps it.
+        var kept = buttons.Children.OfType<Button>().Select((button) => button.DataContext as PageButton).ToList();
+
+        if (kept.Count == view.Buttons.Count && kept.Zip(view.Buttons).All((pair) => pair.First is { } was && was with { Enabled = pair.Second.Enabled, Tip = pair.Second.Tip } == pair.Second))
         {
-            buttons.Children.Add(PageButton(button));
+            foreach (var (button, spec) in buttons.Children.OfType<Button>().Zip(view.Buttons))
+            {
+                button.IsEnabled = spec.Enabled;
+                ToolTip.SetTip(button, spec.Tip);
+                button.DataContext = spec;
+            }
+        }
+        else
+        {
+            buttons.Children.Clear();
+
+            foreach (var button in view.Buttons)
+            {
+                buttons.Children.Add(PageButton(button));
+            }
         }
 
         notes.Children.Clear();
@@ -670,34 +686,99 @@ public sealed class SettingsWindow : Window
 
     void DrawNav(EditorState? state)
     {
-        nav.Children.Clear();
+        IReadOnlyList<NavEntry> entries = state is null ? [] : SettingsPages.Nav(state);
 
-        if (state is null)
+        // A button whose entry stays, by kind, command and target, is kept and updated in place, so one with the focus keeps it; headings are
+        // drawn again, as they take no focus.
+        var kept = nav.Children.OfType<Button>().Where((button) => navEntries.ContainsKey(button)).ToDictionary((button) => Identity(navEntries[button]));
+        List<Control> wanted = [];
+
+        navEntries.Clear();
+
+        foreach (var entry in entries)
         {
-            return;
+            if (entry.Kind == "heading")
+            {
+                wanted.Add(nav.Children.OfType<TextBlock>().FirstOrDefault((text) => text.Text == entry.Label.ToUpperInvariant() && !wanted.Contains(text))
+                    ?? new TextBlock { Text = entry.Label.ToUpperInvariant(), FontSize = 11, FontWeight = FontWeight.SemiBold, Margin = new Thickness(4, 10, 0, 2) });
+                continue;
+            }
+
+            if (kept.Remove(Identity(entry), out var button))
+            {
+                ShowNav(button, entry);
+            }
+            else
+            {
+                button = NavButton(entry);
+            }
+
+            button.Margin = entry.Kind == "namespace" ? new Thickness(0, 4, 0, 0) : default;
+            navEntries[button] = entry;
+            wanted.Add(button);
         }
 
-        foreach (var entry in SettingsPages.Nav(state))
+        foreach (var gone in kept.Values)
         {
-            switch (entry.Kind)
-            {
-                case "heading":
-                    nav.Children.Add(new TextBlock { Text = entry.Label.ToUpperInvariant(), FontSize = 11, FontWeight = FontWeight.SemiBold, Margin = new Thickness(4, 10, 0, 2) });
-                    break;
-                case "namespace":
-                    var button = NavButton(entry);
+            current.GetValueOrDefault(gone)?.Dispose();
+            current.Remove(gone);
+        }
 
-                    button.Margin = new Thickness(0, 4, 0, 0);
-                    nav.Children.Add(button);
-                    break;
-                default:
-                    nav.Children.Add(NavButton(entry));
-                    break;
+        for (var index = nav.Children.Count - 1; index >= 0; index--)
+        {
+            if (!wanted.Contains(nav.Children[index]))
+            {
+                nav.Children.RemoveAt(index);
+            }
+        }
+
+        for (var index = 0; index < wanted.Count; index++)
+        {
+            if (index < nav.Children.Count && nav.Children[index] == wanted[index])
+            {
+                continue;
+            }
+
+            if (nav.Children.IndexOf(wanted[index]) is var at and >= 0)
+            {
+                nav.Children.Move(at, index);
+            }
+            else
+            {
+                nav.Children.Insert(index, wanted[index]);
             }
         }
     }
 
+    /// <summary>The entry each navigation button shows, by which an update finds the button again.</summary>
+    readonly Dictionary<Button, NavEntry> navEntries = [];
+
+    /// <summary>What names a navigation entry across updates: its kind, command and target, not its label, note or marks.</summary>
+    static (string Kind, string? Command, string? Argument) Identity(NavEntry entry) => (entry.Kind, entry.Command, entry.Argument);
+
     Button NavButton(NavEntry entry)
+    {
+        var button = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, Padding = new Thickness(8, 3), Tag = entry.Argument };
+
+        button.Classes.Add("nav");
+        button.Click += (_, _) =>
+        {
+            if (entry.Command == "add-source")
+            {
+                editor.AddSource(entry.Argument!);
+            }
+            else
+            {
+                editor.Navigate(entry.Argument!);
+            }
+        };
+        ShowNav(button, entry);
+
+        return button;
+    }
+
+    /// <summary>Sets a navigation button's label, marks and current state.</summary>
+    void ShowNav(Button button, NavEntry entry)
     {
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var text = new TextBlock { Text = entry.Kind == "add" ? $"+ {entry.Label}" : entry.Label };
@@ -727,33 +808,27 @@ public sealed class SettingsWindow : Window
             label.Children.Add(Tinted(new TextBlock { Text = "⚠", Classes = { "errors" } }, "DockError"));
         }
 
-        var button = new Button { Content = label, HorizontalAlignment = HorizontalAlignment.Stretch, Background = Brushes.Transparent, Padding = new Thickness(8, 3), Tag = entry.Argument };
+        button.Content = label;
+        current.GetValueOrDefault(button)?.Dispose();
+        current.Remove(button);
+        button.Classes.Set("current", entry.Current);
 
         if (entry.Current)
         {
-            button.Bind(BackgroundProperty, this.GetResourceObservable("DockSelected"));
-            button.Classes.Add("current");
+            current[button] = button.Bind(BackgroundProperty, this.GetResourceObservable("DockSelected"));
         }
-
-        button.Classes.Add("nav");
-        button.Click += (_, _) =>
+        else
         {
-            if (entry.Command == "add-source")
-            {
-                editor.AddSource(entry.Argument!);
-            }
-            else
-            {
-                editor.Navigate(entry.Argument!);
-            }
-        };
-
-        return button;
+            button.Background = Brushes.Transparent;
+        }
     }
+
+    /// <summary>The current navigation button's background binding, removed when another becomes current.</summary>
+    readonly Dictionary<Button, IDisposable> current = [];
 
     Button PageButton(PageButton spec)
     {
-        var button = new Button { Content = spec.Label, IsEnabled = spec.Enabled, Tag = spec.Command };
+        var button = new Button { Content = spec.Label, IsEnabled = spec.Enabled, Tag = spec.Command, DataContext = spec };
 
         if (spec.Primary)
         {

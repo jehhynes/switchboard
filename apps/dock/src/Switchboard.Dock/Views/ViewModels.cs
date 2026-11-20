@@ -556,8 +556,7 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
 
         groupContent = content;
         var kept = Groups.ToDictionary((group) => group.Key);
-
-        Groups.Clear();
+        List<GroupViewModel> shown = [];
 
         doneGroup = view.Groups.FirstOrDefault((group) => group.Key == "done");
 
@@ -566,8 +565,11 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
             var model = kept.GetValueOrDefault(group.Key) ?? new GroupViewModel(group.Key, IsOpen(group.Key), Toggled, IsBandOpen, BandToggled);
 
             model.Show(group, selected, filter);
-            Groups.Add(model);
+            shown.Add(model);
         }
+
+        // Updated in place, so the rows' controls, their focus and the list's scroll position survive each view.
+        Lists.Sync(Groups, shown);
 
         // The rows the hub found before the Done list stay while their search does.
         if (older.Count > 0)
@@ -576,7 +578,6 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         }
 
         SearchChanged();
-
     }
 
     bool IsOpen(string key) => settings.Groups.TryGetValue(key, out var open) ? open : OpenByDefault.Contains(key);
@@ -821,6 +822,7 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     : Observable
 {
     readonly Dictionary<string, BandViewModel> kept = [];
+    readonly Dictionary<string, RowViewModel> rowModels = [];
     bool isOpen = open;
     string glyph = "";
     string title = "";
@@ -895,7 +897,25 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
         Title = group.Title;
         Glyph = group.Glyph;
         Empty = group.Empty;
-        all = group.Rows.Select((row) => new RowViewModel(row) { IsSelected = row.Key == selected }).ToList();
+        // A row keeps its model while its key stays, so its controls and their focus survive the update.
+        all = group.Rows.Select((row) =>
+        {
+            var model = rowModels.TryGetValue(row.Key, out var known) ? known.Update(row) : new RowViewModel(row);
+
+            model.IsSelected = row.Key == selected;
+            return model;
+        }).ToList();
+
+        foreach (var gone in rowModels.Keys.Except(all.Select((row) => row.Key)).ToList())
+        {
+            rowModels.Remove(gone);
+        }
+
+        foreach (var row in all)
+        {
+            rowModels[row.Key] = row;
+        }
+
         Filter(filtering);
     }
 
@@ -1003,12 +1023,35 @@ public sealed class SourceEntryViewModel(string name, bool enabled) : Observable
     public bool Enabled { get => enabled; set => Set(ref enabled, value); }
 }
 
-/// <summary>One row's texts, as the hub sent them.</summary>
+/// <summary>One row's texts, as the hub sent them; a later view of the same row updates it in place.</summary>
 public sealed class RowViewModel(DockRow row) : Observable
 {
+    static readonly string[] Properties = typeof(RowViewModel).GetProperties().Select((property) => property.Name).Where((name) => name != nameof(IsSelected)).ToArray();
+
     bool isSelected;
+    IReadOnlyList<DetailViewModel> details = row.Details.Select((detail) => new DetailViewModel(detail)).ToList();
 
     public DockRow Row => row;
+
+    /// <summary>Takes the hub's newer view of the row and raises a change for each text; unchanged details and links keep their lists, so their controls stay.</summary>
+    public RowViewModel Update(DockRow next)
+    {
+        var links = next.Links.SequenceEqual(row.Links) ? row.Links : next.Links;
+
+        if (!next.Details.SequenceEqual(row.Details))
+        {
+            details = next.Details.Select((detail) => new DetailViewModel(detail)).ToList();
+        }
+
+        row = next with { Links = links };
+
+        foreach (var name in Properties)
+        {
+            Changed(name);
+        }
+
+        return this;
+    }
 
     public string Key => row.Key;
 
@@ -1042,7 +1085,7 @@ public sealed class RowViewModel(DockRow row) : Observable
     /// <summary>Running and Triaging spin, as in the panel.</summary>
     public bool MarkSpins => row.Mark?.Kind is "running" or "triaging";
 
-    public IReadOnlyList<DetailViewModel> Details { get; } = row.Details.Select((detail) => new DetailViewModel(detail)).ToList();
+    public IReadOnlyList<DetailViewModel> Details => details;
 
     public bool IsGithub => row.SourceKind == "github";
 

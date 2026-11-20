@@ -19,6 +19,10 @@ public sealed class HeldSessionsWindow : Window
     readonly IHub hub;
     readonly IDockActions actions;
     readonly StackPanel rows = new() { Name = "HeldRows", Spacing = 4 };
+    // Each session's row, kept while the session is held, so a view that changes only its texts keeps its buttons and their focus.
+    readonly Dictionary<string, HeldRow> shown = [];
+    readonly StackPanel header = Row();
+    readonly TextBlock none = new() { Text = "No held sessions.", Classes = { "muted" } };
     readonly TextBlock status = new() { Name = "HeldStatus", TextWrapping = TextWrapping.Wrap };
 
     public HeldSessionsWindow(DockViewModel model, IHub hub, IDockActions actions)
@@ -49,47 +53,106 @@ public sealed class HeldSessionsWindow : Window
         }
     }
 
+    /// <summary>Shows the view's held sessions, updating the rows of sessions still held in place and adding or removing only the others.</summary>
     void Fill()
     {
-        rows.Children.Clear();
-
-        if (model.Held.Count == 0)
+        if (header.Children.Count == 0)
         {
-            rows.Children.Add(new TextBlock { Text = "No held sessions.", Classes = { "muted" } });
-            return;
+            foreach (var (label, width) in Columns)
+            {
+                header.Children.Add(Cell(label, width, FontWeight.SemiBold));
+            }
         }
 
-        var header = Row();
-
-        foreach (var (label, width) in Columns)
+        foreach (var gone in shown.Keys.Except(model.Held.Select((held) => held.Session)).ToList())
         {
-            header.Children.Add(Cell(label, width, FontWeight.SemiBold));
+            shown.Remove(gone);
         }
 
-        rows.Children.Add(header);
+        List<Control> wanted = model.Held.Count == 0 ? [none] : [header];
 
         foreach (var held in model.Held)
         {
-            var row = Row();
-            string[] texts = [held.Item, held.Session, held.NativeSessionId, held.Cwd, held.State, held.Idle, held.Memory, held.Clients.ToString(System.Globalization.CultureInfo.InvariantCulture)];
-
-            foreach (var (text, (_, width)) in texts.Zip(Columns))
+            if (!shown.TryGetValue(held.Session, out var row))
             {
-                row.Children.Add(Cell(text, width));
+                row = new HeldRow(this, held.Session);
+                shown[held.Session] = row;
             }
 
-            var open = new Button { Content = "Open in terminal", Tag = $"open:{held.Session}", IsEnabled = held.Terminal is not null };
-            var stop = new Button { Content = "Stop", Tag = $"stop:{held.Session}", IsEnabled = !held.Exited };
+            row.Show(held);
+            wanted.Add(row.Panel);
+        }
 
-            if (held.Terminal is { } terminal)
+        for (var index = 0; index < wanted.Count; index++)
+        {
+            if (index < rows.Children.Count && rows.Children[index] == wanted[index])
             {
-                open.Click += async (_, _) => status.Text = await actions.Terminal(null, terminal, CancellationToken.None);
+                continue;
             }
 
-            stop.Click += async (_, _) => status.Text = await hub.StopHeld(held.Session) ?? $"Stopped held session {held.Session}.";
-            row.Children.Add(open);
-            row.Children.Add(stop);
-            rows.Children.Add(row);
+            if (rows.Children.IndexOf(wanted[index]) is var at and >= 0)
+            {
+                rows.Children.Move(at, index);
+            }
+            else
+            {
+                rows.Children.Insert(index, wanted[index]);
+            }
+        }
+
+        while (rows.Children.Count > wanted.Count)
+        {
+            rows.Children.RemoveAt(rows.Children.Count - 1);
+        }
+    }
+
+    /// <summary>One held session's cells and buttons; the buttons act on the session as the latest view shows it.</summary>
+    sealed class HeldRow
+    {
+        readonly TextBlock[] cells;
+        readonly Button open;
+        readonly Button stop;
+        DockHeld? held;
+
+        public HeldRow(HeldSessionsWindow window, string session)
+        {
+            Panel = Row();
+            cells = Columns.Select((column) => Cell("", column.Width)).ToArray();
+            open = new Button { Content = "Open in terminal", Tag = $"open:{session}" };
+            stop = new Button { Content = "Stop", Tag = $"stop:{session}" };
+            open.Click += async (_, _) =>
+            {
+                if (held?.Terminal is { } terminal)
+                {
+                    window.status.Text = await window.actions.Terminal(null, terminal, CancellationToken.None);
+                }
+            };
+            stop.Click += async (_, _) => window.status.Text = await window.hub.StopHeld(session) ?? $"Stopped held session {session}.";
+
+            foreach (var cell in cells)
+            {
+                Panel.Children.Add(cell);
+            }
+
+            Panel.Children.Add(open);
+            Panel.Children.Add(stop);
+        }
+
+        public StackPanel Panel { get; }
+
+        public void Show(DockHeld next)
+        {
+            held = next;
+            string[] texts = [next.Item, next.Session, next.NativeSessionId, next.Cwd, next.State, next.Idle, next.Memory, next.Clients.ToString(System.Globalization.CultureInfo.InvariantCulture)];
+
+            foreach (var (cell, text) in cells.Zip(texts))
+            {
+                cell.Text = text;
+                ToolTip.SetTip(cell, text);
+            }
+
+            open.IsEnabled = next.Terminal is not null;
+            stop.IsEnabled = !next.Exited;
         }
     }
 
