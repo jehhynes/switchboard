@@ -412,6 +412,8 @@ export interface PageView {
   tab: Tab;
   unopened: ReadonlySet<string>;
   cards?: ReadonlyMap<string, CardDraft>;
+  /** Whether the New messages pill shows: new items came below a conversation scrolled up. */
+  pill?: boolean;
 }
 
 const CONVERSATION_TAB: PageView = { tab: 'conversation', unopened: new Set() };
@@ -624,12 +626,16 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     : state.session?.state === 'waiting' && state.session.waitingFor === 'question'
       ? `<div class="terminal-question" role="status"><span class="codicon codicon-question" aria-hidden="true"></span><span class="terminal-question-text">${state.session.provider === 'codex' ? 'Codex' : 'Claude'} is waiting for an answer in the terminal</span><button type="button" class="terminal-question-open" data-action="terminal">Open in terminal</button></div>`
       : '';
+  // Each tab's panel, and each conversation's, is its own node, so a redraw keeps its scroll position and another tab or conversation starts afresh.
+  const shownKey = `${state.scope.scopeGen}-${state.session?.id ?? ''}`;
+  // The New messages pill sits at the bottom of the conversation's own area, just above the composer, never behind it.
+  const pill = `<button class="pill" type="button" data-action="pill"${page.pill === true ? '' : ' hidden'}>New messages</button>`;
   const panel =
     page.tab === 'status'
-      ? `<div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard)}</div>`
+      ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard)}</div>`
       : page.tab === 'artifacts'
-        ? `<div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
-        : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${asking}`;
+        ? `<div class="panel" id="panel" data-key="artifacts-${shownKey}" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
+        : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll-area" data-key="conversation-${shownKey}"><div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${pill}</div>${asking}`;
 
   return `${header}${tabs}${panel}`;
 }

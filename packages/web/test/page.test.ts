@@ -205,6 +205,35 @@ describe('the page', () => {
   };
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+
+  it('redraws by changing only what differs, keeping the focus on a list row and the conversation at its end until the operator scrolls away', () => {
+    const { page, source } = start();
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+    const sized = (height: number) => {
+      Object.defineProperty(panel, 'scrollHeight', { value: height, configurable: true });
+      Object.defineProperty(panel, 'clientHeight', { value: 100, configurable: true });
+    };
+    const groups = [{ kind: 'item', title: 'Fix it', conversations: [{ workItemId: 1, title: 'Fix it', state: 'idle', unread: 0 }] }];
+
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+
+    const row = root.querySelector<HTMLElement>('.list-item')!;
+
+    row.focus();
+    sized(300);
+    source.emit('reply', { reply: reply('r2', 2) });
+    expect(root.querySelector('.list-item')).toBe(row);
+    expect(document.activeElement).toBe(row);
+    expect(panel.scrollTop).toBe(300);
+    // Scrolled up by the operator, the conversation stays where it is.
+    panel.scrollTop = 50;
+    panel.dispatchEvent(new Event('scroll'));
+    sized(500);
+    source.emit('reply', { reply: reply('r3', 3) });
+    expect(panel.scrollTop).toBe(50);
+    page.close();
+  });
+
   it('opens its page stream, selects the work item its address names, and reports its focus', async () => {
     const { page, source } = start();
 

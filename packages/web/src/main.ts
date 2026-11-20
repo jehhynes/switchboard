@@ -4,6 +4,7 @@ import { escape, renderMarkdown } from './markdown.js';
 import { answerText, artifactUrl, complete, markdownBody, newView, parseQuestions, renderArtifacts, renderArtifactView, renderHeader, renderList, renderStatus, renderTabs, renderTimeline, renderVoice, TABS } from './render.js';
 import type { CardDraft, Tab, View } from './render.js';
 import type { ItemView } from './types.js';
+import { morph } from './morph.js';
 
 /** The stream's event types the page reads. */
 export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft'];
@@ -523,20 +524,54 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
 
+  // Whether the conversation follows its end, set by the operator's own scrolling, and where the page itself last scrolled it, as in the Conversation view.
+  let pinned = true;
+  let ownTop = 0;
+  /** What the panel last showed: its tab and conversation; another starts at its top, or at its end for a conversation. */
+  let shown: string | null = null;
+  const atEnd = (): boolean => panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
+  const followEnd = (): void => {
+    if (view.tab === 'conversation' && state.scope !== null && pinned && !atEnd()) {
+      panel.scrollTop = panel.scrollHeight;
+      ownTop = panel.scrollTop;
+    }
+  };
+
+  panel.addEventListener('scroll', () => {
+    if (view.tab !== 'conversation') {
+      return;
+    }
+
+    if (atEnd()) {
+      pinned = true;
+    } else if (Math.abs(panel.scrollTop - ownTop) > 1) {
+      pinned = false;
+    }
+  });
+
+  // The panel shrinks when the composer or a banner grows, and its content grows when a fold opens or a picture loads.
+  const resized =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          followEnd();
+        })
+      : null;
+
+  resized?.observe(panel);
+
+  /** Draws the state by changing only what differs (`morph`), so the focus, a selection, the scroll position and open menus stay. */
   const draw = (): void => {
-    list.innerHTML = expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null);
+    morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null));
 
     if (state.scope === null) {
-      head.innerHTML = '';
-      panel.innerHTML = `<p class="empty">${state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'}</p>`;
+      morph(head, '');
+      morph(panel, `<p class="empty">${state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…'}</p>`);
+      shown = null;
       updateComposer();
       return;
     }
 
-    const atEnd = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
-    const scroll = panel.scrollTop;
-
-    head.innerHTML = renderHeader(state, view) + renderTabs(view, state);
+    morph(head, renderHeader(state, view) + renderTabs(view, state));
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -548,13 +583,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         void fillArtifact(artifact.path);
       }
     } else {
-      panel.innerHTML = view.tab === 'status' ? renderStatus(state, view, now) : view.tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view);
+      morph(panel, view.tab === 'status' ? renderStatus(state, view, now) : view.tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
       drawDiagrams(panel);
-      panel.scrollTop = view.tab === 'conversation' && atEnd ? panel.scrollHeight : scroll;
     }
 
     panel.classList.toggle('framed', view.tab === 'artifacts' && artifact !== undefined);
+    // The composer first, so the conversation is scrolled against its final height.
     updateComposer();
+
+    const showing = `${view.tab} ${state.scope.scopeGen} ${state.session?.id ?? ''}`;
+
+    if (showing !== shown) {
+      shown = showing;
+      pinned = true;
+      panel.scrollTop = view.tab === 'conversation' ? panel.scrollHeight : 0;
+      ownTop = panel.scrollTop;
+    }
+
+    const timelineList = panel.querySelector('.timeline');
+
+    if (timelineList !== null) {
+      resized?.observe(timelineList);
+    }
+
+    followEnd();
     checkSeen();
   };
 

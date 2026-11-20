@@ -1567,6 +1567,7 @@ describe('the tab strip', () => {
     Object.defineProperty(scroller, 'scrollHeight', { value: 1_000, configurable: true });
     Object.defineProperty(scroller, 'clientHeight', { value: 100, configurable: true });
     scroller.scrollTop = 300;
+    scroller.dispatchEvent(new Event('scroll'));
     root.querySelector<HTMLElement>('[role="tab"][data-tab="artifacts"]')!.click();
     expect(saved).toMatchObject({ tab: 'artifacts', scroll: 300 });
     root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
@@ -1609,6 +1610,7 @@ describe('the tab strip', () => {
     root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
     tall(root.querySelector<HTMLElement>('.scroll')!);
     root.querySelector<HTMLElement>('.scroll')!.scrollTop = 300;
+    root.querySelector<HTMLElement>('.scroll')!.dispatchEvent(new Event('scroll'));
     root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
     send(state({ items: [reply('r1', T0), reply('r2', T0 + 1)] }));
     const scroller = root.querySelector<HTMLElement>('.scroll');
@@ -1818,5 +1820,77 @@ describe('several conversations in a window (architecture.md § Conversation vie
     expect(input.value).toBe('Fifth');
     sent(4, null);
     expect(input.value).toBe('Fourth');
+  });
+});
+
+describe('redraws and following the end (architecture.md § Conversation view)', () => {
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ ...applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0)])), ...patch });
+  const send = (shown: ConversationState) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: shown } }));
+  const sized = (element: HTMLElement, height: number) => {
+    Object.defineProperty(element, 'scrollHeight', { value: height, configurable: true });
+    Object.defineProperty(element, 'clientHeight', { value: 100, configurable: true });
+  };
+
+  it('keeps the nodes a state does not change, with the focus on a reply\'s button and the conversation\'s own scroller', () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, { postMessage: () => undefined, getState: () => null, setState: () => undefined });
+    send(state());
+
+    const scroller = root.querySelector('.scroll');
+    const copy = root.querySelector<HTMLElement>('li[data-id="r1"] [data-action="copy-reply"]')!;
+
+    copy.focus();
+    send(state({ items: [reply('r1', T0), reply('r2', T0 + 60_000)] }));
+    expect(root.querySelector('.scroll')).toBe(scroller);
+    expect(root.querySelector('li[data-id="r1"] [data-action="copy-reply"]')).toBe(copy);
+    expect(document.activeElement).toBe(copy);
+    expect(root.querySelectorAll('.timeline > li')).toHaveLength(2);
+    // Another conversation gets a scroller of its own.
+    send(applyEvent(EMPTY_CONVERSATION, hello([reply('r9', T0)], { scope: { ...SCOPE, scopeGen: 2 } })));
+    expect(root.querySelector('.scroll')).not.toBe(scroller);
+  });
+
+  it('follows the end from the first state on, through items and size changes, until the operator scrolls away, and then shows the pill above the composer', () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, { postMessage: () => undefined, getState: () => null, setState: () => undefined });
+    send(state());
+
+    const scroller = root.querySelector<HTMLElement>('.scroll')!;
+
+    // The composer or a banner grew after the first draw, so the end moved 95 px down with no scroll by the operator: the next state follows it.
+    sized(scroller, 195);
+    send(state({ items: [reply('r1', T0), reply('r2', T0 + 1)] }));
+    expect(scroller.scrollTop).toBe(195);
+    // The page's own scroll event never stops the following, even when it comes after more items.
+    sized(scroller, 400);
+    scroller.dispatchEvent(new Event('scroll'));
+    send(state({ items: [reply('r1', T0), reply('r2', T0 + 1), reply('r3', T0 + 2)] }));
+    expect(scroller.scrollTop).toBe(400);
+    expect(root.querySelector<HTMLElement>('.pill')!.hidden).toBe(true);
+
+    // Scrolled up by the operator: new items stay below, and the pill, inside the conversation's area over the composer, takes them to the end.
+    scroller.scrollTop = 100;
+    scroller.dispatchEvent(new Event('scroll'));
+    sized(scroller, 600);
+    send(state({ items: [reply('r1', T0), reply('r2', T0 + 1), reply('r3', T0 + 2), reply('r4', T0 + 3)] }));
+    expect(scroller.scrollTop).toBe(100);
+
+    const pill = root.querySelector<HTMLElement>('.pill')!;
+
+    expect(pill.hidden).toBe(false);
+    expect(pill.parentElement?.classList.contains('scroll-area')).toBe(true);
+    pill.click();
+    expect(scroller.scrollTop).toBe(600);
+    expect(pill.hidden).toBe(true);
+    // Following again.
+    sized(scroller, 900);
+    send(state({ items: [reply('r1', T0), reply('r5', T0 + 4)] }));
+    expect(scroller.scrollTop).toBe(900);
   });
 });

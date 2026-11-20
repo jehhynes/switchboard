@@ -6,6 +6,7 @@ import { answerText, complete, parseQuestions } from '@switchboard/conversation/
 import { selectedEntry, statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 import { startComposerExtras } from './composerExtras.js';
+import { morph } from './morph.js';
 import type { ExtrasReply } from './composerExtras.js';
 
 interface VsCodeApi {
@@ -469,6 +470,11 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   let unopened = new Set<string>();
   let shownIds = new Set<string>();
   let restore = saved?.scroll ?? null;
+  // Whether the conversation follows its end: set by the operator's own scrolling, never by a size measured after a layout change, so a composer,
+  // banner or fold that changes height keeps a conversation at its end there.
+  let pinned = restore === null;
+  /** Where the page itself last scrolled the conversation, so its own scroll events, which can come after more items, never stop the following. */
+  let ownTop = 0;
   let focused: string | null = null;
   // New items arrived below the part the operator is reading, until they scroll to the end.
   let unseenBelow = false;
@@ -528,7 +534,22 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   let seenTimer: ReturnType<typeof setTimeout> | undefined;
   let wasConnected = false;
   // The timeline's size changes without a window resize when a fold opens or the composer grows.
-  const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => checkSeen()) : null;
+  const resized =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          follow();
+          checkSeen();
+        })
+      : null;
+  /** Keeps a conversation that follows its end at its end. */
+  const follow = (): void => {
+    const scroller = root.querySelector<HTMLElement>('.scroll');
+
+    if (scroller !== null && pinned && !atEnd(scroller)) {
+      scroller.scrollTop = scroller.scrollHeight;
+      ownTop = scroller.scrollTop;
+    }
+  };
   /**
    * The unread items on screen, only in the tab shown: the status on the Status tab, and the replies at least half in the timeline's viewport, or
    * filling half of it. None while the window has no focus or the page is hidden.
@@ -667,14 +688,12 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
     // Off the Conversation tab, the scroll position it had is kept until it is shown again. The composer keeps its draft in the same state.
-    const scroll = scroller === null ? restore : atEnd(scroller) ? null : scroller.scrollTop;
+    const scroll = scroller === null ? restore : pinned ? null : scroller.scrollTop;
 
     vscode.setState({ ...((vscode.getState() as object | null) ?? {}), open: [...open], scroll, tab } satisfies PageState);
   };
   const atEnd = (scroller: HTMLElement): boolean => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
 
-  // The tab and scope the page last drew, so a redraw of the same Status or Artifacts tab keeps its scroll position.
-  let drawn: string | null = null;
   /** A focused tab or button outside the timeline, found again after a redraw by its tab, action and path. */
   const focusKey = (element: Element | null): { tab?: string | undefined; action?: string | undefined; path?: string | undefined } | null => {
     // A question card's controls are found again by their card, question and letter.
@@ -685,83 +704,57 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     return element.dataset['tab'] !== undefined ? { tab: element.dataset['tab'] } : element.dataset['action'] !== undefined ? { action: element.dataset['action'], path: element.dataset['path'] } : null;
   };
 
+  /**
+   * Draws the state by changing only what differs (`morph`), so the nodes kept keep the focus, a selection, scroll positions and open menus; a
+   * conversation that follows its end stays at it, and new items below a conversation scrolled up bring the New messages pill.
+   */
   const draw = (): void => {
     const before = root.querySelector<HTMLElement>('.scroll');
     // A redraw puts the focus back on the item it was on only while the timeline had it, never taking it from the composer.
     const timelineFocused = root.contains(document.activeElement);
     const refocus = focusKey(document.activeElement);
-    const wasAtEnd = before === null || atEnd(before);
-    const top = before?.scrollTop ?? 0;
-    const panelTop = root.querySelector<HTMLElement>('.panel')?.scrollTop ?? 0;
-    const view = `${tab} ${state.scope?.scopeGen ?? ''} ${state.scope?.sessionId ?? ''}`;
     const ids = new Set(state.items.map((item) => item.id));
     const added = state.items.filter((item) => !shownIds.has(item.id));
 
-    // Items that come while another tab is shown, with the conversation scrolled up, are below where the operator was reading.
-    if (before === null && restore !== null && added.length > 0 && shownIds.size > 0) {
+    // Items that come below where the operator was reading, while another tab is shown or the conversation is scrolled up.
+    if (added.length > 0 && shownIds.size > 0 && (before === null ? restore !== null : !pinned)) {
       unseenBelow = true;
     }
 
-    // A question card's option, Other field or Submit keeps the focus over a redraw, and an Other field its caret.
-    const active = document.activeElement;
-    const cardFocus =
-      active instanceof HTMLElement && root.contains(active) && active.dataset['card'] !== undefined
-        ? { card: active.dataset['card'], question: active.dataset['question'], letter: active.dataset['letter'], action: active.dataset['action'], caret: active instanceof HTMLInputElement ? ([active.selectionStart ?? null, active.selectionEnd ?? null] as const) : null }
-        : null;
-
     startFreshClock();
-    root.innerHTML = renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards });
-    // The composer belongs to the Conversation tab.
+    morph(root, renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards, pill: unseenBelow }));
     document.body.dataset['tab'] = tab;
-
-    const panel = root.querySelector<HTMLElement>('.panel');
-
-    if (panel !== null && drawn === view) {
-      panel.scrollTop = panelTop;
-    }
-
-    drawn = view;
 
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
     if (scroller !== null) {
-      if (restore !== null) {
-        scroller.scrollTop = restore;
+      // A conversation shown again, or another conversation: back where the operator left it, else at its end.
+      if (scroller !== before) {
+        pinned = restore === null;
+        scroller.scrollTop = restore ?? scroller.scrollHeight;
+        ownTop = scroller.scrollTop;
         restore = null;
-      } else if (wasAtEnd) {
-        scroller.scrollTop = scroller.scrollHeight;
-      } else {
-        scroller.scrollTop = top;
-
-        if (added.length > 0 && shownIds.size > 0) {
-          unseenBelow = true;
-        }
+        resized?.disconnect();
+        resized?.observe(scroller);
       }
 
-      if (unseenBelow && !atEnd(scroller)) {
-        const pill = document.createElement('button');
+      const list = scroller.querySelector('.timeline');
 
-        pill.className = 'pill';
-        pill.textContent = 'New messages';
-        pill.addEventListener('click', () => {
-          scroller.scrollTop = scroller.scrollHeight;
-          unseenBelow = false;
-          pill.remove();
-        });
-        root.appendChild(pill);
+      if (list !== null) {
+        resized?.observe(list);
       }
 
-      resized?.disconnect();
-      resized?.observe(scroller);
-      scroller.addEventListener('scroll', () => {
-        if (atEnd(scroller)) {
-          unseenBelow = false;
-          root.querySelector('.pill')?.remove();
-        }
+      follow();
 
-        save();
-        checkSeen();
-      });
+      if (unseenBelow && atEnd(scroller)) {
+        unseenBelow = false;
+      }
+
+      const pill = root.querySelector<HTMLElement>('.pill');
+
+      if (pill !== null) {
+        pill.hidden = !unseenBelow;
+      }
     }
 
     // New replies are read out by a screen reader once.
@@ -773,19 +766,10 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
     shownIds = ids;
 
-    if (refocus !== null) {
+    // The focused node is kept when it is drawn again; one drawn anew is found by its tab, action and path.
+    if (refocus !== null && !root.contains(document.activeElement)) {
       [...root.querySelectorAll<HTMLElement>('[data-tab], [data-action]')].find((element) => focusKey(element) !== null && element.dataset['tab'] === refocus.tab && element.dataset['action'] === refocus.action && element.dataset['path'] === refocus.path)?.focus();
-    } else if (cardFocus !== null) {
-      const again = [...root.querySelectorAll<HTMLElement>('[data-card]')].find(
-        (element) => element.dataset['card'] === cardFocus.card && element.dataset['question'] === cardFocus.question && element.dataset['letter'] === cardFocus.letter && element.dataset['action'] === cardFocus.action,
-      );
-
-      again?.focus();
-
-      if (again instanceof HTMLInputElement && cardFocus.caret !== null) {
-        again.setSelectionRange(cardFocus.caret[0], cardFocus.caret[1]);
-      }
-    } else if (focused !== null && timelineFocused) {
+    } else if (focused !== null && timelineFocused && !root.contains(document.activeElement)) {
       root.querySelector<HTMLElement>(`li[data-id="${CSS.escape(focused)}"]`)?.focus();
     }
 
@@ -801,7 +785,7 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
     if (scroller !== null) {
-      restore = atEnd(scroller) ? null : scroller.scrollTop;
+      restore = pinned ? null : scroller.scrollTop;
     }
 
     tab = next;
@@ -835,6 +819,17 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       vscode.postMessage({ type: 'answer-request', requestId: button?.dataset['request'] ?? '', target: { sessionId: state.session.id, scopeGen: state.scope.scopeGen } });
     } else if (action === 'terminal' || action === 'earlier' || action === 'statuses' || action === 'new' || action === 'persona') {
       vscode.postMessage({ type: action });
+    } else if (action === 'pill') {
+      // The New messages pill goes to the end, where the conversation follows new items again.
+      const scroller = root.querySelector<HTMLElement>('.scroll');
+
+      if (scroller !== null) {
+        pinned = true;
+        unseenBelow = false;
+        button!.hidden = true;
+        scroller.scrollTop = scroller.scrollHeight;
+        ownTop = scroller.scrollTop;
+      }
     } else if (action === 'picker') {
       if (!open.delete(PICKER)) {
         open.add(PICKER);
@@ -1051,6 +1046,29 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
   });
 
+  // The operator's own scrolling decides whether the conversation follows its end: away from it stops following, back at it follows again.
+  root.addEventListener(
+    'scroll',
+    (event) => {
+      const scroller = event.target;
+
+      if (!(scroller instanceof HTMLElement) || !scroller.classList.contains('scroll')) {
+        return;
+      }
+
+      if (atEnd(scroller)) {
+        pinned = true;
+        unseenBelow = false;
+        root.querySelector<HTMLElement>('.pill')?.setAttribute('hidden', '');
+      } else if (Math.abs(scroller.scrollTop - ownTop) > 1) {
+        pinned = false;
+      }
+
+      save();
+      checkSeen();
+    },
+    true,
+  );
   window.addEventListener('resize', checkSeen);
   document.addEventListener('visibilitychange', () => {
     // A New status that came while the page was hidden starts its minute once the page shows it.
@@ -1099,8 +1117,9 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       }
 
       noteStatus();
-      draw();
+      // The composer first, so the conversation is drawn and scrolled against its final height.
       composer?.update(state);
+      draw();
     } else if (event.data.type === 'sent') {
       const key = cardSends.get(event.data.id);
 
@@ -1155,8 +1174,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
   });
 
-  draw();
   composer?.update(state);
+  draw();
   vscode.postMessage({ type: 'ready' });
 }
 

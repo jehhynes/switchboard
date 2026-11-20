@@ -38,7 +38,8 @@ body:not([data-tab="conversation"]) #composer { display: none; }
 /* The Artifacts tab: one row per artifact, a dot in the badge colour while it is new or changed since last opened. */
 .artifact-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .artifact-new { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-activityBarBadge-background, var(--vscode-badge-background)); }
-.scroll { flex: 1; overflow-y: auto; padding: 20px 20px 16px; }
+.scroll-area { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 20px 16px; }
 /* Items are spaced as Claude Code's messages: 8 px above and below, 20 px above a reply with a time, 4 px below a message, none above the first. */
 .timeline { list-style: none; margin: 0; padding: 0; }
 .timeline > li { --pad-top: 8px; position: relative; margin: 0; padding-top: var(--pad-top); padding-bottom: 8px; }
@@ -115,7 +116,9 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .body th, .body td { border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); padding: 2px; }
 .earlier-items, .pill { font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: 10px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 1px 10px; }
 .earlier-items { display: block; margin: 0 auto 8px; }
-.pill { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); }
+/* The pill sits 8 px above the bottom of the conversation's area, which ends at the banners and the composer, so it is never behind them. */
+.pill { position: absolute; z-index: 1; bottom: 8px; left: 50%; transform: translateX(-50%); box-shadow: 0 1px 4px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3)); }
+.pill[hidden] { display: none; }
 /* A typed message's delivery, before its time on the line over the bubble, so the times line up at the right. */
 .message .stamp-line { align-items: center; gap: 4px; color: var(--vscode-descriptionForeground); font-size: 0.85em; line-height: 16px; }
 .message .stamp-line .stamp { font-size: inherit; }
