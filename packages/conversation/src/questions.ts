@@ -246,3 +246,35 @@ export function answersIn(message: string, questions: readonly Question[]): Map<
 
   return found;
 }
+
+/** A conversation item as `unansweredCard` reads it: a message, or a reply with the text a card is drawn from. */
+export type CardItem =
+  | { type: 'message'; withdrawn: boolean; delivery?: string | null }
+  | { type: 'reply'; id: string; kind: 'reply' | 'aside' | 'note'; opening: string; rewrittenBy: string | null; withdrawn: boolean };
+
+/**
+ * Whether a session's conversation holds a question card no message has answered yet (PRD R103): a reply, not an aside, a note or one a rewrite
+ * replaced, or the newest status, that asks lettered questions and comes after the newest message. Any message answers every card before it,
+ * as in the view, except a message still `open`, not yet typed, which may yet come back not sent. `items` are in conversation order, from the
+ * newest answering message on; `status` is the newest status, with the reply it was written in.
+ */
+export function unansweredCard(items: readonly CardItem[], status: { replyId: string; markdown: string } | null): boolean {
+  let start = items.length;
+
+  while (start > 0 && !answers(items[start - 1]!)) {
+    start--;
+  }
+
+  const after = items.slice(start);
+  const asks = (markdown: string): boolean => parseQuestions(markdown).length > 0;
+
+  return (
+    after.some((item) => item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && item.rewrittenBy === null && asks(item.opening)) ||
+    (status !== null && after.some((item) => item.type === 'reply' && item.id === status.replyId) && asks(status.markdown))
+  );
+}
+
+/** Whether a conversation item answers the cards before it, for `unansweredCard`: a message that is not withdrawn and has left the composer's queue. */
+export function answers(item: CardItem): boolean {
+  return item.type === 'message' && !item.withdrawn && item.delivery !== 'open';
+}

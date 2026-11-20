@@ -80,6 +80,23 @@ export class CodexConversationAdapter implements ConversationAdapter {
     }
   }
 
+  /** Whether a reply of the session may be held back: its thread is not followed under its current subscription yet, or live items wait for its history. */
+  pending(session: Session): boolean {
+    return this.supports(session) && session.nativeSessionId !== null && (this.#followed.get(session.id) !== this.#revision(session) || (this.#buffered.get(session.id)?.length ?? 0) > 0);
+  }
+
+  /** Follows the session's thread and imports its history and the live items held for it now, as a poll does, so its last reply is stored. */
+  async catchUp(session: Session): Promise<void> {
+    if (!this.pending(session)) return;
+    await this.deps.runner.follow(session);
+    if (this.#closed) return;
+    await this.#history(session);
+    if (this.#closed) return;
+    this.#followed.set(session.id, this.#revision(session));
+    for (const item of this.#buffered.get(session.id) ?? []) this.#item(session, item, this.deps.now());
+    this.#buffered.delete(session.id);
+  }
+
   readEnded(session: Session): void {
     if (session.state !== 'ended' || session.nativeSessionId === null || this.#followed.get(session.id) === `ended:${this.#revision(session)}`) return;
     this.#log(session);

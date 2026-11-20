@@ -4,7 +4,7 @@ import { delimiter, join } from 'node:path';
 import { ClaudeRunner, conversationRules } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
-import { DEFAULT_SETTINGS, launchOptions, parsePlaybook, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
+import { DEFAULT_SETTINGS, launchOptions, parsePlaybook, QUESTION_CARD, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { NotWritten } from '@switchboard/conversation';
@@ -13,7 +13,7 @@ import type { ContextResult, CopyRelation, Playbook, PolledTicket, PollResult, S
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/config.js';
 import type { HolderConnection } from '../src/holder.js';
-import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, SESSION_ENDED, SESSION_RELAUNCHED, triageText, WAKE_MS } from '../src/runtime.js';
+import { ATTACH_RESERVATION_MS, INPUT_SETTLE_MS, questionCardOpen, REPORT_CHECK_MS, MARKER_MS, RECHECK_MS, MARKER_WATCH_RETRY_MS, repoKeysOf, Runtime, SESSION_ENDED, SESSION_RELAUNCHED, triageText, WAKE_MS } from '../src/runtime.js';
 import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 
@@ -2648,6 +2648,101 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(stored).toMatchObject({ state: 'starting', codeMode: true, nativeSessionId: action.nativeSessionId, launchId: action.launchId });
     expect(context.store.session(action.sessionId)).toMatchObject({ state: 'running', shortId: action.nativeSessionId!.slice(0, 8) });
     context.runtime.stop();
+  });
+
+  it('defers a held turn end until a conversation read only asynchronously is in, and drops it for a newer state (PRD R103)', async () => {
+    const codeMode = fakeRunner();
+    const { runtime, store } = setup(config({ codeMode: true }), () => T0, { codeMode });
+
+    runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await runtime.settled();
+    const id = store.activeSessions()[0]!.id;
+    let release = (): void => {};
+    let held = true;
+    runtime.setConversationReader({
+      read: () => {},
+      catchUp: () => (held ? new Promise<void>((resolve) => { release = () => { held = false; resolve(); }; }) : null),
+    });
+
+    runtime.send({ type: 'marker', sessionId: id, state: 'idle', detail: null });
+    expect(store.session(id)?.state).toBe('running');
+    store.addReply({ id: 'r1', sessionId: id, workItemId: 1, at: T0, kind: 'reply', answers: null, opening: '1. Which?\n   - A) One\n   - B) Two', source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: 'r1' });
+    release();
+    await runtime.settled();
+    expect(store.session(id)).toMatchObject({ state: 'idle', stateDetail: QUESTION_CARD });
+    expect(store.workItem(1)?.status).toBe('running');
+
+    // A held idle marker that a newer state overtook is dropped.
+    held = true;
+    runtime.send({ type: 'marker', sessionId: id, state: 'running', detail: null });
+    runtime.send({ type: 'marker', sessionId: id, state: 'idle', detail: null });
+    const deferredRelease = release;
+    held = false;
+    runtime.send({ type: 'marker', sessionId: id, state: 'waiting', detail: null });
+    deferredRelease();
+    await runtime.settled();
+    expect(store.session(id)?.state).toBe('waiting');
+    runtime.stop();
+  });
+
+  it('finds a card after more replies than one page, and takes no message still being typed as its answer (PRD R103)', () => {
+    const store = Store.open(':memory:');
+    const reply = (id: string, opening: string, at: number) => store.addReply({ id, sessionId: 's1', workItemId: 1, at, kind: 'reply', answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });
+
+    store.addMessage({ id: 'm1', sessionId: 's1', workItemId: 1, at: T0, origin: 'terminal', text: 'Go', transcriptUuid: 'm1', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
+    reply('card', '1. Which?\n   - A) One\n   - B) Two', T0 + 1);
+    for (let index = 0; index < 150; index++) reply(`r${index}`, `Step ${index}.`, T0 + 2 + index);
+    expect(questionCardOpen(store, 's1')).toBe(true);
+
+    store.addMessage({ id: 'm2', sessionId: 's1', workItemId: 1, at: T0 + 500, origin: 'typed', text: '1A', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: null });
+    expect(questionCardOpen(store, 's1')).toBe(true);
+    store.updateMessage('m2', { delivery: 'sent', provisional: false });
+    expect(questionCardOpen(store, 's1')).toBe(false);
+    store.close();
+  });
+
+  it('reads the conversation before a held turn ends, so a question card written last keeps its work item waiting on the answer (PRD R103)', async () => {
+    const codeMode = fakeRunner();
+    const context = setup(config({ codeMode: true }), () => T0, { codeMode });
+    const { runtime, store } = context;
+    const reads: string[][] = [];
+
+    runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await runtime.settled();
+    const session = store.activeSessions()[0]!;
+    const reply = (id: string, opening: string) => store.addReply({ id, sessionId: session.id, workItemId: 1, at: T0, kind: 'reply', answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });
+
+    store.addMessage({ id: 'm1', sessionId: session.id, workItemId: 1, at: T0, origin: 'terminal', text: 'Start', transcriptUuid: 'm1', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
+    // The card reaches the store only through the read the turn's end asks for, as a transcript line read between polls does.
+    runtime.setConversationReader({
+      read: (ids) => {
+        reads.push([...ids]);
+        reply('r1', 'Before I go on:\n\n1. Which port?\n   - A) 8765\n   - B) 8799');
+      },
+      catchUp: () => null,
+    });
+    runtime.send({ type: 'marker', sessionId: session.id, state: 'idle', detail: null });
+
+    expect(reads).toEqual([[session.id]]);
+    expect(store.session(session.id)).toMatchObject({ state: 'idle', stateDetail: QUESTION_CARD });
+    expect(store.workItem(1)?.status).toBe('running');
+    expect(markOf({ ...store.workItem(1)!, sessions: store.sessionsFor(1), triage: null, approvalSends: false })).toBe('question');
+
+    // The marker keeps reading idle while the card waits; that is no change to send again.
+    codeMode.markers = () => new Map([[session.nativeSessionId!, { at: 1, observed: { state: 'idle' as const, detail: null }, recheck: false }]]);
+    const sent = vi.spyOn(runtime, 'send');
+    runtime.readMarkers();
+    expect(sent).not.toHaveBeenCalled();
+    // A session already idle needs no read before the flow decides.
+    runtime.send({ type: 'roster', sessions: [{ sessionId: session.id, state: 'idle', detail: null }] });
+    expect(reads).toHaveLength(1);
+
+    // Once a message answers the card, the next idle reading settles the turn as before: this prompt offers done, so it blocks.
+    store.addMessage({ id: 'm2', sessionId: session.id, workItemId: 1, at: T0 + 1, origin: 'terminal', text: '1A', transcriptUuid: 'm2', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
+    runtime.send({ type: 'roster', sessions: [{ sessionId: session.id, state: 'idle', detail: null }] });
+    expect(store.session(session.id)?.stateDetail).toBeNull();
+    expect(store.workItem(1)?.status).toBe('blocked');
+    runtime.stop();
   });
 
   it('gives a Code Mode session the conversation rules after a resume and with its contract after a compaction', async () => {

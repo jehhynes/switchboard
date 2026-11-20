@@ -19,6 +19,12 @@ export interface ConversationAdapter {
   supports(session: Session): boolean;
   poll(sessions: Session[]): Promise<void>;
   readEnded(session: Session): void;
+  /** Reads what the session has written so far at once, between polls, where the provider can read it synchronously. */
+  readNow?(session: Session): void;
+  /** Whether a reply of the session may not be stored yet and can only be read asynchronously. */
+  pending?(session: Session): boolean;
+  /** Reads what `pending` says may be held back. */
+  catchUp?(session: Session): Promise<void>;
   send(session: Session, message: ConversationMessage, text: string, done: (outcome: DeliveryOutcome) => void, guard: SendGuard): void;
   resolve(message: ConversationMessage, text: string, done: (outcome: DeliveryOutcome) => void, guard: ResolveGuard): void;
   commands(session: Session): SlashCommand[];

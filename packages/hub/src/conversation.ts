@@ -334,6 +334,25 @@ export class ConversationService {
     }));
   }
 
+  /** Reads the conversations of these sessions at once, between polls, so a turn's last reply is in the store when its end is decided (PRD R103). */
+  readNow(sessionIds: readonly string[]): void {
+    if (this.#closed) return;
+    for (const id of sessionIds) {
+      const session = this.deps.store.session(id);
+      if (session !== null) this.#adapter(session)?.readNow?.(session);
+    }
+  }
+
+  /**
+   * Reads the conversation of a session whose replies may be held back and only read asynchronously, as a Codex thread's before its history is
+   * imported; null when nothing is held back, so its turn's end can be decided now (PRD R103).
+   */
+  catchUp(sessionId: string): Promise<void> | null {
+    const session = this.#closed ? null : this.deps.store.session(sessionId);
+    const adapter = session === null ? undefined : this.#adapter(session);
+    return session === null || adapter?.pending?.(session) !== true || adapter.catchUp === undefined ? null : adapter.catchUp(session);
+  }
+
   #adapter(session: Session): ConversationAdapter | undefined { return this.#adapters.find(adapter => adapter.supports(session)); }
 
   #view(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {

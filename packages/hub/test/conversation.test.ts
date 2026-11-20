@@ -721,6 +721,16 @@ describe('ConversationService', () => {
     expect(open(view.file).frames[0]).toMatchObject({ type: 'hello', unread: 1, items: [{ id: one, unread: true }, { id: two, unread: false }, { type: 'message', text: 'Next?' }], status: { unread: false } });
   });
 
+  it('reads a live session\'s transcript at once when the hub asks before a turn end, and nothing for an unknown session (PRD R103)', () => {
+    const { service, transcript, reply, store } = setup();
+
+    transcript('D:/w12', 'n2', [reply('a1', 'Which one?\n\n- A) This\n- B) That')]);
+    service.readNow(['s2', 'forged']);
+
+    expect(store.conversation('s2', null, 10).items).toMatchObject([{ type: 'reply', opening: 'Which one?\n\n- A) This\n- B) That' }]);
+    expect(store.conversation('s3', null, 10).items).toEqual([]);
+  });
+
   it("says hello with the window's scope, its current session and its items, and sends each window only its own session's replies", async () => {
     const { view, service, transcript, reply, open } = setup();
 

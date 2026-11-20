@@ -6,12 +6,12 @@ import { classify, ClaudeRunner, findTranscript, CodeModeRunner, conversationRul
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, QUESTION_CARD, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
 import { HolderError, recordPath } from '@switchboard/holder';
-import { NotWritten } from '@switchboard/conversation';
+import { answers, NotWritten, unansweredCard } from '@switchboard/conversation';
 import type { SessionEntry } from '@switchboard/holder';
 import { findHeld, heldFromHolder } from './held.js';
 import type { HeldSession } from './held.js';
@@ -141,6 +141,8 @@ export class Runtime {
   private hookInstalls: Record<Provider, Promise<void>> = { claude: Promise.resolve(), codex: Promise.resolve() };
   private pending = new Set<Promise<void>>();
   private listeners = new Set<() => void>();
+  /** Reads the conversation of sessions whose turn may be ending, so the flow sees a question card written just before the turn ended. */
+  private conversation: ConversationReader = { read: () => {}, catchUp: () => null };
   /** The roster, marker and wake timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
   private timers: NodeJS.Timeout[] = [];
   /** Set by `stop`, so a pending recheck does not read a source after the store closes. */
@@ -280,11 +282,63 @@ export class Runtime {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Sets what reads the conversation of a held session whose turn is ending, before the flow decides the turn (PRD R103): the conversation
+   * layer reads the transcript every `CONVERSATION_POLL_MS`, after the 50 ms marker read, so a reply written just before the turn ended may not
+   * be in the store yet.
+   */
+  setConversationReader(reader: ConversationReader): void {
+    this.conversation = reader;
+  }
+
   /** Applies one event in one transaction and starts its actions. */
   send(event: FlowEvent): FlowResult {
+    return this.deferTurnEnd(event) ? { actions: [], refused: null } : this.apply(event);
+  }
+
+  /**
+   * Holds an `idle` marker of a session whose conversation can only be read asynchronously, as a Codex thread's live reply waits for its history,
+   * until it is read, so the flow sees a question card (PRD R103). A later state of the session, such as its next turn, drops the held marker.
+   */
+  private deferTurnEnd(event: FlowEvent): boolean {
+    const [id] = event.type === 'marker' ? turnEnds(this.deps.store, event) : [];
+    const read = id === undefined ? null : this.conversation.catchUp(id);
+
+    if (read === null) {
+      return false;
+    }
+
+    const { state, stateAt } = this.deps.store.session(id!)!;
+
+    this.track(
+      read
+        .catch((error: unknown) => this.deps.log(`conversation read before a turn end failed: ${String(error)}`))
+        .then(() => {
+          const now = this.deps.store.session(id!);
+
+          if (now !== null && now.state === state && now.stateAt === stateAt) {
+            this.apply(event);
+          }
+        }),
+    );
+
+    return true;
+  }
+
+  private apply(event: FlowEvent): FlowResult {
     const { settings, playbooks } = this.config;
+    const ending = turnEnds(this.deps.store, event);
+
+    if (ending.length > 0) {
+      try {
+        this.conversation.read(ending);
+      } catch (error) {
+        this.deps.log(`conversation read before a turn end failed: ${String(error)}`);
+      }
+    }
+
     const result = this.deps.store.transaction(() =>
-      handle(this.deps.store, event, { now: this.deps.now(), settings, playbooks, report: this.reportCommand, newSessionId: this.deps.newSessionId, newUuid: randomUUID }),
+      handle(this.deps.store, event, { now: this.deps.now(), settings, playbooks, report: this.reportCommand, newSessionId: this.deps.newSessionId, newUuid: randomUUID, questionCard: (sessionId) => questionCardOpen(this.deps.store, sessionId) }),
     );
 
     for (const action of result.actions) {
@@ -930,7 +984,10 @@ export class Runtime {
       // A reading that needs the roster read is left to it, so a provisional state never releases a session.
       const observed = reading === undefined || reading.recheck ? null : reading.observed;
 
-      if (observed !== null && session.state !== 'starting' && (observed.state !== session.state || observed.detail !== session.stateDetail)) {
+      // A turn that ended waiting on a question card's answer reads idle from its marker until its next turn (PRD R103).
+      const card = observed?.state === 'idle' && observed.detail === null && session.state === 'idle' && session.stateDetail === QUESTION_CARD;
+
+      if (observed !== null && !card && session.state !== 'starting' && (observed.state !== session.state || observed.detail !== session.stateDetail)) {
         this.send({ type: 'marker', sessionId: session.id, ...observed });
       }
     }
@@ -2384,3 +2441,39 @@ export function triageText(context: string, now: number, handled: HandledWork | 
 function utc(time: number): string {
   return new Date(time).toISOString().slice(0, 16).replace('T', ' ');
 }
+
+/** How the runtime reads a session's conversation before deciding its turn's end (PRD R103). */
+export interface ConversationReader {
+  /** Reads these sessions' conversations now, where that can be done synchronously. */
+  read(sessionIds: string[]): void;
+  /** Reads a session's conversation that can only be read asynchronously; null when nothing is held back. */
+  catchUp(sessionId: string): Promise<void> | null;
+}
+
+/** The live held sessions an event may end a turn of: a marker or roster read that finds one idle that was not. */
+function turnEnds(store: Store, event: FlowEvent): string[] {
+  const idle = event.type === 'marker' ? (event.state === 'idle' ? [event.sessionId] : []) : event.type === 'roster' ? event.sessions.filter((entry) => entry.state === 'idle').map((entry) => entry.sessionId) : [];
+
+  return idle.filter((id) => {
+    const session = store.session(id);
+
+    return session !== null && (session.codeMode === true || session.execution === 'app-server') && session.state !== 'idle' && session.state !== 'starting' && session.state !== 'ended';
+  });
+}
+
+/** Whether a session's conversation holds a question card no message has answered yet, read from the store as the view reads it (PRD R103). */
+export function questionCardOpen(store: Store, sessionId: string): boolean {
+  // Pages back to the newest message that answers, since a turn can write more replies after its card than one page holds.
+  let page = store.conversation(sessionId, null, QUESTION_CARD_PAGE, false);
+  let items = page.items;
+
+  while (page.more && !items.some(answers) && items.length > 0) {
+    page = store.conversation(sessionId, items[0]!.id, QUESTION_CARD_PAGE, false);
+    items = [...page.items, ...items];
+  }
+
+  return unansweredCard(items, store.latestStatus(sessionId));
+}
+
+/** How many of a session's messages and replies `questionCardOpen` reads at a time. */
+const QUESTION_CARD_PAGE = 100;

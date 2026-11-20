@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { answersIn, answerText, complete, parseQuestions } from '../src/questions.js';
-import type { QuestionChoice } from '../src/questions.js';
+import { answersIn, answerText, complete, parseQuestions, unansweredCard } from '../src/questions.js';
+import type { CardItem, QuestionChoice } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
 const ASKED = 'Two things before I start:\n\n1. Which port?\n   - A) 8765 (recommended)\n   - B) 8799\n2. **Keep the old route?**\n   - A) Yes\n   - B) No, remove it\n   - C) Keep it behind a flag\n\nSay if neither fits.';
@@ -95,5 +95,39 @@ describe('a complete card', () => {
     expect(complete(questions, choices([[0, { letters: ['A'] }], [1, { other: 'later' }]]))).toBe(true);
     expect(complete(questions, choices([[0, { letters: ['A'] }]]))).toBe(false);
     expect(complete(questions, choices([[0, { letters: ['A'] }], [1, { other: '   ' }]]))).toBe(false);
+  });
+});
+
+describe('an unanswered card (PRD R103)', () => {
+  const message = (withdrawn = false, delivery: string | null = 'sent'): CardItem => ({ type: 'message', withdrawn, delivery });
+  const reply = (id: string, opening: string, patch: Partial<Extract<CardItem, { type: 'reply' }>> = {}): CardItem => ({ type: 'reply', id, kind: 'reply', opening, rewrittenBy: null, withdrawn: false, ...patch });
+
+  it('is a reply after the newest message that asks lettered questions', () => {
+    expect(unansweredCard([message(), reply('r1', ASKED)], null)).toBe(true);
+    expect(unansweredCard([reply('r1', ASKED)], null)).toBe(true);
+    expect(unansweredCard([message(), reply('r1', ASKED), reply('r2', 'Working on it.')], null)).toBe(true);
+    // A withdrawn message never reached Claude, so it answers nothing.
+    expect(unansweredCard([reply('r1', ASKED), message(true)], null)).toBe(true);
+    // Nor does one still waiting to be typed, which may come back not sent.
+    expect(unansweredCard([reply('r1', ASKED), message(false, 'open')], null)).toBe(true);
+    expect(unansweredCard([reply('r1', ASKED), message(false, null)], null)).toBe(false);
+  });
+
+  it('is none once any message follows, or when the reply is an aside, a note, rewritten, withdrawn or asks no lettered question', () => {
+    expect(unansweredCard([reply('r1', ASKED), message()], null)).toBe(false);
+    expect(unansweredCard([message(), reply('r1', ASKED, { kind: 'aside' })], null)).toBe(false);
+    expect(unansweredCard([message(), reply('r1', ASKED, { kind: 'note' })], null)).toBe(false);
+    expect(unansweredCard([message(), reply('r1', ASKED, { rewrittenBy: 'r2' }), reply('r2', 'Never mind.')], null)).toBe(false);
+    expect(unansweredCard([message(), reply('r1', ASKED, { withdrawn: true })], null)).toBe(false);
+    expect(unansweredCard([message(), reply('r1', '1. Build\n2. Test')], null)).toBe(false);
+    expect(unansweredCard([], null)).toBe(false);
+  });
+
+  it('is the newest status asking lettered questions, written in a reply after the newest message', () => {
+    expect(unansweredCard([message(), reply('r1', '')], { replyId: 'r1', markdown: ASKED })).toBe(true);
+    expect(unansweredCard([reply('r1', ''), message()], { replyId: 'r1', markdown: ASKED })).toBe(false);
+    expect(unansweredCard([message(), reply('r1', '')], { replyId: 'r1', markdown: 'Done.' })).toBe(false);
+    // A status whose reply is older than the items read is answered by the message read after it.
+    expect(unansweredCard([message(), reply('r2', 'Ok.')], { replyId: 'r1', markdown: ASKED })).toBe(false);
   });
 });

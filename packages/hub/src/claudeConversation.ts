@@ -50,6 +50,10 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
     const reader = this.#reader(session);
     this.#readTranscript(reader, session); reader.conversation.end(); this.#readers.delete(session.id);
   }
+  /** Reads the transcript of a live session at once, as a poll would, without its screen. */
+  readNow(session: Session): void {
+    if (this.supports(session) && session.nativeSessionId !== null && session.state !== 'starting' && session.state !== 'ended') this.#readTranscript(this.#reader(session), session);
+  }
   send(session: Session, _message: ConversationMessage, text: string, done: (outcome: InputOutcome) => void, guard: SendGuard): void { void this.#input(session).send(text, done, guard); }
   resolve(message: ConversationMessage, text: string, done: (outcome: InputOutcome) => void, guard: ResolveGuard): void {
     const session = this.deps.store.session(message.sessionId);

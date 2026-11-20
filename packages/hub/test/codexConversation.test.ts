@@ -85,6 +85,23 @@ describe('Codex conversation adapter and shared service',()=>{
     expect(ordered.map(i=>i.type)).toEqual(['message','reply']);
     expect(p.store.latestReplies('s1',10)[0]?.answers).toBe(ordered[0]!.id);
   });
+  it('holds back a turn end while a thread is not followed or live items wait, and catches up on request (PRD R103)',async()=>{
+    const p=setup();
+    const s1=()=>p.store.session('s1')!;
+    expect(p.adapter().pending(s1())).toBe(true);
+    expect(p.service.catchUp('s1')).not.toBeNull();
+    await p.service.catchUp('s1');
+    expect(p.adapter().pending(s1())).toBe(false);
+    expect(p.service.catchUp('s1')).toBeNull();
+    expect(p.service.catchUp('forged')).toBeNull();
+    // A new subscription holds it back again, and its catch-up stores the reply its history holds.
+    p.runner.subscription=()=>1;
+    p.turns([{items:[(recorded.reply['params'] as Json)['item']]}]);
+    expect(p.adapter().pending(s1())).toBe(true);
+    await p.service.catchUp('s1');
+    expect(p.store.conversation('s1',null,10).items.map(i=>i.type)).toEqual(['reply']);
+    expect(p.adapter().pending(s1())).toBe(false);
+  });
   it('reads recorded native entries once, filters tool output, and scopes every event without Claude hooks or screens',async()=>{
     const p=setup();
     expect(sessionView(p.store.session('s1')!,true,false).conversation).toBe('full');
