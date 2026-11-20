@@ -152,9 +152,15 @@ describe('question cards in the Conversation view', () => {
     expect(option(1, 'A').classList.contains('dimmed')).toBe(true);
     expect(root.querySelector('.question-other')).toBeNull();
 
-    // A message that says nothing of the questions still answers the card; a later reply can ask again.
+    // A message that ignores the questions sets the card aside as Skipped, with no picks; a later reply can ask again.
     show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, 'Not now'), reply('r2', T0 + 2, ASKED)]));
-    expect([...root.querySelectorAll('.question-card')].map((one) => one.classList.contains('answered'))).toEqual([true, false]);
+    expect([...root.querySelectorAll('.question-card')].map((one) => one.className)).toEqual(['question-card skipped', 'question-card']);
+    expect(root.querySelector('.question-card.skipped .question-state')?.textContent).toBe('Skipped: your next message did not answer these questions');
+    expect(root.querySelector('.question-card.skipped [aria-checked="true"]')).toBeNull();
+    expect(root.querySelector('.question-card.skipped')?.getAttribute('aria-label')).toBe('Questions, skipped');
+    // A message still being sent leaves the card open.
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1A', { delivery: 'open', provisional: true })]));
+    expect(root.querySelector('.question-card')?.className).toBe('question-card');
 
     for (const session of [{ ...SESSION, state: 'ended' as const, conversation: 'read-only' as const, reason: 'Ended.' }, SESSION]) {
       show(state([reply('r1', T0, ASKED)], { session, connected: session === SESSION ? false : true }));
@@ -162,6 +168,30 @@ describe('question cards in the Conversation view', () => {
       expect(root.querySelector('.question-other')).toBeNull();
       expect(option(0, 'A').disabled).toBe(true);
     }
+  });
+
+  it('leaves questions that end a reply out of its text, since the card draws them, and folds questions written mid-message into one line', () => {
+    const { show, root } = page();
+    const ending = 'Two things before I start:\n\n1. Which port?\n   - A) 8765\n   - B) 8799';
+
+    show(state([reply('r1', T0, ending)]));
+    expect(root.querySelector('li[data-id="r1"] > .body')?.textContent?.trim()).toBe('Two things before I start:');
+    expect(root.querySelector('li[data-id="r1"] .question-card')).not.toBeNull();
+    // ASKED has text after its questions, against the rules: they stay in place, folded, and open on a click.
+    show(state([reply('r1', T0, ASKED)]));
+
+    const fold = root.querySelector<HTMLDetailsElement>('li[data-id="r1"] > .body > details.questions-fold')!;
+
+    expect(fold.querySelector('summary')?.textContent).toBe('2 questions — answer below');
+    expect(fold.open).toBe(false);
+    expect(fold.textContent).toContain('Which port?');
+    expect(root.querySelector('li[data-id="r1"] > .body')?.textContent).toContain('Say if neither fits.');
+    fold.open = true;
+    fold.dispatchEvent(new Event('toggle'));
+    show(state([reply('r1', T0, ASKED)]));
+    expect(root.querySelector<HTMLDetailsElement>('details.questions-fold')!.open).toBe(true);
+    // The copy button still copies the reply whole.
+    expect(root.querySelector('li[data-id="r1"] [data-action="copy-reply"]')).not.toBeNull();
   });
 
   it('draws a card under the status on the Status tab, answered by a message after the reply it came from', () => {

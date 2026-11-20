@@ -96,6 +96,8 @@ describe('Code Mode command', () => {
     expect(RULES).toContain('each question is numbered and each of its options starts with a capital letter on its own line, as a nested list item under its question');
     expect(RULES).toContain('  ```markdown\n  1. Which port?\n     - A) 8765 (recommended)\n     - B) 8799\n  ```\n');
     expect(RULES).toContain('The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"');
+    // The questions end the message, so the view shows them as the card alone.
+    expect(RULES).toContain('Put the questions at the end of the message, after everything else you write in it');
     expect(RULES).toContain("Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal");
     expect(RULES).toContain("Ask in a reply instead; the answer comes as the operator's next message.");
   });

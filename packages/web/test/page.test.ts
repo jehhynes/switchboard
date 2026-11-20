@@ -81,6 +81,28 @@ describe('question cards', () => {
   });
 });
 
+describe('question cards in replies', () => {
+  const ending = 'Before I go on:\n\n1. Port?\n   - A) 1\n   - B) 2';
+  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [] });
+
+  it('leaves questions that end a reply out of its text, folds ones written mid-message, and tells an answer from a message that skipped them', () => {
+    const host = document.createElement('div');
+
+    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending })]), newView());
+    expect(host.querySelector('li[data-id="r1"] > .body')?.textContent?.trim()).toBe('Before I go on:');
+    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: `${ending}\n\nThen I start.` })]), newView());
+    expect(host.querySelector('details.questions-fold summary')?.textContent).toBe('1 question — answer below');
+    expect(host.querySelector('li[data-id="r1"] > .body')?.textContent).toContain('Then I start.');
+    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView());
+    expect(host.querySelector('.question-card')?.className).toBe('question-card skipped');
+    expect(host.querySelector('.question-card [aria-checked="true"]')).toBeNull();
+    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B' })]), newView());
+    expect(host.querySelector('.question-card')?.className).toBe('question-card answered');
+    host.innerHTML = renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView());
+    expect(host.querySelector('.question-card')?.className).toBe('question-card');
+  });
+});
+
 describe('drawing', () => {
   it("keeps raw HTML out of Markdown, opens web links in a new tab and shows paths as text", () => {
     const html = renderMarkdown('<img src=x onerror=alert(1)> [web](https://example.com) [file](src/a.ts) [bad](javascript:alert(1))');

@@ -24,7 +24,7 @@ ${provider === 'claude' ? '- Text written directly before a tool call in the sam
      - B) 8799
   \`\`\`
 
-  The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"; the operator may also type an answer or ignore the card.
+  Put the questions at the end of the message, after everything else you write in it, so the view can show them as the card alone. The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"; the operator may also type an answer or ignore the card.
 ${provider === 'claude' ? "- Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal, so the operator's messages wait behind it, and the view cannot show it. Ask in a reply instead; the answer comes as the operator's next message." : "- You may ask a question with request_user_input; the view can show its request and return the operator's answer."}
 
 ${voice ? `${SPOKEN_RULES}\n\n${DICTATION_RULES}\n\n` : ''}${artifactRules(artifactsDir)}`;

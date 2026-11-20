@@ -2,7 +2,7 @@ import { providerMark } from '@switchboard/conversation/providerIcons';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
-import { answersIn, answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
+import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionParts } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 import type { ArtifactView, MessageView, NativeRequest, PageGroup, ReplyView, StatusView, VoiceView } from './types.js';
 
@@ -143,7 +143,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, view: View, stamped: 
   // Focused mode: a reply with a [speak] passage shows the passage first and the whole reply behind Show more.
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' && item.speak.trim() !== item.opening.trim() ? item.speak : null;
   const expanded = passage === null || expandReplies !== view.open.has(`more:${item.id}`);
-  const body = renderMarkdown(expanded || passage === null ? item.opening : passage);
+  const body = !expanded && passage !== null ? renderMarkdown(passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, view.open);
   const more = passage === null ? '' : `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`;
   const tone = item.tone === null ? '' : `<div class="tone">${escape(item.tone)}</div>`;
   const rewritten = earlier === null ? '' : `<details class="fold" data-fold="earlier:${escape(item.id)}"${view.open.has(`earlier:${item.id}`) ? ' open' : ''}><summary>Rewritten</summary><div class="was">${renderMarkdown(earlier.opening)}</div></details>`;
@@ -157,10 +157,33 @@ function artifactRow(artifact: ArtifactView): string {
   return `<li class="artifact"><button class="artifact-open" type="button" data-action="artifact" data-path="${escape(artifact.path)}" title="${escape(artifact.path)}"><span class="codicon codicon-${artifactIcon(artifact.type)}" aria-hidden="true"></span><span class="artifact-title">${escape(artifact.title)}</span><span class="artifact-kind">${escape(artifact.kind)}</span></button></li>`;
 }
 
+/**
+ * A reply's or a status's Markdown when its card draws its questions: questions that end it are left out; questions with text after them stay
+ * in place, folded into one line, "2 questions — answer below", that opens them.
+ */
+export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>): string {
+  const parts = questionParts(markdown);
+
+  if (parts === null) {
+    return renderMarkdown(markdown);
+  }
+
+  if (parts.after.trim() === '') {
+    return renderMarkdown(parts.before);
+  }
+
+  const count = parseQuestions(markdown).length;
+  const fold = `questions:${key}`;
+
+  return `${renderMarkdown(parts.before)}<details class="fold questions-fold" data-fold="${escape(fold)}"${open.has(fold) ? ' open' : ''}><summary>${count} question${count === 1 ? '' : 's'} — answer below</summary><div class="was">${renderMarkdown(parts.questions)}</div></details>${renderMarkdown(parts.after)}`;
+}
+
 /** A question card: each question with its options as radio or checkbox rows, an Other field, and Submit; greyed with its picks once answered. */
 export function questionCard(key: string, questions: readonly Question[], draft: CardDraft | undefined, answer: string | null, canAnswer: boolean): string {
-  const answered = answer !== null;
-  const choices = answered ? answersIn(answer, questions) : (draft?.choices ?? new Map<number, QuestionChoice>());
+  // A later message answers the card only when it answers its questions; one that ignores them sets it aside, Skipped, with no picks.
+  const outcome = cardOutcome(answer, questions);
+  const answered = outcome !== null;
+  const choices = outcome === 'answered' ? answersIn(answer!, questions) : answered ? new Map<number, QuestionChoice>() : (draft?.choices ?? new Map<number, QuestionChoice>());
   const locked = answered || !canAnswer || draft?.sending === true || draft?.sent != null;
   const blocks = questions.map((question, index) => {
     const choice = choices.get(index);
@@ -179,12 +202,12 @@ export function questionCard(key: string, questions: readonly Question[], draft:
     return `<div class="question-block"><div class="question-text">${question.number === null ? '' : `${question.number}. `}${renderInline(question.text)}</div><div class="question-options">${options}${other}</div></div>`;
   });
   const footer = answered
-    ? '<span class="question-state">Answered</span>'
+    ? `<span class="question-state">${outcome === 'answered' ? 'Answered' : 'Skipped: your next message did not answer these questions'}</span>`
     : !canAnswer
       ? ''
       : `${draft?.error ? `<span class="question-error">${escape(draft.error)}</span>` : ''}${draft?.sent != null ? '<span class="question-state">Sending…</span>' : ''}<button type="button" class="question-submit" data-action="answer" data-card="${escape(key)}"${locked || !complete(questions, choices) ? ' disabled' : ''}>Submit</button>`;
 
-  return `<div class="question-card" data-card-key="${escape(key)}">${blocks.join('')}<div class="question-footer">${footer}</div></div>`;
+  return `<div class="question-card${answered ? ` ${outcome}` : ''}" data-card-key="${escape(key)}">${blocks.join('')}<div class="question-footer">${footer}</div></div>`;
 }
 
 /** The card of a reply's or a status's questions, answered by the first message after it; empty without questions. */
@@ -197,7 +220,7 @@ function cardOf(key: string, markdown: string, answer: string | null, view: View
 /** The text of the first message after a reply, which answers its card. */
 function answerAfter(state: PageState, replyId: string): string | null {
   const from = state.items.findIndex((item) => item.id === replyId);
-  const later = from === -1 ? undefined : state.items.slice(from + 1).find((item) => item.type === 'message' && !item.withdrawn);
+  const later = from === -1 ? undefined : state.items.slice(from + 1).find((item) => item.type === 'message' && answers(item));
 
   return later?.type === 'message' ? later.text : null;
 }
@@ -310,14 +333,14 @@ export function renderStatus(state: PageState, view: View, now: number): string 
 
   const answer = (): string | null => {
     const from = state.items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
-    const later = (from === -1 ? state.items.filter((item) => item.at > status.at) : state.items.slice(from + 1)).find((item) => item.type === 'message' && !item.withdrawn);
+    const later = (from === -1 ? state.items.filter((item) => item.at > status.at) : state.items.slice(from + 1)).find((item) => item.type === 'message' && answers(item));
 
     return later?.type === 'message' ? later.text : null;
   };
   const card = status.fallback ? '' : cardOf(`status:${status.id}`, status.markdown, answer(), view, state.connected && state.session?.conversation === 'full');
   const label = status.fallback ? 'Stage' : 'Status';
 
-  return `<div class="status-tab${status.fallback ? ' fallback' : ''}${status.unread ? ' unread' : ''}"${status.unread ? ` data-unread="${escape(status.id)}"` : ''}><div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">${label}</span><span class="status-age">${stampTime(status.at)} · ${ago(status.at, now)}</span>${status.unread ? '<span class="status-new">New</span>' : ''}</div><div class="status-body body">${renderMarkdown(status.markdown)}</div>${card}</div>`;
+  return `<div class="status-tab${status.fallback ? ' fallback' : ''}${status.unread ? ' unread' : ''}"${status.unread ? ` data-unread="${escape(status.id)}"` : ''}><div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span><span class="status-label">${label}</span><span class="status-age">${stampTime(status.at)} · ${ago(status.at, now)}</span>${status.unread ? '<span class="status-new">New</span>' : ''}</div><div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, view.open)}</div>${card}</div>`;
 }
 
 /** The Artifacts tab: the work item's artifacts newest first; a click opens one in the page. */

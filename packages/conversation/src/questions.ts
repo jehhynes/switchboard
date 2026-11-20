@@ -42,6 +42,9 @@ interface Block {
   number: number | null;
   text: string;
   options: QuestionOption[];
+  /** The block's first and last lines in the Markdown: its question, or the line a lone run asks, to its last option or continuation. */
+  first: number;
+  last: number;
 }
 
 /**
@@ -50,10 +53,25 @@ interface Block {
  * Returns none when the shape is ambiguous: a number used twice, or an unnumbered run beside other questions, whose answers could not be told apart.
  */
 export function parseQuestions(markdown: string): Question[] {
+  return parseBlocks(markdown).map(({ number, text, options, multi }) => ({ number, text, multi, options }));
+}
+
+/**
+ * The lines a card's questions take in the Markdown, from the first question, or the line a lone run asks, to the last option or its
+ * continuation, as 0-based line indexes; null when it asks none. A view that draws the card can leave these lines out of the text.
+ */
+export function questionLines(markdown: string): { first: number; last: number } | null {
+  const blocks = parseBlocks(markdown);
+
+  return blocks.length === 0 ? null : { first: blocks[0]!.first, last: blocks.at(-1)!.last };
+}
+
+function parseBlocks(markdown: string): Array<Block & { multi: boolean }> {
   const blocks: Block[] = [];
   let open: Block | null = null;
   let last: QuestionOption | null = null;
   let previous = '';
+  let previousAt = -1;
   let fence: string | null = null;
 
   const close = (): void => {
@@ -65,7 +83,7 @@ export function parseQuestions(markdown: string): Question[] {
     last = null;
   };
 
-  for (const line of markdown.replace(/\r/g, '').split('\n')) {
+  for (const [at, line] of markdown.replace(/\r/g, '').split('\n').entries()) {
     const fenced = FENCE.exec(line);
 
     if (fence !== null) {
@@ -97,16 +115,19 @@ export function parseQuestions(markdown: string): Question[] {
 
         if (letter !== 'A') {
           previous = line;
+          previousAt = at;
           continue;
         }
 
         // A run of options with no numbered question above it asks the line before it.
-        open = { number: null, text: unbold(previous.replace(/^\s*(?:[-*+]\s+|#{1,6}\s+)?/, '').trim()), options: [] };
+        open = { number: null, text: unbold(previous.replace(/^\s*(?:[-*+]\s+|#{1,6}\s+)?/, '').trim()), options: [], first: previousAt === -1 ? at : previousAt, last: at };
       }
 
       last = { letter, text };
       open!.options.push(last);
+      open!.last = at;
       previous = line;
+      previousAt = at;
       continue;
     }
 
@@ -114,8 +135,9 @@ export function parseQuestions(markdown: string): Question[] {
 
     if (question !== null) {
       close();
-      open = { number: Number(question[1]), text: unbold(question[2]!), options: [] };
+      open = { number: Number(question[1]), text: unbold(question[2]!), options: [], first: at, last: at };
       previous = line;
+      previousAt = at;
       continue;
     }
 
@@ -132,11 +154,14 @@ export function parseQuestions(markdown: string): Question[] {
       } else {
         block.text = `${block.text} ${line.trim()}`;
       }
+
+      block.last = at;
     } else {
       close();
     }
 
     previous = line;
+    previousAt = at;
   }
 
   close();
@@ -148,6 +173,31 @@ export function parseQuestions(markdown: string): Question[] {
   }
 
   return blocks.map((block) => ({ ...block, multi: MULTI.test(block.text) }));
+}
+
+/**
+ * A reply's or a status's Markdown cut around its questions, for a view that draws them as a card: the text before them, their own lines, and
+ * the text after them, which is empty when they end the message, as the conversation rules ask; null when it asks none.
+ */
+export function questionParts(markdown: string): { before: string; questions: string; after: string } | null {
+  const range = questionLines(markdown);
+
+  if (range === null) {
+    return null;
+  }
+
+  const lines = markdown.replace(/\r/g, '').split('\n');
+
+  return { before: lines.slice(0, range.first).join('\n'), questions: lines.slice(range.first, range.last + 1).join('\n'), after: lines.slice(range.last + 1).join('\n') };
+}
+
+/**
+ * How a later message left a card (voice-design § 5): `answered` when it gives an answer to one of the card's questions, as "1A" or
+ * "2 Other: …" or Submit writes; `skipped` when it ignores them, so the card is set aside unanswered with no picks; null with no later message.
+ * Either way the session's wait on the card ends (`unansweredCard`).
+ */
+export function cardOutcome(message: string | null, questions: readonly Question[]): 'answered' | 'skipped' | null {
+  return message === null ? null : answersIn(message, questions).size > 0 ? 'answered' : 'skipped';
 }
 
 /** What the operator chose for one question: the letters picked, and the text of its Other field. */

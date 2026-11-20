@@ -3,7 +3,7 @@ import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, Statu
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { artifactIcon, awaitingReply, PAUSED_BY_VOICE_TIP, ROOM_HOLD_TIP, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
-import { answersIn, answerText, complete, parseQuestions } from '@switchboard/conversation/questions';
+import { answers, answersIn, answerText, cardOutcome, complete, parseQuestions, questionParts } from '@switchboard/conversation/questions';
 import type { Question, QuestionChoice } from '@switchboard/conversation/questions';
 
 /** What the page posts to the extension. */
@@ -46,7 +46,7 @@ export interface SendTarget {
 /** The text of the first message after the reply a status came from, or after the status's time when that reply is not loaded; null for none. */
 function statusAnswer(items: readonly ItemView[], status: StatusView): string | null {
   const from = items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
-  const later = (from === -1 ? items.filter((item) => item.at > status.at) : items.slice(from + 1)).find((item) => item.type === 'message' && !item.withdrawn);
+  const later = (from === -1 ? items.filter((item) => item.at > status.at) : items.slice(from + 1)).find((item) => item.type === 'message' && answers(item));
 
   return later?.type === 'message' ? later.text : null;
 }
@@ -303,7 +303,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
   const folded = passage !== null && passage.trim() !== item.opening.trim();
   const expanded = !folded || expandReplies !== open.has(moreKey(item.id));
-  const shown = passage !== null && !expanded ? passageHtml(item, passage) : renderMarkdown(item.opening);
+  const shown = passage !== null && !expanded ? passageHtml(item, passage) : card === '' ? renderMarkdown(item.opening) : withoutQuestions(item.opening, `reply:${item.id}`, open);
   const more = folded
     ? `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`
     : '';
@@ -322,6 +322,32 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const dot = item.unread ? '<span class="dot" title="Unread"><span class="unread-label">Unread</span></span>' : '<span class="dot"></span>';
 
   return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${passage === null ? '' : ' data-speak="1"'} tabindex="-1">${stamped ? stamp(item.at) : ''}${dot}${tone}<div class="body">${shown}${more}${rewritten}</div>${spokenLine(item)}${card}${actions}</li>`;
+}
+
+/**
+ * A reply's or a status's Markdown when its card draws its questions (architecture.md § Conversation view): questions that end it, as the rules
+ * ask, are left out, so the text does not repeat them cut up; questions with text after them, against the rules, stay in place folded into one
+ * line, "2 questions — answer below", that opens them.
+ */
+export function withoutQuestions(markdown: string, key: string, open: ReadonlySet<string>): string {
+  const parts = questionParts(markdown);
+
+  if (parts === null) {
+    return renderMarkdown(markdown);
+  }
+
+  if (parts.after.trim() === '') {
+    return renderMarkdown(parts.before);
+  }
+
+  const count = parseQuestions(markdown).length;
+  const fold = `questions:${key}`;
+
+  return (
+    renderMarkdown(parts.before) +
+    `<details class="fold questions-fold" data-fold="${escape(fold)}"${open.has(fold) ? ' open' : ''}><summary>${count} question${count === 1 ? '' : 's'} — answer below</summary><div class="was">${renderMarkdown(parts.questions)}</div></details>` +
+    renderMarkdown(parts.after)
+  );
 }
 
 /** What the page keeps of a question card the operator has not answered yet: the choices made, and the answer being sent or refused. */
@@ -351,8 +377,10 @@ function inlineMarkdown(text: string): string {
  * Submit or by any later message, it greys out and shows the choices that message gave. It takes no answer while the composer could not send.
  */
 export function questionCard(key: string, questions: readonly Question[], draft: CardDraft | undefined, answer: string | null, canAnswer: boolean): string {
-  const answered = answer !== null;
-  const choices = answered ? answersIn(answer, questions) : (draft?.choices ?? new Map<number, QuestionChoice>());
+  // A later message answers the card only when it answers its questions; one that ignores them sets the card aside, Skipped, with no picks.
+  const outcome = cardOutcome(answer, questions);
+  const answered = outcome !== null;
+  const choices = outcome === 'answered' ? answersIn(answer!, questions) : answered ? new Map<number, QuestionChoice>() : (draft?.choices ?? new Map<number, QuestionChoice>());
   const locked = answered || !canAnswer || draft?.sending === true || draft?.sent != null;
   const blocks = questions.map((question, index) => {
     const choice = choices.get(index);
@@ -377,12 +405,12 @@ export function questionCard(key: string, questions: readonly Question[], draft:
   });
   const text = complete(questions, choices) ? answerText(questions, choices) : '';
   const footer = answered
-    ? '<div class="question-footer"><span class="question-state">Answered</span></div>'
+    ? `<div class="question-footer"><span class="question-state">${outcome === 'answered' ? 'Answered' : 'Skipped: your next message did not answer these questions'}</span></div>`
     : !canAnswer
       ? ''
       : `<div class="question-footer">${draft?.error == null ? '' : `<span class="question-error" role="alert">${escape(draft.error)}</span>`}<button type="button" class="question-submit" data-action="answer" data-card="${escape(key)}"${locked || text === '' ? ' disabled' : ''} title="${escape(text === '' ? 'Answer every question first' : `Send "${text}"`)}">${draft?.sending === true || draft?.sent != null ? 'Sending…' : 'Submit'}</button></div>`;
 
-  return `<div class="question-card${answered ? ' answered' : ''}" data-card="${escape(key)}" role="group" aria-label="${answered ? 'Questions, answered' : 'Questions'}">${blocks.join('')}${footer}</div>`;
+  return `<div class="question-card${answered ? ` ${outcome}` : ''}" data-card="${escape(key)}" role="group" aria-label="${outcome === 'answered' ? 'Questions, answered' : outcome === 'skipped' ? 'Questions, skipped' : 'Questions'}">${blocks.join('')}${footer}</div>`;
 }
 
 /** An artifact as a one-line row where it was written: it opens, it does not expand (architecture.md § Conversation view). */
@@ -441,7 +469,7 @@ export function statusBadge(status: StatusView | null, fresh: boolean): boolean 
  * `fresh`, and the buttons that open it and the earlier statuses in the Markdown preview. Before the first status, the work item's stage, dimmed;
  * with neither, a line that says so.
  */
-export function renderStatus(status: StatusView | null, fresh: boolean, now: number, card = ''): string {
+export function renderStatus(status: StatusView | null, fresh: boolean, now: number, card = '', open: ReadonlySet<string> = new Set()): string {
   if (status === null) {
     return '<p class="empty">The session has posted no status yet. Ask it for one, and its latest shows here.</p>';
   }
@@ -464,7 +492,7 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
   return (
     `<div class="status-tab${fresh ? ' fresh' : ''}${unread}" role="region" aria-label="${unread === '' ? 'Status' : 'Status, unread'}">` +
     `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span>${time}<span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}${mark}${actions}</div>` +
-    `<div class="status-body body">${renderMarkdown(status.markdown)}</div>${card}</div>`
+    `<div class="status-body body">${card === '' ? renderMarkdown(status.markdown) : withoutQuestions(status.markdown, `status:${status.id}`, open)}</div>${card}</div>`
   );
 }
 
@@ -608,7 +636,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const canAnswer = state.connected && state.session?.conversation === 'full';
   // Found in conversation order, not the timeline's, where a rewrite takes the place of the reply it rewrote.
   const answerAfter = (replyId: string): string | null => {
-    const later = state.items.slice(state.items.findIndex((item) => item.id === replyId) + 1).find((item) => item.type === 'message' && !item.withdrawn);
+    // A message still on its way, which may come back not sent, leaves the card as it is.
+    const later = state.items.slice(state.items.findIndex((item) => item.id === replyId) + 1).find((item) => item.type === 'message' && answers(item));
 
     return later?.type === 'message' ? later.text : null;
   };
@@ -668,7 +697,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const pill = `<button class="pill" type="button" data-action="pill"${page.pill === true ? '' : ' hidden'}>New messages</button>`;
   const panel =
     page.tab === 'status'
-      ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard)}</div>`
+      ? `<div class="panel" id="panel" data-key="status-${shownKey}" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard, open)}</div>`
       : page.tab === 'artifacts'
         ? `<div class="panel" id="panel" data-key="artifacts-${shownKey}" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
         : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll-area" data-key="conversation-${shownKey}"><div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${pill}</div>${asking}`;

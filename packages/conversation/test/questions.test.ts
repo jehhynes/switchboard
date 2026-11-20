@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answersIn, answerText, complete, parseQuestions, unansweredCard } from '../src/questions.js';
+import { answersIn, answerText, complete, parseQuestions, unansweredCard , cardOutcome, questionLines, questionParts } from '../src/questions.js';
 import type { CardItem, QuestionChoice } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
@@ -129,5 +129,32 @@ describe('an unanswered card (PRD R103)', () => {
     expect(unansweredCard([message(), reply('r1', '')], { replyId: 'r1', markdown: 'Done.' })).toBe(false);
     // A status whose reply is older than the items read is answered by the message read after it.
     expect(unansweredCard([message(), reply('r2', 'Ok.')], { replyId: 'r1', markdown: ASKED })).toBe(false);
+  });
+});
+
+describe('where the questions are, and how a later message left them', () => {
+  const asked = 'Two things before I go on.\n\n1. Which port?\n   - A) 8765\n   - B) 8799\n2. Which checks?\n   - A) Unit\n   - B) Live\n     and the smoke run';
+
+  it('finds the lines from the first question to the last option or its continuation, and the line a lone run asks', () => {
+    expect(questionLines(asked)).toEqual({ first: 2, last: 8 });
+    expect(questionLines('Intro\n\nPick one:\n- A) x\n- B) y\n\nThen more.')).toEqual({ first: 2, last: 4 });
+    expect(questionLines('No questions.')).toBeNull();
+  });
+
+  it('cuts the Markdown before, around and after its questions, with nothing after questions that end it', () => {
+    expect(questionParts(asked)).toEqual({ before: 'Two things before I go on.\n', questions: asked.split('\n').slice(2).join('\n'), after: '' });
+    expect(questionParts('Intro\n1. Port?\n   - A) 1\n   - B) 2\n\nMore after.')).toEqual({ before: 'Intro', questions: '1. Port?\n   - A) 1\n   - B) 2', after: '\nMore after.' });
+    expect(questionParts('Nothing asked.')).toBeNull();
+  });
+
+  it('counts a message as an answer only when it answers one of the questions, else as skipping them', () => {
+    const questions = parseQuestions(asked);
+
+    expect(cardOutcome(null, questions)).toBeNull();
+    expect(cardOutcome('1A, 2B', questions)).toBe('answered');
+    expect(cardOutcome('2 Other: none', questions)).toBe('answered');
+    expect(cardOutcome('Never mind, do the docs first.', questions)).toBe('skipped');
+    // A number with a letter for a question the card does not ask answers nothing.
+    expect(cardOutcome('3A', questions)).toBe('skipped');
   });
 });
