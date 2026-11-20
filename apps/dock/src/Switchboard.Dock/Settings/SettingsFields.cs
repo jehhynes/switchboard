@@ -427,6 +427,7 @@ public static partial class SettingsFields
                 new Field("voice.micIdleMinutes", "Mic idle timeout (minutes)", FieldKind.Integer, "0 to 1440. After this many minutes of silence the mic stops listening, even with the voice here; 0 never stops it.", "10"),
                 new Field("voice.endPauseMs", "End-of-message pause (ms)", FieldKind.Integer, "500 to 20000. How long a pause ends a dictated message; turn detection shortens it when the words look finished.", "3000"),
                 new Field("voice.inputDevice", "Input device", FieldKind.Text, "Part of the capture device’s name, such as Headset. Empty uses the system default.", "System default"),
+                new Field("voice.halfDuplexTailMs", "Listening pause after speech (ms)", FieldKind.Integer, "0 to 5000. With no echo cancellation, as over Remote Desktop, the mic stops listening while the voice speaks and for this long after, and talking over a reply does not stop it.", "800"),
             ]),
             new Section("Voice check",
             [
