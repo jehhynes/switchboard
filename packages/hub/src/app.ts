@@ -12,6 +12,7 @@ import { zohoSource } from '@switchboard/zoho';
 import { forumSource } from '@switchboard/forum';
 import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
+import { DoneSearch } from './dockSearch.js';
 import { dockView, windowOf, windowsDir, writeWorkspaceFile } from './dock.js';
 import type { DockRow, DockTerminal } from './dock.js';
 import { isPastePath } from './report.js';
@@ -329,6 +330,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
   const scopes = new WindowScopes({ store, windows, now: deps.now });
+  const doneSearch = new DoneSearch();
+  /** A done work item's ID and ticket by its row key, for a row the dock's search found before the Done list (PRD R63). */
+  const olderRow = (rowKey: string): { id: number; ticket: { hostWindow?: string | null } } | undefined => {
+    const item = /^item:(\d+)$/.test(rowKey) ? store.workItem(Number(rowKey.slice(5))) : null;
+    const ticket = item === null || item.status !== 'done' ? null : store.ticket(item.ticketId);
+
+    return item === null || ticket === null ? undefined : { id: item.id, ticket };
+  };
   const builtListeners: Array<() => void> = [];
   const builder = new SnapshotBuilder({
     inputs: () => runtime.snapshotInputs(),
@@ -886,13 +895,22 @@ const dockWithRuns = () => {
 
         return clickDock({ rowKey: body['rowKey'] }) ? { status: 202, body: { sent: true } } : { status: 409, body: { error: 'The dock is not running.' } };
       },
+      // The dock's search past its Done list (PRD R63): Done rows from `since`, in epoch milliseconds, whose search text holds every word of `text`.
+      '/dock/search': async (body) => {
+        if (!isRecord(body) || typeof body['text'] !== 'string' || typeof body['since'] !== 'number' || !Number.isFinite(body['since'])) {
+          return { status: 400, body: { error: 'Expected {text, since}, the search text and the epoch milliseconds to search from.' } };
+        }
+
+        return { status: 200, body: doneSearch.search(store, views().snapshot, runtime.snapshotInputs(), body['text'], body['since'], windows) };
+      },
       // A dock row's click (architecture.md § Dock): a hosted conversation becomes its host binding's selection, shown by the window the click opens.
       '/dock/select': async (body) => {
         if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
           return { status: 400, body: { error: 'Expected {rowKey}.' } };
         }
 
-        const item = views().snapshot.workItems.find((one) => rowKeyOf(one) === body['rowKey']);
+        // A row the search found before the Done list is not in the snapshot (PRD R63).
+        const item = views().snapshot.workItems.find((one) => rowKeyOf(one) === body['rowKey']) ?? olderRow(body['rowKey']);
 
         if (item === undefined) {
           return { status: 404, body: { error: 'No work item has that row.' } };

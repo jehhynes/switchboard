@@ -739,6 +739,33 @@ describe('createHubApp', () => {
     expect(shown.terminal).toMatchObject({ executable: '/opt/claude/bin/claude' });
   });
 
+  it('searches Done rows before the Done list for the dock, and selects one it found (PRD R63)', async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const app = await start();
+
+    app.runtime.send({ type: 'adhoc', prompt: 'Rotate the signing key', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+    const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
+    const old = Date.now() - 90 * 86_400_000;
+
+    writer.updateWorkItem(1, { status: 'done', doneAt: old, doneReason: 'operator' });
+    writer.close();
+    // Another work item builds a snapshot without the old one.
+    app.runtime.send({ type: 'adhoc', prompt: 'Something else', repoRoot: 'D:/scratch', start: false });
+    await app.runtime.settled();
+
+    const found = await app.post['/dock/search']!({ text: 'signing KEY', since: 0 });
+
+    expect(found).toMatchObject({ status: 200, body: { more: false, rows: [{ key: 'item:1', title: 'Rotate the signing key' }] } });
+    expect(await app.post['/dock/search']!({ text: 'signing', since: Date.now() - 30 * 86_400_000 })).toEqual({ status: 200, body: { rows: [], more: false } });
+    expect(await app.post['/dock/select']!({ rowKey: 'item:1' })).toMatchObject({ status: 200 });
+    expect(await app.post['/dock/select']!({ rowKey: 'item:9' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
+
+    for (const body of [{}, { text: 'x' }, { text: 3, since: 0 }, { text: 'x', since: 'now' }, { text: 'x', since: Number.NaN }]) {
+      expect(await app.post['/dock/search']!(body)).toEqual({ status: 400, body: { error: 'Expected {text, since}, the search text and the epoch milliseconds to search from.' } });
+    }
+  });
+
   it('forwards a click to the dock only while a dock that runs clicks is connected (PRD R65, R69)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();

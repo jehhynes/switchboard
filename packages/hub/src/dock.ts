@@ -292,17 +292,10 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     'done',
   ];
   const order = groups.review.map((entry) => (entry as WorkItemView).id);
-  const kinds = new Map(snapshot.sourceStates.map((source) => [source.name, source.kind]));
-  const row = (group: RowGroup) => (entry: WorkItemView | PoolView) => {
-    const search = [entry.ticket.title, searchDescription(entry, group, snapshot.namespaces, snapshot.repoKeys), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
+  // Done is sorted newest first, so each band's rows are consecutive.
+  const row = (group: RowGroup) => (entry: WorkItemView | PoolView) =>
+    dockRow(snapshot, entry, group, now, windows, group === 'review' ? order : null, group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null);
 
-    // Done is sorted newest first, so each band's rows are consecutive.
-    const band = group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null;
-
-    const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, group === 'review' ? order : null, snapshot.openVSCode, snapshot.openTerminal, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
-
-    return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kinds.get(entry.ticket.source) ?? entry.ticket.source, search, links: linksOf(entry, snapshot.repoKeys), returned: entry.returned, unread: 'status' in entry ? entry.unread : 0, comment: 'status' in entry ? commentOf(entry) : null, band };
-  };
   return {
     notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
     groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
@@ -313,6 +306,19 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     ...(snapshot.held === undefined ? {} : { held: snapshot.held.map((one) => heldRow(snapshot, one, now, windows)) }),
     ...orphanNote(snapshot.held ?? []),
   };
+}
+
+/** What the search box matches in a row: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63). */
+export function searchText(entry: Pick<WorkItemView, 'ticket' | 'links' | 'status' | 'playbook' | 'parentId' | 'taskPrompt' | 'moved' | 'worktree'> | PoolView, group: RowGroup, snapshot: Pick<Snapshot, 'namespaces' | 'repoKeys'>): string {
+  return [entry.ticket.title, searchDescription(entry as WorkItemView | PoolView, group, snapshot.namespaces, snapshot.repoKeys), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
+}
+
+/** A row of `group` as the dock draws it; `order` is Ready for review's IDs in list order when the row is in that group. */
+export function dockRow(snapshot: Snapshot, entry: WorkItemView | PoolView, group: RowGroup, now: number, windows: string, order: number[] | null, band: string | null): DockRow {
+  const kind = snapshot.sourceStates.find((source) => source.name === entry.ticket.source)?.kind;
+  const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, order, snapshot.openVSCode, snapshot.openTerminal, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
+
+  return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys), returned: entry.returned, unread: 'status' in entry ? entry.unread : 0, comment: 'status' in entry ? commentOf(entry) : null, band };
 }
 
 function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: string): DockHeld {

@@ -133,11 +133,10 @@ export function repoKeysOf(settings: Settings, stored: Readonly<Record<string, r
 }
 
 
-export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
-const { settings, settingsError, playbookErrors } = inputs;
+/** Builds a work item's view as the snapshot shows it, and counts a ticket's returns (PRD R51); the dock's search builds older Done rows with it. */
+export function workItemViews(store: Store, inputs: SnapshotInputs): { view: (item: WorkItem) => WorkItemView; returned: (items: WorkItem[], playbook: string | null, ticket: Ticket) => number } {
+const { settings } = inputs;
 const playbooks = new Map(inputs.playbooks);
-const enabled = new Set(inputs.enabled);
-const sources = new Set(inputs.sources);
 const guarded = new Map(inputs.guarded);
 const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
   const pids = latest === undefined ? undefined : guarded.get(latest.id);
@@ -158,10 +157,10 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
   };
   const unreadOf = (latest: Session | undefined): number => (latest?.codeMode === true || latest?.execution === 'app-server' ? store.unreadCount(latest.id) : 0);
   const used = heldSlots(store);
-  const held = inputs.held;
 
   return {
-    workItems: store.workItems(doneSince(inputs.now)).map((item) => {
+    returned,
+    view: (item) => {
       const ticket = store.ticket(item.ticketId)!;
       const triages = store.triagesFor(item.id);
 
@@ -185,7 +184,20 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
         reopenable: reopenRefusal(item, store.workItemsForTicket(item.ticketId), ticket) === null,
         playbookChoices: item.status === 'unstarted' ? playbookChoices(item.playbook, ticket.source, playbooks) : [],
       };
-    }),
+    },
+  };
+}
+
+export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
+  const { settings, settingsError, playbookErrors } = inputs;
+  const playbooks = new Map(inputs.playbooks);
+  const enabled = new Set(inputs.enabled);
+  const sources = new Set(inputs.sources);
+  const { view, returned } = workItemViews(store, inputs);
+  const held = inputs.held;
+
+  return {
+    workItems: store.workItems(doneSince(inputs.now)).map(view),
     pool: store
       .poolTickets()
       .map((ticket) => ({ ticket, items: store.workItemsForTicket(ticket.id) }))
