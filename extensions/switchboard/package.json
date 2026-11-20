@@ -57,7 +57,7 @@
         "switchboard.rememberSideBarWidths": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Keep the width you drag each side bar to at each window width, and set each side bar after the window's width changed, to within 30 pixels: between two widths you dragged at, the line between them; outside them, the nearest one scaled by the square root of the window's width. Widths are read from the Switchboard pane, so they are kept and set while it is visible in the Explorer or Source Control. Setting the secondary side bar hides the primary for a moment. **Switchboard: Forget Side Bar Widths** drops the kept widths."
+          "markdownDescription": "Keep the width you drag each side bar to at each window width, and set each side bar after the window's width changed, to within 30 pixels: between two widths you dragged at, the line between them; outside them, the nearest one scaled by the square root of the window's width. Widths are read from the Switchboard pane, so they are kept and set while it is visible in the Explorer or Source Control. Setting the secondary side bar hides the primary for a moment. **Switchboard: Reset Side Bar Widths** drops the kept widths."
         }
       }
     },
@@ -96,7 +96,7 @@
     "commands": [
       {
         "command": "switchboard.showDock",
-        "title": "Show the Dock",
+        "title": "Show Dock",
         "category": "Switchboard"
       },
       {
@@ -117,7 +117,7 @@
       },
       {
         "command": "switchboard.forgetSideBarWidths",
-        "title": "Forget Side Bar Widths",
+        "title": "Reset Side Bar Widths",
         "category": "Switchboard"
       },
       {
@@ -144,32 +144,32 @@
       },
       {
         "command": "switchboard.talkHere",
-        "title": "Talk Here",
+        "title": "Voice: Talk Here",
         "category": "Switchboard"
       },
       {
         "command": "switchboard.stopSpeaking",
-        "title": "Stop Speaking",
+        "title": "Voice: Stop Speaking",
         "category": "Switchboard"
       },
       {
         "command": "switchboard.toggleSpeakReplies",
-        "title": "Toggle Speak Replies",
+        "title": "Voice: Toggle Speak Replies",
         "category": "Switchboard"
       },
       {
         "command": "switchboard.toggleMicrophone",
-        "title": "Toggle Microphone",
+        "title": "Voice: Toggle Microphone",
         "category": "Switchboard"
       },
       {
         "command": "switchboard.replayLastReply",
-        "title": "Replay Last Reply",
+        "title": "Voice: Replay Last Reply",
         "category": "Switchboard"
       },
       {
         "command": "switchboard.showVoiceLog",
-        "title": "Show Voice Log",
+        "title": "Voice: Show Log",
         "category": "Switchboard"
       }
     ],
@@ -188,8 +188,16 @@
       ],
       "commandPalette": [
         {
+          "command": "switchboard.showDock",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.newClaudeTab",
+          "when": "false"
+        },
+        {
           "command": "switchboard.continueInBackground",
-          "when": "activeWebviewPanelId == 'claudeVSCodePanel'"
+          "when": "false"
         },
         {
           "command": "switchboard.continueSidebarInBackground",
@@ -198,6 +206,34 @@
         {
           "command": "switchboard.openArtifact",
           "when": "false"
+        },
+        {
+          "command": "switchboard.newSession",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.talkHere",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.stopSpeaking",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.toggleSpeakReplies",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.toggleMicrophone",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.replayLastReply",
+          "when": "switchboard.voiceEnabled"
+        },
+        {
+          "command": "switchboard.showVoiceLog",
+          "when": "switchboard.voiceEnabled"
         }
       ],
       "view/title": [
@@ -243,12 +279,14 @@
       {
         "command": "switchboard.stopSpeaking",
         "key": "ctrl+alt+.",
-        "mac": "cmd+alt+."
+        "mac": "cmd+alt+.",
+        "when": "switchboard.voiceEnabled"
       },
       {
         "command": "switchboard.toggleMicrophone",
         "key": "ctrl+alt+m",
-        "mac": "cmd+alt+m"
+        "mac": "cmd+alt+m",
+        "when": "switchboard.voiceEnabled"
       }
     ]
   },

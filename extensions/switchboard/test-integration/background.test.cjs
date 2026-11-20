@@ -229,10 +229,11 @@ describe('Continue in Background (PRD R89)', () => {
     assert.deepStrictEqual(closes, []);
   });
 
-  it('is offered in the command palette only while a Claude tab is in front', () => {
+  it("is the Claude tab title bar's button only, never in the command palette", () => {
     const { menus } = vscode.extensions.getExtension('switchboard.switchboard').packageJSON.contributes;
 
-    assert.ok(menus.commandPalette.some((item) => item.command === 'switchboard.continueInBackground' && item.when === "activeWebviewPanelId == 'claudeVSCodePanel'"));
+    assert.ok(menus.commandPalette.some((item) => item.command === 'switchboard.continueInBackground' && item.when === 'false'));
+    assert.ok(menus['editor/title'].some((item) => item.command === 'switchboard.continueInBackground' && item.when === "activeWebviewPanelId == 'claudeVSCodePanel'"));
   });
 
   it('does not close a replacement Claude tab with the same label opened while the hub answered (review round 1, extension-1)', async () => {

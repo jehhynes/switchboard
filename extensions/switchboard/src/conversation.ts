@@ -455,8 +455,18 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     return reply?.status === 200 ? null : (reply?.error ?? 'Codex did not confirm the answer. Check its terminal.');
   }
 
-  /** Draws the voice's status bar item from this window's voice state. */
+  /** Whether `switchboard.voiceEnabled` was last set on, which shows the voice commands in the palette and turns their keys on. */
+  #voiceContext: boolean | null = null;
+
+  /** Draws the voice's status bar item from this window's voice state, and sets the voice commands' context key when it changes. */
   #showVoice(): void {
+    const enabled = this.#state.voice?.enabled === true;
+
+    if (enabled !== this.#voiceContext) {
+      this.#voiceContext = enabled;
+      void vscode.commands.executeCommand('setContext', 'switchboard.voiceEnabled', enabled);
+    }
+
     const shown = voiceStatus(this.#state.voice);
 
     if (shown === null) {
