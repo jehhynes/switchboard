@@ -91,6 +91,15 @@ describe('Code Mode command', () => {
     expect(PROMPT.endsWith(RULES)).toBe(true);
   });
 
+  it('explains the question shape the view draws as a card, and asks in a reply rather than with AskUserQuestion, with why (voice-design § 5)', () => {
+    // The shape the Conversation view's parser reads (extensions/switchboard/src/questionModel.ts), and the message its card sends.
+    expect(RULES).toContain('each question is numbered and each of its options starts with a capital letter on its own line, as a nested list item under its question');
+    expect(RULES).toContain('  ```markdown\n  1. Which port?\n     - A) 8765 (recommended)\n     - B) 8799\n  ```\n');
+    expect(RULES).toContain('The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"');
+    expect(RULES).toContain("Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal");
+    expect(RULES).toContain("Ask in a reply instead; the answer comes as the operator's next message.");
+  });
+
   it('explains where and how to write an artifact, naming the folder and its variable, and not when to write one', () => {
     expect(RULES).toMatch(/\n\n## Artifacts\n/);
     expect(RULES).toContain(`artifact folder, \`${ARTIFACTS}\` (also in the \`CLAUDE_ARTIFACTS_DIR\` environment variable)`);
