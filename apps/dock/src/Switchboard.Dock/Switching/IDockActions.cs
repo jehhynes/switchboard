@@ -17,4 +17,10 @@ public interface IDockActions
     Task<string?> Terminal(DockRow? row, DockTerminal terminal, CancellationToken cancel);
 
     string? OpenUrl(string url);
+
+    /// <summary>
+    /// Brings forward or opens the VS Code window on a canonical folder, as <c>code &lt;folder&gt;</c>, and waits for a folder window on it to connect;
+    /// returns why not, or null.
+    /// </summary>
+    Task<string?> OpenFolder(string folder, CancellationToken cancel);
 }

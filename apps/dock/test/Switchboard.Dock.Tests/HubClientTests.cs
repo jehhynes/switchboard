@@ -202,6 +202,32 @@ public sealed class HubClientTests
     }
 
     [Fact]
+    public async Task NewConversation_ResponseLost_SendsTheSameOpIdOnceMoreAndReturnsTheFirstConversation()
+    {
+        var answered = 0;
+        // The first request is read and its connection closed with no answer, as a response lost after the hub made the conversation.
+        using var server = new LoopbackHub((_, _, stream) => Interlocked.Increment(ref answered) == 1 ? Task.CompletedTask : LoopbackHub.Reply(stream, 200, "{\"workItemId\":3,\"folder\":\"D:\\\\git\\\\support\"}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(new NewConversationReply(null, 3, "D:\\git\\support"), await client.NewConversation("d:/git/support", "op-1"));
+
+        var posts = server.Requests.Where((line) => line.StartsWith("POST ", StringComparison.Ordinal)).ToList();
+
+        Assert.Equal(["POST /dock/new-conversation HTTP/1.1 {\"folder\":\"d:/git/support\",\"opId\":\"op-1\"}", "POST /dock/new-conversation HTTP/1.1 {\"folder\":\"d:/git/support\",\"opId\":\"op-1\"}"], posts);
+    }
+
+    [Fact]
+    public async Task NewConversation_HubRefuses_ReturnsTheRefusalWithoutAskingAgain()
+    {
+        using var server = new LoopbackHub((_, _, stream) => LoopbackHub.Reply(stream, 409, "{\"error\":\"New sessions need Code Mode (sessions.codeMode).\"}"));
+        using var client = new HubClient(HomeFor(server));
+
+        Assert.Equal(new NewConversationReply("New sessions need Code Mode (sessions.codeMode).", null, null), await client.NewConversation("D:/git/support", "op-1"));
+        Assert.Single(server.Requests, (line) => line.StartsWith("POST ", StringComparison.Ordinal));
+        Assert.Equal("Switchboard is not running.", (await new HubClient(Fixtures.TempFolder()).NewConversation("D:/git/support", "op-2")).Error);
+    }
+
+    [Fact]
     public async Task StopHeld_HubRefusesOrAccepts_PostsTheIdAndReturnsTheRefusal()
     {
         using var server = new LoopbackHub((_, body, stream) => body.Contains("\"nope\"", StringComparison.Ordinal) ? LoopbackHub.Reply(stream, 404, "{\"error\":\"No held session nope.\"}") : LoopbackHub.Reply(stream, 200, "{\"stopped\":\"o1\"}"));

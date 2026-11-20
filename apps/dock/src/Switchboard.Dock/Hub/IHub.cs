@@ -31,12 +31,21 @@ public interface IHub
     /// </summary>
     Task<string?> Select(string rowKey);
 
+    /// <summary>
+    /// The header's New session: makes a conversation hosted by <paramref name="folder"/> and stored as its folder window's selection, with no window
+    /// open (architecture.md § Hosted conversations). A retry with the same <paramref name="opId"/> answers the first conversation.
+    /// </summary>
+    Task<NewConversationReply> NewConversation(string folder, string opId);
+
     /// <summary>Stops a held session by its Switchboard session ID (PRD R94).</summary>
     Task<string?> StopHeld(string session);
 
     /// <summary>The first view, from the current one on, that passes <paramref name="test"/>, or null after <paramref name="within"/>.</summary>
     Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within);
 }
+
+/// <summary>The hub's answer to New session: the refusal or failure, or the new work item and the canonical folder that hosts it.</summary>
+public sealed record NewConversationReply(string? Error, int? WorkItemId, string? Folder);
 
 /// <summary>The hub's answer to a window command: the refusal or failure, or the command's ID for withdrawing it.</summary>
 public sealed record WindowReply(string? Error, int? Id);

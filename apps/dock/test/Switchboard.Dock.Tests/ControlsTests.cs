@@ -34,6 +34,15 @@ public sealed class ControlsTests
 
     static Button ButtonIn(Control scope, string className) => scope.GetVisualDescendants().OfType<Button>().Single((button) => button.Classes.Contains(className));
 
+    static void Tap(Window window, Control control)
+    {
+        var point = control.TranslatePoint(new Point(Math.Min(20, control.Bounds.Width / 2), Math.Min(8, control.Bounds.Height / 2)), window)!.Value;
+
+        window.MouseDown(point, MouseButton.Left);
+        window.MouseUp(point, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+    }
+
     static void Click(Button button)
     {
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -52,6 +61,104 @@ public sealed class ControlsTests
 
     static List<string> VisibleTitles(Window window) =>
         window.GetVisualDescendants().OfType<Border>().Where((border) => border.Classes.Contains("row") && border.IsEffectivelyVisible).Select((border) => ((RowViewModel)border.DataContext!).Title).ToList();
+
+    [AvaloniaFact]
+    public void NewSessionInAFolder_FolderChosen_MakesTheConversationThenOpensTheHubsFolder()
+    {
+        var (window, model) = Open();
+        var picked = new TaskCompletionSource<string?>();
+        var asked = 0;
+
+        window.PickFolder = (_) =>
+        {
+            asked++;
+            return picked.Task;
+        };
+        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:\\git\\support"));
+        model.Status = "Earlier.";
+
+        // A second click while the picker is open asks nothing more.
+        Choose(window, "New Session in a Folder…");
+        Choose(window, "New Session in a Folder…");
+        picked.SetResult("d:/git/support");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(1, asked);
+        Assert.Matches("^new-conversation d:/git/support [0-9a-f-]{36}$", Assert.Single(hub.Calls));
+        Assert.Equal(["D:\\git\\support"], actions.Folders);
+        Assert.Null(model.Status);
+    }
+
+    [AvaloniaFact]
+    public void NewSessionInAFolder_RowClickedWhileTheHubAnswers_LeavesThatClickAndOpensNoFolder()
+    {
+        var (window, model) = Open();
+        var answer = new TaskCompletionSource<NewConversationReply>();
+
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
+        hub.HoldNewConversation = answer;
+        Choose(window, "New Session in a Folder…");
+
+        // A row clicked meanwhile replaces New session, which then opens nothing over that row's window and shows nothing.
+        var pending = new TaskCompletionSource<string?>();
+
+        actions.Pending = pending;
+        Tap(window, RowOf(window, "item:10"));
+        answer.SetResult(new NewConversationReply(null, 3, "D:/git/support"));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Empty(actions.Folders);
+        Assert.Single(actions.Clicked);
+        Assert.False(actions.Cancels[0].IsCancellationRequested);
+        Assert.Null(model.Status);
+        pending.SetResult(null);
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
+    public void NewSessionInAFolder_EarlierAttemptEndsWhileANewerOneWaits_KeepsTheNewerOnesHold()
+    {
+        var (window, _) = Open();
+        var opening = new TaskCompletionSource<string?>();
+        var answer = new TaskCompletionSource<NewConversationReply>();
+
+        window.PickFolder = (_) => Task.FromResult<string?>("D:/git/support");
+        hub.NewConversationReplies.Enqueue(new NewConversationReply(null, 3, "D:/git/support"));
+        actions.HoldFolder = opening;
+        // The first attempt has its conversation and waits for the folder window.
+        Choose(window, "New Session in a Folder…");
+        Assert.Equal(["D:/git/support"], actions.Folders);
+
+        // A second replaces it and waits for the hub; the first then ends, and a third, chosen meanwhile, makes nothing.
+        hub.HoldNewConversation = answer;
+        Choose(window, "New Session in a Folder…");
+        opening.SetResult(null);
+        Dispatcher.UIThread.RunJobs();
+        Choose(window, "New Session in a Folder…");
+
+        Assert.Equal(2, hub.Calls.Count((call) => call.StartsWith("new-conversation ", StringComparison.Ordinal)));
+        answer.SetResult(new NewConversationReply("Refused.", null, null));
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
+    public void NewSessionInAFolder_PickerCancelledOrHubRefuses_OpensNoWindow()
+    {
+        var (window, model) = Open();
+        string? folder = null;
+
+        window.PickFolder = (_) => Task.FromResult(folder);
+        Choose(window, "New Session in a Folder…");
+        Assert.Empty(hub.Calls);
+
+        folder = "D:/git/support";
+        hub.NewConversationReplies.Enqueue(new NewConversationReply("New sessions need Code Mode (sessions.codeMode).", null, null));
+        Choose(window, "New Session in a Folder…");
+
+        Assert.Single(hub.Calls);
+        Assert.Equal("New sessions need Code Mode (sessions.codeMode).", model.Status);
+        Assert.Empty(actions.Folders);
+    }
 
     [AvaloniaFact]
     public void MainButton_ApproveRow_PostsApproveWithoutTheRowClick()
@@ -551,7 +658,7 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Ticket Volume Report", "Held Sessions", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "Refresh Sources", "Open Settings", "Ticket Volume Report", "Held Sessions", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
         Assert.All(more.ContextMenu.Items.OfType<MenuItem>(), (item) => Assert.NotNull(item.Icon));
     }
 
@@ -563,7 +670,7 @@ public sealed class ControlsTests
 
         Click(more);
 
-        Assert.Equal(["New Ad-hoc Session…", "Refresh Sources", "Open Settings", "Held Sessions", "Show Hub Log"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "Refresh Sources", "Open Settings", "Held Sessions", "Show Hub Log"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
     }
 
     [AvaloniaFact]

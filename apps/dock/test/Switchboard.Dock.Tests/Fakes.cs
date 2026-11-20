@@ -88,11 +88,28 @@ sealed class FakeHub : IHub
 
     public string? SelectReply { get; set; }
 
+    /// <summary>Runs when the hub receives a selection, such as to cancel the click that sent it.</summary>
+    public Action? OnSelect { get; set; }
+
     public Task<string?> Select(string rowKey)
     {
         Calls.Add($"select {rowKey}");
+        OnSelect?.Invoke();
 
         return Task.FromResult(SelectReply);
+    }
+
+    /// <summary>The answers to New session, in order; a request with none left fails, as a hub that is not running.</summary>
+    public Queue<NewConversationReply> NewConversationReplies { get; } = new();
+
+    /// <summary>When set, New session waits for it and answers with it.</summary>
+    public TaskCompletionSource<NewConversationReply>? HoldNewConversation { get; set; }
+
+    public Task<NewConversationReply> NewConversation(string folder, string opId)
+    {
+        Calls.Add($"new-conversation {folder} {opId}");
+
+        return HoldNewConversation is { } held ? held.Task : Task.FromResult(NewConversationReplies.Count > 0 ? NewConversationReplies.Dequeue() : new NewConversationReply("Switchboard is not running.", null, null));
     }
 
     public string? StopReply { get; set; }
@@ -327,6 +344,20 @@ sealed class FakeActions : IDockActions
         Terminals.Add(terminal);
 
         return Task.FromResult(TerminalReply);
+    }
+
+    public List<string> Folders { get; } = [];
+
+    public string? FolderReply { get; set; }
+
+    /// <summary>When set, opening a folder waits for it.</summary>
+    public TaskCompletionSource<string?>? HoldFolder { get; set; }
+
+    public Task<string?> OpenFolder(string folder, CancellationToken cancel)
+    {
+        Folders.Add(folder);
+
+        return HoldFolder?.Task ?? Task.FromResult(FolderReply);
     }
 
     public List<DockRow> InTerminal { get; } = [];

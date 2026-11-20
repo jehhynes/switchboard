@@ -256,6 +256,33 @@ public sealed class HubClient(string switchboardHome, HubStarter? starter = null
 
     public Task<string?> Select(string rowKey) => Post("/dock/select", new JsonObject { ["rowKey"] = rowKey });
 
+    public async Task<NewConversationReply> NewConversation(string folder, string opId)
+    {
+        var body = new JsonObject { ["folder"] = folder, ["opId"] = opId };
+        var (status, reply, failure) = await Send("/dock/new-conversation", body);
+
+        // A request whose answer was lost is sent once more with the same opId, which the hub answers with the conversation it made, not a second.
+        if (status is null)
+        {
+            (status, reply, failure) = await Send("/dock/new-conversation", body);
+        }
+
+        if (failure is not null)
+        {
+            return new NewConversationReply(failure, null, null);
+        }
+
+        if (status != HttpStatusCode.OK)
+        {
+            return new NewConversationReply(RefusalOf(reply?.ToJsonString() ?? "") ?? $"The hub answered {(int?)status}.", null, null);
+        }
+
+        var workItemId = reply?["workItemId"] is JsonValue id && id.TryGetValue<int>(out var number) ? number : (int?)null;
+        var hosted = reply?["folder"] is JsonValue path && path.TryGetValue<string>(out var text) ? text : null;
+
+        return new NewConversationReply(null, workItemId, hosted);
+    }
+
     public Task<string?> StopHeld(string session) => Post("/holder/stop", new JsonObject { ["id"] = session });
 
     public Task<string?> Open(string sessionId, string cwd, string workspace) => Post("/open", new JsonObject { ["sessionId"] = sessionId, ["cwd"] = cwd, ["workspace"] = workspace });

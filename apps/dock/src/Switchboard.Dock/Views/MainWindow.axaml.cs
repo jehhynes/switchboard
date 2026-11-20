@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -1342,6 +1343,7 @@ public sealed partial class MainWindow : Window
     const string CopyGlyph = "\uEBCC";
     const string LinkGlyph = "\uEB14";
     const string AddGlyph = "\uEA60";
+    const string FolderGlyph = "\uEAF7";
     const string SettingsGlyph = "\uEB51";
     const string OutputGlyph = "\uEB9D";
     const string RefreshGlyph = "\uEB37";
@@ -1616,12 +1618,13 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// New Ad-hoc Session, Refresh Sources, which polls each source that is on now, Open Settings, Ticket Volume Report when a Zoho or Forum source is configured,
+    /// New Ad-hoc Session, New Session in a Folder, Refresh Sources, which polls each source that is on now, Open Settings, Ticket Volume Report when a Zoho or Forum source is configured,
     /// Held Sessions (PRD R94), and Show Hub Log, which shows the hub log in the VS Code window used last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
         Item("New Ad-hoc Session…", NewAdhoc, AddGlyph),
+        Item("New Session in a Folder…", NewSession, FolderGlyph),
         Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
         Item("Open Settings", OpenSettings, SettingsGlyph),
         .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket Volume Report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
@@ -1659,6 +1662,79 @@ public sealed partial class MainWindow : Window
             "dark" => ThemeVariant.Dark,
             _ => ThemeVariant.Default,
         };
+    }
+
+    /// <summary>
+    /// More Actions' New Session in a Folder (PRD R104): asks for a folder, has the hub make a conversation hosted by it and stored as its folder
+    /// window's selection, then opens that window, which shows it. A second click while the picker is open or the hub answers does nothing; a row
+    /// clicked meanwhile replaces it, so the conversation is made but its window not opened.
+    /// </summary>
+    internal async Task NewSession()
+    {
+        if (creating is not null)
+        {
+            return;
+        }
+
+        // Each attempt releases only its own hold, so an earlier attempt that ends late never frees a newer one's.
+        var mine = new object();
+
+        creating = mine;
+
+        void Release()
+        {
+            if (creating == mine)
+            {
+                creating = null;
+            }
+        }
+
+        try
+        {
+            if (await PickFolder(ShownForDialog()) is not { } folder)
+            {
+                return;
+            }
+
+            // Run as a click is, so a row clicked while the hub answers replaces it and its window is not opened over that row's.
+            await Running(async (cancel) =>
+            {
+                NewConversationReply reply;
+
+                try
+                {
+                    reply = await hub.NewConversation(folder, Guid.NewGuid().ToString());
+                }
+                finally
+                {
+                    Release();
+                }
+
+                if (cancel.IsCancellationRequested)
+                {
+                    return null;
+                }
+
+                return reply.Error ?? await actions.OpenFolder(reply.Folder ?? folder, cancel);
+            }, "The session did not start");
+        }
+        finally
+        {
+            Release();
+        }
+    }
+
+    /// <summary>The New session attempt that holds the picker or waits for the hub, or null.</summary>
+    object? creating;
+
+    /// <summary>Asks for a folder to start a session in, or null when the operator cancels; tests replace it, as the headless platform has no picker.</summary>
+    internal Func<Window, Task<string?>> PickFolder { get; set; } = AskFolder;
+
+    static async Task<string?> AskFolder(Window owner)
+    {
+        var picked = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "New session in a folder", AllowMultiple = false });
+
+        return picked.Count == 0 ? null : picked[0].TryGetLocalPath();
     }
 
     /// <summary>Opens the New Ad-hoc Session window (PRD R6); the work item starts only when Start automatically is checked.</summary>
@@ -1867,6 +1943,8 @@ public sealed partial class MainWindow : Window
         public Task<string?> Run(DockRow? row, JsonObject command, CancellationToken cancel) => Task.FromResult<string?>(null);
 
         public string? OpenUrl(string url) => null;
+
+        public Task<string?> OpenFolder(string folder, CancellationToken cancel) => Task.FromResult<string?>(null);
     }
 
     sealed class NoHub : IHub
@@ -1886,6 +1964,8 @@ public sealed partial class MainWindow : Window
         public Task<string?> Select(string rowKey) => Task.FromResult<string?>(null);
 
         public Task<string?> StopHeld(string session) => Task.FromResult<string?>(null);
+
+        public Task<NewConversationReply> NewConversation(string folder, string opId) => Task.FromResult(new NewConversationReply(null, null, folder));
 
         public Task<DockView?> Until(Func<DockView, bool> test, TimeSpan within) => Task.FromResult<DockView?>(null);
     }
