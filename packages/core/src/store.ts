@@ -3,6 +3,7 @@ import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemS
 import { ownPrompt } from './group.js';
 import { CONVERSATION_RETENTION } from './conversation.js';
 import type { ConversationMessage, ConversationReply, ConversationStatus, TranscriptCheckpoint, WindowBinding } from './conversation.js';
+import { windowFileKey } from './conversation.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -420,6 +421,14 @@ export const MIGRATIONS = [
   UPDATE statuses SET seenAt = at;`,
   // Every session is read as if it carries the current conversation rules, so no version is kept.
   `ALTER TABLE sessions DROP COLUMN rulesVersion;`,
+  // Hosted conversations (architecture.md § Hosted conversations): an ad hoc ticket's host window, a session started with no prompt, and a
+  // window binding's selected conversation and the ticket and title it showed.
+  `ALTER TABLE tickets ADD COLUMN hostWindow TEXT;
+  ALTER TABLE sessions ADD COLUMN promptless INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE windowBindings ADD COLUMN selectedWorkItemId INTEGER;
+  ALTER TABLE windowBindings ADD COLUMN selectedSessionId TEXT;
+  ALTER TABLE windowBindings ADD COLUMN ticketId INTEGER;
+  ALTER TABLE windowBindings ADD COLUMN title TEXT;`,
 ];
 
 /**
@@ -431,7 +440,7 @@ const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
 /** A reply that counts as unread (`countsUnread`) and was not seen. */
 const UNREAD_REPLY = "seenAt IS NULL AND withdrawn = 0 AND rewrittenBy IS NULL AND kind <> 'note' AND opening <> ''";
 
-const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode']);
+const BOOLEANS = new Set(['assigned', 'pool', 'inQueue', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -581,7 +590,7 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The register event names an external session, and its end already shows when it was cleared.
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree']),
+  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),
@@ -858,7 +867,7 @@ export class Store {
   }
 
   insertTicket(ticket: NewTicket): Ticket {
-    const row = { adhocKey: null, repo: '', inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [], ...ticket };
+    const row = { adhocKey: null, hostWindow: null, repo: '', inQueue: false, assigneeId: null, handledAssignmentKey: null, snoozeComment: null, blockers: [], ...ticket };
 
     return { id: this.#insert('tickets', row as unknown as Row), ...row };
   }
@@ -1540,8 +1549,15 @@ export class Store {
 
   setWindowBinding(binding: WindowBinding): void {
     this.#db
-      .prepare('INSERT INTO windowBindings (file, workItemId, since, scopeGen) VALUES (?, ?, ?, ?) ON CONFLICT (file) DO UPDATE SET workItemId = excluded.workItemId, since = excluded.since, scopeGen = excluded.scopeGen')
-      .run(binding.file, binding.workItemId, binding.since, binding.scopeGen);
+      .prepare(
+        'INSERT INTO windowBindings (file, workItemId, since, scopeGen, selectedWorkItemId, selectedSessionId, ticketId, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (file) DO UPDATE SET workItemId = excluded.workItemId, since = excluded.since, scopeGen = excluded.scopeGen, selectedWorkItemId = excluded.selectedWorkItemId, selectedSessionId = excluded.selectedSessionId, ticketId = excluded.ticketId, title = excluded.title',
+      )
+      .run(binding.file, binding.workItemId, binding.since, binding.scopeGen, binding.selectedWorkItemId ?? null, binding.selectedSessionId ?? null, binding.ticketId ?? null, binding.title ?? null);
+  }
+
+  /** The work items of the ad hoc tickets a window binding hosts (`Ticket.hostWindow`, compared by `windowFileKey`), newest first. */
+  hostedWorkItems(file: string): WorkItem[] {
+    return this.#all<WorkItem>("SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE lower(replace(t.hostWindow, '\\', '/')) = ? ORDER BY w.id DESC", windowFileKey(file));
   }
 
   #replyRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationReply[] {

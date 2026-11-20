@@ -104,11 +104,24 @@ export interface TranscriptCheckpoint {
 }
 
 /** A window's work item (architecture.md § Window scope), kept by its workspace file so a reload keeps its scope generation. */
+/**
+ * A window's binding (architecture.md § Window scope), kept by its workspace file: its primary work item, the ticket and title it showed, so they
+ * outlive a deleted primary, its selected conversation and that conversation's current session, and the generation every command echoes.
+ */
 export interface WindowBinding {
   file: string;
   workItemId: number | null;
   since: number;
   scopeGen: number;
+  selectedWorkItemId?: number | null;
+  selectedSessionId?: string | null;
+  ticketId?: number | null;
+  title?: string | null;
+}
+
+/** How a workspace file is kept as a window binding and a host link: forward slashes, no trailing slash, lower case, so spellings of one file match. */
+export function windowFileKey(file: string): string {
+  return file.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
 }
 
 /** Messages and replies kept per session, and statuses, counted apart; older ones are deleted. */

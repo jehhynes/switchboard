@@ -67,7 +67,7 @@ describe('WindowScopes', () => {
 
     expect(noted).not.toHaveProperty('notes');
     expect(noted.errors.sources).toEqual({});
-    expect(store.windowBinding(file)).toEqual({ file, workItemId: 2, since: NOW, scopeGen: 1 });
+    expect(store.windowBinding(file)).toMatchObject({ file, workItemId: 2, since: NOW, scopeGen: 1 });
   });
 
   it("moves a window to a new work item of its ticket, raising its scope generation, and keeps it across a reload", () => {

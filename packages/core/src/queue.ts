@@ -11,7 +11,10 @@ export function heldSlots(store: Store): number {
     const item = store.workItem(session.workItemId)!;
     const sessions = store.sessionsFor(item.id);
 
-    return activeSession({ sessions })?.id === session.id && !store.ticket(item.ticketId)!.snoozed && holdsSlot({ status: item.status, sessions });
+    const ticket = store.ticket(item.ticketId)!;
+
+    // A hosted conversation stays open between turns, so it holds a slot only while its session is in a turn (architecture.md § Hosted conversations).
+    return activeSession({ sessions })?.id === session.id && !ticket.snoozed && holdsSlot({ status: item.status, sessions }) && (ticket.hostWindow == null || TURN_IN_PROGRESS.includes(session.state));
   }).length;
 }
 

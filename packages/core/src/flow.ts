@@ -13,6 +13,10 @@ import { renderTaskPrompt, sessionContract, sessionPrompt, triagePrompt } from '
 import type { PlaybookChoice, TemplateVariable } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
+/** A hosted conversation's title until its first message titles it (architecture.md § Hosted conversations). */
+export const NEW_CONVERSATION_TITLE = 'New session';
+/** Why a hosted conversation is refused while Code Mode is off. */
+export const NEEDS_CODE_MODE = 'New sessions need Code Mode (sessions.codeMode).';
 
 /** The statuses of a run; entering one from another status starts the Working clock (PRD R27). */
 const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['setup', 'running']);
@@ -207,6 +211,13 @@ export type FlowEvent =
   | { type: 'worktree-found'; source: string; sourceKey: string; path: string; branch: string }
   /** `start` queues the work item to run now; otherwise it waits `unstarted` for Start (PRD R6). */
   | { type: 'adhoc'; prompt: string; repoRoot: string; start?: boolean }
+  /**
+   * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item hosted by the window binding `hostWindow`, run in
+   * `folder`, whose Code Mode session starts at once with no prompt.
+   */
+  | { type: 'new-conversation'; hostWindow: string; folder: string }
+  /** A hosted conversation's first message, whose first line titles it while it is still titled `NEW_CONVERSATION_TITLE`. */
+  | { type: 'conversation-title'; workItemId: number; text: string }
   /** A live Claude session the operator started outside Switchboard, as the roster lists it (PRD R81). */
   | { type: 'register'; nativeSessionId: string; shortId: string; cwd: string; title: string }
   /**
@@ -362,7 +373,7 @@ function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-conversation', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'open-question', 'background','pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -452,6 +463,8 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { path: event.path, branch: event.branch };
     case 'adhoc':
       return { repoRoot: event.repoRoot, start: event.start === true };
+    case 'new-conversation':
+      return { folder: event.folder };
     case 'register':
       return { cwd: event.cwd };
     case 'session-resumed':
@@ -637,6 +650,10 @@ class Flow {
         return this.worktreeFound(event.source, event.sourceKey, event.path, event.branch);
       case 'adhoc':
         return this.adhoc(event.prompt, event.repoRoot, event.start === true);
+      case 'new-conversation':
+        return this.newConversation(event.hostWindow, event.folder);
+      case 'conversation-title':
+        return this.conversationTitle(event.workItemId, event.text);
       case 'register':
         return this.register(event);
       case 'ticket':
@@ -921,6 +938,39 @@ class Flow {
   }
 
   /**
+   * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item in the window's folder, hosted by its window binding,
+   * whose Code Mode session starts at once at an empty prompt, without waiting for a free slot, since the operator is there to use it.
+   */
+  private newConversation(hostWindow: string, folder: string): void {
+    const sessions = this.context.settings.sessions;
+
+    if (!sessions.codeMode) {
+      throw new Refusal(NEEDS_CODE_MODE);
+    }
+
+    if (!sessions.installHooks) {
+      throw new Refusal('Code Mode sessions need sessions.installHooks.');
+    }
+
+    if (folder === '' || hostWindow === '') {
+      throw new Refusal('The window has no folder.');
+    }
+
+    this.startSession(this.insertAdhoc(null, NEW_CONVERSATION_TITLE, folder, null, 'running', hostWindow));
+  }
+
+  /** Titles a hosted conversation by its first message's first line, as an ad-hoc work item is by its prompt's (PRD R6). */
+  private conversationTitle(workItemId: number, text: string): void {
+    const item = this.store.workItem(workItemId);
+    const ticket = item === null ? null : this.store.ticket(item.ticketId);
+    const title = firstLine(text);
+
+    if (ticket?.hostWindow != null && ticket.title === NEW_CONVERSATION_TITLE && title !== '') {
+      this.store.updateTicket(ticket.id, { title });
+    }
+  }
+
+  /**
    * PRD R81: a live Claude session the operator started outside Switchboard becomes a running ad-hoc work item in its own directory. The session
    * counts as released, because its process is the operator's, and stays external until it ends.
    */
@@ -1069,11 +1119,11 @@ class Flow {
    * An ad-hoc ticket and work item: queued when the operator chose Start automatically, otherwise unstarted, and running, with no
    * prompt, for a registered session (PRD R6, R68, R81).
    */
-  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running'): WorkItem {
+  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', hostWindow: string | null = null): WorkItem {
     const keys = this.store.adhocKeys().map(Number);
     const sourceKey = String(Math.max(0, ...keys) + 1);
     // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R76).
-    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: parentId === null ? null : 'task', title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
+    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: parentId === null ? null : 'task', title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot, ...(hostWindow === null ? {} : { hostWindow }) });
     const queued = status === 'queued';
 
     if (parentId !== null) {
@@ -1436,7 +1486,8 @@ class Flow {
     const session = this.session(sessionId);
 
     if (session.state === 'starting') {
-      const state = startPrompt ? { state: 'waiting' as const, stateDetail: START_PROMPT } : { state: 'running' as const };
+      // A session started with no prompt waits for the operator's first message (mechanics M87).
+      const state = startPrompt ? { state: 'waiting' as const, stateDetail: START_PROMPT } : { state: session.promptless === true ? ('idle' as const) : ('running' as const) };
 
       this.store.updateSession(sessionId, { nativeSessionId, shortId, ...state, stateAt: this.now, ...(launchId === undefined ? {} : { launchId }) });
       const item = this.store.workItem(session.workItemId)!;
@@ -1626,6 +1677,11 @@ class Flow {
     if (TURN_ENDED.includes(state) && current.outcome === null && item.status === 'running') {
       const cause = state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : null;
 
+      // A hosted conversation offers no done report, so a turn that ends leaves it open (architecture.md § Hosted conversations).
+      if (cause === null && this.hosted(item)) {
+        return;
+      }
+
       if (item.unassignedAt !== null) {
         this.done(item, 'unassigned', null);
       } else if (item.approvalHeld) {
@@ -1690,7 +1746,7 @@ class Flow {
     // A done report with its ticket still assigned leaves the work item open until the recheck or the ticket leaving settles it.
     if (item.unassignedAt !== null) {
       this.done(item, 'unassigned', null);
-    } else if (session.outcome === 'done') {
+    } else if (session.outcome === 'done' || this.hosted(item)) {
       return;
     } else if (item.status === 'running') {
       if (item.approvalHeld) {
@@ -2571,6 +2627,11 @@ class Flow {
     return item.status !== 'done' && sessions.at(-1)?.id === session.id ? item : null;
   }
 
+  /** Whether the work item is a hosted conversation, which offers no done report and stays open when a turn or its session ends. */
+  private hosted(item: WorkItem): boolean {
+    return this.store.ticket(item.ticketId)?.hostWindow != null;
+  }
+
   private activeSession(item: WorkItem): Session | null {
     return activeSession({ sessions: this.store.sessionsFor(item.id) });
   }
@@ -2713,9 +2774,11 @@ class Flow {
       prompt = rendered.text;
     }
 
-    // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do.
-    const provider = playbook?.provider ?? sessions.provider;
-    const reports = sessionReports(kind, approved, playbook, provider);
+    // Every session of a work item runs in its playbook's agent, so a setup or an approved prompt runs where the playbook's skills do. A hosted
+    // conversation is Claude in Code Mode whatever sessions.provider names, and offers no done or approval report.
+    const hosted = ticket.hostWindow != null;
+    const provider = hosted ? 'claude' : (playbook?.provider ?? sessions.provider);
+    const reports = sessionReports(kind, approved, playbook, provider).filter((report) => !hosted || (report !== 'done' && report !== 'approval'));
     // The setting applies at the start; resumes keep the session's mode (PRD R93). The Claude session ID and launch are stored before the
     // start, so a hub restarted during it finds the process in the holder.
     const held = provider === 'claude' && sessions.codeMode ? { codeMode: true as const, nativeSessionId: this.context.newUuid(), launchId: this.context.newUuid() } : null;
@@ -2754,6 +2817,7 @@ class Flow {
       movedAt: null,
       codeMode: held !== null,
       launchId: held?.launchId ?? null,
+      promptless: hosted,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     // Rows open only the latest session, so an older held one ends (PRD R95).

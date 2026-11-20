@@ -140,6 +140,8 @@ describe('Code Mode command', () => {
 
     expect(codeModeStartArgs(action, NATIVE)).toEqual(['--session-id', NATIVE, '--permission-mode', 'auto', '-n', 'Switchboard · #12', '--model', 'haiku', '--append-system-prompt', `Report with …\n\n${PROMPT}`, '--settings', SETTINGS, '/fix the bug\nnow']);
     expect(codeModeStartArgs({ ...action, model: null }, NATIVE)).not.toContain('--model');
+    // An empty prompt is left out, so the session waits for the first message (mechanics M87).
+    expect(codeModeStartArgs({ ...action, prompt: '' }, NATIVE).at(-1)).toBe(SETTINGS);
   });
 
   it("resumes with no prompt, keeping the permission mode, model and settings, and appends the panel's sections for after a compaction", () => {
@@ -598,6 +600,27 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
     lookup = { gone: true };
     expect(await runner().stop({ sessionId: 'sb-1', shortId: null }, 'operator')).toBeNull();
     expect(await runner().isBackground({ sessionId: 'sb-1', shortId: null })).toBe(false);
+  });
+
+
+  it('starts a promptless session that ended before its first message again under its session ID, since it has no transcript to resume (mechanics M87)', async () => {
+    const fresh = { contract: 'Report with …', name: 'switchboard · ad-hoc · adhoc 3' };
+
+    expect(await runner({ transcriptExists: () => false }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l2', fresh)).toEqual({ launchId: 'l2' });
+    expect(holder.spawned[0]!.args).toEqual(codeModeStartArgs({ permissionMode: 'auto', name: fresh.name, model: 'haiku', contract: fresh.contract, prompt: '', cwd: 'D:/work', workItemId: 1 }, NATIVE));
+    expect(holder.spawned[0]!.args.at(-2)).toBe('--settings');
+
+    // With a transcript, or for a session started with a prompt, it resumes.
+    expect(await runner({ transcriptExists: () => true }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l3', fresh)).toEqual({ launchId: 'l3' });
+    expect(await runner({ transcriptExists: () => false }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l4')).toEqual({ launchId: 'l4' });
+    expect(holder.spawned.slice(1).map((one) => one.args[0])).toEqual(['--resume', '--resume']);
+  });
+
+  it('reads a promptless start as idle and a prompted one as running (mechanics M87)', () => {
+    marker(NATIVE, { event: 'SessionStart', source: 'startup', launch: LAUNCH, at: 44 });
+
+    expect(runner().markers([session()]).get(NATIVE)?.observed).toEqual({ state: 'running', detail: null });
+    expect(runner().markers([session({ promptless: true })]).get(NATIVE)?.observed).toEqual({ state: 'idle', detail: null });
   });
 
   it('resumes an ended session in the holder with a new launch and no prompt', async () => {

@@ -75,7 +75,14 @@ export interface SessionRunner {
    */
   heldActivity?(sessionId: string): Promise<{ clients: number; lastInputAt: number | null; lastOutputAt?: number | null } | { error: string }>;
   /** The Code Mode runner only: resumes an ended session in the holder under a new launch (PRD R95). */
-  resumeHeld?(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd'>, permissionMode: PermissionMode, model: string | null, label: string, launchId?: string): Promise<{ launchId: string } | { error: string }>;
+  resumeHeld?(
+    session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId'>,
+    permissionMode: PermissionMode,
+    model: string | null,
+    label: string,
+    launchId?: string,
+    fresh?: { contract: string; name: string },
+  ): Promise<{ launchId: string } | { error: string }>;
   /** The Code Mode runner only: a new launch ID for a resume, which the hub stores before the spawn (PRD R95). */
   newLaunchId?(): string;
   /** The Code Mode runner only: the members of a process tree that still run, matched by pid and creation time (PRD R95). */

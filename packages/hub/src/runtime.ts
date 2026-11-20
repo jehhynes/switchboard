@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { join } from 'node:path';
-import { classify, ClaudeRunner, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
+import { dirname, join } from 'node:path';
+import { classify, ClaudeRunner, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
@@ -211,6 +211,7 @@ export class Runtime {
           home: this.home,
           hooks,
           holder: (start) => this.holder.find(start),
+          transcriptExists: (cwd, nativeSessionId) => findTranscript(join(dirname(deps.claudeSettings), 'projects'), cwd, nativeSessionId) !== null,
           now: deps.now,
           sleep: deps.sleep,
           ...(deps.codeModeIdleMs === undefined ? {} : { idleMs: deps.codeModeIdleMs }),
@@ -1946,7 +1947,15 @@ export class Runtime {
 
       const resumed = this.runners.codeMode.resumeHeld === undefined
         ? { error: 'The Code Mode runner cannot resume sessions.' }
-        : await this.runners.codeMode.resumeHeld(session, options.permissionMode, options.model, `${sessionName(session.kind, item, ticket)} ${session.nativeSessionId ?? ''}`, launchId);
+        : await this.runners.codeMode.resumeHeld(
+            session,
+            options.permissionMode,
+            options.model,
+            `${sessionName(session.kind, item, ticket)} ${session.nativeSessionId ?? ''}`,
+            launchId,
+            // A session started with no prompt that ended before its first message starts again with its contract (mechanics M87).
+            session.promptless === true ? { contract: sessionContract(session.id, this.reportCommand, session.reports, session.provider), name: sessionName(session.kind, item, ticket) } : undefined,
+          );
 
       if ('error' in resumed) {
         return refuse(resumed.error);

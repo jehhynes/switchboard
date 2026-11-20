@@ -69,6 +69,11 @@ export interface Ticket {
   repo: string;
   /** The ad-hoc key of a ticket a ticket report moved to a source (PRD R83), so the key is not used again and the item window keeps its name. */
   adhocKey: string | null;
+  /**
+   * The window binding an ad hoc conversation was started from (architecture.md § Hosted conversations): an item window's workspace file, compared
+   * by `windowFileKey`. Null for every other ticket.
+   */
+  hostWindow?: string | null;
   /** The open issues the source lists as blocking this ticket, from the last complete poll that saw it (PRD R90); absent from an older hub's snapshot. */
   blockers?: TicketBlocker[];
 }
@@ -225,6 +230,8 @@ export interface Session {
   launchId?: string | null;
   /** The process tree the holder last listed for a Code Mode session, pids with creation times; the resume guard checks it (PRD R95). */
   lastTree?: Array<{ pid: number; created: string }> | null;
+  /** A Code Mode session started with no prompt, as a hosted conversation's is, so its `SessionStart` `startup` reads as idle (mechanics M87). */
+  promptless?: boolean;
 }
 
 /**

@@ -92,7 +92,10 @@ export function codeModeSettings(): string {
   return JSON.stringify({ env: { ANTHROPIC_BASE_URL: DIRECT_API, ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_CUSTOM_HEADERS: '' }, viewMode: 'focus', tui: 'default' });
 }
 
-/** An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). */
+/**
+ * An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). An empty prompt is left
+ * out, so the session waits for the operator's first message (mechanics M87).
+ */
 export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt' | 'cwd' | 'workItemId'>, nativeSessionId: string): string[] {
   return [
     '--session-id',
@@ -106,7 +109,7 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
     `${action.contract}\n\n${codeModePrompt(artifactsDir(action.cwd, action.workItemId))}`,
     '--settings',
     codeModeSettings(),
-    action.prompt,
+    ...(action.prompt === '' ? [] : [action.prompt]),
   ];
 }
 
@@ -222,6 +225,8 @@ export interface CodeModeRunnerDeps {
   processes?(): Promise<ProcessRow[] | { error: string }>;
   /** Ends a process and its descendants; `killTree` by default. */
   killTree?(pid: number): Promise<{ error: string } | null>;
+  /** Whether Claude keeps a transcript of the session, which a resume needs; a session is resumed whenever this is left out (mechanics M87). */
+  transcriptExists?(cwd: string, nativeSessionId: string): boolean;
   /** Makes a work item's artifact folder before its session starts; `makeArtifactsDir` by default. */
   makeArtifactsDir?(dir: string): void;
 }
@@ -296,14 +301,15 @@ function ownMarker(markers: ReadonlyMap<string, Marker>, session: Pick<Session, 
 
 /**
  * A marker's state for a held process. A start runs its prompt; a resume, `/clear` or `/branch` waits for input (mechanics M68, M73); a
- * compaction says nothing, because a manual `/compact` ends with no Stop while an automatic one runs mid-turn (mechanics M65).
+ * compaction says nothing, because a manual `/compact` ends with no Stop while an automatic one runs mid-turn (mechanics M65). A start with no
+ * prompt waits for input too (mechanics M87).
  */
-export function heldState(marker: Marker): { state: LiveState; detail: string | null } | null {
+export function heldState(marker: Marker, promptless = false): { state: LiveState; detail: string | null } | null {
   if (marker.event !== 'SessionStart') {
     return markerState(marker);
   }
 
-  return marker.source === 'startup' ? { state: 'running', detail: null } : marker.source === 'compact' ? null : { state: 'idle', detail: null };
+  return marker.source === 'startup' ? { state: promptless ? 'idle' : 'running', detail: null } : marker.source === 'compact' ? null : { state: 'idle', detail: null };
 }
 
 /** Code Mode sessions, held in the terminal holder (architecture.md § Code Mode sessions). */
@@ -342,15 +348,30 @@ export class CodeModeRunner implements SessionRunner {
     return this.newId();
   }
 
-  /** Resumes an ended session in the holder with a new launch; the session keeps the mode, model and permission mode it started with. */
-  async resumeHeld(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId'>, permissionMode: PermissionMode, model: string | null, label: string, launch?: string): Promise<{ launchId: string } | { error: string }> {
+  /**
+   * Resumes an ended session in the holder with a new launch; the session keeps the mode, model and permission mode it started with. A session
+   * started with no prompt that ended before its first message has no transcript, which `claude --resume` refuses, so with `fresh`, its contract
+   * and name, it starts again under its session ID with no prompt (mechanics M87).
+   */
+  async resumeHeld(
+    session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId'>,
+    permissionMode: PermissionMode,
+    model: string | null,
+    label: string,
+    launch?: string,
+    fresh?: { contract: string; name: string },
+  ): Promise<{ launchId: string } | { error: string }> {
     if (session.nativeSessionId === null) {
       return { error: 'The session never started, so it cannot be resumed.' };
     }
 
     const launchId = launch ?? this.newId();
     const artifacts = artifactsDir(session.cwd, session.workItemId);
-    const spawned = await this.spawn(session.id, label, codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts), session.cwd, launchId, artifacts);
+    const again = fresh !== undefined && this.deps.transcriptExists?.(session.cwd, session.nativeSessionId) === false;
+    const args = again
+      ? codeModeStartArgs({ permissionMode, name: fresh.name, model, contract: fresh.contract, prompt: '', cwd: session.cwd, workItemId: session.workItemId }, session.nativeSessionId)
+      : codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts);
+    const spawned = await this.spawn(session.id, label, args, session.cwd, launchId, artifacts);
 
     return 'error' in spawned ? spawned : { launchId };
   }
@@ -506,7 +527,7 @@ export class CodeModeRunner implements SessionRunner {
       const moved = candidates.length === 0 ? undefined : await this.confirmed(candidates, entry);
 
       if (moved !== undefined) {
-        forks.push({ sessionId: session.id, nativeSessionId: moved.sessionId, shortId: moved.sessionId.slice(0, 8), ...(heldState(moved) ?? { state: 'running', detail: null }) });
+        forks.push({ sessionId: session.id, nativeSessionId: moved.sessionId, shortId: moved.sessionId.slice(0, 8), ...(heldState(moved, session.promptless === true) ?? { state: 'running', detail: null }) });
       }
 
       if (marker !== undefined && session.stateDetail === START_PROMPT) {
@@ -527,7 +548,7 @@ export class CodeModeRunner implements SessionRunner {
         }
       }
 
-      const state = marker === undefined ? null : heldState(marker);
+      const state = marker === undefined ? null : heldState(marker, session.promptless === true);
 
       observed.push({ sessionId: session.id, ...(state ?? { state: session.state === 'starting' || session.state === 'ended' ? 'running' : session.state, detail: session.stateDetail }), interactive: false, ...tree });
     }
@@ -568,7 +589,7 @@ export class CodeModeRunner implements SessionRunner {
       const marker = ownMarker(markers, session);
 
       if (marker !== undefined) {
-        readings.set(marker.sessionId, { at: marker.at ?? 0, cwd: marker.cwd ?? null, observed: heldState(marker), recheck: false, ...(marker.event === 'SessionStart' && marker.source === 'compact' ? { compacted: true as const } : {}) });
+        readings.set(marker.sessionId, { at: marker.at ?? 0, cwd: marker.cwd ?? null, observed: heldState(marker, session.promptless === true), recheck: false, ...(marker.event === 'SessionStart' && marker.source === 'compact' ? { compacted: true as const } : {}) });
       }
     }
 
