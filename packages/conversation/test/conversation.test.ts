@@ -120,6 +120,24 @@ describe('SessionConversation', () => {
     expect(items()).toHaveLength(3);
   });
 
+  it('confirms a dictated message and a [partial] part by their tagged lines, and passes on a reply\'s heard tags once, from its transcript copy only', () => {
+    const { store, conversation, path, append, items, changes } = setup();
+    const voice = { sessionId: 's1', workItemId: 7, origin: 'voice' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'open' as const };
+
+    store.addMessage({ ...voice, id: 'm-part', at: T0, text: 'fix the', opId: 'op1', pastedAt: T0, partial: true });
+    store.addMessage({ ...voice, id: 'm-rest', at: T0 + 100, text: 'login flow on a llama', opId: 'op2', pastedAt: T0 + 100 });
+    append(user('u1', T0 + 500, '[voice] [partial] fix the'), user('u2', T0 + 600, '[voice] login flow on a llama'), assistant('a1', T0 + 1000, 'Fixed on Ollama.\n<!--heard:a llama=Ollama-->'));
+    conversation.readTranscript(path);
+    conversation.readTranscript(path);
+
+    expect(items()).toMatchObject([
+      { type: 'message', id: 'm-part', delivery: 'sent', transcriptUuid: 'u1', text: 'fix the', partial: true },
+      { type: 'message', id: 'm-rest', delivery: 'sent', transcriptUuid: 'u2', text: 'login flow on a llama' },
+      { type: 'reply', opening: 'Fixed on Ollama.', answers: 'm-rest' },
+    ]);
+    expect(changes.filter((change) => change.type === 'heard')).toEqual([{ type: 'heard', replyId: items()[2]!.id, heard: [{ heard: 'a llama', meant: 'Ollama' }] }]);
+  });
+
   it('confirms a slash command chosen from the composer by its command line, and keeps it apart from the same words sent as a message', () => {
     const { store, conversation, path, append, items } = setup();
     const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'open' as const };

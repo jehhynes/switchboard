@@ -157,18 +157,29 @@ describe('VoiceControl', () => {
       {
         type: 'targets',
         targets: [
-          { sessionId: 's1', workItemId: 1 },
-          { sessionId: 's2', workItemId: 2 },
+          { sessionId: 's1', workItemId: 1, repo: null },
+          { sessionId: 's2', workItemId: 2, repo: null },
         ],
         focus: { sessionId: 's1', via: 'window' },
       },
+      // No window's composer has the focus.
+      { type: 'typing', on: false },
     ]);
 
     // Nothing changed, so nothing is sent again; the focus leaving every window is sent.
     control.update();
     focus(null);
     control.update();
-    expect(connections[0]!.sent.slice(2)).toEqual([{ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1 }, { sessionId: 's2', workItemId: 2 }], focus: null }]);
+    expect(connections[0]!.sent.slice(3)).toEqual([
+      {
+        type: 'targets',
+        targets: [
+          { sessionId: 's1', workItemId: 1, repo: null },
+          { sessionId: 's2', workItemId: 2, repo: null },
+        ],
+        focus: null,
+      },
+    ]);
 
     windows.clear();
     control.update();

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { endsInOpenTag, keyOf, messageTags, parseReply, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
+import { endsInOpenTag, keyOf, messageTags, parseReply, splitHeard, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
+import { typedText } from '../src/transcript.js';
 
 describe('reply tags', () => {
   it('reads an aside and a rewrite only at the very start, the aside after a rewrite tag', () => {
@@ -12,16 +13,16 @@ describe('reply tags', () => {
   });
 
   it('parses a reply into its kind, rewrite, text and status, keeps any other bracketed word as text', () => {
-    expect(parseReply('[rewrite] Both done.\n\n- a\n- b')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', status: null, speak: null, tone: null });
-    expect(parseReply('Done.\n[details]\nx')).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n[details]\nx', status: null, speak: null, tone: null });
-    expect(parseReply('[aside] Reading files.')).toEqual({ kind: 'aside', rewrite: false, opening: 'Reading files.', status: null, speak: null, tone: null });
-    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge')).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', status: '## Done\n- the badge', speak: null, tone: null });
-    expect(parseReply('[status]\nAll green.')).toEqual({ kind: 'reply', rewrite: false, opening: '', status: 'All green.', speak: null, tone: null });
+    expect(parseReply('[rewrite] Both done.\n\n- a\n- b')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', status: null, speak: null, tone: null, heard: [] });
+    expect(parseReply('Done.\n[details]\nx')).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n[details]\nx', status: null, speak: null, tone: null, heard: [] });
+    expect(parseReply('[aside] Reading files.')).toEqual({ kind: 'aside', rewrite: false, opening: 'Reading files.', status: null, speak: null, tone: null, heard: [] });
+    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge')).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', status: '## Done\n- the badge', speak: null, tone: null, heard: [] });
+    expect(parseReply('[status]\nAll green.')).toEqual({ kind: 'reply', rewrite: false, opening: '', status: 'All green.', speak: null, tone: null, heard: [] });
   });
 
   it('reads the [speak] passage and the tone line, and leaves their markers out of the text the view shows', () => {
-    expect(parseReply('[speak]Fixed the badge.[/speak]\n\n- one\n- two')).toEqual({ kind: 'reply', rewrite: false, opening: 'Fixed the badge.\n\n- one\n- two', status: null, speak: 'Fixed the badge.', tone: null });
-    expect(parseReply('[tone: calm, slightly amused]\n[rewrite]\n[speak]\nBoth done.\n[/speak]\nDetails.')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\nDetails.', status: null, speak: 'Both done.', tone: 'calm, slightly amused' });
+    expect(parseReply('[speak]Fixed the badge.[/speak]\n\n- one\n- two')).toEqual({ kind: 'reply', rewrite: false, opening: 'Fixed the badge.\n\n- one\n- two', status: null, speak: 'Fixed the badge.', tone: null, heard: [] });
+    expect(parseReply('[tone: calm, slightly amused]\n[rewrite]\n[speak]\nBoth done.\n[/speak]\nDetails.')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\nDetails.', status: null, speak: 'Both done.', tone: 'calm, slightly amused', heard: [] });
     expect(parseReply('[rewrite]\n[tone: dry]\nNo.')).toMatchObject({ rewrite: true, opening: 'No.', tone: 'dry' });
     expect(parseReply('[speak]Done.[/speak]\n[status]\nGreen.')).toMatchObject({ opening: 'Done.', status: 'Green.', speak: 'Done.' });
     // Quoted in inline code, a marker is text; one never closed marks nothing.
@@ -50,6 +51,31 @@ describe('reply tags', () => {
     expect(messageTags(false, true)).toBe('');
     expect(stripMessageTags('[spoken] [expressive] Hello there')).toBe('Hello there');
     expect(stripMessageTags('Say [spoken] here')).toBe('Say [spoken] here');
+  });
+
+  it('tags a dictated message and a [partial] part after any reply tags, and untags them with the reply tags', () => {
+    expect(messageTags(false, false, 'voice')).toBe('[voice] ');
+    expect(messageTags(true, true, 'voice')).toBe('[spoken] [expressive] [voice] ');
+    expect(messageTags(false, false, 'partial')).toBe('[voice] [partial] ');
+    expect(stripMessageTags('[spoken] [voice] fix the login flow')).toBe('fix the login flow');
+    expect(stripMessageTags('[voice] [partial] fix the')).toBe('fix the');
+    expect(stripMessageTags('fix the [voice] tag')).toBe('fix the [voice] tag');
+    expect(typedText('[voice] [partial] fix the')).toBe('fix the');
+  });
+
+  it('reads heard tags, leaves them out of the text the view shows, and ignores one in code', () => {
+    expect(parseReply('Ollama is running. <!--heard:a llama=Ollama-->')).toMatchObject({ opening: 'Ollama is running.', heard: [{ heard: 'a llama', meant: 'Ollama' }] });
+    expect(parseReply('[speak]Done.[/speak]\n<!--heard:work train=worktree-->\n<!-- heard: nematron = Nemotron -->\nMore.')).toMatchObject({
+      opening: 'Done.\nMore.',
+      speak: 'Done.',
+      heard: [
+        { heard: 'work train', meant: 'worktree' },
+        { heard: 'nematron', meant: 'Nemotron' },
+      ],
+    });
+    expect(splitHeard('Write `<!--heard:a llama=Ollama-->` to teach it.')).toEqual({ heard: [], text: 'Write `<!--heard:a llama=Ollama-->` to teach it.' });
+    expect(splitHeard('```\n<!--heard:x=Y-->\n```').heard).toEqual([]);
+    expect(splitHeard('<!--heard:=Y--> <!--note-->').heard).toEqual([]);
   });
 
   it('splits a status at its own [status] line outside fenced code, never at a quoted or indented tag', () => {

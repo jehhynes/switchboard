@@ -5,6 +5,7 @@ import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
 import { keyOf, stripAside } from './tags.js';
+import type { HeardTag } from './tags.js';
 import { parseLine, readLines } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
 import type { ScreenRead } from './screen.js';
@@ -40,7 +41,12 @@ export interface ConversationStore {
 }
 
 /** What changed in a session's conversation, for the windows that show it. */
-export type ConversationChange = { type: 'message'; message: ConversationMessage } | { type: 'reply'; reply: ConversationReply } | { type: 'status'; status: ConversationStatus };
+export type ConversationChange =
+  | { type: 'message'; message: ConversationMessage }
+  | { type: 'reply'; reply: ConversationReply }
+  | { type: 'status'; status: ConversationStatus }
+  /** A reply's transcript copy carries heard tags, for the voice's glossary (architecture.md § Dictation); sent once per reply. */
+  | { type: 'heard'; replyId: string; heard: HeardTag[] };
 
 export interface ConversationDeps {
   store: ConversationStore;

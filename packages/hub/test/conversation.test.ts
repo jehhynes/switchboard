@@ -1046,6 +1046,43 @@ describe('ConversationService send', () => {
     expect(pins).toEqual(['s2 nova', 's2 null', 's3 nova']);
   });
 
+  it('types a draft that holds dictation as a [voice] message with its pieces, and the voice\'s turns and [partial] parts with their tags (architecture.md § Dictation)', async () => {
+    const { voice, calls } = fakeVoice({ spoken: true, expressive: false });
+    const pieces = [{ text: 'fix the build', score: null, f0: null, dropped: false }];
+    let held = pieces as typeof pieces | null;
+
+    voice.dictated = (key) => {
+      calls.push(`dictated ${key}`);
+      const taken = held;
+
+      held = null;
+      return taken;
+    };
+    voice.delivered = (message) => void calls.push(`delivered ${message.id} ${message.delivery}`);
+
+    const { service, held: holder, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
+    const mine = open(view.file);
+
+    expect(service.send(body(mine.key, { text: 'Fix the build, please' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', pieces, spokenRequested: true } } });
+    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    expect(holder.writes[0]).toBe('\u001b[200~[spoken] [voice] Fix the build, please\u001b[201~');
+    expect(calls).toContain('delivered m-1 sent');
+
+    // The voice's own turn, and a [partial] part, which never asks for a spoken reply.
+    expect(service.dictate(mine.key, 's2', 'and the tests', pieces, true)).toMatchObject({ message: { id: 'm-3', origin: 'voice', partial: true, spokenRequested: false } });
+    await vi.waitFor(() => expect(store.message('m-3')?.delivery).toBe('sent'));
+    expect(holder.writes.at(-2)).toBe('\u001b[200~[voice] [partial] and the tests\u001b[201~');
+    expect(service.dictate(mine.key, 's2', 'too', pieces, false)).toMatchObject({ message: { origin: 'voice', spokenRequested: true } });
+
+    // Refused for another session than the window's, before anything is stored, with a refused message to the window only.
+    expect(service.dictate(mine.key, 's3', 'hello', pieces, false)).toEqual({ refused: "The voice's session is no longer this window's." });
+    expect(mine.frames.filter((frame) => frame.type === 'message' && (frame.message as { delivery: string }).delivery === 'refused')).toMatchObject([
+      { message: { origin: 'voice', text: 'hello', delivery: 'refused', error: "The voice's session is no longer this window's." } },
+    ]);
+    expect(store.conversation('s3', null, 10).items).toEqual([]);
+    expect(service.voiceCommand('composer', { window: mine.key, scopeGen: 1, opId: 'o', focused: 'yes', draft: '' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } });
+  });
+
   it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {
     const { voice, calls } = fakeVoice();
     const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
@@ -1061,6 +1098,15 @@ describe('ConversationService send', () => {
     expect(command('speak-replies', { on: false })).toEqual({ status: 200, body: { on: false } });
     expect(command('speak-replies')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } });
     expect(command('replay', { replyId: 'r-1' })).toEqual({ status: 200, body: { done: true } });
+    // The mic and the composer reach the voice; a hub with no mic says so.
+    expect(command('mic', { on: true })).toEqual({ status: 409, body: { error: 'This hub has no voice.' } });
+    voice.mic = (key, on) => (key === mine.key ? (calls.push(`mic ${on}`), null) : 'Voice is off (voice.enabled).');
+    voice.composer = (key, focused, draft) => void calls.push(`composer ${focused} ${draft}`);
+    expect(command('mic', { on: true })).toEqual({ status: 200, body: { on: true } });
+    expect(command('mic', { on: true }, theirs.key)).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
+    expect(command('mic')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } });
+    expect(command('composer', { focused: true, draft: 'fix' })).toEqual({ status: 200, body: { done: true } });
+    expect(calls.slice(-2)).toEqual(['mic true', 'composer true fix']);
     expect(command('replay', { replyId: 'r-x' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(command('replay')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } });
     expect(service.voiceCommand('talk-here', { window: mine.key, scopeGen: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } });

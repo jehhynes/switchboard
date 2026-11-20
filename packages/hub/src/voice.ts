@@ -1,6 +1,9 @@
-import type { ConversationReply, Persona, SpokenState, VoiceSettings } from '@switchboard/core';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import type { ConversationMessage, ConversationReply, Persona, Piece, SpokenState, VoiceSettings } from '@switchboard/core';
 import { spokenText } from '@switchboard/conversation';
-import type { HubMessage, VoiceMessage, VoiceTarget } from '@switchboard/voice';
+import type { HeardTag } from '@switchboard/conversation';
+import type { HubMessage, MicState, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
 import type { WindowScope } from './windows.js';
 
@@ -9,13 +12,52 @@ export interface VoiceView {
   enabled: boolean;
   /** This window's selected conversation's session is the voice target; a window never learns where else the voice is. */
   here: boolean;
-  /** Capture is slice 10's: always `off` until then. */
-  mic: 'off';
+  /** What capture is doing for this window: `off` in a window that is not here (architecture.md § Dictation). */
+  mic: MicState;
   /** The reply of this window's session playing now, or null. */
   speaking: string | null;
   speakReplies: boolean;
-  /** Null in slice 9: playback and speech errors are the voice's, which the dock shows; a failed reply says so in its window. */
+  /** Why capture cannot run, while the mic is `unavailable` here; playback and speech errors are the voice's, which the dock shows. */
   error: string | null;
+}
+
+/** A composer's name: a window's draft belongs to one conversation, so a switch never carries it to another session. */
+const composerKey = (key: string, sessionId: string): string => `${key}|${sessionId}`;
+
+/** How often a long dictated message still being spoken goes as a `[partial]` while its session works (claude-collab `FRAGMENT_FLUSH_MS`). */
+export const FRAGMENT_FLUSH_MS = 10_000;
+/** How often open utterances are checked for a `[partial]`. */
+const FLUSH_CHECK_MS = 1_000;
+
+/** A window's composer as the hub keeps it for the focus rule (architecture.md § Dictation): its text, its focus, and the dictation in it. */
+interface Composer {
+  focused: boolean;
+  draft: string;
+  /** The pieces dictated into the draft since it was last sent or emptied; empty while it holds no dictation. */
+  pieces: Piece[];
+}
+
+/** An utterance the voice process is hearing, and the window whose draft it goes into. */
+interface Heard {
+  key: string;
+  sessionId: string;
+  gen: number;
+  startedAt: number;
+  /** When it last went as a `[partial]`, or null. */
+  flushedAt: number | null;
+}
+
+/** What one line of the fragments log records (architecture.md § Dictation). */
+export interface Fragment {
+  event: 'heard' | 'dropped' | 'submitted' | 'sent' | 'not-sent' | 'refused';
+  sessionId: string;
+  utteranceId: string | null;
+  pieceId: string | null;
+  messageId: string | null;
+  text: string;
+  score?: number | null;
+  f0?: number | null;
+  error?: string | null;
 }
 
 /** How long the voice process runs on after the last demand ends. */
@@ -42,6 +84,19 @@ export interface VoiceControlDeps {
   full(sessionId: string): boolean;
   /** The session's persona, whose voice, style and personality its replies are spoken with; null for the settings' (architecture.md § Personas). */
   persona?(sessionId: string): Persona | null;
+  /** Whether the session is in a turn, when a long dictated message goes in `[partial]` parts. */
+  busy?(sessionId: string): boolean;
+  /** The text of the session's latest reply, which the turn model reads; null with none. */
+  lastReply?(sessionId: string): string | null;
+  /** The `owner/name` of the repository a folder belongs to, from its `origin` remote, or null. */
+  originRepo?(cwd: string): Promise<string | null>;
+  /**
+   * Types dictated text into the window's selected conversation's session as a `[voice]` message, or a `[partial]` part (architecture.md
+   * § Dictation): the message, or why it was refused.
+   */
+  dictate?(key: string, sessionId: string, text: string, pieces: Piece[], partial: boolean): { message: ConversationMessage } | { refused: string };
+  /** Where the fragments log goes, `<home>/voice`; none when left out. */
+  fragmentsDir?: string;
   /** A reply's speech changed; the windows showing its session get it again. */
   replyChanged(replyId: string): void;
   /** Sends a window's stream an event. */
@@ -52,6 +107,7 @@ export interface VoiceControlDeps {
   log(line: string): void;
   setTimer?(run: () => void, ms: number): unknown;
   clearTimer?(timer: unknown): void;
+  every?(run: () => void, ms: number): { stop(): void };
 }
 
 interface Offered {
@@ -84,6 +140,18 @@ export class VoiceControl {
   #targetsSent = '';
   readonly #viewSent = new Map<string, string>();
   #closed = false;
+  /** The mic as the operator set it, one per machine; the process gets it after each start. */
+  #micOn = false;
+  /** What capture is doing, as the process last said. */
+  #mic: MicState = 'off';
+  readonly #composers = new Map<string, Composer>();
+  readonly #heard = new Map<string, Heard>();
+  /** The window the voice last moved to by its own command, which hears dictation when no focused window shows the target. */
+  #talkedFrom: string | null = null;
+  #typingSent: boolean | null = null;
+  readonly #contextSent = new Map<string, string>();
+  readonly #repos = new Map<string, string | null | 'pending'>();
+  #flushTimer: { stop(): void } | null = null;
 
   constructor(private readonly deps: VoiceControlDeps) {}
 
@@ -110,8 +178,16 @@ export class VoiceControl {
     const session = this.deps.windows.scope(key)?.sessionId ?? null;
     const here = settings.enabled && session !== null && this.#target.sessionId === session;
 
-    // A playback or speech error is the voice's, not this window's, so only the dock shows it; a reply it failed shows so in its window.
-    return { enabled: settings.enabled, here, mic: 'off', speaking: session === null ? null : (this.#playing.get(session) ?? null), speakReplies: this.speakReplies, error: null };
+    // A playback or speech error is the voice's, not this window's, so only the dock shows it; a reply it failed shows so in its window. Capture
+    // that cannot run is this window's mic's.
+    return {
+      enabled: settings.enabled,
+      here,
+      mic: here ? this.#mic : 'off',
+      speaking: session === null ? null : (this.#playing.get(session) ?? null),
+      speakReplies: this.speakReplies,
+      error: here && this.#mic === 'unavailable' ? this.#audioError : null,
+    };
   }
 
   /** Sends each window its voice state when it changed. */
@@ -137,6 +213,14 @@ export class VoiceControl {
 
   windowClosed(key: string): void {
     this.#viewSent.delete(key);
+    for (const one of [...this.#composers.keys()].filter((name) => name.startsWith(`${key}|`))) {
+      this.#composers.delete(one);
+    }
+
+    if (this.#talkedFrom === key) {
+      this.#talkedFrom = null;
+    }
+
     this.update();
   }
 
@@ -164,7 +248,7 @@ export class VoiceControl {
 
     for (const { scope } of scopes) {
       if (scope.sessionId !== null && scope.workItemId !== null && this.deps.full(scope.sessionId)) {
-        targets.set(scope.sessionId, { sessionId: scope.sessionId, workItemId: scope.workItemId });
+        targets.set(scope.sessionId, { sessionId: scope.sessionId, workItemId: scope.workItemId, repo: this.#repoOf(scope.cwd) });
       }
     }
 
@@ -177,6 +261,33 @@ export class VoiceControl {
       this.#targetsSent = text;
       this.#client.send(message);
     }
+
+    this.#syncTyping();
+  }
+
+  /** A folder's repository, looked up once; null until the lookup answers, which sends the targets again. */
+  #repoOf(cwd: string | null): string | null {
+    if (cwd === null || this.deps.originRepo === undefined) {
+      return null;
+    }
+
+    const known = this.#repos.get(cwd);
+
+    if (known === undefined) {
+      this.#repos.set(cwd, 'pending');
+      void this.deps.originRepo(cwd).then(
+        (repo) => {
+          this.#repos.set(cwd, repo);
+
+          if (repo !== null) {
+            this.update();
+          }
+        },
+        () => this.#repos.set(cwd, null),
+      );
+    }
+
+    return known === undefined || known === 'pending' ? null : known;
   }
 
   /** The settings were reloaded: the process and the windows get them; with voice turned off, nothing goes on speaking. */
@@ -185,6 +296,7 @@ export class VoiceControl {
 
     if (!this.deps.settings().enabled) {
       this.#client?.send({ type: 'stop' });
+      this.#micOn = false;
     }
 
     for (const key of this.deps.windows.keys()) {
@@ -218,6 +330,8 @@ export class VoiceControl {
     const settings = this.deps.settings();
     const asked = reply.answers === null ? false : this.deps.store.message(reply.answers)?.spokenRequested === true;
 
+    this.#sendContext(reply.sessionId);
+
     if (!settings.enabled || !this.speakReplies || !asked || this.#client === null || this.#target.sessionId !== reply.sessionId) {
       return;
     }
@@ -225,11 +339,310 @@ export class VoiceControl {
     this.#offer(reply, reply.answers);
   }
 
+  /** The target's latest reply, for the turn model, when it changed. */
+  #sendContext(sessionId: string | null): void {
+    const lastReply = sessionId === null ? null : (this.deps.lastReply?.(sessionId) ?? null);
+
+    if (this.#client !== null && sessionId !== null && sessionId === this.#target.sessionId && lastReply !== null && this.#contextSent.get(sessionId) !== lastReply) {
+      this.#contextSent.set(sessionId, lastReply);
+      this.#client.send({ type: 'context', sessionId, lastReply });
+    }
+  }
+
+  /**
+   * The mic command (architecture.md § Dictation): turning it on also moves the voice to this window's session, so the mic is on where the
+   * operator turned it on; turning it off stops capture wherever the voice is. Why not, or null.
+   */
+  mic(key: string, on: boolean): string | null {
+    if (on) {
+      const refused = this.talkHere(key);
+
+      if (refused !== null) {
+        return refused;
+      }
+    } else if (!this.view(key).here && this.#micOn) {
+      return 'Voice is not in this window.';
+    }
+
+    this.#micOn = on;
+    this.#client?.send({ type: 'mic', on });
+    return null;
+  }
+
+  /**
+   * The composer's focus and draft (architecture.md § Dictation, the focus rule): the hub keeps each window's draft as the one text dictation
+   * joins, and while the here window's composer has the focus the voice process holds every send and stops listening. A draft emptied by the
+   * operator no longer holds dictation.
+   */
+  composer(key: string, focused: boolean, draft: string): void {
+    const composer = this.#composer(key, this.deps.windows.scope(key)?.sessionId ?? '');
+
+    composer.focused = focused;
+    composer.draft = draft;
+
+    if (draft.trim() === '') {
+      composer.pieces = [];
+    }
+
+    this.#syncTyping();
+  }
+
+  /**
+   * A message the window sends from its composer: the pieces of the dictation it holds, so it goes as a `[voice]` message, or null for one with
+   * none. The draft is then the composer's again, empty.
+   */
+  dictated(key: string, sessionId: string): Piece[] | null {
+    const composer = this.#composers.get(composerKey(key, sessionId));
+
+    if (composer === undefined || composer.pieces.length === 0) {
+      return null;
+    }
+
+    const pieces = composer.pieces;
+
+    composer.pieces = [];
+    composer.draft = '';
+    return pieces;
+  }
+
+  /** A reply's heard tags go to the glossary (architecture.md § Dictation). */
+  heard(tags: HeardTag[]): void {
+    for (const tag of tags) {
+      this.#client?.send({ type: 'heard', heard: tag.heard, meant: tag.meant });
+    }
+  }
+
+  /** A dictated message settled: its pieces go to the fragments log with its delivery. */
+  delivered(message: ConversationMessage): void {
+    if (message.origin !== 'voice' || (message.delivery !== 'sent' && message.delivery !== 'not-sent')) {
+      return;
+    }
+
+    for (const piece of message.pieces ?? []) {
+      this.#fragment({ event: message.delivery, sessionId: message.sessionId, utteranceId: null, pieceId: null, messageId: message.id, text: piece.text, error: message.error });
+    }
+  }
+
+  #composer(key: string, sessionId: string): Composer {
+    let composer = this.#composers.get(composerKey(key, sessionId));
+
+    if (composer === undefined) {
+      composer = { focused: false, draft: '', pieces: [] };
+      this.#composers.set(composerKey(key, sessionId), composer);
+    }
+
+    return composer;
+  }
+
+  /** The window dictation goes to: the focused window showing the target, else the one that last moved the voice there, else any showing it. */
+  #hereKey(): string | null {
+    const session = this.#target.sessionId;
+
+    if (session === null) {
+      return null;
+    }
+
+    const showing = this.deps.windows.keys().filter((key) => this.deps.windows.scope(key)?.sessionId === session);
+    const focused = this.deps.focusedWindow();
+
+    if (focused !== null && showing.includes(focused)) {
+      return focused;
+    }
+
+    return this.#talkedFrom !== null && showing.includes(this.#talkedFrom) ? this.#talkedFrom : (showing[0] ?? null);
+  }
+
+  /** Tells the process whether the here window's composer has the focus, when that changed. */
+  #syncTyping(): void {
+    const key = this.#hereKey();
+    const typing = key !== null && this.#composers.get(composerKey(key, this.#target.sessionId ?? ''))?.focused === true;
+
+    if (this.#client !== null && typing !== this.#typingSent) {
+      this.#typingSent = typing;
+      this.#client.send({ type: 'typing', on: typing });
+    }
+  }
+
+  /** The window an utterance's dictation goes to, chosen at its first report while its generation is current; null for one of another. */
+  #heardFor(gen: number, utteranceId: string, sessionId: string): Heard | null {
+    const known = this.#heard.get(utteranceId);
+
+    if (known !== undefined) {
+      return known;
+    }
+
+    const key = this.#hereKey();
+
+    if (gen !== this.#target.gen || sessionId !== this.#target.sessionId || key === null) {
+      return null;
+    }
+
+    const heard = { key, sessionId, gen, startedAt: this.deps.now(), flushedAt: null };
+
+    this.#heard.set(utteranceId, heard);
+    this.#armFlush();
+    return heard;
+  }
+
+  /** A piece settled: it joins its window's draft after the text already there, and goes to the fragments log. */
+  #piece(message: Extract<VoiceMessage, { type: 'piece' }>): void {
+    const heard = this.#heardFor(message.gen, message.utteranceId, message.sessionId);
+
+    if (heard === null) {
+      this.deps.log(`voice: piece of utterance ${message.utteranceId} dropped: generation ${message.gen} is not ${this.#target.gen}`);
+      return;
+    }
+
+    const piece: Piece = { text: message.text, score: message.score, f0: message.f0, dropped: message.dropped };
+
+    this.#fragment({ event: message.dropped ? 'dropped' : 'heard', sessionId: message.sessionId, utteranceId: message.utteranceId, pieceId: message.pieceId, messageId: null, text: message.text, score: message.score, f0: message.f0 });
+
+    if (message.dropped) {
+      return;
+    }
+
+    const composer = this.#composer(heard.key, heard.sessionId);
+
+    composer.draft = composer.draft === '' || /\s$/.test(composer.draft) ? `${composer.draft}${message.text}` : `${composer.draft} ${message.text}`;
+    composer.pieces.push(piece);
+    this.deps.notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
+  }
+
+  /**
+   * An utterance ended. Turn detection's end, while its generation is current and its window's composer does not have the focus, sends the
+   * whole draft as one `[voice]` message and empties it; a refusal leaves the draft and says why in that window. An utterance cut short sends
+   * nothing and leaves its words in the draft.
+   */
+  #utterance(message: Extract<VoiceMessage, { type: 'utterance' }>): void {
+    const heard = this.#heard.get(message.utteranceId);
+
+    this.#heard.delete(message.utteranceId);
+
+    if (heard === undefined || !message.final || message.gen !== this.#target.gen) {
+      return;
+    }
+
+    const composer = this.#composer(heard.key, heard.sessionId);
+
+    if (composer.focused) {
+      return;
+    }
+
+    this.#submit(heard, composer, false);
+  }
+
+  /** Types the window's draft as a dictated message or a `[partial]` part, and empties the draft once it was taken; false when refused. */
+  #submit(heard: Heard, composer: Composer, partial: boolean): boolean {
+    let text = composer.draft.trim();
+    let pieces = composer.pieces;
+    // A [partial] part leaves the last settled piece in the draft, so the message that ends the utterance always has words to carry.
+    const kept = partial ? pieces.at(-1) : undefined;
+
+    if (partial) {
+      const draft = composer.draft.trimEnd();
+
+      if (kept === undefined || pieces.length < 2 || !draft.endsWith(kept.text)) {
+        return false;
+      }
+
+      text = draft.slice(0, draft.length - kept.text.length).trim();
+      pieces = pieces.slice(0, -1);
+    }
+
+    if (text === '' || this.deps.dictate === undefined) {
+      return false;
+    }
+
+    const sent = this.deps.dictate(heard.key, heard.sessionId, text, pieces, partial);
+
+    if ('refused' in sent) {
+      this.deps.log(`voice: dictated message refused: ${sent.refused}`);
+
+      for (const piece of pieces) {
+        this.#fragment({ event: 'refused', sessionId: heard.sessionId, utteranceId: null, pieceId: null, messageId: null, text: piece.text, error: sent.refused });
+      }
+
+      this.deps.notify(heard.key, 'refused', { error: sent.refused });
+      return false;
+    }
+
+    for (const piece of pieces) {
+      this.#fragment({ event: 'submitted', sessionId: heard.sessionId, utteranceId: null, pieceId: null, messageId: sent.message.id, text: piece.text });
+    }
+
+    composer.draft = kept?.text ?? '';
+    composer.pieces = kept === undefined ? [] : [kept];
+    this.deps.notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
+    return true;
+  }
+
+  /**
+   * While an utterance is open in a window whose composer does not have the focus and its session works, the draft goes as a `[partial]` at most
+   * every `FRAGMENT_FLUSH_MS` (architecture.md § Dictation).
+   */
+  #flush(): void {
+    const now = this.deps.now();
+
+    for (const heard of new Set(this.#heard.values())) {
+      const composer = this.#composers.get(composerKey(heard.key, heard.sessionId));
+
+      if (
+        composer === undefined ||
+        composer.focused ||
+        this.#mic === 'paused-other-app' ||
+        heard.gen !== this.#target.gen ||
+        this.deps.busy?.(heard.sessionId) !== true ||
+        now - (heard.flushedAt ?? heard.startedAt) < FRAGMENT_FLUSH_MS
+      ) {
+        continue;
+      }
+
+      if (this.#submit(heard, composer, true)) {
+        heard.flushedAt = now;
+      }
+    }
+
+    if (this.#heard.size === 0) {
+      this.#stopFlush();
+    }
+  }
+
+  #armFlush(): void {
+    this.#flushTimer ??= (this.deps.every ?? every)(() => this.#flush(), FLUSH_CHECK_MS);
+  }
+
+  #stopFlush(): void {
+    this.#flushTimer?.stop();
+    this.#flushTimer = null;
+  }
+
+  /** Appends a line to the day's fragments log, `<home>/voice/fragments-<local date>.jsonl`. */
+  #fragment(fragment: Fragment): void {
+    if (this.deps.fragmentsDir === undefined) {
+      return;
+    }
+
+    const at = new Date(this.deps.now());
+    const date = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+
+    try {
+      mkdirSync(this.deps.fragmentsDir, { recursive: true });
+      appendFileSync(join(this.deps.fragmentsDir, `fragments-${date}.jsonl`), `${JSON.stringify({ at: at.toISOString(), ...fragment })}\n`);
+    } catch (error) {
+      this.deps.log(`voice: the fragments log could not be written: ${(error as Error).message}`);
+    }
+  }
+
   /** Talk here from a window: the voice moves to its selected conversation's session; why not, or null. */
   talkHere(key: string): string | null {
     const session = this.deps.windows.scope(key)?.sessionId ?? null;
+    const refused = session === null ? 'This window has no session to talk to.' : this.#talkTo(session);
 
-    return session === null ? 'This window has no session to talk to.' : this.#talkTo(session);
+    if (refused === null) {
+      this.#talkedFrom = key;
+    }
+
+    return refused;
   }
 
   /** A dock row's click (architecture.md § Dock): Talk here for that work item's session when one of its windows is connected; why not, or null. */
@@ -306,6 +719,7 @@ export class VoiceControl {
 
   close(): void {
     this.#closed = true;
+    this.#stopFlush();
     this.#clear('linger');
     this.#clear('restart');
     this.#client?.close();
@@ -383,8 +797,26 @@ export class VoiceControl {
         this.deps.log(`voice target ${message.sessionId ?? 'none'} (${message.reason}), generation ${message.gen}`);
         this.viewsChanged();
         this.deps.dockChanged();
+        this.#syncTyping();
+        this.#sendContext(message.sessionId);
         return;
       }
+      case 'words': {
+        const heard = message.text === '' ? (this.#heard.get(message.utteranceId) ?? null) : this.#heardFor(message.gen, message.utteranceId, message.sessionId);
+
+        // Live words only in the window the voice is in.
+        if (heard !== null && heard.gen === this.#target.gen) {
+          this.deps.notify(heard.key, 'words', { messageId: message.utteranceId, text: message.text });
+        }
+
+        return;
+      }
+      case 'piece':
+        this.#piece(message);
+        return;
+      case 'utterance':
+        this.#utterance(message);
+        return;
       case 'speech': {
         if (message.gen !== this.#target.gen || !this.#offered.has(message.replyId)) {
           return;
@@ -427,6 +859,11 @@ export class VoiceControl {
         return;
       }
       case 'audio':
+        if (message.mic !== this.#mic) {
+          this.#mic = message.mic;
+          this.viewsChanged();
+        }
+
         if (message.error !== this.#audioError) {
           this.#audioError = message.error;
 
@@ -523,6 +960,13 @@ export class VoiceControl {
     });
     found.onMessage((message) => this.#receive(message));
     found.send({ type: 'settings', settings: this.deps.settings() });
+    this.#typingSent = null;
+    this.#contextSent.clear();
+
+    if (this.#micOn) {
+      found.send({ type: 'mic', on: true });
+    }
+
     this.deps.dockChanged();
     this.update();
   }
@@ -535,6 +979,9 @@ export class VoiceControl {
 
     this.#offered.clear();
     this.#playing.clear();
+    this.#heard.clear();
+    this.#stopFlush();
+    this.#mic = 'off';
     this.#target = { gen: this.#target.gen, sessionId: null };
     this.viewsChanged();
   }
@@ -560,4 +1007,11 @@ export class VoiceControl {
       this.#restart = null;
     }
   }
+}
+
+function every(run: () => void, ms: number): { stop(): void } {
+  const timer = setInterval(run, ms);
+
+  timer.unref();
+  return { stop: () => clearInterval(timer) };
 }

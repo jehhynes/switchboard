@@ -1,5 +1,6 @@
 import type { ConversationMessage, ConversationReply, ConversationStatus } from '@switchboard/core';
 import { parseReply } from './tags.js';
+import type { HeardTag } from './tags.js';
 import type { ConversationDeps } from './conversation.js';
 import type { Via } from './screenHold.js';
 
@@ -60,6 +61,7 @@ export class ConversationLog {
 
       this.deps.store.updateReply(existing.id, patch);
       this.status(existing.id, via, parsed.status, patch.at);
+      this.heard(existing.id, via, parsed.heard);
 
       // A screen copy takes its transcript line's place once that is read.
       if (via === 'transcript' && move) {
@@ -101,6 +103,7 @@ export class ConversationLog {
 
     this.deps.store.addReply(reply);
     this.status(reply.id, via, parsed.status, at);
+    this.heard(reply.id, via, parsed.heard);
 
     if (parsed.rewrite) {
       this.rewrite(reply.id);
@@ -108,6 +111,22 @@ export class ConversationLog {
 
     this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(reply.id)! });
     return reply.id;
+  }
+
+  /** The heard tags already passed on, by reply and tag, so a reply read again or a later line of it passes each on once. */
+  readonly #heardSent = new Set<string>();
+
+  /** Passes on the heard tags of a reply's transcript copy that were not passed on before; a screen copy's are not, since it may be withdrawn. */
+  protected heard(replyId: string, via: Via, heard: HeardTag[]): void {
+    const fresh = via === 'transcript' ? heard.filter((tag) => !this.#heardSent.has(`${replyId} ${tag.heard.toLowerCase()}=${tag.meant}`)) : [];
+
+    if (fresh.length > 0) {
+      for (const tag of fresh) {
+        this.#heardSent.add(`${replyId} ${tag.heard.toLowerCase()}=${tag.meant}`);
+      }
+
+      this.deps.onChange({ type: 'heard', replyId, heard: fresh });
+    }
   }
 
   /**

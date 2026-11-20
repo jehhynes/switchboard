@@ -27,6 +27,7 @@ import { CodexConversationAdapter } from './codexConversation.js';
 import { runAppServerDebrief } from '@switchboard/codex';
 import { VoiceControl } from './voice.js';
 import { VoiceLink } from './voiceLink.js';
+import { parseRemote } from '@switchboard/voice';
 import { buildSnapshot } from './snapshot.js';
 import type { Snapshot, WorkItemView } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
@@ -346,7 +347,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       listener();
     }
   };
-  const voice = new VoiceControl({
+  const voice: VoiceControl = new VoiceControl({
     link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep }),
     settings: () => config.settings.voice,
     store,
@@ -360,12 +361,28 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     persona: (sessionId) => personaById(config.settings.voice, store.session(sessionId)?.personaId),
     replyChanged: (replyId) => conversation.replyUpdated(replyId),
     notify: (key, type, payload) => conversation.notify(key, type, payload),
+    // Dictation (architecture.md § Dictation).
+    busy: (sessionId) => store.session(sessionId)?.state === 'running',
+    lastReply: (sessionId) => {
+      const items = store.conversation(sessionId, null, 20, false).items;
+
+      const latest = [...items].reverse().find((item) => item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && item.rewrittenBy === null && item.opening !== '');
+
+      return latest?.type === 'reply' ? latest.opening : null;
+    },
+    originRepo: async (cwd) => {
+      const result = await deps.exec('git', ['remote', 'get-url', 'origin'], { cwd, timeoutMs: 5_000 });
+
+      return result.code === 0 ? parseRemote(result.stdout) : null;
+    },
+    dictate: (key, sessionId, text, pieces, partial) => conversation.dictate(key, sessionId, text, pieces, partial),
+    fragmentsDir: join(home, 'voice'),
     // The dock's mic mark and voice note are added to its view as it is sent.
     dockChanged: builtNow,
     now: deps.now,
     log: deps.log,
   });
-  const conversation = new ConversationService({
+  const conversation: ConversationService = new ConversationService({
     adapters: changed => [new CodexConversationAdapter({ server: runtime.codexServer, runner: runtime.codexAppServer, store, now: deps.now, newId: randomUUID, log: deps.log, requestsChanged: () => conversation.sessionsChanged() }, changed)],
     store,
     windows: scopes,
@@ -381,6 +398,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       update: () => voice.update(),
       selected: (key) => voice.selected(key),
       expressive: () => config.settings.voice.expressive,
+      dictated: (key, sessionId) => voice.dictated(key, sessionId),
+      heard: (tags) => voice.heard(tags),
+      delivered: (message) => voice.delivered(message),
+      mic: (key, on) => voice.mic(key, on),
+      composer: (key, focused, draft) => voice.composer(key, focused, draft),
     },
     personas: () => config.settings.voice,
     pinPersona: (sessionId, personaId) => runtime.send({ type: 'persona', sessionId, personaId }).refused,
@@ -702,6 +724,8 @@ const dockWithRuns = () => {
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
       '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
+      '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
+      '/v1/conversation/composer': async (body) => (isRecord(body) ? conversation.voiceCommand('composer', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } }),
       '/claim': async (body) => {
         if (!isRecord(body) || typeof body['folder'] !== 'string' || !optionalString(body['workspace']) || !(body['focused'] === undefined || typeof body['focused'] === 'boolean') || !optionalString(body['window'])) {
           return { status: 400, body: { error: 'Expected {folder, workspace?, focused?, window?}.' } };

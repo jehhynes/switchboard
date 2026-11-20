@@ -188,6 +188,43 @@ export interface ParsedReply {
   speak: string | null;
   /** The tone line, which `opening` leaves out; null with none. */
   tone: string | null;
+  /** The heard tags, which `opening` leaves out, in order (architecture.md § Dictation). */
+  heard: HeardTag[];
+}
+
+/** A heard tag, `<!--heard:X=Y-->`: the recogniser heard X where the operator meant the term Y. */
+export interface HeardTag {
+  heard: string;
+  meant: string;
+}
+
+/** A heard tag; each side at most 100 characters, as a term is short. */
+const HEARD_TAG = /<!--\s*heard:\s*([^=\n]{1,100}?)\s*=\s*([^\n]{1,100}?)\s*-->/gi;
+
+/**
+ * The heard tags of a text (architecture.md § Dictation), and the text without them, a tag alone on its line with its line. A tag in inline code
+ * or a fenced code block, as when a reply explains the rule, is text and counts for nothing.
+ */
+export function splitHeard(text: string): { heard: HeardTag[]; text: string } {
+  const code = codeRanges(text);
+  const tags = [...text.matchAll(HEARD_TAG)].filter((tag) => !code.some(([start, end]) => tag.index >= start && tag.index < end));
+
+  if (tags.length === 0) {
+    return { heard: [], text };
+  }
+
+  let without = text;
+
+  for (const tag of [...tags].reverse()) {
+    const lineStart = without.lastIndexOf('\n', tag.index - 1) + 1;
+    const lineEnd = without.indexOf('\n', tag.index + tag[0].length);
+    const end = lineEnd === -1 ? without.length : lineEnd;
+    const alone = without.slice(lineStart, tag.index).trim() === '' && without.slice(tag.index + tag[0].length, end).trim() === '';
+
+    without = alone ? without.slice(0, lineStart) + without.slice(lineEnd === -1 ? end : end + 1) : without.slice(0, tag.index).replace(/[ \t]+$/, '') + without.slice(tag.index + tag[0].length);
+  }
+
+  return { heard: tags.map((tag) => ({ heard: tag[1]!.trim(), meant: tag[2]!.trim() })).filter((tag) => tag.heard !== '' && tag.meant !== ''), text: without.trim() };
 }
 
 /** Splits a reply's text into its parts. Every session is read as if it carries the current conversation rules. */
@@ -198,22 +235,31 @@ export function parseReply(text: string): ParsedReply {
   const before = splitTone(unaside);
   const { rewrite, text: rewritten } = splitRewrite(before.text);
   const after = before.tone === null ? splitTone(rewritten) : { tone: null, text: rewritten };
-  const { speak, text: body } = splitSpeak(after.text);
+  const { heard, text: unheard } = splitHeard(after.text);
+  const { speak, text: body } = splitSpeak(unheard);
 
-  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), status, speak, tone: before.tone ?? after.tone };
+  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), status, speak, tone: before.tone ?? after.tone, heard };
 }
 
-/** The tags Switchboard puts before a typed message (architecture.md § Voice): its reply will be heard, and read expressively. */
-const MESSAGE_TAGS = /^\s*(?:\[(?:spoken|expressive)\][ \t]*)+/i;
+/**
+ * The tags Switchboard puts before a message it types (architecture.md § Voice, § Dictation): its reply will be heard and read expressively, it
+ * was dictated, and it is a part of a message still being spoken.
+ */
+const MESSAGE_TAGS = /^\s*(?:\[(?:spoken|expressive|voice|partial)\][ \t]*)+/i;
 
 /** A message's text without the tags Switchboard typed before it. */
 export function stripMessageTags(text: string): string {
   return text.replace(MESSAGE_TAGS, '').trim();
 }
 
-/** The tags Switchboard types before a message whose reply will be heard: `[spoken]`, and `[expressive]` while `voice.expressive` is on. */
-export function messageTags(spoken: boolean, expressive: boolean): string {
-  return spoken ? (expressive ? '[spoken] [expressive] ' : '[spoken] ') : '';
+/**
+ * The tags Switchboard types before a message: `[spoken]` when its reply will be heard, with `[expressive]` while `voice.expressive` is on, then
+ * `[voice]` for a dictated message and `[voice] [partial]` for a part of one still being spoken (architecture.md § Dictation).
+ */
+export function messageTags(spoken: boolean, expressive: boolean, dictated: 'voice' | 'partial' | null = null): string {
+  const reply = spoken ? (expressive ? '[spoken] [expressive] ' : '[spoken] ') : '';
+
+  return reply + (dictated === 'voice' ? '[voice] ' : dictated === 'partial' ? '[voice] [partial] ' : '');
 }
 
 /**
