@@ -159,6 +159,39 @@ describe('VoiceControl dictation', () => {
     expect(connection.sent.at(-1)).toEqual({ type: 'mic', on: false });
   });
 
+  it('keeps the mic off once the voice process turned it off for a locked computer, also for a process started again', async () => {
+    const { control, connection, advance, settle } = await setup();
+
+    expect(control.mic('k1', true)).toBeNull();
+    connection.receive({ type: 'mic-off', reason: 'locked' });
+    connection.drop();
+
+    const before = connection.sent.length;
+
+    advance(60_000);
+    await settle();
+    expect(connection.sent.slice(before).map((one) => one.type)).toContain('settings');
+    expect(connection.sent.slice(before).filter((one) => one.type === 'mic')).toEqual([]);
+    // Off, so turning it off from a window the voice is not in is not refused.
+    expect(control.mic('k2', false)).toBeNull();
+  });
+
+  it('restores the mic to a voice process started again, marked as a restore, so a lock the hub did not hear keeps it off', async () => {
+    const { control, connection, advance, settle } = await setup();
+
+    expect(control.mic('k1', true)).toBeNull();
+    connection.drop();
+
+    const before = connection.sent.length;
+
+    advance(60_000);
+    await settle();
+    expect(connection.sent.slice(before).filter((one) => one.type === 'mic')).toEqual([{ type: 'mic', on: true, restore: true }]);
+    // The process answers that it turned the mic off on its own: the hub's mic goes off.
+    connection.receive({ type: 'mic-off', reason: 'locked' });
+    expect(control.mic('k2', false)).toBeNull();
+  });
+
   it('sends each target\'s repository once its remote is read, the here window\'s composer focus, and the target\'s last reply', async () => {
     const { control, connection, settle } = await setup();
 

@@ -4,7 +4,7 @@ import type { ConversationMessage, ConversationReply, Interruption, Persona, Pie
 import { spokenText } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
 import { ENROLL_SECONDS } from '@switchboard/voice';
-import type { EnrollmentState, HubMessage, MicState, VoiceMessage, VoiceTarget } from '@switchboard/voice';
+import type { AwayReason, EnrollmentState, HubMessage, MicState, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
 import type { WindowScope } from './windows.js';
 
@@ -28,6 +28,9 @@ export interface VoiceView {
   /** Where speech recognition runs, here once the recogniser loaded, else null (architecture.md § Dictation). */
   recognizer: 'gpu' | 'cpu' | null;
 }
+
+/** Why the voice process turned the mic off, as the hub's log says it. */
+const MIC_OFF_TEXT: Record<AwayReason, string> = { locked: 'computer locked', asleep: 'computer going to sleep', disconnected: 'session disconnected' };
 
 /** The key dictation uses for the target's session terminal window, which no window key can equal (architecture.md § Voice). */
 const TERMINAL = '\0terminal';
@@ -1114,6 +1117,12 @@ export class VoiceControl {
       case 'enrollment':
         this.#enrollmentChanged(message.state, message.error);
         return;
+      case 'mic-off':
+        // The operator left the computer: the mic stays off, also for a voice process started later, until they turn it on.
+        this.#micOn = false;
+        this.deps.log(`voice: mic off: ${MIC_OFF_TEXT[message.reason]}`);
+        this.viewsChanged();
+        return;
       case 'audio':
         if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || message.recognizer !== this.#recognizer) {
           this.#mic = message.mic;
@@ -1227,7 +1236,8 @@ export class VoiceControl {
     this.#contextSent.clear();
 
     if (this.#micOn) {
-      found.send({ type: 'mic', on: true });
+      // A restore: the process keeps the mic off if it turned it off on its own while no hub heard it, as for a lock.
+      found.send({ type: 'mic', on: true, restore: true });
     }
 
     if (this.#enrollment.state === 'starting') {
