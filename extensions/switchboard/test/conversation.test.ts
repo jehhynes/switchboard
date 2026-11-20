@@ -213,9 +213,9 @@ describe('the conversation state', () => {
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'question' }).icon).toBe('question');
     expect(stateIcon({ ...SESSION, state: 'waiting', waitingFor: 'permission' }).icon).toBe('shield');
     expect(stateIcon({ ...SESSION, state: 'idle' }).icon).toBe('check');
-    expect(stateIcon({ ...SESSION, state: 'ended' }).icon).toBe('circle-slash');
+    expect(stateIcon({ ...SESSION, state: 'ended' }).icon).toBe('debug-stop');
     expect(stateIcon({ ...SESSION, state: 'starting' }).icon).toBe('loading~spin');
-    expect(stateIcon(null).icon).toBe('circle-slash');
+    expect(stateIcon(null).icon).toBe('circle-outline');
   });
 
   it('shows a session waiting for a usage limit to reset with a watch and when it resumes (architecture.md § Rate limits)', () => {

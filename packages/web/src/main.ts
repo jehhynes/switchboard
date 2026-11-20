@@ -581,7 +581,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null));
 
     // An ended session's reason sits just above the composer it disables, on every tab; the page has no terminal to resume it in.
-    morph(note, state.session?.state === 'ended' && state.session.reason !== null ? `<div class="session-note" role="status"><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason)}</span></div>` : '');
+    morph(note, state.session?.state === 'ended' && state.session.reason !== null ? `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason)}</span></div>` : '');
 
     if (state.scope === null) {
       morph(head, '');

@@ -137,7 +137,7 @@ button.icon, a.icon { display: inline-flex; align-items: center; border: none; b
 .question-option:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); }
 .question-option:disabled { cursor: default; }
 .question-option.dimmed { opacity: 0.6; }
-.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid var(--vscode-input-border); }
+.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid color-mix(in srgb, var(--vscode-checkbox-foreground, var(--vscode-foreground)) 60%, transparent); background: var(--vscode-checkbox-background, transparent); }
 .question-mark.radio { border-radius: 50%; }
 .question-mark.checked { border-color: var(--vscode-button-background); }
 .question-mark.checkbox.checked { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }

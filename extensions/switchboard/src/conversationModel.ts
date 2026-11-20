@@ -379,7 +379,7 @@ export function stateIcon(session: SessionView | null): { icon: string; text: st
 
   switch (session?.state) {
     case undefined:
-      return { icon: 'circle-slash', text: 'No session' };
+      return { icon: 'circle-outline', text: 'No session' };
     case 'starting':
       return { icon: 'loading~spin', text: 'Starting' };
     case 'running':
@@ -389,6 +389,6 @@ export function stateIcon(session: SessionView | null): { icon: string; text: st
     case 'idle':
       return { icon: 'check', text: 'Idle' };
     case 'ended':
-      return { icon: 'circle-slash', text: 'Ended' };
+      return { icon: 'debug-stop', text: 'Ended' };
   }
 }

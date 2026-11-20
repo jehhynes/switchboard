@@ -602,7 +602,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const notes = state.session?.reason == null || ended ? [] : [state.session.reason];
   const endedNote = !ended
     ? ''
-    : `<div class="session-note" role="status"><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason!)}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
+    : `<div class="session-note" role="status"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason!)}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
   const shown = timeline(state.items, state.artifacts);
   // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).
   const canAnswer = state.connected && state.session?.conversation === 'full';

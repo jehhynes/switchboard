@@ -198,7 +198,7 @@ export function stateIcon(state: SessionView['state'] | null | undefined, waitin
     case 'idle':
       return { icon: 'check', text: 'Idle' };
     case 'ended':
-      return { icon: 'circle-slash', text: 'Ended' };
+      return { icon: 'debug-stop', text: 'Ended' };
     default:
       return { icon: 'circle-outline', text: 'No session' };
   }

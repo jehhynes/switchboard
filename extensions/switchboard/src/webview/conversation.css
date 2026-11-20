@@ -247,7 +247,8 @@ button.persona .codicon { flex: none; }
 /* A question card (architecture.md § Conversation view), measured from Claude Code's question form: a box in the input colours with the input
    border and an 8 px radius, questions 16 px apart in the foreground, options as 4 px rows with a 16 px radio mark, or a checkbox where a question
    takes several, in the button colour once picked, the letter dimmed before the text, an Other field, and Submit in the button colours. An
-   answered card shows only its answer's picks, the rest dimmed. */
+   answered card shows only its answer's picks, the rest dimmed. An unpicked mark takes the theme's checkbox colours: its fill, and its
+   foreground at 60% as the border, since Dark Modern's checkbox border is the input background's own grey (about 1.2:1 on it). */
 .question-card { --card-border: var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); display: flex; flex-direction: column; gap: 16px; margin: 8px 0 4px; padding: 8px; border: 1px solid var(--card-border); border-radius: 8px; background: var(--vscode-input-background); color: var(--vscode-foreground); }
 .question-card:focus-within { border-color: color-mix(in srgb, var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder)) 65%, transparent); }
 .question-block { display: flex; flex-direction: column; gap: 8px; }
@@ -257,7 +258,7 @@ button.persona .codicon { flex: none; }
 .question-option:hover:not(:disabled), .question-option:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground); }
 .question-option:disabled { cursor: default; }
 .question-option.dimmed { opacity: 0.6; }
-.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid var(--card-border); }
+.question-mark { display: flex; flex: none; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; margin-top: 2px; border: 1.5px solid color-mix(in srgb, var(--vscode-checkbox-foreground, var(--vscode-foreground)) 60%, transparent); background: var(--vscode-checkbox-background, transparent); }
 .question-mark.radio { border-radius: 50%; }
 .question-mark.radio.checked { border-color: var(--vscode-button-background); }
 .radio-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-button-background); }
