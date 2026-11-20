@@ -1,7 +1,9 @@
 import MarkdownIt from 'markdown-it';
-import type { ArtifactView, MessageView, ReplyView, StatusView } from '@switchboard/hub';
+import type { ArtifactView, ItemView, MessageView, ReplyView, StatusView } from '@switchboard/hub';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
+import { answersIn, answerText, parseQuestions } from '../questionModel.js';
+import type { Question, QuestionChoice } from '../questionModel.js';
 
 /** What the page posts to the extension. */
 export type ConversationMessage =
@@ -30,6 +32,14 @@ export interface SendTarget {
   scopeGen: number;
   sessionId: string;
   launch: string | null;
+}
+
+/** The text of the first message after the reply a status came from, or after the status's time when that reply is not loaded; null for none. */
+function statusAnswer(items: readonly ItemView[], status: StatusView): string | null {
+  const from = items.findIndex((item) => item.type === 'reply' && `st-${item.id}` === status.id);
+  const later = (from === -1 ? items.filter((item) => item.at > status.at) : items.slice(from + 1)).find((item) => item.type === 'message' && !item.withdrawn);
+
+  return later?.type === 'message' ? later.text : null;
 }
 
 /** What a typed message's line under its box says (architecture.md § Conversation view). */
@@ -132,7 +142,7 @@ function message(item: MessageView, stamped: boolean): string {
   return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${line}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div></li>`;
 }
 
-function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean): string {
+function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = ''): string {
   if (item.kind === 'note') {
     return `<li class="note" data-id="${escape(item.id)}" tabindex="-1">${escape(item.opening)}</li>`;
   }
@@ -149,7 +159,73 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
   const dot = item.unread ? '<span class="dot" title="Unread"><span class="unread-label">Unread</span></span>' : '<span class="dot"></span>';
 
-  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}" tabindex="-1">${stamped ? stamp(item.at) : ''}${dot}<div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
+  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}" tabindex="-1">${stamped ? stamp(item.at) : ''}${dot}<div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${card}${actions}</li>`;
+}
+
+/** What the page keeps of a question card the operator has not answered yet: the choices made, and the answer being sent or refused. */
+export interface CardDraft {
+  choices: Map<number, QuestionChoice>;
+  /** The text sent with Submit, until the message shows in the conversation or comes back not sent. */
+  sent: string | null;
+  /** The work item whose conversation the answer was sent in. */
+  workItemId: number | null;
+  sending: boolean;
+  error: string | null;
+}
+
+/** A card's key: the reply or the status that asks its questions. */
+export function cardKey(kind: 'reply' | 'status', id: string): string {
+  return `${kind}:${id}`;
+}
+
+/** Whether every question has a pick or Other text, as Claude Code's form asks before Submit, since any later message answers the whole card. */
+export function complete(questions: readonly Question[], choices: ReadonlyMap<number, QuestionChoice>): boolean {
+  return questions.every((_question, index) => (choices.get(index)?.letters.length ?? 0) > 0 || (choices.get(index)?.other.trim() ?? '') !== '');
+}
+
+/** Inline Markdown, as a reply's, for a question or an option. */
+function inlineMarkdown(text: string): string {
+  return markdown.renderInline(text).replace(/<a href="([^"]*)"/g, (_match, href: string) => `<a href="#" data-href="${href}"`);
+}
+
+/**
+ * A question card (architecture.md § Conversation view), in the style of Claude Code's question form: each question in the foreground, its options
+ * as rows with a radio mark, or a checkbox where it takes several, the letter dimmed before the text, an Other field, and Submit. Answered, by
+ * Submit or by any later message, it greys out and shows the choices that message gave. It takes no answer while the composer could not send.
+ */
+export function questionCard(key: string, questions: readonly Question[], draft: CardDraft | undefined, answer: string | null, canAnswer: boolean): string {
+  const answered = answer !== null;
+  const choices = answered ? answersIn(answer, questions) : (draft?.choices ?? new Map<number, QuestionChoice>());
+  const locked = answered || !canAnswer || draft?.sending === true || draft?.sent != null;
+  const blocks = questions.map((question, index) => {
+    const choice = choices.get(index);
+    const multi = question.multi;
+    const label = question.number === null ? '' : `<span class="question-number">${question.number}.</span> `;
+    const options = question.options
+      .map((option) => {
+        const checked = choice?.letters.includes(option.letter) ?? false;
+        const mark = multi ? `<span class="question-mark checkbox${checked ? ' checked' : ''}" aria-hidden="true">${checked ? '<span class="codicon codicon-check"></span>' : ''}</span>` : `<span class="question-mark radio${checked ? ' checked' : ''}" aria-hidden="true">${checked ? '<span class="radio-dot"></span>' : ''}</span>`;
+        const name = `${question.number === null ? '' : question.number}${option.letter}`;
+
+        return (
+          `<button type="button" class="question-option${checked ? ' checked' : ''}${answered && !checked ? ' dimmed' : ''}" role="${multi ? 'checkbox' : 'radio'}" aria-checked="${checked}" data-action="pick" data-card="${escape(key)}" data-question="${index}" data-letter="${option.letter}"${locked ? ' disabled' : ''} title="${escape(`Answer ${name}`)}">` +
+          `${mark}<span class="question-option-text"><span class="question-letter">${option.letter}</span> ${inlineMarkdown(option.text)}</span></button>`
+        );
+      })
+      .join('');
+    const given = answered && choice !== undefined && choice.other !== '' ? `<div class="question-answer-other"><span class="question-letter">Other:</span> ${escape(choice.other)}</div>` : '';
+    const other = answered || !canAnswer ? given : `<input class="question-other" type="text" data-card="${escape(key)}" data-question="${index}" placeholder="Other…" aria-label="${escape(`Other answer${question.number === null ? '' : ` to question ${question.number}`}`)}" value="${escape(choice?.other ?? '')}"${locked ? ' disabled' : ''}>`;
+
+    return `<div class="question-block"><div class="question-text">${label}${inlineMarkdown(question.text)}</div><div class="question-options" role="${multi ? 'group' : 'radiogroup'}">${options}${other}</div></div>`;
+  });
+  const text = complete(questions, choices) ? answerText(questions, choices) : '';
+  const footer = answered
+    ? '<div class="question-footer"><span class="question-state">Answered</span></div>'
+    : !canAnswer
+      ? ''
+      : `<div class="question-footer">${draft?.error == null ? '' : `<span class="question-error" role="alert">${escape(draft.error)}</span>`}<button type="button" class="question-submit" data-action="answer" data-card="${escape(key)}"${locked || text === '' ? ' disabled' : ''} title="${escape(text === '' ? 'Answer every question first' : `Send "${text}"`)}">${draft?.sending === true || draft?.sent != null ? 'Sending…' : 'Submit'}</button></div>`;
+
+  return `<div class="question-card${answered ? ' answered' : ''}" data-card="${escape(key)}" role="group" aria-label="${answered ? 'Questions, answered' : 'Questions'}">${blocks.join('')}${footer}</div>`;
 }
 
 /** An artifact as a one-line row where it was written: it opens, it does not expand (architecture.md § Conversation view). */
@@ -176,10 +252,14 @@ export const TABS: ReadonlyArray<{ tab: Tab; label: string }> = [
   { tab: 'artifacts', label: 'Artifacts' },
 ];
 
-/** What the page adds to the state to draw it: the tab shown, and the artifacts new or changed since they were last opened in the workspace. */
+/**
+ * What the page adds to the state to draw it: the tab shown, the artifacts new or changed since they were last opened in the workspace, and the
+ * question cards' choices by card key.
+ */
 export interface PageView {
   tab: Tab;
   unopened: ReadonlySet<string>;
+  cards?: ReadonlyMap<string, CardDraft>;
 }
 
 const CONVERSATION_TAB: PageView = { tab: 'conversation', unopened: new Set() };
@@ -202,7 +282,7 @@ export function statusBadge(status: StatusView | null, fresh: boolean): boolean 
  * `fresh`, and the buttons that open it and the earlier statuses in the Markdown preview. Before the first status, the work item's stage, dimmed;
  * with neither, a line that says so.
  */
-export function renderStatus(status: StatusView | null, fresh: boolean, now: number): string {
+export function renderStatus(status: StatusView | null, fresh: boolean, now: number, card = ''): string {
   if (status === null) {
     return '<p class="empty">The session has posted no status yet. Ask it for one, and its latest shows here.</p>';
   }
@@ -225,7 +305,7 @@ export function renderStatus(status: StatusView | null, fresh: boolean, now: num
   return (
     `<div class="status-tab${fresh ? ' fresh' : ''}${unread}" role="region" aria-label="${unread === '' ? 'Status' : 'Status, unread'}">` +
     `<div class="status-head"><span class="codicon codicon-pulse" aria-hidden="true"></span>${time}<span class="status-dot" aria-hidden="true">·</span>${age(status.at, now, 'status-age')}${mark}${actions}</div>` +
-    `<div class="status-body body">${renderMarkdown(status.markdown)}</div></div>`
+    `<div class="status-body body">${renderMarkdown(status.markdown)}</div>${card}</div>`
   );
 }
 
@@ -306,6 +386,19 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const header = `<header class="header">${codicon(stateIcon(state.session))}${picker(state, open.has(PICKER))}<button class="icon" data-action="new" title="New session" aria-label="New session"><span class="codicon codicon-add"></span></button>${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
   const notes = state.session?.reason == null ? [] : [state.session.reason];
   const shown = timeline(state.items, state.artifacts);
+  // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).
+  const canAnswer = state.connected && state.session?.conversation === 'full';
+  // Found in conversation order, not the timeline's, where a rewrite takes the place of the reply it rewrote.
+  const answerAfter = (replyId: string): string | null => {
+    const later = state.items.slice(state.items.findIndex((item) => item.id === replyId) + 1).find((item) => item.type === 'message' && !item.withdrawn);
+
+    return later?.type === 'message' ? later.text : null;
+  };
+  const cardOf = (key: string, markdown: string, answer: string | null): string => {
+    const questions = parseQuestions(markdown);
+
+    return questions.length === 0 ? '' : questionCard(key, questions, page.cards?.get(key), answer, canAnswer);
+  };
   const waiting = awaitingReply(state.items, shown, state.session);
   // While the session works on a reply, a spinner under the operator's latest message; it has no data-id, so the keys skip it.
   // While the session waits on a question or a permission, it stands still.
@@ -339,19 +432,28 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
       lastMinute = minute;
     }
 
-    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped)) + (index === waiting ? spinner : '');
+    const card = entry.type === 'reply' && entry.item.kind === 'reply' ? cardOf(cardKey('reply', entry.item.id), entry.item.opening, answerAfter(entry.item.id)) : '';
+
+    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card)) + (index === waiting ? spinner : '');
   });
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
   const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}</ol>`;
 
   const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
   const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });
+  const status = state.status;
+  const statusCard = status === null || status.fallback ? '' : cardOf(cardKey('status', status.id), status.markdown, statusAnswer(state.items, status));
+  // While an AskUserQuestion menu holds the session, the view says so: the menu is answered in the terminal (voice-design § 5).
+  const asking =
+    state.session?.state === 'waiting' && state.session.waitingFor === 'question'
+      ? '<div class="terminal-question" role="status"><span class="codicon codicon-question" aria-hidden="true"></span><span class="terminal-question-text">Claude is waiting for an answer in the terminal</span><button type="button" class="terminal-question-open" data-action="terminal">Open in terminal</button></div>'
+      : '';
   const panel =
     page.tab === 'status'
-      ? `<div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-status">${renderStatus(state.status, fresh, now)}</div>`
+      ? `<div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-status">${renderStatus(status, fresh, now, statusCard)}</div>`
       : page.tab === 'artifacts'
         ? `<div class="panel" id="panel" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
-        : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>`;
+        : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${asking}`;
 
   return `${header}${tabs}${panel}`;
 }

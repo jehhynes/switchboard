@@ -1,6 +1,8 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, PICKER, renderConversation, replyText, TABS } from './conversationRender.js';
+import { ago, complete, PICKER, renderConversation, replyText, TABS } from './conversationRender.js';
+import type { CardDraft } from './conversationRender.js';
+import { answerText, parseQuestions } from '../questionModel.js';
 import { selectedEntry, statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
 import { startComposerExtras } from './composerExtras.js';
@@ -286,6 +288,48 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   // Copy buttons waiting for the extension to say it wrote the clipboard.
   const copies = new Map<number, HTMLElement>();
   let nextCopy = 1;
+  // The question cards' choices by card key, and the cards whose answer is being sent by send ID, numbered apart from the composer's.
+  const cards = new Map<string, CardDraft>();
+  const cardSends = new Map<number, string>();
+  let nextCardSend = 1_000_000;
+  /** The questions a card asks, read again from the reply or status it belongs to. */
+  const cardQuestions = (key: string): ReturnType<typeof parseQuestions> => {
+    const [kind, ...rest] = key.split(':');
+    const id = rest.join(':');
+    const markdown = kind === 'status' ? (state.status?.id === id ? state.status.markdown : '') : (state.items.flatMap((item) => (item.id === id && item.type === 'reply' ? [item.opening] : []))[0] ?? '');
+
+    return markdown === '' ? [] : parseQuestions(markdown);
+  };
+  const cardDraft = (key: string): CardDraft => {
+    let draft = cards.get(key);
+
+    if (draft === undefined) {
+      draft = { choices: new Map(), sent: null, workItemId: null, sending: false, error: null };
+      cards.set(key, draft);
+    }
+
+    return draft;
+  };
+  /** Sends a card's answer as an ordinary message, to the session the page shows, as the composer's Enter does. */
+  const submitCard = (key: string): void => {
+    const draft = cards.get(key);
+    const questions = cardQuestions(key);
+    const text = draft === undefined || !complete(questions, draft.choices) ? '' : answerText(questions, draft.choices);
+
+    if (draft === undefined || text === '' || draft.sending || draft.sent !== null || state.scope === null || state.session === null || !state.connected || state.session.conversation !== 'full') {
+      return;
+    }
+
+    const id = nextCardSend++;
+
+    cardSends.set(id, key);
+    draft.sending = true;
+    draft.sent = text;
+    draft.workItemId = state.scope.workItemId;
+    draft.error = null;
+    draw();
+    vscode.postMessage({ type: 'send', id, text, target: { scopeGen: state.scope.scopeGen, sessionId: state.session.id, launch: state.session.launch } });
+  };
   // The status the Status tab last had, and until when a status that replaced it is marked New: Infinity until the tab shows it.
   let shownStatus: { sessionId: string | null; id: string; markdown: string } | null = null;
   // Whether this VS Code window has the focus, which the extension says; unread items count as seen only then.
@@ -446,7 +490,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   let drawn: string | null = null;
   /** A focused tab or button outside the timeline, found again after a redraw by its tab, action and path. */
   const focusKey = (element: Element | null): { tab?: string | undefined; action?: string | undefined; path?: string | undefined } | null => {
-    if (!(element instanceof HTMLElement) || !root.contains(element) || element.closest('.timeline') !== null) {
+    // A question card's controls are found again by their card, question and letter.
+    if (!(element instanceof HTMLElement) || !root.contains(element) || element.closest('.timeline') !== null || element.dataset['card'] !== undefined) {
       return null;
     }
 
@@ -470,8 +515,15 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       unseenBelow = true;
     }
 
+    // A question card's option, Other field or Submit keeps the focus over a redraw, and an Other field its caret.
+    const active = document.activeElement;
+    const cardFocus =
+      active instanceof HTMLElement && root.contains(active) && active.dataset['card'] !== undefined
+        ? { card: active.dataset['card'], question: active.dataset['question'], letter: active.dataset['letter'], action: active.dataset['action'], caret: active instanceof HTMLInputElement ? ([active.selectionStart ?? null, active.selectionEnd ?? null] as const) : null }
+        : null;
+
     startFreshClock();
-    root.innerHTML = renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened });
+    root.innerHTML = renderConversation(state, open, Date.now(), freshUntil > Date.now(), { tab, unopened, cards });
     // The composer belongs to the Conversation tab.
     document.body.dataset['tab'] = tab;
 
@@ -536,6 +588,16 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
     if (refocus !== null) {
       [...root.querySelectorAll<HTMLElement>('[data-tab], [data-action]')].find((element) => focusKey(element) !== null && element.dataset['tab'] === refocus.tab && element.dataset['action'] === refocus.action && element.dataset['path'] === refocus.path)?.focus();
+    } else if (cardFocus !== null) {
+      const again = [...root.querySelectorAll<HTMLElement>('[data-card]')].find(
+        (element) => element.dataset['card'] === cardFocus.card && element.dataset['question'] === cardFocus.question && element.dataset['letter'] === cardFocus.letter && element.dataset['action'] === cardFocus.action,
+      );
+
+      again?.focus();
+
+      if (again instanceof HTMLInputElement && cardFocus.caret !== null) {
+        again.setSelectionRange(cardFocus.caret[0], cardFocus.caret[1]);
+      }
     } else if (focused !== null && timelineFocused) {
       root.querySelector<HTMLElement>(`li[data-id="${CSS.escape(focused)}"]`)?.focus();
     }
@@ -595,6 +657,25 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       open.delete(PICKER);
       draw();
       vscode.postMessage({ type: 'select', workItemId: Number(button!.dataset['workItem']) });
+    } else if (action === 'pick') {
+      // One option per question, picked again to clear it, or several where the question takes several; a pick replaces a single question's Other text.
+      const key = button!.dataset['card']!;
+      const index = Number(button!.dataset['question']);
+      const letter = button!.dataset['letter']!;
+      const question = cardQuestions(key)[index];
+      const draft = cardDraft(key);
+      const choice = draft.choices.get(index) ?? { letters: [], other: '' };
+      const picked = choice.letters.includes(letter);
+
+      if (question === undefined) {
+        return;
+      }
+
+      draft.choices.set(index, question.multi ? { ...choice, letters: picked ? choice.letters.filter((one) => one !== letter) : [...choice.letters, letter] } : { letters: picked ? [] : [letter], other: picked ? choice.other : '' });
+      draft.error = null;
+      draw();
+    } else if (action === 'answer') {
+      submitCard(button!.dataset['card']!);
     } else if (action === 'artifact') {
       vscode.postMessage({ type: 'artifact', path: button!.dataset['path'] ?? '' });
     } else if (action === 'status-open') {
@@ -634,6 +715,44 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     },
     true,
   );
+
+  // An Other field keeps its text without a redraw, so the caret stays; text in a single question's field replaces its picked option.
+  root.addEventListener('input', (event) => {
+    const field = event.target as HTMLElement;
+
+    if (!(field instanceof HTMLInputElement) || !field.classList.contains('question-other')) {
+      return;
+    }
+
+    const key = field.dataset['card']!;
+    const index = Number(field.dataset['question']);
+    const draft = cardDraft(key);
+    const choice = draft.choices.get(index) ?? { letters: [], other: '' };
+    const single = cardQuestions(key)[index]?.multi !== true;
+
+    draft.choices.set(index, { letters: single && field.value.trim() !== '' ? [] : choice.letters, other: field.value });
+    draft.error = null;
+
+    if (single && choice.letters.length > 0 && field.value.trim() !== '') {
+      draw();
+    } else {
+      const submit = root.querySelector<HTMLButtonElement>(`.question-submit[data-card="${CSS.escape(key)}"]`);
+
+      if (submit !== null) {
+        submit.disabled = !complete(cardQuestions(key), draft.choices);
+      }
+    }
+  });
+
+  // Enter in an Other field submits its card.
+  root.addEventListener('keydown', (event) => {
+    const field = event.target as HTMLElement;
+
+    if (field instanceof HTMLInputElement && field.classList.contains('question-other') && event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      submitCard(field.dataset['card']!);
+    }
+  });
 
   // Escape closes the conversation list; Up and Down move within it.
   root.addEventListener('keydown', (event) => {
@@ -677,7 +796,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     const items = [...(list?.querySelectorAll<HTMLElement>(':scope > li[data-id]') ?? [])];
     const current = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.timeline > li[data-id]') ?? null;
 
-    if (items.length === 0 || (document.activeElement !== list && current === null)) {
+    // Keys typed in a field, such as a question card's Other field, are its own.
+    if (items.length === 0 || (document.activeElement !== list && current === null) || event.target instanceof HTMLInputElement) {
       return;
     }
 
@@ -741,14 +861,52 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       }
 
       wasConnected = state.connected;
+
+      // A card's answer that shows in the conversation with its delivery settled is done with: only one still on its way can come back not sent.
+      for (const [key, draft] of cards) {
+        const replyId = key.startsWith('status:st-') ? key.slice('status:st-'.length) : key.startsWith('reply:') ? key.slice('reply:'.length) : null;
+        const from = state.items.findIndex((item) => item.id === replyId);
+
+        if (draft.sent !== null && !draft.sending && draft.workItemId === state.scope?.workItemId && from !== -1 && state.items.slice(from + 1).some((item) => item.type === 'message' && !item.withdrawn && item.delivery !== 'open' && item.text === draft.sent)) {
+          draft.sent = null;
+        }
+      }
+
       noteStatus();
       draw();
       composer?.update(state);
     } else if (event.data.type === 'sent') {
-      composer?.sent(event.data.id, event.data.error);
+      const key = cardSends.get(event.data.id);
+
+      if (key === undefined) {
+        composer?.sent(event.data.id, event.data.error);
+        return;
+      }
+
+      // A refused answer keeps the card's choices and shows why; a taken one waits, greyed, until its message shows in the conversation.
+      const draft = cardDraft(key);
+
+      cardSends.delete(event.data.id);
+      draft.sending = false;
+
+      if (event.data.error !== null) {
+        draft.error = event.data.error;
+        draft.sent = null;
+      }
+
+      draw();
     } else if (event.data.type === 'unsent') {
       for (const one of event.data.returned) {
-        composer?.unsent(one.text, one.error, one.workItemId);
+        // A card's answer that was not sent goes back to its card, with why, rather than into the composer.
+        const card = [...cards.values()].find((draft) => draft.sent !== null && draft.sent === one.text && draft.workItemId === one.workItemId);
+
+        if (card !== undefined) {
+          card.sent = null;
+          card.error = one.error;
+          draw();
+        } else {
+          composer?.unsent(one.text, one.error, one.workItemId);
+        }
       }
     } else if (event.data.type === 'copied') {
       const button = copies.get(event.data.id);

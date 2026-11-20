@@ -1,0 +1,335 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { ItemView, MessageView, ReplyView, ScopeView, SessionView, StatusView } from '@switchboard/hub';
+import { describe, expect, it, vi } from 'vitest';
+import type { ConversationState } from '../src/conversationModel.js';
+import { answersIn, answerText, parseQuestions } from '../src/questionModel.js';
+import type { QuestionChoice } from '../src/questionModel.js';
+import { startConversation } from '../src/webview/conversationMain.js';
+import { renderConversation } from '../src/webview/conversationRender.js';
+
+const T0 = Date.UTC(2026, 10, 19, 12);
+const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:/w', title: 'Fix the badge', cwd: 'D:/w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, title: 'Fix the badge', primary: true, sessionId: 's2', state: 'idle', conversation: 'full', unread: 0 }] };
+const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
+const reply = (id: string, at: number, opening: string, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false, ...patch });
+const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at, ord: at, origin: 'typed', text, provisional: false, withdrawn: false, delivery: 'sent', error: null, ...patch });
+const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+
+/** The shape the conversation rules show, with a second question. */
+const ASKED = 'Two things before I start:\n\n1. Which port?\n   - A) 8765 (recommended)\n   - B) 8799\n2. **Keep the old route?**\n   - A) Yes\n   - B) No, remove it\n   - C) Keep it behind a flag\n\nSay if neither fits.';
+const choices = (entries: Array<[number, Partial<QuestionChoice>]>): Map<number, QuestionChoice> => new Map(entries.map(([index, choice]) => [index, { letters: [], other: '', ...choice }]));
+
+describe('parsing lettered questions', () => {
+  it('reads numbered questions with options lettered from A, each on its own line, as the conversation rules show them', () => {
+    expect(parseQuestions(ASKED)).toEqual([
+      { number: 1, text: 'Which port?', multi: false, options: [{ letter: 'A', text: '8765 (recommended)' }, { letter: 'B', text: '8799' }] },
+      { number: 2, text: 'Keep the old route?', multi: false, options: [{ letter: 'A', text: 'Yes' }, { letter: 'B', text: 'No, remove it' }, { letter: 'C', text: 'Keep it behind a flag' }] },
+    ]);
+  });
+
+  it('takes the option shapes Claude writes, a bold or parenthesised letter, a lower-case one, and a line that continues an option or a question', () => {
+    const questions = parseQuestions('1) Scope\n   for this run\n**A)** Only the inbox\n(b) Everything\n  including the dock\nc) Nothing\n\n2. Name?\n   A. Short\n   B: Long');
+
+    expect(questions.map((question) => [question.number, question.text, question.options.map((option) => `${option.letter} ${option.text}`)])).toEqual([
+      [1, 'Scope for this run', ['A Only the inbox', 'B Everything including the dock', 'C Nothing']],
+      [2, 'Name?', ['A Short', 'B Long']],
+    ]);
+  });
+
+  it('reads a lone question with lettered options and no number, answered by its letter alone', () => {
+    const questions = parseQuestions('Which one should I keep?\n\n- A) The first\n- B) The second');
+
+    expect(questions).toEqual([{ number: null, text: 'Which one should I keep?', multi: false, options: [{ letter: 'A', text: 'The first' }, { letter: 'B', text: 'The second' }] }]);
+    expect(answerText(questions, choices([[0, { letters: ['B'] }]]))).toBe('B');
+    expect(answerText(questions, choices([[0, { other: 'neither' }]]))).toBe('Other: neither');
+    expect(answersIn('b', questions).get(0)?.letters).toEqual(['B']);
+    // Several picks of a lone question read back as they were sent.
+    const several = parseQuestions('Which should run? Pick any that apply.\n\n- A) Lint\n- B) Tests');
+
+    expect(answerText(several, choices([[0, { letters: ['A', 'B'] }]]))).toBe('A, B');
+    expect(answersIn('A, B', several).get(0)?.letters).toEqual(['A', 'B']);
+  });
+
+  it('marks a question that says it takes several options', () => {
+    expect(parseQuestions('1. Which checks should run? Pick any that apply.\n   - A) Lint\n   - B) Tests')[0]?.multi).toBe(true);
+    expect(parseQuestions('1. Which one? Choose one or more.\n   - A) Lint\n   - B) Tests')[0]?.multi).toBe(true);
+    expect(parseQuestions(ASKED)[0]?.multi).toBe(false);
+  });
+
+  it('finds no question in lists, prose, code or shapes whose answers could not be told apart', () => {
+    // A numbered list with no options, one option alone, letters out of order or not from A, and initials.
+    expect(parseQuestions('1. Build\n2. Test\n3. Ship')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - A) Only one')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - B) One\n   - C) Two')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - A) One\n   - C) Two')).toEqual([]);
+    expect(parseQuestions('1. Which?\n   - A) One\n   - B) Two\n   - D) Four')).toEqual([]);
+    expect(parseQuestions('Asked J. Smith and\nK. Jones about it.')).toEqual([]);
+    // Options inside a fenced block are code.
+    expect(parseQuestions('```\n1. Which?\n   - A) One\n   - B) Two\n```')).toEqual([]);
+    // A paragraph after the question's line ends it.
+    expect(parseQuestions('1. Which?\nI think so.\n- A) One\n- B) Two').map((question) => question.number)).toEqual([null]);
+    // A number used twice, or a lone run beside numbered questions.
+    expect(parseQuestions('1. One?\n   - A) x\n   - B) y\n1. Again?\n   - A) x\n   - B) y')).toEqual([]);
+    expect(parseQuestions('1. One?\n   - A) x\n   - B) y\n\nAlso:\n\n- A) p\n- B) q')).toEqual([]);
+    expect(parseQuestions('- A) p\n- B) q')).toEqual([]);
+  });
+});
+
+describe('the answer a card sends', () => {
+  const questions = parseQuestions(ASKED);
+
+  it('names each answered question by number and letter, an Other answer by its text, and leaves out unanswered ones', () => {
+    expect(answerText(questions, choices([[0, { letters: ['A'] }], [1, { letters: ['B'] }]]))).toBe('1A, 2B');
+    expect(answerText(questions, choices([[0, { letters: ['A'] }], [1, { other: '  use   port 8800 ' }]]))).toBe('1A, 2 Other: use port 8800');
+    expect(answerText(questions, choices([[1, { letters: ['C', 'A'] }]]))).toBe('2A, 2C');
+    expect(answerText(questions, choices([[0, { other: '   ' }]]))).toBe('');
+    // A comma in an Other text puts each answer on its own line.
+    expect(answerText(questions, choices([[0, { other: 'both, in turn' }], [1, { letters: ['A'] }]]))).toBe('1 Other: both, in turn\n2A');
+  });
+
+  it('reads the choices back from the message, sent by a card or typed', () => {
+    expect(answersIn('1A, 2 Other: use port 8800', questions)).toEqual(choices([[0, { letters: ['A'] }], [1, { other: 'use port 8800' }]]));
+    expect(answersIn('1 Other: both, in turn\n2A', questions)).toEqual(choices([[0, { other: 'both, in turn' }], [1, { letters: ['A'] }]]));
+    expect(answersIn('1B and 2 C please', questions)).toEqual(choices([[0, { letters: ['B'] }], [1, { letters: ['C'] }]]));
+    // A lone Other answer keeps its commas, and Other text is never read for picks.
+    expect(answerText(questions.slice(0, 1), choices([[0, { other: 'both, in turn' }]]))).toBe('1 Other: both, in turn');
+    expect(answersIn('1 Other: both, in turn', questions)).toEqual(choices([[0, { other: 'both, in turn' }]]));
+    expect(answersIn('1 Other: neither; use 2B later\n2A', questions)).toEqual(choices([[0, { other: 'neither; use 2B later' }], [1, { letters: ['A'] }]]));
+    expect(answersIn('1A, 2 Other: none', questions)).toEqual(choices([[0, { letters: ['A'] }], [1, { other: 'none' }]]));
+    // A letter a question does not have, or a number no question has, is no answer.
+    expect(answersIn('1C, 3A, port 8765A', questions)).toEqual(new Map());
+  });
+});
+
+describe('question cards in the Conversation view', () => {
+  function page() {
+    if (typeof CSS === 'undefined') {
+      vi.stubGlobal('CSS', { escape: (value: string) => value });
+    }
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const host = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    const vscode = { postMessage: (message: { type: string }) => posted.push(message), getState: () => null, setState: () => undefined };
+
+    document.body.replaceChildren(root, host, live);
+    startConversation(root, live, vscode, host);
+
+    const post = (data: unknown) => window.dispatchEvent(new MessageEvent('message', { data }));
+    const show = (next: ConversationState) => post({ type: 'state', state: next });
+    const card = () => root.querySelector<HTMLElement>('.question-card');
+    const option = (question: number, letter: string) => root.querySelector<HTMLButtonElement>(`.question-option[data-question="${question}"][data-letter="${letter}"]`)!;
+    const other = (question: number) => root.querySelector<HTMLInputElement>(`.question-other[data-question="${question}"]`)!;
+    const submit = () => root.querySelector<HTMLButtonElement>('.question-submit')!;
+    const sends = () => posted.filter((one) => one.type === 'send');
+
+    return { root, host, posted, post, show, card, option, other, submit, sends };
+  }
+
+  it('draws a card under a reply that asks lettered questions, as Claude Code\'s question form, and none under an aside or a plain reply', () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state([reply('r1', T0, ASKED), reply('r2', T0 + 1, 'Done.'), reply('r3', T0 + 2, '[aside] x\n\n1. Q?\n- A) a\n- B) b', { kind: 'aside' })]));
+
+    const cards = root.querySelectorAll('.question-card');
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.closest('li')?.dataset['id']).toBe('r1');
+    expect([...cards[0]!.querySelectorAll('.question-text')].map((one) => one.textContent)).toEqual(['1. Which port?', '2. Keep the old route?']);
+    expect([...cards[0]!.querySelectorAll('.question-option')].map((one) => one.textContent)).toEqual(['A 8765 (recommended)', 'B 8799', 'A Yes', 'B No, remove it', 'C Keep it behind a flag']);
+    expect(cards[0]!.querySelectorAll('[role="radiogroup"]')).toHaveLength(2);
+    expect(cards[0]!.querySelectorAll('.question-other')).toHaveLength(2);
+    expect(cards[0]!.querySelector<HTMLButtonElement>('.question-submit')?.disabled).toBe(true);
+    // The reply itself still shows whole.
+    expect(root.querySelector('li[data-id="r1"] .body')?.textContent).toContain('Say if neither fits.');
+
+    const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+
+    expect(css).toMatch(/\.question-card \{[^}]*border-radius: 8px;[^}]*background: var\(--vscode-input-background\)/);
+    expect(css).toMatch(/\.question-mark\.radio\.checked \{ border-color: var\(--vscode-button-background\); \}/);
+    expect(css).toMatch(/\.question-option\.dimmed \{ opacity: 0\.6; \}/);
+  });
+
+  it('picks one option per question, clears it when picked again, and sends the answer as an ordinary message on Submit', () => {
+    const { show, option, submit, sends, post, card } = page();
+
+    show(state([reply('r1', T0, ASKED)]));
+    option(0, 'A').click();
+    option(0, 'B').click();
+    expect(option(0, 'A').getAttribute('aria-checked')).toBe('false');
+    expect(option(0, 'B').getAttribute('aria-checked')).toBe('true');
+    // Every question needs an answer first.
+    expect(submit().disabled).toBe(true);
+    option(1, 'C').click();
+    expect(submit().disabled).toBe(false);
+    option(1, 'C').click();
+    expect(option(1, 'C').classList.contains('checked')).toBe(false);
+    option(1, 'A').click();
+    submit().click();
+    expect(sends()).toEqual([{ type: 'send', id: 1_000_000, text: '1B, 2A', target: { scopeGen: 1, sessionId: 's2', launch: 'l' } }]);
+    // Locked while it is sent and after the hub took it, until the message shows.
+    expect(submit().textContent).toBe('Sending…');
+    expect(option(0, 'A').disabled).toBe(true);
+    submit().click();
+    expect(sends()).toHaveLength(1);
+    post({ type: 'sent', id: 1_000_000, error: null });
+    expect(submit().disabled).toBe(true);
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1B, 2A')]));
+    expect(card()?.classList.contains('answered')).toBe(true);
+    expect(card()?.querySelector('.question-submit')).toBeNull();
+    expect(card()?.querySelector('.question-state')?.textContent).toBe('Answered');
+    expect(option(0, 'B').getAttribute('aria-checked')).toBe('true');
+    expect(option(0, 'A').classList.contains('dimmed')).toBe(true);
+  });
+
+  it('keeps the choices and shows why when the hub refuses the answer, and takes back an answer that was not sent', () => {
+    const { show, option, submit, sends, post, card, host } = page();
+
+    show(state([reply('r1', T0, ASKED)]));
+    option(0, 'A').click();
+    option(1, 'A').click();
+    submit().click();
+    post({ type: 'sent', id: sends().at(-1)!['id'], error: 'The session has ended.' });
+    expect(card()?.querySelector('.question-error')?.textContent).toBe('The session has ended.');
+    expect(option(0, 'A').getAttribute('aria-checked')).toBe('true');
+    expect(submit().disabled).toBe(false);
+
+    // The hub took it, then it was not sent: it goes back to the card, not the composer.
+    submit().click();
+    post({ type: 'sent', id: sends().at(-1)!['id'], error: null });
+    post({ type: 'unsent', returned: [{ text: '1A, 2A', error: 'Claude Code did not take the message.', workItemId: 2 }] });
+    expect(card()?.querySelector('.question-error')?.textContent).toBe('Claude Code did not take the message.');
+    expect(submit().disabled).toBe(false);
+    expect(host.querySelector('textarea')?.value).toBe('');
+  });
+
+  it('takes an Other answer from its field, which replaces a single question\'s pick and submits on Enter, and checkboxes for several', () => {
+    const { show, option, other, submit, sends, root } = page();
+    const multi = '1. Which checks? Pick any that apply.\n   - A) Lint\n   - B) Tests\n2. Port?\n   - A) 8765\n   - B) 8799';
+
+    show(state([reply('r1', T0, multi)]));
+    expect(root.querySelectorAll('[role="checkbox"]')).toHaveLength(2);
+    option(0, 'A').click();
+    option(0, 'B').click();
+    expect(option(0, 'A').getAttribute('aria-checked')).toBe('true');
+    option(1, 'A').click();
+
+    const field = other(1);
+
+    field.focus();
+    field.value = 'use 8800';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    // The pick goes, and the field keeps the focus over the redraw.
+    expect(option(1, 'A').getAttribute('aria-checked')).toBe('false');
+    expect(document.activeElement).toBe(other(1));
+    expect(other(1).value).toBe('use 8800');
+    other(1).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(sends().map((one) => one['text'])).toEqual(['1A, 1B, 2 Other: use 8800']);
+    expect(submit().disabled).toBe(true);
+  });
+
+  it('marks a card answered by any later message, showing what a typed answer picked, and takes no answer while the composer could not send', () => {
+    const { show, option, root } = page();
+
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, '1B', { origin: 'terminal', delivery: null })]));
+    expect(root.querySelector('.question-card.answered')).not.toBeNull();
+    expect(option(0, 'B').getAttribute('aria-checked')).toBe('true');
+    expect(option(1, 'A').classList.contains('dimmed')).toBe(true);
+    expect(root.querySelector('.question-other')).toBeNull();
+
+    // A message that says nothing of the questions still answers the card; a later reply can ask again.
+    show(state([reply('r1', T0, ASKED), message('m1', T0 + 1, 'Not now'), reply('r2', T0 + 2, ASKED)]));
+    expect([...root.querySelectorAll('.question-card')].map((one) => one.classList.contains('answered'))).toEqual([true, false]);
+
+    for (const session of [{ ...SESSION, state: 'ended' as const, conversation: 'read-only' as const, reason: 'Ended.' }, SESSION]) {
+      show(state([reply('r1', T0, ASKED)], { session, connected: session === SESSION ? false : true }));
+      expect(root.querySelector('.question-submit')).toBeNull();
+      expect(root.querySelector('.question-other')).toBeNull();
+      expect(option(0, 'A').disabled).toBe(true);
+    }
+  });
+
+  it('draws a card under the status on the Status tab, answered by a message after the reply it came from', () => {
+    const { show, root, option, submit, sends } = page();
+    const status: StatusView = { id: 'st-r1', sessionId: 's2', at: T0, markdown: `Blocked on two choices.\n\n${ASKED}`, fallback: false, unread: false };
+
+    show(state([reply('r1', T0, '')], { status }));
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    expect(root.querySelector('.status-tab .question-card')).not.toBeNull();
+    option(1, 'B').click();
+    // Every question needs an answer before Submit, since the next message answers the whole card.
+    expect(submit().disabled).toBe(true);
+    submit().click();
+    expect(sends()).toEqual([]);
+    option(0, 'A').click();
+    submit().click();
+    expect(sends().map((one) => one['text'])).toEqual(['1A, 2B']);
+    show(state([reply('r1', T0, ''), message('m1', T0 + 1, '1A, 2B')], { status }));
+    expect(root.querySelector('.status-tab .question-card.answered')).not.toBeNull();
+    // The stage before the first status asks nothing.
+    show(state([], { status: { ...status, id: 'stage-2', fallback: true } }));
+    expect(root.querySelector('.question-card')).toBeNull();
+  });
+
+  it('says Claude waits for an answer in the terminal while an AskUserQuestion menu holds the session, with Open in terminal', () => {
+    const { show, root, posted } = page();
+
+    show(state([], { session: { ...SESSION, state: 'waiting', waitingFor: 'question' } }));
+    expect(root.querySelector('.terminal-question')?.textContent).toBe('Claude is waiting for an answer in the terminalOpen in terminal');
+    root.querySelector<HTMLElement>('.terminal-question button')!.click();
+    expect(posted.at(-1)).toEqual({ type: 'terminal' });
+
+    for (const session of [{ ...SESSION, state: 'waiting' as const, waitingFor: 'permission' as const }, { ...SESSION, state: 'running' as const }]) {
+      show(state([], { session }));
+      expect(root.querySelector('.terminal-question')).toBeNull();
+    }
+  });
+
+  it('leaves the Up and Down keys in an Other field to the field', () => {
+    const { show, other } = page();
+
+    show(state([reply('r0', T0 - 1, 'Hi'), reply('r1', T0, ASKED)]));
+
+    const field = other(0);
+
+    field.focus();
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(field);
+  });
+  it('answers a rewrite that asks again only with a message after the rewrite, not the one before the reply it rewrote', () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state([reply('r1', T0, 'Ask later.', { rewrittenBy: 'r2' }), message('m1', T0 + 1, 'More'), reply('r2', T0 + 2, ASKED, { replaces: 'r1' })]));
+    expect(root.querySelector('.question-card')?.classList.contains('answered')).toBe(false);
+    expect(root.querySelector('.question-submit')).not.toBeNull();
+  });
+
+  it('keeps the focus on the option picked on the Status tab, and sends a not-sent composer message from another conversation back to the composer', () => {
+    const { show, root, option, submit, post, host } = page();
+    const status: StatusView = { id: 'st-r1', sessionId: 's2', at: T0, markdown: ASKED, fallback: false, unread: false };
+
+    show(state([reply('r1', T0, '')], { status }));
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    option(1, 'B').focus();
+    option(1, 'B').click();
+    expect(document.activeElement).toBe(option(1, 'B'));
+    option(0, 'A').click();
+
+    // An answer still being typed can come back to its card; once sent, a later composer message with the same text that was not sent is the composer's.
+    submit().click();
+    post({ type: 'sent', id: 1_000_000, error: null });
+    show(state([reply('r1', T0, ''), message('m1', T0 + 1, '1A, 2B', { delivery: 'open', provisional: true })], { status }));
+    // A message that was not sent leaves the conversation as it comes back.
+    show(state([reply('r1', T0, '')], { status }));
+    post({ type: 'unsent', returned: [{ text: '1A, 2B', error: 'Not sent.', workItemId: 2 }] });
+    expect(root.querySelector('.question-error')?.textContent).toBe('Not sent.');
+    expect(host.querySelector('textarea')?.value).toBe('');
+    submit().click();
+    post({ type: 'sent', id: 1_000_001, error: null });
+    show(state([reply('r1', T0, ''), message('m1', T0 + 1, '1A, 2B')], { status }));
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
+    post({ type: 'unsent', returned: [{ text: '1A, 2B', error: 'Not sent.', workItemId: 2 }] });
+    expect(host.querySelector('textarea')?.value).toBe('1A, 2B');
+  });
+});
