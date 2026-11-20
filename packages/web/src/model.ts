@@ -163,13 +163,10 @@ export function timeline(items: ItemView[], artifacts: readonly ArtifactView[]):
   return entries;
 }
 
-/**
- * The index of the operator's latest message in `entries` while the session is in a turn and no reply answers it or a later one, where the
- * spinner shows; -1 otherwise.
- */
-export function awaitingReply(items: readonly ItemView[], entries: readonly Entry[], session: SessionView | null): number {
+/** Whether the session is in a turn and no reply answers the operator's latest message or a later one, while the spinner shows at the timeline's end. */
+export function awaitingReply(items: readonly ItemView[], session: SessionView | null): boolean {
   if (session === null || (session.state !== 'starting' && session.state !== 'running' && session.state !== 'waiting')) {
-    return -1;
+    return false;
   }
 
   const lastIndex = <T,>(list: readonly T[], test: (one: T) => boolean): number => list.reduce((found, one, index) => (test(one) ? index : found), -1);
@@ -177,7 +174,7 @@ export function awaitingReply(items: readonly ItemView[], entries: readonly Entr
   const at = new Map(items.map((item, index) => [item.id, index]));
   const replied = items.some((item, index) => item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && (item.answers === null ? index > latest : (at.get(item.answers) ?? -1) >= latest));
 
-  return latest === -1 || replied ? -1 : lastIndex(entries, (entry) => entry.type === 'message');
+  return latest !== -1 && !replied;
 }
 
 /** The session state's codicon and its words. */

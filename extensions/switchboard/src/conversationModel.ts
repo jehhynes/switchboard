@@ -278,14 +278,14 @@ export function isWorking(session: SessionView | null): boolean {
 }
 
 /**
- * The index of the operator's latest message in `entries` while the session is in a turn and no reply answers it or a later message, under which
- * the view shows its spinner; -1 otherwise. A reply's `answers` follows the transcript's links, so a rewrite, which the timeline shows in the
+ * Whether the session is in a turn and no reply answers the operator's latest message or a later one, while the view shows its spinner at the
+ * end of the timeline. A reply's `answers` follows the transcript's links, so a rewrite, which the timeline shows in the
  * place of the earlier reply it rewrote, can end the wait; asides and notes do not. A reply that names no message ends it when it comes later.
  */
-export function awaitingReply(items: readonly ItemView[], entries: readonly Entry[], session: SessionView | null): number {
+export function awaitingReply(items: readonly ItemView[], session: SessionView | null): boolean {
   // It stands still while the session waits on a question or a permission, and goes when the turn or the session ends.
   if (!isWorking(session) && session?.state !== 'waiting') {
-    return -1;
+    return false;
   }
 
   const lastIndex = <T,>(list: readonly T[], test: (one: T) => boolean): number => list.reduce((found, one, index) => (test(one) ? index : found), -1);
@@ -295,7 +295,7 @@ export function awaitingReply(items: readonly ItemView[], entries: readonly Entr
     (item, index) => item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && (item.answers === null ? index > latest : (at.get(item.answers) ?? -1) >= latest),
   );
 
-  return latest === -1 || replied ? -1 : lastIndex(entries, (entry) => entry.type === 'message');
+  return latest !== -1 && !replied;
 }
 
 /** The newest reply the view shows that has a passage to speak, which Replay Last Reply speaks again; null for none. */

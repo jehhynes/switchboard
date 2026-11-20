@@ -204,32 +204,32 @@ describe('the conversation state', () => {
     expect(stateIcon(null).icon).toBe('circle-slash');
   });
 
-  it('waits for a reply under the latest message only while the session works, as the header spins, until a reply comes', () => {
+  it('waits for a reply to the latest message only while the session works, as the header spins, until a reply comes', () => {
     const items = [message('m1', T0, 'One'), reply('r1', T0 + 1), message('m2', T0 + 2, 'Two'), reply('a1', T0 + 3, { kind: 'aside' }), reply('n1', T0 + 4, { kind: 'note' })];
 
     for (const state of ['starting', 'running', 'waiting', 'idle', 'ended'] as const) {
       const session = { ...SESSION, state };
 
       expect(isWorking(session)).toBe(stateIcon(session).icon === 'sync~spin');
-      expect(awaitingReply(items, timeline(items), session)).toBe(isWorking(session) || state === 'waiting' ? 2 : -1);
+      expect(awaitingReply(items, session)).toBe(isWorking(session) || state === 'waiting');
     }
 
-    expect(awaitingReply(items, timeline(items), null)).toBe(-1);
-    expect(awaitingReply([...items, reply('r2', T0 + 5)], timeline([...items, reply('r2', T0 + 5)]), SESSION)).toBe(-1);
-    expect(awaitingReply([reply('r1', T0)], timeline([reply('r1', T0)]), SESSION)).toBe(-1);
+    expect(awaitingReply(items, null)).toBe(false);
+    expect(awaitingReply([...items, reply('r2', T0 + 5)], SESSION)).toBe(false);
+    expect(awaitingReply([reply('r1', T0)], SESSION)).toBe(false);
 
     // A rewrite of the earlier reply answers the latest message, though the timeline shows it above that message.
     const rewritten = [message('m1', T0, 'One'), reply('r1', T0 + 1, { rewrittenBy: 'r2' }), message('m2', T0 + 2, 'Two'), reply('r2', T0 + 3, { replaces: 'r1' })];
 
-    expect(awaitingReply(rewritten, timeline(rewritten), SESSION)).toBe(-1);
+    expect(awaitingReply(rewritten, SESSION)).toBe(false);
     // A reply ends the wait when it answers the latest message or a later one, wherever the timeline shows it; one answering an earlier message
     // does not, such as the reply to the first message written after the second was sent.
     const batch = [message('m1', T0, 'One'), message('m2', T0 + 1, 'Two'), reply('r1', T0 + 2, { answers: 'm1' })];
 
-    expect(awaitingReply(batch, timeline(batch), SESSION)).toBe(1);
-    expect(awaitingReply([...batch, reply('r2', T0 + 3, { answers: 'm2' })], timeline(batch), SESSION)).toBe(-1);
+    expect(awaitingReply(batch, SESSION)).toBe(true);
+    expect(awaitingReply([...batch, reply('r2', T0 + 3, { answers: 'm2' })], SESSION)).toBe(false);
     // A withdrawn screen copy is no reply.
-    expect(awaitingReply([...items, reply('r3', T0 + 5, { withdrawn: true })], timeline(items), SESSION)).toBe(2);
+    expect(awaitingReply([...items, reply('r3', T0 + 5, { withdrawn: true })], SESSION)).toBe(true);
   });
 });
 
@@ -390,12 +390,15 @@ describe('the Conversation view page', () => {
     expect(root.querySelector('.day')?.textContent).toBe('Thu, Dec 31, 2026');
   });
 
-  it("shows a spinner under the operator's latest message while the session works on a reply, gone when the reply arrives or the turn ends", () => {
+  it('shows a spinner after the newest item while the session works on a reply, gone when the reply arrives or the turn ends', () => {
     const root = document.createElement('div');
     const asked = [reply('r1', T0, { opening: 'Hi' }), message('m1', T0 + 1, 'Why?'), reply('a1', T0 + 2, { kind: 'aside', opening: 'Reading' })];
 
     root.innerHTML = renderConversation(state(asked));
-    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['reply reply', 'message', 'working', 'reply aside']);
+    // Progress written mid-turn shows above it, as an artifact written since does.
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.className)).toEqual(['reply reply', 'message', 'reply aside', 'working']);
+    root.innerHTML = renderConversation(state([...asked, reply('a2', T0 + 3, { kind: 'aside', opening: 'Writing' })], { artifacts: [{ path: 'chat/a.md', owner: 'chat', kind: 'page', title: 'Page', ext: 'md', type: 'markdown', updatedAt: T0 + 4 }] }));
+    expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['r1', 'm1', 'a1', 'a2', 'artifact:chat/a.md', 'working']);
     expect(root.querySelector('.working .codicon')?.className).toBe('working-icon codicon codicon-loading codicon-modifier-spin');
     // "Thinking…" beside it, as in Claude Code's panel, which a screen reader hears once, as "Thinking".
     expect(root.querySelector('.working .working-label')?.textContent).toBe('Thinking…');
@@ -530,12 +533,16 @@ describe('the Conversation view page', () => {
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     expect(document.activeElement?.getAttribute('data-id')).toBe('r2');
 
-    // The keys skip the spinner under a message the session is working on. jsdom has no CSS.escape, which a redraw with a focused item uses.
+    // The keys skip the spinner at the end of a turn the session is working on. jsdom has no CSS.escape, which a redraw with a focused item uses.
     vi.stubGlobal('CSS', { escape: (value: string) => value });
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: state([reply('r1', T0, { opening: 'One' }), message('m3', T0 + 1, 'Three?'), reply('a3', T0 + 2, { kind: 'aside', opening: 'Reading' })]) } }));
     expect(root.querySelector('.timeline > li.working')).not.toBeNull();
     root.querySelector<HTMLElement>('li[data-id="m3"]')!.focus();
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement?.getAttribute('data-id')).toBe('a3');
+    // From the last item, the spinner after it is not a stop.
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement?.className).not.toBe('working');
     expect(document.activeElement?.getAttribute('data-id')).toBe('a3');
     vi.unstubAllGlobals();
     vi.restoreAllMocks();

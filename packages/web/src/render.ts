@@ -208,14 +208,14 @@ export function renderTimeline(state: PageState, view: View): string {
   }
 
   const entries = timeline(state.items, state.artifacts);
-  const waiting = awaitingReply(state.items, entries, state.session);
   const canAnswer = state.connected && state.session.conversation === 'full';
-  const spinner = `<li class="working"><span class="codicon codicon-loading${state.session.state === 'waiting' ? '' : ' codicon-modifier-spin'}" aria-hidden="true"></span><span>Thinking…</span></li>`;
+  // After the newest item, so replies written mid-turn show above it.
+  const spinner = !awaitingReply(state.items, state.session) ? '' : `<li class="working"><span class="codicon codicon-loading${state.session.state === 'waiting' ? '' : ' codicon-modifier-spin'}" aria-hidden="true"></span><span>Thinking…</span></li>`;
   let lastMinute: string | null = null;
   let lastDay: string | null = null;
-  const rows = entries.map((entry, index) => {
+  const rows = entries.map((entry) => {
     if (entry.type === 'artifact') {
-      return artifactRow(entry.artifact) + (index === waiting ? spinner : '');
+      return artifactRow(entry.artifact);
     }
 
     const day = new Date(entry.item.at).toDateString();
@@ -236,7 +236,7 @@ export function renderTimeline(state: PageState, view: View): string {
         ? message(entry.item, stamped)
         : reply(entry.item, entry.earlier, view, stamped, entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, entry.item.opening, answerAfter(state, entry.item.id), view, canAnswer) : '', state.expandReplies);
 
-    return divider + html + (index === waiting ? spinner : '');
+    return divider + html;
   });
   const earlier = state.more ? '<button class="earlier-items" type="button" data-action="earlier">Show earlier messages</button>' : '';
   const notice = state.session.reason === null ? '' : `<p class="notice">${escape(state.session.reason)}</p>`;
@@ -248,7 +248,7 @@ export function renderTimeline(state: PageState, view: View): string {
         ? `<p class="notice terminal-question"><span class="codicon codicon-question" aria-hidden="true"></span> ${state.session.provider === 'codex' ? 'Codex' : 'Claude'} is waiting for an answer in the terminal.</p>`
         : '';
 
-  return `${notice}${earlier}${rows.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}</ol>`}${asking}`;
+  return `${notice}${earlier}${rows.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}${spinner}</ol>`}${asking}`;
 }
 
 const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };

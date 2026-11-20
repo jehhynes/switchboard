@@ -566,19 +566,19 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
     return questions.length === 0 ? '' : questionCard(key, questions, page.cards?.get(key), answer, canAnswer);
   };
-  const waiting = awaitingReply(state.items, shown, state.session);
-  // While the session works on a reply, a spinner under the operator's latest message; it has no data-id, so the keys skip it.
+  // While the session works on a reply, a spinner after the newest item, so replies written mid-turn show above it; it has no data-id, so the
+  // keys skip it.
   // While the session waits on a question or a permission, it stands still.
   const spin = state.session?.state === 'waiting' ? '' : ' codicon-modifier-spin';
   // As Claude Code's panel draws it: the spinner and "Thinking…" beside it; a screen reader hears "Thinking".
-  const spinner = `<li class="working"><span class="working-icon codicon codicon-loading${spin}" aria-hidden="true"></span><span class="working-label" aria-hidden="true">Thinking…</span><span role="status">Thinking</span></li>`;
+  const spinner = !awaitingReply(state.items, state.session) ? '' : `<li class="working"><span class="working-icon codicon codicon-loading${spin}" aria-hidden="true"></span><span class="working-label" aria-hidden="true">Thinking…</span><span role="status">Thinking</span></li>`;
   // A turn starts at each message; one that starts on another day than the turn before it has a divider, as in Claude Code's panel.
   let turnDay: string | null = null;
   // A time shows only where the minute changes from the item before, so a message and the reply to it in the same minute read as one exchange.
   let lastMinute: string | null = null;
   const entries = shown.map((entry, index) => {
     if (entry.type === 'artifact') {
-      return artifactRow(entry.artifact) + (index === waiting ? spinner : '');
+      return artifactRow(entry.artifact);
     }
 
     let divider = '';
@@ -601,10 +601,10 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
     const card = entry.type === 'reply' && entry.item.kind === 'reply' ? cardOf(cardKey('reply', entry.item.id), entry.item.opening, answerAfter(entry.item.id)) : '';
 
-    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card, state.settings.expandReplies)) + (index === waiting ? spinner : '');
+    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card, state.settings.expandReplies));
   });
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
-  const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}</ol>`;
+  const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${spinner}</ol>`;
 
   const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
   const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });

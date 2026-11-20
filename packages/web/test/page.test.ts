@@ -39,9 +39,9 @@ describe('the page model', () => {
 
     expect(entries.map((entry) => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id))).toEqual(['m1', 'r2', 'm2', 'chat/a.md']);
     expect(entries[1]).toMatchObject({ earlier: { id: 'r1' } });
-    expect(awaitingReply(items, entries, session({ state: 'running' }))).toBe(2);
-    expect(awaitingReply(items, entries, session({ state: 'idle' }))).toBe(-1);
-    expect(awaitingReply([...items, reply('r3', 5, { answers: 'm2' })], entries, session({ state: 'running' }))).toBe(-1);
+    expect(awaitingReply(items, session({ state: 'running' }))).toBe(true);
+    expect(awaitingReply(items, session({ state: 'idle' }))).toBe(false);
+    expect(awaitingReply([...items, reply('r3', 5, { answers: 'm2' })], session({ state: 'running' }))).toBe(false);
   });
 
   it('writes mentions and reads the @ and / queries as the composer types', () => {
@@ -118,6 +118,16 @@ describe('drawing', () => {
     expect(renderVoice(null)).toBe('');
     expect(renderVoice({ enabled: true, here: false, speaking: null, speakReplies: true, error: null })).toContain('data-voice="talk-here"');
     expect(renderVoice({ enabled: true, here: true, speaking: 'r1', speakReplies: false, error: null })).toContain('data-voice="stop"');
+  });
+
+  it('draws the spinner after the newest item while the session works on a reply, so progress written mid-turn shows above it', () => {
+    const items = [message('m1', 1), reply('a1', 2, { kind: 'aside' }), reply('a2', 3, { kind: 'aside' })];
+    const order = (html: string): string[] => [...html.matchAll(/<li class="([^"]+)"(?: data-id="([^"]+)")?/g)].map((match) => match[2] ?? match[1]!);
+    const html = renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items }, newView());
+
+    expect(order(html)).toEqual(['m1', 'a1', 'a2', 'working']);
+    expect(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }), items: [...items, reply('r1', 4)] }, newView())).not.toContain('class="working"');
+    expect(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView())).not.toContain('class="working"');
   });
 
   it('draws a card under a reply that asks, answered by the next message', () => {
