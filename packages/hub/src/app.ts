@@ -715,6 +715,8 @@ const dockWithRuns = () => {
 
         return { status: 200, body: { selected } };
       },
+      // The dock's New session (architecture.md § Hosted conversations): a conversation hosted by a folder, selected there before its window opens.
+      '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
       '/dock/show': async () =>
         sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
       // The dock's Settings window (PRD R54): settings.json with its version, and what the editor offers.

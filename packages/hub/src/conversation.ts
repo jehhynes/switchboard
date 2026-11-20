@@ -7,6 +7,7 @@ import { findTranscript } from '@switchboard/claude';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
+import { canonicalFolder } from './windows.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 
 /** Conversation API version (architecture.md § Conversation API). */
@@ -1010,11 +1011,7 @@ export class ConversationService {
       return { status: 409, body: { error: made.refused } };
     }
 
-    this.#created.set(done, made.workItemId);
-
-    for (const key of [...this.#created.keys()].slice(0, -UNSENT_KEPT)) {
-      this.#created.delete(key);
-    }
+    this.#remember(done, made.workItemId);
 
     // Every window of the binding lists it; the one that made it selects it.
     this.deps.windows.select(window, made.workItemId);
@@ -1022,6 +1019,58 @@ export class ConversationService {
     this.conversationsChanged();
 
     return { status: 200, body: { workItemId: made.workItemId } };
+  }
+
+  /**
+   * `POST /dock/new-conversation` (architecture.md § Hosted conversations): makes a conversation hosted by the folder's canonical folder and run
+   * in it, with or without a window on it, stores it as that folder binding's selection, and answers `{workItemId, folder}`, the canonical folder
+   * the dock opens. A repeated `opId` answers the first work item and makes none. 400 for a path that is not a folder, 409 with the refusal.
+   */
+  dockConversation(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { folder, opId } = body;
+
+    if (typeof folder !== 'string' || folder === '' || typeof opId !== 'string' || opId === '' || opId.length > 200) {
+      return { status: 400, body: { error: 'Expected {folder, opId}.' } };
+    }
+
+    const host = canonicalFolder(folder);
+
+    if (host === null) {
+      return { status: 400, body: { error: `${folder} is not a folder a session can run in.` } };
+    }
+
+    if (this.deps.newConversation === undefined) {
+      return { status: 409, body: { error: 'The conversation was not made.' } };
+    }
+
+    // Keyed as a folder window's command is, by the canonical folder, so a retry by another spelling still answers the first.
+    const done = `${hostKey(host)} ${opId}`;
+    const earlier = this.#created.get(done);
+
+    if (earlier !== undefined) {
+      return { status: 200, body: { workItemId: earlier, folder: host } };
+    }
+
+    const made = this.deps.newConversation(host, host);
+
+    if ('refused' in made) {
+      return { status: 409, body: { error: made.refused } };
+    }
+
+    this.#remember(done, made.workItemId);
+    this.scopesChanged(this.deps.windows.selectMade(host, made.workItemId));
+    this.conversationsChanged();
+
+    return { status: 200, body: { workItemId: made.workItemId, folder: host } };
+  }
+
+  /** Remembers the work item a `new-conversation` made, keeping the last `UNSENT_KEPT`. */
+  #remember(done: string, workItemId: number): void {
+    this.#created.set(done, workItemId);
+
+    for (const key of [...this.#created.keys()].slice(0, -UNSENT_KEPT)) {
+      this.#created.delete(key);
+    }
   }
 
   /**

@@ -333,6 +333,19 @@ export class WindowScopes {
     return { keys: moved.map((window) => window.key), selected: stored || windows.length > 0 };
   }
 
+  /**
+   * A conversation the dock made for a folder (architecture.md § Hosted conversations): stores it as the folder binding's selection, making the
+   * binding when no folder window has stored one yet, so the window the dock then opens shows it, and selects it in the folder windows open on
+   * that folder, never in an item window that holds it. Returns the keys of the windows it moved.
+   */
+  selectMade(folder: string, workItemId: number): string[] {
+    if (this.#binding(folder) === null) {
+      this.deps.store.setWindowBinding({ file: hostKey(folder), workItemId: null, since: this.deps.now(), scopeGen: 0, selectedWorkItemId: null, selectedSessionId: null, ticketId: null, title: basename(folder) || folder });
+    }
+
+    return this.selectFor(workItemId, folder).keys;
+  }
+
   /** The keys of connected windows whose selected conversation's current session is this one. */
   showing(sessionId: string): string[] {
     return [...this.#windows.values()].filter((window) => window.selected !== null && window.sessionId === sessionId).map((window) => window.key);

@@ -540,6 +540,58 @@ describe('folder-hosted conversations (architecture.md § Window scope)', () => 
     expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
     expect(scopes.scope(scopes.open(null, view, link))).toMatchObject({ kind: 'folder', workItemId: newer, scopeGen: 3 });
   });
+
+  it('makes a dock conversation once per opId with no window open, selects it in the folder window that then opens, and never in an item window on that folder', () => {
+    const calls: Array<[string, string]> = [];
+    const context = setup((hostWindow, folder) => {
+      calls.push([hostWindow, folder]);
+
+      return { workItemId: context.host(hostWindow, `d${calls.length}`, folder) };
+    });
+    const { scopes, service, store, view, support, link, files, frames } = context;
+    const item1 = scopes.open(files[0]!, view);
+    const seen = frames(item1);
+
+    // Asked by a link to the folder: hosted by and run in its canonical folder, and stored as that folder's selection before any window opens.
+    expect(service.dockConversation({ folder: link, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
+    expect(calls).toEqual([[support, support]]);
+    expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: 3, selectedSessionId: 'd1', title: 'support' });
+
+    // The response was lost: the retry, by another spelling, answers the same work item and makes none.
+    expect(service.dockConversation({ folder: `${support}${sep}`, opId: 'dock-1' })).toEqual({ status: 200, body: { workItemId: 3, folder: support } });
+    expect(calls).toHaveLength(1);
+
+    const folder = scopes.open(null, view, support);
+
+    expect(scopes.scope(folder)).toMatchObject({ kind: 'folder', workItemId: 3, sessionId: 'd1', conversations: [{ workItemId: 3, primary: false }] });
+    expect(scopes.scope(item1)).toMatchObject({ workItemId: 1, conversations: [{ workItemId: 1, primary: true }] });
+    expect(seen.filter((frame) => frame.type === 'scope')).toEqual([]);
+
+    // A second one moves the open folder window to it.
+    const moved = frames(folder);
+
+    expect(service.dockConversation({ folder: support, opId: 'dock-2' })).toEqual({ status: 200, body: { workItemId: 4, folder: support } });
+    expect(scopes.scope(folder)).toMatchObject({ workItemId: 4, conversations: [{ workItemId: 4, primary: false }, { workItemId: 3, primary: false }] });
+    expect(moved.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 4 } }, { type: 'hello', sessions: [{ id: 'd2' }] }]);
+    expect(scopes.scope(item1)).toMatchObject({ workItemId: 1 });
+  });
+
+  it('refuses a dock conversation for a malformed body or a path that is no folder, and passes the flow\'s refusal on without storing a selection', () => {
+    const { service, store, support } = setup(() => ({ refused: 'New sessions need Code Mode (sessions.codeMode).' }));
+
+    writeFileSync(join(dir, 'a.txt'), '');
+
+    for (const body of [{}, { folder: support }, { folder: support, opId: '' }, { folder: 7, opId: 'x' }, { folder: '', opId: 'x' }, { folder: support, opId: 'x'.repeat(201) }]) {
+      expect(service.dockConversation(body)).toEqual({ status: 400, body: { error: 'Expected {folder, opId}.' } });
+    }
+
+    for (const path of [join(dir, 'missing'), join(dir, 'a.txt')]) {
+      expect(service.dockConversation({ folder: path, opId: 'x' })).toEqual({ status: 400, body: { error: `${path} is not a folder a session can run in.` } });
+    }
+
+    expect(service.dockConversation({ folder: support, opId: 'x' })).toEqual({ status: 409, body: { error: 'New sessions need Code Mode (sessions.codeMode).' } });
+    expect(store.windowBinding(windowFileKey(support))).toBeNull();
+  });
 });
 
 describe('ConversationService', () => {

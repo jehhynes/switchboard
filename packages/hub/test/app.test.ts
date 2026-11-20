@@ -749,6 +749,11 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true } });
     expect(await app.post['/dock/select']!({})).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
     expect(await app.post['/dock/select']!({ rowKey: 'nope' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
+
+    // The dock's New session takes a folder with no window open, and gets the flow's refusal the same way.
+    expect(await app.post['/dock/new-conversation']!({ folder: temp.home, opId: 'd1' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need sessions.installHooks.' } });
+    expect(await app.post['/dock/new-conversation']!([])).toEqual({ status: 400, body: { error: 'Expected {folder, opId}.' } });
+    expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
 
   it('opens a folder-hosted session only in a folder window on that folder, never in an item window that holds the folder (architecture.md § Window scope)', async () => {
