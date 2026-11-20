@@ -65,6 +65,9 @@ function confirms(at: number, message: ConversationMessage): boolean {
   return message.pastedAt !== null && at >= message.pastedAt - TYPED_SLACK_MS && (message.delivery === 'sent' || at <= message.pastedAt + TYPED_LATE_MS);
 }
 
+/** A typed `/clear`, which moves the session to a new transcript file that records it. */
+const CLEAR = /^\/clear(?:\s|$)/;
+
 /** How many stored replies seed the screen reader, so the screen's old replies, redrawn, are never published again. */
 const SEED_REPLIES = 200;
 
@@ -187,9 +190,12 @@ export class SessionConversation {
         return at !== null && previous.lastAt !== null && at < previous.lastAt;
       });
 
-      // A message typed into the earlier transcript is never confirmed by an entry of this one, so it keeps its place.
+      // A message typed into the earlier transcript is never confirmed by an entry of this one, so it keeps its place; a typed `/clear` is the
+      // first line of the file it starts (mechanics M88), so it waits for that line.
       for (const message of this.deps.store.typedAwaitingTranscript(this.sessionId)) {
-        this.deps.store.updateMessage(message.id, { pastedAt: null, provisional: false });
+        if (copied || !CLEAR.test(message.text.trim())) {
+          this.deps.store.updateMessage(message.id, { pastedAt: null, provisional: false });
+        }
       }
 
       if (copied) {
@@ -322,7 +328,8 @@ export class SessionConversation {
   #typed(text: string, at: number): ConversationMessage | undefined {
     return this.deps.store
       .typedAwaitingTranscript(this.sessionId)
-      .filter((message) => pasteText(message.text) === text.trim() && confirms(at, message))
+      // A message goes escaped, and a slash command chosen from the composer's list as it is.
+      .filter((message) => (pasteText(message.text) === text.trim() || pasteText(message.text, true) === text.trim()) && confirms(at, message))
       .sort((a, b) => b.pastedAt! - a.pastedAt!)[0];
   }
 

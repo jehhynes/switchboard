@@ -1,4 +1,5 @@
 export * from './artifacts.js';
+export * from './commands.js';
 export * from './conversation.js';
 export * from './input.js';
 export * from './screen.js';

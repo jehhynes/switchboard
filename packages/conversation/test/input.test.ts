@@ -31,9 +31,19 @@ describe('pasteText', () => {
     expect(pasteText('/compact now')).toBe('\\/compact now');
     expect(pasteText('!ls')).toBe('\\!ls');
     expect(pasteText('# note')).toBe('\\# note');
-    expect(pasteText('@file.ts')).toBe('\\@file.ts');
+    // A first @ is a file mention, which the escape would lose (mechanics M88).
+    expect(pasteText('@file.ts what is this?')).toBe('@file.ts what is this?');
+    expect(pasteText('@"a b.ts" and @c.ts')).toBe('@"a b.ts" and @c.ts');
     expect(pasteText('& run')).toBe('\\& run');
     expect(pasteText('a/b')).toBe('a/b');
+  });
+
+  it('keeps the slash of a command chosen from the list, and still escapes the other command characters', () => {
+    expect(pasteText(' /compact keep the plan ', true)).toBe('/compact keep the plan');
+    expect(pasteText('/hello7', true)).toBe('/hello7');
+    expect(pasteText('!ls', true)).toBe('\\!ls');
+    expect(pasteText('# note', true)).toBe('\\# note');
+    expect(pasteText('& run', true)).toBe('\\& run');
   });
 });
 
@@ -82,6 +92,13 @@ describe('sentInTranscript', () => {
     // A paste of several lines, as Claude Code 2.1.328 records it (mechanics M86).
     expect(sentInTranscript([user('<pasted_content id="914d">\nLine one\nLine two\n\nHow many?\n</pasted_content id="914d">', T0)], 'Line one\nLine two\n\nHow many?', T0)).toBe(true);
   });
+
+  it('finds a slash command by the tags Claude Code records it in, with and without arguments (mechanics M88)', () => {
+    expect(sentInTranscript([user('<command-message>hello7</command-message>\n<command-name>/hello7</command-name>', T0)], '/hello7', T0)).toBe(true);
+    expect(sentInTranscript([user('<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>keep the plan</command-args>', T0)], '/compact keep the plan', T0)).toBe(true);
+    expect(sentInTranscript([user('<command-name>/compact</command-name>\n<command-args>other</command-args>', T0)], '/compact keep the plan', T0)).toBe(false);
+    expect(sentInTranscript([user('<command-name>/hello7</command-name>', T0 - 1)], '/hello7', T0)).toBe(false);
+  });
 });
 
 /** A held Claude Code session as the holder serves it: its input box, a menu, Enters it drops, and its transcript. */
@@ -94,6 +111,8 @@ class FakeSession {
   dropEnters = 0;
   /** Whether an Enter writes the message to the transcript. */
   saves = true;
+  /** Whether Claude takes a box that starts with a slash as a command, recorded in its tags, as for a command sent unescaped. */
+  runsCommands = false;
   readonly writes: string[] = [];
   clock = T0;
   readonly transcript: string;
@@ -115,8 +134,10 @@ class FakeSession {
       if (this.dropEnters > 0) {
         this.dropEnters--;
       } else if (this.box !== '') {
+        const command = this.runsCommands ? /^\/(\S+)(?: (.*))?$/.exec(this.box) : null;
+
         if (this.saves) {
-          appendFileSync(this.transcript, `${user(this.box, this.clock)}\n`);
+          appendFileSync(this.transcript, `${user(command === null ? this.box : `<command-message>${command[1]}</command-message>\n<command-name>/${command[1]}</command-name>${command[2] === undefined ? '' : `\n<command-args>${command[2]}</command-args>`}`, this.clock)}\n`);
         }
 
         this.box = '';
@@ -157,6 +178,20 @@ class FakeSession {
 }
 
 describe('SessionInput', () => {
+  it('types a slash command chosen from the list as it is, and a message that starts with one escaped, each confirmed by the transcript', async () => {
+    const session = new FakeSession();
+    const { deps } = session.deps();
+    const input = new SessionInput('s1', deps);
+    const outcomes: InputOutcome[] = [];
+
+    session.runsCommands = true;
+    await input.send('/compact keep the plan', (outcome) => outcomes.push(outcome), { command: true });
+    await input.send('/compact is what I meant', (outcome) => outcomes.push(outcome));
+
+    expect(session.writes).toEqual(['\u001b[200~/compact keep the plan\u001b[201~', '\r', '\u001b[200~\\/compact is what I meant\u001b[201~', '\r']);
+    expect(outcomes).toEqual([{ delivery: 'sent' }, { delivery: 'sent' }]);
+  });
+
   it('waits for the pause after a key typed in a terminal, pastes, presses Enter separately, and counts the message sent from the transcript', async () => {
     const session = new FakeSession();
     const { deps, reservations, logs } = session.deps();

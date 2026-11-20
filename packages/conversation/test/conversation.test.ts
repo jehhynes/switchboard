@@ -105,6 +105,28 @@ describe('SessionConversation', () => {
     expect(changes.map((change) => change.type)).toEqual(['message', 'message', 'reply']);
   });
 
+  it('confirms a slash command chosen from the composer by its command line, and keeps it apart from the same words sent as a message', () => {
+    const { store, conversation, path, append, items } = setup();
+    const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'open' as const };
+
+    store.addMessage({ ...typed, id: 'm-command', at: T0, text: '/hello7', opId: 'op1', pastedAt: T0 });
+    store.addMessage({ ...typed, id: 'm-message', at: T0 + 3000, text: '/hello7', opId: 'op2', pastedAt: T0 + 3000 });
+    append(
+      user('u1', T0 + 500, '<command-message>hello7</command-message>\n<command-name>/hello7</command-name>'),
+      user('u2', T0 + 600, 'Base directory for this skill: D:/x', { isMeta: true }),
+      assistant('a1', T0 + 1000, 'HELLO-SEVEN-OK'),
+      user('u3', T0 + 3500, '\\/hello7'),
+    );
+    conversation.readTranscript(path);
+
+    expect(items()).toMatchObject([
+      { type: 'message', id: 'm-command', text: '/hello7', delivery: 'sent', transcriptUuid: 'u1', provisional: false },
+      { type: 'reply', answers: 'm-command', opening: 'HELLO-SEVEN-OK' },
+      { type: 'message', id: 'm-message', text: '/hello7', delivery: 'sent', transcriptUuid: 'u3', provisional: false },
+    ]);
+    expect(items()).toHaveLength(3);
+  });
+
   it('confirms a typed message only by an entry near its paste: never one still waiting to paste, nor an uncertain one long after', () => {
     const { store, conversation, path, append, items } = setup();
     const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null };
@@ -648,6 +670,31 @@ describe('SessionConversation', () => {
     conversation.readTranscript(branched);
 
     expect(items().map((item) => (item.type === 'reply' ? `${item.kind}:${item.opening}` : ''))).toEqual(['reply:Before.', 'reply:After clear.', 'note:Conversation continued from another session.', 'reply:New in branch.']);
+  });
+
+  it('confirms a typed /clear by its line in the new transcript it starts, and still lets go of other messages typed into the earlier one', () => {
+    const { store, conversation, path, append, items } = setup();
+    const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'sent' as const };
+
+    append(assistant('a1', T0, 'Before.'));
+    conversation.readTranscript(path);
+    store.addMessage({ ...typed, id: 'm-clear', at: T0 + 1000, text: '/clear', opId: 'op1', pastedAt: T0 + 1000 });
+    store.addMessage({ ...typed, id: 'm-other', at: T0 + 900, text: 'Lost words', opId: 'op2', pastedAt: T0 + 900 });
+
+    const cleared = join(dir, 'native-2.jsonl');
+
+    writeFileSync(
+      cleared,
+      [user('c0', T0 + 1200, '<local-command-caveat>Caveat: run directly.</local-command-caveat>'), user('c1', T0 + 1200, '<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>')].map((line) => `${line}\n`).join(''),
+    );
+    conversation.readTranscript(cleared);
+
+    expect(items()).toMatchObject([
+      { type: 'reply', opening: 'Before.' },
+      { type: 'message', id: 'm-other', provisional: false, transcriptUuid: null },
+      { type: 'message', id: 'm-clear', text: '/clear', transcriptUuid: 'c1', provisional: false },
+    ]);
+    expect(items()).toHaveLength(3);
   });
 
   it('waits for a line still being written, and reads nothing from a missing transcript', () => {

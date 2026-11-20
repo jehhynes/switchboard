@@ -8,7 +8,7 @@
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import headless from '@xterm/headless';
 import type { Line } from './screenReader.js';
-import { unwrapPasted } from './transcript.js';
+import { typedText, unwrapPasted } from './transcript.js';
 
 /** Gap between a paste and its Enter; an Enter too soon after a paste can be dropped, and is retried. */
 export const PASTE_SETTLE_MS = 60;
@@ -25,16 +25,18 @@ const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 
 /**
  * The text as it is pasted: line breaks kept as newlines, other control characters removed, and a backslash before a first character the input
- * box would take as a command (`/` slash command, `!` shell, `#` memory, `@` file, `&` background), so a message is always a message.
+ * box would take as a command (`/` slash command, `!` shell, `#` memory, `&` background), so a message is always a message. A first `@` is
+ * a file mention, as anywhere else in the text, and is kept (mechanics M88). A slash command chosen from the composer's list (`command`) keeps
+ * its `/`, so it runs.
  */
-export function pasteText(text: string): string {
+export function pasteText(text: string, command = false): string {
   const clean = text
     .replace(/\r\n?/g, '\n')
     .replace(/\t/g, ' ')
     .replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '')
     .trim();
 
-  return /^[/!#@&]/.test(clean) ? `\\${clean}` : clean;
+  return (command ? /^[!#&]/ : /^[/!#&]/).test(clean) ? `\\${clean}` : clean;
 }
 
 /** What the visible screen says about typing, from Claude Code's classic renderer (claude-collab `session.js` `screenState`). */
@@ -128,7 +130,8 @@ export function sentInTranscript(lines: string[], text: string, since: number): 
       return false;
     }
 
-    if (typeof said === 'string' && unwrapPasted(said).trim() === want) {
+    // A slash command is recorded in tags, which read back as `/name args`.
+    if (typeof said === 'string' && (unwrapPasted(said).trim() === want || typedText(said) === want)) {
       return true;
     }
   }
@@ -360,16 +363,16 @@ export class SessionInput {
 
   /**
    * Queues a message; `done` gets what became of it. `guard` replaces the check and reservation for this message, such as for the launch it names,
-   * and `pasting` is told when the paste is about to be written.
+   * `pasting` is told when the paste is about to be written, and `command` types a slash command chosen from the composer's list as it is.
    */
-  send(text: string, done: (outcome: InputOutcome) => void, guard: Partial<Pick<SessionInputDeps, 'check' | 'reserve'>> & { pasting?(at: number): void } = {}): Promise<void> {
+  send(text: string, done: (outcome: InputOutcome) => void, guard: Partial<Pick<SessionInputDeps, 'check' | 'reserve'>> & { pasting?(at: number): void; command?: boolean } = {}): Promise<void> {
     const check = guard.check ?? this.deps.check;
     const reserve = guard.reserve ?? this.deps.reserve;
 
     this.#pending++;
 
     const run = this.#tail
-      .then(() => this.#type(text, check, reserve, guard.pasting ?? (() => undefined)))
+      .then(() => this.#type(text, check, reserve, guard.pasting ?? (() => undefined), guard.command === true))
       .then(done, (error: unknown) => done({ delivery: 'uncertain', error: String(error) }))
       .finally(() => void this.#pending--);
 
@@ -431,7 +434,7 @@ export class SessionInput {
     }
   }
 
-  async #type(text: string, check: () => string | null, reserve: SessionInputDeps['reserve'], pasting: (at: number) => void): Promise<InputOutcome> {
+  async #type(text: string, check: () => string | null, reserve: SessionInputDeps['reserve'], pasting: (at: number) => void, command: boolean): Promise<InputOutcome> {
     let ready: { release(): void } | { refused: string };
 
     try {
@@ -444,7 +447,7 @@ export class SessionInput {
       return { delivery: 'not-sent', error: ready.refused };
     }
 
-    const pasted = pasteText(text);
+    const pasted = pasteText(text, command);
     const since = this.deps.now();
     const sent = (): boolean => {
       const path = this.deps.transcriptPath();

@@ -50,7 +50,7 @@ export function unwrapPasted(text: string): string {
 }
 
 /** A slash command as the operator typed it, `/name args`, from the tags Claude Code records it with; the text itself otherwise. */
-function typed(text: string): string {
+export function typedText(text: string): string {
   const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1];
 
   if (name === undefined) {
@@ -122,7 +122,7 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
 
     // A paste of several lines starts with its `pasted_content` tag, which is the operator's text, not Claude Code's.
     if (raw['operation'] === 'enqueue' && typeof content === 'string' && content.trim() !== '' && !NOT_TYPED.test(unwrapPasted(content)) && !NOT_SENT.test(unwrapPasted(content))) {
-      return { entry: { kind: 'sent', uuid: null, at: at ?? 0, text: typed(content) }, assistantAt: null, uuid: null, parent: null, at, received: null };
+      return { entry: { kind: 'sent', uuid: null, at: at ?? 0, text: typedText(content) }, assistantAt: null, uuid: null, parent: null, at, received: null };
     }
 
     return { ...none, at };
@@ -136,10 +136,10 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
     const human = (attachment['origin'] === undefined ? attachment['commandMode'] === 'prompt' : fromHuman(attachment['origin'])) && !side;
 
     if (text !== null && text.trim() !== '' && human && !NOT_TYPED.test(text)) {
-      return { ...line_, entry: { kind: 'message', uuid, at: at ?? 0, text: typed(text) }, assistantAt: null, at, received: typed(text) };
+      return { ...line_, entry: { kind: 'message', uuid, at: at ?? 0, text: typedText(text) }, assistantAt: null, at, received: typedText(text) };
     }
 
-    return { ...none, ...line_, at, received: text === null ? null : typed(text) };
+    return { ...none, ...line_, at, received: text === null ? null : typedText(text) };
   }
 
   if (raw['type'] === 'user' && message !== null) {
@@ -148,10 +148,10 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
     const human = raw['origin'] === undefined || fromHuman(raw['origin']);
 
     if (text !== null && text.trim() !== '' && human && !side && !NOT_TYPED.test(text)) {
-      return { ...line_, entry: { kind: 'message', uuid, at: at ?? 0, text: typed(text) }, assistantAt: null, at, received: typed(text) };
+      return { ...line_, entry: { kind: 'message', uuid, at: at ?? 0, text: typedText(text) }, assistantAt: null, at, received: typedText(text) };
     }
 
-    return { ...none, ...line_, at, received: text === null ? null : typed(text) };
+    return { ...none, ...line_, at, received: text === null ? null : typedText(text) };
   }
 
   return { ...none, ...line_, at };
@@ -190,4 +190,50 @@ export function readLines(path: string, offset: number): { lines: string[]; offs
   }
 
   return { lines: buffer.subarray(0, end).toString('utf8').split('\n').filter((line) => line.trim() !== ''), offset: from + end + 1 };
+}
+
+/** A slash command a session offers: a built-in or one of its skills, without its slash. */
+export interface SlashCommand {
+  name: string;
+  description: string;
+}
+
+/** The longest skill description the command list keeps. */
+const DESCRIPTION_CHARS = 300;
+
+/**
+ * The skills a `skill_listing` attachment line names, each with its description from the listing's `- name: description` lines, and whether the
+ * listing is the whole list (`isInitial`) or adds to and updates the one before (mechanics M88); null for any other line.
+ */
+export function skillListing(line: string): { initial: boolean; skills: SlashCommand[] } | null {
+  if (!line.includes('"skill_listing"')) {
+    return null;
+  }
+
+  let raw: unknown;
+
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (!isObject(raw) || raw['type'] !== 'attachment' || !isObject(raw['attachment']) || raw['attachment']['type'] !== 'skill_listing') {
+    return null;
+  }
+
+  const listing = raw['attachment'];
+  const described = new Map<string, string>();
+
+  for (const row of String(listing['content'] ?? '').split('\n')) {
+    const match = /^- (\S+?): (.*)$/.exec(row);
+
+    if (match !== null) {
+      described.set(match[1]!, match[2]!.trim());
+    }
+  }
+
+  const names = Array.isArray(listing['names']) ? listing['names'].filter((name): name is string => typeof name === 'string' && /^[\w:.-]+$/.test(name)) : [];
+
+  return { initial: listing['isInitial'] !== false, skills: names.map((name) => ({ name, description: (described.get(name) ?? '').slice(0, DESCRIPTION_CHARS) })) };
 }
