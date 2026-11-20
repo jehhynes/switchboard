@@ -25,6 +25,9 @@ public sealed class HeldSessionsWindow : Window
     readonly TextBlock none = new() { Text = "No held sessions.", Classes = { "muted" } };
     readonly TextBlock status = new() { Name = "HeldStatus", TextWrapping = TextWrapping.Wrap };
 
+    /// <summary>Asks before Stop; tests replace it, as a modal dialog would wait for a click.</summary>
+    internal Func<Window, string, string, string, Task<bool>> Confirm { get; set; } = ConfirmDialog.Ask;
+
     public HeldSessionsWindow(DockViewModel model, IHub hub, IDockActions actions)
     {
         this.model = model;
@@ -127,7 +130,16 @@ public sealed class HeldSessionsWindow : Window
                     window.status.Text = await window.actions.Terminal(null, terminal, CancellationToken.None);
                 }
             };
-            stop.Click += async (_, _) => window.status.Text = await window.hub.StopHeld(session) ?? $"Stopped held session {session}.";
+            stop.Click += async (_, _) =>
+            {
+                // Stop ends a live process, so it asks first, naming the session, as Delete does.
+                if (held is not { } shown || !await window.Confirm(window, StopQuestion(shown), $"Session {shown.Session} in {shown.Cwd}. Its process ends and anything it is doing stops.", "Stop"))
+                {
+                    return;
+                }
+
+                window.status.Text = await window.hub.StopHeld(session) ?? $"Stopped held session {session}.";
+            };
 
             foreach (var cell in cells)
             {
@@ -139,6 +151,8 @@ public sealed class HeldSessionsWindow : Window
         }
 
         public StackPanel Panel { get; }
+
+        static string StopQuestion(DockHeld held) => held.Orphan ? $"Stop held session {held.Session}?" : $"Stop the held session of {held.Item}?";
 
         public void Show(DockHeld next)
         {

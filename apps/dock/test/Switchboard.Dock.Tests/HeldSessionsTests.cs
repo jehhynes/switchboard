@@ -84,11 +84,35 @@ public sealed class HeldSessionsTests
     }
 
     [AvaloniaFact]
+    public void HeldSessions_StopCancelled_AsksNamingTheSessionAndPostsNothing()
+    {
+        var (window, _) = Open();
+        var held = Held(window);
+        List<string> asked = [];
+
+        held.Confirm = (_, question, detail, action) =>
+        {
+            asked.Add($"{question} | {detail} | {action}");
+            return Task.FromResult(false);
+        };
+        Click(Tagged(held, "stop:o1"));
+        Click(Tagged(held, "stop:cm15"));
+
+        Assert.Empty(hub.Calls);
+        Assert.Equal(2, asked.Count);
+        Assert.StartsWith("Stop held session o1? | Session o1 in ", asked[0]);
+        Assert.EndsWith(" | Stop", asked[0]);
+        Assert.StartsWith("Stop the held session of gh 115? | Session cm15 in ", asked[1]);
+        held.Close();
+    }
+
+    [AvaloniaFact]
     public void HeldSessions_Stop_PostsTheSwitchboardIdAndShowsTheResultOrRefusal()
     {
         var (window, _) = Open();
         var held = Held(window);
 
+        held.Confirm = (_, _, _, _) => Task.FromResult(true);
         Click(Tagged(held, "stop:o1"));
         Assert.Equal(["stop held o1"], hub.Calls);
         Assert.Contains("Stopped held session o1.", Texts(held));
