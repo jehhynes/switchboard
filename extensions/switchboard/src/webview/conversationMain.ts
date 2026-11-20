@@ -3,6 +3,8 @@ import { EMPTY_CONVERSATION } from '../conversationModel.js';
 import { ago, renderConversation, replyText, TABS } from './conversationRender.js';
 import { statusLine } from '../conversationModel.js';
 import type { ConversationMessage, SendTarget, Tab } from './conversationRender.js';
+import { startComposerExtras } from './composerExtras.js';
+import type { ExtrasReply } from './composerExtras.js';
 
 interface VsCodeApi {
   postMessage(message: ConversationMessage): void;
@@ -12,11 +14,16 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-/** What the page keeps while hidden, since it is not retained: its open folds, whether it was scrolled to the end, and the tab shown. */
+/**
+ * What the page keeps while hidden, since it is not retained, and over a reload: its open folds, whether it was scrolled to the end, the tab
+ * shown, and the composer's draft with the slash command chosen for it.
+ */
 interface PageState {
   open: string[];
   scroll: number | null;
   tab?: Tab;
+  draft?: string;
+  command?: string | null;
 }
 
 /** How long a copy button shows its check. */
@@ -53,7 +60,7 @@ export function shortTitle(title: string): string {
  * enabled only for a session the view can talk to, keeps its text until the hub took the message, takes back the text of a message that was
  * not sent, and shows why above the box until dismissed.
  */
-function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: ConversationState): void; sent(id: number, error: string | null): void; unsent(text: string, error: string): void } {
+function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: ConversationState): void; sent(id: number, error: string | null): void; unsent(text: string, error: string): void; receive(reply: ExtrasReply): void } {
   // As Claude Code's input: the text area over a footer, whose left side is kept for the controls later slices add. Why a message did not go
   // shows above it until dismissed.
   host.innerHTML =
@@ -81,6 +88,7 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
 
     grow();
     refresh();
+    extras.changed();
   };
   let enabled = false;
   let target: SendTarget | null = null;
@@ -103,8 +111,12 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
     input.readOnly = true;
     host.classList.add('sending');
     refresh();
-    vscode.postMessage({ type: 'send', id: sending, text: input.value, target: target! });
+    vscode.postMessage({ type: 'send', id: sending, text: input.value, target: target!, ...(extras.command(input.value) ? { command: true as const } : {}) });
   };
+  const extras = startComposerExtras(host, input, host.querySelector<HTMLElement>('.composer-controls')!, vscode, () => {
+    grow();
+    refresh();
+  }, (text) => showError(text));
 
   input.addEventListener('input', () => {
     grow();
@@ -115,6 +127,10 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
     input.focus();
   });
   input.addEventListener('keydown', (event) => {
+    if (extras.keydown(event)) {
+      return;
+    }
+
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
       return;
     }
@@ -130,6 +146,7 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
   return {
     update: (state) => {
       enabled = state.connected && state.session?.conversation === 'full';
+      extras.update(state);
       target = state.scope === null || state.session === null ? null : { scopeGen: state.scope.scopeGen, sessionId: state.session.id, launch: state.session.launch };
       host.hidden = state.scope === null;
       input.disabled = !enabled;
@@ -149,8 +166,10 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
         input.value = '';
         grow();
         showError(null);
+        extras.sent(true);
       } else {
         showError(refusal);
+        extras.sent(false);
       }
 
       putBack();
@@ -162,6 +181,7 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
         putBack();
       }
     },
+    receive: (reply) => extras.receive(reply),
   };
 }
 
@@ -331,10 +351,10 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
   const save = (): void => {
     const scroller = root.querySelector<HTMLElement>('.scroll');
 
-    // Off the Conversation tab, the scroll position it had is kept until it is shown again.
+    // Off the Conversation tab, the scroll position it had is kept until it is shown again. The composer keeps its draft in the same state.
     const scroll = scroller === null ? restore : atEnd(scroller) ? null : scroller.scrollTop;
 
-    vscode.setState({ open: [...open], scroll, tab } satisfies PageState);
+    vscode.setState({ ...((vscode.getState() as object | null) ?? {}), open: [...open], scroll, tab } satisfies PageState);
   };
   const atEnd = (scroller: HTMLElement): boolean => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
 
@@ -582,8 +602,10 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     checkSeen();
   });
 
-  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> }>) => {
-    if (event.data.type === 'focus') {
+  window.addEventListener('message', (event: MessageEvent<{ type: 'state'; state: ConversationState; unopened?: string[] } | { type: 'focus'; focused: boolean } | { type: 'seen-failed'; ids: string[] } | { type: 'sent'; id: number; error: string | null } | { type: 'copied'; id: number; ok: boolean } | { type: 'unsent'; returned: Array<{ text: string; error: string }> } | ExtrasReply>) => {
+    if (event.data.type === 'files' || event.data.type === 'commands' || event.data.type === 'mentions' || event.data.type === 'image') {
+      composer?.receive(event.data);
+    } else if (event.data.type === 'focus') {
       windowFocused = event.data.focused;
       checkSeen();
     } else if (event.data.type === 'seen-failed') {

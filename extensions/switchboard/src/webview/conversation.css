@@ -127,6 +127,28 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .composer .send:disabled { cursor: not-allowed; opacity: 0.4; }
 .composer .send .codicon { font-size: 16px; }
 .sending .composer { opacity: 0.7; }
+/* The composer's extras, measured from Claude Code's panel: its file and command lists 8 px above the box at its width, rows 4 by 8 px with a
+   4 px radius, a folder path dimmed and cut from its start; footer tools as 26 px ghost buttons; a dashed ring while files are dragged over. */
+.composer { position: relative; }
+.composer-menu { position: absolute; z-index: 10; left: -1px; right: -1px; bottom: 100%; margin-bottom: 8px; display: flex; flex-direction: column; gap: 2px; max-height: min(300px, 50vh); overflow-y: auto; padding: 2px; border: 1px solid var(--composer-border); border-radius: 8px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); color: var(--vscode-menu-foreground, var(--vscode-foreground)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.25)); }
+.composer-menu[hidden] { display: none; }
+.menu-item { display: flex; align-items: center; min-width: 0; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.menu-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.menu-item > .codicon { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; margin-right: 6px; opacity: 0.6; }
+.menu-name { flex: none; margin-right: 16px; white-space: nowrap; }
+.menu-dir { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; direction: rtl; opacity: 0.4; }
+.menu-dir bdi { direction: ltr; unicode-bidi: plaintext; }
+.menu-item.command { flex-direction: column; align-items: stretch; }
+.menu-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.menu-description { display: -webkit-box; margin-top: 2px; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; font-size: 0.85em; color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); }
+.menu-item.active .menu-description { color: inherit; opacity: 0.8; }
+.menu-empty { padding: 8px; text-align: center; font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+.composer-tool { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 5px; cursor: pointer; color: var(--vscode-descriptionForeground); background: transparent; font: inherit; }
+.composer-tool:hover:not(:disabled) { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+.composer-tool:disabled { cursor: not-allowed; opacity: 0.4; }
+.composer-tool .codicon { font-size: 16px; }
+.slash-glyph { font-family: var(--vscode-editor-font-family, monospace); font-size: 14px; line-height: 1; }
+#composer.drop-target .composer { outline: 2px dashed var(--vscode-focusBorder); outline-offset: 2px; }
 .composer-error { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 6px; padding: 6px 4px 6px 10px; border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); border-radius: 6px; background: var(--vscode-inputValidation-errorBackground, transparent); color: var(--vscode-foreground); }
 .composer-error[hidden] { display: none; }
 .composer-error-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }

@@ -627,7 +627,8 @@ describe('the composer', () => {
       input.dispatchEvent(new Event('input'));
     };
 
-    expect(host.querySelector('.composer > textarea + .composer-footer > .composer-controls')?.childElementCount).toBe(0);
+    // The left side holds the attach and slash command buttons (test/composer.test.ts), and later slices' controls after them.
+    expect([...host.querySelectorAll('.composer > textarea + .composer-footer > .composer-controls > button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Attach files', 'Show slash commands']);
     expect(send.querySelector('.codicon')?.className).toBe('codicon codicon-arrow-up');
     expect(send.getAttribute('aria-label')).toBe('Send');
     show(state());

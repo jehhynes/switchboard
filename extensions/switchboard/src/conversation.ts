@@ -8,6 +8,9 @@ import { applyEvent, EMPTY_CONVERSATION, statusLine, withEarlier } from './conve
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
 import type { ConversationMessage, SeenTarget, SendTarget } from './webview/conversationRender.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
+import { excludeGlob, fileGlob, rankFiles } from './composerModel.js';
+import type { CommandItem, FileItem } from './composerModel.js';
+import { writePastedImage } from './pastedImages.js';
 
 /**
  * The Conversation view's two contributions (architecture.md § Conversation view): in the secondary side bar, as Claude Code's own panel, and
@@ -70,6 +73,8 @@ const SEND_TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 5;
 /** How many not-sent messages of other windows, or not yet answered, the view remembers. */
 const NOT_SENT_KEPT = 20;
+/** How many files the picker asks VS Code for before it ranks them. */
+const FILES_FOUND = 500;
 
 /**
  * The Conversation view (architecture.md § Conversation view): follows this window's conversation stream, keeps its state and draws it in a
@@ -440,7 +445,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
    * Sends the composer's text to this window's current session (architecture.md § Typing a message). A command that got no answer is posted once
    * more with the same `opId`, which the hub answers with the message it already added. Resolves the refusal, or null once the hub took it.
    */
-  async send(text: string, shown: SendTarget): Promise<string | null> {
+  async send(text: string, shown: SendTarget, command = false): Promise<string | null> {
     const target = this.#target;
 
     if (target === null) {
@@ -448,7 +453,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
 
     // The session, launch and scope generation the page showed, so the hub refuses the message rather than send it elsewhere.
-    const body = { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, launch: shown.launch, text };
+    const body = { window: target.key, scopeGen: shown.scopeGen, opId: randomUUID(), sessionId: shown.sessionId, launch: shown.launch, text, ...(command ? { command: true } : {}) };
     const reply = (await postToHub(target.record, '/v1/conversation/send', body, SEND_TIMEOUT_MS)) ?? (await postToHub(target.record, '/v1/conversation/send', body, SEND_TIMEOUT_MS));
 
     if (reply === null) {
@@ -479,6 +484,54 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     }
 
     return null;
+  }
+
+  /** The folder the composer's mentions are relative to: the session's, or the window's first folder before the session has one. */
+  #folder(): string | null {
+    return this.#state.scope?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+  }
+
+  /**
+   * The composer's file picker (architecture.md § Conversation view): files under the session's folder whose path holds the query, without
+   * case, and the folders above them, leaving out `files.exclude`, `search.exclude` and the folders Claude Code's panel leaves out.
+   */
+  async files(query: string): Promise<FileItem[]> {
+    const folder = this.#folder();
+
+    if (folder === null) {
+      return [];
+    }
+
+    const exclude = excludeGlob(vscode.workspace.getConfiguration('files').get<Record<string, unknown>>('exclude'), vscode.workspace.getConfiguration('search').get<Record<string, unknown>>('exclude'));
+    const found = await vscode.workspace.findFiles(new vscode.RelativePattern(vscode.Uri.file(folder), fileGlob(query)), exclude, FILES_FOUND);
+    const base = vscode.Uri.file(folder).path.replace(/\/$/, '');
+
+    return rankFiles(
+      found.map((uri) => (uri.path.toLowerCase().startsWith(`${base.toLowerCase()}/`) ? uri.path.slice(base.length + 1) : null)).filter((path): path is string => path !== null),
+      query,
+    );
+  }
+
+  /** The window's current session's slash commands from the hub's `commands`, or why there are none. */
+  async commands(): Promise<{ commands: CommandItem[] | null; error: string | null }> {
+    const target = this.#target;
+    const scope = this.#state.scope;
+
+    if (target === null || scope === null || scope.sessionId === null) {
+      return { commands: null, error: 'This window has no session.' };
+    }
+
+    const reply = await postToHub(target.record, '/v1/conversation/commands', { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), sessionId: scope.sessionId }, HISTORY_TIMEOUT_MS);
+
+    return reply?.status === 200 ? { commands: (reply.body as { commands: CommandItem[] }).commands, error: null } : { commands: null, error: reply?.error ?? 'The hub did not answer.' };
+  }
+
+  /** Files picked in VS Code's open dialog, from the session's folder, for the composer to mention. */
+  async attach(): Promise<string[]> {
+    const folder = this.#folder();
+    const picked = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: true, openLabel: 'Attach', title: 'Attach files', ...(folder === null ? {} : { defaultUri: vscode.Uri.file(folder) }) });
+
+    return (picked ?? []).map((uri) => uri.fsPath);
   }
 
   /** Opens a reply's link: a web page in the browser, a file at its line in an editor; anything else is dropped. */
@@ -537,7 +590,27 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
               () => view.webview.postMessage({ type: 'copied', id: message.id, ok: false }),
             );
           case 'send':
-            return this.send(String(message.text), message.target).then((error) => view.webview.postMessage({ type: 'sent', id: message.id, error }));
+            return this.send(String(message.text), message.target, message.command === true).then((error) => view.webview.postMessage({ type: 'sent', id: message.id, error }));
+          case 'files':
+            return this.files(String(message.query)).then(
+              (items) => view.webview.postMessage({ type: 'files', id: message.id, items }),
+              () => view.webview.postMessage({ type: 'files', id: message.id, items: [] }),
+            );
+          case 'commands':
+            return this.commands().then((answer) => view.webview.postMessage({ type: 'commands', id: message.id, ...answer }));
+          case 'attach':
+            return this.attach().then((paths) => (paths.length === 0 ? undefined : view.webview.postMessage({ type: 'mentions', paths })));
+          case 'image': {
+            let written: { path: string } | { error: string };
+
+            try {
+              written = writePastedImage(String(message.mime), String(message.data), Date.now());
+            } catch (error) {
+              written = { error: `The pasted image could not be saved: ${error instanceof Error ? error.message : String(error)}` };
+            }
+
+            return Promise.resolve(view.webview.postMessage({ type: 'image', id: message.id, path: 'path' in written ? written.path : null, error: 'error' in written ? written.error : null }));
+          }
           default:
             return Promise.resolve();
         }

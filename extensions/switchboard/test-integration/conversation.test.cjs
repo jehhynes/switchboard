@@ -48,6 +48,32 @@ describe('the Conversation view', () => {
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 
+  it("lists the composer's files under the window's folder without case, leaving out excluded folders, with the folders above them", async () => {
+    const extension = await vscode.extensions.getExtension('switchboard.switchboard').activate();
+    const folder = vscode.workspace.workspaceFolders[0].uri;
+    const made = ['pick-test/Alpha One.ts', 'pick-test/deep/alphabet.md', 'node_modules/pick-test/alpha.js', 'pick-test/beta.ts'];
+
+    try {
+      for (const path of made) {
+        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(folder, path), new Uint8Array());
+      }
+
+      // The window has no session, so the picker searches the window's folder.
+      assert.deepStrictEqual(await extension.conversationFiles('ALPH'), [
+        { path: 'pick-test/Alpha One.ts', dir: false },
+        { path: 'pick-test/deep/alphabet.md', dir: false },
+      ]);
+      assert.deepStrictEqual(await extension.conversationFiles('pick-test/de'), [
+        { path: 'pick-test/deep/', dir: true },
+        { path: 'pick-test/deep/alphabet.md', dir: false },
+      ]);
+      assert.deepStrictEqual(await extension.conversationFiles('[x]'), []);
+    } finally {
+      await vscode.workspace.fs.delete(vscode.Uri.joinPath(folder, 'pick-test'), { recursive: true });
+      await vscode.workspace.fs.delete(vscode.Uri.joinPath(folder, 'node_modules'), { recursive: true });
+    }
+  });
+
   it('serves a status as a Markdown document under switchboard-status:, which the Markdown preview opens', async () => {
     await vscode.extensions.getExtension('switchboard.switchboard').activate();
 

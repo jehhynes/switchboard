@@ -9,7 +9,11 @@ export type ConversationMessage =
   | { type: 'earlier' }
   | { type: 'open'; href: string }
   | { type: 'terminal' }
-  | { type: 'send'; id: number; text: string; target: SendTarget }
+  | { type: 'send'; id: number; text: string; target: SendTarget; command?: true }
+  | { type: 'files'; id: number; query: string }
+  | { type: 'commands'; id: number }
+  | { type: 'attach' }
+  | { type: 'image'; id: number; mime: string; data: string }
   | { type: 'copy'; id: number; text: string }
   | { type: 'status-open' }
   | { type: 'statuses' }

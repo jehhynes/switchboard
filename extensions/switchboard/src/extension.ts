@@ -74,6 +74,8 @@ export interface SwitchboardApi {
   receiveConversation(event: ConversationEvent): void;
   /** The Conversation view's badge, its current session's unread count (architecture.md § Unread); undefined while none is unread or the view is not resolved. */
   conversationBadge(): vscode.ViewBadge | undefined;
+  /** The composer's file picker for a query (architecture.md § Conversation view), as the page asks for it. */
+  conversationFiles(query: string): ReturnType<ConversationView['files']>;
   /** What the Conversation view's Artifacts tab lists, its badge and the HTML artifact panels open (architecture.md § Artifacts). */
   artifacts(): ReturnType<Artifacts['shown']>;
   /** Turns ```mermaid fences into diagrams in the Markdown preview (architecture.md § Artifacts), which VS Code's Markdown extension calls. */
@@ -564,6 +566,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     conversation: () => conversation.state(),
     receiveConversation: (event) => conversation.receive(event),
     conversationBadge: () => conversation.badge(),
+    conversationFiles: (query) => conversation.files(query),
     artifacts: () => artifacts.shown(),
     extendMarkdownIt,
     windowKey: () => windowKey,
