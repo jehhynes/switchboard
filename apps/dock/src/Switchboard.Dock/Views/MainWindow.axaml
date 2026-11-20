@@ -333,12 +333,13 @@
             IsVisible="{Binding GripOnLeft}" PointerPressed="OnGripPressed" PointerMoved="OnGripMoved" PointerReleased="OnGripReleased" PointerCaptureLost="OnGripCaptureLost" />
     <DockPanel Name="ListPanel" Grid.Column="1">
       <StackPanel DockPanel.Dock="Top" Margin="8,0,0,0" Spacing="4">
-        <!-- 35px, the height of VS Code's title bar on Windows. -->
-        <Grid Height="35" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <!-- 35px, the height of VS Code's title bar on Windows. Close and the header's buttons keep their width on a narrow dock and the title takes
+             what is left, ending in an ellipsis (HeaderPanel). -->
+        <views:HeaderPanel Height="35">
           <!-- Dragging the title docks the dock at the nearer left or right edge of the monitor under the pointer as it moves. -->
-          <TextBlock Name="MoveHandle" Text="Switchboard" FontSize="12" Classes="muted" VerticalAlignment="Center" Cursor="SizeAll" Background="Transparent"
+          <TextBlock Name="MoveHandle" Text="Switchboard" FontSize="12" Classes="muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Cursor="SizeAll" Background="Transparent"
                      ToolTip.Tip="Drag to the left or right half of a monitor to dock there" PointerPressed="OnMovePressed" PointerMoved="OnMoveMoved" PointerReleased="OnMoveReleased" PointerCaptureLost="OnMoveCaptureLost" />
-          <ItemsControl Name="SourceList" Grid.Column="1" ItemsSource="{Binding Sources}" VerticalAlignment="Center">
+          <ItemsControl Name="SourceList" ItemsSource="{Binding Sources}" VerticalAlignment="Center">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
                 <StackPanel Orientation="Horizontal" />
@@ -356,23 +357,23 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <Border Grid.Column="2" Classes="separator" IsVisible="{Binding !!Sources.Count}" />
-          <Button Name="SearchButton" Grid.Column="3" Classes="header" Click="OnSearchClicked" ToolTip.Tip="Search" AutomationProperties.Name="Search">
+          <Border Classes="separator" IsVisible="{Binding !!Sources.Count}" />
+          <Button Name="SearchButton" Classes="header" Click="OnSearchClicked" ToolTip.Tip="Search" AutomationProperties.Name="Search">
             <TextBlock Classes="icon" Text="&#xEA6D;" />
           </Button>
-          <Button Name="AutoHideButton" Grid.Column="4" Classes="header" Click="OnAutoHideClicked" ToolTip.Tip="{Binding AutoHideTip}" AutomationProperties.Name="Auto-hide">
+          <Button Name="AutoHideButton" Classes="header" Click="OnAutoHideClicked" ToolTip.Tip="{Binding AutoHideTip}" AutomationProperties.Name="Auto-hide">
             <TextBlock Classes="icon" Text="{Binding AutoHideGlyph}" />
           </Button>
           <!-- New Ad-hoc Session, New Session in a Folder, Open Settings and Show Hub Log, in a menu to keep the title row short. -->
-          <Button Name="MoreButton" Grid.Column="5" Classes="header" Click="OnMoreClicked" ToolTip.Tip="More Actions…" AutomationProperties.Name="More Actions">
+          <Button Name="MoreButton" Classes="header" Click="OnMoreClicked" ToolTip.Tip="More Actions…" AutomationProperties.Name="More Actions">
             <TextBlock Classes="icon" Text="&#xEA7C;" />
           </Button>
           <!-- Set apart, so Close is not clicked by mistake for another control. -->
-          <Border Grid.Column="6" Classes="separator" Margin="8,0" />
-          <Button Name="CloseButton" Grid.Column="7" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock" AutomationProperties.Name="Close the dock">
+          <Border Classes="separator" Margin="8,0" />
+          <Button Name="CloseButton" Classes="header" Click="OnCloseClicked" ToolTip.Tip="Close the dock" AutomationProperties.Name="Close the dock">
             <TextBlock Classes="icon" Text="&#xEA76;" />
           </Button>
-        </Grid>
+        </views:HeaderPanel>
         <TextBox Name="SearchBox" Text="{Binding Query}" IsVisible="{Binding SearchOpen}" PlaceholderText="Search title, key, PR, playbook, branch" KeyDown="OnSearchKey" Margin="0,0,8,8" FontSize="13">
           <TextBox.InnerRightContent>
             <Button Name="ClearSearchButton" Classes="header" Click="OnClearSearchClicked" ToolTip.Tip="Clear search" AutomationProperties.Name="Clear search">
