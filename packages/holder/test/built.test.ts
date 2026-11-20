@@ -20,29 +20,33 @@ function alive(pid: number): boolean {
   }
 }
 
-function forceKill(pid: number): void {
+/** Ends the process and its tree. taskkill fails when the process, or a member of its tree, ends while it runs, so a process that is gone counts as ended. */
+async function forceKill(pid: number): Promise<void> {
   if (!alive(pid)) {
     return;
   }
 
-  if (process.platform === 'win32') {
-    execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
-  } else {
-    process.kill(pid, 'SIGKILL');
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      process.kill(pid, 'SIGKILL');
+    }
+  } catch (error) {
+    // Termination completes after taskkill returns, so wait for it before deciding.
+    await until(() => !alive(pid), `process ${pid} to end`, 5_000).catch(() => {
+      throw error;
+    });
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const pid of pids.splice(0)) {
-    try {
-      forceKill(pid);
-    } catch {
-      // Already gone.
-    }
+    await forceKill(pid).catch(() => undefined);
   }
 
   for (const home of homes.splice(0)) {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -155,8 +159,8 @@ describe('built holder', () => {
     await until(async () => (await client.screen('s1')).head.includes('ready'), 'the program output');
     expect(await client.kill('s1')).toBe(7);
     expect(readFileSync(marker, 'utf8')).toBe('hangup');
-    client.close();
-    forceKill(holder.pid);
+    await client.shutdown();
+    expect(await holder.exited).toBe(0);
   }, 30_000);
 
   it('exits by itself after the idle time with no live session, whatever clients are connected', async () => {
@@ -192,7 +196,7 @@ describe('built holder', () => {
     const first = startHolder(home);
 
     await record(home);
-    forceKill(first.pid);
+    await forceKill(first.pid);
     await first.exited;
     expect(existsSync(recordPath(home))).toBe(true);
 
