@@ -13,7 +13,7 @@ const recorded = JSON.parse(readFileSync(new URL('../../codex/test/fixtures/app-
 const closes: Array<() => void> = [];
 afterEach(() => closes.splice(0).forEach(close => close()));
 
-function setup() {
+function setup(resume?: (sessionId: string) => Promise<string | null>) {
   const store = Store.open(':memory:'); let id=0; let keys=0; let now=1_000;
   const first = item(1,{sessions:[session({provider:'codex',execution:'app-server',nativeSessionId:'thread-1',shortId:'thread-1',launchId:'launch-1'})]});
   const second = item(2,{sessions:[session({id:'s2',workItemId:2,provider:'codex',execution:'app-server',nativeSessionId:'thread-2',shortId:'thread-2',launchId:'launch-2',cwd:'D:/other'})]});
@@ -29,7 +29,7 @@ function setup() {
   let turns:Json[]=[];
   const runner={subscription:()=>0,configure:vi.fn(async()=>{}),restoreInstructions:vi.fn(async()=>{}),follow:vi.fn(async()=>({status:{type:'idle'}})),history:vi.fn(async(threadId:string)=>threadId==='thread-1'?turns:[]),send:vi.fn(async()=>{})};
   const frames:Json[]=[];const others:Json[]=[];let adapter:CodexConversationAdapter;
-  const service=new ConversationService({store,windows:scopes,projectsDir:'/unused',claudeConfig:'/unused',screen:async()=>{throw new Error('Codex must not read a screen');},input:{reserve:async()=>{throw new Error('Codex must not reserve terminal input');},write:async()=>{throw new Error('Codex must not type');},cannotType:()=> 'holder unavailable'},hooks:()=>false,now:()=>now,newId:()=>String(++id),log:()=>{},adapters:changed=>[adapter=new CodexConversationAdapter({store,server:server as unknown as AppServer,runner:runner as unknown as AppServerRunner,now:()=>now,newId:()=>String(++id),log:()=>{},requestsChanged:()=>service.sessionsChanged()},changed)]});
+  const service=new ConversationService({store,windows:scopes,projectsDir:'/unused',claudeConfig:'/unused',screen:async()=>{throw new Error('Codex must not read a screen');},input:{reserve:async()=>{throw new Error('Codex must not reserve terminal input');},write:async()=>{throw new Error('Codex must not type');},cannotType:()=> 'holder unavailable'},hooks:()=>false,now:()=>now,newId:()=>String(++id),log:()=>{},...(resume===undefined?{}:{resume}),adapters:changed=>[adapter=new CodexConversationAdapter({store,server:server as unknown as AppServer,runner:runner as unknown as AppServerRunner,now:()=>now,newId:()=>String(++id),log:()=>{},requestsChanged:()=>service.sessionsChanged()},changed)]});
   service.open(key,frame=>frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   service.open(other,frame=>others.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   closes.push(()=>{service.stop();store.close();});
@@ -38,6 +38,45 @@ function setup() {
 }
 
 describe('Codex conversation adapter and shared service',()=>{
+  it('resumes an ended thread before sending a message typed to it, under its new launch, and gives the message back when it cannot',async()=>{
+    let refuse:string|null=null;
+    const resume=vi.fn(async(sessionId:string)=>{if(refuse===null)p.store.updateSession(sessionId,{state:'idle',endedAt:null,released:false,launchId:'launch-2'});return refuse;});
+    const p=setup(resume);await p.service.poll();
+    p.store.updateSession('s1',{state:'ended',endedAt:1_000,released:true});
+    expect(sessionView(p.store.session('s1')!,true,false)).toMatchObject({conversation:'full',reason:null,state:'ended'});
+    const result=p.service.send(p.body);expect(result.status).toBe(200);
+    const id=(result.body as {message:{id:string}}).message.id;
+    await vi.waitFor(()=>expect(p.runner.send).toHaveBeenCalledWith('thread-1',id,'hello',[]));
+    expect(resume).toHaveBeenCalledWith('s1');
+    expect(p.store.message(id)?.delivery).toBe('sent');
+
+    p.store.updateSession('s1',{state:'ended',endedAt:2_000,released:true});refuse='A newer session of this work item started; this one cannot resume.';
+    const refused=p.service.send({...p.body,launch:'launch-2',opId:'op-2'});
+    const gone=(refused.body as {message:{id:string}}).message.id;
+    await vi.waitFor(()=>expect(p.store.message(gone)).toBeNull());
+    expect(p.frames.some(f=>f['type']==='message'&&(f['message'] as Json)['id']===gone&&(f['message'] as Json)['delivery']==='not-sent'&&(f['message'] as Json)['error']===refuse)).toBe(true);
+    expect(p.runner.send).toHaveBeenCalledTimes(1);
+    // A session that never got a thread ID has nothing to resume.
+    expect(sessionView({...p.store.session('s1')!,nativeSessionId:null},true,false)).toMatchObject({conversation:'read-only',reason:expect.stringContaining('Open it in the terminal')});
+  });
+  it('resumes an ended thread whose last follow failed, rather than refusing with that failure',async()=>{
+    const resume=vi.fn(async(sessionId:string)=>{p.store.updateSession(sessionId,{state:'idle',endedAt:null,released:false,launchId:'launch-2'});return null;});
+    const p=setup(resume);
+    p.runner.follow.mockRejectedValueOnce(new Error('daemon gone'));
+    await p.service.poll();
+    expect(p.adapter().cannotSend(p.store.session('s1')!)).toContain('daemon gone');
+    p.store.updateSession('s1',{state:'ended',endedAt:1_000,released:true});
+    expect(p.service.send(p.body).status).toBe(200);
+    await vi.waitFor(()=>expect(p.runner.send).toHaveBeenCalledTimes(1));
+    expect(resume).toHaveBeenCalledWith('s1');
+  });
+  it('refuses a message to an ended thread when the hub cannot resume it',async()=>{
+    const p=setup();await p.service.poll();
+    p.store.updateSession('s1',{state:'ended',endedAt:1_000,released:true});
+    const id=(p.service.send(p.body).body as {message:{id:string}}).message.id;
+    await vi.waitFor(()=>expect(p.store.message(id)).toBeNull());
+    expect(p.runner.send).not.toHaveBeenCalled();
+  });
   it('buffers a live reply until older history is imported, so it answers the right message',async()=>{
     const p=setup();
     p.runner.history.mockImplementationOnce(async()=>{p.emit(recorded.reply);return [{items:[(recorded.user['params'] as Json)['item']]}];});

@@ -42,6 +42,21 @@ describe('Codex app-server sessions', () => {
     h.act({type:'marker',sessionId:'s1',state:'idle',detail:null});expect(heldSlots(h.store)).toBe(0);
     expect(h.item(1).status).toBe('running');h.store.close();
   });
+  it('holds a stopped thread again under a new launch when it resumes, keeping its outcome and work item status until a turn', () => {
+    const h = new Harness({settings:settings({sessions:{provider:'codex'}})}); start(h);
+    h.act({type:'stop-succeeded',sessionId:'s1',reason:'operator'});
+    const stopped = h.item(1).status;
+    expect(h.store.session('s1')).toMatchObject({state:'ended',released:true});
+    h.act({type:'held-resumed',sessionId:'s1',launchId:'launch-2'});
+    expect(h.store.session('s1')).toMatchObject({state:'idle',released:false,releasing:false,endedAt:null,launchId:'launch-2',outcome:'stopped'});
+    expect(h.item(1).status).toBe(stopped);
+    h.act({type:'marker',sessionId:'s1',state:'running',detail:null});
+    expect(h.item(1).status).toBe('running');
+    // A live session is not resumed again.
+    h.act({type:'held-resumed',sessionId:'s1',launchId:'launch-3'});
+    expect(h.store.session('s1')?.launchId).toBe('launch-2');
+    h.store.close();
+  });
   it('carries the execution method through Delete and revives a stopped thread only when observed active', () => {
     const h = new Harness({settings:settings({sessions:{provider:'codex'}})}); start(h);
     h.act({type:'stop-succeeded',sessionId:'s1',reason:'operator'});

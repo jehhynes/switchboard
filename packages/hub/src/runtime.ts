@@ -209,6 +209,11 @@ export class Runtime {
       sessionByNative: id => deps.store.sessionByNativeId(id),
       canRevive: session => deps.store.workItem(session.workItemId)?.status !== 'done' && deps.store.sessionsFor(session.workItemId).at(-1)?.id === session.id,
       currentInstructions: session => this.contract(session.nativeSessionId!, 'resume') ?? '',
+      resumeOptions: session => {
+        const item = deps.store.workItem(session.workItemId);
+        const playbook = item?.playbook == null ? null : (this.config.playbooks.get(item.playbook) ?? null);
+        return launchOptions(this.config.settings, playbook, session.kind, session.provider);
+      },
       configured: session => { this.send({ type: 'persona-delivered', sessionId: session.id }); },
       instructionsDelivered: (id, hash, compactionId) => { if (deps.store.session(id) !== null) deps.store.updateSession(id, { instructionsHash: hash, instructionsCompactionId: compactionId }); },
       log: deps.log,
@@ -1956,6 +1961,105 @@ export class Runtime {
     }
   }
 
+  /** The resume of each ended Codex app-server session in flight, which concurrent resumes share. */
+  private readonly threadResumes = new Map<string, Promise<string | null>>();
+
+  /**
+   * Resumes an ended Codex app-server session (PRD R107), for a message typed to it or a resume in its terminal: joins its thread in the daemon
+   * with the start's options and the current instructions, then holds the session again under a new launch. Only the work item's latest session
+   * resumes, since a newer one continues the work. Why not, or null.
+   */
+  resumeThread(sessionId: string): Promise<string | null> {
+    const running = this.threadResumes.get(sessionId);
+
+    if (running !== undefined) {
+      return running;
+    }
+
+    const work = this.joinThread(sessionId).finally(() => this.threadResumes.delete(sessionId));
+
+    this.threadResumes.set(sessionId, work);
+    return work;
+  }
+
+  /**
+   * A Codex SessionStart hook with source `resume` for an ended app-server session: a client such as Open in terminal's `codex resume --remote`
+   * resumed its thread in the daemon, so Switchboard resumes the session too.
+   */
+  threadResumedElsewhere(nativeSessionId: string): void {
+    const session = this.deps.store.sessionByNativeId(nativeSessionId);
+
+    if (session?.execution === 'app-server' && session.state === 'ended' && !this.resuming.has(session.id)) {
+      this.track(this.resumeThread(session.id).then((refused) => {
+        if (refused !== null) {
+          this.deps.log(`session ${session.id} was resumed in Codex, but Switchboard could not follow it: ${refused}`);
+        }
+      }));
+    }
+  }
+
+  private async joinThread(sessionId: string): Promise<string | null> {
+    const store = this.deps.store;
+    const session = store.session(sessionId);
+
+    if (session === null) {
+      return `No session ${sessionId}.`;
+    }
+
+    if (session.execution !== 'app-server' || session.nativeSessionId === null) {
+      return SESSION_ENDED;
+    }
+
+    if (session.state !== 'ended') {
+      return null;
+    }
+
+    if (store.sessionsFor(session.workItemId).at(-1)?.id !== sessionId) {
+      return 'A newer session of this work item started; this one cannot resume.';
+    }
+
+    this.resuming.add(sessionId);
+
+    try {
+      // A Stop still running would end the resumed launch, so the resume waits for it.
+      while (this.ending.has(sessionId)) {
+        await this.ending.get(sessionId);
+      }
+
+      try {
+        await this.codexAppServer.resumeThread(session);
+      } catch (error) {
+        this.deps.log(`session ${sessionId} could not resume in the Codex daemon: ${String(error)}`);
+        return `Codex could not resume the session: ${String(error)}`;
+      }
+
+      const after = store.session(sessionId);
+
+      if (after === null) {
+        return `No session ${sessionId}.`;
+      }
+
+      // A newer session that started meanwhile, as by Approve, continues the work, so this thread is left again.
+      if (store.sessionsFor(after.workItemId).at(-1)?.id !== sessionId) {
+        if (after.state === 'ended') {
+          await this.codexAppServer.stop({ sessionId, shortId: after.nativeSessionId }, 'release');
+        }
+
+        return 'A newer session of this work item started; this one cannot resume.';
+      }
+
+      // A roster read may have held it again meanwhile, after a turn the operator started in its terminal.
+      if (after.state === 'ended') {
+        this.deps.log(`session ${sessionId} resumed in the Codex daemon`);
+        this.send({ type: 'held-resumed', sessionId, launchId: randomUUID() });
+      }
+
+      return null;
+    } finally {
+      this.resuming.delete(sessionId);
+    }
+  }
+
   /** Spawns the ended session again; roster reads leave it alone meanwhile, since they cannot tell its new process from its old launch. */
   private async resume(session: Session, name: string, answer: () => AttachResult, refuse: (refused: string, status?: 404 | 409) => AttachResult): Promise<AttachResult> {
     const store = this.deps.store;
@@ -2200,8 +2304,9 @@ export class Runtime {
           });
         }
 
-        // An attach waits for every stop of a held session, operator stops included, until its result reaches the flow.
-        if (action.codeMode === true) {
+        // An attach waits for every stop of a held session, operator stops included, until its result reaches the flow, and a Codex app-server
+        // resume for every stop of its thread.
+        if (action.codeMode === true || action.execution === 'app-server') {
           const earlier = this.ending.get(action.sessionId);
 
           return this.trackEnd(action.sessionId, async () => {

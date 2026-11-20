@@ -4,7 +4,7 @@ import { delimiter, join } from 'node:path';
 import { ClaudeRunner, conversationRules } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
-import { DEFAULT_SETTINGS, parsePlaybook, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
+import { DEFAULT_SETTINGS, launchOptions, parsePlaybook, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { NotWritten } from '@switchboard/conversation';
@@ -3767,5 +3767,70 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
         context.runtime.stop();
       });
     });
+  });
+});
+
+describe('Codex app-server resume (PRD R107)', () => {
+  async function stopped() {
+    const h = setup(config({ provider: 'codex' }));
+    h.runtime.send({ type: 'adhoc', prompt: 'Do it', repoRoot: 'D:/repo', start: true });
+    await h.runtime.settled();
+    const started = h.store.session('s1')!;
+    expect(started).toMatchObject({ execution: 'app-server' });
+    h.runtime.send({ type: 'stop-succeeded', sessionId: 's1', reason: 'operator' });
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended' });
+    return { ...h, started };
+  }
+
+  it('resumes an ended thread once with the start options, and holds it again under a new launch', async () => {
+    const h = await stopped();
+    const configure = vi.spyOn(h.runtime.codexAppServer, 'configure').mockResolvedValue();
+    expect(await Promise.all([h.runtime.resumeThread('s1'), h.runtime.resumeThread('s1')])).toEqual([null, null]);
+    expect(configure).toHaveBeenCalledTimes(1);
+    expect(h.store.session('s1')).toMatchObject({ state: 'idle', released: false, endedAt: null });
+    expect(h.store.session('s1')!.launchId).not.toBe(h.started.launchId);
+    expect(h.logs).toContain('session s1 resumed in the Codex daemon');
+    expect(h.runtime.codexAppServer.deps.resumeOptions?.(h.store.session('s1')!)).toEqual(launchOptions(config({ provider: 'codex' }).settings, null, 'task', 'codex'));
+    // A live session is not resumed again.
+    expect(await h.runtime.resumeThread('s1')).toBeNull();
+    expect(configure).toHaveBeenCalledTimes(1);
+    expect(await h.runtime.resumeThread('missing')).toBe('No session missing.');
+    h.runtime.stop(); h.store.close();
+  });
+
+  it('leaves the session ended with why when Codex refuses, and follows a resume another Codex client made', async () => {
+    const h = await stopped();
+    const configure = vi.spyOn(h.runtime.codexAppServer, 'configure').mockRejectedValueOnce(new Error('thread not found'));
+    expect(await h.runtime.resumeThread('s1')).toContain('thread not found');
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended' });
+    configure.mockResolvedValue();
+    h.runtime.threadResumedElsewhere('unknown-thread');
+    h.runtime.threadResumedElsewhere(h.started.nativeSessionId!);
+    await h.runtime.settled();
+    expect(configure).toHaveBeenCalledTimes(2);
+    expect(h.store.session('s1')).toMatchObject({ state: 'idle' });
+    h.runtime.stop(); h.store.close();
+  });
+
+  it('waits for a Stop still running, and leaves the thread when a newer session started during the resume', async () => {
+    const h = await stopped();
+    let finish = (): void => undefined;
+    const stopping = new Promise<void>((resolve) => { finish = resolve; });
+    (h.runtime as unknown as { ending: Map<string, Promise<void>> }).ending.set('s1', stopping);
+    const real = h.store.sessionsFor.bind(h.store);
+    let newer = false;
+    vi.spyOn(h.store, 'sessionsFor').mockImplementation((id) => (newer ? [...real(id), { ...real(id)[0]!, id: 's9' }] : real(id)));
+    const configure = vi.spyOn(h.runtime.codexAppServer, 'configure').mockImplementation(async () => { newer = true; });
+    const stop = vi.spyOn(h.runtime.codexAppServer, 'stop').mockResolvedValue(null);
+    const resumed = h.runtime.resumeThread('s1');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(configure).not.toHaveBeenCalled();
+    (h.runtime as unknown as { ending: Map<string, Promise<void>> }).ending.delete('s1');
+    finish();
+    expect(await resumed).toContain('A newer session');
+    expect(configure).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledWith({ sessionId: 's1', shortId: h.started.nativeSessionId }, 'release');
+    expect(h.store.session('s1')).toMatchObject({ state: 'ended' });
+    h.runtime.stop(); h.store.close();
   });
 });

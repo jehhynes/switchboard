@@ -198,7 +198,10 @@ export type FlowEvent =
   | { type: 'held-idle'; sessionId: string }
   /** `POST /attach` is about to resume this ended Code Mode session under this launch, stored first so a hub restart during the spawn can recognize it (PRD R95). */
   | { type: 'held-resuming'; sessionId: string; launchId: string }
-  /** `POST /attach` resumed this ended Code Mode session in the holder under a new launch, or the hub found it live under its stored launch (PRD R95). */
+  /**
+   * `POST /attach` resumed this ended Code Mode session in the holder under a new launch, or the hub found it live under its stored launch (PRD R95),
+   * or the hub resumed this ended Codex app-server thread under a new launch (PRD R107).
+   */
   | { type: 'held-resumed'; sessionId: string; launchId: string }
   | { type: 'report'; sessionId: string; report: Report }
   /** The hub's recheck of a done report whose first read still listed the ticket as assigned (PRD R10). */
@@ -1971,11 +1974,14 @@ class Flow {
     }
   }
 
-  /** A resume through `POST /attach` holds the ended session again; its outcome and its work item's status stand until a new turn (PRD R95). */
+  /**
+   * A resume through `POST /attach` (PRD R95), or of a Codex app-server thread (PRD R107), holds the ended session again under a new launch; its
+   * outcome and its work item's status stand until a new turn.
+   */
   private heldResumed(sessionId: string, launchId: string): void {
     const session = this.store.session(sessionId);
 
-    if (session === null || session.codeMode !== true || session.state !== 'ended') {
+    if (session === null || !persistent(session) || session.state !== 'ended') {
       return;
     }
 

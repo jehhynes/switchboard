@@ -91,11 +91,13 @@ export function statusView(status: ConversationStatus): StatusView {
 export function sessionView(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
   const state = session.state === 'failed' ? 'idle' : session.state;
   const waitingFor = session.state !== 'waiting' ? null : session.stateDetail === PERMISSION_PROMPT ? 'permission' : session.stateDetail === START_PROMPT ? 'start-prompt' : 'question';
-  const conversation = session.codeMode !== true && session.execution !== 'app-server' ? 'none' : session.state === 'ended' || (session.codeMode === true && !hooks) ? 'read-only' : 'full';
+  // A message to an ended app-server session resumes its thread first (PRD R107); an ended Code Mode session resumes through its attach terminal.
+  const resumable = session.execution === 'app-server' && session.nativeSessionId !== null;
+  const conversation = session.codeMode !== true && session.execution !== 'app-server' ? 'none' : (session.state === 'ended' && !resumable) || (session.codeMode === true && !hooks) ? 'read-only' : 'full';
   const reason =
     conversation === 'none'
       ? `This session runs in the background; open it in ${session.provider === 'codex' ? 'Codex' : 'Claude'} to talk to it.`
-      : session.state === 'ended'
+      : session.state === 'ended' && !resumable
         ? 'The session has ended. Open it in the terminal to resume it.'
         : conversation === 'read-only'
           ? 'Switchboard cannot follow this session while sessions.installHooks is off.'
@@ -200,6 +202,8 @@ export interface ConversationServiceDeps {
   newConversation?(hostWindow: string, folder: string): { workItemId: number } | { refused: string };
   /** A message was added to a work item's conversation, whose first titles a hosted conversation. */
   messageAdded?(workItemId: number, text: string): void;
+  /** Resumes an ended Codex app-server session before a message typed to it is sent (PRD R107); why not, or null. */
+  resume?(sessionId: string): Promise<string | null>;
   /** Speech out (architecture.md § Voice); without it no window has voice. */
   voice?: ConversationVoice;
   /** The voice settings personas are read from (architecture.md § Personas); without them no session has a persona. */
@@ -901,7 +905,8 @@ export class ConversationService {
       return { status: 409, body: { error: SESSION_RELAUNCHED } };
     }
 
-    const cannotType = this.#adapter(session)?.cannotSend(session) ?? null;
+    // A resume follows an ended app-server thread again, which clears an error left from before it ended.
+    const cannotType = session.state === 'ended' ? null : (this.#adapter(session)?.cannotSend(session) ?? null);
 
     if (cannotType !== null) {
       return { status: 409, body: { error: cannotType } };
@@ -955,12 +960,28 @@ export class ConversationService {
     const message = this.deps.store.message(added.id)!;
 
     this.#changed(sessionId, { type: 'message', message });
-    this.#adapter(session)?.send(session, message, typed, (outcome) => this.#delivered(message.id, outcome), {
-      check: () => this.#check(sessionId, launch),
-      reserve: () => this.deps.input.reserve(sessionId, launch),
+    const deliver = (to: Session, toLaunch: string | null): void => this.#adapter(to)?.send(to, message, typed, (outcome) => this.#delivered(message.id, outcome), {
+      check: () => this.#check(sessionId, toLaunch),
+      reserve: () => this.deps.input.reserve(sessionId, toLaunch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
       command: options.command,
     });
+
+    if (session.state !== 'ended') {
+      deliver(session, launch);
+    } else {
+      // An ended app-server session resumes under a new launch, which the message is then sent to (PRD R107).
+      void (this.deps.resume?.(sessionId) ?? Promise.resolve(SESSION_ENDED)).then((refused) => {
+        const resumed = this.deps.store.session(sessionId);
+
+        if (refused !== null || resumed === null || resumed.state === 'ended') {
+          this.#delivered(message.id, { delivery: 'not-sent', error: refused ?? SESSION_ENDED });
+          return;
+        }
+
+        deliver(resumed, resumed.launchId ?? null);
+      }, (error: unknown) => this.#delivered(message.id, { delivery: 'not-sent', error: String(error) }));
+    }
 
     return message;
   }
@@ -982,7 +1003,9 @@ export class ConversationService {
           ? (view.reason ?? SESSION_ENDED)
           : text.length > MAX_MESSAGE_CHARS
             ? `The message is longer than ${MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.`
-            : (this.#adapter(session!)?.cannotSend(session!) ?? null);
+            : session!.state === 'ended'
+              ? null
+              : (this.#adapter(session!)?.cannotSend(session!) ?? null);
 
     if (refused !== null || session === null) {
       const why = refused ?? SESSION_ENDED;

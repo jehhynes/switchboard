@@ -205,6 +205,40 @@ describe('Codex app-server runner', () => {
     expect(p.sent.filter(m=>m['method']==='thread/inject_items')).toHaveLength(2);
   });
 
+  it('resumes an ended thread with the start\'s folder, permissions, artifact folder and model, and its changed instructions once', async () => {
+    const p=setup();await p.runner.start(p.action);p.session.state='ended';
+    p.runner.deps.resumeOptions=()=>({permissionMode:'auto',model:'test-model'});
+    p.runner.deps.currentInstructions=()=> 'contract and rules\n\nVoice rules';
+    const configured=vi.fn();p.runner.deps.configured=configured;
+    await p.runner.configure(p.session);
+    const resume=p.sent.filter(m=>m['method']==='thread/resume');
+    expect(resume).toHaveLength(1);
+    expect(resume[0]!['params']).toMatchObject({threadId:'thread-1',excludeTurns:true,cwd:p.session.cwd,approvalPolicy:'on-request',approvalsReviewer:'auto_review',sandbox:'workspace-write',model:'test-model',config:{'sandbox_workspace_write.network_access':true,'shell_environment_policy.set.CLAUDE_ARTIFACTS_DIR':expect.stringContaining('1')}});
+    expect(p.sent.filter(m=>m['method']==='thread/inject_items').map(m=>object(m['params'])['items'])).toEqual([[{type:'message',role:'developer',content:[{type:'input_text',text:'contract and rules\n\nVoice rules'}]}]]);
+    expect(configured).toHaveBeenCalledWith(p.session);
+    // Joined, so the next follow reads the thread instead of resuming it again.
+    await p.runner.follow(p.session);
+    expect(p.sent.filter(m=>m['method']==='thread/resume')).toHaveLength(1);
+    // Unchanged instructions are not given again, and an unknown mode leaves the daemon's options alone.
+    p.runner.deps.resumeOptions=()=>({permissionMode:'manual',model:null});
+    await p.runner.configure(p.session);
+    expect(p.sent.filter(m=>m['method']==='thread/resume').at(-1)!['params']).toEqual({threadId:'thread-1',excludeTurns:true});
+    expect(p.sent.filter(m=>m['method']==='thread/inject_items')).toHaveLength(1);
+    p.session.nativeSessionId=null;
+    await expect(p.runner.configure(p.session)).rejects.toThrow('no thread ID');
+  });
+
+  it('leaves a resumed ended thread unjoined, so the next follow rejoins it and the daemon replays pending requests', async () => {
+    const p=setup();await p.runner.start(p.action);p.session.state='ended';
+    await p.runner.resumeThread(p.session);
+    expect(p.sent.filter(m=>m['method']==='thread/resume')).toHaveLength(1);
+    p.session.state='idle';
+    await p.runner.follow(p.session);
+    expect(p.sent.filter(m=>m['method']==='thread/resume')).toHaveLength(2);
+    await p.runner.follow(p.session);
+    expect(p.sent.filter(m=>m['method']==='thread/resume')).toHaveLength(2);
+  });
+
   it('treats an unsent socket read as a connection failure without marking running sessions failed', async () => {
     const p=setup();await p.runner.start(p.action);p.session.state='running';
     vi.spyOn(p.server,'request').mockRejectedValueOnce(new AppServerError('socket closing',false,true));

@@ -13,6 +13,8 @@ export interface AppServerRunnerDeps {
   sessions(): Session[];
   sessionByNative?(id: string): Session | null;
   canRevive?(session: Session): boolean;
+  /** The permission mode and model a resumed thread runs with; without them a resume keeps what the daemon loads. */
+  resumeOptions?(session: Session): { permissionMode: string; model: string | null };
   currentInstructions?(session: Session): string;
   configured?(session: Session): void;
   instructionsDelivered?(sessionId: string, hash: string, compactionId: string | null): void;
@@ -130,7 +132,7 @@ export class AppServerRunner implements SessionRunner {
       const revision = this.subscription(session);
       const joined = this.#joined.get(id) === this.deps.server.generation;
       const instructions = joined ? undefined : this.deps.currentInstructions?.(session);
-      const result = await this.deps.server.request(joined ? 'thread/read' : 'thread/resume', { threadId: id, ...(joined ? {} : { excludeTurns: true }) });
+      const result = await this.deps.server.request(joined ? 'thread/read' : 'thread/resume', { threadId: id, ...(joined ? {} : { excludeTurns: true, ...this.#resumeOptions(session) }) });
       if (!joined && this.subscription(session) === revision) {
         await this.#configure(session, instructions);
         this.#joined.set(id, this.deps.server.generation);
@@ -144,12 +146,41 @@ export class AppServerRunner implements SessionRunner {
 
   subscription(session: Session): number { return this.#subscriptions.get(session.nativeSessionId ?? '') ?? 0; }
 
+  /**
+   * Joins the thread and gives it the current instructions when they changed, as before `/compact` and when an ended session resumes (Open in
+   * terminal or a message to it). The thread's history keeps the instructions it was given, also when the daemon loads it again from disk.
+   */
   async configure(session: Session): Promise<void> {
+    if (session.nativeSessionId === null) throw new Error('The Codex session has no thread ID.');
     const instructions = this.deps.currentInstructions?.(session);
-    await this.deps.server.request('thread/resume', { threadId: session.nativeSessionId, excludeTurns: true });
+    await this.deps.server.request('thread/resume', { threadId: session.nativeSessionId, excludeTurns: true, ...this.#resumeOptions(session) });
     await this.#configure(session, instructions);
     if (session.nativeSessionId !== null) this.#joined.set(session.nativeSessionId, this.deps.server.generation);
     this.deps.configured?.(session);
+  }
+
+  /**
+   * Resumes an ended session's thread as `configure` does, then leaves it unjoined, so the conversation's next follow rejoins it and the daemon
+   * replays a question or approval that arrived while the session still read as ended (mechanics M92).
+   */
+  async resumeThread(session: Session): Promise<void> {
+    await this.configure(session);
+    if (session.nativeSessionId !== null) this.#joined.delete(session.nativeSessionId);
+  }
+
+  /**
+   * The start's working folder, permissions, artifact folder and model, for a thread the daemon loads again from disk; a loaded thread keeps its
+   * sandbox (mechanics M95).
+   */
+  #resumeOptions(session: Session): Json {
+    const options = this.deps.resumeOptions?.(session);
+    if (options === undefined || !isCodexPermissionMode(options.permissionMode)) return {};
+    const permissions = permissionOptions(options.permissionMode);
+    return {
+      cwd: session.cwd, ...permissions,
+      config: { ...object(permissions['config']), 'shell_environment_policy.set.CLAUDE_ARTIFACTS_DIR': artifactsDir(session.cwd, session.workItemId) },
+      ...(options.model === null ? {} : { model: options.model }),
+    };
   }
 
   async #configure(session: Session, instructions: string | undefined): Promise<void> {

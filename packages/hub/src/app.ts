@@ -416,6 +416,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     newId: randomUUID,
     // The dock's rows count each work item's unread items, so a change builds the views again.
     unreadChanged: () => builder.schedule(),
+    resume: (sessionId) => runtime.resumeThread(sessionId),
     newConversation: (hostWindow, folder) => {
       const { refused } = runtime.send({ type: 'new-conversation', hostWindow, folder });
       const made = refused === null ? store.hostedWorkItems(hostWindow)[0] : undefined;
@@ -583,6 +584,11 @@ const dockWithRuns = () => {
         }
 
         const contract = runtime.contract(body['nativeSessionId'], body['source'] ?? 'compact');
+
+        // A Codex client resumed an ended app-server thread, as Open in terminal does (PRD R107).
+        if (body['source'] === 'resume') {
+          runtime.threadResumedElsewhere(body['nativeSessionId']);
+        }
 
         return contract === null ? { status: 404, body: { error: 'No Switchboard session has this Claude session ID.' } } : { status: 200, body: { contract } };
       },
