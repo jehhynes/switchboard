@@ -911,21 +911,23 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(renderMicButton({ ...VOICE, here: false })).toContain('title="Mic off: the voice is not in this window. Click to talk here with the mic on."');
     expect(renderMicButton(VOICE)).toMatch(/class="mic off".*data-on="true".*aria-pressed="false"/);
     expect(glyph(VOICE)).toMatch(/^off /);
-    expect(glyph({ ...VOICE, mic: 'idle-off' })).toMatch(/^off /);
+    // After the idle timeout: an outlined mic, apart from off.
+    expect(glyph({ ...VOICE, mic: 'idle-off' })).toMatch(/^outline .*codicon-mic"/);
+    expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('class="mic idle"');
     expect(renderMicButton({ ...VOICE, mic: 'idle-off' })).toContain('Mic off after a quiet spell.');
     expect(glyph({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toMatch(/^off /);
     // The mic is on but cannot run: the click turns it off, never only tries again.
     expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toContain('Mic on but unavailable: No &#60;model&#62;. Click to turn the mic off.');
     expect(renderMicButton({ ...VOICE, mic: 'unavailable', error: 'No <model>.' })).toContain('data-on="false"');
-    // On and waiting: a plain mic; hearing: filled, pulsing by its class.
+    // Listening: filled, in the accent colour and pulsing by its class; hearing: the same, pulsing faster.
     expect(renderMicButton({ ...VOICE, mic: 'listening' })).toMatch(/class="mic listening".*data-on="false".*aria-pressed="true"/);
-    expect(glyph({ ...VOICE, mic: 'listening' })).toMatch(/^on .*codicon-mic"/);
+    expect(glyph({ ...VOICE, mic: 'listening' })).toMatch(/^filled .*codicon-mic-filled"/);
     expect(renderMicButton({ ...VOICE, mic: 'hearing' })).toContain('class="mic hearing"');
     expect(glyph({ ...VOICE, mic: 'hearing' })).toMatch(/^filled .*codicon-mic-filled"/);
     expect(renderMicButton({ ...VOICE, mic: 'starting' })).toContain('class="mic starting"');
     // Typing and another app recording: a mic with a pause badge.
     expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('Mic paused while you type');
-    expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('<span class="mic-glyph paused"><span class="codicon codicon-mic" aria-hidden="true"></span><span class="codicon codicon-debug-pause mic-badge"');
+    expect(renderMicButton({ ...VOICE, mic: 'typing' })).toContain('<span class="mic-glyph outline"><span class="codicon codicon-mic" aria-hidden="true"></span><span class="mic-badge pause" aria-hidden="true"><span class="codicon codicon-debug-pause">');
     expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('Mic paused: another app is using the microphone.');
     expect(renderMicButton({ ...VOICE, mic: 'paused-other-app' })).toContain('class="mic paused"');
     // Half-duplex capture says why listening pauses while a reply plays, only while it listens or hears.
@@ -933,6 +935,10 @@ describe('speech in the view (architecture.md § Voice)', () => {
     const halfDuplex = { ...VOICE, halfDuplex: 'no echo cancellation on Remote Audio' };
     expect(renderMicButton({ ...halfDuplex, mic: 'listening' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
     expect(renderMicButton({ ...VOICE, fullDuplex: 'echo check: none heard', mic: 'listening' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Full duplex (echo check: none heard): talking over a reply stops it. Click to turn the mic off."');
+    // Held for a reply playing: its own speaker badge, and why.
+    expect(renderMicButton({ ...halfDuplex, mic: 'listening', speaking: 'r1' })).toMatch(/class="mic held"[\s\S]*mic-badge held[\s\S]*codicon-unmute/);
+    expect(renderMicButton({ ...halfDuplex, mic: 'listening', speaking: 'r1' })).toContain('Mic on, held while the reply plays (no echo cancellation on Remote Audio)');
+    expect(renderMicButton({ ...VOICE, mic: 'listening', speaking: 'r1' })).toContain('class="mic listening"');
     expect(renderMicButton({ ...halfDuplex, mic: 'hearing' })).toContain('title="Mic on: hearing you. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
     // Where recognition runs, once the recogniser loaded.
     expect(renderMicButton({ ...VOICE, mic: 'listening', recognizer: 'gpu' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Speech recognition runs on the GPU. Click to turn the mic off."');

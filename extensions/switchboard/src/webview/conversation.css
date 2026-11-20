@@ -155,20 +155,25 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .composer .live-words::before { content: attr(data-lead); }
 .composer .composer-input textarea { position: relative; }
 .live-showing .composer textarea::placeholder { color: transparent; }
-/* One mic button, a ghost icon whose glyph is its state: a slash while off, plain while listening, filled and pulsing while hearing, a pause
-   badge while paused. The slash and the badge are cut out of the glyph with the input's background, as a codicon mic-off would be. */
+/* One mic button, a ghost icon whose glyph is its state, each drawn apart: slashed while off, outlined after the idle timeout, filled in the
+   accent colour and pulsing while it listens (faster while it hears, still while it starts), a pause badge while paused, a speaker badge while
+   half-duplex capture holds it for a reply. The slash is cut out of the glyph with the input's background, as a codicon mic-off would be; a
+   badge is a small disc in the input's background at the bottom right. */
 .composer .mic { display: flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: none; border-radius: 5px; cursor: pointer; color: var(--vscode-foreground); background: transparent; }
 .composer .mic:hover { background: var(--vscode-toolbar-hoverBackground); }
-.composer .mic.off, .composer .mic.elsewhere { color: var(--vscode-descriptionForeground); }
-.composer .mic.off:hover, .composer .mic.elsewhere:hover { color: var(--vscode-foreground); }
-.composer .mic.starting, .composer .mic.paused { opacity: 0.6; }
+.composer .mic.off, .composer .mic.elsewhere, .composer .mic.idle { color: var(--vscode-descriptionForeground); }
+.composer .mic.off:hover, .composer .mic.elsewhere:hover, .composer .mic.idle:hover { color: var(--vscode-foreground); }
+.composer .mic.listening, .composer .mic.hearing, .composer .mic.starting, .composer .mic.held { color: var(--vscode-focusBorder); }
+.composer .mic.starting, .composer .mic.held .codicon-mic-filled { opacity: 0.6; }
 .composer .mic.unavailable { color: var(--vscode-editorWarning-foreground); }
 .mic-glyph { position: relative; display: inline-flex; }
 .mic-glyph.off::after { content: ''; position: absolute; left: 50%; top: -1px; width: 1.5px; height: 18px; margin-left: -0.75px; background: currentColor; box-shadow: 0 0 0 1px var(--vscode-input-background); transform: rotate(-45deg); }
-.mic-glyph .mic-badge { position: absolute; right: -4px; bottom: -3px; font-size: 9px; line-height: 1; border-radius: 50%; background: var(--vscode-input-background); }
-.composer .mic.hearing .codicon { animation: mic-pulse 1s ease-in-out infinite; }
-@keyframes mic-pulse { 50% { opacity: 0.4; } }
-body.vscode-reduce-motion .composer .mic.hearing .codicon { animation: none; }
+.mic-badge { position: absolute; right: -5px; bottom: -4px; display: flex; align-items: center; justify-content: center; width: 11px; height: 11px; border-radius: 50%; color: var(--vscode-foreground); background: var(--vscode-input-background); box-shadow: 0 0 0 1px currentColor; }
+.mic-badge .codicon { font-size: 8px; }
+.composer .mic.listening .codicon-mic-filled { animation: mic-pulse 2s ease-in-out infinite; }
+.composer .mic.hearing .codicon-mic-filled { animation: mic-pulse 0.8s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { opacity: 0.45; } }
+body.vscode-reduce-motion .composer .mic .codicon { animation: none; }
 .message .voice-line { display: flex; justify-content: flex-end; align-items: center; gap: 4px; margin-top: 2px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
 /* The composer's extras, measured from Claude Code's panel: its file and command lists 8 px above the box at its width, rows 4 by 8 px with a
    4 px radius, a folder path dimmed and cut from its start; footer tools as 26 px ghost buttons; a dashed ring while files are dragged over. */

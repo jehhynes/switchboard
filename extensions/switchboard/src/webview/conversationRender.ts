@@ -228,31 +228,31 @@ export function renderVoiceControls(voice: VoiceView | null, live = true): strin
   return `${speakReplies}${stop}${talkHere}`;
 }
 
-/** A mic glyph: plain, filled, with a slash for off, or with a pause badge. */
-function micGlyph(kind: 'on' | 'filled' | 'off' | 'paused'): string {
+/** A mic glyph: slashed while off, outlined, or filled; with a badge while paused, or while half-duplex capture holds it for a reply playing. */
+function micGlyph(kind: 'off' | 'outline' | 'filled', badge: 'pause' | 'held' | null = null): string {
   const mic = `<span class="codicon codicon-${kind === 'filled' ? 'mic-filled' : 'mic'}" aria-hidden="true"></span>`;
+  const mark = badge === null ? '' : `<span class="mic-badge ${badge}" aria-hidden="true"><span class="codicon codicon-${badge === 'pause' ? 'debug-pause' : 'unmute'}"></span></span>`;
 
-  return kind === 'paused'
-    ? `<span class="mic-glyph paused">${mic}<span class="codicon codicon-debug-pause mic-badge" aria-hidden="true"></span></span>`
-    : `<span class="mic-glyph ${kind}">${mic}</span>`;
+  return `<span class="mic-glyph ${kind}">${mic}${mark}</span>`;
 }
 
 /**
- * The composer's one mic button (architecture.md § Dictation), whose glyph and tooltip carry the mic's state: a mic with a slash while off, after
- * the idle timeout, unavailable or in a window the voice is not in, whose click talks here and turns the mic on; a plain mic while it listens; a
- * filled, pulsing mic while it hears; a mic with a pause badge while the composer has the focus or another app records. While the mic is on, in
- * any state, a click turns it off. Empty with voice off.
+ * The composer's one mic button (architecture.md § Dictation), whose glyph and tooltip carry the mic's state, each drawn apart: a slashed mic while
+ * off, unavailable or in a window the voice is not in, whose click talks here and turns the mic on; an outlined mic after the idle timeout; a
+ * filled mic in the accent colour that pulses while it listens, faster while it hears, and still while it starts; a pause badge while the composer
+ * has the focus or another app records; and a speaker badge while half-duplex capture holds it for a reply playing. While the mic is on, in any
+ * state, a click turns it off. Empty with voice off.
  */
 export function renderMicButton(voice: VoiceView | null): string {
   if (voice === null || !voice.enabled) {
     return '';
   }
 
-  const button = (glyph: Parameters<typeof micGlyph>[0], title: string, on: boolean, kind: string): string =>
-    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}">${micGlyph(glyph)}</button>`;
+  const button = (glyph: string, title: string, on: boolean, kind: string): string =>
+    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}">${glyph}</button>`;
 
   if (!voice.here) {
-    return button('off', 'Mic off: the voice is not in this window. Click to talk here with the mic on.', true, 'elsewhere');
+    return button(micGlyph('off'), 'Mic off: the voice is not in this window. Click to talk here with the mic on.', true, 'elsewhere');
   }
 
   // Where recognition runs, once the recogniser loaded; half-duplex capture does not listen while the voice speaks, and full duplex with no echo
@@ -262,27 +262,32 @@ export function renderMicButton(voice: VoiceView | null): string {
   // The room hold (architecture.md § Voice check and barge-in): spoken turns stay in the box.
   const held = voice.roomHold === true ? ` ${ROOM_HOLD_TIP}` : '';
 
+  // Half-duplex capture holding the mic while this window's reply plays.
+  if (voice.halfDuplex !== undefined && voice.speaking !== null && (voice.mic === 'listening' || voice.mic === 'hearing')) {
+    return button(micGlyph('filled', 'held'), `Mic on, held while the reply plays (${voice.halfDuplex}): it listens again when the reply ends.${where} Click to turn the mic off.`, false, 'held');
+  }
+
   switch (voice.mic) {
     case 'listening':
-      return button('on', `Mic on: listening. ${held === '' ? 'Dictation sends when you stop talking.' : ROOM_HOLD_TIP}${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
+      return button(micGlyph('filled'), `Mic on: listening. ${held === '' ? 'Dictation sends when you stop talking.' : ROOM_HOLD_TIP}${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
     case 'hearing':
-      return button('filled', `Mic on: hearing you.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
+      return button(micGlyph('filled'), `Mic on: hearing you.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
     case 'typing':
-      return button('paused', `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused');
+      return button(micGlyph('outline', 'pause'), `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused');
     case 'starting':
-      return button('on', 'Mic starting. Click to turn it off.', false, 'starting');
+      return button(micGlyph('filled'), 'Mic starting. Click to turn it off.', false, 'starting');
     case 'paused-other-app':
-      return button('paused', `Mic paused: another app is using the microphone.${where} Click to turn the mic off.`, false, 'paused');
+      return button(micGlyph('outline', 'pause'), `Mic paused: another app is using the microphone.${where} Click to turn the mic off.`, false, 'paused');
     case 'paused-by-voice':
       // Only "start listening" is heard: a click listens again rather than turning the mic off.
-      return button('paused', `Mic ${PAUSED_BY_VOICE_TIP.charAt(0).toLowerCase()}${PAUSED_BY_VOICE_TIP.slice(1)}`, true, 'paused');
+      return button(micGlyph('outline', 'pause'), `Mic ${PAUSED_BY_VOICE_TIP.charAt(0).toLowerCase()}${PAUSED_BY_VOICE_TIP.slice(1)}`, true, 'paused');
     case 'unavailable':
       // The mic is on but cannot run: a click turns it off, and turning it on again tries again.
-      return button('off', `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable');
+      return button(micGlyph('off'), `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable');
     case 'idle-off':
-      return button('off', 'Mic off after a quiet spell. Click to turn it on (Ctrl+Alt+M).', true, 'off');
+      return button(micGlyph('outline'), 'Mic off after a quiet spell. Click to turn it on (Ctrl+Alt+M).', true, 'idle');
     default:
-      return button('off', 'Mic off. Click to turn it on (Ctrl+Alt+M).', true, 'off');
+      return button(micGlyph('off'), 'Mic off. Click to turn it on (Ctrl+Alt+M).', true, 'off');
   }
 }
 
