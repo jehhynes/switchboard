@@ -915,6 +915,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       submit.disabled = !complete(cardQuestions(key), draft.choices);
     }
   });
+  // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
+  document.addEventListener('pointerdown', (event) => {
+    if (view.picker && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+      view.picker = false;
+      draw();
+    }
+  });
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && view.picker) {
+      view.picker = false;
+      draw();
+      head.querySelector<HTMLElement>('button.picker')?.focus();
+      event.stopImmediatePropagation();
+    }
+  });
   root.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && (event.target as HTMLElement) !== input && state.voice?.here === true && state.voice.speaking !== null) {
       void command('stop-speaking');

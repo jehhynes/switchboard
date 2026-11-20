@@ -1907,3 +1907,29 @@ describe('redraws and following the end (architecture.md § Conversation view)',
     expect(scroller.scrollTop).toBe(900);
   });
 });
+
+describe('the conversation dropdown (architecture.md § Conversation view)', () => {
+  it('closes on a press outside the header and on Escape, and stays open for a press inside it', () => {
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const two: ScopeView = { ...SCOPE, conversations: [...SCOPE.conversations, { ...SCOPE.conversations[0]!, workItemId: 3, title: 'Side', primary: false }] };
+
+    document.body.replaceChildren(root, live);
+    startConversation(root, live, { postMessage: () => undefined, getState: () => null, setState: () => undefined });
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0)], { scope: two })) } }));
+
+    const toggle = () => root.querySelector<HTMLElement>('button.picker')!.click();
+    const press = (element: Element) => element.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+    toggle();
+    expect(root.querySelector('.conversation-list')).not.toBeNull();
+    press(root.querySelector('.conversation-list')!);
+    expect(root.querySelector('.conversation-list')).not.toBeNull();
+    press(root.querySelector('.timeline')!);
+    expect(root.querySelector('.conversation-list')).toBeNull();
+    toggle();
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.conversation-list')).toBeNull();
+    expect(document.activeElement?.classList.contains('picker')).toBe(true);
+  });
+});

@@ -243,6 +243,22 @@ describe('the page', () => {
     page.close();
   });
 
+  it('closes the conversation dropdown on a press outside the header and on Escape', () => {
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('button.picker')!.click();
+    expect(root.querySelector('.conversation-list')).not.toBeNull();
+    root.querySelector('.conversation-list')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(root.querySelector('.conversation-list')).not.toBeNull();
+    root.querySelector('.timeline')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(root.querySelector('.conversation-list')).toBeNull();
+    root.querySelector<HTMLElement>('button.picker')!.click();
+    root.querySelector<HTMLElement>('button.picker')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.conversation-list')).toBeNull();
+    page.close();
+  });
+
   it('opens its page stream, selects the work item its address names, and reports its focus', async () => {
     const { page, source } = start();
 

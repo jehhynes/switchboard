@@ -216,14 +216,23 @@ body.vscode-reduce-motion .codicon-modifier-spin { animation: none; }
 
 /* The header's conversation dropdown: the selected conversation's title as a button that opens the list of the window's conversations. */
 .header { position: relative; }
-button.picker { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 0 4px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
+/* The title keeps the room: the dropdown takes the free width and gives way last, with an ellipsis; the persona shrinks first, and under 360 px it
+   and the provider show as icons only. Nothing overlaps: every other header control keeps its own width. */
+button.picker { flex: 1 1 0; min-width: 6em; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; background: transparent; color: inherit; padding: 0 4px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; text-align: left; font: inherit; }
 button.picker:hover { background: var(--vscode-toolbar-hoverBackground); }
 button.picker .title { flex: 0 1 auto; padding: 6px 0; }
+button.picker > .codicon { flex: none; }
+.header > button.icon, .header > .provider { flex: none; }
 /* The session's persona (architecture.md § Personas); dimmed while its tone change waits for a resume or compaction. */
-button.persona { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 2px 6px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; font: inherit; font-size: 12px; }
+button.persona { flex: 0 100 auto; max-width: 40%; min-width: 0; display: flex; align-items: center; gap: 4px; border: none; background: transparent; color: var(--vscode-descriptionForeground); padding: 2px 6px; border-radius: var(--vscode-cornerRadius-small, 4px); cursor: pointer; font: inherit; font-size: 12px; }
 button.persona:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 button.persona .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.persona.pending .name { font-style: italic; }
+button.persona .codicon { flex: none; }
+@media (max-width: 360px) {
+  button.persona { flex: none; max-width: none; }
+  button.persona .name { display: none; }
+}
 .conversation-list { position: absolute; top: 100%; left: 6px; right: 6px; z-index: 2; margin: 0; padding: 4px 0; list-style: none; max-height: 50vh; overflow-y: auto; background: var(--vscode-quickInput-background, var(--vscode-editorWidget-background)); color: var(--vscode-quickInput-foreground, var(--vscode-foreground)); border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); border-radius: 6px; box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3)); }
 .conversation-list button { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: transparent; color: inherit; padding: 4px 10px; font: inherit; text-align: left; cursor: pointer; }
 .conversation-list button:hover, .conversation-list button:focus-visible { background: var(--vscode-list-hoverBackground); }

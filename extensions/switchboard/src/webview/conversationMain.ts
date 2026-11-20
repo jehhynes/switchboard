@@ -955,6 +955,14 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
   });
 
+  // A press outside the header closes the conversation list, as a VS Code dropdown does.
+  document.addEventListener('pointerdown', (event) => {
+    if (open.has(PICKER) && !(event.target instanceof Node && root.querySelector('.header')?.contains(event.target) === true)) {
+      open.delete(PICKER);
+      draw();
+    }
+  });
+
   // Escape closes the conversation list; Up and Down move within it.
   root.addEventListener('keydown', (event) => {
     if (!open.has(PICKER)) {
