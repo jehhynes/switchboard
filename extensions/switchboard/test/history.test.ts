@@ -681,6 +681,40 @@ describe('History page', () => {
     }
   });
 
+  it('redraws in place on a chip press, a new history and the tick, so the focused control keeps its focus', () => {
+    const run = approvedRun();
+    const api = { postMessage: () => {}, getState: () => null, setState: () => {} };
+    const root = document.createElement('div');
+
+    document.body.append(root);
+    vi.useFakeTimers();
+
+    try {
+      startHistory(root, api, () => run.now);
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'history', history: run.history() } }));
+
+      const chip = root.querySelector<HTMLButtonElement>('[data-category="you"]')!;
+      const section = root.querySelector<HTMLDetailsElement>('[data-section="w1"]')!;
+      const link = root.querySelector<HTMLButtonElement>('[data-open]')!;
+
+      chip.focus();
+      chip.click();
+      expect(root.querySelector('[data-category="you"]')).toBe(chip);
+      expect(chip.getAttribute('aria-pressed')).toBe('false');
+      expect(document.activeElement).toBe(chip);
+
+      link.focus();
+      vi.advanceTimersByTime(30_000);
+      window.dispatchEvent(new MessageEvent('message', { data: { type: 'history', history: run.history() } }));
+      expect(root.querySelector('[data-section="w1"]')).toBe(section);
+      expect(root.querySelector('[data-open]')).toBe(link);
+      expect(document.activeElement).toBe(link);
+    } finally {
+      vi.useRealTimers();
+      root.remove();
+    }
+  });
+
   it('starts from the filters a reloaded page saved', () => {
     const run = approvedRun();
     const api = { postMessage: () => {}, getState: () => ({ ticketId: 1, key: 'gh 77', ui: { ...EMPTY_UI, hidden: ['you', 'session'] } }), setState: () => {} };

@@ -65,7 +65,7 @@ function entryHtml(entry: Entry, gap: number | null): string {
   ].join('');
   const detail = [entry.refused, entry.detail].filter((text): text is string => text !== null && text !== '');
 
-  return `<li class="${classes}" data-entry="${escape(entry.key)}">
+  return `<li class="${classes}" data-entry="${escape(entry.key)}" data-key="entry:${escape(entry.key)}">
 <time datetime="${new Date(entry.at).toISOString()}" title="${escape(timeText(entry.at))}:${String(new Date(entry.at).getSeconds()).padStart(2, '0')}">${clock(entry.at)}</time>
 <span class="dot"><span class="codicon codicon-${entry.icon}"></span></span>
 <div class="body"><div class="text">${escape(entry.text)}${marks}</div>${detail.map((text) => `<div class="detail">${escape(text)}</div>`).join('')}${
@@ -91,7 +91,7 @@ function timeline(entries: Entry[], ui: HistoryUi): string {
 
     if (dayKey(entry.at) !== lastDay) {
       lastDay = dayKey(entry.at);
-      parts.push(`<li class="day">${escape(day(entry.at))}</li>`);
+      parts.push(`<li class="day" data-key="day:${lastDay}">${escape(day(entry.at))}</li>`);
     }
 
     if (end - index > RUN_LIMIT) {
@@ -99,7 +99,7 @@ function timeline(entries: Entry[], ui: HistoryUi): string {
       const open = ui.runs.includes(entry.key);
 
       parts.push(
-        `<li class="run"><details data-run="${escape(entry.key)}"${open ? ' open' : ''}><summary><span class="codicon codicon-pulse"></span>${run.length} session state changes, ${clock(run[0]!.at)} to ${clock(run.at(-1)!.at)}</summary><ol class="timeline">${run
+        `<li class="run" data-key="run:${escape(entry.key)}"><details data-run="${escape(entry.key)}"${open ? ' open' : ''}><summary><span class="codicon codicon-pulse"></span>${run.length} session state changes, ${clock(run[0]!.at)} to ${clock(run.at(-1)!.at)}</summary><ol class="timeline">${run
           .map((item, at) => entryHtml(item, at === 0 ? (previous === null ? null : item.at - previous) : item.at - run[at - 1]!.at))
           .join('')}</ol></details></li>`,
       );
@@ -121,7 +121,7 @@ function sectionHtml(section: Section, ui: HistoryUi, open: boolean): string {
   const filtered = entries.length < section.entries.length;
   const count = filtered ? `${entries.length} of ${section.entries.length}` : String(section.entries.length);
 
-  return `<details class="section" data-section="${escape(section.key)}"${open ? ' open' : ''}>
+  return `<details class="section" data-section="${escape(section.key)}" data-key="section:${escape(section.key)}"${open ? ' open' : ''}>
 <summary><span class="title">${escape(section.title)}</span>${section.status === '' ? '' : `<span class="status${section.tone === null ? '' : ` tone-${section.tone}`}">${escape(section.status)}</span>`}<span class="count">${escape(count)}</span><span class="facts">${section.facts.map(escape).join(' · ')}</span></summary>
 ${section.prompt === null ? '' : `<div class="prompt"><div class="label">Prompt</div><div class="text">${escape(section.prompt)}</div></div>`}
 ${entries.length === 0 ? `<p class="empty">${section.entries.length === 0 ? 'Nothing recorded.' : 'No entries match the filter.'}</p>` : `<ol class="timeline">${timeline(entries, ui)}</ol>`}

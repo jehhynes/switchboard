@@ -1,6 +1,7 @@
 import type { TicketHistory } from '@switchboard/core';
 import { historyView } from './historyModel.js';
 import { EMPTY_UI, renderHistory } from './historyRender.js';
+import { morph } from './morph.js';
 import type { HistoryUi } from './historyRender.js';
 
 interface VsCodeApi {
@@ -11,7 +12,7 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-/** Redraws this often so running sessions' times stay current. */
+/** Redraws this often so running sessions' times stay current; a redraw changes only what differs, so focus and scroll stay put. */
 const TICK_MS = 30_000;
 
 /** What the page keeps across reloads: the ticket it shows, for restoring the tab, and the operator's filters and open sections. */
@@ -41,27 +42,12 @@ export function startHistory(root: HTMLElement, vscode: VsCodeApi, now: () => nu
 
   const draw = () => {
     if (error !== null) {
-      root.innerHTML = `<p class="error"><span class="codicon codicon-error"></span>${error.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)}</p>`;
+      morph(root, `<p class="error"><span class="codicon codicon-error"></span>${error.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`)}</p>`);
       return;
     }
 
-    if (history === null) {
-      return;
-    }
-
-    const search = root.querySelector<HTMLInputElement>('#search');
-    const focused = search !== null && document.activeElement === search ? [search.selectionStart, search.selectionEnd] : null;
-    const scroll = window.scrollY;
-
-    root.innerHTML = renderHistory(historyView(history, now()), ui);
-    if (scroll > 0) {
-      window.scrollTo(0, scroll);
-    }
-
-    if (focused !== null) {
-      const next = root.querySelector<HTMLInputElement>('#search')!;
-      next.focus();
-      next.setSelectionRange(focused[0] ?? null, focused[1] ?? null);
+    if (history !== null) {
+      morph(root, renderHistory(historyView(history, now()), ui));
     }
   };
 
