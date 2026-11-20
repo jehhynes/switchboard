@@ -1111,6 +1111,20 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Not covered:** an Enter dropped by Claude and retried, a menu open while a message waits, and a hub restart while a message is typed, which the Vitest suites cover with fakes; the Conversation view's composer itself, which the operator checks in VS Code.
 - **Current use:** typing from the Conversation view (architecture.md § Typing a message); `unwrapPasted` for confirmation and for a pasted block typed in the terminal.
 
+## M87. A prompt-less Code Mode start, 2026-11-19
+
+- **Versions:** Claude Code CLI 2.1.329, Haiku 5.5, on Windows 11 Pro 10.0.26300; Node.js 24.14.0, node-pty 1.1.0.
+- **Setup:** a driver spawned `claude` in a node-pty pseudo-terminal of 120×40 with `codeModeStartArgs` and `codeModeEnvironment` from the built `packages/claude`, the final prompt argument left out, a contract from `sessionContract` with the reports `stage`, `worktree` and `link` and the line "Code word one is OSPREY.", and the conversation rules, under a scratch `CLAUDE_CONFIG_DIR` holding a copy of the operator's `.credentials.json` and `.claude.json` (deleted afterwards) and a `settings.json` whose hooks logged every event with `SWITCHBOARD_LAUNCH`; a `SessionStart` `resume` hook returned `additionalContext` "Code word two is HERON.", standing in for the contract hook. Scratch git repositories outside any checkout, one trusted in the copied `.claude.json` and one not.
+- **Result:**
+  - **Idle start.** The `is on` line was on screen 1.6 s after the spawn, with the input box and its suggested prompt; the only hook in the next 15 s was `SessionStart` `startup`, and `claude agents --json` listed the process with `status: "idle"`. No transcript file existed yet.
+  - **First reply.** A message pasted and submitted gave `UserPromptSubmit` and `Stop`; the reply named code word one and the report commands `stage`, `worktree`, `link` and `handled`, so the contract and rules in `--append-system-prompt` reached the model without a first prompt.
+  - **Resume.** After `taskkill /T /F` of that process, `codeModeResumeArgs` with a new launch showed the `is on` line and gave only `SessionStart` `resume` (idle); the next message's reply named both code words, the second from the hook's `additionalContext`.
+  - **Resume before any message.** A prompt-less session killed before its first message has no transcript; `claude --resume` printed `No conversation found with session ID: <id>` and exited, with `SessionEnd` as its only hook.
+  - **Trust and other dialogs.** In the untrusted folder the folder trust dialog ("❯ No, exit" selected) came first and no hook fired; Down and Enter (Yes) led to "Allow external CLAUDE.md file imports?" for the operator's `~/.claude/AGENTS.md`, still with no hook, as in M70. Enter on the default "No, exit" printed "Claude Code didn't start because this folder isn't trusted." and exited.
+- **Pass criteria (slice 6a spike):** a prompt-less start comes up idle with Code Mode on; the contract and rules reach the first reply; a resume is idle and gets the contract hook's context; the trust prompt is told from a start. **Passed**, with one limit: a session with no message cannot be resumed.
+- **Not verified:** Linux; an automatic compaction of a prompt-less session.
+- **Current use:** the prompt-less hosted start (architecture.md § Code Mode sessions, Hosted conversations): `SessionStart` `startup` reads as idle for a session started without a prompt, the start check's dialog rule covers the trust prompt, a conversation's work item holds no slot while idle, and a hosted session that ended before its first message restarts under its session ID with no prompt instead of resuming.
+
 ## M88. Mentions, slash commands and images pasted into a Code Mode session, 2026-11-19
 
 - **Versions:** Claude Code CLI 2.1.329, Haiku 5.5, on Windows 11 Pro 10.0.26300; Node.js 24.14.0.
