@@ -6,7 +6,8 @@ import type { AsrDevice } from './sherpa.js';
 import type { MicUse } from './micUse.js';
 import type { Capture, CaptureStream } from './output.js';
 import { ENROLL_SECONDS } from './protocol.js';
-import type { Interrupted, MicState, VoiceMessage } from './protocol.js';
+import type { Interrupted, MicState, SpokenCommand, VoiceMessage } from './protocol.js';
+import { hotwordList } from './hotwords.js';
 import { pauseWait, textWait } from './turn.js';
 import type { TurnModel } from './turn.js';
 import { loudness } from './voiceprint.js';
@@ -19,6 +20,35 @@ const BARGE_PREROLL = 0.3 * ASR_RATE;
 /** After a reply ends, audio still this loud in its last 0.6 s keeps the words held and checked for up to `TAIL_HOLD_MS`. */
 const TAIL_KEEP = 0.6 * ASR_RATE;
 const TAIL_HOLD_MS = 1_500;
+/** The spoken commands (architecture.md § Dictation), recognised only as a whole utterance in the operator's voice and never sent. */
+export const SPOKEN_COMMANDS: Readonly<Record<string, SpokenCommand>> = {
+  'stop listening': 'stop-listening',
+  'pause listening': 'stop-listening',
+  'start listening': 'start-listening',
+  'resume listening': 'start-listening',
+};
+
+/** Recognised words as a command's words are written: lower case, no punctuation. */
+const commandWords = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z' ]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .join(' ');
+
+/** The spoken command that the whole text is, or null. */
+export function spokenCommand(text: string): SpokenCommand | null {
+  return SPOKEN_COMMANDS[commandWords(text)] ?? null;
+}
+
+/** Whether the text is a spoken command or its first words, so a piece may still turn out to be one. */
+function commandStart(text: string): boolean {
+  const words = commandWords(text);
+
+  return words !== '' && Object.keys(SPOKEN_COMMANDS).some((command) => command === words || command.startsWith(`${words} `));
+}
+
 /** A piece dropped this soon after a reply stopped playing may be its echo, so it starts no room hold. */
 export const ROOM_ECHO_GUARD_MS = 2_000;
 
@@ -40,7 +70,7 @@ export interface DictationDeps {
   /** Barge-in: stops the reply playing, and says how much of its passage was heard; null when none was playing. */
   interrupt?(): Interrupted | null;
   /** `words`, `piece`, `utterance` and `enrollment` to the hub. */
-  send(message: Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' }>): void;
+  send(message: Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' | 'command' }>): void;
   /** The mic state or the capture error changed. */
   changed(): void;
   /** The operator spoke: the away timeout counts again. */
@@ -73,6 +103,8 @@ interface Utterance {
   words: string;
   /** The reply it spoke over, when a barge-in opened it. */
   interrupted: Interrupted | null;
+  /** Its first pieces while they are a spoken command or its start: not reported until the utterance ends or another piece follows. */
+  pending: Array<Extract<VoiceMessage, { type: 'piece' }>>;
 }
 
 /** A reply being played while capture runs: words heard then are held back, since they may be its echo, until barge-in says they are the operator's. */
@@ -124,6 +156,10 @@ export class Dictation {
   /** When the room hold ends (epoch milliseconds), while one runs: the voice check heard someone else (`voice.roomHold`). */
   #roomHoldUntil: number | null = null;
   #roomTimer: unknown = null;
+  /** "Stop listening" paused dictation: the recogniser runs, but only "start listening" is heard. */
+  #pausedByVoice = false;
+  /** The pieces in the operator's voice heard while paused, until the words have been quiet for `voice.endPauseMs`; null with none. */
+  #paused: { texts: string[]; checks: Array<{ score: number | null; f0: number | null }>; lastAt: number } | null = null;
 
   constructor(private readonly deps: DictationDeps) {}
 
@@ -147,6 +183,10 @@ export class Dictation {
 
     if (this.#idleOff || this.#target === null) {
       return 'idle-off';
+    }
+
+    if (this.#pausedByVoice) {
+      return 'paused-by-voice';
     }
 
     if (this.#typing) {
@@ -180,10 +220,15 @@ export class Dictation {
     return this.#engine?.engine.device ?? null;
   }
 
-  /** The operator turned the mic on or off. Turning it on starts again after the idle timeout or an error. */
+  /** The operator turned the mic on or off. Turning it on starts again after the idle timeout, an error or a pause by voice. */
   mic(on: boolean): void {
     if (on === this.#micOn) {
-      if (on && (this.#idleOff || this.#error !== null)) {
+      if (on && (this.#idleOff || this.#error !== null || this.#pausedByVoice)) {
+        if (this.#pausedByVoice) {
+          this.deps.log('listening resumed: the mic was turned on');
+          this.#leavePause();
+        }
+
         this.#idleOff = false;
         this.#error = null;
         this.#sync();
@@ -193,6 +238,10 @@ export class Dictation {
     }
 
     this.#micOn = on;
+
+    if (this.#pausedByVoice) {
+      this.#leavePause();
+    }
 
     if (on) {
       this.#idleOff = false;
@@ -412,7 +461,8 @@ export class Dictation {
 
   /** Loads the recogniser for the target's terms when they changed; false, with the error kept, when it cannot run. */
   #loadEngine(): boolean {
-    const terms = this.deps.vocabulary.terms(this.#target?.repo ?? null);
+    // The spoken commands are boosted, so they are heard as said.
+    const terms = hotwordList(this.deps.vocabulary.terms(this.#target?.repo ?? null), Object.keys(SPOKEN_COMMANDS));
     const key = terms.join('\n');
 
     if (this.#engine?.key === key) {
@@ -518,7 +568,8 @@ export class Dictation {
     this.#trackPlayback();
     this.#transcriber?.feed(samples);
 
-    if (this.#holding()) {
+    // Paused by voice, a reply is not stopped by talking over it.
+    if (this.#holding() && !this.#pausedByVoice) {
       this.#checkBarge();
     }
   }
@@ -652,6 +703,20 @@ export class Dictation {
       return;
     }
 
+    // Paused by voice: nothing is shown or sent, but talking keeps the mic from its idle stop and the voice from the away timeout.
+    if (this.#pausedByVoice) {
+      if (text !== '') {
+        this.#armIdle();
+        this.deps.spoke();
+
+        if (this.#paused !== null) {
+          this.#paused.lastAt = this.deps.now();
+        }
+      }
+
+      return;
+    }
+
     if (text !== '') {
       this.#spoke();
     }
@@ -682,6 +747,11 @@ export class Dictation {
       return false;
     }
 
+    if (this.#pausedByVoice) {
+      this.#pausedPiece(text, audio);
+      return false;
+    }
+
     const utterance = this.#open();
 
     if (utterance === null) {
@@ -689,8 +759,19 @@ export class Dictation {
     }
 
     const check = this.deps.voiceprint?.check(audio, text, this.deps.settings()) ?? { score: null, f0: null, dropped: false, reason: null };
+    const piece = { type: 'piece' as const, gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, pieceId: this.deps.newId(), text, score: check.score, f0: check.f0, dropped: check.dropped };
 
-    this.deps.send({ type: 'piece', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, pieceId: this.deps.newId(), text, score: check.score, f0: check.f0, dropped: check.dropped });
+    // A spoken command counts only as a whole utterance: its pieces wait until the utterance ends or turns out to be dictation.
+    if (!check.dropped && utterance.pieces.length === 0 && commandStart([...utterance.pending.map((one) => one.text), text].join(' '))) {
+      utterance.pending.push(piece);
+      return true;
+    }
+
+    if (!check.dropped) {
+      this.#release(utterance);
+    }
+
+    this.deps.send(piece);
 
     if (check.dropped) {
       this.deps.log(`piece dropped by the voice check (${check.reason === 'pitch' ? 'pitch' : 'score'} ${check.reason === 'pitch' ? `${check.f0} Hz` : check.score}): ${text}`);
@@ -710,6 +791,86 @@ export class Dictation {
     return true;
   }
 
+  /** The pieces held as a possible spoken command are dictation after all: they are reported and join the utterance. */
+  #release(utterance: Utterance): void {
+    for (const piece of utterance.pending.splice(0)) {
+      this.deps.send(piece);
+      utterance.pieces.push(piece.text);
+      this.deps.vocabulary.used(piece.text);
+    }
+  }
+
+  /**
+   * Paused by voice: the pieces in the operator's voice gather until the words have been quiet for `voice.endPauseMs`, so a resume command
+   * counts only as a whole utterance; another voice's pieces do not join and start a room hold.
+   */
+  #pausedPiece(text: string, audio: Float32Array): void {
+    const check = this.deps.voiceprint?.check(audio, text, this.deps.settings()) ?? { score: null, f0: null, dropped: false, reason: null };
+
+    if (check.dropped) {
+      this.#roomVoice(audio);
+      return;
+    }
+
+    this.#paused ??= { texts: [], checks: [], lastAt: this.deps.now() };
+    this.#paused.texts.push(text);
+    this.#paused.checks.push(check);
+    this.#paused.lastAt = this.deps.now();
+  }
+
+  /** The words heard while paused by voice have been quiet long enough: a resume command among them alone resumes; the rest is forgotten. */
+  #pausedQuiet(): void {
+    const paused = this.#paused;
+
+    if (paused === null || (this.#transcriber?.words ?? '') !== '' || this.deps.now() - paused.lastAt < this.deps.settings().endPauseMs) {
+      return;
+    }
+
+    this.#paused = null;
+    // Nothing of what was said while paused is kept: the recogniser starts afresh.
+    this.#transcriber?.end(false);
+
+    const text = paused.texts.join(' ');
+    const command = spokenCommand(text);
+
+    if (command === 'start-listening' && !paused.checks.every((check) => this.#fullMatch(check.score))) {
+      // Two words pass the voice check with its short-piece allowance even in other voices (0.54 to 0.59 for synthetic ones), so resuming,
+      // which lets dictation through again, needs the full voice.matchThreshold.
+      this.deps.log(`"${text}" not taken: its voice match ${paused.checks.map((check) => check.score ?? 'unknown').join(', ')} is under voice.matchThreshold`);
+    } else if (command !== null) {
+      this.#command(command, text, null, paused.checks[0]!);
+    }
+  }
+
+  /** Leaves the pause by voice, dropping what was heard during it, so none of it reaches the draft. */
+  #leavePause(): void {
+    this.#pausedByVoice = false;
+    this.#paused = null;
+    this.#transcriber?.take();
+    this.#transcriber?.end(false);
+  }
+
+  /** Whether a voice check score clears `voice.matchThreshold` without the short-piece allowance; anything does without an enrolment. */
+  #fullMatch(score: number | null): boolean {
+    return this.deps.voiceprint?.enrolled !== true || (score !== null && score >= this.deps.settings().matchThreshold);
+  }
+
+  /** Does a spoken command, logs it and tells the hub; it goes to no session. */
+  #command(command: SpokenCommand, text: string, utteranceId: string | null, check: { score: number | null; f0: number | null }): void {
+    if (command === 'stop-listening' && !this.#pausedByVoice) {
+      this.#pausedByVoice = true;
+      this.deps.log(`listening paused by voice ("${text}"): only "start listening" is heard until then`);
+    } else if (command === 'start-listening' && this.#pausedByVoice) {
+      this.#pausedByVoice = false;
+      this.deps.log(`listening resumed by voice ("${text}")`);
+    } else {
+      this.deps.log(`spoken command "${text}" heard: listening is already ${this.#pausedByVoice ? 'paused' : 'on'}`);
+    }
+
+    this.deps.send({ type: 'command', command, text, sessionId: this.#target?.sessionId ?? null, utteranceId, score: check.score, f0: check.f0 });
+    this.#report();
+  }
+
   /** Speech came: the open utterance, opened now if none is; null with no target to hear it for. */
   #spoke(): void {
     this.#open();
@@ -719,7 +880,7 @@ export class Dictation {
 
   #open(): Utterance | null {
     if (this.#utterance === null && this.#target !== null) {
-      this.#utterance = { id: this.deps.newId(), gen: this.#target.gen, sessionId: this.#target.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, words: '', interrupted: null };
+      this.#utterance = { id: this.deps.newId(), gen: this.#target.gen, sessionId: this.#target.sessionId, pieces: [], lastActivity: this.deps.now(), completeAt: null, waitMs: 0, words: '', interrupted: null, pending: [] };
       this.#report();
     }
 
@@ -728,7 +889,7 @@ export class Dictation {
 
   /** The words said so far, settled and live. */
   #said(): string {
-    return [...(this.#utterance?.pieces ?? []), this.#transcriber?.words ?? ''].join(' ').trim();
+    return [...(this.#utterance?.pieces ?? []), ...(this.#utterance?.pending.map((one) => one.text) ?? []), this.#transcriber?.words ?? ''].join(' ').trim();
   }
 
   /** Asks the turn model whether the words so far are a finished turn; only the newest check of the open utterance counts. */
@@ -766,6 +927,11 @@ export class Dictation {
   #tick(): void {
     // The voice may have started playing since the last audio came: an utterance open then is cut, never ended as final.
     if (this.#stream?.halfDuplex != null && this.#halfDuplexDeaf()) {
+      return;
+    }
+
+    if (this.#pausedByVoice) {
+      this.#pausedQuiet();
       return;
     }
 
@@ -815,6 +981,20 @@ export class Dictation {
       this.#piece(rest.text, rest.audio);
     }
 
+    // An utterance that turn detection ended and that is only a spoken command is done, not sent; cut short, its words are dictation.
+    if (utterance !== null && utterance.pending.length > 0) {
+      const text = utterance.pending.map((one) => one.text).join(' ');
+      const command = final && utterance.pieces.length === 0 ? spokenCommand(text) : null;
+
+      if (command === null) {
+        this.#release(utterance);
+      } else {
+        const [first] = utterance.pending.splice(0);
+
+        this.#command(command, text, utterance.id, first!);
+      }
+    }
+
     if (utterance !== null) {
       if (utterance.words !== '') {
         this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text: '' });
@@ -832,6 +1012,14 @@ export class Dictation {
 
   /** Cuts the open utterance short: the composer took the focus, the mic went off, the voice moved or the device failed. Nothing is sent. */
   #cut(drain: boolean): void {
+    // Paused by voice: words cut short are no command, and nothing of them is kept.
+    if (this.#pausedByVoice) {
+      this.#paused = null;
+      this.#transcriber?.take();
+      this.#transcriber?.end(false);
+      return;
+    }
+
     if (this.#utterance !== null || (this.#transcriber?.words ?? '') !== '') {
       this.#close(false, drain);
     }
@@ -841,6 +1029,7 @@ export class Dictation {
   #discard(): void {
     const utterance = this.#utterance;
 
+    this.#paused = null;
     this.#transcriber?.take();
 
     if (utterance !== null) {

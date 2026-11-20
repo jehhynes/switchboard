@@ -16,7 +16,7 @@ export interface VoiceTarget {
 }
 
 /** What capture is doing (architecture.md § Dictation), as the window's `VoiceView.mic` shows it. */
-export const MIC_STATES = ['off', 'listening', 'hearing', 'typing', 'idle-off', 'paused-other-app', 'unavailable', 'starting'] as const;
+export const MIC_STATES = ['off', 'listening', 'hearing', 'typing', 'idle-off', 'paused-other-app', 'paused-by-voice', 'unavailable', 'starting'] as const;
 
 export type MicState = (typeof MIC_STATES)[number];
 
@@ -35,6 +35,9 @@ export interface Interrupted {
   said: string;
   rest: string;
 }
+
+/** A spoken command (architecture.md § Dictation): "stop listening" or "pause listening", and "start listening" or "resume listening". */
+export type SpokenCommand = 'stop-listening' | 'start-listening';
 
 /** How long voiceprint enrolment records (voice-design § 3.2). */
 export const ENROLL_SECONDS = 60;
@@ -101,6 +104,11 @@ export type VoiceMessage =
    * the reply it spoke over (barge-in), or null.
    */
   | { type: 'utterance'; gen: number; utteranceId: string; sessionId: string; text: string; final: boolean; interrupted: Interrupted | null }
+  /**
+   * A spoken command was heard alone, as a whole utterance that passed the voice check, and done; it goes to no session. `sessionId` is the
+   * voice target then, or null; `utteranceId` the utterance it was, or null when heard while listening was paused by voice.
+   */
+  | { type: 'command'; command: SpokenCommand; text: string; sessionId: string | null; utteranceId: string | null; score: number | null; f0: number | null }
   /** Voiceprint enrolment changed state; `error` says why it failed. */
   | { type: 'enrollment'; state: EnrollmentState; error: string | null }
   /**

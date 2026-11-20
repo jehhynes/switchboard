@@ -8,11 +8,12 @@ import type { ChatTurn } from '../src/turn.js';
 import type { PieceCheck, Voiceprint } from '../src/voiceprint.js';
 import { Clock, FakeCapture, FakeEngine, settle } from './fakes.js';
 
-type Sent = Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' }>;
+type Sent = Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' | 'command' }>;
 
 /** A voice check that passes a piece unless `verdict` fails it, and an enrolment that saves unless told to fail. */
-function fakeVoiceprint(options: { verdict?: (text: string) => PieceCheck | null; unavailable?: string; enrollError?: string; replyVoice?: number | null } = {}) {
+function fakeVoiceprint(options: { verdict?: (text: string) => PieceCheck | null; unavailable?: string; enrollError?: string; replyVoice?: number | null; enrolled?: boolean } = {}) {
   const voiceprint = {
+    enrolled: options.enrolled ?? false,
     replyVoiceScore: () => options.replyVoice ?? null,
     checks: [] as Array<{ text: string; samples: number }>,
     enrolls: [] as number[],
@@ -138,7 +139,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
 
 const kinds = (sent: Sent[]): string[] =>
   sent.map((one) =>
-    one.type === 'words' ? `words "${one.text}"` : one.type === 'piece' ? `piece "${one.text}"${one.dropped ? ' dropped' : ''}` : one.type === 'enrollment' ? `enrollment ${one.state}` : `utterance "${one.text}" ${one.final ? 'final' : 'cut'}`,
+    one.type === 'words' ? `words "${one.text}"` : one.type === 'piece' ? `piece "${one.text}"${one.dropped ? ' dropped' : ''}` : one.type === 'enrollment' ? `enrollment ${one.state}` : one.type === 'command' ? `command ${one.command}` : `utterance "${one.text}" ${one.final ? 'final' : 'cut'}`,
   );
 
 describe('Dictation', () => {
@@ -157,7 +158,8 @@ describe('Dictation', () => {
     expect(capture.opens).toBe(1);
     expect(capture.devices).toEqual([null]);
     expect(termsAsked).toEqual(['acme/app']);
-    expect(loads).toEqual([['Switchboard', 'acme/app']]);
+    // The spoken commands are boosted with the terms.
+    expect(loads).toEqual([['Switchboard', 'acme/app', 'stop listening', 'pause listening', 'start listening', 'resume listening']]);
     expect(dictation.state).toBe('listening');
     // Where the loaded recogniser runs, for the audio report.
     expect(dictation.recognizer).toBe('gpu');
@@ -790,5 +792,152 @@ describe('Dictation room hold', () => {
     expect(dictation.roomHold).not.toBeNull();
     dictation.close();
     expect(dictation.roomHold).toBeNull();
+  });
+});
+
+describe('Dictation spoken commands', () => {
+  it('pauses on "stop listening" said alone, sends none of it, and hears only "start listening" until then', async () => {
+    const { dictation, say, quiet, sent, logs, capture, listening } = setup();
+
+    await listening();
+    say('Stop listening.', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent)).toEqual(['words "Stop listening."', 'words ""', 'command stop-listening', 'utterance "" cut']);
+    expect(sent[2]).toMatchObject({ type: 'command', text: 'Stop listening.', sessionId: 's1', utteranceId: 'id1' });
+    expect(dictation.state).toBe('paused-by-voice');
+    expect(logs).toContain('listening paused by voice ("Stop listening."): only "start listening" is heard until then');
+    // Capture keeps running for the command that resumes.
+    expect(capture.open_).toBe(true);
+
+    const before = sent.length;
+    say('so what do you think about dinner', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(sent.slice(before)).toEqual([]);
+    say('resume listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent.slice(before))).toEqual(['command start-listening']);
+    expect(sent.at(-1)).toMatchObject({ utteranceId: null, sessionId: 's1' });
+    expect(dictation.state).toBe('listening');
+    say('fix the login', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent).slice(-4)).toEqual(['words "fix the login"', 'piece "fix the login"', 'words ""', 'utterance "fix the login" final']);
+  });
+
+  it('sends a command said inside a longer utterance, or cut short, as dictation', async () => {
+    const { dictation, say, quiet, sent, listening } = setup();
+
+    await listening();
+    say('stop listening', 100);
+    quiet(PHRASE_SILENCE_MS);
+    say('stop listening to the radio', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent).filter((one) => one.startsWith('piece') || one.startsWith('utterance') || one.startsWith('command'))).toEqual(['piece "stop listening"', 'piece "to the radio"', 'utterance "stop listening to the radio" final']);
+    expect(dictation.state).toBe('listening');
+
+    say('start listening now please', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent).at(-1)).toBe('utterance "start listening now please" final');
+
+    say('pause listening', 100);
+    quiet(PHRASE_SILENCE_MS);
+    dictation.typing(true);
+    expect(kinds(sent).slice(-2)).toEqual(['piece "pause listening"', 'utterance "pause listening" cut']);
+    expect(dictation.state).toBe('typing');
+  });
+
+  it('resumes only on a "start listening" that clears voice.matchThreshold without the short-piece allowance', async () => {
+    const voiceprint = fakeVoiceprint({ enrolled: true, verdict: (text) => (text === 'start listening' ? { score: 0.55, f0: 120, dropped: false, reason: null } : null) });
+    const { dictation, say, quiet, logs, listening } = setup({ voiceprint });
+
+    await listening();
+    say('stop listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('paused-by-voice');
+    say('start listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('paused-by-voice');
+    expect(logs.at(-1)).toBe('"start listening" not taken: its voice match 0.55 is under voice.matchThreshold');
+    say('resume listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('listening');
+  });
+
+  it('takes no command in another voice, resumes on Mic on, and keeps the room hold while paused', async () => {
+    const voiceprint = fakeVoiceprint({ verdict: (text) => (text.includes('other') || text === 'start listening' ? { score: 0.2, f0: 230, dropped: true, reason: 'score' } : null) });
+    const { dictation, say, quiet, sent, listening } = setup({ voiceprint });
+
+    await listening();
+    say('pause listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('paused-by-voice');
+    // Someone else's "start listening" does not resume, and holds.
+    say('start listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('paused-by-voice');
+    expect(dictation.roomHold).not.toBeNull();
+    expect(kinds(sent).filter((one) => one.startsWith('command'))).toEqual(['command stop-listening']);
+    dictation.mic(true);
+    expect(dictation.state).toBe('listening');
+
+    // Off and on again also clears a pause.
+    say('stop listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('paused-by-voice');
+    dictation.mic(false);
+    dictation.mic(true);
+    expect(dictation.state).not.toBe('paused-by-voice');
+  });
+
+  it('resumes only on a whole utterance while paused: a command split by a pause counts, one with more words or cut short does not', async () => {
+    const { dictation, say, quiet, sent, spoke, listening } = setup();
+
+    await listening();
+    say('stop listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    // Talking while paused restarts the away timeout's count.
+    const spoken = spoke();
+    say('start listening', 100);
+    quiet(PHRASE_SILENCE_MS);
+    expect(spoke()).toBeGreaterThan(spoken);
+    say('start listening to the radio', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('paused-by-voice');
+    say('start', 100);
+    quiet(PHRASE_SILENCE_MS);
+    say('start listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('listening');
+    expect(kinds(sent).filter((one) => one.startsWith('command'))).toEqual(['command stop-listening', 'command start-listening']);
+
+    say('stop listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    say('start listening', 100);
+    quiet(PHRASE_SILENCE_MS);
+    dictation.typing(true);
+    dictation.typing(false);
+    await settle();
+    quiet(4_000);
+    expect(dictation.state).toBe('paused-by-voice');
+  });
+
+  it('drops what was said while paused when Mic on resumes, so none of it reaches the draft', async () => {
+    const { dictation, say, quiet, sent, listening } = setup();
+
+    await listening();
+    say('stop listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    const before = sent.length;
+    say('this is for my wife', 400);
+    dictation.mic(true);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(dictation.state).toBe('listening');
+    expect(sent.slice(before)).toEqual([]);
+
+    say('stop listening', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    const paused = sent.length;
+    say('more for my wife', 400);
+    dictation.mic(false);
+    expect(sent.slice(paused)).toEqual([]);
   });
 });
