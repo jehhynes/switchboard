@@ -15,6 +15,7 @@ import { parseVoiceRecord, voiceLockAddress, voiceRecordPath } from './record.js
 import { VoiceServer } from './server.js';
 import { VoiceService } from './service.js';
 import { readKey, SAMPLE_RATE, Tts } from './tts.js';
+import { SPEAKER_MODEL, sherpaEmbedder, Voiceprint } from './voiceprint.js';
 
 /** How long the voice process stays up with no hub connected; the hub stops it sooner when the demand ends. */
 const IDLE_EXIT_MS = 10 * 60_000;
@@ -104,6 +105,8 @@ async function main(): Promise<void> {
   const scripts = dirname(process.argv[1]!);
   const vocabulary = new Vocabulary(voiceHome, Date.now, log);
   const capture = await decibriCapture(ASR_RATE, SAMPLE_RATE);
+  // The speaker model loads at its first use, the first piece or enrolment.
+  const voiceprint = new Voiceprint({ dir: voiceHome, embedder: () => sherpaEmbedder(join(voiceHome, 'models', SPEAKER_MODEL), process.argv[1]!), log });
   const service: VoiceService = new VoiceService({
     tts,
     output: await decibriOutput(SAMPLE_RATE),
@@ -121,6 +124,7 @@ async function main(): Promise<void> {
         turn: turnModel(join(voiceHome, 'models', TURN_MODEL), join(scripts, 'turn.js'), log),
         watchMicUse: (changed, failed) => watchMicUse({ script: join(scripts, 'micuse.ps1'), changed, failed, log }),
         settings: () => service.settings,
+        voiceprint,
         send: hooks.send,
         changed: hooks.changed,
         spoke: hooks.spoke,

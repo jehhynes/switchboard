@@ -5,11 +5,36 @@ import { PHRASE_SILENCE_MS } from '../src/asr.js';
 import { Dictation } from '../src/dictation.js';
 import type { VoiceMessage } from '../src/protocol.js';
 import type { ChatTurn } from '../src/turn.js';
+import type { PieceCheck, Voiceprint } from '../src/voiceprint.js';
 import { Clock, FakeCapture, FakeEngine, settle } from './fakes.js';
 
-type Sent = Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' }>;
+type Sent = Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' }>;
 
-function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' | 'manual'; recognizer?: { error: string }; settings?: Partial<VoiceSettings> } = {}) {
+/** A voice check that passes a piece unless `verdict` fails it, and an enrolment that saves unless told to fail. */
+function fakeVoiceprint(options: { verdict?: (text: string) => PieceCheck | null; unavailable?: string; enrollError?: string } = {}) {
+  const voiceprint = {
+    checks: [] as Array<{ text: string; samples: number }>,
+    enrolls: [] as number[],
+    unavailable: () => options.unavailable ?? null,
+    check: (audio: Float32Array, text: string): PieceCheck => {
+      voiceprint.checks.push({ text, samples: audio.length });
+      return options.verdict?.(text) ?? { score: 0.9, f0: 110, dropped: false, reason: null };
+    },
+    enroll: (samples: Float32Array) => {
+      voiceprint.enrolls.push(samples.length);
+
+      if (options.enrollError !== undefined) {
+        throw new Error(options.enrollError);
+      }
+
+      return { windows: 20, f0: 107 };
+    },
+  };
+
+  return voiceprint;
+}
+
+function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' | 'manual'; recognizer?: { error: string }; settings?: Partial<VoiceSettings>; voiceprint?: ReturnType<typeof fakeVoiceprint> } = {}) {
   const clock = new Clock();
   const capture = new FakeCapture();
   const engine = new FakeEngine();
@@ -58,6 +83,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
       return { close: () => void watch.closed++ };
     },
     settings: () => settings,
+    ...(options.voiceprint === undefined ? {} : { voiceprint: options.voiceprint as unknown as Voiceprint }),
     send: (message) => sent.push(message),
     changed: () => void changed++,
     spoke: () => void spoke++,
@@ -89,7 +115,10 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
   return { clock, capture, engine, sent, logs, chats, termsAsked, loads, used, watch, settings, dictation, say, quiet, listening, spoke: () => spoke, changed: () => changed };
 }
 
-const kinds = (sent: Sent[]): string[] => sent.map((one) => (one.type === 'words' ? `words "${one.text}"` : one.type === 'piece' ? `piece "${one.text}"` : `utterance "${one.text}" ${one.final ? 'final' : 'cut'}`));
+const kinds = (sent: Sent[]): string[] =>
+  sent.map((one) =>
+    one.type === 'words' ? `words "${one.text}"` : one.type === 'piece' ? `piece "${one.text}"${one.dropped ? ' dropped' : ''}` : one.type === 'enrollment' ? `enrollment ${one.state}` : `utterance "${one.text}" ${one.final ? 'final' : 'cut'}`,
+  );
 
 describe('Dictation', () => {
   it('captures only once the watcher says no other app records, and loads the recogniser with the target repository\'s terms', async () => {
@@ -328,5 +357,128 @@ describe('Dictation', () => {
     expect(capture.references.map((one) => one.length)).toEqual([8]);
     dictation.close();
     expect(capture.stream!.stopped).toBe(true);
+  });
+  it('drops a piece that fails the voice check: reported with its score, kept out of the utterance, and nothing sent for an utterance of dropped pieces only', async () => {
+    const voiceprint = fakeVoiceprint({ verdict: (text) => (text.includes('someone') ? { score: 0.31, f0: 240, dropped: true, reason: 'score' } : null) });
+    const { say, quiet, sent, used, logs, listening } = setup({ voiceprint });
+
+    await listening();
+    say('fix it', 100);
+    quiet(PHRASE_SILENCE_MS);
+    say('fix it someone else', 100);
+    quiet(PHRASE_SILENCE_MS);
+    expect(kinds(sent)).toEqual(['words "fix it"', 'piece "fix it"', 'words ""', 'words "someone else"', 'piece "someone else" dropped', 'words ""']);
+    expect(sent[4]).toMatchObject({ score: 0.31, f0: 240, dropped: true });
+    expect(sent[1]).toMatchObject({ score: 0.9, f0: 110, dropped: false });
+    expect(voiceprint.checks.map((one) => one.text)).toEqual(['fix it', 'someone else']);
+    expect(voiceprint.checks[0]!.samples).toBeGreaterThan(0);
+    expect(logs).toContain('piece dropped by the voice check (score 0.31): someone else');
+    expect(used).toEqual(['fix it']);
+    quiet(2_000);
+    expect(kinds(sent).at(-1)).toBe('utterance "fix it" final');
+
+    say('someone talking', 100);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent).slice(-3)).toEqual(['words "someone talking"', 'piece "someone talking" dropped', 'words ""']);
+  });
+
+  it('judges the end of a turn again without a dropped piece, so someone else\'s words do not end the operator\'s turn', async () => {
+    const voiceprint = fakeVoiceprint({ verdict: (text) => (text.includes('go ahead') ? { score: 0.2, f0: 120, dropped: true, reason: 'score' } : null) });
+    const { say, quiet, sent, chats, listening } = setup({ voiceprint, turn: (chat) => (chat[1]!.content.includes('go ahead') ? 0.05 : 0.0001) });
+
+    await listening();
+    say('fix it', 100);
+    quiet(PHRASE_SILENCE_MS);
+    say('fix it go ahead', 100);
+    quiet(400);
+    await settle();
+    quiet(800);
+    await settle();
+    expect(chats.map((chat) => chat[1]!.content)).toEqual(['fix it', 'fix it go ahead', 'fix it']);
+    // The words "go ahead" earned a 2 s wait, which no longer counts.
+    quiet(1_000);
+    expect(sent.some((one) => one.type === 'utterance')).toBe(false);
+    quiet(900);
+    expect(kinds(sent).at(-1)).toBe('utterance "fix it" final');
+  });
+
+  it('records 60 s for enrolment with the mic off and no recogniser, sends none of it to a session, and saves the print', async () => {
+    const voiceprint = fakeVoiceprint();
+    const { dictation, capture, clock, sent, loads, logs } = setup({ voiceprint });
+
+    dictation.enroll('start');
+    await settle();
+    expect(kinds(sent)).toEqual(['enrollment recording']);
+    expect([capture.opens, loads.length, dictation.state]).toEqual([1, 0, 'off']);
+
+    for (let at = 0; at < 600; at++) {
+      capture.pcm(100);
+    }
+
+    clock.advance(59_000);
+    dictation.enroll('start');
+    expect(kinds(sent)).toEqual(['enrollment recording', 'enrollment recording']);
+    clock.advance(1_000);
+    expect(voiceprint.enrolls).toEqual([960_000]);
+    expect(kinds(sent).at(-1)).toBe('enrollment enrolled');
+    expect(capture.stream!.stopped).toBe(true);
+    expect(logs).toContain('voiceprint enrolled from 20 windows, median pitch 107 Hz');
+  });
+
+  it('cancels an enrolment without saving, and fails one that cannot run without opening the microphone', async () => {
+    const voiceprint = fakeVoiceprint();
+    const { dictation, capture, clock, sent } = setup({ voiceprint });
+
+    dictation.enroll('cancel');
+    expect(sent).toEqual([]);
+    dictation.enroll('start');
+    await settle();
+    capture.pcm(100);
+    dictation.enroll('cancel');
+    clock.advance(60_000);
+    expect(kinds(sent)).toEqual(['enrollment recording', 'enrollment cancelled']);
+    expect(voiceprint.enrolls).toEqual([]);
+    expect(capture.stream!.stopped).toBe(true);
+
+    const missing = setup({ voiceprint: fakeVoiceprint({ unavailable: 'No speaker model at m.' }) });
+
+    missing.dictation.enroll('start');
+    await settle();
+    expect(missing.sent).toEqual([{ type: 'enrollment', state: 'failed', error: 'No speaker model at m.' }]);
+    expect(missing.capture.opens).toBe(0);
+
+    const none = setup();
+
+    none.dictation.enroll('start');
+    expect(none.sent).toEqual([{ type: 'enrollment', state: 'failed', error: 'The voice check is not available.' }]);
+  });
+
+  it('cuts dictation short for an enrolment, hears no words while it records, and listens again after a failed one', async () => {
+    const voiceprint = fakeVoiceprint({ enrollError: 'The recording was too short: speak for at least 9 seconds.' });
+    const { dictation, capture, clock, sent, say, listening } = setup({ voiceprint });
+
+    await listening();
+    say('about the', 200);
+    dictation.enroll('start');
+    await settle();
+    expect(kinds(sent)).toEqual(['words "about the"', 'piece "about the"', 'words ""', 'utterance "about the" cut', 'enrollment recording']);
+    expect([capture.opens, dictation.state]).toEqual([2, 'idle-off']);
+    say('the quick brown fox', 2_000);
+    expect(sent).toHaveLength(5);
+    clock.advance(60_000);
+    await settle();
+    expect(sent.at(-1)).toEqual({ type: 'enrollment', state: 'failed', error: 'The recording was too short: speak for at least 9 seconds.' });
+    expect([capture.opens, dictation.state]).toEqual([3, 'listening']);
+  });
+
+  it('fails an enrolment whose microphone fails', async () => {
+    const voiceprint = fakeVoiceprint();
+    const { dictation, capture, sent } = setup({ voiceprint });
+
+    capture.fail = new Error('device gone');
+    dictation.enroll('start');
+    await settle();
+    expect(sent.at(-1)).toEqual({ type: 'enrollment', state: 'failed', error: 'The microphone failed: device gone' });
+    expect(voiceprint.enrolls).toEqual([]);
   });
 });

@@ -128,6 +128,16 @@ export class VoiceService {
       case 'heard':
         this.deps.heard?.(message.heard, message.meant);
         return;
+      case 'enroll':
+        if (this.#dictation === null) {
+          if (message.action === 'start') {
+            this.deps.send({ type: 'enrollment', state: 'failed', error: 'Capture is not available.' });
+          }
+        } else {
+          this.#dictation.enroll(message.action);
+        }
+
+        return;
       case 'speak':
         if (message.gen !== this.#router.gen || message.sessionId !== this.#router.target) {
           this.deps.log(`reply ${message.replyId} dropped: generation ${message.gen} is not ${this.#router.gen}`);

@@ -219,6 +219,24 @@ export class FakeCapture implements Capture {
     }
   }
 
+  /** Delivers `ms` of a sine at `hz` to the open stream, continuing its phase from the last tone. */
+  tone(ms: number, hz: number, amplitude = 0.3): void {
+    if (this.stream === null || this.stream.stopped) {
+      return;
+    }
+
+    const count = ms * 16;
+    const pcm = Buffer.alloc(count * 2);
+
+    for (let index = 0; index < count; index++) {
+      pcm.writeInt16LE(Math.round(Math.sin((2 * Math.PI * hz * this.#phase++) / 16_000) * amplitude * 32_767), index * 2);
+    }
+
+    this.stream.onPcm(pcm);
+  }
+
+  #phase = 0;
+
   get open_(): boolean {
     return this.stream !== null && !this.stream.stopped;
   }

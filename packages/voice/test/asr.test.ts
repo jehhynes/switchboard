@@ -10,7 +10,11 @@ const CHUNK = new Float32Array(1600);
 function setup() {
   const engine = new FakeEngine();
   const events: string[] = [];
-  const transcriber = new Transcriber(engine, { onWords: (text) => events.push(`words ${text}`), onPiece: (text) => events.push(`piece ${text}`), onQuiet: () => events.push('quiet') });
+  const audios: Float32Array[] = [];
+  const transcriber = new Transcriber(engine, { onWords: (text) => events.push(`words ${text}`), onPiece: (text, audio) => {
+      events.push(`piece ${text}`);
+      audios.push(audio);
+    }, onQuiet: () => events.push('quiet') });
   const feed = (text: string, chunks = 1): void => {
     engine.text = text;
 
@@ -19,7 +23,7 @@ function setup() {
     }
   };
 
-  return { engine, events, transcriber, feed };
+  return { engine, events, audios, transcriber, feed };
 }
 
 describe('Transcriber', () => {
@@ -34,7 +38,7 @@ describe('Transcriber', () => {
     feed('hello there world');
     expect(events.slice(4)).toEqual(['words world']);
     expect(transcriber.words).toBe('world');
-    expect(transcriber.take()).toBe('world');
+    expect(transcriber.take()).toMatchObject({ text: 'world' });
     expect(transcriber.take()).toBeNull();
   });
 
@@ -44,13 +48,46 @@ describe('Transcriber', () => {
     feed('rename the', 3);
     engine.held = 'button';
     transcriber.drain();
-    expect(transcriber.take()).toBe('rename the button');
+    expect(transcriber.take()).toMatchObject({ text: 'rename the button' });
     transcriber.end();
     expect(engine.streams).toBe(2);
     expect(transcriber.words).toBe('');
     transcriber.end(false);
     expect(engine.streams).toBe(3);
     expect(transcriber.total).toBe(4800);
+  });
+
+  it('gives a piece the audio since the last piece, at least the last 4 s and at most the last 8 s, for the voice check', () => {
+    const { audios, transcriber, feed } = setup();
+
+    feed('hello', 13);
+    expect(audios.map((audio) => audio.length)).toEqual([20_800]);
+    feed('hello', 100);
+    feed('hello there', 13);
+    // 11 s since the first piece: the last 8 s, all the ring keeps.
+    expect(audios.map((audio) => audio.length)).toEqual([20_800, 128_000]);
+    feed('hello there again', 13);
+    expect(audios[2]!.length).toBe(64_000);
+    feed('hello there again', 1);
+    expect(transcriber.take()).toBeNull();
+    expect(transcriber.samples(transcriber.total - 3200).length).toBe(3200);
+    expect(transcriber.samples(0).length).toBe(128_000);
+  });
+
+  it('starts recognition again from a barge-in\'s onset, and keeps the audio before it out of the next piece\'s voice check', () => {
+    const { engine, audios, transcriber, feed } = setup();
+
+    feed('the session token is', 30);
+    expect(engine.streams).toBe(1);
+    transcriber.restartFrom(transcriber.total - 8000);
+    expect([engine.streams, transcriber.words]).toEqual([2, '']);
+    feed('hold on', 13);
+    expect(transcriber.words).toBe('');
+    expect(audios.at(-1)!.length).toBe(8000 + 13 * 1600);
+    transcriber.end();
+    feed('next', 13);
+    // After the message ends, a piece's audio is no longer cut at the onset.
+    expect(audios.at(-1)!.length).toBe(64_000);
   });
 
   it('reads 16-bit PCM as samples from -1 to 1', () => {

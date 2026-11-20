@@ -29,8 +29,8 @@ export interface AsrEngine {
 export interface TranscriberEvents {
   /** The words not yet settled into a piece changed; empty once they settled. */
   onWords(text: string): void;
-  /** Words that stopped growing for `PHRASE_SILENCE_MS`: a piece. */
-  onPiece(text: string): void;
+  /** Words that stopped growing for `PHRASE_SILENCE_MS`: a piece, with its audio for the voice check (`recent`). */
+  onPiece(text: string, audio: Float32Array): void;
   /** `QUIET_MS` after the words last grew. */
   onQuiet(): void;
 }
@@ -49,6 +49,10 @@ export class Transcriber {
   #settled = 0;
   #grewAt = 0;
   #quietDone = true;
+  /** Where the audio of the next piece begins. */
+  #pieceStart = 0;
+  /** No audio before this sample goes into a piece's voice check: after a barge-in, the reply's echo before the operator's first word. */
+  #audioFrom = 0;
 
   constructor(
     private readonly engine: AsrEngine,
@@ -90,20 +94,68 @@ export class Transcriber {
 
     if (words(this.#text).length > this.#settled && this.#total - this.#grewAt >= (PHRASE_SILENCE_MS * ASR_RATE) / 1000) {
       const piece = this.words;
+      const audio = this.recent();
 
       this.#settled = words(this.#text).length;
-      this.events.onPiece(piece);
+      this.#pieceStart = this.#total;
+      this.events.onPiece(piece, audio);
       this.events.onWords('');
     }
   }
 
-  /** Takes the words not settled yet as text, without reporting them as a piece; null with none. */
-  take(): string | null {
+  /** The samples from `from` (an absolute sample count) to now, within the last 8 seconds. */
+  samples(from: number): Float32Array {
+    const start = Math.max(from, this.#total - KEEP, 0);
+    const out = new Float32Array(this.#total - start);
+
+    for (let index = 0; index < out.length; index++) {
+      out[index] = this.#ring[(start + index) % KEEP]!;
+    }
+
+    return out;
+  }
+
+  /** A piece's audio for the voice check: the last 4 to 8 seconds, or since the last piece when longer, never before a barge-in's onset. */
+  recent(): Float32Array {
+    let count = Math.min(KEEP, this.#total, Math.max(4 * ASR_RATE, this.#total - this.#pieceStart));
+
+    if (this.#audioFrom > 0) {
+      count = Math.min(count, this.#total - this.#audioFrom);
+    }
+
+    return this.samples(this.#total - count);
+  }
+
+  /** Takes the words not settled yet, with their audio, without reporting them as a piece; null with none. */
+  take(): { text: string; audio: Float32Array } | null {
     const rest = this.words;
 
     this.#settled = words(this.#text).length;
 
-    return rest === '' ? null : rest;
+    if (rest === '') {
+      return null;
+    }
+
+    const audio = this.recent();
+
+    this.#pieceStart = this.#total;
+    return { text: rest, audio };
+  }
+
+  /**
+   * A barge-in: recognition starts again on a fresh stream from `from` (an absolute sample count), so the words start with the operator's and
+   * not the reply's echo before them, which the old stream may have followed instead.
+   */
+  restartFrom(from: number): void {
+    const pre = this.samples(from);
+
+    this.#stream = this.engine.stream();
+    this.#stream.accept(pre);
+    this.#text = this.#stream.text().trim();
+    this.#settled = 0;
+    this.#grewAt = this.#total;
+    this.#quietDone = false;
+    this.#audioFrom = this.#pieceStart = this.#total - pre.length;
   }
 
   /** No more audio comes for this message: the stream gives up the words it held back. `end` must follow. */
@@ -134,6 +186,7 @@ export class Transcriber {
     this.#text = '';
     this.#settled = 0;
     this.#quietDone = true;
+    this.#audioFrom = 0;
   }
 }
 

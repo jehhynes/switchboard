@@ -29,6 +29,19 @@ export type VoiceFocus = { sessionId: string; via: 'window' | 'terminal' } | nul
 /** What became of a reply's speech, as the voice process reports it. */
 export type SpeechState = 'playing' | 'played' | 'interrupted' | 'skipped' | 'failed';
 
+/** The reply an utterance spoke over: the part of its passage played before it stopped (`said`) and the part never played (`rest`). */
+export interface Interrupted {
+  replyId: string;
+  said: string;
+  rest: string;
+}
+
+/** How long voiceprint enrolment records (voice-design § 3.2). */
+export const ENROLL_SECONDS = 60;
+
+/** Where voiceprint enrolment stands: recording, ended with a print saved, failed with why, or cancelled. */
+export type EnrollmentState = 'recording' | 'enrolled' | 'failed' | 'cancelled';
+
 /** Why the voice target changed: the focus after its debounce, Talk here, or the target dropped (away timeout, or no longer a target). */
 export type ActiveReason = 'focus' | 'talk-here' | 'gone';
 
@@ -55,6 +68,8 @@ export type HubMessage =
   | { type: 'context'; sessionId: string; lastReply: string }
   /** A reply's heard tag, for the glossary. */
   | { type: 'heard'; heard: string; meant: string }
+  /** Voiceprint enrolment: record `ENROLL_SECONDS` of the operator's speech and save the print, or stop recording and save nothing. */
+  | { type: 'enroll'; action: 'start' | 'cancel' }
   | { type: 'shutdown' };
 
 export type VoiceMessage =
@@ -67,13 +82,16 @@ export type VoiceMessage =
   | { type: 'audio'; mic: MicState; engine: string; device: string | null; error: string | null }
   /** The live words of an utterance, not settled yet; empty once they settled or were dropped. */
   | { type: 'words'; gen: number; utteranceId: string; sessionId: string; text: string }
-  /** A piece of an utterance settled, with its voice check results, which a later slice adds (null until then). */
+  /** A piece of an utterance settled, with its voice check: its match score and median pitch (null when not judged), and whether it failed. */
   | { type: 'piece'; gen: number; utteranceId: string; sessionId: string; pieceId: string; text: string; score: number | null; f0: number | null; dropped: boolean }
   /**
    * An utterance ended: `final` when turn detection ended it, so the hub may send it; false when it was cut off (the composer took the focus,
-   * the mic went off, another app started recording, the voice moved), so the hub sends nothing. `text` is its pieces' words.
+   * the mic went off, another app started recording, the voice moved), so the hub sends nothing. `text` is its kept pieces' words; `interrupted`
+   * the reply it spoke over (barge-in), or null.
    */
-  | { type: 'utterance'; gen: number; utteranceId: string; sessionId: string; text: string; final: boolean; interrupted: null };
+  | { type: 'utterance'; gen: number; utteranceId: string; sessionId: string; text: string; final: boolean; interrupted: Interrupted | null }
+  /** Voiceprint enrolment changed state; `error` says why it failed. */
+  | { type: 'enrollment'; state: EnrollmentState; error: string | null };
 
 /** Splits a byte stream into lines; a line over the limit is an error, since the peer is not following the protocol. */
 export class LineReader {
@@ -189,6 +207,8 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
       return typeof m.on === 'boolean' ? { type: m.type, on: m.on } : invalid;
     case 'context':
       return isId(m.sessionId) && isText(m.lastReply) ? { type: 'context', sessionId: m.sessionId, lastReply: m.lastReply } : invalid;
+    case 'enroll':
+      return m.action === 'start' || m.action === 'cancel' ? { type: 'enroll', action: m.action } : invalid;
     case 'heard':
       return isText(m.heard) && isText(m.meant) && m.heard.trim() !== '' && m.meant.trim() !== '' && m.heard.length <= 200 && m.meant.length <= 200 ? { type: 'heard', heard: m.heard, meant: m.meant } : invalid;
     default:

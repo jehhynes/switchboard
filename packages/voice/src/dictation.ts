@@ -3,9 +3,11 @@ import { pcmToSamples, Transcriber } from './asr.js';
 import type { AsrEngine } from './asr.js';
 import type { MicUse } from './micUse.js';
 import type { Capture, CaptureStream } from './output.js';
+import { ENROLL_SECONDS } from './protocol.js';
 import type { MicState, VoiceMessage } from './protocol.js';
 import { pauseWait, textWait } from './turn.js';
 import type { TurnModel } from './turn.js';
+import type { Voiceprint } from './voiceprint.js';
 
 /** How often an open message is checked for its end. */
 export const TURN_TICK_MS = 100;
@@ -19,8 +21,10 @@ export interface DictationDeps {
   /** Starts watching other apps' recording; null where nothing can watch, and the voice never pauses for another app. */
   watchMicUse(changed: (busy: boolean, apps: string[]) => void, failed: () => void): MicUse | null;
   settings(): VoiceSettings;
-  /** `words`, `piece` and `utterance` to the hub. */
-  send(message: Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' }>): void;
+  /** The voice check and enrolment; without it every piece passes unscored and enrolment fails. */
+  voiceprint?: Voiceprint | null;
+  /** `words`, `piece`, `utterance` and `enrollment` to the hub. */
+  send(message: Extract<VoiceMessage, { type: 'words' | 'piece' | 'utterance' | 'enrollment' }>): void;
   /** The mic state or the capture error changed. */
   changed(): void;
   /** The operator spoke: the away timeout counts again. */
@@ -81,12 +85,19 @@ export class Dictation {
   #idle: unknown = null;
   #ticker: { stop(): void } | null = null;
   #reported = '';
+  /** Voiceprint enrolment's recording, while one runs: capture goes to it instead of the recogniser. */
+  #enrollment: { chunks: Float32Array[]; timer: unknown } | null = null;
 
   constructor(private readonly deps: DictationDeps) {}
 
   get state(): MicState {
     if (!this.#micOn) {
       return 'off';
+    }
+
+    // Enrolment speech is not dictation.
+    if (this.#enrollment !== null) {
+      return 'idle-off';
     }
 
     if (this.#error !== null) {
@@ -200,7 +211,82 @@ export class Dictation {
     }
   }
 
+  /**
+   * Voiceprint enrolment (architecture.md § Voice check and barge-in): `start` cuts any utterance short and records `ENROLL_SECONDS` of
+   * capture, which goes to no session, then saves the print from it; `cancel` stops recording and saves nothing. Each change is reported.
+   */
+  enroll(action: 'start' | 'cancel'): void {
+    if (action === 'cancel') {
+      if (this.#enrollment !== null) {
+        this.deps.log('voiceprint enrolment cancelled');
+        this.#endEnrollment();
+        this.deps.send({ type: 'enrollment', state: 'cancelled', error: null });
+      }
+
+      return;
+    }
+
+    if (this.#enrollment !== null) {
+      this.deps.send({ type: 'enrollment', state: 'recording', error: null });
+      return;
+    }
+
+    const unavailable = this.deps.voiceprint == null ? 'The voice check is not available.' : this.deps.voiceprint.unavailable();
+
+    if (unavailable !== null) {
+      this.deps.log(`voiceprint enrolment failed: ${unavailable}`);
+      this.deps.send({ type: 'enrollment', state: 'failed', error: unavailable });
+      return;
+    }
+
+    this.#cut(true);
+    this.#enrollment = { chunks: [], timer: this.#timer(() => this.#finishEnrollment(), ENROLL_SECONDS * 1000) };
+    this.deps.log('voiceprint enrolment started');
+    this.deps.send({ type: 'enrollment', state: 'recording', error: null });
+    // Capture open for dictation opens again for the recording, which needs no recogniser.
+    this.#stopCapture();
+    this.#sync();
+  }
+
+  #finishEnrollment(): void {
+    const chunks = this.#enrollment?.chunks ?? [];
+    const samples = new Float32Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+    let at = 0;
+
+    for (const chunk of chunks) {
+      samples.set(chunk, at);
+      at += chunk.length;
+    }
+
+    this.#endEnrollment();
+
+    try {
+      const result = this.deps.voiceprint!.enroll(samples);
+
+      this.deps.log(`voiceprint enrolled from ${result.windows} windows, median pitch ${result.f0 ?? 'unknown'} Hz`);
+      this.deps.send({ type: 'enrollment', state: 'enrolled', error: null });
+    } catch (error) {
+      this.deps.log(`voiceprint enrolment failed: ${(error as Error).message}`);
+      this.deps.send({ type: 'enrollment', state: 'failed', error: (error as Error).message });
+    }
+  }
+
+  #endEnrollment(): void {
+    if (this.#enrollment !== null) {
+      this.#clearTimer(this.#enrollment.timer);
+      this.#enrollment = null;
+    }
+
+    this.#stopCapture();
+    this.#sync();
+  }
+
   close(): void {
+    if (this.#enrollment !== null) {
+      this.#clearTimer(this.#enrollment.timer);
+      this.#enrollment = null;
+    }
+
     this.#micOn = false;
     this.#watch?.close();
     this.#watch = null;
@@ -228,15 +314,24 @@ export class Dictation {
     this.#sync();
   }
 
+  /** Whether dictation could listen, whatever the last error. */
+  #ready(): boolean {
+    return this.#micOn && this.#otherApp === false && !this.#idleOff && this.#target !== null && !this.#typing;
+  }
+
+  /** Whether capture should run: for enrolment, or for dictation. */
+  #wanted(): boolean {
+    return this.#enrollment !== null || (this.#ready() && this.#error === null);
+  }
+
   /** Starts or stops capture for the current state, and reports the state when it changed. */
   #sync(): void {
-    const ready = this.#micOn && this.#otherApp === false && !this.#idleOff && this.#target !== null && !this.#typing;
-
-    if (ready && this.#recognizerFailed) {
+    // A recogniser that failed to load is tried again at each attempt to listen.
+    if (this.#ready() && this.#recognizerFailed) {
       this.#error = null;
     }
 
-    const wanted = ready && this.#error === null;
+    const wanted = this.#wanted();
 
     if (wanted && this.#stream === null && !this.#opening) {
       void this.#startCapture();
@@ -283,14 +378,14 @@ export class Dictation {
     this.#engine = { key, engine };
     this.#transcriber = new Transcriber(engine, {
       onWords: (text) => this.#words(text),
-      onPiece: (text) => this.#piece(text),
+      onPiece: (text, audio) => this.#piece(text, audio),
       onQuiet: () => void this.#checkTurn(),
     });
     return true;
   }
 
   async #startCapture(): Promise<void> {
-    if (!this.#loadEngine()) {
+    if (this.#enrollment === null && !this.#loadEngine()) {
       this.#report();
       return;
     }
@@ -303,7 +398,7 @@ export class Dictation {
     try {
       stream = await this.deps.capture.open(
         this.deps.settings().inputDevice,
-        (pcm) => this.#transcriber?.feed(pcmToSamples(pcm)),
+        (pcm) => this.#audio(pcm),
         (error) => this.#failed(error),
       );
     } catch (error) {
@@ -315,7 +410,7 @@ export class Dictation {
     this.#opening = false;
 
     // The state moved on while the device opened.
-    if (!this.#micOn || this.#error !== null || this.#otherApp !== false || this.#idleOff || this.#target === null || this.#typing) {
+    if (!this.#wanted()) {
       stream.stop();
       this.#sync();
       return;
@@ -335,10 +430,29 @@ export class Dictation {
     this.#clearIdle();
   }
 
+  /** Captured audio: to enrolment's recording while one runs, else to the recogniser. */
+  #audio(pcm: Buffer): void {
+    const samples = pcmToSamples(pcm);
+
+    if (this.#enrollment !== null) {
+      this.#enrollment.chunks.push(samples);
+      return;
+    }
+
+    this.#transcriber?.feed(samples);
+  }
+
   #failed(error: Error): void {
     this.#recognizerFailed = false;
     this.#error = `The microphone failed: ${error.message}`;
     this.deps.log(this.#error);
+
+    if (this.#enrollment !== null) {
+      this.#clearTimer(this.#enrollment.timer);
+      this.#enrollment = null;
+      this.deps.send({ type: 'enrollment', state: 'failed', error: this.#error });
+    }
+
     this.#cut(false);
     this.#stopCapture();
     this.#report();
@@ -365,16 +479,35 @@ export class Dictation {
     this.deps.send({ type: 'words', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, text });
   }
 
-  #piece(text: string): void {
+  /**
+   * A piece settled: the voice check judges its audio (architecture.md § Voice check and barge-in), and only a piece that passes joins the
+   * utterance, so someone else's words neither reach the session nor end the operator's turn.
+   */
+  #piece(text: string, audio: Float32Array): void {
     const utterance = this.#open();
 
     if (utterance === null) {
       return;
     }
 
+    const check = this.deps.voiceprint?.check(audio, text, this.deps.settings()) ?? { score: null, f0: null, dropped: false, reason: null };
+
+    this.deps.send({ type: 'piece', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, pieceId: this.deps.newId(), text, score: check.score, f0: check.f0, dropped: check.dropped });
+
+    if (check.dropped) {
+      this.deps.log(`piece dropped by the voice check (${check.reason === 'pitch' ? 'pitch' : 'score'} ${check.reason === 'pitch' ? `${check.f0} Hz` : check.score}): ${text}`);
+
+      // An end the turn model judged on words that included these is judged again without them.
+      if (utterance.completeAt !== null) {
+        utterance.completeAt = null;
+        void this.#checkTurn();
+      }
+
+      return;
+    }
+
     utterance.pieces.push(text);
     this.deps.vocabulary.used(text);
-    this.deps.send({ type: 'piece', gen: utterance.gen, utteranceId: utterance.id, sessionId: utterance.sessionId, pieceId: this.deps.newId(), text, score: null, f0: null, dropped: false });
   }
 
   /** Speech came: the open utterance, opened now if none is; null with no target to hear it for. */
@@ -461,7 +594,7 @@ export class Dictation {
     const rest = transcriber?.take() ?? null;
 
     if (rest !== null) {
-      this.#piece(rest);
+      this.#piece(rest.text, rest.audio);
     }
 
     if (utterance !== null) {
@@ -521,6 +654,14 @@ export class Dictation {
         this.#sync();
       }, minutes * 60_000);
     }
+  }
+
+  #timer(run: () => void, ms: number): unknown {
+    return (this.deps.setTimer ?? ((call, wait) => setTimeout(call, wait)))(run, ms);
+  }
+
+  #clearTimer(timer: unknown): void {
+    (this.deps.clearTimer ?? ((one) => clearTimeout(one as NodeJS.Timeout)))(timer);
   }
 
   #clearIdle(): void {
