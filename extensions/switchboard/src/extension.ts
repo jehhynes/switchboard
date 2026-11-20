@@ -24,7 +24,8 @@ import type { ConversationEvent, ConversationState } from './conversationModel.j
 import { extendMarkdownIt } from './markdownMermaid.js';
 import type MarkdownIt from 'markdown-it';
 import { mainTerminal, paneModel, terminalCommand, windowRows } from './paneModel.js';
-import type { PaneModel } from './paneModel.js';
+import type { PaneModel, PaneWindow } from './paneModel.js';
+import { statusLine } from './conversationModel.js';
 import { POLL_MS, SIDES, SideBars } from './sideBars.js';
 import type { EditorLayout, Kept, Outcome, Point } from './sideBars.js';
 import { HubState } from './state.js';
@@ -310,7 +311,11 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   const conversation: ConversationView = new ConversationView(context.extensionUri, {
     openTerminal: openWindowTerminal,
     openArtifact: (path) => artifacts.open(path),
-    changed: (shown) => artifacts.update(shown),
+    changed: (shown) => {
+      artifacts.update(shown);
+      // The pane shows this window's voice and latest status too.
+      pane.changed();
+    },
     unopened: () => artifacts.unopenedPaths(),
     log: (line) => hubLog.appendLine(`[conversation] ${line}`),
   });
@@ -323,11 +328,20 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
         return runMain(message.key);
       case 'dock':
         return showDock(keeper.current(), home);
+      case 'talk-here':
+        return conversation.talkHere();
       default:
         return Promise.resolve(undefined);
     }
   };
-  const pane = new Pane(context.extensionUri, () => paneModel(state.current(), windowFile, windowsDir(home), Date.now()), paneClick);
+  // Only this window's: its Conversation view's latest status, for the work item it belongs to, and its voice.
+  const paneWindow = (): PaneWindow => {
+    const shown = conversation.state();
+    const status = shown.status === null || shown.status.fallback || shown.scope?.workItemId == null ? null : { workItemId: shown.scope.workItemId, line: statusLine(shown.status.markdown) };
+
+    return { status, voice: shown.voice };
+  };
+  const pane = new Pane(context.extensionUri, () => paneModel(state.current(), windowFile, windowsDir(home), Date.now(), paneWindow()), paneClick);
   // The kept widths are the profile's, so every window uses them (PRD R91).
   const KEPT = 'sideBars.';
   const keptWidths = (): Kept => {

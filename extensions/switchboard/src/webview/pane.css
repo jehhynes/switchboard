@@ -14,3 +14,25 @@ button.main:hover { background: var(--vscode-button-hoverBackground); }
 .pill.mentioned { background: transparent; border-color: var(--vscode-descriptionForeground); color: var(--vscode-descriptionForeground); }
 span.pill { cursor: default; }
 .idle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--vscode-descriptionForeground); }
+/* The ticket pill in its source's colour, as the dock's key: GitHub in the foreground (black or white), Zoho and Forum green. */
+.pill.ticket.source-github { border-color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent); }
+.pill.ticket.source-zoho { border-color: #089949; background: color-mix(in srgb, #089949 18%, transparent); }
+.pill.ticket.source-forum { border-color: #57ae57; background: color-mix(in srgb, #57ae57 18%, transparent); }
+body.vscode-high-contrast .pill, body.vscode-high-contrast-light .pill { border-color: var(--vscode-contrastBorder, currentColor); }
+/* A pull request's state, review and checks after its number. */
+.pill .pr-review, .pill .pr-checks, .pill .pr-state { font-size: 12px; }
+.pr-review.approved, .pr-checks.passing, .pr-state.merged { color: var(--vscode-testing-iconPassed, #73c991); }
+.pr-review.changes-requested, .pr-checks.failing { color: var(--vscode-testing-iconFailed, #f14c4c); }
+.pr-review.pending, .pr-checks.running { color: var(--vscode-editorWarning-foreground, #cca700); }
+.playbook { display: inline-flex; align-items: center; gap: 4px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.playbook .mark { font-size: 14px; }
+.progress, .status, .alert { display: flex; align-items: flex-start; gap: 4px; margin-top: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.progress { color: var(--vscode-descriptionForeground); }
+.alert { color: var(--vscode-editorWarning-foreground); }
+.status .codicon, .alert .codicon { flex: none; margin-top: 1px; }
+/* The item's left edge in the dock row's stripe colour. */
+.item.stripe-error { box-shadow: inset 2px 0 var(--vscode-testing-iconFailed, #f14c4c); padding-left: 6px; }
+.item.stripe-warning { box-shadow: inset 2px 0 var(--vscode-editorWarning-foreground, #cca700); padding-left: 6px; }
+.item.stripe-turn { box-shadow: inset 2px 0 var(--vscode-focusBorder); padding-left: 6px; }
+.voice { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-widget-border, transparent); color: var(--vscode-descriptionForeground); font-size: 12px; }
+.voice-text { flex: 1; min-width: 0; }

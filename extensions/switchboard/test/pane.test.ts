@@ -2,6 +2,10 @@ import type { Snapshot, WorkItemView } from '@switchboard/hub';
 import { describe, expect, it, vi } from 'vitest';
 import type { DockRow } from '@switchboard/hub';
 import { mainTerminal, paneModel, windowRows } from '../src/paneModel.js';
+import type { PaneItem } from '../src/paneModel.js';
+
+/** A pane item's fields the pane draws beside its links and actions. */
+const EXTRA: Omit<PaneItem, 'key' | 'links' | 'report' | 'main'> = { sourceKind: 'github', playbook: 'dev:develop', mark: null, stripe: null, progress: [], status: null, alerts: [] };
 import { SIZE_MS, startPane } from '../src/webview/paneMain.js';
 import { clickMessage, renderPane } from '../src/webview/paneRender.js';
 
@@ -143,13 +147,37 @@ describe('paneModel (PRD R92)', () => {
     expect(paneModel(snapshot([item()]), FILE.replaceAll('\\', '/').toUpperCase(), WINDOWS, NOW).items).toHaveLength(1);
   });
 
-  it("shows the hub's count of what needs the operator in a window that is not an item window, which names no work item", () => {
-    expect(paneModel({ ...snapshot([]), needsCount: 3 }, null, WINDOWS, NOW)).toEqual({ items: [], needs: 3 });
-    expect(paneModel(snapshot([item({ ...approval })]), null, WINDOWS, NOW)).toEqual({ items: [], needs: 0 });
+  it('shows no work item and nothing global, such as what needs the operator elsewhere, in a window that is not an item window', () => {
+    expect(paneModel({ ...snapshot([]), needsCount: 3 }, null, WINDOWS, NOW)).toEqual({ items: [], voice: null });
+    expect(paneModel(snapshot([item({ ...approval })]), null, WINDOWS, NOW)).toEqual({ items: [], voice: null });
   });
 
-  it('shows nothing before the first snapshot', () => {
-    expect(paneModel(null, FILE, WINDOWS, NOW)).toEqual({ items: [], needs: 0 });
+  it('shows nothing before the first snapshot but this window\'s voice', () => {
+    expect(paneModel(null, FILE, WINDOWS, NOW)).toEqual({ items: [], voice: null });
+    expect(paneModel(null, FILE, WINDOWS, NOW, { status: null, voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } }).voice).toEqual({ icon: 'circle-slash', text: 'Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', talkHere: true });
+  });
+
+  it("shows each work item's source, playbook and mark, its stage, the window's latest status, its alerts and its pull request's review and checks", () => {
+    const failed = item({ status: 'failed', error: 'Setup ended without a worktree.', stage: 'Writing the fix', stageAt: NOW - 60_000, ...pr });
+    const statuses = { [PR]: { state: 'open' as const, review: 'changes-requested' as const, checks: 'failing' as const } };
+    const model = paneModel({ ...snapshot([failed]), pullRequests: statuses }, FILE, WINDOWS, NOW, { status: { workItemId: 7, line: 'Fixed the badge; tests run' }, voice: null });
+    const shown = model.items[0]!;
+
+    expect(shown).toMatchObject({ sourceKind: 'github', playbook: expect.stringContaining('develop'), stripe: 'error', status: 'Fixed the badge; tests run' });
+    expect(shown.mark?.title).toBeTruthy();
+    expect(shown.alerts.map((alert) => alert.text)).toEqual(['Setup ended without a worktree.']);
+    expect(shown.links[1]).toMatchObject({ kind: 'pr', pr: statuses[PR], title: 'PR #19002 · Open · Changes requested · Checks failing' });
+    // A rate-limit wait, which the dock draws untoned, is an alert here, with its reset time.
+    const limited = { ...failed, status: 'blocked' as const, error: null, sessions: [{ id: 's7', workItemId: 7, kind: 'task' as const, provider: 'claude' as const, nativeSessionId: 'n7', shortId: 'ab12', cwd: WORKTREE, state: 'ended' as const, stateAt: NOW, stateDetail: null, outcome: 'failed' as const, outcomeDetail: null, startedAt: NOW, endedAt: NOW, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null, rateLimit: { kind: 'usage', message: null, resetsAt: NOW + 3_600_000, cli: false, attempts: 0, nextAt: NOW + 3_600_000 } }] };
+    const row = windowRows(snapshot([limited as never]), FILE, WINDOWS, NOW)[0]!;
+    const limitDetail = row.details.find((detail) => detail.text.startsWith('Rate limited'));
+
+    expect(limitDetail?.tone).toBeNull();
+    expect(paneModel(snapshot([limited as never]), FILE, WINDOWS, NOW).items[0]!.alerts.map((one) => one.text)).toContain(limitDetail!.text);
+    expect(paneModel(snapshot([limited as never]), FILE, WINDOWS, NOW).items[0]!.progress.map((one) => one.text)).not.toContain(limitDetail!.text);
+
+    // Another work item's status is not this one's.
+    expect(paneModel(snapshot([failed]), FILE, WINDOWS, NOW, { status: { workItemId: 9, line: 'Other' }, voice: null }).items[0]!.status).toBeNull();
   });
 
   it('shows the key of a ticket with no page without a link', () => {
@@ -201,14 +229,31 @@ describe('renderPane (PRD R92)', () => {
     return div;
   };
 
-  it('says what needs the operator, with Show the Dock, when the window has no work items', () => {
+  it('says the window has no work item, with no count of other work, and draws the voice with Talk here while it is elsewhere', () => {
     const div = root();
 
-    for (const [needs, text] of [[0, 'Nothing needs you'], [1, '1 needs you'], [3, '3 need you']] as const) {
-      div.innerHTML = renderPane({ items: [], needs });
-      expect(div.querySelector('.idle span')!.textContent).toBe(text);
-      expect(clickMessage(div.querySelector('button'))).toEqual({ type: 'dock' });
-    }
+    div.innerHTML = renderPane({ items: [], voice: null });
+    expect(div.querySelector('.idle span')!.textContent).toBe('No work item in this window.');
+    expect(div.querySelector('button')).toBeNull();
+    div.innerHTML = renderPane({ items: [], voice: { icon: 'circle-slash', text: 'Voice not here', tooltip: 'Voice is not in this window.', talkHere: true } });
+    expect(div.querySelector('.voice-text')!.textContent).toBe('Voice not here');
+    expect(clickMessage(div.querySelector('.voice button'))).toEqual({ type: 'talk-here' });
+    div.innerHTML = renderPane({ items: [], voice: { icon: 'mic-filled', text: 'Listening', tooltip: '', talkHere: false } });
+    expect(div.querySelector('.voice button')).toBeNull();
+  });
+
+  it("draws the ticket pill in its source's colour, the pull request's review and checks, the stage, status and alerts", () => {
+    const div = root();
+    const statuses = { [PR]: { state: 'open' as const, review: 'approved' as const, checks: 'running' as const } };
+
+    div.innerHTML = renderPane(paneModel({ ...snapshot([item({ status: 'failed', error: 'Usage limit; resets at 3:00 PM.', ...pr })]), pullRequests: statuses }, FILE, WINDOWS, NOW, { status: { workItemId: 7, line: 'Done & tested' }, voice: null }));
+    expect(div.querySelector('.pill.ticket')!.classList.contains('source-github')).toBe(true);
+    expect(div.querySelector('.pill.pr .pr-review.approved')).not.toBeNull();
+    expect(div.querySelector('.pill.pr .pr-checks.running')).not.toBeNull();
+    expect(div.querySelector('.pill.pr')!.getAttribute('title')).toBe('PR #19002 · Open · Approved · Checks running');
+    expect(div.querySelector('.status span:last-child')!.textContent).toBe('Done & tested');
+    expect(div.querySelector('.alert span:last-child')!.textContent).toBe('Usage limit; resets at 3:00 PM.');
+    expect(div.querySelector('.item')!.classList.contains('stripe-error')).toBe(true);
   });
 
   it('draws the pills, Report and the main control, each with its click', () => {
@@ -241,7 +286,7 @@ describe('renderPane (PRD R92)', () => {
   it('draws a pill with no link as text that sends nothing', () => {
     const div = root();
 
-    div.innerHTML = renderPane({ items: [{ key: 'k', links: [{ text: 'adhoc 3', glyph: null, url: null, kind: 'ticket', mentioned: false, title: 'Fix' }], report: null, main: null }], needs: 0 });
+    div.innerHTML = renderPane({ items: [{ key: 'k', ...EXTRA, links: [{ text: 'adhoc 3', glyph: null, url: null, kind: 'ticket', mentioned: false, title: 'Fix', pr: null }], report: null, main: null }], voice: null });
 
     expect(div.querySelector('button')).toBeNull();
     expect(div.querySelector('span.pill')!.textContent).toBe('adhoc 3');
@@ -250,7 +295,7 @@ describe('renderPane (PRD R92)', () => {
   it('escapes markup in texts and URLs', () => {
     const div = root();
 
-    div.innerHTML = renderPane({ items: [{ key: 'k"<', links: [{ text: '<b>x</b>', glyph: null, url: 'https://e/?a="1"', kind: 'url', mentioned: true, title: 't' }], report: null, main: null }], needs: 0 });
+    div.innerHTML = renderPane({ items: [{ key: 'k"<', ...EXTRA, links: [{ text: '<b>x</b>', glyph: null, url: 'https://e/?a="1"', kind: 'url', mentioned: true, title: 't', pr: null }], report: null, main: null }], voice: null });
 
     expect(div.querySelector('b')).toBeNull();
     expect(div.querySelector('button')!.textContent).toBe('<b>x</b>');
@@ -279,14 +324,14 @@ describe('startPane (PRD R92)', () => {
 
     expect(postMessage).toHaveBeenCalledWith({ type: 'ready' });
 
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items: [], needs: 2 } } }));
-    expect(div.textContent).toContain('2 need you');
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items: [], voice: { icon: 'circle-slash', text: 'Voice not here', tooltip: '', talkHere: true } } } }));
+    expect(div.textContent).toContain('No work item in this window.');
 
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'other' } }));
-    expect(div.textContent).toContain('2 need you');
+    expect(div.textContent).toContain('No work item in this window.');
 
     div.querySelector('button')!.click();
-    expect(postMessage).toHaveBeenLastCalledWith({ type: 'dock' });
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'talk-here' });
 
     postMessage.mockClear();
     div.querySelector('span')!.click();
@@ -295,8 +340,8 @@ describe('startPane (PRD R92)', () => {
 
   it('redraws in place, so a focused button keeps its focus when a model adds a work item before it', () => {
     const div = document.createElement('div');
-    const block = (key: string, label: string) => ({ key, links: [{ text: key, glyph: null, url: null, kind: 'ticket' as const, mentioned: false, title: key }], report: null, main: { label, glyph: null, title: label } });
-    const show = (items: ReturnType<typeof block>[]) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items, needs: 0 } } }));
+    const block = (key: string, label: string) => ({ key, ...EXTRA, links: [{ text: key, glyph: null, url: null, kind: 'ticket' as const, mentioned: false, title: key, pr: null }], report: null, main: { label, glyph: null, title: label } });
+    const show = (items: ReturnType<typeof block>[]) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items, voice: null } } }));
 
     document.body.replaceChildren(div);
     startPane(div, { postMessage: vi.fn() });
@@ -315,8 +360,8 @@ describe('startPane (PRD R92)', () => {
 
   it('keys link pills by their target, so two pills with the same text keep their own buttons', () => {
     const div = document.createElement('div');
-    const link = (url: string) => ({ text: '42', glyph: null, url, kind: 'pr' as const, mentioned: false, title: url });
-    const show = () => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items: [{ key: 'item:7', links: [link('https://github.com/a/r/pull/42'), link('https://github.com/b/r/pull/42')], report: null, main: null }], needs: 0 } } }));
+    const link = (url: string) => ({ text: '42', glyph: null, url, kind: 'pr' as const, mentioned: false, title: url, pr: null });
+    const show = () => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: { items: [{ key: 'item:7', ...EXTRA, links: [link('https://github.com/a/r/pull/42'), link('https://github.com/b/r/pull/42')], report: null, main: null }], voice: null } } }));
 
     document.body.replaceChildren(div);
     startPane(div, { postMessage: vi.fn() });
@@ -333,7 +378,7 @@ describe('startPane (PRD R92)', () => {
 
   it('keeps the focused main control on its own button when a Report button appears before it', () => {
     const div = document.createElement('div');
-    const model = (report: string | null) => ({ items: [{ key: 'item:7', links: [], report, main: { label: 'Approve', glyph: null, title: 'Approve' } }], needs: 0 });
+    const model = (report: string | null) => ({ items: [{ key: 'item:7', ...EXTRA, links: [], report, main: { label: 'Approve', glyph: null, title: 'Approve' } }], voice: null });
     const show = (report: string | null) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'model', model: model(report) } }));
 
     document.body.replaceChildren(div);

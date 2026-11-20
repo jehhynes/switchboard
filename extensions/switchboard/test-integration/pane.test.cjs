@@ -138,7 +138,7 @@ describe('the Switchboard pane (PRD R92)', () => {
     extension.show(JSON.stringify(hubState));
   });
 
-  it("shows in the Explorer and Source Control, with the hub's count of what needs you in a window that is not an item window", async () => {
+  it('shows in the Explorer and Source Control, with no work item and no count of other work in a window that is not an item window', async () => {
     await vscode.commands.executeCommand('switchboard.pane.focus');
     await until(() => shown('switchboard.pane'), 'the Explorer pane never rendered');
     await vscode.commands.executeCommand('switchboard.paneScm.focus');
@@ -148,7 +148,7 @@ describe('the Switchboard pane (PRD R92)', () => {
     extension.show(JSON.stringify({ ...hubState, workItems: [item(folder, 'awaiting-approval')], needsCount: 3 }));
 
     for (const view of ['switchboard.pane', 'switchboard.paneScm']) {
-      assert.deepStrictEqual(shown(view), { items: [], needs: 3 });
+      assert.deepStrictEqual(shown(view), { items: [], voice: null });
     }
   });
 
