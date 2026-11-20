@@ -901,11 +901,11 @@ describe('Dictation', () => {
 
     t.capture.halfDuplex = 'no echo cancellation on Microphone';
     await t.listening();
-    expect(t.dictation.fullDuplex).toBe('set to full duplex on this computer');
+    expect(t.dictation.fullDuplex).toBe('set on this computer');
     t.watch.devices!({ output: 'Remote Audio', formFactor: 'remote network device', input: 'Remote Audio', remote: true });
     expect([t.dictation.halfDuplex, t.logs.at(-1)]).toEqual(['set to half duplex over Remote Desktop', 'listening: half-duplex (set to half duplex over Remote Desktop)']);
     t.watch.devices!({ output: 'LG HDR 4K', formFactor: 'speakers', input: 'Microphone (BRIO)', remote: false });
-    expect(t.dictation.fullDuplex).toBe('set to full duplex on this computer');
+    expect(t.dictation.fullDuplex).toBe('set on this computer');
   });
 
   it('runs no echo check when voice.duplex is set, or on capture that cancels the echo', async () => {

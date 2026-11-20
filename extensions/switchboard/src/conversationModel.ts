@@ -320,8 +320,8 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
     return { text: '$(warning) Voice', tooltip: `Voice: ${voice.error} Click to show the voice log.`, command: 'switchboard.showVoiceLog', warning: true };
   }
 
-  // Half-duplex capture (architecture.md § Dictation) does not listen while the voice speaks.
-  const halfDuplex = voice.halfDuplex === undefined ? '' : ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.`;
+  // Half-duplex capture (architecture.md § Dictation) does not listen while the voice speaks; full duplex with no echo cancellation says why it does.
+  const halfDuplex = voice.halfDuplex !== undefined ? ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.` : voice.fullDuplex !== undefined ? ` Full duplex (${voice.fullDuplex}): talking over a reply stops it.` : '';
   // The room hold (architecture.md § Voice check and barge-in).
   const sends = voice.roomHold === true ? ROOM_HOLD_TIP : 'Dictation sends when you stop talking.';
 

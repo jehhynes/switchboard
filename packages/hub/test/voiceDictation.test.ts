@@ -332,8 +332,15 @@ describe('VoiceControl dictation', () => {
     expect(control.view('k1')).toMatchObject({ here: true, mic: 'listening', halfDuplex: 'no echo cancellation on Remote Audio' });
     expect(control.view('k2')).not.toHaveProperty('halfDuplex');
     expect(notified.slice(sent)).toEqual([expect.objectContaining({ key: 'k1', type: 'voice', payload: { voice: expect.objectContaining({ halfDuplex: 'no echo cancellation on Remote Audio' }) } })]);
+    // Full duplex with no echo cancellation says why, as the echo check decided, also only here.
+    connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, recognizer: null, error: null, fullDuplex: 'echo check: none heard' });
+    expect(control.view('k1')).toMatchObject({ here: true, mic: 'listening', fullDuplex: 'echo check: none heard' });
+    expect(control.view('k1')).not.toHaveProperty('halfDuplex');
+    expect(control.view('k2')).not.toHaveProperty('fullDuplex');
+    expect(notified.at(-1)).toMatchObject({ key: 'k1', type: 'voice', payload: { voice: expect.objectContaining({ fullDuplex: 'echo check: none heard' }) } });
     connection.receive({ type: 'audio', mic: 'listening', engine: 'decibri', device: null, recognizer: null, error: null });
     expect(control.view('k1')).not.toHaveProperty('halfDuplex');
+    expect(control.view('k1')).not.toHaveProperty('fullDuplex');
     expect(notified.at(-1)).toMatchObject({ key: 'k1', type: 'voice' });
     expect(notified.at(-1)!.payload.voice).not.toHaveProperty('halfDuplex');
     control.replyChanged({ id: 'r1', sessionId: 's1', kind: 'reply', source: 'transcript', withdrawn: false, rewrittenBy: null, speak: null, spokenState: 'none', answers: null } as unknown as ConversationReply);

@@ -30,6 +30,7 @@ describe('VoiceService', () => {
     let hooks!: { changed(): void; spoke(): void; send(message: VoiceMessage): void; playedUntil(): number };
     let state: 'off' | 'listening' = 'off';
     let halfDuplex: string | null = null;
+    let fullDuplex: string | null = null;
     const service = new VoiceService({
       tts,
       output,
@@ -43,6 +44,9 @@ describe('VoiceService', () => {
           },
           get halfDuplex() {
             return halfDuplex;
+          },
+          get fullDuplex() {
+            return fullDuplex;
           },
           error: null,
           mic: (on: boolean) => calls.push(`mic ${on}`),
@@ -81,6 +85,10 @@ describe('VoiceService', () => {
     halfDuplex = 'no echo cancellation on Remote Audio';
     hooks.changed();
     expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', recognizer: null, error: null, halfDuplex: 'no echo cancellation on Remote Audio' });
+    halfDuplex = null;
+    fullDuplex = 'echo check: none heard';
+    hooks.changed();
+    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', recognizer: null, error: null, fullDuplex: 'echo check: none heard' });
     hooks.send({ type: 'words', gen: 1, utteranceId: 'u', sessionId: 's1', text: 'hi' });
     expect(sent.at(-1)).toMatchObject({ type: 'words', text: 'hi' });
 

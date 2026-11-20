@@ -122,6 +122,10 @@ describe('the conversation state', () => {
     const halfDuplex = { ...voice, mic: 'listening' as const, halfDuplex: 'no echo cancellation on Remote Audio' };
     expect(voiceStatus(halfDuplex)).toMatchObject({ tooltip: 'Dictation sends when you stop talking. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off.' });
     expect(voiceStatus({ ...halfDuplex, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', tooltip: 'Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to stop speaking.' });
+    // Full duplex with no echo cancellation, as the echo check decided: the tooltip says so, and that talking over a reply stops it.
+    const fullDuplex = { ...voice, mic: 'listening' as const, fullDuplex: 'echo check: none heard' };
+    expect(voiceStatus(fullDuplex)).toMatchObject({ tooltip: 'Dictation sends when you stop talking. Full duplex (echo check: none heard): talking over a reply stops it. Click to turn the mic off.' });
+    expect(voiceStatus({ ...fullDuplex, speaking: 'r1' })).toMatchObject({ tooltip: 'Full duplex (echo check: none heard): talking over a reply stops it. Click to stop speaking.' });
     // A room hold: spoken turns stay in the box.
     expect(voiceStatus({ ...voice, mic: 'listening', roomHold: true })).toEqual({ text: '$(mic-filled) Listening (held)', tooltip: 'Held: someone else is talking in the room, so dictation stays in the box until you press Enter. Click to turn the mic off.', command: 'switchboard.toggleMicrophone', warning: false });
     // Paused by "stop listening": the toggle listens again.
@@ -907,6 +911,7 @@ describe('speech in the view (architecture.md § Voice)', () => {
     expect(renderMicButton({ ...VOICE, mic: 'listening' })).not.toContain('Listening pauses');
     const halfDuplex = { ...VOICE, halfDuplex: 'no echo cancellation on Remote Audio' };
     expect(renderMicButton({ ...halfDuplex, mic: 'listening' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
+    expect(renderMicButton({ ...VOICE, fullDuplex: 'echo check: none heard', mic: 'listening' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Full duplex (echo check: none heard): talking over a reply stops it. Click to turn the mic off."');
     expect(renderMicButton({ ...halfDuplex, mic: 'hearing' })).toContain('title="Mic on: hearing you. Listening pauses while a reply plays (no echo cancellation on Remote Audio), so talking over it does not stop it. Click to turn the mic off."');
     // Where recognition runs, once the recogniser loaded.
     expect(renderMicButton({ ...VOICE, mic: 'listening', recognizer: 'gpu' })).toContain('title="Mic on: listening. Dictation sends when you stop talking. Speech recognition runs on the GPU. Click to turn the mic off."');

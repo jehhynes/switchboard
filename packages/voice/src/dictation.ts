@@ -499,7 +499,7 @@ export class Dictation {
   }
 
   #report(): void {
-    const text = `${this.state} ${this.recognizer ?? ''} ${this.#error ?? ''} ${this.halfDuplex ?? ''}`;
+    const text = `${this.state} ${this.recognizer ?? ''} ${this.#error ?? ''} ${this.halfDuplex ?? ''} ${this.fullDuplex ?? ''}`;
 
     if (text !== this.#reported) {
       this.#reported = text;
@@ -1331,7 +1331,7 @@ export function duplexMode(
   }
 
   if (mode === 'full') {
-    return { halfDuplex: null, fullDuplex: `set to full duplex ${where}`, why: `set to full duplex ${where}; ${stream.halfDuplex}` };
+    return { halfDuplex: null, fullDuplex: `set ${where}`, why: `set to full duplex ${where}; ${stream.halfDuplex}` };
   }
 
   return auto.full

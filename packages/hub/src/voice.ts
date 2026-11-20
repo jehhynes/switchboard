@@ -29,6 +29,8 @@ export interface VoiceView {
   recognizer: 'gpu' | 'cpu' | null;
   /** Only while the voice is here and a room hold runs: dictated turns stay in the composer (architecture.md § Voice check and barge-in). */
   roomHold?: true;
+  /** Only while the voice is here and its capture cancels no echo but listens anyway: why, such as "echo check: none heard"; talking over a reply then stops it. */
+  fullDuplex?: string;
 }
 
 /** Why the voice process turned the mic off, as the hub's log says it. */
@@ -194,6 +196,8 @@ export class VoiceControl {
   #recognizer: 'gpu' | 'cpu' | null = null;
   /** When the room hold ends, as the process last said; null with none. */
   #roomHoldUntil: number | null = null;
+  /** Why the open capture listens while the voice plays though it cancels no echo, as the process last said; null otherwise. */
+  #fullDuplex: string | null = null;
   readonly #composers = new Map<string, Composer>();
   readonly #heard = new Map<string, Heard>();
   /** The window the voice last moved to by its own command, which hears dictation when no focused window shows the target. */
@@ -247,6 +251,7 @@ export class VoiceControl {
       recognizer: here ? this.#recognizer : null,
       ...(here && this.#halfDuplex !== null ? { halfDuplex: this.#halfDuplex } : {}),
       ...(here && this.#roomHeld() ? { roomHold: true as const } : {}),
+      ...(here && this.#fullDuplex !== null ? { fullDuplex: this.#fullDuplex } : {}),
     };
   }
 
@@ -1178,9 +1183,10 @@ export class VoiceControl {
         this.#fragment({ event: 'command', sessionId: message.sessionId ?? '', utteranceId: message.utteranceId, pieceId: null, messageId: null, text: message.text, score: message.score, f0: message.f0 });
         return;
       case 'audio':
-        if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || message.recognizer !== this.#recognizer || (message.roomHold ?? null) !== this.#roomHoldUntil) {
+        if (message.mic !== this.#mic || (message.halfDuplex ?? null) !== this.#halfDuplex || (message.fullDuplex ?? null) !== this.#fullDuplex || message.recognizer !== this.#recognizer || (message.roomHold ?? null) !== this.#roomHoldUntil) {
           this.#mic = message.mic;
           this.#halfDuplex = message.halfDuplex ?? null;
+          this.#fullDuplex = message.fullDuplex ?? null;
           this.#recognizer = message.recognizer;
           this.#roomHoldUntil = message.roomHold ?? null;
           this.viewsChanged();
@@ -1323,6 +1329,7 @@ export class VoiceControl {
     this.#halfDuplex = null;
     this.#recognizer = null;
     this.#roomHoldUntil = null;
+    this.#fullDuplex = null;
     this.#target = { gen: this.#target.gen, sessionId: null };
     this.viewsChanged();
   }

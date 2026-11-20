@@ -319,6 +319,7 @@ export class VoiceService {
   #audio(): VoiceMessage {
     const halfDuplex = this.#dictation?.halfDuplex ?? null;
     const roomHold = this.#dictation?.roomHold ?? null;
+    const fullDuplex = this.#dictation?.fullDuplex ?? null;
 
     return {
       type: 'audio',
@@ -329,6 +330,7 @@ export class VoiceService {
       error: this.#dictation?.error ?? this.#error,
       ...(halfDuplex === null ? {} : { halfDuplex }),
       ...(roomHold === null ? {} : { roomHold }),
+      ...(fullDuplex === null ? {} : { fullDuplex }),
     };
   }
 }

@@ -255,9 +255,10 @@ export function renderMicButton(voice: VoiceView | null): string {
     return button('off', 'Mic off: the voice is not in this window. Click to talk here with the mic on.', true, 'elsewhere');
   }
 
-  // Where recognition runs, once the recogniser loaded, and half-duplex capture, which does not listen while the voice speaks (architecture.md § Dictation).
+  // Where recognition runs, once the recogniser loaded; half-duplex capture does not listen while the voice speaks, and full duplex with no echo
+  // cancellation says why it does (architecture.md § Dictation).
   const where = voice.recognizer === null ? '' : ` Speech recognition runs on the ${voice.recognizer === 'gpu' ? 'GPU' : 'CPU'}.`;
-  const halfDuplex = voice.halfDuplex === undefined ? '' : ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.`;
+  const halfDuplex = voice.halfDuplex !== undefined ? ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.` : voice.fullDuplex !== undefined ? ` Full duplex (${voice.fullDuplex}): talking over a reply stops it.` : '';
   // The room hold (architecture.md § Voice check and barge-in): spoken turns stay in the box.
   const held = voice.roomHold === true ? ` ${ROOM_HOLD_TIP}` : '';
 
