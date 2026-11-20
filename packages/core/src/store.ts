@@ -2,7 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 import { ownPrompt } from './group.js';
 import { CONVERSATION_RETENTION } from './conversation.js';
-import type { ConversationMessage, ConversationReply, ConversationStatus, TranscriptCheckpoint, WindowBinding } from './conversation.js';
+import type { ConversationMessage, ConversationReply, ConversationStatus, Piece, TranscriptCheckpoint, WindowBinding } from './conversation.js';
 import { windowFileKey } from './conversation.js';
 
 export const MIGRATIONS = [
@@ -449,6 +449,9 @@ export const MIGRATIONS = [
   `ALTER TABLE sessions ADD COLUMN instructionsHash TEXT;`,
   `ALTER TABLE sessions ADD COLUMN instructionsCompactionId TEXT;
   CREATE INDEX IF NOT EXISTS sessionsByNativeId ON sessions (nativeSessionId);`,
+  // Dictation (architecture.md § Dictation): a message's recognised pieces, and whether it is a [partial] part of one still being spoken.
+  `ALTER TABLE messages ADD COLUMN pieces TEXT;
+  ALTER TABLE messages ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /**
@@ -1315,8 +1318,27 @@ export class Store {
   /** Adds a message to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
   addMessage(message: Omit<ConversationMessage, 'ord'>): void {
     this.#db
-      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch, spokenRequested) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0, message.delivery, message.error, message.opId, message.pastedAt, message.launch ?? null, message.spokenRequested === true ? 1 : 0);
+      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch, spokenRequested, pieces, partial) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        this.#nextOrd(),
+        message.id,
+        message.sessionId,
+        message.workItemId,
+        message.at,
+        message.origin,
+        message.text,
+        message.transcriptUuid,
+        message.provisional ? 1 : 0,
+        message.withdrawn ? 1 : 0,
+        message.delivery,
+        message.error,
+        message.opId,
+        message.pastedAt,
+        message.launch ?? null,
+        message.spokenRequested === true ? 1 : 0,
+        message.pieces === undefined || message.pieces.length === 0 ? null : JSON.stringify(message.pieces),
+        message.partial === true ? 1 : 0,
+      );
     this.#prune(message.sessionId);
   }
 
@@ -1380,7 +1402,7 @@ export class Store {
 
   /** A session's typed messages that may still reach its transcript, oldest first: pasted, not `not-sent`, and not yet matched to an entry. */
   typedAwaitingTranscript(sessionId: string): ConversationMessage[] {
-    return this.#messageRows("SELECT * FROM messages WHERE sessionId = ? AND origin = 'typed' AND transcriptUuid IS NULL AND pastedAt IS NOT NULL AND delivery <> 'not-sent' ORDER BY at, ord", sessionId);
+    return this.#messageRows("SELECT * FROM messages WHERE sessionId = ? AND origin IN ('typed', 'voice') AND transcriptUuid IS NULL AND pastedAt IS NOT NULL AND delivery <> 'not-sent' ORDER BY at, ord", sessionId);
   }
 
   /** Typed messages a stopped hub left `open`, which the hub settles from the transcript and the screen. */
@@ -1591,11 +1613,16 @@ export class Store {
   }
 
   #messageRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationMessage[] {
-    return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<Omit<ConversationMessage, 'provisional' | 'withdrawn' | 'spokenRequested'> & { seq: number; provisional: number; withdrawn: number; spokenRequested: number }>).map(({ seq: _seq, ...message }) => ({
+    return (this.#db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as Array<
+        Omit<ConversationMessage, 'provisional' | 'withdrawn' | 'spokenRequested' | 'pieces' | 'partial'> & { seq: number; provisional: number; withdrawn: number; spokenRequested: number; pieces: string | null; partial: number }
+      >).map(({ seq: _seq, pieces, partial, ...message }) => ({
       ...message,
       provisional: message.provisional === 1,
       withdrawn: message.withdrawn === 1,
       spokenRequested: message.spokenRequested === 1,
+      // Left out unless set, as on a message that holds no dictation.
+      ...(partial === 1 ? { partial: true } : {}),
+      ...(pieces === null ? {} : { pieces: JSON.parse(pieces) as Piece[] }),
     }));
   }
 

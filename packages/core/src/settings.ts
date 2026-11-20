@@ -156,6 +156,12 @@ export interface VoiceSettings {
   needsYouSound: boolean;
   /** The playback device, a case-insensitive part of its name; null for the system default. */
   outputDevice: string | null;
+  /** Minutes of silence after which capture stops even with the voice here; 0 never stops it. */
+  micIdleMinutes: number;
+  /** The end-of-message pause in milliseconds, which turn detection shortens when the words look finished. */
+  endPauseMs: number;
+  /** The capture device, a case-insensitive part of its name; null for the system default. */
+  inputDevice: string | null;
   /** The persona roster; empty, the default, leaves every session with `voice` and `style` and no tone section. */
   personas: Persona[];
   /** A persona ID by playbook name, which that playbook's sessions take unless one is pinned. */
@@ -178,7 +184,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
-  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, personas: [], playbookPersonas: {} },
+  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, personas: [], playbookPersonas: {} },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -455,7 +461,7 @@ export function parseSettings(text: string): SettingsResult {
   };
 
   const voiceIn = read.section(root, 'voice', 'voice');
-  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'personas', 'playbookPersonas'], 'voice');
+  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'personas', 'playbookPersonas'], 'voice');
   const voice: VoiceSettings = {
     enabled: read.boolean(voiceIn, 'enabled', 'voice', defaults.voice.enabled),
     voice: read.choice(voiceIn, 'voice', 'voice', TTS_VOICES, defaults.voice.voice),
@@ -466,6 +472,9 @@ export function parseSettings(text: string): SettingsResult {
     awayMinutes: read.integer(voiceIn, 'awayMinutes', 'voice', defaults.voice.awayMinutes, 1, 1440),
     needsYouSound: read.boolean(voiceIn, 'needsYouSound', 'voice', defaults.voice.needsYouSound),
     outputDevice: read.optionalName(voiceIn, 'outputDevice', 'voice'),
+    micIdleMinutes: read.integer(voiceIn, 'micIdleMinutes', 'voice', defaults.voice.micIdleMinutes, 0, 1440),
+    endPauseMs: read.integer(voiceIn, 'endPauseMs', 'voice', defaults.voice.endPauseMs, 500, 20_000),
+    inputDevice: read.optionalName(voiceIn, 'inputDevice', 'voice'),
     personas: [],
     playbookPersonas: {},
   };

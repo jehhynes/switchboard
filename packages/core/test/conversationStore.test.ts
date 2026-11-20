@@ -37,6 +37,22 @@ describe('conversation store', () => {
     expect(store.reply('r1')).toMatchObject({ spokenState: 'interrupted', spokenAtMs: 7000, saidChars: 40 });
   });
 
+  it('keeps a dictated message\'s pieces and [partial] mark, leaves both out of other messages, and matches voice messages as typed ones', () => {
+    const store = Store.open(':memory:');
+    const pieces = [{ text: 'fix the', score: null, f0: null, dropped: false }, { text: 'login flow', score: null, f0: null, dropped: false }];
+
+    store.addMessage({ id: 'v1', sessionId: 's1', workItemId: 1, at: 10, origin: 'voice', text: 'fix the login flow', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'o', pastedAt: 12, pieces });
+    store.addMessage({ id: 'v2', sessionId: 's1', workItemId: 1, at: 11, origin: 'voice', text: 'and the', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'p', pastedAt: 13, partial: true, pieces: pieces.slice(0, 1) });
+    store.addMessage({ id: 't1', sessionId: 's1', workItemId: 1, at: 12, origin: 'typed', text: 'hi', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'q', pastedAt: 14 });
+
+    expect(store.message('v1')).toMatchObject({ origin: 'voice', pieces });
+    expect(store.message('v1')?.partial).toBeUndefined();
+    expect(store.message('v2')).toMatchObject({ partial: true, pieces: pieces.slice(0, 1) });
+    expect(store.message('t1')).not.toHaveProperty('pieces');
+    expect(store.message('t1')).not.toHaveProperty('partial');
+    expect(store.typedAwaitingTranscript('s1').map((message) => message.id)).toEqual(['v1', 'v2', 't1']);
+  });
+
   it("keeps a session's statuses in the order read, updates one in place, pages them newest first and keeps the newest CONVERSATION_RETENTION", () => {
     const store = Store.open(':memory:');
     const status = (id: string, sessionId = 's1', markdown = id) => store.setStatus({ id, sessionId, workItemId: 1, replyId: `r-${id}`, at: 10, markdown });

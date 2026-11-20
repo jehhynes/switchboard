@@ -11,8 +11,11 @@ export interface ConversationMessage {
   /** Null only for a session with no work item. */
   workItemId: number | null;
   at: number;
-  /** `terminal`: typed into the session's terminal and read from its transcript; `typed`: sent from the view's composer. */
-  origin: 'terminal' | 'typed';
+  /**
+   * `terminal`: typed into the session's terminal and read from its transcript; `typed`: sent from the view's composer; `voice`: holds dictated text,
+   * however it was sent (architecture.md § Dictation).
+   */
+  origin: 'terminal' | 'typed' | 'voice';
   text: string;
   /** The transcript entry it came from, so a hub restart never imports it twice. */
   transcriptUuid: string | null;
@@ -34,6 +37,18 @@ export interface ConversationMessage {
   launch?: string | null;
   /** It was typed with `[spoken]`, so its reply may be spoken (architecture.md § Voice); false when left out. */
   spokenRequested?: boolean;
+  /** A part of a dictated message still being spoken, typed with `[partial]` (architecture.md § Dictation); false when left out. */
+  partial?: boolean;
+  /** The recognised pieces of a dictated message, in order; empty when left out. */
+  pieces?: Piece[];
+}
+
+/** One recognised segment of a dictated message, with its voice check results; the check comes in a later slice, so both are null for now. */
+export interface Piece {
+  text: string;
+  score: number | null;
+  f0: number | null;
+  dropped: boolean;
 }
 
 /** What became of a reply's speech (architecture.md § Voice): `none` until it is offered, then queued, playing and how it ended. */

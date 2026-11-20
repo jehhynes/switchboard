@@ -10,7 +10,7 @@ describe('parseSettings', () => {
         sources: {},
         schedules: {},
         dock: { openVSCode: 'always', openTerminal: 'vscode' },
-        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, personas: [], playbookPersonas: {} },
+        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, personas: [], playbookPersonas: {} },
       },
     });
   });
@@ -24,7 +24,7 @@ describe('parseSettings', () => {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
         dock: { openVSCode: 'review', openTerminal: 'auto' },
-        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers' },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset' },
       }),
     );
 
@@ -45,7 +45,7 @@ describe('parseSettings', () => {
         },
         schedules: {},
         dock: { openVSCode: 'review', openTerminal: 'auto' },
-        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', personas: [], playbookPersonas: {} },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', personas: [], playbookPersonas: {} },
       },
     });
   });
@@ -60,6 +60,9 @@ describe('parseSettings', () => {
         'voice.awayMinutes must be a whole number from 1 to 1440.',
         'voice.outputDevice must be a device name or null.',
       ],
+    });
+    expect(parseSettings('{"voice":{"micIdleMinutes":-1,"endPauseMs":400,"inputDevice":3}}')).toEqual({
+      errors: ['voice.micIdleMinutes must be a whole number from 0 to 1440.', 'voice.endPauseMs must be a whole number from 500 to 20000.', 'voice.inputDevice must be a device name or null.'],
     });
     expect(parseSettings('{"voice":{"enabled":"yes"}}')).toEqual({ errors: ['voice.enabled must be true or false.'] });
     expect(parseSettings('{"voice":{"speed":0.25,"outputDevice":null}}')).toMatchObject({ settings: { voice: { speed: 0.25, outputDevice: null } } });
