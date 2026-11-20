@@ -159,6 +159,13 @@ button.icon, a.icon { display: inline-flex; align-items: center; border: none; b
 .request-button { padding: 4px 12px; border: 1px solid var(--vscode-button-border); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
 .request-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 
+/* An ended session's note and the composer's "Sent" line, just above the composer. */
+.session-note { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: calc(100% - 32px); max-width: 680px; margin: 0 auto 8px; padding: 6px 10px; border: 1px solid var(--vscode-input-border); border-radius: 6px; background: var(--vscode-input-background); }
+.session-note-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.composer-sent { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.composer-sent[hidden] { display: none; }
+.composer-sent .codicon { color: var(--vscode-testing-iconPassed); }
+
 /* The composer, as Claude Code's input: at most 680 px wide and centred, an 8 px radius and a ring in the focus colour. */
 #composer { box-sizing: border-box; width: 100%; max-width: 712px; margin: 0 auto; padding: 0 16px 16px; }
 #composer[hidden] { display: none; }

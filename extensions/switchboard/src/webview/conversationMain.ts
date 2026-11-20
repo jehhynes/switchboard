@@ -29,6 +29,8 @@ interface PageState {
   command?: string | null;
 }
 
+/** How long the composer says a message sent from the Status or Artifacts tab went. */
+export const SENT_NOTE_MS = 4_000;
 /** How long a copy button shows its check. */
 const COPIED_MS = 2_000;
 /** How long an unread reply or status must be visible in a focused window before it counts as seen (architecture.md § Unread). */
@@ -88,6 +90,7 @@ function startComposer(
   // As Claude Code's input: the text area over a footer, whose left side is kept for the controls later slices add. Why a message did not go
   // shows above it until dismissed.
   host.innerHTML =
+    '<div class="composer-sent" role="status" hidden><span class="codicon codicon-check" aria-hidden="true"></span><span>Sent. Its reply shows on the Conversation tab.</span></div>' +
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span>' +
     '<button class="dismiss" type="button" title="Dismiss" aria-label="Dismiss"><span class="codicon codicon-close" aria-hidden="true"></span></button></div>' +
     '<div class="composer"><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls"></div>' +
@@ -101,6 +104,20 @@ function startComposer(
   const mirror = host.querySelector<HTMLElement>('.live-mirror')!;
   const mirrorText = host.querySelector<HTMLElement>('.mirror-text')!;
   const micSlot = host.querySelector<HTMLElement>('.mic-slot')!;
+  const sentNote = host.querySelector<HTMLElement>('.composer-sent')!;
+  let sentTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A message sent from another tab leaves that tab shown, with a short line that it went (architecture.md § Conversation view). */
+  const confirmSent = (): void => {
+    clearTimeout(sentTimer);
+
+    if (document.body.dataset['tab'] === undefined || document.body.dataset['tab'] === 'conversation') {
+      sentNote.hidden = true;
+      return;
+    }
+
+    sentNote.hidden = false;
+    sentTimer = setTimeout(() => void (sentNote.hidden = true), SENT_NOTE_MS);
+  };
   // The voice in this window, and a draft the hub changed while the box held a message being sent, which takes the box once the hub answered.
   let voiceHere = false;
   let micListening = false;
@@ -426,6 +443,7 @@ function startComposer(
         grow();
         showError(null);
         extras.sent(true);
+        confirmSent();
       } else {
         showError(refusal);
         extras.sent(false);

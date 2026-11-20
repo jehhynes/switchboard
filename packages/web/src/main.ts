@@ -12,6 +12,8 @@ export const EVENTS = ['hello', 'list', 'scope', 'conversations', 'session', 'me
 export const SEEN_MS = 1_000;
 const SEEN_CHECK_MS = 250;
 const COMPOSER_MAX_PX = 200;
+/** How long the composer says a message sent from the Status or Artifacts tab went. */
+export const SENT_NOTE_MS = 4_000;
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 
@@ -32,12 +34,13 @@ type Answer = { status: number; body: Record<string, unknown> };
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
   root.innerHTML =
     '<aside class="side"><div class="side-head">Switchboard</div><div id="list"></div></aside>' +
-    '<main class="main"><div id="head"></div><div id="panel" class="scroll"></div><div id="composer" hidden></div></main><div class="live" aria-live="polite"></div>';
+    '<main class="main"><div id="head"></div><div id="panel" class="scroll"></div><div id="note"></div><div id="composer" hidden></div></main><div class="live" aria-live="polite"></div>';
 
   const list = root.querySelector<HTMLElement>('#list')!;
   const head = root.querySelector<HTMLElement>('#head')!;
   const panel = root.querySelector<HTMLElement>('#panel')!;
   const composerHost = root.querySelector<HTMLElement>('#composer')!;
+  const note = root.querySelector<HTMLElement>('#note')!;
   let state: PageState = EMPTY;
   const view: View = newView();
   let wanted: number | null = Number(/^#w=(\d+)$/.exec(location.hash)?.[1] ?? NaN) || null;
@@ -60,6 +63,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   // ---- The composer ----
   composerHost.innerHTML =
+    '<div class="composer-sent" role="status" hidden><span class="codicon codicon-check" aria-hidden="true"></span><span>Sent. Its reply shows on the Conversation tab.</span></div>' +
     '<div class="composer-error" role="alert" hidden><span class="composer-error-text"></span><button class="dismiss" type="button" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>' +
     '<div class="composer"><div class="composer-menu" role="listbox" hidden></div><div class="composer-input"><div class="live-mirror"><span class="mirror-text" aria-hidden="true"></span><span class="live-words" aria-live="polite" hidden></span></div><textarea rows="1" aria-label="Message"></textarea></div><div class="composer-footer"><div class="composer-controls">' +
     '<button class="composer-tool slash" type="button" title="Show slash commands (/)" aria-label="Show slash commands"><span class="slash-glyph">/</span></button><div class="voice-controls"></div></div>' +
@@ -135,6 +139,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     localStorage.setItem(DRAFTS, JSON.stringify(all));
+  };
+  const sentNote = composerHost.querySelector<HTMLElement>('.composer-sent')!;
+  let sentTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A message sent from another tab leaves that tab shown, with a short line that it went. */
+  const confirmSent = (): void => {
+    clearTimeout(sentTimer);
+    sentNote.hidden = view.tab === 'conversation';
+
+    if (!sentNote.hidden) {
+      sentTimer = setTimeout(() => void (sentNote.hidden = true), SENT_NOTE_MS);
+    }
   };
   const showError = (text: string | null): void => {
     errorBox.querySelector('.composer-error-text')!.textContent = text ?? '';
@@ -287,6 +302,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         input.value = dictated !== null && dictated.sessionId === target.sessionId ? dictated.text : '';
         chosen = null;
         showError(null);
+        confirmSent();
       }
 
       const all = drafts();
@@ -464,7 +480,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const full = state.connected && state.session?.conversation === 'full';
 
-    composerHost.hidden = state.scope === null || view.tab !== 'conversation';
+    // On every tab, so the operator can type and dictate from the status or the artifacts too.
+    composerHost.hidden = state.scope === null;
     input.disabled = !full;
     input.placeholder = full ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
     voiceControls.innerHTML = renderVoice(state.voice);
@@ -562,6 +579,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Draws the state by changing only what differs (`morph`), so the focus, a selection, the scroll position and open menus stay. */
   const draw = (): void => {
     morph(list, expired ? '<p class="empty">This page\'s link is no longer valid. Open a new one with Switchboard: Open Web Page in VS Code, or hub.js web.</p>' : renderList(state.groups, state.scope?.workItemId ?? null));
+
+    // An ended session's reason sits just above the composer it disables, on every tab; the page has no terminal to resume it in.
+    morph(note, state.session?.state === 'ended' && state.session.reason !== null ? `<div class="session-note" role="status"><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span class="session-note-text">${escape(state.session.reason)}</span></div>` : '');
 
     if (state.scope === null) {
       morph(head, '');

@@ -23,7 +23,6 @@ button:focus-visible, li:focus-visible, .timeline:focus-visible, summary:focus-v
 /* The Status and Artifacts tabs take the view's full height and scroll on their own. */
 .panel { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 20px 16px; }
 .panel > .empty { margin: 0; }
-body:not([data-tab="conversation"]) #composer { display: none; }
 /* The Status tab: a line with the pulse codicon, the time, how long ago, the New mark and the tools, over the whole status as Markdown. */
 .status-head { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 8px; user-select: none; }
 .status-head .codicon-pulse { color: var(--vscode-descriptionForeground); }
@@ -282,6 +281,13 @@ button.persona .codicon { flex: none; }
 /* While an AskUserQuestion menu holds the session: a line over the composer, in the waiting colour, with Open in terminal. */
 .terminal-question { display: flex; flex: none; align-items: center; gap: 6px; margin: 0 auto 8px; width: calc(100% - 32px); max-width: 680px; box-sizing: border-box; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); border-radius: 6px; background: var(--vscode-input-background); }
 .terminal-question > .codicon { color: var(--vscode-editorWarning-foreground); }
+/* An ended session's note, and the composer's "Sent" line on another tab: one line in the composer's width just above it. */
+.session-note { display: flex; flex: none; align-items: center; gap: 6px; margin: 0 auto 8px; width: calc(100% - 32px); max-width: 680px; box-sizing: border-box; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.4)))); border-radius: 6px; background: var(--vscode-input-background); }
+.session-note > .codicon { color: var(--vscode-descriptionForeground); }
+.session-note-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.composer-sent { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.composer-sent[hidden] { display: none; }
+.composer-sent .codicon { color: var(--vscode-testing-iconPassed, var(--vscode-descriptionForeground)); }
 .terminal-question-text { flex: 1; min-width: 0; }
 .terminal-question-open { flex: none; padding: 2px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font: inherit; cursor: pointer; }
 .terminal-question-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }

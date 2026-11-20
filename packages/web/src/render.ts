@@ -240,7 +240,8 @@ export function renderTimeline(state: PageState, view: View): string {
     return divider + html;
   });
   const earlier = state.more ? '<button class="earlier-items" type="button" data-action="earlier">Show earlier messages</button>' : '';
-  const notice = state.session.reason === null ? '' : `<p class="notice">${escape(state.session.reason)}</p>`;
+  // An ended session's reason shows above the composer instead.
+  const notice = state.session.reason === null || state.session.state === 'ended' ? '' : `<p class="notice">${escape(state.session.reason)}</p>`;
   const requests = state.session.requests ?? [];
   const asking =
     requests.length > 0

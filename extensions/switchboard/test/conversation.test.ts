@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenReply, limitText, micOn, selectedEntry, stateIcon, statusLine, timeline, totalUnread, voiceStatus, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
-import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
+import { SENT_NOTE_MS, shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
 import { ago, linkAllowed, personaButton, PICKER, renderConversation, renderMarkdown, renderMicButton, renderVoiceControls } from '../src/webview/conversationRender.js';
 import type { Tab } from '../src/webview/conversationRender.js';
 
@@ -1937,5 +1937,50 @@ describe('the conversation dropdown (architecture.md § Conversation view)', () 
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.conversation-list')).toBeNull();
     expect(document.activeElement?.classList.contains('picker')).toBe(true);
+  });
+});
+
+describe('the composer on every tab (architecture.md § Conversation view)', () => {
+  it('keeps the composer on the Status and Artifacts tabs, stays on the tab after a send there with a short Sent line, and shows an ended session\'s note with Resume above it', () => {
+    vi.useFakeTimers();
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const host = document.createElement('div');
+    const posted: Array<Record<string, unknown>> = [];
+
+    document.body.replaceChildren(root, host, live);
+    startConversation(root, live, { postMessage: (message: unknown) => posted.push(message as Record<string, unknown>), getState: () => null, setState: () => undefined }, host);
+
+    const show = (shown: ConversationState) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: shown } }));
+
+    show(applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0)])));
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="status"]')!.click();
+    expect(host.hidden).toBe(false);
+
+    const input = host.querySelector('textarea')!;
+
+    input.value = 'From the status';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+
+    const send = posted.find((one) => one['type'] === 'send')!;
+
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'sent', id: send['id'], error: null } }));
+    expect(document.body.dataset['tab']).toBe('status');
+    expect(host.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(false);
+    vi.advanceTimersByTime(SENT_NOTE_MS);
+    expect(host.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(true);
+
+    // An ended session: its reason just above the composer on every tab, with Resume, and not at the top of the conversation.
+    show(applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0)], { sessions: [{ ...SESSION, state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' }] })));
+    expect(root.lastElementChild?.classList.contains('session-note')).toBe(true);
+    expect(root.querySelector('.session-note-text')?.textContent).toBe('The session has ended. Open it in the terminal to resume it.');
+    root.querySelector<HTMLElement>('.session-note [data-action="terminal"]')!.click();
+    expect(posted.at(-1)).toEqual({ type: 'terminal' });
+    root.querySelector<HTMLElement>('[role="tab"][data-tab="conversation"]')!.click();
+    expect(root.querySelector('.notice')).toBeNull();
+    expect(root.lastElementChild?.classList.contains('session-note')).toBe(true);
+    vi.useRealTimers();
   });
 });

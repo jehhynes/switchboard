@@ -3,7 +3,7 @@ import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
 import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMarkdown } from '../src/markdown.js';
-import { startPage } from '../src/main.js';
+import { SENT_NOTE_MS, startPage } from '../src/main.js';
 import type { ArtifactView, MessageView, ReplyView, SessionView } from '../src/types.js';
 
 const message = (id: string, ord: number, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: 1_000 + ord, ord, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
@@ -240,6 +240,33 @@ describe('the page', () => {
     sized(500);
     source.emit('reply', { reply: reply('r3', 3) });
     expect(panel.scrollTop).toBe(50);
+    page.close();
+  });
+
+  it('keeps the composer on every tab, says Sent after a send from the Status tab, and shows an ended session\'s reason above the composer', async () => {
+    const { page, source } = start();
+    const composer = root.querySelector<HTMLElement>('#composer')!;
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    expect(composer.hidden).toBe(false);
+
+    const input = composer.querySelector('textarea')!;
+
+    input.value = 'From the status';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flush();
+    await flush();
+    expect(posts.some((post) => post.url.endsWith('/send') && post.body['text'] === 'From the status')).toBe(true);
+    expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('status');
+    expect(composer.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(false);
+    expect(SENT_NOTE_MS).toBe(4_000);
+
+    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended.' }) });
+    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended.');
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
+    expect(root.querySelector('#panel .notice')).toBeNull();
     page.close();
   });
 

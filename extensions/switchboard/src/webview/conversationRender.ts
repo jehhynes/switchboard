@@ -597,7 +597,12 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
   const provider = providerMark(state.session?.provider);
   const header = `<header class="header">${picker(state, open.has(PICKER))}${provider}${personaButton(state.session?.persona)}${plus}${state.session?.conversation === 'none' ? '' : '<button class="icon" data-action="terminal" title="Open in terminal" aria-label="Open in terminal"><span class="codicon codicon-terminal"></span></button>'}</header>`;
-  const notes = state.session?.reason == null ? [] : [state.session.reason];
+  // An ended session's reason sits just above the composer it disables, on every tab, with Resume; any other reason heads the conversation.
+  const ended = state.session?.state === 'ended' && state.session.reason !== null;
+  const notes = state.session?.reason == null || ended ? [] : [state.session.reason];
+  const endedNote = !ended
+    ? ''
+    : `<div class="session-note" role="status"><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span class="session-note-text">${escape(state.session!.reason!)}</span>${state.session!.conversation === 'none' ? '' : '<button type="button" class="terminal-question-open" data-action="terminal" title="Resume the session in its terminal">Resume</button>'}</div>`;
   const shown = timeline(state.items, state.artifacts);
   // A card's answer is the first message after the reply or status that asks it, sent with Submit or typed (voice-design § 5).
   const canAnswer = state.connected && state.session?.conversation === 'full';
@@ -668,5 +673,5 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
         ? `<div class="panel" id="panel" data-key="artifacts-${shownKey}" role="tabpanel" aria-labelledby="tab-artifacts">${renderArtifacts(state.artifacts, page.unopened, now)}</div>`
         : `${notes.map((note) => `<p class="notice">${escape(note)}</p>`).join('')}<div class="scroll-area" data-key="conversation-${shownKey}"><div class="scroll" id="panel" role="tabpanel" aria-labelledby="tab-conversation">${earlier}${body}</div>${pill}</div>${asking}`;
 
-  return `${header}${tabs}${panel}`;
+  return `${header}${tabs}${panel}${endedNote}`;
 }
