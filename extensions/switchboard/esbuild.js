@@ -34,7 +34,21 @@ const holder = {
   outdir: 'dist/holder',
   logLevel: 'info',
   // After each build, watch mode included, the folder gets node-pty and a new manifest, so it can be installed.
-  plugins: [{ name: 'holder-files', setup: (build) => build.onEnd((result) => { if (result.errors.length === 0) { copyNodePty(); writeHolderManifest(); } }) }],
+  plugins: [{ name: 'holder-files', setup: (build) => build.onEnd((result) => { if (result.errors.length === 0) { copyNodePty(); writeManifest('dist/holder'); } }) }],
+};
+
+// The voice process runs on the operator's Node.js too, since decibri, its playback, is a native module (architecture.md § Voice).
+// decibri stays outside the bundle: it loads its binary from its platform package.
+const voice = {
+  entryPoints: { voice: '../../packages/voice/src/main.ts' },
+  bundle: true,
+  format: 'cjs',
+  platform: 'node',
+  target: 'node22',
+  external: ['decibri'],
+  outdir: 'dist/voice',
+  logLevel: 'info',
+  plugins: [{ name: 'voice-files', setup: (build) => build.onEnd((result) => { if (result.errors.length === 0) { copyDecibri(); writeManifest('dist/voice'); } }) }],
 };
 
 // The History, pane and conversation scripts run in webviews, and the Mermaid script in the Markdown preview: browsers.
@@ -109,9 +123,49 @@ function copyNodePty() {
   }
 }
 
-/** Names the holder build by a hash of every file's path and content, so any change installs a new folder (architecture.md § Terminal holder). */
-function writeHolderManifest() {
-  const dir = 'dist/holder';
+/**
+ * Copies what decibri loads at run time for this platform: its package.json, its scripts without the browser build, the models its capture
+ * uses, and its platform package with the binary and the libraries beside it.
+ */
+function copyDecibri() {
+  let source;
+
+  try {
+    // Its exports hide package.json; its main script is in src/.
+    source = path.dirname(path.dirname(require.resolve('decibri')));
+  } catch {
+    // An optional dependency npm could not install here; playback then fails with the voice process's load error.
+    console.warn('decibri is not installed, so the voice process cannot play speech.');
+    return;
+  }
+
+  const target = 'dist/voice/node_modules/decibri';
+  const wanted = (file) => file === 'package.json' || file === 'index.js' || (file.startsWith('src/') && !file.startsWith('src/browser/') && file.endsWith('.js')) || file.startsWith('models/');
+
+  for (const file of filesUnder(source).filter(wanted)) {
+    fs.mkdirSync(path.dirname(path.join(target, file)), { recursive: true });
+    fs.copyFileSync(path.join(source, file), path.join(target, file));
+  }
+
+  const abi = process.platform === 'win32' ? 'msvc' : process.platform === 'linux' ? 'gnu' : null;
+  const name = `@decibri/decibri-${process.platform}-${process.arch}${abi === null ? '' : `-${abi}`}`;
+  let binary;
+
+  try {
+    binary = path.dirname(require.resolve(name, { paths: [source] }));
+  } catch {
+    console.warn(`${name} is not installed, so the voice process cannot play speech.`);
+    return;
+  }
+
+  for (const file of filesUnder(binary).filter((one) => !one.endsWith('.md'))) {
+    fs.mkdirSync(path.dirname(path.join('dist/voice/node_modules', name, file)), { recursive: true });
+    fs.copyFileSync(path.join(binary, file), path.join('dist/voice/node_modules', name, file));
+  }
+}
+
+/** Names a holder or voice build by a hash of every file's path and content, so any change installs a new folder (architecture.md § Terminal holder). */
+function writeManifest(dir) {
   const files = filesUnder(dir).filter((file) => file !== 'manifest.json');
   const hash = crypto.createHash('sha256');
 
@@ -128,14 +182,14 @@ async function main() {
   copyAssets();
 
   if (process.argv.includes('--watch')) {
-    for (const config of [options, webview, holder]) {
+    for (const config of [options, webview, holder, voice]) {
       await (await esbuild.context(config)).watch();
     }
 
     return;
   }
 
-  await Promise.all([esbuild.build(options), esbuild.build(webview), esbuild.build(holder)]);
+  await Promise.all([esbuild.build(options), esbuild.build(webview), esbuild.build(holder), esbuild.build(voice)]);
 }
 
 main().catch((error) => {

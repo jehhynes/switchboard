@@ -136,6 +136,31 @@
         "command": "switchboard.newSession",
         "title": "New Session",
         "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.talkHere",
+        "title": "Talk Here",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.stopSpeaking",
+        "title": "Stop Speaking",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.toggleSpeakReplies",
+        "title": "Toggle Speak Replies",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.replayLastReply",
+        "title": "Replay Last Reply",
+        "category": "Switchboard"
+      },
+      {
+        "command": "switchboard.showVoiceLog",
+        "title": "Show Voice Log",
+        "category": "Switchboard"
       }
     ],
     "menus": {
@@ -203,6 +228,13 @@
     ],
     "markdown.previewStyles": [
       "./dist/mermaidPreview.css"
+    ],
+    "keybindings": [
+      {
+        "command": "switchboard.stopSpeaking",
+        "key": "ctrl+alt+.",
+        "mac": "cmd+alt+."
+      }
     ]
   },
   "scripts": {

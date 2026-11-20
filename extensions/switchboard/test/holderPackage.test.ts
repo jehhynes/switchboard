@@ -6,6 +6,8 @@ import { delimiter, dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Attachment, HolderClient, parseHolderRecord, recordPath } from '@switchboard/holder';
 import type { HolderRecord } from '@switchboard/holder';
+import { parseVoiceRecord, VoiceClient, voiceRecordPath } from '@switchboard/voice';
+import type { VoiceMessage } from '@switchboard/voice';
 
 // The packaged extension, extracted outside the checkout so no node_modules of the repository can be reached; npm run build writes dist.
 const EXTENSION = join(import.meta.dirname, '..');
@@ -156,5 +158,52 @@ describe('the packaged terminal holder', () => {
     expect(await client.list()).toEqual([]);
     await client.shutdown();
     client.close();
+  }, 30_000);
+});
+
+describe('the packaged voice process (architecture.md § Voice)', () => {
+  const voiceDir = (): string => join(extracted, 'extension', 'dist', 'voice');
+
+  it('carries every file its manifest lists, decibri and its binary included, with the build hash of their contents', () => {
+    const manifest = JSON.parse(readFileSync(join(voiceDir(), 'manifest.json'), 'utf8')) as { build: string; files: string[] };
+    const hash = createHash('sha256');
+
+    for (const file of manifest.files) {
+      hash.update(file).update('\0').update(readFileSync(join(voiceDir(), file))).update('\0');
+    }
+
+    expect(hash.digest('hex').slice(0, 16)).toBe(manifest.build);
+    expect(manifest.files).toContain('voice.js');
+    expect(manifest.files).toContain('node_modules/decibri/package.json');
+    expect(manifest.files).toContain('node_modules/decibri/src/decibri-output.js');
+    expect(manifest.files.some((file) => file.startsWith('node_modules/@decibri/') && file.endsWith('.node'))).toBe(true);
+    expect(manifest.files.some((file) => file.includes('/browser/'))).toBe(false);
+  });
+
+  it('starts in a home, loads its playback, greets the hub that knows its token, and exits when asked', async () => {
+    const home = join(root, 'home-voice');
+
+    run(join(voiceDir(), 'voice.js'), [`--home=${home}`, '--build=package-test']);
+
+    const record = await until(() => (existsSync(voiceRecordPath(home)) ? parseVoiceRecord(readFileSync(voiceRecordPath(home), 'utf8')) : null), 'voice record');
+
+    await expect(VoiceClient.connect({ port: record.port, token: 'wrong' })).rejects.toThrow('The token is wrong.');
+
+    const client = await VoiceClient.connect({ port: record.port, token: record.token });
+    const messages: VoiceMessage[] = [];
+
+    expect(client.welcome).toMatchObject({ protocol: 1, build: 'package-test', pid: record.pid });
+    client.onMessage((message) => messages.push(message));
+    await until(() => (messages.length >= 2 ? true : null), 'greeting');
+    expect(messages).toEqual([
+      { type: 'active', gen: 0, sessionId: null, reason: 'gone' },
+      { type: 'audio', mic: 'off', engine: 'decibri', device: null, error: null },
+    ]);
+
+    const closed = new Promise((resolve) => client.onClose(resolve));
+
+    client.send({ type: 'shutdown' });
+    await closed;
+    await until(() => (existsSync(voiceRecordPath(home)) ? null : true), 'record removed');
   }, 30_000);
 });

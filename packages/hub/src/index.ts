@@ -27,3 +27,5 @@ export * from './snapshotBuilder.js';
 export * from './snapshotWorker.js';
 export * from './windows.js';
 export * from './needs.js';
+export * from './voice.js';
+export * from './voiceLink.js';

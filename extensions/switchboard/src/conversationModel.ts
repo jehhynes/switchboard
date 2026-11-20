@@ -1,4 +1,4 @@
-import type { ArtifactView, ConversationEntry, ItemView, ReplyView, ScopeView, SessionView, StatusView } from '@switchboard/hub';
+import type { ArtifactView, ConversationEntry, ItemView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/hub';
 
 /** What a window's Conversation view shows, kept from its conversation stream (architecture.md § Conversation view). */
 export interface ConversationState {
@@ -19,13 +19,20 @@ export interface ConversationState {
   artifacts: ArtifactView[];
   /** How many replies and statuses of the selected conversation's current session the operator has not seen (architecture.md § Unread). */
   unread: number;
+  /** This window's voice state (architecture.md § Voice); null from a hub without voice. */
+  voice: VoiceView | null;
+  /** The one setting the view reads: whether a reply with a `[speak]` passage starts expanded. */
+  settings: { expandReplies: boolean };
 }
 
-export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [], unread: 0 };
+export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false } };
 
 /** An event of the conversation stream, as parsed from its data line. */
 export type ConversationEvent =
-  | { type: 'hello'; scope: ScopeView | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number }
+  | { type: 'hello'; scope: ScopeView | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread?: number; voice?: VoiceView; settings?: { expandReplies: boolean } }
+  | { type: 'voice'; voice: VoiceView }
+  | { type: 'settings'; settings: { expandReplies: boolean } }
+  | { type: 'progress'; replyId: string; chars: number; atMs: number }
   | { type: 'scope'; scope: ScopeView | null }
   | { type: 'conversations'; conversations: ConversationEntry[] }
   | { type: 'session'; session: SessionView }
@@ -79,7 +86,19 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
         artifacts: newestFirst(hello.artifacts),
         // A hub from before unread counts sends none.
         unread: hello.unread ?? 0,
+        voice: hello.voice ?? null,
+        settings: hello.settings ?? state.settings,
       };
+    }
+    case 'voice':
+      return { ...state, voice: (event as Extract<ConversationEvent, { type: 'voice' }>).voice };
+    case 'settings':
+      return { ...state, settings: (event as Extract<ConversationEvent, { type: 'settings' }>).settings };
+    case 'progress': {
+      // Where a playing reply stands, until its next `reply` event; nothing is stored.
+      const { replyId, chars, atMs } = event as Extract<ConversationEvent, { type: 'progress' }>;
+
+      return { ...state, items: state.items.map((item) => (item.id === replyId && item.type === 'reply' ? { ...item, spoken: { state: 'playing', atMs, saidChars: chars } } : item)) };
     }
     case 'scope': {
       const { scope } = event as Extract<ConversationEvent, { type: 'scope' }>;
@@ -277,6 +296,35 @@ export function awaitingReply(items: readonly ItemView[], entries: readonly Entr
   );
 
   return latest === -1 || replied ? -1 : lastIndex(entries, (entry) => entry.type === 'message');
+}
+
+/** The newest reply the view shows that has a passage to speak, which Replay Last Reply speaks again; null for none. */
+export function lastSpokenReply(state: ConversationState): ReplyView | null {
+  return [...state.items].reverse().find((item): item is ReplyView => item.type === 'reply' && !item.withdrawn && item.rewrittenBy === null && item.speak !== null) ?? null;
+}
+
+/**
+ * The voice's status bar item (architecture.md § Voice): only this window's state, so a window that is not here cannot tell whether the voice is
+ * in another window or in none; null hides it.
+ */
+export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: string; command: string | null; warning: boolean } | null {
+  if (voice === null || !voice.enabled) {
+    return null;
+  }
+
+  if (!voice.here) {
+    return { text: '$(circle-slash) Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', command: 'switchboard.talkHere', warning: false };
+  }
+
+  if (voice.error !== null) {
+    return { text: '$(warning) Voice', tooltip: `Voice: ${voice.error} Click to show the voice log.`, command: 'switchboard.showVoiceLog', warning: true };
+  }
+
+  if (voice.speaking !== null) {
+    return { text: '$(unmute) Speaking', tooltip: 'Click to stop speaking.', command: 'switchboard.stopSpeaking', warning: false };
+  }
+
+  return { text: '$(unmute) Voice here', tooltip: voice.speakReplies ? 'Replies to messages you send here are spoken.' : 'Speak replies is off.', command: null, warning: false };
 }
 
 /** The header's codicon for the session's state (architecture.md § Conversation view). */

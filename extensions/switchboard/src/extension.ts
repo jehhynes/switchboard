@@ -1,10 +1,10 @@
 import { appendFileSync, unwatchFile, watchFile } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import * as vscode from 'vscode';
 import { hubBundlePath, hubLogPath, resolveConfigDir, switchboardHome } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
-import { buildOf, dockView, findHub, installBundle, installHolder, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
+import { buildOf, dockView, findHub, installBundle, installHolder, installVoice, keepHub, makeEnsure, openEvents, postToHub, stopHub, windowItems, windowsDir } from '@switchboard/hub';
 import { continueInBackground } from './background.js';
 import { closeDueAt, closeIfDone } from './closeWindow.js';
 import { showDock } from './dockApp.js';
@@ -128,16 +128,19 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
   reportConfigError();
   installBundle(context.asAbsolutePath('dist/hub.js'), bundle);
 
-  // A holder that cannot be installed fails only Code Mode starts; the cause goes to the hub log, which every window shows (PRD R94).
-  void installHolder(context.asAbsolutePath('dist/holder'), switchboardHome(home)).then((installed) => {
-    if ('error' in installed) {
-      try {
-        appendFileSync(hubLogPath(home), `${new Date().toISOString()} ${installed.error}\n`);
-      } catch {
-        // The home cannot be written, which the hub's own start reports.
+  // A holder that cannot be installed fails only Code Mode starts, and a voice process only speech; the cause goes to the hub log, which every
+  // window shows (PRD R94, architecture.md § Voice).
+  for (const install of [installHolder(context.asAbsolutePath('dist/holder'), switchboardHome(home)), installVoice(context.asAbsolutePath('dist/voice'), switchboardHome(home))]) {
+    void install.then((installed) => {
+      if ('error' in installed) {
+        try {
+          appendFileSync(hubLogPath(home), `${new Date().toISOString()} ${installed.error}\n`);
+        } catch {
+          // The home cannot be written, which the hub's own start reports.
+        }
       }
-    }
-  });
+    });
+  }
 
   // A hub from another build or config folder, such as one started before this extension was updated, is replaced.
   const ensure = makeEnsure({
@@ -460,6 +463,12 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     vscode.commands.registerCommand('switchboard.newClaudeTab', newClaudeTab),
     // As the Conversation view's plus button: a conversation hosted by this window (architecture.md § Hosted conversations).
     vscode.commands.registerCommand('switchboard.newSession', () => conversation.newConversation()),
+    // The voice (architecture.md § Voice), for this window's selected conversation only.
+    vscode.commands.registerCommand('switchboard.talkHere', () => conversation.talkHere()),
+    vscode.commands.registerCommand('switchboard.stopSpeaking', () => conversation.stopSpeaking()),
+    vscode.commands.registerCommand('switchboard.toggleSpeakReplies', () => conversation.speakReplies()),
+    vscode.commands.registerCommand('switchboard.replayLastReply', () => conversation.replay()),
+    vscode.commands.registerCommand('switchboard.showVoiceLog', () => vscode.commands.executeCommand('vscode.open', vscode.Uri.file(join(switchboardHome(home), 'voice.log')))),
     ...(['tab', 'sidebar'] as const).map((where) =>
       vscode.commands.registerCommand(where === 'tab' ? 'switchboard.continueInBackground' : 'switchboard.continueSidebarInBackground', () => {
         const snapshot = state.current();

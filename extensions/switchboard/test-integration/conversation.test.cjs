@@ -40,7 +40,7 @@ describe('the Conversation view', () => {
     const own = extension.conversation().scope;
     const folder = require('node:fs').realpathSync.native(vscode.workspace.workspaceFolders[0].uri.fsPath);
 
-    assert.deepStrictEqual({ ...extension.conversation(), scope: null }, { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+    assert.deepStrictEqual({ ...extension.conversation(), scope: null }, { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: { enabled: false, here: false, mic: 'off', speaking: null, speakReplies: true, error: null }, settings: { expandReplies: false } });
     assert.deepStrictEqual({ ...own, key: 'k' }, { kind: 'folder', key: 'k', folder, title: require('node:path').basename(folder), scopeGen: 0, conversations: [], workItemId: null, cwd: null, sessionId: null });
     assert.strictEqual(extension.conversationBadge(), undefined);
 

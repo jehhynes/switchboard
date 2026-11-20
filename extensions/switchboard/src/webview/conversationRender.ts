@@ -1,5 +1,5 @@
 import MarkdownIt from 'markdown-it';
-import type { ArtifactView, ItemView, MessageView, ReplyView, StatusView } from '@switchboard/hub';
+import type { ArtifactView, ItemView, MessageView, ReplyView, StatusView, VoiceView } from '@switchboard/hub';
 import { artifactIcon, awaitingReply, selectedEntry, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 import { answersIn, answerText, parseQuestions } from '../questionModel.js';
@@ -12,6 +12,10 @@ export type ConversationMessage =
   | { type: 'open'; href: string }
   | { type: 'terminal' }
   | { type: 'select'; workItemId: number }
+  | { type: 'talk-here' }
+  | { type: 'stop-speaking' }
+  | { type: 'speak-replies'; on: boolean }
+  | { type: 'replay'; replyId: string }
   | { type: 'new' }
   | { type: 'send'; id: number; text: string; target: SendTarget; command?: true }
   | { type: 'files'; id: number; query: string }
@@ -142,10 +146,77 @@ function message(item: MessageView, stamped: boolean): string {
   return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${line}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div></li>`;
 }
 
-function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = ''): string {
+/** A playback position as the view shows it: "0:07". */
+function clock(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/** What became of a reply's speech, as a small line under it (architecture.md § Voice); empty when there is nothing to say. */
+export function spokenLine(item: ReplyView): string {
+  const line = (icon: string, text: string, kind: string): string => `<div class="spoken ${kind}"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span>${escape(text)}</span></div>`;
+
+  switch (item.spoken.state) {
+    case 'playing':
+      return line('unmute', 'Speaking', 'playing');
+    case 'interrupted':
+      return line('unmute', item.spoken.atMs === null ? 'interrupted' : `interrupted at ${clock(item.spoken.atMs)}`, 'interrupted');
+    case 'stopped-moved':
+      return line('mute', 'stopped: voice moved', 'stopped');
+    case 'failed':
+      return line('mute', 'not spoken: speech failed', 'failed');
+    default:
+      return '';
+  }
+}
+
+/** The passage read aloud; while it plays or after it was cut short, the part not heard yet is dimmed, as plain text. */
+function passageHtml(item: ReplyView, passage: string): string {
+  const said = item.spoken.saidChars;
+
+  if ((item.spoken.state !== 'playing' && item.spoken.state !== 'interrupted') || said === null) {
+    return renderMarkdown(passage);
+  }
+
+  return `<p class="passage">${escape(passage.slice(0, said))}<span class="unheard">${escape(passage.slice(said))}</span></p>`;
+}
+
+/**
+ * The composer footer's voice controls (architecture.md § Voice): Speak replies, Stop while this window's session speaks, and the voice's state,
+ * which in a window that is not here offers Talk here; nothing while voice is off.
+ */
+export function renderVoiceControls(voice: VoiceView | null): string {
+  if (voice === null || !voice.enabled) {
+    return '';
+  }
+
+  const speakReplies = `<button class="ghost" type="button" data-voice="speak-replies" aria-pressed="${voice.speakReplies}" title="Speak replies: ${voice.speakReplies ? 'on' : 'off'}"><span class="codicon codicon-${voice.speakReplies ? 'unmute' : 'mute'}" aria-hidden="true"></span><span>Speak replies</span></button>`;
+  const stop = voice.here && voice.speaking !== null ? '<button class="ghost" type="button" data-voice="stop" title="Stop speaking (Escape)"><span class="codicon codicon-debug-stop" aria-hidden="true"></span><span>Stop</span></button>' : '';
+  const where = voice.here
+    ? `<span class="voice-state">${voice.error === null ? 'Voice here' : escape(`Voice: ${voice.error}`)}</span>`
+    : '<button class="ghost voice-elsewhere" type="button" data-voice="talk-here" title="Voice is not in this window. Click to talk here."><span class="codicon codicon-circle-slash" aria-hidden="true"></span><span>Voice is not in this window</span></button>';
+
+  return `${speakReplies}${stop}${where}`;
+}
+
+/** The fold key of a reply's Show more, which flips its start, collapsed in focused mode or expanded with `voice.expandReplies`. */
+export const moreKey = (id: string): string => `more:${id}`;
+
+function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>, stamped: boolean, card = '', expandReplies = false): string {
   if (item.kind === 'note') {
     return `<li class="note" data-id="${escape(item.id)}" tabindex="-1">${escape(item.opening)}</li>`;
   }
+
+  // Focused mode (voice-design decision 21): a reply with a [speak] passage shows the passage first, the whole reply behind Show more.
+  const passage = item.kind === 'reply' && item.speak !== null && item.speak.trim() !== '' ? item.speak : null;
+  const folded = passage !== null && passage.trim() !== item.opening.trim();
+  const expanded = !folded || expandReplies !== open.has(moreKey(item.id));
+  const shown = passage !== null && !expanded ? passageHtml(item, passage) : renderMarkdown(item.opening);
+  const more = folded
+    ? `<button class="show-more" type="button" data-action="more" data-reply="${escape(item.id)}" aria-expanded="${expanded}">${expanded ? 'Show less' : 'Show more'}</button>`
+    : '';
+  const tone = item.tone === null ? '' : `<div class="tone" title="How the reply sounds when spoken">${escape(item.tone)}</div>`;
 
   const rewritten =
     earlier === null
@@ -159,7 +230,7 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   const unread = item.unread ? ` unread" data-unread="${escape(item.id)}` : '';
   const dot = item.unread ? '<span class="dot" title="Unread"><span class="unread-label">Unread</span></span>' : '<span class="dot"></span>';
 
-  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}" tabindex="-1">${stamped ? stamp(item.at) : ''}${dot}<div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${card}${actions}</li>`;
+  return `<li class="reply ${item.kind}${unread}" data-id="${escape(item.id)}"${passage === null ? '' : ' data-speak="1"'} tabindex="-1">${stamped ? stamp(item.at) : ''}${dot}${tone}<div class="body">${shown}${more}${rewritten}</div>${spokenLine(item)}${card}${actions}</li>`;
 }
 
 /** What the page keeps of a question card the operator has not answered yet: the choices made, and the answer being sent or refused. */
@@ -441,7 +512,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
     const card = entry.type === 'reply' && entry.item.kind === 'reply' ? cardOf(cardKey('reply', entry.item.id), entry.item.opening, answerAfter(entry.item.id)) : '';
 
-    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card)) + (index === waiting ? spinner : '');
+    return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card, state.settings.expandReplies)) + (index === waiting ? spinner : '');
   });
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
   const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}</ol>`;

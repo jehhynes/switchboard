@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import { openConversation, postToHub } from '@switchboard/hub';
 import type { EventStream, ItemView, StatusView } from '@switchboard/hub';
-import { applyEvent, EMPTY_CONVERSATION, statusLine, totalUnread, withEarlier } from './conversationModel.js';
+import { applyEvent, EMPTY_CONVERSATION, lastSpokenReply, statusLine, totalUnread, voiceStatus, withEarlier } from './conversationModel.js';
 import type { ConversationEvent, ConversationState } from './conversationModel.js';
 import type { ConversationMessage, SeenTarget, SendTarget } from './webview/conversationRender.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from './links.js';
@@ -103,6 +103,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   #returned: Array<{ text: string; error: string; workItemId: number | null }> = [];
   #giving: Promise<void> | null = null;
   #giveAgain = false;
+  /** The voice's status bar item (architecture.md § Voice), shown while `voice.enabled` is on. */
+  readonly #voiceItem = vscode.window.createStatusBarItem('switchboard.voice', vscode.StatusBarAlignment.Left, 99);
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -118,6 +120,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       // The page counts an unread item as seen only while this window has the focus (architecture.md § Unread).
       vscode.window.onDidChangeWindowState((state) => this.#post({ type: 'focus', focused: state.focused })),
       this.#statusChanged,
+      this.#voiceItem,
       { dispose: () => this.disconnect() },
     );
   }
@@ -380,6 +383,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     this.#state = state;
     this.deps.changed?.(state);
     this.refresh();
+    this.#showVoice();
 
     for (const view of this.#views.values()) {
       view.badge = unreadBadge(totalUnread(state));
@@ -418,6 +422,64 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
       // The page reports them again; a refusal for a session the window no longer shows starts over with its next state anyway.
       this.#post({ type: 'seen-failed', ids });
     }
+  }
+
+  /** Draws the voice's status bar item from this window's voice state. */
+  #showVoice(): void {
+    const shown = voiceStatus(this.#state.voice);
+
+    if (shown === null) {
+      this.#voiceItem.hide();
+      return;
+    }
+
+    this.#voiceItem.name = 'Switchboard Voice';
+    this.#voiceItem.text = shown.text;
+    this.#voiceItem.tooltip = shown.tooltip;
+    this.#voiceItem.command = shown.command ?? undefined;
+    this.#voiceItem.backgroundColor = shown.warning ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+    this.#voiceItem.show();
+  }
+
+  /** A voice command for this window (architecture.md § Voice); a refusal shows as a warning, except Stop speaking's, which has nothing to stop. */
+  async #voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay', extra: Record<string, unknown> = {}): Promise<void> {
+    const target = this.#target;
+    const scope = this.#state.scope;
+
+    if (target === null || scope === null) {
+      void vscode.window.showWarningMessage('Switchboard: this window has no session for the voice.');
+      return;
+    }
+
+    const reply = await postToHub(target.record, `/v1/conversation/${name}`, { window: target.key, scopeGen: scope.scopeGen, opId: randomUUID(), ...extra }, HISTORY_TIMEOUT_MS);
+
+    if (reply?.status !== 200 && name !== 'stop-speaking') {
+      void vscode.window.showWarningMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
+    }
+  }
+
+  /** Talk here: the voice moves to this window's selected conversation's session. */
+  talkHere(): Promise<void> {
+    return this.#voiceCommand('talk-here');
+  }
+
+  stopSpeaking(): Promise<void> {
+    return this.#voiceCommand('stop-speaking');
+  }
+
+  /** Speak replies on or off; with no value, the opposite of what it is. */
+  speakReplies(on = !(this.#state.voice?.speakReplies ?? true)): Promise<void> {
+    return this.#voiceCommand('speak-replies', { on });
+  }
+
+  /** Speaks a reply's passage again, or the newest reply's that has one. */
+  replay(replyId = lastSpokenReply(this.#state)?.id): Promise<void> {
+    if (replyId === undefined) {
+      void vscode.window.showInformationMessage('Switchboard: no reply here has a passage to speak.');
+      return Promise.resolve();
+    }
+
+    return this.#voiceCommand('replay', { replyId });
   }
 
   /** Loads the items before the oldest the view shows. */
@@ -621,6 +683,14 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
             return this.deps.openTerminal();
           case 'select':
             return this.select(Number(message.workItemId));
+          case 'talk-here':
+            return this.talkHere();
+          case 'stop-speaking':
+            return this.stopSpeaking();
+          case 'speak-replies':
+            return this.speakReplies(message.on === true);
+          case 'replay':
+            return this.replay(String(message.replyId));
           case 'new':
             return this.newConversation();
           case 'status-open':

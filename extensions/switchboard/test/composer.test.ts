@@ -13,7 +13,7 @@ const T0 = Date.UTC(2026, 10, 19, 12);
 const SCOPE: ScopeView = { kind: 'item', workItemId: 2, key: 'k1', folder: 'D:\\w', title: 'Fix the badge', cwd: 'D:\\w', scopeGen: 1, sessionId: 's2', conversations: [{ workItemId: 2, title: 'Fix the badge', primary: true, sessionId: 's2', state: 'idle', conversation: 'full', unread: 0 }] };
 const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa', state: 'idle', waitingFor: null, launch: 'l', current: true, conversation: 'full', reason: null };
 const message = (id: string, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at: T0, ord: T0, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
-const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
 const COMMANDS = [
   { name: 'clear', description: 'Clear the conversation history and free up context' },
   { name: 'compact', description: 'Clear the conversation history but keep a summary in context.' },

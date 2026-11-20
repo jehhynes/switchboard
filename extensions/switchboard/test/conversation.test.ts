@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
-import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, ScopeView } from '@switchboard/hub';
+import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, ScopeView, VoiceView } from '@switchboard/hub';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, selectedEntry, stateIcon, statusLine, timeline, totalUnread, withEarlier } from '../src/conversationModel.js';
+import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, lastSpokenReply, selectedEntry, stateIcon, statusLine, timeline, totalUnread, voiceStatus, withEarlier } from '../src/conversationModel.js';
 import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
-import { ago, linkAllowed, PICKER, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
+import { ago, linkAllowed, PICKER, renderConversation, renderMarkdown, renderVoiceControls } from '../src/webview/conversationRender.js';
 import type { Tab } from '../src/webview/conversationRender.js';
 
 /** The page's extras for a tab. */
@@ -22,7 +22,7 @@ const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyVie
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
-const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number; voice: VoiceView; settings: { expandReplies: boolean } }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 /** A timeline entry's ID: an item's, or an artifact's path. */
 const idOf = (entry: Entry): string => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id);
 
@@ -44,7 +44,41 @@ describe('the conversation state', () => {
 
     const moved = applyEvent(applyEvent(state, { type: 'scope', scope: { ...SCOPE, workItemId: 3, sessionId: null } }), hello([], { scope: { ...SCOPE, workItemId: 3, sessionId: null }, sessions: [] }));
 
-    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0 });
+    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false } });
+  });
+
+  it('keeps the voice state and the setting from hello and their events, and shows a playing reply\'s progress (architecture.md § Voice)', () => {
+    const voice = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null };
+    let state = applyEvent(EMPTY_CONVERSATION, hello([reply('r1', T0, { speak: 'Done.' })], { voice, settings: { expandReplies: true } }));
+
+    expect(state.voice).toEqual(voice);
+    expect(state.settings).toEqual({ expandReplies: true });
+    state = applyEvent(state, { type: 'voice', voice: { ...voice, here: false } });
+    expect(state.voice?.here).toBe(false);
+    state = applyEvent(state, { type: 'settings', settings: { expandReplies: false } });
+    expect(state.settings.expandReplies).toBe(false);
+    state = applyEvent(state, { type: 'progress', replyId: 'r1', chars: 3, atMs: 450 });
+    expect(state.items[0]).toMatchObject({ spoken: { state: 'playing', atMs: 450, saidChars: 3 } });
+    expect(applyEvent(state, { type: 'progress', replyId: 'gone', chars: 1, atMs: 1 }).items).toEqual(state.items);
+    // A hub without voice sends none, and a new hello keeps the setting it had.
+    expect(applyEvent(state, hello([]))).toMatchObject({ voice: null, settings: { expandReplies: false } });
+  });
+
+  it('shows the voice in the status bar only as this window sees it, and finds the reply Replay speaks again', () => {
+    const voice = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null };
+
+    expect(voiceStatus(null)).toBeNull();
+    expect(voiceStatus({ ...voice, enabled: false })).toBeNull();
+    expect(voiceStatus({ ...voice, here: false })).toEqual({ text: '$(circle-slash) Voice not here', tooltip: 'Voice is not in this window. Click to talk here.', command: 'switchboard.talkHere', warning: false });
+    expect(voiceStatus({ ...voice, error: 'no device' })).toMatchObject({ text: '$(warning) Voice', command: 'switchboard.showVoiceLog', warning: true });
+    expect(voiceStatus({ ...voice, speaking: 'r1' })).toMatchObject({ text: '$(unmute) Speaking', command: 'switchboard.stopSpeaking' });
+    expect(voiceStatus(voice)).toEqual({ text: '$(unmute) Voice here', tooltip: 'Replies to messages you send here are spoken.', command: null, warning: false });
+    expect(voiceStatus({ ...voice, speakReplies: false })?.tooltip).toBe('Speak replies is off.');
+
+    const items = [reply('r1', T0, { speak: 'One.' }), reply('r2', T0 + 1, { speak: 'Two.', rewrittenBy: 'r3' }), reply('r3', T0 + 2), message('m1', T0 + 3, 'Next')];
+
+    expect(lastSpokenReply({ ...EMPTY_CONVERSATION, items })?.id).toBe('r1');
+    expect(lastSpokenReply(EMPTY_CONVERSATION)).toBeNull();
   });
 
   it("takes the unread count from the hello and each unread event, and drops it when the window's session moves", () => {
@@ -151,7 +185,7 @@ describe('the conversation state', () => {
 });
 
 describe('the Conversation view page', () => {
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
 
   it('draws the header, messages as boxes, replies whole, asides, notes and rewrites, escaping every text', () => {
     const html = renderConversation(
@@ -437,7 +471,7 @@ describe('the Conversation view page', () => {
 });
 
 describe('unread replies and statuses', () => {
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
   const status = (id: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown: 'Done.', fallback: false, unread: true, ...patch });
 
   it("marks an unread reply's dot on the Conversation tab and the unread status on the Status tab, and never a seen one, a note or the stage", () => {
@@ -593,8 +627,117 @@ describe('unread replies and statuses', () => {
   });
 });
 
+describe('speech in the view (architecture.md § Voice)', () => {
+  const VOICE = { enabled: true, here: true, mic: 'off' as const, speaking: null, speakReplies: true, error: null };
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: VOICE, settings: { expandReplies: false }, ...patch });
+
+  function page() {
+    if (typeof CSS === 'undefined') {
+      vi.stubGlobal('CSS', { escape: (value: string) => value });
+    }
+
+    const root = document.createElement('div');
+    const live = document.createElement('div');
+    const host = document.createElement('div');
+    const posted: Array<{ type: string; [field: string]: unknown }> = [];
+    let kept: unknown = null;
+
+    document.body.replaceChildren(root, host, live);
+    startConversation(root, live, { postMessage: (message: { type: string }) => posted.push(message), getState: () => kept, setState: (next: unknown) => void (kept = next) }, host);
+
+    const show = (next: ConversationState) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'state', state: next } }));
+
+    return { root, host, posted, show };
+  }
+
+  it('shows a reply with a passage as the passage first, the whole reply behind Show more, and whole with voice.expandReplies', () => {
+    const passage = reply('r1', T0, { opening: 'Fixed the **badge**.\n\n- one\n- two', speak: 'Fixed the **badge**.', tone: 'calm' });
+    const { root, show } = page();
+
+    show(state([passage, reply('r2', T0 + 1, { opening: 'Same.', speak: 'Same.' }), reply('r3', T0 + 2, { opening: 'Plain.' })]));
+
+    const first = root.querySelector<HTMLElement>('li[data-id="r1"]')!;
+
+    expect(first.querySelector('.body')!.innerHTML).toContain('<strong>badge</strong>');
+    expect(first.querySelector('.body ul')).toBeNull();
+    expect(first.querySelector('.tone')!.textContent).toBe('calm');
+    expect(first.dataset['speak']).toBe('1');
+    // A reply whose passage is all of it, and one with none, have no Show more.
+    expect(root.querySelector('li[data-id="r2"] .show-more')).toBeNull();
+    expect(root.querySelector('li[data-id="r3"] .show-more')).toBeNull();
+    expect(root.querySelector<HTMLElement>('li[data-id="r3"]')!.dataset['speak']).toBeUndefined();
+
+    // Enter on the focused reply flips it, as the button does.
+    first.focus();
+    first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(root.querySelector('li[data-id="r1"] .body ul')).not.toBeNull();
+    root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
+    expect(root.querySelector('li[data-id="r1"] .body ul')).toBeNull();
+    root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
+    expect(root.querySelector('li[data-id="r1"] .body ul')).not.toBeNull();
+    expect(root.querySelector('li[data-id="r1"] .show-more')!.textContent).toBe('Show less');
+    root.querySelector<HTMLButtonElement>('li[data-id="r1"] .show-more')!.click();
+    expect(root.querySelector('li[data-id="r1"] .body ul')).toBeNull();
+
+    const expanded = renderConversation(state([passage], { settings: { expandReplies: true } }));
+
+    expect(expanded).toContain('<li>one</li>');
+    expect(expanded).toContain('aria-expanded="true">Show less</button>');
+  });
+
+  it("says what became of a reply's speech, dimming the passage not heard yet", () => {
+    const spoken = (state_: ReplyView['spoken']['state'], atMs: number | null = null, saidChars: number | null = null) =>
+      renderConversation(state([reply('r1', T0, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state: state_, atMs, saidChars } })]));
+
+    expect(spoken('playing', 100, 3)).toContain('<p class="passage">Fix<span class="unheard">ed it.</span></p>');
+    expect(spoken('playing', 100, 3)).toContain('<span>Speaking</span>');
+    expect(spoken('interrupted', 7_400, 5)).toContain('<span>interrupted at 0:07</span>');
+    expect(spoken('interrupted')).toContain('<span>interrupted</span>');
+    expect(spoken('stopped-moved')).toContain('<span>stopped: voice moved</span>');
+    expect(spoken('failed')).toContain('<span>not spoken: speech failed</span>');
+    expect(spoken('played')).not.toContain('class="spoken');
+    expect(spoken('queued')).not.toContain('class="spoken');
+  });
+
+  it('offers Speak replies, Stop while speaking and Talk here in the composer, R to replay a reply and Escape to stop', () => {
+    const { root, host, posted, show } = page();
+    const controls = () => host.querySelector<HTMLElement>('.voice-controls')!;
+
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, enabled: false } }));
+    expect(controls().innerHTML).toBe('');
+
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, here: false } }));
+    expect(controls().textContent).toBe('Speak repliesVoice is not in this window');
+    controls().querySelector<HTMLButtonElement>('[data-voice="talk-here"]')!.click();
+    controls().querySelector<HTMLButtonElement>('[data-voice="speak-replies"]')!.click();
+
+    show(state([reply('r1', T0, { opening: 'Done. More.', speak: 'Done.' })], { voice: { ...VOICE, speaking: 'r1', speakReplies: false } }));
+    expect(controls().textContent).toBe('Speak repliesStopVoice here');
+    expect(controls().querySelector('[data-voice="speak-replies"] .codicon-mute')).not.toBeNull();
+    controls().querySelector<HTMLButtonElement>('[data-voice="stop"]')!.click();
+    controls().querySelector<HTMLButtonElement>('[data-voice="speak-replies"]')!.click();
+
+    const item = root.querySelector<HTMLElement>('li[data-id="r1"]')!;
+
+    item.focus();
+    item.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true }));
+    item.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(posted.filter((message) => message.type !== 'ready' && message.type !== 'seen')).toEqual([
+      { type: 'talk-here' },
+      { type: 'speak-replies', on: false },
+      { type: 'stop-speaking' },
+      { type: 'speak-replies', on: true },
+      { type: 'replay', replyId: 'r1' },
+      { type: 'stop-speaking' },
+      { type: 'stop-speaking' },
+    ]);
+    expect(renderVoiceControls({ ...VOICE, error: 'no <device>' })).toContain('Voice: no &#60;device&#62;');
+  });
+});
+
 describe('the composer', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
 
   function page() {
     // Pages of earlier tests still listen on the window, and jsdom has no CSS.escape for the one that kept a focused item.
@@ -871,7 +1014,7 @@ describe('reply links and the secondary side bar', () => {
 });
 
 describe('the Status tab', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
   const status = (id: string, markdown: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown, fallback: false, unread: false, ...patch });
 
   it("takes the hello's status and each status of the window's session or work item, and drops another session's", () => {
@@ -1061,7 +1204,7 @@ describe('the Status tab', () => {
 });
 
 describe('the tab strip', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [reply('r1', T0)], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [reply('r1', T0)], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], unread: 0, voice: null, settings: { expandReplies: false }, ...patch });
 
   it('draws Conversation, Status and Artifacts under the header as tabs, the selected one alone in the panel, and none for a window with no work item', () => {
     const root = document.createElement('div');

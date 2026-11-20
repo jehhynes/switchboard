@@ -232,3 +232,17 @@ button.picker .title { flex: 0 1 auto; }
 .terminal-question-text { flex: 1; min-width: 0; }
 .terminal-question-open { flex: none; padding: 2px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font: inherit; cursor: pointer; }
 .terminal-question-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }
+
+/* Speech out (architecture.md § Voice): focused mode's Show more, the tone line, what became of a reply's speech, and the composer's voice controls. */
+.show-more { display: inline-block; margin: 2px 0 0; padding: 0; border: none; background: none; color: var(--vscode-textLink-foreground); font: inherit; font-size: 0.92em; cursor: pointer; }
+.show-more:hover { text-decoration: underline; }
+.show-more:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.reply .tone { color: var(--vscode-descriptionForeground); font-size: 0.9em; font-style: italic; }
+.reply .spoken { display: flex; align-items: center; gap: 4px; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+.reply .spoken .codicon { font-size: 12px; }
+.passage .unheard { color: var(--vscode-descriptionForeground); opacity: 0.7; }
+.voice-controls { display: flex; align-items: center; gap: 2px; min-width: 0; margin-left: 4px; }
+.voice-controls .ghost { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border: none; border-radius: 4px; background: none; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.85em; white-space: nowrap; cursor: pointer; }
+.voice-controls .ghost:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.voice-controls .ghost[aria-pressed="true"] { color: var(--vscode-foreground); }
+.voice-controls .voice-state { overflow: hidden; color: var(--vscode-descriptionForeground); font-size: 0.85em; text-overflow: ellipsis; white-space: nowrap; }

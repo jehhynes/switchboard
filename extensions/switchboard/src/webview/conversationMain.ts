@@ -1,6 +1,6 @@
 import type { ConversationState } from '../conversationModel.js';
 import { EMPTY_CONVERSATION } from '../conversationModel.js';
-import { ago, complete, PICKER, renderConversation, replyText, TABS } from './conversationRender.js';
+import { ago, complete, moreKey, PICKER, renderConversation, renderVoiceControls, replyText, TABS } from './conversationRender.js';
 import type { CardDraft } from './conversationRender.js';
 import { answerText, parseQuestions } from '../questionModel.js';
 import { selectedEntry, statusLine } from '../conversationModel.js';
@@ -172,6 +172,23 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
     grow();
     refresh();
   }, (text) => showError(text));
+  // The voice's controls on the footer's left (architecture.md § Voice): Speak replies, Stop while speaking, and where the voice is.
+  const voiceControls = document.createElement('div');
+
+  voiceControls.className = 'voice-controls';
+  host.querySelector<HTMLElement>('.composer-controls')!.appendChild(voiceControls);
+  voiceControls.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-voice]');
+
+    if (button?.dataset['voice'] === 'speak-replies') {
+      vscode.postMessage({ type: 'speak-replies', on: button.getAttribute('aria-pressed') !== 'true' });
+    } else if (button?.dataset['voice'] === 'stop') {
+      vscode.postMessage({ type: 'stop-speaking' });
+    } else if (button?.dataset['voice'] === 'talk-here') {
+      vscode.postMessage({ type: 'talk-here' });
+    }
+  });
+  let speaking = false;
 
   input.addEventListener('input', () => {
     grow();
@@ -183,6 +200,12 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
   });
   input.addEventListener('keydown', (event) => {
     if (extras.keydown(event)) {
+      return;
+    }
+
+    // Escape stops speech while the view has focus.
+    if (event.key === 'Escape' && speaking) {
+      vscode.postMessage({ type: 'stop-speaking' });
       return;
     }
 
@@ -208,6 +231,8 @@ function startComposer(host: HTMLElement, vscode: VsCodeApi): { update(state: Co
       host.hidden = state.scope === null || state.scope.workItemId === null;
       input.disabled = !enabled;
       input.placeholder = enabled ? `Message ${shortTitle(selectedEntry(state)?.title ?? state.scope?.title ?? '')}…` : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : 'Connecting to Switchboard…'));
+      voiceControls.innerHTML = renderVoiceControls(state.voice);
+      speaking = state.voice?.here === true && state.voice.speaking !== null;
       refresh();
     },
     sent: (id, refusal) => {
@@ -677,6 +702,16 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       draw();
     } else if (action === 'answer') {
       submitCard(button!.dataset['card']!);
+    } else if (action === 'more') {
+      // Show more and Show less flip the reply from where it starts (architecture.md § Voice).
+      const key = moreKey(button!.dataset['reply'] ?? '');
+
+      if (!open.delete(key)) {
+        open.add(key);
+      }
+
+      draw();
+      save();
     } else if (action === 'artifact') {
       vscode.postMessage({ type: 'artifact', path: button!.dataset['path'] ?? '' });
     } else if (action === 'status-open') {
@@ -755,6 +790,13 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     }
   });
 
+  // Escape stops speech while the view has focus, unless it closes the conversation list.
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !open.has(PICKER) && state.voice?.here === true && state.voice.speaking !== null) {
+      vscode.postMessage({ type: 'stop-speaking' });
+    }
+  });
+
   // Escape closes the conversation list; Up and Down move within it.
   root.addEventListener('keydown', (event) => {
     if (!open.has(PICKER)) {
@@ -815,10 +857,24 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
       move(index + 1);
     } else if (event.key === 'ArrowUp') {
       move(index === -1 ? items.length - 1 : index - 1);
+    } else if ((event.key === 'r' || event.key === 'R') && !event.ctrlKey && !event.metaKey && !event.altKey && current?.dataset['speak'] === '1') {
+      // R speaks a reply's passage again (architecture.md § Voice).
+      vscode.postMessage({ type: 'replay', replyId: current.dataset['id']! });
+      event.preventDefault();
     } else if ((event.key === 'Enter' || event.key === ' ') && current !== null && (event.target as HTMLElement).closest('button, a') === null) {
       // An artifact's row opens it.
       if (current.dataset['path'] !== undefined) {
         vscode.postMessage({ type: 'artifact', path: current.dataset['path'] });
+        event.preventDefault();
+        return;
+      }
+
+      // A reply in focused mode flips its Show more first.
+      const more = current.querySelector<HTMLButtonElement>(':scope > .body > .show-more');
+
+      if (more !== null) {
+        more.click();
+        root.querySelector<HTMLElement>(`li[data-id="${CSS.escape(current.dataset['id'] ?? '')}"]`)?.focus();
         event.preventDefault();
         return;
       }
