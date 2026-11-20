@@ -21,8 +21,8 @@ export const DIRECT_API = 'https://api.anthropic.com';
 export const CODE_MODE_START_MS = 60_000;
 /** A live process with no marker of its launch after this long waits on a prompt in its terminal (mechanics M70). */
 export const START_PROMPT_MS = 20_000;
-/** A held session with no terminal attached and no input or output for this long is ended (PRD R95). */
-export const CODE_MODE_IDLE_MS = 4 * 60 * 60_000;
+/** A held session with no terminal attached and no input or output for this long is ended (PRD R95); opening it resumes it at once. */
+export const CODE_MODE_IDLE_MS = 60 * 60_000;
 const POLL_MS = 1_000;
 const COLS = 120;
 const ROWS = 40;

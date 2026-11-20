@@ -117,7 +117,7 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
     expect(h.item(1)).toMatchObject({ status: 'blocked', error: MESSAGES.turnEndedWithoutApproval });
   });
 
-  it('ends a held setup session at its turn end and starts the task once a worktree is linked, before the process has ended', () => {
+  it('keeps a held setup session running after its turn and starts the task once a worktree is linked', () => {
     const h = new Harness();
     const setup = heldSetup(h);
 
@@ -125,42 +125,40 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
 
     const actions = h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null });
 
-    expect(actions[0]).toEqual(release(setup));
-    expect(actions[1]).toMatchObject({ type: 'start-session', kind: 'task', cwd: 'D:/git/widgets-wt/15619' });
-    expect(h.store.session(setup)).toMatchObject({ released: false, releasing: true, outcome: 'done' });
-    expect(h.status(1)).toBe('running');
-
-    expect(h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release', shortId: `${setup}-short` })).toEqual([]);
-    expect(h.store.session(setup)).toMatchObject({ state: 'ended', released: true, releasing: false });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ type: 'start-session', kind: 'task', cwd: 'D:/git/widgets-wt/15619' });
+    expect(h.store.session(setup)).toMatchObject({ state: 'idle', released: false, releasing: false, outcome: 'done' });
     expect(h.status(1)).toBe('running');
   });
 
-  it('fails a held setup whose turn ended without a worktree once its process has ended', () => {
+  it('leaves a held setup whose turn ended without a worktree in setup, and fails it once the idle limit ends its process', () => {
     const h = new Harness();
     const setup = heldSetup(h);
 
-    expect(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null })).toEqual([release(setup)]);
+    expect(h.act({ type: 'marker', sessionId: setup, state: 'idle', detail: null })).toEqual([]);
     expect(h.status(1)).toBe('setup');
 
+    expect(h.act({ type: 'held-idle', sessionId: setup })).toEqual([release(setup)]);
     h.act({ type: 'stop-succeeded', sessionId: setup, reason: 'release', shortId: `${setup}-short` });
     expect(h.item(1)).toMatchObject({ status: 'failed', error: MESSAGES.setupWithoutWorktree });
   });
 
-  it('ends a held session whose work item becomes done: at once after its turn, at its turn end during one', () => {
+  it('keeps a held session running when its work item becomes done, after its turn and during one', () => {
     const h = new Harness();
     const idle = heldTask(h);
 
     h.act({ type: 'marker', sessionId: idle, state: 'idle', detail: null });
-    expect(h.act({ type: 'mark-done', workItemId: 1 })).toEqual([release(idle)]);
+    expect(h.act({ type: 'mark-done', workItemId: 1 })).toEqual([]);
+    expect(h.store.session(idle)).toMatchObject({ state: 'idle', releasing: false, released: false });
 
     const other = new Harness();
     const running = heldTask(other);
 
     expect(other.act({ type: 'mark-done', workItemId: 1 })).toEqual([]);
-    expect(other.act({ type: 'marker', sessionId: running, state: 'idle', detail: null })).toEqual([release(running)]);
+    expect(other.act({ type: 'marker', sessionId: running, state: 'idle', detail: null })).toEqual([]);
   });
 
-  it('ends an older held session when a newer session of its work item starts', () => {
+  it('keeps an older held session running when a newer session of its work item starts', () => {
     const h = new Harness();
     const first = heldTask(h);
 
@@ -169,21 +167,22 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
 
     const actions = h.act({ type: 'approve', workItemId: 1 });
 
-    expect(actions[0]).toEqual(release(first));
-    expect(actions[1]).toMatchObject({ type: 'start-session', kind: 'task', prompt: expect.stringContaining('/publish 7') });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ type: 'start-session', kind: 'task', prompt: expect.stringContaining('/publish 7') });
+    expect(h.store.session(first)).toMatchObject({ state: 'idle', releasing: false });
   });
 
-  it('cancels a pending end when a new turn starts, and decides again at its turn end', () => {
+  it('cancels an idle-limit end that waits for a terminal when a new turn starts, and does not end the session at its next turn end', () => {
     const h = new Harness();
     const id = heldTask(h);
 
     h.act({ type: 'marker', sessionId: id, state: 'idle', detail: null });
-    h.act({ type: 'mark-done', workItemId: 1 });
+    h.act({ type: 'held-idle', sessionId: id });
     expect(h.store.session(id)).toMatchObject({ releasing: true, released: false });
 
     h.act({ type: 'marker', sessionId: id, state: 'running', detail: null });
     expect(h.store.session(id)).toMatchObject({ releasing: false, released: false });
-    expect(h.act({ type: 'marker', sessionId: id, state: 'idle', detail: null })).toEqual([release(id)]);
+    expect(h.act({ type: 'marker', sessionId: id, state: 'idle', detail: null })).toEqual([]);
   });
 
   it('keeps a held session held when its end fails, so the idle limit can end it later', () => {
@@ -191,7 +190,7 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
     const id = heldTask(h);
 
     h.act({ type: 'marker', sessionId: id, state: 'idle', detail: null });
-    h.act({ type: 'mark-done', workItemId: 1 });
+    h.act({ type: 'held-idle', sessionId: id });
     h.act({ type: 'stop-failed', sessionId: id, reason: 'release', message: 'The terminal holder did not answer.', shortId: `${id}-short` });
     expect(h.store.session(id)).toMatchObject({ state: 'idle', releasing: false, released: false });
     expect(h.act({ type: 'held-idle', sessionId: id })).toEqual([release(id)]);
@@ -296,11 +295,21 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
       h.report(first, { kind: 'approval', prompt: '/publish 7', summary: 'Post the answer', report: null });
       h.act({ type: 'marker', sessionId: first, state: 'idle', detail: null });
 
-      const second = held(h, h.act({ type: 'approve', workItemId: 1 })[1], 'launch-2');
+      const second = held(h, h.act({ type: 'approve', workItemId: 1 })[0], 'launch-2');
 
-      h.act({ type: 'stop-succeeded', sessionId: first, reason: 'release', shortId: `${first}-short` });
       h.act({ type: 'marker', sessionId: second, state: 'idle', detail: null });
-      expect(h.act({ type: 'delete', workItemId: 1 })).toEqual([{ type: 'stop-session', sessionId: second, provider: 'claude', shortId: `${second}-short`, reason: 'operator', codeMode: true }]);
+      expect(h.act({ type: 'delete', workItemId: 1 })).toEqual(expect.arrayContaining([
+        { type: 'stop-session', sessionId: first, provider: 'claude', shortId: `${first}-short`, reason: 'operator', codeMode: true },
+        { type: 'stop-session', sessionId: second, provider: 'claude', shortId: `${second}-short`, reason: 'operator', codeMode: true },
+      ]));
+
+      const ended = new Harness();
+      const gone = heldTask(ended);
+
+      ended.act({ type: 'marker', sessionId: gone, state: 'idle', detail: null });
+      ended.act({ type: 'held-idle', sessionId: gone });
+      ended.act({ type: 'stop-succeeded', sessionId: gone, reason: 'release', shortId: `${gone}-short` });
+      expect(ended.act({ type: 'delete', workItemId: 1 })).toEqual([]);
     });
   });
 
@@ -321,7 +330,7 @@ describe('Code Mode sessions in the flow (PRD R93-R95)', () => {
     h.report(first, { kind: 'approval', prompt: '/publish 7', summary: 'Post the answer', report: null });
     h.act({ type: 'marker', sessionId: first, state: 'idle', detail: null });
 
-    const second = held(h, h.act({ type: 'approve', workItemId: 1 })[1], 'launch-2');
+    const second = held(h, h.act({ type: 'approve', workItemId: 1 })[0], 'launch-2');
 
     expect(h.act({ type: 'stop', workItemId: 1, sessionId: first })).toEqual([{ type: 'stop-session', sessionId: first, provider: 'claude', shortId: `${first}-short`, reason: 'operator', codeMode: true }]);
     h.act({ type: 'stop-succeeded', sessionId: first, reason: 'operator', shortId: `${first}-short` });

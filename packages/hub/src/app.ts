@@ -185,7 +185,7 @@ export interface AppOptions {
   /** The folder holding settings.json; the Switchboard home when left out. */
   configDir?: string;
   log(line: string): void;
-  /** The Code Mode idle limit (`--code-mode-idle-ms`); 4 hours when left out. */
+  /** The Code Mode idle limit (`--code-mode-idle-ms`); 1 hour when left out. */
   codeModeIdleMs?: number;
   /** Overrides for tests. */
   deps?: Partial<RuntimeDeps>;

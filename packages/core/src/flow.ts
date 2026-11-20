@@ -1847,13 +1847,13 @@ class Flow {
   }
 
   /**
-   * PRD R95: a held Code Mode session whose turn has ended ends when it is a setup session, its work item is done, or a newer session of its work
-   * item has started; otherwise it keeps running in the holder.
+   * A Codex app-server thread whose turn has ended releases its subscription when it is a setup session, its work item is done, or a newer session
+   * of its work item has started (PRD R39). A held Code Mode session keeps running between turns; only Stop, Delete and the idle limit end it (PRD R95).
    */
   private endHeld(session: Session): void {
     const item = this.store.workItem(session.workItemId);
 
-    if (item === null || session.released || session.releasing) {
+    if (item === null || session.codeMode === true || session.released || session.releasing) {
       return;
     }
 
@@ -2948,7 +2948,7 @@ class Flow {
       personaPinned: false,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
-    // Rows open only the latest session, so an older held one ends (PRD R95).
+    // An older app-server thread leaves its subscription (PRD R39); an older held Code Mode session keeps running (PRD R95).
     this.endHeldSessions(item.id);
     this.actions.push({
       type: 'start-session',
