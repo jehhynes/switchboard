@@ -62,6 +62,8 @@ export class Harness {
   playbooks: Map<string, Playbook>;
   #sessions = 0;
   #uuids = 0;
+  /** Sessions whose conversation holds an unanswered question card, as the hub reads it (PRD R103). */
+  readonly questionCards = new Set<string>();
 
   constructor(options: { settings?: Settings; playbooks?: Map<string, Playbook> } = {}) {
     this.settings = options.settings ?? settings();
@@ -70,7 +72,7 @@ export class Harness {
 
   send(event: FlowEvent): FlowResult {
     return this.store.transaction(() =>
-      handle(this.store, event, { now: this.now, settings: this.settings, playbooks: this.playbooks, report: REPORT, newSessionId: () => `s${++this.#sessions}`, newUuid: () => `uuid-${++this.#uuids}` }),
+      handle(this.store, event, { now: this.now, settings: this.settings, playbooks: this.playbooks, report: REPORT, newSessionId: () => `s${++this.#sessions}`, newUuid: () => `uuid-${++this.#uuids}`, questionCard: (id) => this.questionCards.has(id) }),
     );
   }
 

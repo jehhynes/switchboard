@@ -1,5 +1,5 @@
 import type { Playbook } from './playbook.js';
-import { activeSession, failedAtTriage, groupOf, ownPrompt, reviewKey, START_PROMPT, waitsOnPermission, waitsToStart } from './group.js';
+import { activeSession, failedAtTriage, groupOf, ownPrompt, QUESTION_CARD, reviewKey, START_PROMPT, waitsOnCard, waitsOnPermission, waitsToStart } from './group.js';
 import { heldSlots, queueWaits } from './queue.js';
 import { latestDue, SCHEDULE_SOURCE, scheduleText } from './schedule.js';
 import { homeRepo, isRootPattern, repoOf, repoRoots, samePath, ticketRoot } from './repo.js';
@@ -328,6 +328,8 @@ export interface FlowContext {
   newSessionId(): string;
   /** A random UUID, for a Code Mode session's Claude session ID and launch (PRD R93). */
   newUuid(): string;
+  /** Whether the session's conversation holds a question card no message has answered yet (PRD R103); none without it. */
+  questionCard?(sessionId: string): boolean;
 }
 
 export interface FlowResult {
@@ -1664,6 +1666,11 @@ class Flow {
   }
 
   private setState(session: Session, state: LiveState, detail: string | null): void {
+    // A turn that ends asking lettered questions no message has answered waits on the operator's answer, not finished or blocked (PRD R103).
+    if (state === 'idle' && detail === null && this.asksInCard(session)) {
+      detail = QUESTION_CARD;
+    }
+
     if (session.state === state && session.stateDetail === detail) {
       return;
     }
@@ -1708,7 +1715,8 @@ class Flow {
       const cause = state === 'failed' ? `The turn failed: ${detail ?? 'unknown error'}.` : null;
 
       // A hosted conversation offers no done report, so a turn that ends leaves it open (architecture.md § Hosted conversations).
-      if (cause === null && this.hosted(item)) {
+      // A turn that asked in a question card leaves the work item running, waiting on the answer (PRD R103).
+      if (cause === null && (this.hosted(item) || detail === QUESTION_CARD)) {
         return;
       }
 
@@ -1872,6 +1880,7 @@ class Flow {
     }
 
     const turnEnded = TURN_ENDED.includes(session.state);
+    const card = waitsOnCard(session);
 
     this.store.updateSession(sessionId, {
       state: 'ended',
@@ -1884,8 +1893,9 @@ class Flow {
       ...(turnEnded || session.outcome !== null ? {} : { outcome: 'failed' as const, outcomeDetail: MESSAGES.holderStopped }),
     });
 
-    // A session that reported done ends as its process would, so a done report that waits for its second read still settles (PRD R10).
-    if (session.outcome === 'done') {
+    // A session that reported done ends as its process would, so a done report that waits for its second read still settles (PRD R10). So does
+    // one that waited on a question card's answer, whose turn had ended with its work item still running (PRD R103).
+    if (session.outcome === 'done' || card) {
       this.ended({ ...session, state: 'ended' });
       return;
     }
@@ -2706,6 +2716,27 @@ class Flow {
     const sessions = this.store.sessionsFor(item.id);
 
     return item.status !== 'done' && sessions.at(-1)?.id === session.id ? item : null;
+  }
+
+  /**
+   * Whether a turn of this Code Mode or Codex app-server task session that ends now would leave a question card unanswered and would otherwise
+   * settle its running work item as finished or blocked (PRD R103). A hosted conversation, an unassigned ticket, a held approval and a report
+   * decide as before.
+   */
+  private asksInCard(session: Session): boolean {
+    const item = this.latest(session);
+
+    return (
+      persistent(session) &&
+      session.kind === 'task' &&
+      session.outcome === null &&
+      item !== null &&
+      item.status === 'running' &&
+      item.unassignedAt === null &&
+      !item.approvalHeld &&
+      !this.hosted(item) &&
+      this.context.questionCard?.(session.id) === true
+    );
   }
 
   /** Whether the work item is a hosted conversation, which offers no done report and stays open when a turn or its session ends. */

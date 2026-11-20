@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, markOf, needsYou, reviewOrder, triageLabel, turnOf, urlKey } from '../src/group.js';
+import { activeSession, adhocLabel, failedAtTriage, groupOf, holdsSlot, markOf, needsYou, QUESTION_CARD, reviewOrder, triageLabel, turnOf, urlKey, waitsOnCard } from '../src/group.js';
 import type { DoneReason, SessionOutcome, SessionState, WorkItemStatus } from '../src/model.js';
 
 const item = (status: WorkItemStatus, ...states: SessionState[]) => ({
@@ -52,6 +52,27 @@ describe('groupOf', () => {
     expect(groupOf(triageFailed('failed', 1000))).toBe('unstarted');
     expect(groupOf({ ...item('failed'), triage: { error: null } })).toBe('blocked');
     expect(groupOf({ ...ready('failed'), triage: { error: null } })).toBe('review');
+  });
+});
+
+describe('a question card waiting on its answer (PRD R103)', () => {
+  const card = (status: WorkItemStatus, readyAt: number | null = null) => ({ ...item(status), readyAt, sessions: [{ state: 'idle' as SessionState, outcome: null, stateDetail: QUESTION_CARD }], doneReason: null, approvalSends: false, ticket: { snoozed: false } });
+
+  it('marks a running work item Answer a question, the operator\'s turn, in Blocked on you or Ready for review, holding no slot', () => {
+    expect(waitsOnCard({ state: 'idle', stateDetail: QUESTION_CARD })).toBe(true);
+    expect(waitsOnCard({ state: 'running', stateDetail: QUESTION_CARD })).toBe(false);
+    expect(waitsOnCard({ state: 'idle' })).toBe(false);
+    expect(groupOf(card('running'))).toBe('blocked');
+    expect(groupOf(card('running', 1000))).toBe('review');
+    expect(markOf(card('running'))).toBe('question');
+    expect(needsYou(card('running'))).toBe(true);
+    expect(holdsSlot(card('running'))).toBe(false);
+  });
+
+  it('is no question once the work item has moved on', () => {
+    expect(markOf(card('blocked'))).toBe('blocked');
+    expect(markOf(card('awaiting-approval'))).toBe('review');
+    expect(markOf(card('done'))).toBe('done-session');
   });
 });
 

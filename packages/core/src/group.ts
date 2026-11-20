@@ -21,6 +21,17 @@ export function waitsOnPermission(session: { state: Session['state']; stateDetai
   return session !== null && session.state === 'waiting' && session.stateDetail === PERMISSION_PROMPT;
 }
 
+/**
+ * The state detail of an `idle` Code Mode or Codex app-server task session whose turn ended with a question card no message has answered yet,
+ * so its work item waits on the operator's answer (PRD R103).
+ */
+export const QUESTION_CARD = 'question-card';
+
+/** A session whose turn ended asking lettered questions in a reply or a status that no message has answered yet (PRD R103). */
+export function waitsOnCard(session: { state: Session['state']; stateDetail?: string | null } | null | undefined): boolean {
+  return session != null && session.state === 'idle' && session.stateDetail === QUESTION_CARD;
+}
+
 /** `triage` is the work item's latest triage, or null when it has none. A caller without `stateDetail` gets no permission mark. */
 type Grouped = Pick<WorkItem, 'status' | 'readyAt'> & { sessions: (Pick<Session, 'state' | 'outcome' | 'promptless'> & { stateDetail?: string | null })[]; triage: Pick<Triage, 'error'> | null };
 
@@ -42,19 +53,22 @@ export function activeSession<S extends Pick<Session, 'state'>>(item: { sessions
   return latest !== undefined && latest.state !== 'ended' ? latest : null;
 }
 
+/** A work item's sessions as the question rules read them; without `stateDetail`, a question card's wait is not seen. */
+type Asking = Pick<WorkItem, 'status'> & { sessions: (Pick<Session, 'state' | 'outcome'> & { stateDetail?: string | null })[] };
+
 /**
- * A question waits on the operator: the session waits on it, or Open in Claude or Codex stopped it and it has not run since (PRD R70). A
- * queued, triaged or failed work item has moved on from an opened question.
+ * A question waits on the operator: the session waits on it, its turn ended with an unanswered question card (PRD R103), or Open in Claude or
+ * Codex stopped it and it has not run since (PRD R70). A queued, triaged or failed work item has moved on from an opened question.
  */
-export function waitsOnQuestion(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state' | 'outcome'>[] }): boolean {
+export function waitsOnQuestion(item: Asking): boolean {
   const latest = item.sessions.at(-1);
   const opened = latest?.outcome === 'opened' && (item.status === 'setup' || item.status === 'running' || item.status === 'awaiting-approval');
 
-  return latest?.state === 'waiting' || opened;
+  return latest?.state === 'waiting' || (waitsOnCard(latest) && item.status === 'running') || opened;
 }
 
 /** The work item waits on the operator's answer or fix: it is blocked or failed, or a question waits on the operator (PRD R27). */
-export function blocksOnYou(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state' | 'outcome'>[] }): boolean {
+export function blocksOnYou(item: Asking): boolean {
   return item.status === 'blocked' || item.status === 'failed' || waitsOnQuestion(item);
 }
 
@@ -105,7 +119,7 @@ export function needsYou(item: Grouped & { ticket: { snoozed: boolean } }): bool
 }
 
 /** A session whose work item is running and not waiting on a question holds a concurrency slot (PRD R38). */
-export function holdsSlot(item: Pick<WorkItem, 'status'> & { sessions: Pick<Session, 'state' | 'outcome'>[] }): boolean {
+export function holdsSlot(item: Asking): boolean {
   return (item.status === 'setup' || item.status === 'running') && !waitsOnQuestion(item);
 }
 
