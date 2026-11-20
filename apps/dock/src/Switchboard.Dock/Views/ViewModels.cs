@@ -369,7 +369,8 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
     {
         foreach (var group in Groups)
         {
-            if (group.AllRows.FirstOrDefault((row) => row.Row.Window?.Name == name || row.Row.Open?.Terminal?.Name == name || row.Row.Terminal?.Name == name) is { } row)
+            // A folder window has no sb: title, so no row is found by its window's name (architecture.md § Dock).
+            if (group.AllRows.FirstOrDefault((row) => (row.Row.Window is { Folder: null } window && window.Name == name) || row.Row.Open?.Terminal?.Name == name || row.Row.Terminal?.Name == name) is { } row)
             {
                 Reveal(group, row);
 

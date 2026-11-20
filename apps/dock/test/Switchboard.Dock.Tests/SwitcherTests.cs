@@ -56,6 +56,71 @@ public sealed class SwitcherTests
     }
 
     [Fact]
+    public async Task Click_FolderHostedConversation_SelectsItAndOpensTheFolderNeverAnItemWindow()
+    {
+        var row = Fixtures.Row("item:7");
+        var hosted = row with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };
+
+        // An item window whose name matches the row's window is never the destination: a folder window is found by no title. The click is done
+        // once the hub lists a folder window on that folder, with either separator.
+        windows.Open["support"] = (42, 0);
+        hub.Ended = Fixtures.View with { Windows = new OpenWindows([], null, 1, ["D:\\git\\support"]) };
+
+        Assert.Null(await Switcher().Click(hosted, TestContext.Current.CancellationToken));
+        Assert.Equal(["select item:7", "open aaaa1111-native D:/git/widgets/.worktrees/107-fix support", "until 20s"], hub.Calls);
+        Assert.Equal(["open support"], vsCode.Calls);
+        Assert.Empty(windows.Calls);
+        Assert.Equal(0, windows.Finds("support"));
+    }
+
+    [Fact]
+    public async Task Run_FolderHostedRow_LeavesTheCommandForTheFolderAndOpensIt()
+    {
+        var row = Fixtures.Row("item:7") with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };
+
+        hub.Ended = Fixtures.View with { Windows = new OpenWindows([], null, 1, ["D:/git/support"]) };
+        Assert.Null(await Switcher().Run(row, new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
+        Assert.Equal(["window support {\"type\":\"openUrl\",\"url\":\"D:/drafts/reply.md\"}", "until 20s"], hub.Calls);
+        Assert.Equal(["open support"], vsCode.Calls);
+        Assert.Empty(windows.Calls);
+    }
+
+    [Fact]
+    public async Task Click_FolderWindowNeverConnects_SaysSoEvenWithAnItemWindowOnTheFolder()
+    {
+        var row = Fixtures.Row("item:7") with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };
+
+        // Only an item window on the folder is connected, which never reaches a folder destination.
+        hub.Ended = Fixtures.View with { Windows = new OpenWindows(["D:/sb/windows/gh-1-support-abc123.code-workspace"], null, 1, []) };
+
+        Assert.Equal("VS Code did not open a window on D:/git/support within 20 seconds.", await Switcher().Click(row, TestContext.Current.CancellationToken));
+        Assert.Equal(["open support"], vsCode.Calls);
+    }
+
+    [Fact]
+    public async Task Run_FolderRowCancelledWhileWaiting_WithdrawsTheCommandAtOnce()
+    {
+        var row = Fixtures.Row("item:7") with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };
+        using var cancel = new CancellationTokenSource();
+
+        // A later click cancels this one while it waits; the wait itself never ends, as for a folder window still opening.
+        hub.HoldUntil = new TaskCompletionSource();
+        hub.OnUntil = cancel.Cancel;
+
+        Assert.Null(await Switcher().Run(row, new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, cancel.Token));
+        Assert.Equal(["window support {\"type\":\"openUrl\",\"url\":\"D:/drafts/reply.md\"}", "until 20s", "withdraw 41"], hub.Calls);
+    }
+
+    [Fact]
+    public async Task Run_FolderWindowNeverConnects_WithdrawsTheCommand()
+    {
+        var row = Fixtures.Row("item:7") with { Window = new DockWindow("support", "New session", ["D:/git/support"], null, true, "D:/git/support") };
+
+        Assert.Equal("VS Code did not open a window on D:/git/support within 20 seconds.", await Switcher().Run(row, new System.Text.Json.Nodes.JsonObject { ["type"] = "openUrl", ["url"] = "D:/drafts/reply.md" }, TestContext.Current.CancellationToken));
+        Assert.Equal(["window support {\"type\":\"openUrl\",\"url\":\"D:/drafts/reply.md\"}", "until 20s", "withdraw 41"], hub.Calls);
+    }
+
+    [Fact]
     public async Task Click_HubRefusesTheSelection_ShowsWhyAndOpensNothing()
     {
         var row = Fixtures.Row("item:7");

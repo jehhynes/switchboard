@@ -48,7 +48,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         }
 
         // Checked before a question's stop, so a session is not stopped for a window the dock cannot open.
-        if (FileOf(window) is null)
+        if (FileOf(window) is null && FolderOf(window) is null)
         {
             return Older;
         }
@@ -78,8 +78,59 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
             open = open with { Type = "session" };
         }
 
-        return await ItemWindow(window, open, cancel);
+        return await Destination(window, open, cancel);
     }
+
+    /// <summary>The row's window: a folder window for a folder-hosted conversation, else its item window.</summary>
+    Task<string?> Destination(DockWindow window, DockOpen? open, CancellationToken cancel) =>
+        FolderOf(window) is { } folder ? FolderWindow(folder, open, cancel) : ItemWindow(window, open, cancel);
+
+    /// <summary>
+    /// Leaves the session for the folder window, then opens the folder as <c>code &lt;folder&gt;</c>, which brings forward the folder window already on
+    /// it or opens one, and waits for a folder window on it to be connected. A folder window has no <c>sb:</c> title to find it by, and an item
+    /// window that holds the folder never counts, since only a folder window on that folder claims what was left for it (architecture.md § Dock).
+    /// Returns why not, or null.
+    /// </summary>
+    async Task<string?> FolderWindow(string folder, DockOpen? open, CancellationToken cancel)
+    {
+        if (open is { Type: "session", SessionId: { } sessionId, Cwd: { } cwd } && await hub.Open(sessionId, cwd, folder) is { } refused)
+        {
+            return cancel.IsCancellationRequested ? null : refused;
+        }
+
+        if (cancel.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        var failure = Launch(folder) ?? await Reached(folder, cancel);
+
+        return cancel.IsCancellationRequested ? null : failure;
+    }
+
+    /// <summary>
+    /// Waits for the hub to list a folder window on the folder; returns why not, or null once one is connected or when the click is cancelled, which
+    /// stops the wait at once so a command left for the folder is withdrawn before a window can claim it.
+    /// </summary>
+    async Task<string?> Reached(string folder, CancellationToken cancel)
+    {
+        var until = hub.Until((view) => view.Windows?.Folders?.Any((one) => SameFolder(one, folder)) == true, OpenWait);
+        var cancelled = new TaskCompletionSource();
+
+        using (cancel.Register(() => cancelled.TrySetResult()))
+        {
+            if (await Task.WhenAny(until, cancelled.Task) != until)
+            {
+                return null;
+            }
+        }
+
+        return await until is null ? $"VS Code did not open a window on {folder} within {OpenWait.TotalSeconds:0} seconds." : null;
+    }
+
+    /// <summary>Whether two canonical folders from the hub are one, by its spelling: separators and, on Windows and macOS, case aside.</summary>
+    static bool SameFolder(string a, string b) =>
+        string.Equals(a.Replace('\\', '/').TrimEnd('/'), b.Replace('\\', '/').TrimEnd('/'), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Leaves the session to open for the item window, then brings the window forward or opens it; returns why not, or null.</summary>
     async Task<string?> ItemWindow(DockWindow window, DockOpen? open, CancellationToken cancel)
@@ -164,7 +215,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         if (shown.Active)
         {
             return row?.Window is { } window
-                ? await ItemWindow(window, new DockOpen("session", null, shown.SessionId, shown.Cwd, null, shown.Provider), cancel)
+                ? await Destination(window, new DockOpen("session", null, shown.SessionId, shown.Cwd, null, shown.Provider), cancel)
                 : "The session runs in a window the dock cannot find.";
         }
 
@@ -305,6 +356,21 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
     {
         if (row?.Window is { } window)
         {
+            // A folder window, found by no title, gets the command and is brought forward or opened by VS Code itself.
+            if (FileOf(window) is null && FolderOf(window) is { } folder)
+            {
+                var forFolder = await hub.Window(command, folder);
+
+                if (forFolder.Error is { } notLeft)
+                {
+                    return cancel.IsCancellationRequested ? null : notLeft;
+                }
+
+                var notOpened = cancel.IsCancellationRequested ? null : Launch(folder) ?? await Reached(folder, cancel);
+
+                return await Withdrawn(forFolder, notOpened, cancel);
+            }
+
             if (FileOf(window) is not { } file)
             {
                 return Older;
@@ -421,7 +487,7 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
         }
     }
 
-    /// <summary>Starts VS Code on the workspace file; returns why it did not start, or null.</summary>
+    /// <summary>Starts VS Code on the workspace file or folder; returns why it did not start, or null.</summary>
     string? Launch(string file)
     {
         try
@@ -472,6 +538,9 @@ public sealed class Switcher(IHub hub, IWindows windows, IVsCode vsCode, Func<Ti
 
     /// <summary>The window's workspace file, which the hub writes before it sends the view (architecture.md § Dock).</summary>
     static string? FileOf(DockWindow window) => string.IsNullOrEmpty(window.File) ? null : window.File;
+
+    /// <summary>A folder-hosted conversation's folder window's canonical folder, for a window with no workspace file (architecture.md § Dock).</summary>
+    static string? FolderOf(DockWindow window) => FileOf(window) is null && !string.IsNullOrEmpty(window.Folder) ? window.Folder : null;
 
     public static DockRow? RowOf(DockView view, string key) => view.Groups.SelectMany((group) => group.Rows).FirstOrDefault((row) => row.Key == key);
 }

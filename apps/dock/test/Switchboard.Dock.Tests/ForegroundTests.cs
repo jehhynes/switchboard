@@ -48,6 +48,20 @@ public sealed class ForegroundTests
     }
 
     [Fact]
+    public void SelectWindow_FolderHostedRowsWindowName_SelectsNoRow()
+    {
+        // A folder window has no sb: title, so a title naming the same window name belongs to some other window.
+        var folderHosted = Fixtures.View with
+        {
+            Groups = Fixtures.View.Groups.Select((group) => group with { Rows = group.Rows.Select((row) => row.Key == "item:8" ? row with { Window = row.Window! with { File = null, Hosted = true, Folder = "D:/git/widgets" } } : row).ToList() }).ToList(),
+        };
+        var model = Model(folderHosted);
+
+        Assert.Null(model.SelectWindow("gh-108-widgets-655280"));
+        Assert.Null(model.Selected);
+    }
+
+    [Fact]
     public void SelectWindow_UnknownWindow_KeepsTheSelection()
     {
         var model = Model(Fixtures.View);

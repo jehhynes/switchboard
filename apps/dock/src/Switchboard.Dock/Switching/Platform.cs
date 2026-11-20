@@ -36,6 +36,9 @@ public interface ITerminal
 /// <summary>The VS Code installation that item windows open in.</summary>
 public interface IVsCode
 {
-    /// <summary>Opens a workspace file, as <c>code &lt;file&gt;</c>, in the profile VS Code gives it; throws when VS Code cannot be started.</summary>
+    /// <summary>
+    /// Opens a workspace file or a folder, as <c>code &lt;path&gt;</c>, in the profile VS Code gives it, which focuses a window already on it; throws when VS
+    /// Code cannot be started.
+    /// </summary>
     void Open(string workspaceFile);
 }

@@ -16,9 +16,10 @@ public sealed record DockView(IReadOnlyList<string> Notes, IReadOnlyList<DockGro
 
 /// <summary>
 /// The VS Code windows connected to the hub: each item window's workspace file, the one in front, and how many windows there are, item windows or not.
-/// The dock follows them where it cannot see other apps' windows (architecture.md § Dock).
+/// The dock follows them where it cannot see other apps' windows (architecture.md § Dock). <c>Folders</c> are the canonical folders of connected folder
+/// windows, which a folder-hosted conversation's click waits for; an older hub sends none.
 /// </summary>
-public sealed record OpenWindows(IReadOnlyList<string> Open, string? Front, int Count);
+public sealed record OpenWindows(IReadOnlyList<string> Open, string? Front, int Count, IReadOnlyList<string>? Folders = null);
 
 /// <summary>
 /// A session the terminal holder holds, as the held sessions window lists it (PRD R94): its work item's key or <c>No work item</c>, the Switchboard and
@@ -158,9 +159,10 @@ sealed class StripeConverter : JsonConverter<Tone?>
 /// <summary>
 /// A work item's VS Code window: the workspace file's name, which the window title ends with as <c>sb:&lt;name&gt;</c>, the ticket title, its folders,
 /// and the workspace file the hub writes (PRD R71); a hub older than the dock sends no file. <c>Hosted</c> marks a hosted conversation's row, whose
-/// window is its host's (architecture.md § Hosted conversations).
+/// window is its host's (architecture.md § Hosted conversations). <c>Folder</c> names a folder window's canonical folder instead of a file: a
+/// folder-hosted conversation's host, which has no workspace file and no <c>sb:</c> title.
 /// </summary>
-public sealed partial record DockWindow(string Name, string Title, IReadOnlyList<string> Folders, string? File = null, bool Hosted = false)
+public sealed partial record DockWindow(string Name, string Title, IReadOnlyList<string> Folders, string? File = null, bool Hosted = false, string? Folder = null)
 {
     /// <summary>
     /// The window name in the last <c>sb:&lt;name&gt;</c> at the start of a title or after <c> · </c>, or null for a window that is not an item window.
