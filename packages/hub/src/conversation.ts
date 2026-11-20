@@ -35,7 +35,7 @@ export interface SessionView {
 }
 
 /** A message names its work item, so a window that hears one was not sent puts it back in that conversation's draft only. */
-export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'transcriptUuid' | 'opId' | 'pastedAt'>;
+export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'transcriptUuid' | 'opId' | 'pastedAt' | 'launch'>;
 /**
  * `provisional`: not in the transcript yet, so placed by when it was first seen (`inTranscript`); `unread`: it counts as unread and the operator
  * has not seen it (architecture.md § Unread).
@@ -96,6 +96,7 @@ export function itemView(item: ({ type: 'message' } & ConversationMessage) | ({ 
   if (view.type === 'message') {
     delete (view as { opId?: unknown }).opId;
     delete (view as { pastedAt?: unknown }).pastedAt;
+    delete (view as { launch?: unknown }).launch;
 
     return { ...view, provisional: !inTranscript(item) } as ItemView;
   }
@@ -132,7 +133,8 @@ export type ScopeView = Omit<WindowScope, 'conversations'> & { conversations: Co
 
 /** Why a message waiting to be typed is no longer typed into its session. */
 export const NEWER_SESSION = 'A newer session of this work item started; the message was not sent.';
-const RESTARTED = 'Switchboard restarted while the message was being typed; check the terminal.';
+const RESTARTED = 'Switchboard restarted while the message was being typed and could not read its input box: check the terminal before sending it again.';
+const RESTARTED_UNTYPED = 'Switchboard restarted before typing the message. Send it again.';
 
 export interface ConversationServiceDeps {
   store: Store;
@@ -197,15 +199,47 @@ export class ConversationService {
   constructor(private readonly deps: ConversationServiceDeps) {
     this.#ansiTheme = ansiTheme(deps.claudeConfig);
 
-    // A message the stopped hub was typing may or may not have gone; it is never typed again.
-    for (const message of deps.store.settleOpenMessages(RESTARTED)) {
-      deps.log(`session ${message.sessionId}: message ${message.id} left open by a stopped hub is uncertain`);
+    for (const message of deps.store.openMessages()) {
+      this.#leftOpen.set(message.sessionId, [...(this.#leftOpen.get(message.sessionId) ?? []), message]);
     }
   }
+
+  /**
+   * Typed messages a stopped hub left being typed, by session, settled once a window showing the session opens its stream, so a message that
+   * was not sent reaches a composer.
+   */
+  readonly #leftOpen = new Map<string, ConversationMessage[]>();
+  /** Messages a stopped hub left that were settled not sent while no window showed their session, by session, given back when one does. */
+  readonly #toGiveBack = new Map<string, ConversationMessage[]>();
 
   start(): void {
     this.#timer ??= setInterval(() => void this.poll(), CONVERSATION_POLL_MS);
     this.#timer.unref();
+  }
+
+  /**
+   * A message the stopped hub was typing is never typed again: one never pasted is not sent; a pasted one is sent when the transcript has it or
+   * the input box no longer holds it, and not sent when the box still holds it, which is cleared, only in the launch it was typed into
+   * (architecture.md § Typing a message). One not sent goes back to the composer of the windows showing the session, since this hub does not
+   * know which window sent it.
+   */
+  #settleLeftOpen(message: ConversationMessage): void {
+    const session = this.deps.store.session(message.sessionId);
+    const giveBack = (outcome: InputOutcome): void => this.#delivered(message.id, outcome, true);
+
+    this.deps.log(`session ${message.sessionId}: message ${message.id} left open by a stopped hub is settled from the transcript and the screen`);
+
+    if (session === null || message.pastedAt === null || message.launch == null) {
+      giveBack({ delivery: 'not-sent', error: message.pastedAt === null ? RESTARTED_UNTYPED : RESTARTED });
+      return;
+    }
+
+    const launch = message.launch;
+
+    void this.#input(session).resolve(message.text, message.pastedAt, giveBack, RESTARTED, {
+      check: () => this.#check(message.sessionId, launch),
+      reserve: () => this.deps.input.reserve(message.sessionId, launch),
+    });
   }
 
   stop(): void {
@@ -324,8 +358,8 @@ export class ConversationService {
     reader.conversation.tick(busy);
   }
 
-  /** Sends a change to the windows showing its session, and to `also`, a window that must hear it wherever its scope moved. */
-  #changed(sessionId: string, change: ConversationChange, also?: string): void {
+  /** Sends a change to the windows showing its session, and to `also`, a window that must hear it wherever its scope moved, with `extra` fields. */
+  #changed(sessionId: string, change: ConversationChange, also?: string, extra: Record<string, unknown> = {}): void {
     if (change.type === 'status') {
       this.#statusChanged(this.deps.windows.showing(sessionId));
       this.#unreadChanged(sessionId);
@@ -344,7 +378,7 @@ export class ConversationService {
     }
 
     for (const key of keys) {
-      this.#send(key, change.type, change.type === 'message' ? { message: item } : { reply: item });
+      this.#send(key, change.type, change.type === 'message' ? { message: item, ...extra } : { reply: item, ...extra });
     }
 
     // A new message can push an unread reply past the retention limit, so every change counts again.
@@ -451,6 +485,26 @@ export class ConversationService {
     streams.add(send);
     this.#streams.set(key, streams);
     send('hello', hello);
+
+    const showing = this.deps.windows.scope(key)?.sessionId ?? null;
+    const left = showing === null ? undefined : this.#leftOpen.get(showing);
+    const owed = showing === null ? undefined : this.#toGiveBack.get(showing);
+
+    if (showing !== null && owed !== undefined) {
+      this.#toGiveBack.delete(showing);
+
+      for (const message of owed) {
+        send('message', { message: itemView({ type: 'message', ...message }), giveBack: true });
+      }
+    }
+
+    if (showing !== null && left !== undefined) {
+      this.#leftOpen.delete(showing);
+
+      for (const message of left) {
+        this.#settleLeftOpen(message);
+      }
+    }
 
     return {
       close: () => {
@@ -746,7 +800,7 @@ export class ConversationService {
     }
 
     // Not in the transcript until Claude receives it, so it waits after the items that are (`inTranscript`).
-    const added: Omit<ConversationMessage, 'ord'> = { id: `m-${this.deps.newId()}`, sessionId, workItemId: session.workItemId, at: this.deps.now(), origin: 'typed', text, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId, pastedAt: null };
+    const added: Omit<ConversationMessage, 'ord'> = { id: `m-${this.deps.newId()}`, sessionId, workItemId: session.workItemId, at: this.deps.now(), origin: 'typed', text, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId, pastedAt: null, launch };
 
     this.deps.store.addMessage(added);
     this.#senders.set(added.id, window);
@@ -809,8 +863,11 @@ export class ConversationService {
     return this.deps.store.sessionsFor(session.workItemId).at(-1)?.id === sessionId ? null : NEWER_SESSION;
   }
 
-  /** A typed message's outcome; a message its transcript entry already confirmed stays sent. */
-  #delivered(id: string, outcome: InputOutcome): void {
+  /**
+   * A typed message's outcome; a message its transcript entry already confirmed stays sent. `giveBack` asks every window showing the session to
+   * put a message that was not sent back in its composer, for one whose sender this hub does not know.
+   */
+  #delivered(id: string, outcome: InputOutcome, giveBack = false): void {
     const message = this.deps.store.message(id);
 
     const sender = this.#senders.get(id);
@@ -825,8 +882,8 @@ export class ConversationService {
       this.deps.log(`session ${message.sessionId}: message ${id} ${outcome.delivery}: ${outcome.error}`);
     }
 
-    // Nothing was typed, so the message leaves the conversation; its last event tells the windows to drop it, and the one that sent it puts its
-    // text back in the composer with why.
+    // Nothing was typed, or Claude Code did not take it, so the message leaves the conversation; its last event tells the windows to drop it,
+    // and the one that sent it puts its text back in the composer with why.
     if (outcome.delivery === 'not-sent') {
       this.deps.store.deleteMessage(id);
       this.#unsent.set(`${message.sessionId} ${message.opId}`, outcome.error);
@@ -835,12 +892,19 @@ export class ConversationService {
         this.#unsent.delete(key);
       }
 
-      this.#changed(message.sessionId, { type: 'message', message: { ...message, delivery: 'not-sent', error: outcome.error, provisional: false } }, sender);
+      const gone = { ...message, delivery: 'not-sent' as const, error: outcome.error, provisional: false };
+
+      // A window that closed while the message was settled gets it when a window shows the session again.
+      if (giveBack && this.deps.windows.showing(message.sessionId).every((key) => !this.#streams.has(key))) {
+        this.#toGiveBack.set(message.sessionId, [...(this.#toGiveBack.get(message.sessionId) ?? []), gone]);
+      }
+
+      this.#changed(message.sessionId, { type: 'message', message: gone }, sender, giveBack ? { giveBack: true } : {});
       return;
     }
 
-    // An uncertain message keeps its place; a sent one waits for the line where Claude received it.
-    this.deps.store.updateMessage(id, outcome.delivery === 'sent' ? { delivery: 'sent', error: null } : { delivery: outcome.delivery, error: outcome.error, provisional: false });
+    // A sent message waits for the line where Claude received it.
+    this.deps.store.updateMessage(id, { delivery: 'sent', error: null });
     this.#changed(message.sessionId, { type: 'message', message: this.deps.store.message(id)! });
   }
 

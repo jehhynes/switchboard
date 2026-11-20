@@ -351,6 +351,8 @@ class FakeHeld {
 
     if (paste !== null) {
       this.box += paste[1]!;
+    } else if (data === '\u0015') {
+      this.box = this.box.endsWith('\n') ? this.box.slice(0, -1) : this.box.slice(0, this.box.lastIndexOf('\n') + 1);
     } else if (data === '\r' && this.box !== '') {
       const path = this.transcript(session);
 
@@ -823,11 +825,11 @@ describe('ConversationService send', () => {
     const { key } = open(view.file);
     const write = held.write.bind(held);
 
-    // The paste is never answered: it may have reached the session.
+    // The paste is never answered, and the input box does not hold it, so it counts as sent; its transcript line places it if it lands.
     held.write = () => new Promise(() => undefined);
     service.send(body(key));
-    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('uncertain'));
-    expect(store.message('m-1')?.error).toBe('The terminal holder did not answer.');
+    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    expect(store.message('m-1')?.error).toBeNull();
     expect(held.released).toBe(1);
 
     // A screen read that is never answered: nothing was typed.
@@ -854,14 +856,85 @@ describe('ConversationService send', () => {
     expect(held.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r', '\u001b[200~Second\u001b[201~', '\r']);
   });
 
-  it('settles a message a stopped hub left open as uncertain, and never types it again', () => {
-    const { store, make, held, logs } = setupSend();
+  it('settles messages a stopped hub left open once a window shows their session: never typed again, cleared only in their launch, and given back to its composer', async () => {
+    const { store, make, held, logs, scopes, view } = setupSend();
+    const typed = { sessionId: 's2', workItemId: 2, at: NOW, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open' as const, error: null };
+    const stream = (service: ConversationService) => {
+      const frames: Array<{ type: string; [field: string]: unknown }> = [];
 
-    store.addMessage({ id: 'm-left', sessionId: 's2', workItemId: 2, at: NOW, origin: 'typed', text: 'half typed', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'open', error: null, opId: 'op-left', pastedAt: NOW });
-    make();
-    expect(store.message('m-left')).toMatchObject({ delivery: 'uncertain', error: 'Switchboard restarted while the message was being typed; check the terminal.' });
-    expect(held.writes).toEqual([]);
-    expect(logs).toEqual(['session s2: message m-left left open by a stopped hub is uncertain']);
+      service.open(scopes.open(view.file, view.view), (frame) => frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+
+      return frames;
+    };
+    const given = (frames: Array<{ type: string; [field: string]: unknown }>) =>
+      frames.filter((frame) => frame.type === 'message').map((frame) => ({ ...(frame['message'] as { id: string; delivery: string; error: string }), giveBack: frame['giveBack'] }));
+
+    store.addMessage({ ...typed, id: 'm-untyped', text: 'never pasted', opId: 'op-a', pastedAt: null, launch: 'launch-1' });
+    store.addMessage({ ...typed, id: 'm-held', text: 'half typed', opId: 'op-b', pastedAt: NOW, launch: 'launch-1' });
+    held.box = 'half typed';
+
+    const service = make();
+
+    // Nothing is settled before a window that can take the text back connects.
+    service.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(store.message('m-held')?.delivery).toBe('open');
+
+    const frames = stream(service);
+
+    await vi.waitFor(() => expect(store.message('m-held')).toBeNull());
+    service.stop();
+    expect(store.message('m-untyped')).toBeNull();
+    expect(held.writes).toEqual(['\u0015']);
+    expect(held.box).toBe('');
+    expect(held.reservations.at(-1)).toEqual({ sessionId: 's2', launch: 'launch-1' });
+    expect(given(frames)).toMatchObject([
+      { id: 'm-untyped', delivery: 'not-sent', error: 'Switchboard restarted before typing the message. Send it again.', giveBack: true },
+      { id: 'm-held', delivery: 'not-sent', error: 'Claude Code did not take the message, so Switchboard cleared it from the input box. Send it again.', giveBack: true },
+    ]);
+    expect(logs).toContain('session s2: message m-held left open by a stopped hub is settled from the transcript and the screen');
+
+    // One typed into an earlier launch of the session, or by a hub that kept no launch, is never cleared.
+    held.box = 'other launch';
+    store.addMessage({ ...typed, id: 'm-resumed', text: 'other launch', opId: 'op-c', pastedAt: NOW, launch: 'launch-0' });
+    store.addMessage({ ...typed, id: 'm-old', text: 'other launch', opId: 'op-d', pastedAt: NOW });
+
+    const next = make();
+    const later = stream(next);
+
+    await vi.waitFor(() => expect([store.message('m-resumed'), store.message('m-old')]).toEqual([null, null]));
+    next.stop();
+    expect(held.box).toBe('other launch');
+    expect(held.writes).toEqual(['\u0015']);
+    expect(given(later).map((one) => [one.id, one.error]).sort()).toEqual([
+      ['m-old', 'Switchboard restarted while the message was being typed and could not read its input box: check the terminal before sending it again.'],
+      ['m-resumed', 'The session was resumed since the view showed it; send the message again.'],
+    ]);
+
+    // A window that closed while its message was settled gets it back when a window shows the session again.
+    held.box = 'closed early';
+    store.addMessage({ ...typed, id: 'm-closed', text: 'closed early', opId: 'op-f', pastedAt: NOW, launch: 'launch-1' });
+
+    const fourth = make();
+    const shortFrames: Array<{ type: string; [field: string]: unknown }> = [];
+    const short = fourth.open(scopes.open(view.file, view.view), (frame) => shortFrames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+
+    short!.close();
+    await vi.waitFor(() => expect(store.message('m-closed')).toBeNull());
+    expect(held.box).toBe('');
+    expect(given(shortFrames)).toEqual([]);
+    expect(given(stream(fourth)).map((one) => [one.id, one.delivery, one.giveBack])).toEqual([['m-closed', 'not-sent', true]]);
+    fourth.stop();
+
+    // One the box no longer holds was sent.
+    held.box = '';
+    store.addMessage({ ...typed, id: 'm-gone', text: 'went through', opId: 'op-e', pastedAt: NOW, launch: 'launch-1' });
+
+    const third = make();
+
+    stream(third);
+    await vi.waitFor(() => expect(store.message('m-gone')?.delivery).toBe('sent'));
+    third.stop();
   });
 });
 

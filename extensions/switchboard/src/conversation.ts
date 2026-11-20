@@ -205,7 +205,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
     if (message?.type === 'message' && message.delivery === 'not-sent') {
       const error = message.error ?? 'The message was not sent.';
 
-      if (this.#mine.delete(message.id)) {
+      // A message a restarted hub settled has no known sender, so every window showing its session takes its text back.
+      if (this.#mine.delete(message.id) || (event as { giveBack?: unknown }).giveBack === true) {
         this.#returned.push({ text: message.text, error, workItemId: message.workItemId });
         void this.#giveBack();
       } else {

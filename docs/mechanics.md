@@ -1107,7 +1107,7 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
 - **Setup:** as M85: the built hub bundle under an isolated home in the worktree's `.wip/live2`, with `CLAUDE_CONFIG_DIR` and `CODEX_HOME` there, a copy of the operator's `.credentials.json` and `.claude.json` with a scratch repository outside the worktree trusted, deleted afterwards with Claude's `.claude.json` backups; `sessions.codeMode` on, model `haiku`. One ad-hoc session; its start asked "Allow external CLAUDE.md file imports?" for the operator's `~/.claude/AGENTS.md`, answered No with Enter through the holder. A driver connected as the session's item window, opened its conversation stream and sent messages with `POST /v1/conversation/send`.
 - **Result:**
   - A one-line message was pasted, its Enter taken first time, and `sent` 0.49 s after the command, confirmed by the transcript; the reply answered it. A message beginning `/help` went escaped as `\\/help …`, opened no command, and was confirmed. A message sent while the session's turn ran was confirmed by its `enqueue` queue operation and answered in that turn. A 2,070-character line was confirmed. With a key typed and erased in an attached terminal 50 ms before the send, the message went 2.1 s after the last key, after the 1.5-second pause. A repeated `opId` answered the first message; a stale `scopeGen` got 409 and a forged session ID 403.
-  - **A paste of several lines** is recorded in the transcript's user entry, and in its queue operation, wrapped in tags on lines of their own: `<pasted_content id="914d">\n<the text>\n</pasted_content id="914d">`, with a random id. Before the reader removed them, the message was `uncertain` and the transcript line showed as a second message with the tags; with `unwrapPasted` the message was confirmed in place. The screen showed the text in the input box while it waited, so the draft guard and the Enter retry hold for it.
+  - **A paste of several lines** is recorded in the transcript's user entry, and in its queue operation, wrapped in tags on lines of their own: `<pasted_content id="914d">\n<the text>\n</pasted_content id="914d">`, with a random id. Before the reader removed them, the message was not confirmed and the transcript line showed as a second message with the tags; with `unwrapPasted` the message was confirmed in place. The screen showed the text in the input box while it waited, so the draft guard and the Enter retry hold for it.
 - **Not covered:** an Enter dropped by Claude and retried, a menu open while a message waits, and a hub restart while a message is typed, which the Vitest suites cover with fakes; the Conversation view's composer itself, which the operator checks in VS Code.
 - **Current use:** typing from the Conversation view (architecture.md § Typing a message); `unwrapPasted` for confirmation and for a pasted block typed in the terminal.
 
@@ -1148,3 +1148,26 @@ Checked 2026-11-18 on Windows 11 with Codex CLI 0.167.0.
   - After VS Code quits (`terminal.integrated.persistentSessionReviveProcess`, default `onExit`), the pty host revives the terminal on next start: `_reviveTerminalProcess` runs the saved `shellLaunchConfig`, the same executable and arguments, as a new process with the old buffer replayed, under a new process ID unless the operating system happens to reuse the old one.
 - **Not verified:** a live reload; how long a reconnected terminal takes to report its process ID (a lookup waits 1 s for each, then opens a new terminal); whether a revived `claude attach <short ID>` still attaches (the short ID can be stale) and whether a revived `claude --resume` starts a copy of a session that is live elsewhere (M18).
 - **Current use:** Open in terminal keeps each terminal's process ID in workspace state and, with no terminal in its map, shows the listed terminal running that process instead of opening another (architecture.md § Claude Code runner). It forgets the ID once a terminal it holds ends. A revived terminal runs a new process, so the next click usually opens a new terminal beside it; the operating system can reuse a process ID, so after a quit a terminal given the kept ID by chance would be shown instead.
+
+## M90. Clearing Claude Code's input box, 2026-11-20
+
+- **Versions:** Claude Code CLI 2.1.329 (native build), Haiku 5.5, on Windows 11 Pro 10.0.26300; Node.js 24.14.0, node-pty and @xterm/headless as in M63.
+- **Setup:** a driver (`.wip/live-clear/run2.mjs` and `run3.mjs` in the worktree) spawned `claude --model haiku --settings <tui default and the M64 env>` in a node-pty pseudo-terminal of 120×40 in a scratch git repository outside the worktree, with `CLAUDE_CONFIG_DIR` at a scratch folder holding copies of the operator's `.credentials.json` and `.claude.json` (the repository marked trusted), deleted afterwards; no hooks, no user settings. Each step wrote bytes as the holder does and read the input box with `readInputScreen`.
+- **Keys:** the default keybindings in the binary map `ctrl+l` to `chat:clearInput` and `chat:clearScreen`, one handler, `escape` to `chat:cancel`, and Esc over typed text shows "Esc again to clear".
+- **Result:**
+
+  | Input box | Key | After |
+  |---|---|---|
+  | one pasted line | Ctrl+L (`\x0c`) | unchanged: it redraws the screen and leaves the text |
+  | one pasted line | Ctrl+U (`\x15`) | empty |
+  | three pasted lines, cursor at the end | Ctrl+U five times | each press deletes the text before the cursor on its line, or at a line's start the line break before it: `one/two/three` → `one/two/` → `one/two` → `one/` → `one` → empty |
+  | empty | Ctrl+U | empty; no menu, no hint, no exit |
+  | one pasted line | Esc, Esc | the first shows "Esc again to clear", the second empties it; on an empty box a second Esc opens Rewind, and Esc during a turn is `chat:cancel` |
+  | a 1,600-character line, shown as `[Pasted text #1]` | Ctrl+U | empty in one press |
+  | 30 lines, shown as `[Pasted text #2 +29 lines]` | Ctrl+U | empty in one press |
+  | one line pasted while a turn ran `sleep 15` in the shell | Ctrl+U | empty; the turn went on and replied, with no "Interrupted" |
+
+  Ctrl+U shows "ctrl+y to paste deleted text" under the box; the text is not sent.
+- **Pass criteria:** a key that empties the box, never submits, interrupts a turn or opens a menu, also on an empty box. **Passed by Ctrl+U**; Ctrl+L does not clear, and Esc can open Rewind or cancel a turn.
+- **Not verified:** a user keybinding that rebinds `ctrl+u` (`keybindings.json`); the classic renderer only.
+- **Current use:** settling a typed message the transcript does not show (architecture.md § Typing a message): `CLEAR_LINE`, at most two presses per line of the box and two more, each only while the box holds what is left of the message from its start (`leftOfMessage`), and `isMessage` for the `[Pasted text #n +k lines]` placeholder.

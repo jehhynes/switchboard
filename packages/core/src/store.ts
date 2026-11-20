@@ -429,6 +429,10 @@ export const MIGRATIONS = [
   ALTER TABLE windowBindings ADD COLUMN selectedSessionId TEXT;
   ALTER TABLE windowBindings ADD COLUMN ticketId INTEGER;
   ALTER TABLE windowBindings ADD COLUMN title TEXT;`,
+  // A typed message is no longer left uncertain: one that was kept its place and counts as sent, as one gone from the input box does. A typed
+  // message keeps the launch it was sent to, so one a stopped hub left being typed is settled only there.
+  `ALTER TABLE messages ADD COLUMN launch TEXT;
+  UPDATE messages SET delivery = 'sent', error = NULL WHERE delivery = 'uncertain';`,
 ];
 
 /**
@@ -1294,8 +1298,8 @@ export class Store {
   /** Adds a message to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */
   addMessage(message: Omit<ConversationMessage, 'ord'>): void {
     this.#db
-      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0, message.delivery, message.error, message.opId, message.pastedAt);
+      .prepare('INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt, launch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(this.#nextOrd(), message.id, message.sessionId, message.workItemId, message.at, message.origin, message.text, message.transcriptUuid, message.provisional ? 1 : 0, message.withdrawn ? 1 : 0, message.delivery, message.error, message.opId, message.pastedAt, message.launch ?? null);
     this.#prune(message.sessionId);
   }
 
@@ -1362,14 +1366,9 @@ export class Store {
     return this.#messageRows("SELECT * FROM messages WHERE sessionId = ? AND origin = 'typed' AND transcriptUuid IS NULL AND pastedAt IS NOT NULL AND delivery <> 'not-sent' ORDER BY at, ord", sessionId);
   }
 
-  /** Typed messages a stopped hub left `open`, now `uncertain` with `error`; returns them. */
-  settleOpenMessages(error: string): ConversationMessage[] {
-    const open = this.#messageRows("SELECT * FROM messages WHERE delivery = 'open' ORDER BY ord");
-
-    // Settled, so it keeps its place rather than wait at the end for a transcript line (`inTranscript`).
-    this.#db.prepare("UPDATE messages SET delivery = 'uncertain', error = ?, provisional = 0 WHERE delivery = 'open'").run(error);
-
-    return open.map((message) => ({ ...message, delivery: 'uncertain', error, provisional: false }));
+  /** Typed messages a stopped hub left `open`, which the hub settles from the transcript and the screen. */
+  openMessages(): ConversationMessage[] {
+    return this.#messageRows("SELECT * FROM messages WHERE delivery = 'open' ORDER BY ord");
   }
 
   /** Adds a reply to a session's conversation, outside the activity log, keeping the newest `CONVERSATION_RETENTION` items. */

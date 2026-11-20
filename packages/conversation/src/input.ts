@@ -2,8 +2,8 @@
  * Typing a message into a held session (architecture.md § Typing a message), from claude-collab's `session.js`: one input transaction per
  * message, serialized per session. It waits until no menu is open, the input box holds no draft and no key was typed in a terminal for
  * `TYPING_PAUSE_MS`; takes the hub's input reservation; pastes the text as a bracketed paste, waits `PASTE_SETTLE_MS`, and presses Enter as a
- * separate write, retrying Enter alone while the paste sits unsent; and counts the message sent only once the transcript has it. A message the
- * transcript does not confirm is uncertain and never typed again.
+ * separate write, retrying Enter alone while the paste sits unsent; and counts the message sent once the transcript has it. A message the transcript
+ * does not confirm is settled from the screen: still in the input box, it is cleared from there and not sent; gone from it, it was sent.
  */
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import headless from '@xterm/headless';
@@ -16,8 +16,24 @@ export const PASTE_SETTLE_MS = 60;
 export const TYPING_PAUSE_MS = 1_500;
 /** How often a waiting message checks the screen again. */
 export const GUARD_POLL_MS = 200;
-/** How long after its last Enter a message waits for the transcript before it is uncertain. */
+/** How long after its last Enter a message waits for the transcript before the screen settles it. */
 export const CONFIRM_SENT_MS = 10_000;
+/**
+ * The key that clears the input box: Ctrl+U deletes to the start of the line, and at the start of a line joins it to the line before, so a box of
+ * n lines empties in at most 2n - 1 presses, deleting from the end; a long paste shown as "[Pasted text #1 +29 lines]" goes in one. It never
+ * submits, interrupts a turn or opens a menu, also on an empty box (mechanics.md M90).
+ */
+export const CLEAR_LINE = '\u0015';
+/** How long the screen gets to redraw after each clearing key. */
+export const CLEAR_SETTLE_MS = 150;
+/** A message not taken by Claude Code that Switchboard cleared from the input box. */
+export const NOT_TAKEN = 'Claude Code did not take the message, so Switchboard cleared it from the input box. Send it again.';
+/** A message not taken by Claude Code that is still in the input box. */
+export const NOT_CLEARED = 'Claude Code did not take the message, and it is still in the input box: send or clear it in the terminal.';
+/** How long a new hub waits for the holder to show a session's screen before it settles a message a stopped hub left being typed. */
+export const RESOLVE_WAIT_MS = 30_000;
+/** A typed message the transcript has not confirmed while the input box cannot be read. */
+export const UNREADABLE = 'Claude Code has not shown taking the message, and Switchboard could not read its input box: check the terminal before sending it again.';
 /** The longest message the view may send. */
 export const MAX_MESSAGE_CHARS = 10_000;
 /** How much of the transcript's end the confirmation reads: the message was written moments ago. */
@@ -89,6 +105,31 @@ export const screenState = {
     return '';
   },
 };
+
+/** Text with the input box's wrapping and spacing taken out. */
+function flat(text: string): string {
+  return text.replace(/\s+/g, '');
+}
+
+/** The placeholder Claude Code shows in the input box for a long paste: "[Pasted text #1]" or "[Pasted text #1 +29 lines]". */
+const PASTED_PLACEHOLDER = /\[Pasted text #\d+(?: \+\d+ lines?)?\]/;
+
+/** Whether the input box holds exactly the typed message: its text with the box's wrapping ignored, or only a long paste's placeholder. */
+export function isMessage(draft: string, pasted: string): boolean {
+  const shown = draft.trim();
+
+  return shown !== '' && (flat(shown) === flat(pasted) || new RegExp(`^${PASTED_PLACEHOLDER.source}$`).test(shown));
+}
+
+/** Whether the input box holds the typed message, alone or with other text. */
+export function boxHolds(draft: string, pasted: string): boolean {
+  return isMessage(draft, pasted) || PASTED_PLACEHOLDER.test(draft) || (flat(pasted) !== '' && flat(draft).includes(flat(pasted)));
+}
+
+/** Whether what the input box holds is the start of the typed message, as Ctrl+U leaves it, deleting from the end. */
+export function leftOfMessage(draft: string, pasted: string): boolean {
+  return flat(draft) !== '' && flat(pasted).startsWith(flat(draft));
+}
 
 /**
  * Whether the transcript's lines hold `text` as a message written at or after `since`: a user entry, or an `enqueue` queue operation, which
@@ -312,8 +353,11 @@ export async function pasteAndSubmit(text: string, io: SubmitIo, options: Submit
 /** Thrown by `SessionInputDeps.write` when the holder refused the write, so nothing of it reached the session. */
 export class NotWritten extends Error {}
 
-/** What became of a typed message: `sent` once the transcript has it; `uncertain` when it was typed but not confirmed; `not-sent` when nothing was typed. */
-export type InputOutcome = { delivery: 'sent' } | { delivery: 'uncertain' | 'not-sent'; error: string };
+/**
+ * What became of a typed message: `sent` once the transcript has it, or when the input box no longer holds it; `not-sent` when nothing was typed,
+ * or when Claude Code did not take it, with why.
+ */
+export type InputOutcome = { delivery: 'sent' } | { delivery: 'not-sent'; error: string };
 
 export interface SessionInputDeps {
   /** The session's visible screen from the holder, with its revision and when a terminal last typed. */
@@ -373,12 +417,146 @@ export class SessionInput {
 
     const run = this.#tail
       .then(() => this.#type(text, check, reserve, guard.pasting ?? (() => undefined), guard.command === true))
-      .then(done, (error: unknown) => done({ delivery: 'uncertain', error: String(error) }))
+      .then(done, (error: unknown) => done({ delivery: 'not-sent', error: String(error) }))
       .finally(() => void this.#pending--);
 
     this.#tail = run;
 
     return run;
+  }
+
+  /**
+   * Settles a message a stopped hub left being typed after its paste at `pastedAt`, queued behind the session's other messages: sent when the
+   * transcript has it or the input box no longer holds it; not sent when the box still holds it, which is cleared. `guard` names the session
+   * and launch the message was typed into, so nothing is cleared from a session resumed since. It waits up to `waitMs` for the holder to show
+   * the screen, since a new hub connects to it on first use; a screen it never reads leaves the message not sent, with `unreadable`.
+   */
+  resolve(
+    text: string,
+    pastedAt: number,
+    done: (outcome: InputOutcome) => void,
+    unreadable: string,
+    guard: Pick<SessionInputDeps, 'check' | 'reserve'>,
+    waitMs = RESOLVE_WAIT_MS,
+  ): Promise<void> {
+    this.#pending++;
+
+    const run = this.#tail
+      .then(async (): Promise<InputOutcome> => {
+        // A slash command chosen from the composer's list was typed as it is, a message escaped; the box tells which this one was.
+        let pasted = pasteText(text);
+
+        for (const until = this.deps.now() + waitMs; guard.check() === null && this.deps.now() < until; ) {
+          try {
+            const { screen } = await this.#screen();
+
+            pasted = isMessage(screen.draft, pasteText(text, true)) ? pasteText(text, true) : pasted;
+            break;
+          } catch {
+            await this.deps.sleep(GUARD_POLL_MS);
+          }
+        }
+
+        const reservation = await guard.reserve();
+
+        if ('refused' in reservation) {
+          return this.#sent(pasted, pastedAt) ? { delivery: 'sent' } : { delivery: 'not-sent', error: reservation.refused };
+        }
+
+        try {
+          return await this.#settle(pasted, pastedAt, guard.check, unreadable);
+        } finally {
+          reservation.release();
+        }
+      })
+      .then(done, (error: unknown) => done({ delivery: 'not-sent', error: String(error) }))
+      .finally(() => void this.#pending--);
+
+    this.#tail = run;
+
+    return run;
+  }
+
+  #sent(pasted: string, since: number): boolean {
+    const path = this.deps.transcriptPath();
+
+    return path !== null && sentInTranscript(transcriptTail(path), pasted, since);
+  }
+
+  /**
+   * Settles a typed message the transcript has not confirmed, from the input box, pasted no earlier than `since`. An empty box, or one holding
+   * other text, means the message went: it is sent, and its transcript line places it when it lands. A box holding exactly the message, with
+   * no key typed in a terminal since `since`, is cleared with `CLEAR_LINE` one key at a time, each only while the box still holds what is
+   * left of the message, no key was typed in a terminal and the session can take it, and the message is not sent. A box holding the message
+   * with more, or one a terminal typed into, is left as it is, and the message is not sent. The transcript is read again before and after each
+   * key and after any failure, so a message Claude takes late is sent. A screen that cannot be read leaves it not sent, with `unreadable`.
+   */
+  async #settle(pasted: string, since: number, check: () => string | null, unreadable: string): Promise<InputOutcome> {
+    const outcome = (error: string): InputOutcome => (this.#sent(pasted, since) ? { delivery: 'sent' } : { delivery: 'not-sent', error });
+
+    if (this.#sent(pasted, since)) {
+      return { delivery: 'sent' };
+    }
+
+    let shown: { screen: InputScreen; keyAt: number | null };
+
+    try {
+      shown = await this.#screen();
+    } catch {
+      return outcome(unreadable);
+    }
+
+    const draft = shown.screen.draft;
+    const typedSince = (keyAt: number | null): boolean => keyAt !== null && keyAt >= since;
+
+    if (draft === '' || !boxHolds(draft, pasted)) {
+      this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript yet and not in the input box; counted as sent`);
+      return { delivery: 'sent' };
+    }
+
+    if (!isMessage(draft, pasted) || typedSince(shown.keyAt)) {
+      this.deps.log(`session ${this.sessionId}: a typed message Claude Code did not take shares the input box with other text; left as it is`);
+      return outcome(NOT_CLEARED);
+    }
+
+    let left = draft;
+    const most = 2 * draft.split('\n').length + 2;
+
+    for (let presses = 0; left !== '' && presses < most; presses++) {
+      const why = check();
+
+      if (why !== null) {
+        return outcome(why);
+      }
+
+      if (this.#sent(pasted, since)) {
+        return { delivery: 'sent' };
+      }
+
+      try {
+        await this.deps.write(CLEAR_LINE);
+        await this.deps.sleep(CLEAR_SETTLE_MS);
+        shown = await this.#screen();
+      } catch (error) {
+        return outcome((error as Error).message);
+      }
+
+      // Taken while it was being cleared, so the transcript has it.
+      if (this.#sent(pasted, since)) {
+        return { delivery: 'sent' };
+      }
+
+      left = shown.screen.draft;
+
+      // Only what is left of the message, from its start, may be cleared further.
+      if (typedSince(shown.keyAt) || (left !== '' && !leftOfMessage(left, pasted))) {
+        break;
+      }
+    }
+
+    this.deps.log(`session ${this.sessionId}: a typed message Claude Code did not take was ${left === '' ? 'cleared from' : 'left in'} the input box`);
+
+    return outcome(left === '' ? NOT_TAKEN : NOT_CLEARED);
   }
 
   async #screen(): Promise<{ screen: InputScreen; rev: number; keyAt: number | null }> {
@@ -449,11 +627,7 @@ export class SessionInput {
 
     const pasted = pasteText(text, command);
     const since = this.deps.now();
-    const sent = (): boolean => {
-      const path = this.deps.transcriptPath();
-
-      return path !== null && sentInTranscript(transcriptTail(path), pasted, since);
-    };
+    const sent = (): boolean => this.#sent(pasted, since);
     // Once a write is sent, the session may have it, unless the holder refused it.
     let attempted = false;
 
@@ -505,9 +679,10 @@ export class SessionInput {
 
       this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript after ${result.enterAttempts} Enter${result.enterAttempts === 1 ? '' : 's'}${result.submitted ? '' : '; it is still in the input box'}`);
 
-      return { delivery: 'uncertain', error: result.submitted ? 'The transcript does not show the message.' : 'The message is still in the input box; check the terminal.' };
+      return await this.#settle(pasted, since, check, UNREADABLE);
     } catch (error) {
-      return attempted ? { delivery: 'uncertain', error: (error as Error).message } : { delivery: 'not-sent', error: (error as Error).message };
+      // Something was written, so the screen says whether the message went.
+      return attempted ? await this.#settle(pasted, since, check, (error as Error).message) : { delivery: 'not-sent', error: (error as Error).message };
     } finally {
       ready.release();
     }

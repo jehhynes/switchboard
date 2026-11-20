@@ -20,7 +20,7 @@ const SESSION: SessionView = { id: 's2', kind: 'task', title: 'Task session aaaa
 // Each item's ord is its time unless a test gives it another.
 const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's2', at, ord: at, provisional: false, kind: 'reply', answers: null, opening: `Reply ${id}`, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, unread: false, ...patch });
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
-const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent' | 'uncertain', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
+const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', workItemId: 2, at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
 const hello = (items: ItemView[] = [], patch: Partial<{ scope: ScopeView | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[]; unread: number }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], unread: 0, ...patch });
 /** A timeline entry's ID: an item's, or an artifact's path. */
@@ -83,7 +83,7 @@ describe('the conversation state', () => {
     expect(shown.items.map((item) => item.id)).toEqual(['m1']);
     expect(applyEvent(shown, { type: 'message', message: typed('m1', 'not-sent', 'The session has ended.') }).items).toEqual([]);
     expect(applyEvent(empty, { type: 'message', message: typed('m2', 'not-sent', 'x') }).items).toEqual([]);
-    expect(applyEvent(EMPTY_CONVERSATION, hello([typed('m1', 'not-sent', 'x'), typed('m2', 'uncertain', 'y')])).items.map((item) => item.id)).toEqual(['m2']);
+    expect(applyEvent(EMPTY_CONVERSATION, hello([typed('m1', 'not-sent', 'x'), typed('m2', 'sent')])).items.map((item) => item.id)).toEqual(['m2']);
     expect(withEarlier(empty, [typed('m1', 'not-sent', 'x'), typed('m2', 'sent')], false).items.map((item) => item.id)).toEqual(['m2']);
   });
 
@@ -210,10 +210,10 @@ describe('the Conversation view page', () => {
 
     const root = document.createElement('div');
 
-    root.innerHTML = renderConversation(state([typed('t1', 'uncertain', 'The transcript does not show the message.')]), new Set(), T0);
+    root.innerHTML = renderConversation(state([typed('t1', 'not-sent', 'The session has ended.')]), new Set(), T0);
     expect([...root.querySelector('li[data-id="t1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box']);
     // The state comes before the time, so the times stay flush right.
-    expect([...root.querySelector('li[data-id="t1"] > .stamp-line')!.children].map((child) => child.className)).toEqual(['delivery uncertain', 'stamp-dot', 'stamp']);
+    expect([...root.querySelector('li[data-id="t1"] > .stamp-line')!.children].map((child) => child.className)).toEqual(['delivery not-sent', 'stamp-dot', 'stamp']);
   });
 
   it('shows a time only where the minute changes from the item before, never repeating it under a message and over its reply', () => {
@@ -810,11 +810,11 @@ describe('the composer', () => {
           message('m0', minute(0), 'from the terminal'),
           at(typed('m1', 'open'), minute(1)),
           at(typed('m2', 'sent'), minute(2)),
-          at(typed('m3', 'uncertain', 'The transcript does not show <the message>.'), minute(3)),
-          // The same minute as m3: no time, so one sent or sending shows no line, and an uncertain one shows its state alone.
+          at(typed('m3', 'not-sent', 'The session has <ended>.'), minute(3)),
+          // The same minute as m3: no time, so one sent or sending shows no line, and one in error shows its state alone.
           at(typed('m4', 'sent'), minute(3)),
           at(typed('m5', 'open'), minute(3)),
-          at(typed('m6', 'uncertain', 'The message is still in the input box; check the terminal.'), minute(3)),
+          at(typed('m6', 'not-sent', 'The session has ended.'), minute(3)),
         ],
       }),
     );
@@ -822,14 +822,14 @@ describe('the composer', () => {
     const line = (id: string) => root.querySelector(`li[data-id="${id}"] > .stamp-line`);
     const delivery = (id: string) => line(id)?.querySelector('.delivery') ?? null;
 
-    expect(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6'].map((id) => delivery(id)?.textContent ?? null)).toEqual([null, null, null, 'uncertain', null, null, 'uncertain']);
+    expect(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6'].map((id) => delivery(id)?.textContent ?? null)).toEqual([null, null, null, 'not sent', null, null, 'not sent']);
     expect([...line('m1')!.children].map((child) => child.className)).toEqual(['stamp']);
     expect([...line('m2')!.children].map((child) => child.className)).toEqual(['stamp']);
-    expect(delivery('m3')?.getAttribute('title')).toBe('uncertain · The transcript does not show <the message>.');
-    expect(line('m3')?.textContent).toMatch(/^uncertain•\d+:\d\d [AP]M$/);
+    expect(delivery('m3')?.getAttribute('title')).toBe('not sent · The session has <ended>.');
+    expect(line('m3')?.textContent).toMatch(/^not sent•\d+:\d\d [AP]M$/);
     expect(line('m4')).toBeNull();
     expect(line('m5')).toBeNull();
-    expect([...line('m6')!.children].map((child) => child.className)).toEqual(['delivery uncertain']);
+    expect([...line('m6')!.children].map((child) => child.className)).toEqual(['delivery not-sent']);
     // Nothing under a bubble.
     expect([...root.querySelectorAll('.message')].map((li) => li.lastElementChild?.className)).toEqual(['box', 'box', 'box', 'box', 'box', 'box', 'box']);
   });

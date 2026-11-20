@@ -33,7 +33,7 @@ export interface SendTarget {
 }
 
 /** What a typed message's line under its box says (architecture.md § Conversation view). */
-const DELIVERY = { open: 'sending', sent: 'sent', 'not-sent': 'not sent', uncertain: 'uncertain' } as const;
+const DELIVERY = { open: 'sending', sent: 'sent', 'not-sent': 'not sent' } as const;
 
 /** A stamp's time, as Claude Code's panel shows it: "1:46 PM". */
 const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
@@ -114,12 +114,12 @@ export function renderMarkdown(text: string): string {
 }
 
 /**
- * One of our messages: its bubble under a line with its time, where the minute changes, and for one typed in the composer that may not have
- * gone, its error state before the time, with why in the tooltip: "uncertain • 1:47 PM". A message sent or still sending shows only its time.
+ * One of our messages: its bubble under a line with its time, where the minute changes. Only an error state shows, before the time, with why in the
+ * tooltip: a message sent or still sending shows only its time, and today none stays in error, since one not sent leaves the conversation.
  */
 function message(item: MessageView, stamped: boolean): string {
   // Only an error state shows: a message sent or still sending shows only its time; one not sent has left the conversation.
-  const state = item.origin === 'typed' && (item.delivery === 'uncertain' || item.delivery === 'not-sent') ? item.delivery : null;
+  const state = item.origin === 'typed' && item.delivery === 'not-sent' ? item.delivery : null;
   const why = item.error === null ? '' : ` · ${item.error}`;
   const delivery =
     state === null ? '' : `<span class="delivery ${state}" title="${escape(`${DELIVERY[state]}${why}`)}">${DELIVERY[state]}</span>`;

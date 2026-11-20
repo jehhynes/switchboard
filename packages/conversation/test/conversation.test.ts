@@ -127,19 +127,17 @@ describe('SessionConversation', () => {
     expect(items()).toHaveLength(3);
   });
 
-  it('confirms a typed message only by an entry near its paste: never one still waiting to paste, nor an uncertain one long after', () => {
+  it('confirms a typed message only by an entry near its paste: never one still waiting to paste, and a sent one by its line however late', () => {
     const { store, conversation, path, append, items } = setup();
     const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null };
 
     store.addMessage({ ...typed, id: 'm-waiting', at: T0, text: 'Yes', delivery: 'open', opId: 'op1', pastedAt: null });
-    store.addMessage({ ...typed, id: 'm-old', at: T0, text: 'Yes', delivery: 'uncertain', opId: 'op2', pastedAt: T0, provisional: false });
     store.addMessage({ ...typed, id: 'm-queued', at: T0, text: 'Later', delivery: 'sent', opId: 'op3', pastedAt: T0 });
     // An hour later: a "Yes" typed in the terminal, and the queued message Claude took only now.
     append(user('u1', T0 + 3_600_000, 'Yes'), user('u2', T0 + 3_600_001, 'Later'));
     conversation.readTranscript(path);
 
     expect(items().map((item) => [item.id, item.type === 'message' ? item.delivery : null])).toEqual([
-      ['m-old', 'uncertain'],
       ['m-1', null],
       ['m-queued', 'sent'],
       // Still waiting to be pasted, so after everything in the transcript.
@@ -152,19 +150,19 @@ describe('SessionConversation', () => {
     const { store, conversation, path, append, items } = setup();
     const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null };
 
-    store.addMessage({ ...typed, id: 'm-first', at: T0, text: 'Yes', delivery: 'uncertain', opId: 'op1', pastedAt: T0 });
+    store.addMessage({ ...typed, id: 'm-first', at: T0, text: 'Yes', delivery: 'sent', opId: 'op1', pastedAt: T0, provisional: false });
     store.addMessage({ ...typed, id: 'm-second', at: T0 + 30_000, text: 'Yes', delivery: 'sent', opId: 'op2', pastedAt: T0 + 30_000 });
     append(user('u1', T0 + 30_100, 'Yes'));
     conversation.readTranscript(path);
     expect(store.message('m-second')?.transcriptUuid).toBe('u1');
-    expect(store.message('m-first')).toMatchObject({ delivery: 'uncertain', transcriptUuid: null });
+    expect(store.message('m-first')).toMatchObject({ delivery: 'sent', transcriptUuid: null });
 
-    // After /clear the session writes a new transcript; the uncertain "Yes" of the earlier one is never confirmed by it.
+    // After /clear the session writes a new transcript; the earlier "Yes" it never placed is never confirmed by it.
     const cleared = join(dir, 'native-2.jsonl');
 
     writeFileSync(cleared, `${user('u2', T0 + 40_000, 'Yes')}\n`);
     conversation.readTranscript(cleared);
-    expect(store.message('m-first')).toMatchObject({ delivery: 'uncertain', transcriptUuid: null });
+    expect(store.message('m-first')).toMatchObject({ delivery: 'sent', transcriptUuid: null });
     expect(items().filter((item) => item.type === 'message')).toHaveLength(3);
   });
 
@@ -197,7 +195,7 @@ describe('SessionConversation', () => {
   it('shows a pasted block of several lines without the tags Claude Code records it in, and confirms a typed one by it', () => {
     const { store, conversation, path, append, items } = setup();
 
-    store.addMessage({ id: 'm-typed', sessionId: 's1', workItemId: 7, at: T0, origin: 'typed', text: 'One\nTwo', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'uncertain', error: 'x', opId: 'op1', pastedAt: T0 });
+    store.addMessage({ id: 'm-typed', sessionId: 's1', workItemId: 7, at: T0, origin: 'typed', text: 'One\nTwo', transcriptUuid: null, provisional: false, withdrawn: false, delivery: 'sent', error: null, opId: 'op1', pastedAt: T0 });
     append(user('u1', T0 + 100, '<pasted_content id="914d">\nOne\nTwo\n</pasted_content id="914d">'), user('u2', T0 + 200, 'See <pasted_content id="a1">\nx\ny\n</pasted_content id="a1"> please'));
     conversation.readTranscript(path);
 

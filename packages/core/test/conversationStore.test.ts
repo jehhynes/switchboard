@@ -59,7 +59,7 @@ describe('conversation store', () => {
     expect(store.conversation('s1', null, 10)).toEqual({
       items: [
         { type: 'reply', ...reply('r1', 30), ord: 1, seenAt: null },
-        { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null, ord: 2 },
+        { type: 'message', id: 'm1', sessionId: 's1', workItemId: 1, at: 10, origin: 'terminal', text: 'hi', transcriptUuid: 'u', provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null, launch: null, ord: 2 },
         { type: 'reply', ...reply('r2', 20, { withdrawn: true }), ord: 3, seenAt: null },
       ],
       more: false,
@@ -175,13 +175,13 @@ describe('conversation store', () => {
     expect(store.latestStatus('s9')?.id).toBe('st2');
   });
 
-  it('keeps a typed message with its delivery and opId, finds those still awaiting the transcript, and settles open ones after a restart', () => {
+  it('keeps a typed message with its delivery and opId, finds those still awaiting the transcript, and lists open ones after a restart', () => {
     const store = Store.open(':memory:');
     const typed = { sessionId: 's1', workItemId: 1, origin: 'typed' as const, transcriptUuid: null, error: null, pastedAt: 1, provisional: true, withdrawn: false };
 
-    store.addMessage({ ...typed, id: 'm1', at: 1, text: 'one', delivery: 'open', opId: 'op1' });
+    store.addMessage({ ...typed, id: 'm1', at: 1, text: 'one', delivery: 'open', opId: 'op1', launch: 'launch-1' });
     store.addMessage({ ...typed, id: 'm2', at: 2, text: 'two', delivery: 'not-sent', opId: 'op2', error: 'The session has ended.' });
-    store.addMessage({ ...typed, id: 'm3', at: 3, text: 'three', delivery: 'uncertain', opId: 'op3' });
+    store.addMessage({ ...typed, id: 'm3', at: 3, text: 'three', delivery: 'sent', opId: 'op3' });
     store.addMessage({ ...typed, id: 'm4', at: 4, text: 'four', delivery: 'sent', opId: 'op4', transcriptUuid: 'u4' });
     store.addMessage({ ...typed, id: 'm5', at: 5, text: 'five', delivery: 'open', opId: 'op5', sessionId: 's2' });
     store.addMessage({ ...typed, id: 'm6', at: 6, text: 'six', delivery: 'open', opId: 'op6', pastedAt: null });
@@ -200,9 +200,9 @@ describe('conversation store', () => {
     store.updateMessage('m3', { delivery: 'sent', transcriptUuid: 'u3' });
     expect(store.message('m3')).toMatchObject({ delivery: 'sent', transcriptUuid: 'u3', error: null });
     expect(store.typedAwaitingTranscript('s1').map((one) => one.id)).toEqual(['m1']);
-    expect(store.settleOpenMessages('Switchboard restarted.').map((one) => [one.id, one.delivery])).toEqual([['m1', 'uncertain'], ['m5', 'uncertain'], ['m6', 'uncertain']]);
-    expect(store.message('m1')).toMatchObject({ delivery: 'uncertain', error: 'Switchboard restarted.', provisional: false });
-    expect(store.settleOpenMessages('again')).toEqual([]);
+    // The hub settles these itself, so listing them changes nothing.
+    expect(store.openMessages().map((one) => [one.id, one.delivery, one.pastedAt, one.launch])).toEqual([['m1', 'open', 1, 'launch-1'], ['m5', 'open', 1, null], ['m6', 'open', null, null]]);
+    expect(store.openMessages()).toHaveLength(3);
   });
 
   it('counts unread replies the timeline shows and the latest status, and marks each seen on its own', () => {
@@ -273,6 +273,34 @@ describe('conversation store', () => {
     expect(store.reply('r1')?.seenAt).toBe(10);
     expect(store.status('st1')?.seenAt).toBe(10);
     expect(store.unreadCount('s1')).toBe(0);
+    store.close();
+  });
+
+  it('counts a typed message left uncertain by an earlier hub as sent, keeping its place', () => {
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'store-uncertain-'));
+
+    dirs.push(dir);
+
+    const path = join(dir, 'switchboard.db');
+    const db = new DatabaseSync(path);
+    const before = MIGRATIONS.findIndex((migration) => migration.includes("WHERE delivery = 'uncertain'"));
+
+    db.exec('BEGIN');
+    for (const migration of MIGRATIONS.slice(0, before)) {
+      db.exec(migration);
+    }
+    db.exec(`PRAGMA user_version = ${before}`);
+    db.exec("INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt) VALUES (1, 'm1', 's1', 1, 10, 'typed', 'Hello', NULL, 0, 0, 'uncertain', 'The transcript does not show the message.', 'op1', 10)");
+    db.exec("INSERT INTO messages (ord, id, sessionId, workItemId, at, origin, text, transcriptUuid, provisional, withdrawn, delivery, error, opId, pastedAt) VALUES (2, 'm2', 's1', 1, 11, 'typed', 'Open', NULL, 1, 0, 'open', NULL, 'op2', NULL)");
+    db.exec('COMMIT');
+    db.close();
+
+    const store = Store.open(path);
+
+    expect(before).toBeGreaterThan(0);
+    expect(store.message('m1')).toMatchObject({ delivery: 'sent', error: null, provisional: false });
+    expect(store.message('m2')).toMatchObject({ delivery: 'open' });
     store.close();
   });
 

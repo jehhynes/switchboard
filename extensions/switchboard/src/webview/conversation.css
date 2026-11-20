@@ -115,7 +115,7 @@ body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .messag
 .message .stamp-line .stamp { font-size: inherit; }
 .message .delivery { white-space: nowrap; cursor: default; }
 .message .delivery .codicon { font-size: 12px; vertical-align: middle; }
-.message .delivery.not-sent, .message .delivery.uncertain { color: var(--vscode-editorWarning-foreground); }
+.message .delivery.not-sent { color: var(--vscode-editorWarning-foreground); }
 /* The composer, measured from Claude Code's input: at most 680 px wide and centred, 16 px from the view's edges, an 8 px radius, a hairline
    over the footer, and a ring in the focus colour where Claude Code's is orange. */
 #composer { box-sizing: border-box; width: 100%; max-width: calc(680px + 32px); margin: 0 auto; padding: 0 16px 16px; }
