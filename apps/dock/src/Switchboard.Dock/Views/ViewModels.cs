@@ -424,16 +424,29 @@ public sealed class DockViewModel(DockSettings settings, Action<DockSettings> sa
         set => Set(ref adhocRepo, value);
     }
 
-    /// <summary>The result of the last action, such as what a click could not do; the window shows it as a toast that hides after a time.</summary>
+    /// <summary>
+    /// The result of the last action, such as what a click could not do; the window shows it as a toast that hides after a time, in the warning
+    /// colours, since every message set here is a problem. &lt;see cref="ShowInfo"/&gt; shows a message that is not one.
+    /// </summary>
     public string? Status
     {
         get => status;
-        // Always raised, so the same message again restarts the toast's time.
-        set
-        {
-            status = value;
-            Changed(nameof(Status));
-        }
+        set => SetStatus(value, problem: true);
+    }
+
+    /// <summary>Shows a message that reports no problem, such as a copy that worked, in the toast's neutral colours.</summary>
+    public void ShowInfo(string message) => SetStatus(message, problem: false);
+
+    /// <summary>Whether the toast's message is a problem, which it shows in the warning colours.</summary>
+    public bool StatusIsProblem { get; private set; }
+
+    // Always raised, so the same message again restarts the toast's time.
+    void SetStatus(string? value, bool problem)
+    {
+        status = value;
+        StatusIsProblem = value is not null && problem;
+        Changed(nameof(StatusIsProblem));
+        Changed(nameof(Status));
     }
 
     /// <summary>Why the dock has no current view, or null while it has one.</summary>

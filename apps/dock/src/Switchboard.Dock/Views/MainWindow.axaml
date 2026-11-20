@@ -213,11 +213,16 @@
     <Style Selector="TextBlock.warning">
       <Setter Property="Foreground" Value="{DynamicResource DockWarning}" />
     </Style>
+    <!-- The status toast is neutral for a message that reports no problem, and takes the warning colours only for a problem. -->
     <Style Selector="Border.toast">
       <Setter Property="Margin" Value="8" />
       <Setter Property="Padding" Value="8,4,4,4" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockMuted}" />
+      <Setter Property="Background" Value="{DynamicResource DockHover}" />
+    </Style>
+    <Style Selector="Border.toast.warning">
       <Setter Property="BorderBrush" Value="{DynamicResource DockWarning}" />
       <Setter Property="Background" Value="{DynamicResource DockWarningFill}" />
     </Style>
@@ -390,9 +395,9 @@
           </StackPanel>
         </Button>
       </StackPanel>
-      <Border Name="StatusToast" DockPanel.Dock="Bottom" Classes="toast" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}">
+      <Border Name="StatusToast" DockPanel.Dock="Bottom" Classes="toast" Classes.warning="{Binding StatusIsProblem}" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Name="StatusLine" Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" Classes="warning" Tapped="OnStatusTapped" />
+          <TextBlock Name="StatusLine" Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" Classes.warning="{Binding StatusIsProblem}" Tapped="OnStatusTapped" />
           <Button Name="DismissStatusButton" Grid.Column="1" Classes="dismiss" VerticalAlignment="Top" Click="OnDismissStatusClicked"
                   ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
             <TextBlock Classes="icon" Text="&#xEA76;" />

@@ -260,7 +260,7 @@ public sealed partial class MainWindow : Window
     /// <summary>Shows that a work item started needing the operator in the status toast; a click on the message runs its row's click.</summary>
     internal void ShowNeedsYou(string key, string message)
     {
-        model.Status = message;
+        model.ShowInfo(message);
         needsRow = (key, message);
     }
 
@@ -1526,7 +1526,7 @@ public sealed partial class MainWindow : Window
             }
 
             await Clipboard.SetTextAsync(text);
-            model.Status = $"Copied {paste.Label}.";
+            model.ShowInfo($"Copied {paste.Label}.");
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
