@@ -990,7 +990,7 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
-    public void MoreActions_Clicked_OpensTheMenuOfAdhocRefreshSettingsAndHubLog()
+    public void MoreActions_Clicked_OpensTheMenuGroupedWithSettingsLast()
     {
         var (window, _) = Open();
         var more = window.FindControl<Button>("MoreButton")!;
@@ -998,7 +998,7 @@ public sealed class ControlsTests
         Click(more);
 
         Assert.True(more.ContextMenu!.IsOpen);
-        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "Refresh Sources", "Open Settings", "Ticket Volume Report", "Held Sessions", "Show Hub Log"], more.ContextMenu.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "", "Held Sessions", "Ticket Volume Report", "", "Refresh Sources", "Show Hub Log", "", "Open Settings"], more.ContextMenu.Items.OfType<Control>().Select((item) => item is MenuItem named ? (string)named.Header! : Assert.IsType<Separator>(item) is not null ? "" : "?"));
         Assert.All(more.ContextMenu.Items.OfType<MenuItem>(), (item) => Assert.NotNull(item.Icon));
     }
 
@@ -1010,7 +1010,7 @@ public sealed class ControlsTests
 
         Click(more);
 
-        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "Refresh Sources", "Open Settings", "Held Sessions", "Show Hub Log"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
+        Assert.Equal(["New Ad-hoc Session…", "New Session in a Folder…", "Held Sessions", "Refresh Sources", "Show Hub Log", "Open Settings"], more.ContextMenu!.Items.OfType<MenuItem>().Select((item) => (string)item.Header!));
     }
 
     [AvaloniaFact]

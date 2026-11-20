@@ -1710,18 +1710,22 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// New Ad-hoc Session, New Session in a Folder, Refresh Sources, which polls each source that is on now, Open Settings, Ticket Volume Report when a Zoho or Forum source is configured,
-    /// Held Sessions (PRD R94), and Show Hub Log, which shows the hub log in the VS Code window used last.
+    /// The header's More Actions menu in groups with a separator between each: New Ad-hoc Session and New Session in a Folder; Held Sessions
+    /// (PRD R94) and Ticket Volume Report when a Zoho or Forum source is configured; Refresh Sources, which polls each source that is on now, and
+    /// Show Hub Log, which shows the hub log in the VS Code window used last; then Open Settings, last.
     /// </summary>
     internal List<Control> HeaderMenu() =>
     [
         Item("New Ad-hoc Session…", NewAdhoc, AddGlyph),
         Item("New Session in a Folder…", NewSession, FolderGlyph),
-        Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
-        Item("Open Settings", OpenSettings, SettingsGlyph),
-        .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket Volume Report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
+        new Separator(),
         Item("Held Sessions", OpenHeld, TerminalGlyph),
+        .. model.Sources.Any((source) => source.IsZoho || source.IsForum) ? [Item("Ticket Volume Report", OpenVolume, GraphGlyph)] : Array.Empty<Control>(),
+        new Separator(),
+        Item("Refresh Sources", async () => model.Status = await hub.Poll(), RefreshGlyph),
         Item("Show Hub Log", () => Run(null, new JsonObject { ["type"] = "log" }), OutputGlyph),
+        new Separator(),
+        Item("Open Settings", OpenSettings, SettingsGlyph),
     ];
 
     /// <summary>Opens the held sessions window (PRD R94), or brings the open one forward.</summary>

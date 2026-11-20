@@ -372,7 +372,7 @@
           <Button Name="AutoHideButton" Classes="header" Click="OnAutoHideClicked" ToolTip.Tip="{Binding AutoHideTip}" AutomationProperties.Name="Auto-hide">
             <TextBlock Classes="icon" Text="{Binding AutoHideGlyph}" />
           </Button>
-          <!-- New Ad-hoc Session, New Session in a Folder, Open Settings and Show Hub Log, in a menu to keep the title row short. -->
+          <!-- New sessions, Held Sessions and the volume report, Refresh Sources and Show Hub Log, and Open Settings, in a menu to keep the title row short. -->
           <Button Name="MoreButton" Classes="header" Click="OnMoreClicked" ToolTip.Tip="More Actions…" AutomationProperties.Name="More Actions">
             <TextBlock Classes="icon" Text="&#xEA7C;" />
           </Button>
