@@ -16,6 +16,10 @@ export const PASTE_SETTLE_MS = 60;
 export const TYPING_PAUSE_MS = 1_500;
 /** How often a waiting message checks the screen again. */
 export const GUARD_POLL_MS = 200;
+/** How often the transcript is read for a typed message between screen checks: it is a local file, so a sent message shows as sent at once. */
+export const SENT_POLL_MS = 50;
+/** How often the screen is read while a paste has not shown in the input box yet (claude-collab `pasteAndSubmit`). */
+export const ECHO_POLL_MS = 20;
 /** How long after its last Enter a message waits for the transcript before the screen settles it. */
 export const CONFIRM_SENT_MS = 10_000;
 /**
@@ -284,6 +288,8 @@ export interface SubmitOptions {
   /** After this long since the first Enter, an Enter that drew no reaction is retried anyway. */
   quietMs?: number;
   attempts?: number;
+  /** How often the transcript is read between screen checks. */
+  sentMs?: number;
 }
 
 /**
@@ -293,7 +299,7 @@ export interface SubmitOptions {
  * Enter that a menu opened meanwhile would take. A paste that shows only after the Enter is its echo, not a reaction.
  */
 export async function pasteAndSubmit(text: string, io: SubmitIo, options: SubmitOptions = {}): Promise<{ enterAt: number; enterAttempts: number; submitted: boolean }> {
-  const { settleMs = PASTE_SETTLE_MS, echoMs = 1_000, checkMs = 400, quietMs = 10_000, attempts: max = 4 } = options;
+  const { settleMs = PASTE_SETTLE_MS, echoMs = 1_000, checkMs = 400, quietMs = 10_000, attempts: max = 4, sentMs = SENT_POLL_MS } = options;
 
   await io.write(`\u001b[200~${text}\u001b[201~`);
   await io.wait(settleMs);
@@ -301,7 +307,7 @@ export async function pasteAndSubmit(text: string, io: SubmitIo, options: Submit
   let screen = await io.read();
 
   for (const end = io.now() + echoMs; !screen.unsent && !io.sent() && io.now() < end; ) {
-    await io.wait(50);
+    await io.wait(ECHO_POLL_MS);
     screen = await io.read();
   }
 
@@ -337,10 +343,27 @@ export async function pasteAndSubmit(text: string, io: SubmitIo, options: Submit
       return screen.box !== before;
     };
 
-    do {
-      await io.wait(checkMs);
+    // Until the first screen check after an Enter the transcript is read every `sentMs`, so a message Claude took ends the wait as soon as it is
+    // saved; after it, as before, every `checkMs` with the screen.
+    for (let first = true; ; first = false) {
+      if (first) {
+        for (const until = io.now() + checkMs; !io.sent() && io.now() < until; ) {
+          await io.wait(Math.min(sentMs, until - io.now()));
+        }
+      } else {
+        await io.wait(checkMs);
+      }
+
+      if (io.sent()) {
+        break;
+      }
+
       screen = await io.read();
-    } while (!io.sent() && !reacted() && io.now() < quietUntil);
+
+      if (reacted() || io.now() >= quietUntil) {
+        break;
+      }
+    }
 
     if (attempts >= max || !pending()) {
       break;
@@ -778,8 +801,9 @@ export class SessionInput {
         this.deps.submit,
       );
 
-      for (const until = this.deps.now() + CONFIRM_SENT_MS; !sent() && this.deps.now() < until; ) {
-        await this.deps.sleep(GUARD_POLL_MS);
+      // The transcript usually saves the message within a second of its Enter, so it is read often for that second and then less often.
+      for (const start = this.deps.now(), until = start + CONFIRM_SENT_MS; !sent() && this.deps.now() < until; ) {
+        await this.deps.sleep(this.deps.now() - start < 1_000 ? SENT_POLL_MS : GUARD_POLL_MS);
       }
 
       if (sent()) {

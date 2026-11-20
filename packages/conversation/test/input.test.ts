@@ -201,7 +201,7 @@ describe('SessionInput', () => {
     expect(outcomes).toEqual([{ delivery: 'sent' }, { delivery: 'sent' }]);
   });
 
-  it('reports when each step happened: the queue, the guards, the paste, its echo, the Enter and the transcript', async () => {
+  it('reports when each step happened, and counts the message sent as soon as the transcript has it, without waiting for the screen check', async () => {
     const session = new FakeSession();
     const { deps } = session.deps();
     const outcomes: InputOutcome[] = [];
@@ -210,10 +210,10 @@ describe('SessionInput', () => {
     await new SessionInput('s1', deps).send('Fix the build', (outcome) => outcomes.push(outcome), { steps: (reported) => void (steps = reported) });
 
     expect(outcomes).toEqual([{ delivery: 'sent' }]);
-    // Two guard reads, one after the settle, which shows the paste, and the screen check 400 ms after the Enter, when the transcript is read.
-    expect(steps).toEqual({ queuedAt: T0, startedAt: T0, readyAt: T0, waited: null, reads: 4, readMs: 0, pastedAt: T0, echoAt: T0 + 60, missed: null, enterAt: T0 + 60, enters: 1, confirmedAt: T0 + 460 });
-    expect(session.clock).toBe(T0 + 460);
-    expect(stepsText(steps!, session.clock)).toBe('queue 0 ms, guards 0 ms, paste→echo 60 ms, paste→Enter 60 ms, Enter→transcript 400 ms, 4 screen reads in 0 ms, 460 ms in all');
+    // Two guard reads and one after the settle, which shows the paste; the transcript has the message at its Enter, so no 400 ms screen check.
+    expect(steps).toEqual({ queuedAt: T0, startedAt: T0, readyAt: T0, waited: null, reads: 3, readMs: 0, pastedAt: T0, echoAt: T0 + 60, missed: null, enterAt: T0 + 60, enters: 1, confirmedAt: T0 + 60 });
+    expect(session.clock).toBe(T0 + 60);
+    expect(stepsText(steps!, session.clock)).toBe('queue 0 ms, guards 0 ms, paste→echo 60 ms, paste→Enter 60 ms, Enter→transcript 0 ms, 3 screen reads in 0 ms, 60 ms in all');
   });
 
   it('reports a paste never seen in the input box with what the screen showed, and the guard that held the message back', async () => {
@@ -698,5 +698,27 @@ describe('pasteAndSubmit', () => {
 
     expect(writes).toEqual(['\u001b[200~hi\u001b[201~', '\r']);
     expect(result).toEqual({ enterAt: T0 + 60, enterAttempts: 1, submitted: true });
+  });
+
+  it('reads the transcript every 50 ms after an Enter and stops when it has the message, before the 400 ms screen check', async () => {
+    let clock = T0;
+    let enterAt = Infinity;
+    let reads = 0;
+    const result = await pasteAndSubmit('hi', {
+      write: async (data) => {
+        enterAt = data === '\r' ? clock : enterAt;
+        return 1;
+      },
+      read: async () => (reads++, { unsent: true, box: 'box with text', rev: 1 }),
+      // Claude saves the message 130 ms after the Enter.
+      sent: () => clock >= enterAt + 130,
+      now: () => clock,
+      wait: async (ms) => void (clock += ms),
+    });
+
+    expect(result).toEqual({ enterAt: T0 + 60, enterAttempts: 1, submitted: true });
+    expect(clock).toBe(T0 + 60 + 150);
+    // The read after the settle only: none after the Enter.
+    expect(reads).toBe(1);
   });
 });
