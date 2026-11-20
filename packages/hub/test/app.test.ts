@@ -776,6 +776,17 @@ describe('createHubApp', () => {
     expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: true, voice: 'The voice speaks only for a live session.' } });
     app.windowClosed!(key);
     expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { selected: false, voice: 'Open its window to talk to it.' } });
+
+    // The dock reports a session's terminal window in front, or none.
+    const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
+
+    expect(await app.post['/dock/focus']!({ sessionId })).toEqual({ status: 200, body: { focus: sessionId } });
+    expect(await app.post['/dock/focus']!({ sessionId: null })).toEqual({ status: 200, body: { focus: null } });
+    expect(await app.post['/dock/focus']!({ sessionId: 'nope' })).toEqual({ status: 404, body: { error: 'No session has that ID.' } });
+    expect(await app.post['/dock/focus']!({ sessionId, at: Date.now() })).toEqual({ status: 200, body: { focus: sessionId } });
+    expect(await app.post['/dock/focus']!({ sessionId: '' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } });
+    expect(await app.post['/dock/focus']!({ sessionId, at: 'now' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } });
+    expect(await app.post['/dock/focus']!([])).toEqual({ status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } });
   });
 
   it("gives a Code Mode row a Persona menu with the session's persona checked, which pins through /action, and none with voice off (architecture.md § Personas)", async () => {

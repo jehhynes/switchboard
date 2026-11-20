@@ -38,8 +38,8 @@ export interface HubServerOptions {
    * changes focus, with `windows` added (PRD R71).
    */
   dock?: () => object;
-  /** The window in front changed: its key, or null while no window with a key has the focus (architecture.md § Voice). */
-  focusChanged?: (key: string | null) => void;
+  /** The window in front changed: its key, or null while no window with a key has the focus, and when (architecture.md § Voice). */
+  focusChanged?: (key: string | null, at: number) => void;
   /** The web page (architecture.md § Web page); without it the hub serves none. */
   page?: PageRoutes;
   heartbeatMs?: number;
@@ -210,7 +210,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     if (key !== focusedKey) {
       focusedKey = key;
-      options.focusChanged?.(key);
+      options.focusChanged?.(key, frontAt);
     }
   };
   const windowsChanged = (): void => {

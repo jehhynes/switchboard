@@ -21,6 +21,9 @@ export interface VoiceView {
   error: string | null;
 }
 
+/** The key dictation uses for the target's session terminal window, which no window key can equal (architecture.md § Voice). */
+const TERMINAL = '\0terminal';
+
 /** A composer's name: a window's draft belongs to one conversation, so a switch never carries it to another session. */
 const composerKey = (key: string, sessionId: string): string => `${key}|${sessionId}`;
 
@@ -82,6 +85,8 @@ export interface VoiceControlDeps {
   focusedWindow(): string | null;
   /** Whether the session is a live, observed Code Mode session (`full`), the only kind the voice speaks for. */
   full(sessionId: string): boolean;
+  /** A session's work item and folder, for a session whose terminal window counts as a target; null for one the store does not have. */
+  session?(sessionId: string): { workItemId: number; cwd: string | null } | null;
   /** The session's persona, whose voice, style and personality its replies are spoken with; null for the settings' (architecture.md § Personas). */
   persona?(sessionId: string): Persona | null;
   /** Whether the session is in a turn, when a long dictated message goes in `[partial]` parts. */
@@ -91,10 +96,10 @@ export interface VoiceControlDeps {
   /** The `owner/name` of the repository a folder belongs to, from its `origin` remote, or null. */
   originRepo?(cwd: string): Promise<string | null>;
   /**
-   * Types dictated text into the window's selected conversation's session as a `[voice]` message, or a `[partial]` part (architecture.md
-   * § Dictation): the message, or why it was refused.
+   * Types dictated text into the window's selected conversation's session, or with a null key into the session through its terminal, as a
+   * `[voice]` message, or a `[partial]` part (architecture.md § Dictation): the message, or why it was refused.
    */
-  dictate?(key: string, sessionId: string, text: string, pieces: Piece[], partial: boolean): { message: ConversationMessage } | { refused: string };
+  dictate?(key: string | null, sessionId: string, text: string, pieces: Piece[], partial: boolean): { message: ConversationMessage } | { refused: string };
   /** Where the fragments log goes, `<home>/voice`; none when left out. */
   fragmentsDir?: string;
   /** A reply's speech changed; the windows showing its session get it again. */
@@ -152,6 +157,12 @@ export class VoiceControl {
   readonly #contextSent = new Map<string, string>();
   readonly #repos = new Map<string, string | null | 'pending'>();
   #flushTimer: { stop(): void } | null = null;
+  /** The session whose terminal window the dock last reported in front, or null (architecture.md § Voice). */
+  #terminalFocus: string | null = null;
+  /** When the latest focus change the terminal focus heeded happened, by the reporter's clock, so a late report cannot undo a newer one. */
+  #focusAt = -Infinity;
+  /** The live sessions whose terminal window the dock has reported in front, which stay targets while the focus is in another app. */
+  readonly #terminals = new Set<string>();
 
   constructor(private readonly deps: VoiceControlDeps) {}
 
@@ -225,6 +236,34 @@ export class VoiceControl {
   }
 
   /**
+   * The dock reports the session whose terminal window came to the front, or null when the window in front is no session's terminal; a VS Code
+   * window or the web page taking the focus also clears it (architecture.md § Voice). That session stays a target while it is live, so the voice
+   * stays with it in another app until the away timeout.
+   */
+  terminalFocused(sessionId: string | null, at: number): void {
+    // A report older than the last change, terminal or window, arrived late and changes nothing.
+    if (at < this.#focusAt) {
+      return;
+    }
+
+    this.#focusAt = at;
+
+    if (sessionId === this.#terminalFocus) {
+      return;
+    }
+
+    this.#terminalFocus = sessionId;
+    this.update();
+  }
+
+  /** A VS Code window or the web page gained the focus at `at`: the terminal reported before it is no longer in front. */
+  windowGained(at: number): void {
+    if (at >= this.#focusAt) {
+      this.terminalFocused(null, at);
+    }
+  }
+
+  /**
    * Windows, their selections, the focus or the sessions changed: starts or stops the process for the demand, and sends it the eligible targets
    * and the focus when they changed.
    */
@@ -239,7 +278,8 @@ export class VoiceControl {
 
       return scope === null ? [] : [{ key, scope }];
     });
-    const wanted = settings.enabled && scopes.length > 0;
+    const terminals = this.#terminalTargets();
+    const wanted = settings.enabled && (scopes.length > 0 || this.#terminalFocus !== null || (this.#target.sessionId !== null && terminals.has(this.#target.sessionId)));
 
     this.#demand(wanted);
     this.viewsChanged();
@@ -252,9 +292,17 @@ export class VoiceControl {
       }
     }
 
+    for (const [sessionId, target] of terminals) {
+      if (!targets.has(sessionId)) {
+        targets.set(sessionId, target);
+      }
+    }
+
     const focused = this.deps.focusedWindow();
     const session = focused === null ? null : (this.deps.windows.scope(focused)?.sessionId ?? null);
-    const message: HubMessage = { type: 'targets', targets: [...targets.values()], focus: session === null ? null : { sessionId: session, via: 'window' } };
+    // The dock reports a terminal only while it is in front, so its focus wins over a window that has not reported its blur yet.
+    const focus = this.#terminalFocus !== null ? { sessionId: this.#terminalFocus, via: 'terminal' as const } : session === null ? null : { sessionId: session, via: 'window' as const };
+    const message: HubMessage = { type: 'targets', targets: [...targets.values()], focus };
     const text = JSON.stringify(message);
 
     if (this.#client !== null && text !== this.#targetsSent) {
@@ -263,6 +311,27 @@ export class VoiceControl {
     }
 
     this.#syncTyping();
+  }
+
+  /** The live sessions whose terminal window the dock has reported in front, as targets; one that is no longer `full` is forgotten. */
+  #terminalTargets(): Map<string, VoiceTarget> {
+    if (this.#terminalFocus !== null) {
+      this.#terminals.add(this.#terminalFocus);
+    }
+
+    const targets = new Map<string, VoiceTarget>();
+
+    for (const sessionId of [...this.#terminals]) {
+      const session = this.deps.full(sessionId) ? (this.deps.session?.(sessionId) ?? null) : null;
+
+      if (session === null) {
+        this.#terminals.delete(sessionId);
+      } else {
+        targets.set(sessionId, { sessionId, workItemId: session.workItemId, repo: this.#repoOf(session.cwd) });
+      }
+    }
+
+    return targets;
   }
 
   /** A folder's repository, looked up once; null until the lookup answers, which sends the targets again. */
@@ -434,12 +503,19 @@ export class VoiceControl {
     return composer;
   }
 
-  /** The window dictation goes to: the focused window showing the target, else the one that last moved the voice there, else any showing it. */
+  /**
+   * Where dictation goes: the target's terminal window while it is in front (`TERMINAL`), else the focused window showing the target, else the
+   * one that last moved the voice there, else any showing it, else the target's terminal when the voice came to it from there.
+   */
   #hereKey(): string | null {
     const session = this.#target.sessionId;
 
     if (session === null) {
       return null;
+    }
+
+    if (this.#terminalFocus === session) {
+      return TERMINAL;
     }
 
     const showing = this.deps.windows.keys().filter((key) => this.deps.windows.scope(key)?.sessionId === session);
@@ -449,7 +525,7 @@ export class VoiceControl {
       return focused;
     }
 
-    return this.#talkedFrom !== null && showing.includes(this.#talkedFrom) ? this.#talkedFrom : (showing[0] ?? null);
+    return this.#talkedFrom !== null && showing.includes(this.#talkedFrom) ? this.#talkedFrom : (showing[0] ?? (this.#terminals.has(session) ? TERMINAL : null));
   }
 
   /** Tells the process whether the here window's composer has the focus, when that changed. */
@@ -505,20 +581,36 @@ export class VoiceControl {
 
     composer.draft = composer.draft === '' || /\s$/.test(composer.draft) ? `${composer.draft}${message.text}` : `${composer.draft} ${message.text}`;
     composer.pieces.push(piece);
-    this.deps.notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
+    this.#notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
   }
 
   /**
    * An utterance ended. Turn detection's end, while its generation is current and its window's composer does not have the focus, sends the
    * whole draft as one `[voice]` message and empties it; a refusal leaves the draft and says why in that window. An utterance cut short sends
-   * nothing and leaves its words in the draft.
+   * nothing and leaves its words in the draft; in a terminal, which has no composer to keep them, they are dropped, so they are never typed
+   * later with another utterance.
    */
   #utterance(message: Extract<VoiceMessage, { type: 'utterance' }>): void {
     const heard = this.#heard.get(message.utteranceId);
 
     this.#heard.delete(message.utteranceId);
 
-    if (heard === undefined || !message.final || message.gen !== this.#target.gen) {
+    if (heard === undefined) {
+      return;
+    }
+
+    if (!message.final || message.gen !== this.#target.gen) {
+      if (heard.key === TERMINAL) {
+        const composer = this.#composer(heard.key, heard.sessionId);
+
+        if (composer.draft.trim() !== '') {
+          this.deps.log(`voice: utterance ${message.utteranceId} for the terminal of session ${heard.sessionId} was cut off; its words were not typed`);
+        }
+
+        composer.draft = '';
+        composer.pieces = [];
+      }
+
       return;
     }
 
@@ -553,7 +645,7 @@ export class VoiceControl {
       return false;
     }
 
-    const sent = this.deps.dictate(heard.key, heard.sessionId, text, pieces, partial);
+    const sent = this.deps.dictate(heard.key === TERMINAL ? null : heard.key, heard.sessionId, text, pieces, partial);
 
     if ('refused' in sent) {
       this.deps.log(`voice: dictated message refused: ${sent.refused}`);
@@ -562,7 +654,7 @@ export class VoiceControl {
         this.#fragment({ event: 'refused', sessionId: heard.sessionId, utteranceId: null, pieceId: null, messageId: null, text: piece.text, error: sent.refused });
       }
 
-      this.deps.notify(heard.key, 'refused', { error: sent.refused });
+      this.#notify(heard.key, 'refused', { error: sent.refused });
       return false;
     }
 
@@ -572,8 +664,29 @@ export class VoiceControl {
 
     composer.draft = kept?.text ?? '';
     composer.pieces = kept === undefined ? [] : [kept];
-    this.deps.notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
+    this.#notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId });
     return true;
+  }
+
+  /** Words heard for a terminal and not typed are dropped, since no composer shows them and a later utterance must not carry them. */
+  #dropTerminalDrafts(why: string): void {
+    for (const [name, composer] of this.#composers) {
+      if (name.startsWith(`${TERMINAL}|`)) {
+        if (composer.draft.trim() !== '') {
+          this.deps.log(`voice: words heard for the terminal of session ${name.slice(TERMINAL.length + 1)} were not typed: ${why}`);
+        }
+
+        composer.draft = '';
+        composer.pieces = [];
+      }
+    }
+  }
+
+  /** Sends a window an event; the terminal has no view to send it to. */
+  #notify(key: string, type: string, payload: Record<string, unknown>): void {
+    if (key !== TERMINAL) {
+      this.deps.notify(key, type, payload);
+    }
   }
 
   /**
@@ -799,6 +912,12 @@ export class VoiceControl {
         this.deps.dockChanged();
         this.#syncTyping();
         this.#sendContext(message.sessionId);
+
+        // A dropped terminal target can end the demand, with no window connected.
+        if (message.sessionId === null) {
+          this.update();
+        }
+
         return;
       }
       case 'words': {
@@ -806,7 +925,7 @@ export class VoiceControl {
 
         // Live words only in the window the voice is in.
         if (heard !== null && heard.gen === this.#target.gen) {
-          this.deps.notify(heard.key, 'words', { messageId: message.utteranceId, text: message.text });
+          this.#notify(heard.key, 'words', { messageId: message.utteranceId, text: message.text });
         }
 
         return;
@@ -980,6 +1099,7 @@ export class VoiceControl {
     this.#offered.clear();
     this.#playing.clear();
     this.#heard.clear();
+    this.#dropTerminalDrafts('the voice process stopped');
     this.#stopFlush();
     this.#mic = 'off';
     this.#target = { gen: this.#target.gen, sessionId: null };

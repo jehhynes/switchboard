@@ -923,7 +923,7 @@ export class ConversationService {
    * Stores a message `open` and queues its typing in the session's input: `[spoken]` when its reply will be heard (architecture.md § Voice), never
    * for a slash command or a `[partial]` part, and `[voice]` or `[voice] [partial]` with dictation (architecture.md § Dictation).
    */
-  #type(session: Session, window: string, launch: string | null, text: string, options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean }): ConversationMessage {
+  #type(session: Session, window: string | null, launch: string | null, text: string, options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean }): ConversationMessage {
     const sessionId = session.id;
     const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial) ?? { spoken: false, expressive: false };
     const dictated = options.pieces === null ? null : options.partial ? 'partial' : 'voice';
@@ -950,7 +950,10 @@ export class ConversationService {
     const typed = spoken || dictated !== null ? `${messageTags(spoken, expressive, dictated)}${session.codeMode === true ? pasteText(text) : text}` : text;
 
     this.deps.store.addMessage(added);
-    this.#senders.set(added.id, window);
+    // A message dictated into a terminal has no window waiting on it.
+    if (window !== null) {
+      this.#senders.set(added.id, window);
+    }
 
     if (options.auto === true) {
       this.#spoken.add(added.id);
@@ -961,7 +964,7 @@ export class ConversationService {
 
     this.#changed(sessionId, { type: 'message', message });
     const deliver = (to: Session, toLaunch: string | null): void => this.#adapter(to)?.send(to, message, typed, (outcome) => this.#delivered(message.id, outcome), {
-      check: () => this.#check(sessionId, toLaunch),
+      check: () => this.#check(sessionId, toLaunch, options.olderToo === true),
       reserve: () => this.deps.input.reserve(sessionId, toLaunch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
       command: options.command,
@@ -987,18 +990,21 @@ export class ConversationService {
   }
 
   /**
-   * Dictated text the voice sends into the window's selected conversation's current session (architecture.md § Dictation): a spoken turn's end
-   * as a `[voice]` message, or a `[partial]` part of one still being spoken. Refused, before anything is stored, for a session the window no
-   * longer shows, one that cannot take a message or a holder that cannot type; the window then gets a `message` event with delivery `refused` and
-   * why, and its draft keeps the text.
+   * Dictated text the voice sends into the window's selected conversation's current session, or with a null key into the session whose terminal
+   * window it came from, which no window scope names (architecture.md § Dictation): a spoken turn's end as a `[voice]` message, or a
+   * `[partial]` part of one still being spoken. Refused, before anything is stored, for a session the window no longer shows, one that cannot
+   * take a message or a holder that cannot type; the window then gets a `message` event with delivery `refused` and why, and its draft keeps
+   * the text.
    */
-  dictate(key: string, sessionId: string, text: string, pieces: Piece[], partial: boolean): { message: ConversationMessage } | { refused: string } {
-    const scope = this.deps.windows.scope(key);
+  dictate(key: string | null, sessionId: string, text: string, pieces: Piece[], partial: boolean): { message: ConversationMessage } | { refused: string } {
+    const scope = key === null ? null : this.deps.windows.scope(key);
     const session = this.deps.store.session(sessionId);
     const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
     const refused =
-      scope === null || scope.sessionId !== sessionId || session === null || view === null
-        ? "The voice's session is no longer this window's."
+      (key !== null && (scope === null || scope.sessionId !== sessionId)) || session === null || view === null
+        ? key === null
+          ? SESSION_ENDED
+          : "The voice's session is no longer this window's."
         : view.conversation !== 'full'
           ? (view.reason ?? SESSION_ENDED)
           : text.length > MAX_MESSAGE_CHARS
@@ -1011,17 +1017,24 @@ export class ConversationService {
       const why = refused ?? SESSION_ENDED;
       const at = this.deps.now();
 
+      if (key === null) {
+        return { refused: why };
+      }
+
       this.#send(key, 'message', {
         message: { type: 'message', id: `refused-${this.deps.newId()}`, sessionId, workItemId: session?.workItemId ?? null, at, ord: 0, origin: 'voice', text, provisional: false, withdrawn: false, delivery: 'refused', error: why, spokenRequested: false, pieces, ...(partial ? { partial: true } : {}) },
       });
       return { refused: why };
     }
 
-    return { message: this.#type(session, key, session.launchId ?? null, text, { opId: `voice-${this.deps.newId()}`, command: false, pieces, partial, auto: true }) };
+    return { message: this.#type(session, key, session.launchId ?? null, text, { opId: `voice-${this.deps.newId()}`, command: false, pieces, partial, auto: true, olderToo: key === null }) };
   }
 
-  /** Why a message for this session and launch can no longer be typed; null while it can. */
-  #check(sessionId: string, launch: string | null): string | null {
+  /**
+   * Why a message for this session and launch can no longer be typed; null while it can. Only dictation into a session's own terminal window may
+   * go to a session older than its work item's newest (voice-design decision 9).
+   */
+  #check(sessionId: string, launch: string | null, olderToo = false): string | null {
     const session = this.deps.store.session(sessionId);
 
     if (session === null || session.state === 'ended') {
@@ -1032,7 +1045,7 @@ export class ConversationService {
       return SESSION_RELAUNCHED;
     }
 
-    return this.deps.store.sessionsFor(session.workItemId).at(-1)?.id === sessionId ? null : NEWER_SESSION;
+    return olderToo || this.deps.store.sessionsFor(session.workItemId).at(-1)?.id === sessionId ? null : NEWER_SESSION;
   }
 
   /**

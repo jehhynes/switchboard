@@ -1075,6 +1075,16 @@ describe('ConversationService send', () => {
     expect(holder.writes.at(-2)).toBe('\u001b[200~[voice] [partial] and the tests\u001b[201~');
     expect(service.dictate(mine.key, 's2', 'too', pieces, false)).toMatchObject({ message: { origin: 'voice', spokenRequested: true } });
 
+    // Into the session through its terminal window, with no window key: typed the same way; one for an unknown session is refused to no window.
+    const sent = service.dictate(null, 's2', 'from the terminal', pieces, false);
+
+    expect(sent).toMatchObject({ message: { origin: 'voice', spokenRequested: true } });
+    await vi.waitFor(() => expect(holder.writes).toContain('\u001b[200~[spoken] [voice] from the terminal\u001b[201~'));
+    const before = mine.frames.length;
+
+    expect(service.dictate(null, 'nope', 'hello', pieces, false)).toEqual({ refused: 'The session has ended. Open it in the terminal to resume it.' });
+    expect(mine.frames).toHaveLength(before);
+
     // Refused for another session than the window's, before anything is stored, with a refused message to the window only.
     expect(service.dictate(mine.key, 's3', 'hello', pieces, false)).toEqual({ refused: "The voice's session is no longer this window's." });
     expect(mine.frames.filter((frame) => frame.type === 'message' && (frame.message as { delivery: string }).delivery === 'refused')).toMatchObject([
@@ -1230,6 +1240,15 @@ describe('ConversationService send', () => {
     expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-2', delivery: 'not-sent', text: 'Fix the build' } });
     expect(logs).toContain('session s2: message m-2 not-sent: A newer session of this work item started; the message was not sent.');
     expect(held.writes).toEqual([]);
+  });
+
+  it("types dictation from an older session's own terminal window, which a newer session of its work item does not stop (voice-design decision 9)", async () => {
+    const { service, held, store } = setupSend();
+
+    store.insertSession({ ...(store.session('s2') as StoredSession), id: 's2b', nativeSessionId: 'n2b', startedAt: NOW + 1 });
+    expect(service.dictate(null, 's2', 'run the tests', [{ text: 'run the tests', score: null, f0: null, dropped: false }], false)).toMatchObject({ message: { origin: 'voice' } });
+    await vi.waitFor(() => expect(held.writes).toContain('\u001b[200~[voice] run the tests\u001b[201~'));
+    expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
   });
 
   it("replays an opId only within the window's current session and scope generation", () => {

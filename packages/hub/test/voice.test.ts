@@ -82,6 +82,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     windows: { keys: () => [...windows.keys()], scope: (key) => windows.get(key) ?? null },
     focusedWindow: () => focused,
     full: (sessionId) => full.has(sessionId),
+    session: (sessionId) => (['s1', 's2', 's3'].includes(sessionId) ? { workItemId: Number(sessionId.slice(1)), cwd: 'D:/w' } : null),
     persona: (sessionId) => personas.get(sessionId) ?? null,
     replyChanged: (id) => void changedReplies.push(`${id} ${replies.get(id)?.spokenState}`),
     notify: (key, type, payload) => void notified.push({ key, type, payload }),
@@ -205,6 +206,101 @@ describe('VoiceControl', () => {
     expect(stops()).toBe(0);
     advance(1);
     expect(stops()).toBe(1);
+  });
+
+  it('starts the voice process for a session terminal window in front with no window connected, keeps its session a target while the focus is away, and stops after the away drop', async () => {
+    const { control, connections, full, advance, settle, stops } = setup();
+
+    control.terminalFocused('s1', 1);
+    await settle();
+    expect(connections).toHaveLength(1);
+    expect(connections[0]!.sent.filter((message) => message.type === 'targets')).toEqual([
+      { type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: null }], focus: { sessionId: 's1', via: 'terminal' } },
+    ]);
+
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
+    expect(control.target).toBe('s1');
+    expect(control.spokenFor('s1', false).spoken).toBe(true);
+
+    // The terminal leaves the front: its session stays a target, so the voice process keeps it until its away timeout.
+    control.terminalFocused(null, 1);
+    expect(connections[0]!.sent.at(-1)).toEqual({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: null }], focus: null });
+    advance(VOICE_LINGER_MS);
+    expect(stops()).toBe(0);
+
+    // The away timeout dropped the target: nothing wants the process, which stops 10 minutes later.
+    connections[0]!.receive({ type: 'active', gen: 2, sessionId: null, reason: 'gone' });
+    advance(VOICE_LINGER_MS - 1);
+    expect(stops()).toBe(0);
+    advance(1);
+    expect(stops()).toBe(1);
+
+    // A session that ended is forgotten as a terminal target.
+    full.delete('s1');
+    control.update();
+    expect(control.spokenFor('s1', false).spoken).toBe(false);
+  });
+
+  it('sends the terminal focus over a window that has not reported its blur, never a terminal session that is not live, and forgets an ended one', async () => {
+    const { control, connections, windows, full, settle, focus } = setup();
+
+    windows.set('k2', scope('k2', 2, 's2'));
+    focus('k2');
+    control.update();
+    await settle();
+    control.terminalFocused('s1', 1);
+    expect(connections[0]!.sent.at(-1)).toEqual({
+      type: 'targets',
+      targets: [
+        { sessionId: 's2', workItemId: 2, repo: null },
+        { sessionId: 's1', workItemId: 1, repo: null },
+      ],
+      focus: { sessionId: 's1', via: 'terminal' },
+    });
+
+    // s3 is not live: its terminal is the focus, so the voice leaves s1 and s2, but s3 is no target.
+    control.terminalFocused('s3', 1);
+    expect(connections[0]!.sent.at(-1)).toEqual({
+      type: 'targets',
+      targets: [
+        { sessionId: 's2', workItemId: 2, repo: null },
+        { sessionId: 's1', workItemId: 1, repo: null },
+      ],
+      focus: { sessionId: 's3', via: 'terminal' },
+    });
+
+    // s1 ended while its terminal was behind: it is no longer a target. The window's focus counts again once the terminal left.
+    full.delete('s1');
+    control.terminalFocused(null, 1);
+    expect(connections[0]!.sent.at(-1)).toEqual({ type: 'targets', targets: [{ sessionId: 's2', workItemId: 2, repo: null }], focus: { sessionId: 's2', via: 'window' } });
+
+    // Resumed, it is a target again only once its terminal comes to the front again.
+    full.add('s1');
+    control.update();
+    expect(connections[0]!.sent.at(-1)).toEqual({ type: 'targets', targets: [{ sessionId: 's2', workItemId: 2, repo: null }], focus: { sessionId: 's2', via: 'window' } });
+  });
+
+  it('orders terminal and window focus reports by when they happened, so a late report never undoes a newer one', async () => {
+    const { control, connections, windows, settle, focus } = setup();
+    const lastFocus = () => connections[0]!.sent.filter((one) => one.type === 'targets').at(-1)!;
+
+    windows.set('k2', scope('k2', 2, 's2'));
+    control.update();
+    await settle();
+    control.terminalFocused('s1', 200);
+    // k2 gained the focus at 100, before the terminal, but its report came after.
+    focus('k2');
+    control.windowGained(100);
+    control.update();
+    expect(lastFocus()).toMatchObject({ focus: { sessionId: 's1', via: 'terminal' } });
+    // A late terminal report older than the last change is dropped too.
+    control.terminalFocused(null, 150);
+    expect(lastFocus()).toMatchObject({ focus: { sessionId: 's1', via: 'terminal' } });
+    // k2 gained it again after the terminal: the window's focus counts.
+    control.windowGained(300);
+    expect(lastFocus()).toMatchObject({ focus: { sessionId: 's2', via: 'window' } });
+    control.terminalFocused('s1', 250);
+    expect(lastFocus()).toMatchObject({ focus: { sessionId: 's2', via: 'window' } });
   });
 
   it('starts nothing while voice.enabled is off, and shows the dock why the process cannot run, trying again a minute later', async () => {

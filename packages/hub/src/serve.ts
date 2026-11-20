@@ -21,8 +21,8 @@ export interface HubApp {
   windowState?(key: string): unknown;
   /** Opens a window's conversation stream; null for a key no window holds. */
   conversation?(key: string, write: (frame: string) => void): { close(): void } | null;
-  /** The window in front changed: its key, or null. */
-  windowFocused?(key: string | null): void;
+  /** The window in front changed: its key, or null, at `at`, the epoch milliseconds of the change as the window reported it. */
+  windowFocused?(key: string | null, at: number): void;
   /** The web page's routes (architecture.md § Web page). */
   page?: PageRoutes;
   /** The dock view (PRD R71). */
@@ -131,7 +131,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
           ...(app.windowFolder === undefined ? {} : { windowFolder: (key: string) => app.windowFolder!(key) }),
           ...(app.windowClosed === undefined ? {} : { windowClosed: (key: string) => app.windowClosed!(key) }),
           ...(app.conversation === undefined ? {} : { conversation: (key: string, write: (frame: string) => void) => app.conversation!(key, write) }),
-          ...(app.windowFocused === undefined ? {} : { focusChanged: (key: string | null) => app.windowFocused!(key) }),
+          ...(app.windowFocused === undefined ? {} : { focusChanged: (key: string | null, at: number) => app.windowFocused!(key, at) }),
           ...(app.page === undefined ? {} : { page: app.page }),
         }),
   });

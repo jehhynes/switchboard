@@ -14,12 +14,19 @@ class FakeConnection implements VoiceConnection {
   readonly compatible = true;
   readonly sent: HubMessage[] = [];
   #message: (message: VoiceMessage) => void = () => undefined;
+  #close: (error: Error) => void = () => undefined;
 
   onMessage(listener: (message: VoiceMessage) => void): void {
     this.#message = listener;
   }
 
-  onClose(): void {}
+  onClose(listener: (error: Error) => void): void {
+    this.#close = listener;
+  }
+
+  drop(): void {
+    this.#close(new Error('gone'));
+  }
 
   send(message: HubMessage): void {
     this.sent.push(message);
@@ -54,7 +61,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
     ['k2', scope('k2', 2, 's2', 'D:/other')],
   ]);
   const notified: Array<{ key: string; type: string; payload: Record<string, unknown> }> = [];
-  const dictated: Array<{ key: string; sessionId: string; text: string; pieces: Piece[]; partial: boolean }> = [];
+  const dictated: Array<{ key: string | null; sessionId: string; text: string; pieces: Piece[]; partial: boolean }> = [];
   const busy = new Set<string>();
   let refuse: string | null = null;
   let focused: string | null = 'k1';
@@ -66,6 +73,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
     windows: { keys: () => [...windows.keys()], scope: (key) => windows.get(key) ?? null },
     focusedWindow: () => focused,
     full: () => true,
+    session: (sessionId) => ({ workItemId: Number(sessionId.slice(1)), cwd: 'D:/w' }),
     busy: (sessionId) => busy.has(sessionId),
     lastReply: () => lastReply,
     originRepo: async (cwd) => (cwd === 'D:/w' ? 'acme/app' : null),
@@ -267,5 +275,78 @@ describe('VoiceControl dictation', () => {
     expect(control.view('k1')).toMatchObject({ here: true, mic: 'unavailable', error: 'No speech recognition model in m.' });
     expect(control.view('k2')).toMatchObject({ here: false, mic: 'off', error: null });
     control.replyChanged({ id: 'r1', sessionId: 's1', kind: 'reply', source: 'transcript', withdrawn: false, rewrittenBy: null, speak: null, spokenState: 'none', answers: null } as unknown as ConversationReply);
+  });
+  it('types dictation into the target\'s terminal while it is in front, with no window event, and drops a cut-off utterance there', async () => {
+    const { control, connection, notified, dictated, piece, end, fragments, focus } = await setup();
+
+    // The terminal of k1's session came to the front; VS Code reported its blur.
+    focus(null);
+    control.terminalFocused('s1', 1);
+    expect(connection.sent.filter((one) => one.type === 'targets').at(-1)).toMatchObject({ focus: { sessionId: 's1', via: 'terminal' } });
+    connection.receive({ type: 'words', gen: 1, utteranceId: 'u1', sessionId: 's1', text: 'run the' });
+    piece('run the');
+    piece('tests');
+    end();
+    expect(dictated).toEqual([{ key: null, sessionId: 's1', text: 'run the tests', partial: false, pieces: [expect.objectContaining({ text: 'run the' }), expect.objectContaining({ text: 'tests' })] }]);
+    expect(notified.filter((one) => one.type !== 'voice')).toEqual([]);
+    expect(fragments().map((one) => `${String(one.event)} ${String(one.text)}`)).toEqual(['heard run the', 'heard tests', 'submitted run the', 'submitted tests']);
+
+    // Cut off: its words are not kept for the next utterance.
+    piece('stale', 'u2');
+    end(false, 'u2');
+    piece('commit it', 'u3');
+    end(true, 'u3');
+    expect(dictated.map((one) => [one.key, one.text])).toEqual([
+      [null, 'run the tests'],
+      [null, 'commit it'],
+    ]);
+    // k1's own composer holds nothing of it.
+    expect(control.dictated('k1', 's1')).toBeNull();
+  });
+
+  it('keeps dictating into the terminal with the focus in another app when no window shows the session, and into a window that shows it', async () => {
+    const { control, windows, dictated, piece, end, focus } = await setup();
+
+    focus(null);
+    control.terminalFocused('s1', 1);
+    control.terminalFocused(null, 1);
+    // A window shows s1, so dictation goes to it, as in slice 10.
+    piece('one');
+    end();
+    expect(dictated.at(-1)).toMatchObject({ key: 'k1', text: 'one' });
+
+    // With k1 closed, the voice came to s1 from its terminal, so dictation goes there.
+    windows.delete('k1');
+    control.windowClosed('k1');
+    piece('two', 'u2');
+    end(true, 'u2');
+    expect(dictated.at(-1)).toMatchObject({ key: null, text: 'two' });
+  });
+
+  it('drops the words heard for a terminal when the voice process stops, so the next utterance after its restart types only its own', async () => {
+    const { control, connection, dictated, piece, end, focus, advance, settle } = await setup();
+
+    focus(null);
+    control.terminalFocused('s1', 1);
+    piece('discard this');
+    connection.drop();
+    advance(60_000);
+    await settle();
+    connection.receive({ type: 'active', gen: 2, sessionId: 's1', reason: 'focus' });
+    piece('run the tests', 'u2', 2);
+    end(true, 'u2', 2);
+    expect(dictated.map((one) => [one.key, one.text])).toEqual([[null, 'run the tests']]);
+  });
+
+  it('logs a refused terminal turn without sending a window anything', async () => {
+    const { control, notified, piece, end, fragments, focus, refuse } = await setup();
+
+    focus(null);
+    control.terminalFocused('s1', 1);
+    refuse('The session ended.');
+    piece('hello');
+    end();
+    expect(notified.filter((one) => one.type !== 'voice')).toEqual([]);
+    expect(fragments().filter((one) => one.event === 'refused')).toMatchObject([{ text: 'hello', error: 'The session ended.' }]);
   });
 });

@@ -360,6 +360,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return session !== null && sessionView(session, true, config.settings.sessions.installHooks).conversation === 'full';
     },
+    session: (sessionId) => {
+      const session = store.session(sessionId);
+
+      return session === null ? null : { workItemId: session.workItemId, cwd: session.cwd };
+    },
     persona: (sessionId) => personaById(config.settings.voice, store.session(sessionId)?.personaId),
     replyChanged: (replyId) => conversation.replyUpdated(replyId),
     notify: (key, type, payload) => conversation.notify(key, type, payload),
@@ -428,6 +433,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pageFocused: (key, focused) => {
       if (focused) {
         focusedWindow = key;
+        voice.windowGained(deps.now());
       } else if (focusedWindow === key) {
         focusedWindow = null;
       }
@@ -897,6 +903,24 @@ const dockWithRuns = () => {
 
         return { status: 200, body: { selected, ...(voiceRefused === null ? {} : { voice: voiceRefused }) } };
       },
+      // The dock reports a session's terminal window coming to the front, or null when it left (architecture.md § Voice): the voice follows it as
+      // it follows a window.
+      '/dock/focus': async (body) => {
+        const sessionId = isRecord(body) ? body['sessionId'] : undefined;
+        const at = isRecord(body) ? (body['at'] ?? deps.now()) : undefined;
+
+        if (!(sessionId === null || (typeof sessionId === 'string' && sessionId !== '')) || typeof at !== 'number') {
+          return { status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } };
+        }
+
+        if (sessionId !== null && store.session(sessionId) === null) {
+          voice.terminalFocused(null, at);
+          return { status: 404, body: { error: 'No session has that ID.' } };
+        }
+
+        voice.terminalFocused(sessionId, at);
+        return { status: 200, body: { focus: sessionId } };
+      },
       // The dock's New session (architecture.md § Hosted conversations): a conversation hosted by a folder, selected there before its window opens.
       '/dock/new-conversation': async (body) => (isRecord(body) ? conversation.dockConversation(body) : { status: 400, body: { error: 'Expected {folder, opId}.' } }),
       '/dock/show': async () =>
@@ -956,10 +980,15 @@ const dockWithRuns = () => {
 
       return key;
     },
-    windowFocused: (key) => {
+    windowFocused: (key, at) => {
       // VS Code reports a blur when the browser takes the focus, which may arrive after the page reported it has it.
       if (key !== null || focusedWindow === null || !scopes.isPage(focusedWindow)) {
         focusedWindow = key;
+      }
+
+      // A VS Code window in front is no session's terminal, unless the dock reported a terminal since that window's change.
+      if (key !== null) {
+        voice.windowGained(at);
       }
 
       voice.update();
