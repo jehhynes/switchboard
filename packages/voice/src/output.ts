@@ -22,6 +22,8 @@ export interface CaptureStream {
    * voice plays (architecture.md § Dictation); null when the echo is cancelled.
    */
   readonly halfDuplex: string | null;
+  /** Whether the voice process runs in a Remote Desktop session, which picks `voice.duplex.remote` over `voice.duplex.local`; null when unknown. */
+  readonly remote: boolean | null;
   /** Audio being played, 24 kHz mono 16-bit PCM, in played order. */
   reference(pcm: Buffer): void;
 }

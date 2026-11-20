@@ -51,7 +51,7 @@ describe('windowsCapture', () => {
     const stream = await opening;
 
     expect(logs).toEqual([`windows capture: ${HEADER}`]);
-    expect(stream.halfDuplex).toBeNull();
+    expect([stream.halfDuplex, stream.remote]).toEqual([null, false]);
     // A sample split across two reads is joined; nothing from before the header is passed on.
     child.stdout.write(Buffer.from([1, 2, 3]));
     await tick();
@@ -122,6 +122,7 @@ describe('windowsCapture', () => {
     await tick();
     expect(await remote).toBeInstanceOf(NoEchoCancellation);
     expect(((await remote) as NoEchoCancellation).halfDuplex).toBe('no echo cancellation on Remote Audio');
+    expect(((await remote) as NoEchoCancellation).remote).toBe(true);
     expect(runs[5]!.child.killed).toBe(1);
 
     // A helper that failed to open stays silent, even if it answers late.
@@ -143,7 +144,7 @@ describe('noEchoReason', () => {
 
 describe('withFallback', () => {
   it('gives a half-duplex fallback the reason of a device with no echo cancellation, and its own reason after another failure', async () => {
-    let failure: Error = new NoEchoCancellation('Windows applies no echo cancellation to Microphone (Remote Audio)', 'no echo cancellation on Remote Audio');
+    let failure: Error = new NoEchoCancellation('Windows applies no echo cancellation to Microphone (Remote Audio)', 'no echo cancellation on Remote Audio', true);
     const references: number[] = [];
     let stopped = 0;
     const primary: Capture = {
@@ -152,12 +153,12 @@ describe('withFallback', () => {
       },
     };
     const fallback: Capture = {
-      open: async () => ({ stop: () => void stopped++, reference: (pcm) => void references.push(pcm.length), halfDuplex: "decibri's echo canceller removes too little echo" }),
+      open: async () => ({ stop: () => void stopped++, reference: (pcm) => void references.push(pcm.length), halfDuplex: "decibri's echo canceller removes too little echo", remote: null }),
     };
     const capture = withFallback(primary, fallback, () => undefined, 'decibri');
     const stream = await capture.open(null, () => undefined, () => undefined);
 
-    expect(stream.halfDuplex).toBe('no echo cancellation on Remote Audio');
+    expect([stream.halfDuplex, stream.remote]).toEqual(['no echo cancellation on Remote Audio', true]);
     stream.reference(Buffer.alloc(6));
     stream.stop();
     expect([references, stopped]).toEqual([[6], 1]);
@@ -169,7 +170,7 @@ describe('withFallback', () => {
     const logs: string[] = [];
     const opened: string[] = [];
     let failing = true;
-    const stream = { stop: () => undefined, reference: () => undefined, halfDuplex: null };
+    const stream = { stop: () => undefined, reference: () => undefined, halfDuplex: null, remote: false };
     const primary: Capture = {
       open: async (device) => {
         if (failing) {

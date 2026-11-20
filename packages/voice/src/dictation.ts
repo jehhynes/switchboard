@@ -151,8 +151,10 @@ export class Dictation {
   #playback: Playback | null = null;
   /** Half-duplex capture is not listening: the voice plays, or played within `voice.halfDuplexTailMs`. */
   #deaf = false;
-  /** The capture mode last logged: a half-duplex reason, or null for full duplex; undefined before the first open. */
-  #loggedDuplex: string | null | undefined = undefined;
+  /** Why the open capture is half-duplex, or null while it listens as the voice plays (`duplexMode`). */
+  #halfDuplex: string | null = null;
+  /** The capture mode last logged; undefined before the first open. */
+  #loggedDuplex: string | undefined = undefined;
   /** When the room hold ends (epoch milliseconds), while one runs: the voice check heard someone else (`voice.roomHold`). */
   #roomHoldUntil: number | null = null;
   #roomTimer: unknown = null;
@@ -202,7 +204,7 @@ export class Dictation {
 
   /** Why the open capture has no working echo cancellation, so listening pauses while the voice plays; null with none or with no capture. */
   get halfDuplex(): string | null {
-    return this.#stream?.halfDuplex ?? null;
+    return this.#stream === null ? null : this.#halfDuplex;
   }
 
   /** When the room hold ends, while one runs, else null (architecture.md § Voice check and barge-in). */
@@ -305,10 +307,11 @@ export class Dictation {
     this.#stream?.reference(pcm);
   }
 
-  /** The settings were reloaded: the idle timeout starts again with its new length. */
+  /** The settings were reloaded: the idle timeout starts again with its new length, and `voice.duplex` applies to the open capture. */
   settingsChanged(): void {
     if (this.#stream !== null) {
       this.#armIdle();
+      this.#applyDuplex();
     }
 
     if (!this.deps.settings().roomHold && this.#roomHoldUntil !== null) {
@@ -533,14 +536,36 @@ export class Dictation {
 
     this.#stream = stream;
     this.#deaf = false;
-
-    if (!forEnrollment && stream.halfDuplex !== this.#loggedDuplex) {
-      this.#loggedDuplex = stream.halfDuplex;
-      this.deps.log(stream.halfDuplex === null ? 'listening: full duplex (echo cancelled)' : `listening: half-duplex (${stream.halfDuplex})`);
-    }
+    this.#applyDuplex();
 
     this.#ticker = (this.deps.every ?? every)(() => this.#tick(), TURN_TICK_MS);
     this.#armIdle();
+    this.#report();
+  }
+
+  /**
+   * Sets whether the open capture listens while the voice plays, from `voice.duplex` and its echo cancellation, and logs the mode when it
+   * changed. Leaving half-duplex while deaf starts the recogniser afresh.
+   */
+  #applyDuplex(): void {
+    const stream = this.#stream!;
+    const mode = duplexMode(this.deps.settings().duplex, stream);
+
+    this.#halfDuplex = mode.halfDuplex;
+
+    if (mode.halfDuplex === null && this.#deaf) {
+      this.#deaf = false;
+      this.deps.log('listening resumes');
+      this.#transcriber?.end(false);
+    }
+
+    const line = mode.halfDuplex === null ? `listening: full duplex (${mode.why})` : `listening: half-duplex (${mode.why})`;
+
+    if (this.#enrollment === null && line !== this.#loggedDuplex) {
+      this.#loggedDuplex = line;
+      this.deps.log(line);
+    }
+
     this.#report();
   }
 
@@ -561,7 +586,7 @@ export class Dictation {
       return;
     }
 
-    if (this.#stream?.halfDuplex != null && this.#halfDuplexDeaf()) {
+    if (this.#halfDuplex !== null && this.#halfDuplexDeaf()) {
       return;
     }
 
@@ -926,7 +951,7 @@ export class Dictation {
   /** Closes the open utterance once its words have been quiet for the wait the turn model earned, or for the end-of-message pause. */
   #tick(): void {
     // The voice may have started playing since the last audio came: an utterance open then is cut, never ended as final.
-    if (this.#stream?.halfDuplex != null && this.#halfDuplexDeaf()) {
+    if (this.#stream !== null && this.#halfDuplex !== null && this.#halfDuplexDeaf()) {
       return;
     }
 
@@ -1127,6 +1152,26 @@ export class Dictation {
       this.#idle = null;
     }
   }
+}
+
+/**
+ * Whether capture listens while the voice plays (architecture.md § Dictation): `voice.duplex` for this computer or, when the capture runs in
+ * a Remote Desktop session, for Remote Desktop, decides first; `auto` is half-duplex when the capture cancels no echo. `halfDuplex` is why
+ * listening pauses, null when it does not; `why` says what decided it, for the voice log.
+ */
+export function duplexMode(setting: VoiceSettings['duplex'], stream: Pick<CaptureStream, 'halfDuplex' | 'remote'>): { halfDuplex: string | null; why: string } {
+  const where = stream.remote === true ? 'over Remote Desktop' : 'on this computer';
+  const mode = setting[stream.remote === true ? 'remote' : 'local'];
+
+  if (mode === 'half') {
+    return { halfDuplex: `set to half duplex ${where}`, why: `set to half duplex ${where}` };
+  }
+
+  if (mode === 'full') {
+    return { halfDuplex: null, why: stream.halfDuplex === null ? 'echo cancelled' : `set to full duplex ${where}; ${stream.halfDuplex}` };
+  }
+
+  return { halfDuplex: stream.halfDuplex, why: stream.halfDuplex ?? 'echo cancelled' };
 }
 
 function every(run: () => void, ms: number): { stop(): void } {

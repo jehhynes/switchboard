@@ -138,6 +138,11 @@ export interface Persona {
 export const PERSONA_NAME_MAX = 40;
 export const PERSONALITY_MAX = 600;
 
+/** How dictation listens while the voice plays (architecture.md § Dictation). */
+export const DUPLEX_MODES = ['auto', 'full', 'half'] as const;
+
+export type DuplexMode = (typeof DUPLEX_MODES)[number];
+
 /** Speech out (architecture.md § Voice): machine-wide, off by default. */
 export interface VoiceSettings {
   /** The central voice setting: no voice process, no spoken replies and no voice controls while off. */
@@ -164,6 +169,11 @@ export interface VoiceSettings {
   inputDevice: string | null;
   /** On capture with no echo cancellation, how long after the voice stops playing listening resumes, in milliseconds. */
   halfDuplexTailMs: number;
+  /**
+   * Whether dictation listens while the voice plays, on this computer and over Remote Desktop: `auto` decides from the capture's echo
+   * cancellation, `full` always listens, so talking over a reply stops it, and `half` never does.
+   */
+  duplex: { local: DuplexMode; remote: DuplexMode };
   /** The voice check's least match score against the enrolled voiceprint, from 0 to 1 (voice-design decision 27). */
   matchThreshold: number;
   /** The multiple of the enrolled voice's p90 pitch below which a voiced frame counts as low. */
@@ -196,7 +206,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sources: {},
   schedules: {},
   dock: { openVSCode: 'always', openTerminal: 'vscode' },
-  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {} },
+  voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {} },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -473,7 +483,9 @@ export function parseSettings(text: string): SettingsResult {
   };
 
   const voiceIn = read.section(root, 'voice', 'voice');
-  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas'], 'voice');
+  read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'duplex', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas'], 'voice');
+  const duplexIn = read.section(voiceIn, 'duplex', 'voice.duplex');
+  read.unknown(duplexIn, ['local', 'remote'], 'voice.duplex');
   const voice: VoiceSettings = {
     enabled: read.boolean(voiceIn, 'enabled', 'voice', defaults.voice.enabled),
     voice: read.choice(voiceIn, 'voice', 'voice', TTS_VOICES, defaults.voice.voice),
@@ -488,6 +500,10 @@ export function parseSettings(text: string): SettingsResult {
     endPauseMs: read.integer(voiceIn, 'endPauseMs', 'voice', defaults.voice.endPauseMs, 500, 20_000),
     inputDevice: read.optionalName(voiceIn, 'inputDevice', 'voice'),
     halfDuplexTailMs: read.integer(voiceIn, 'halfDuplexTailMs', 'voice', defaults.voice.halfDuplexTailMs, 0, 5000),
+    duplex: {
+      local: read.choice(duplexIn, 'local', 'voice.duplex', DUPLEX_MODES, defaults.voice.duplex.local),
+      remote: read.choice(duplexIn, 'remote', 'voice.duplex', DUPLEX_MODES, defaults.voice.duplex.remote),
+    },
     matchThreshold: read.number(voiceIn, 'matchThreshold', 'voice', defaults.voice.matchThreshold, 0, 1),
     pitchLowFactor: read.number(voiceIn, 'pitchLowFactor', 'voice', defaults.voice.pitchLowFactor, 1, 3),
     pitchMinLowShare: read.number(voiceIn, 'pitchMinLowShare', 'voice', defaults.voice.pitchMinLowShare, 0, 1),

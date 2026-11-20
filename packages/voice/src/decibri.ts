@@ -76,6 +76,8 @@ export async function decibriCapture(sampleRate: number, referenceRate: number):
           }
         },
         halfDuplex: DECIBRI_HALF_DUPLEX,
+        // decibri cannot tell; on Windows the helper that failed before it may (withFallback).
+        remote: null,
         reference: (pcm) => {
           if (!stopped) {
             mic.pushAecReference(pcm);

@@ -665,6 +665,52 @@ describe('Dictation', () => {
     expect(kinds(sent)).toEqual(['words "fix it"']);
   });
 
+  it('follows voice.duplex before the capture\'s echo cancellation, for this computer or Remote Desktop, and applies a change at once', async () => {
+    const { clock, capture, dictation, say, loud, sent, logs, speech, listening, settings, engine } = setup({ settings: { duplex: { local: 'auto', remote: 'full' } } });
+
+    // Over Remote Desktop with no canceller, full duplex as set: it hears words while the voice plays.
+    capture.halfDuplex = 'no echo cancellation on Remote Audio';
+    capture.remote = true;
+    await listening();
+    expect(dictation.halfDuplex).toBeNull();
+    expect(logs).toContain('listening: full duplex (set to full duplex over Remote Desktop; no echo cancellation on Remote Audio)');
+    speech.until = Infinity;
+    say('fix it', 100);
+    expect(kinds(sent)).toEqual(['words "fix it"']);
+
+    // Set to half: listening pauses at the next audio, the utterance cut.
+    settings.duplex = { local: 'auto', remote: 'half' };
+    dictation.settingsChanged();
+    expect(dictation.halfDuplex).toBe('set to half duplex over Remote Desktop');
+    expect(logs.at(-1)).toBe('listening: half-duplex (set to half duplex over Remote Desktop)');
+    say('fix it', 100);
+    expect(kinds(sent).at(-1)).toBe('utterance "fix it" cut');
+    expect(dictation.state).toBe('listening');
+
+    // Back to full while deaf: listening resumes at once on a fresh recogniser stream.
+    const streams = engine.streams;
+
+    settings.duplex = { local: 'auto', remote: 'full' };
+    dictation.settingsChanged();
+    expect(logs.slice(-2)).toEqual(['listening resumes', 'listening: full duplex (set to full duplex over Remote Desktop; no echo cancellation on Remote Audio)']);
+    expect(engine.streams).toBe(streams + 1);
+    clock.advance(100);
+
+    // On this computer the local setting applies: auto keeps the capture's own reason; half applies even with echo cancellation.
+    capture.remote = false;
+    dictation.typing(true);
+    dictation.typing(false);
+    await settle();
+    expect(dictation.halfDuplex).toBe('no echo cancellation on Remote Audio');
+    settings.duplex = { local: 'half', remote: 'full' };
+    capture.halfDuplex = null;
+    dictation.typing(true);
+    dictation.typing(false);
+    await settle();
+    expect(dictation.halfDuplex).toBe('set to half duplex on this computer');
+    expect(logs.filter((line) => line.startsWith('listening: ')).slice(-2)).toEqual(['listening: half-duplex (no echo cancellation on Remote Audio)', 'listening: half-duplex (set to half duplex on this computer)']);
+  });
+
   it('checks the words an early end was judged on before closing, and judges again without them when they fail', async () => {
     const voiceprint = fakeVoiceprint({ verdict: (text) => (text.includes('go ahead') ? { score: 0.2, f0: 120, dropped: true, reason: 'score' } : null) });
     const { say, quiet, sent, chats, listening } = setup({ voiceprint, turn: (chat) => (chat[1]!.content.includes('go ahead') ? 0.9 : 0.0001) });

@@ -390,6 +390,11 @@ public static partial class SettingsFields
     /// <summary>The speaking styles, as core's <c>SPEECH_STYLES</c> lists them.</summary>
     public static readonly IReadOnlyList<string> SpeechStyles = ["none", "pair", "upbeat", "deadpan", "expressive"];
 
+    /// <summary>The choices of <c>voice.duplex.local</c> and <c>voice.duplex.remote</c>, as core's <c>DUPLEX_MODES</c> lists them.</summary>
+    static readonly IReadOnlyList<FieldOption> DuplexModes = [new FieldOption("auto", "Auto"), new FieldOption("full", "Full duplex"), new FieldOption("half", "Half duplex")];
+
+    const string DuplexInfo = "Whether the mic listens while the voice speaks. Auto listens when capture cancels the echo and otherwise pauses while a reply plays. Full duplex always listens, so talking over a reply stops it; choose it with headphones. Half duplex always pauses.";
+
     static string Capitalized(string text) => text == "" ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     static IReadOnlyList<FieldOption> Choices(IEnumerable<string> values) => values.Select((value) => new FieldOption(value, Capitalized(value))).ToList();
@@ -428,6 +433,8 @@ public static partial class SettingsFields
                 new Field("voice.endPauseMs", "End-of-message pause (ms)", FieldKind.Integer, "500 to 20000. How long a pause ends a dictated message; turn detection shortens it when the words look finished.", "3000"),
                 new Field("voice.inputDevice", "Input device", FieldKind.Text, "Part of the capture device’s name, such as Headset. Empty uses the system default.", "System default"),
                 new Field("voice.halfDuplexTailMs", "Listening pause after speech (ms)", FieldKind.Integer, "0 to 5000. With no echo cancellation, as over Remote Desktop, the mic stops listening while the voice speaks and for this long after, and talking over a reply does not stop it.", "800"),
+                new Field("voice.duplex.local", "Duplex on this computer", FieldKind.Select, DuplexInfo, "auto", DuplexModes),
+                new Field("voice.duplex.remote", "Duplex over Remote Desktop", FieldKind.Select, DuplexInfo + " Used while Switchboard runs in a Remote Desktop session.", "auto", DuplexModes),
             ]),
             new Section("Voice check",
             [

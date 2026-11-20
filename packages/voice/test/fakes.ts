@@ -193,6 +193,8 @@ export class FakeCapture implements Capture {
   fail: Error | null = null;
   /** What each stream opened says of its echo cancellation (`CaptureStream.halfDuplex`). */
   halfDuplex: string | null = null;
+  /** What each stream opened says of a Remote Desktop session (`CaptureStream.remote`). */
+  remote: boolean | null = null;
 
   /** When set, an open waits for it before answering. */
   hold: Promise<void> | null = null;
@@ -215,6 +217,7 @@ export class FakeCapture implements Capture {
         stream.stopped = true;
       },
       halfDuplex: this.halfDuplex,
+      remote: this.remote,
       reference: (pcm) => this.references.push(pcm),
     };
   }

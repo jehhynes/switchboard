@@ -40,7 +40,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
         let stopped = false;
         let ended = false;
         let odd: Buffer | null = null;
-        const fail = (why: string, halfDuplex?: string): void => {
+        const fail = (why: string, noEcho?: { halfDuplex: string; remote: boolean }): void => {
           if (stopped || ended) {
             return;
           }
@@ -55,7 +55,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
             child.stdout?.removeAllListeners('data');
             child.stdout?.resume();
             child.kill();
-            reject(halfDuplex === undefined ? new Error(why) : new NoEchoCancellation(why, halfDuplex));
+            reject(noEcho === undefined ? new Error(why) : new NoEchoCancellation(why, noEcho.halfDuplex, noEcho.remote));
           }
         };
         const startTimer = setTimer(() => fail(`the Windows capture helper did not start within ${WINDOWS_CAPTURE_START_MS / 1000} s`), WINDOWS_CAPTURE_START_MS);
@@ -101,8 +101,10 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
           } else if (!started && typeof message.device === 'string') {
             deps.log(`windows capture: ${line}`);
 
+            const remote = message.remote === true || /remote audio/i.test(message.device);
+
             if (!cancelsEcho(message.effects)) {
-              fail(`Windows applies no echo cancellation to ${message.device}`, noEchoReason(message.device, message.remote === true));
+              fail(`Windows applies no echo cancellation to ${message.device}`, { halfDuplex: noEchoReason(message.device, remote), remote });
               return;
             }
 
@@ -123,6 +125,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
                 child.on('exit', () => clearTimer(kill));
               },
               halfDuplex: null,
+              remote,
               // Windows' echo canceller takes its reference from the speakers.
               reference: () => undefined,
             });
@@ -132,11 +135,12 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
   };
 }
 
-/** The device has no echo cancellation; `halfDuplex` says so for the voice log and the mic's tooltip. */
+/** The device has no echo cancellation; `halfDuplex` says so for the voice log and the mic's tooltip, and `remote` whether this is a Remote Desktop session. */
 export class NoEchoCancellation extends Error {
   constructor(
     message: string,
     readonly halfDuplex: string,
+    readonly remote: boolean,
   ) {
     super(message);
   }
@@ -173,7 +177,7 @@ export function withFallback(primary: Capture, fallback: Capture, log: (line: st
 
         const stream = await fallback.open(device, onPcm, onError);
 
-        return error instanceof NoEchoCancellation && stream.halfDuplex !== null ? { stop: () => stream.stop(), reference: (pcm) => stream.reference(pcm), halfDuplex: error.halfDuplex } : stream;
+        return error instanceof NoEchoCancellation && stream.halfDuplex !== null ? { stop: () => stream.stop(), reference: (pcm) => stream.reference(pcm), halfDuplex: error.halfDuplex, remote: error.remote } : stream;
       }
     },
   };

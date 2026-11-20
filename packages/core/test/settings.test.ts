@@ -10,7 +10,7 @@ describe('parseSettings', () => {
         sources: {},
         schedules: {},
         dock: { openVSCode: 'always', openTerminal: 'vscode' },
-        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {} },
+        voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, expandReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {} },
       },
     });
   });
@@ -24,7 +24,7 @@ describe('parseSettings', () => {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
         dock: { openVSCode: 'review', openTerminal: 'auto' },
-        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120 },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120 },
       }),
     );
 
@@ -45,7 +45,7 @@ describe('parseSettings', () => {
         },
         schedules: {},
         dock: { openVSCode: 'review', openTerminal: 'auto' },
-        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {} },
+        voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, expandReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {} },
       },
     });
   });
@@ -65,6 +65,9 @@ describe('parseSettings', () => {
       errors: ['voice.micIdleMinutes must be a whole number from 0 to 1440.', 'voice.endPauseMs must be a whole number from 500 to 20000.', 'voice.inputDevice must be a device name or null.', 'voice.halfDuplexTailMs must be a whole number from 0 to 5000.'],
     });
     expect(parseSettings('{"voice":{"halfDuplexTailMs":0}}')).toMatchObject({ settings: { voice: { halfDuplexTailMs: 0 } } });
+    expect(parseSettings('{"voice":{"duplex":{"local":"both","rdp":"half"}}}')).toEqual({ errors: ['voice.duplex.rdp is not a setting.', 'voice.duplex.local must be one of auto, full, half.'] });
+    expect(parseSettings('{"voice":{"duplex":"full"}}')).toEqual({ errors: ['voice.duplex must be an object.'] });
+    expect(parseSettings('{"voice":{"duplex":{"remote":"full"}}}')).toMatchObject({ settings: { voice: { duplex: { local: 'auto', remote: 'full' } } } });
     expect(parseSettings('{"voice":{"matchThreshold":1.2,"pitchLowFactor":0.9,"pitchMinLowShare":"0.2"}}')).toEqual({
       errors: ['voice.matchThreshold must be a number from 0 to 1.', 'voice.pitchLowFactor must be a number from 1 to 3.', 'voice.pitchMinLowShare must be a number from 0 to 1.'],
     });

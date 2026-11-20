@@ -68,7 +68,7 @@ public sealed class VoiceSettingsTests
         Assert.Equal(
             ["voice.enabled", "voice.voice", "voice.style", "voice.speed", "voice.expressive", "voice.expandReplies", "voice.awayMinutes", "voice.needsYouSound", "voice.outputDevice"],
             sections[0].Fields.Select((field) => field.Path));
-        Assert.Equal(["voice.micIdleMinutes", "voice.endPauseMs", "voice.inputDevice", "voice.halfDuplexTailMs"], sections[1].Fields.Select((field) => field.Path));
+        Assert.Equal(["voice.micIdleMinutes", "voice.endPauseMs", "voice.inputDevice", "voice.halfDuplexTailMs", "voice.duplex.local", "voice.duplex.remote"], sections[1].Fields.Select((field) => field.Path));
         Assert.Empty(sections[3].Fields);
 
         var fields = sections[0].Fields.ToDictionary((field) => field.Path);
@@ -87,6 +87,15 @@ public sealed class VoiceSettingsTests
         Assert.Equal((FieldKind.Integer, "3000"), (dictation["voice.endPauseMs"].Kind, dictation["voice.endPauseMs"].Placeholder));
         Assert.Equal((FieldKind.Text, "System default"), (dictation["voice.inputDevice"].Kind, dictation["voice.inputDevice"].Placeholder));
         Assert.Equal((FieldKind.Integer, "800"), (dictation["voice.halfDuplexTailMs"].Kind, dictation["voice.halfDuplexTailMs"].Placeholder));
+        Assert.Equal(("Duplex on this computer", "Duplex over Remote Desktop"), (dictation["voice.duplex.local"].Label, dictation["voice.duplex.remote"].Label));
+
+        foreach (var path in new[] { "voice.duplex.local", "voice.duplex.remote" })
+        {
+            Assert.Equal(FieldKind.Select, dictation[path].Kind);
+            Assert.Equal(["auto", "full", "half"], dictation[path].Options!.Select((option) => option.Value));
+            Assert.Equal("auto", SettingsPages.FieldViewOf(dictation[path], null, []).Selected);
+            Assert.Equal("half", SettingsPages.FieldViewOf(dictation[path], "half", []).Selected);
+        }
         Assert.Equal("1.25", SettingsPages.FieldViewOf(fields["voice.speed"], 1.25, []).Text);
     }
 
