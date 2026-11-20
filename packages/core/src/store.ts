@@ -459,6 +459,13 @@ export const MIGRATIONS = [
   `ALTER TABLE workItems ADD COLUMN provider TEXT;`,
   // Rate limits (architecture.md § Rate limits): the limit a session's last turn stopped at, as JSON.
   `ALTER TABLE sessions ADD COLUMN rateLimit TEXT;`,
+  // A snapshot and the dock's search read work items by when they were done and tickets by these columns; without the indexes each read scans the
+  // whole history (architecture.md § Dock).
+  `CREATE INDEX IF NOT EXISTS workItemsByDoneAt ON workItems (doneAt);
+  CREATE INDEX IF NOT EXISTS workItemsDone ON workItems (status, doneAt);
+  CREATE INDEX IF NOT EXISTS ticketsBySnoozed ON tickets (snoozed);
+  CREATE INDEX IF NOT EXISTS ticketsByPool ON tickets (pool);
+  CREATE INDEX IF NOT EXISTS ticketsByRepo ON tickets (source, repo);`,
 ];
 
 /**
@@ -549,6 +556,7 @@ export type NewTicket = Omit<Ticket, 'id' | 'adhocKey' | 'repo'> & { adhocKey?: 
 export type NewWorkItem = Omit<WorkItem, 'id'>;
 export type NewTriage = Omit<Triage, 'id'>;
 export type NewWorktree = Omit<Worktree, 'id'>;
+
 
 /** A triage without its context, which History does not show. */
 export type HistoryTriage = Omit<Triage, 'context'>;
@@ -1125,11 +1133,17 @@ export class Store {
 
   /** Work items not done, those done since `doneSince`, and every work item of a snoozed ticket, newest first. */
   workItems(doneSince: number): WorkItem[] {
+    // A union of indexed reads: one OR over both tables scans every work item ever made.
     return this.#all(
-      "SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE w.status <> 'done' OR w.doneAt >= ? OR t.snoozed = 1 ORDER BY w.id DESC",
+      `SELECT * FROM workItems WHERE id IN (
+        SELECT id FROM workItems WHERE status < 'done' OR status > 'done'
+        UNION SELECT id FROM workItems WHERE doneAt >= ?
+        UNION SELECT w.id FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE t.snoozed = 1
+      ) ORDER BY id DESC`,
       doneSince,
     );
   }
+
 
   /** Tickets snoozed at `now`: indefinitely, or until a later time. */
   snoozedTickets(now: number): Ticket[] {
