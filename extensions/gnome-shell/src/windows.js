@@ -29,6 +29,17 @@ export function isListed(window) {
   return window.normal && isVsCode(window.wmClass) && window.width > 0 && window.height > 0;
 }
 
+/**
+ * The signal a change of the focus window sends the dock: `TerminalFocused` each time a terminal gains the focus, `TerminalUnfocused` when it
+ * moves from a terminal to a window that is not one, or to none, else null.
+ * @param {boolean} wasTerminal
+ * @param {boolean} isTerminal
+ * @returns {'TerminalFocused' | 'TerminalUnfocused' | null}
+ */
+export function terminalFocusSignal(wasTerminal, isTerminal) {
+  return isTerminal ? 'TerminalFocused' : wasTerminal ? 'TerminalUnfocused' : null;
+}
+
 /** Whether the extension opens a URL for the dock: http and https only. @param {string} url */
 export function isWebUrl(url) {
   return /^https?:\/\/[^\s]+$/i.test(url);

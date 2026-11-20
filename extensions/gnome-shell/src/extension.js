@@ -1,11 +1,11 @@
-// Lists and brings forward VS Code's windows and the terminals it opens for the Switchboard dock, reports which terminal gains focus, tells it which monitors a full-screen window covers, and opens
+// Lists and brings forward VS Code's windows and the terminals it opens for the Switchboard dock, reports which terminal gains focus and when one loses it, tells it which monitors a full-screen window covers, and opens
 // its links, because under GNOME on Wayland only GNOME Shell can see other apps' windows or let a launched app take the focus (architecture.md § Dock). Exports `switchboard.Shell` on the session bus.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import { isListed, isListedTerminal, isWebUrl } from './windows.js';
+import { isListed, isListedTerminal, isWebUrl, terminalFocusSignal } from './windows.js';
 
 const NAME = 'switchboard.Shell';
 const PATH = '/switchboard/Shell';
@@ -36,6 +36,7 @@ const INTERFACE = `
     <signal name="TerminalFocused">
       <arg name="title" type="s"/>
     </signal>
+    <signal name="TerminalUnfocused"/>
   </interface>
 </node>`;
 
@@ -149,12 +150,20 @@ export default class SwitchboardExtension extends Extension {
         this.exported.emit_signal('FullScreenChanged', new GLib.Variant('(as)', [monitors]));
       }
     });
-    // VS Code windows report their focus to the hub; a terminal cannot, so the shell tells the dock, which selects its row (PRD R71).
+    // VS Code windows report their focus to the hub; a terminal cannot, so the shell tells the dock, which selects its row (PRD R71), and when
+    // the focus leaves it, so the voice stops following it (architecture.md § Voice).
+    this.terminalFocused = false;
     this.focusWatch = global.display.connect('notify::focus-window', () => {
       const window = global.display.focus_window;
+      const terminal = window !== null && isListedTerminal(described(window));
+      const signal = terminalFocusSignal(this.terminalFocused, terminal);
 
-      if (window !== null && isListedTerminal(described(window))) {
+      this.terminalFocused = terminal;
+
+      if (signal === 'TerminalFocused') {
         this.exported.emit_signal('TerminalFocused', new GLib.Variant('(s)', [window.get_title() ?? '']));
+      } else if (signal === 'TerminalUnfocused') {
+        this.exported.emit_signal('TerminalUnfocused', null);
       }
     });
   }

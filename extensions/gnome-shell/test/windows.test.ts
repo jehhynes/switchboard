@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isListed, isListedTerminal, isTerminal, isVsCode, isWebUrl } from '../src/windows.js';
+import { isListed, isListedTerminal, isTerminal, isVsCode, isWebUrl, terminalFocusSignal } from '../src/windows.js';
 
 describe('isVsCode', () => {
   it('takes VS Code as a Wayland client and under XWayland, in any case', () => {
@@ -72,5 +72,14 @@ describe('isWebUrl', () => {
     expect(isWebUrl('https://')).toBe(false);
     expect(isWebUrl('https://a b')).toBe(false);
     expect(isWebUrl(' https://a')).toBe(false);
+  });
+});
+
+describe('terminalFocusSignal', () => {
+  it('reports each terminal that gains the focus, and the focus leaving a terminal once', () => {
+    expect(terminalFocusSignal(false, true)).toBe('TerminalFocused');
+    expect(terminalFocusSignal(true, true)).toBe('TerminalFocused');
+    expect(terminalFocusSignal(true, false)).toBe('TerminalUnfocused');
+    expect(terminalFocusSignal(false, false)).toBeNull();
   });
 });
