@@ -4,6 +4,7 @@ import { pcm24to16, splitSaid } from './barge.js';
 import type { Dictation } from './dictation.js';
 import type { Output } from './output.js';
 import type { HubMessage, Interrupted, VoiceMessage, VoiceTarget } from './protocol.js';
+import { PlayedReference } from './reference.js';
 import { Router } from './routing.js';
 import { Speech } from './speech.js';
 import { BYTES_PER_MS } from './tts.js';
@@ -67,20 +68,28 @@ export class VoiceService {
           return stopped === null ? null : { replyId: stopped.item.replyId, ...splitSaid(stopped.item.text, stopped.said) };
         },
       }) ?? null;
-    // What plays is also the echo canceller's reference, so a reply played aloud is not heard as the operator.
+    // What plays is also the echo canceller's reference, handed over as it plays, so a reply played aloud is not heard as the operator.
     const output: Output = {
       engine: deps.output.engine,
       open: async (device) => {
         const playback = await deps.output.open(device);
+        const reference = new PlayedReference({
+          push: (pcm) => this.#dictation?.reference(pcm),
+          now: deps.now,
+          ...(deps.every === undefined ? {} : { every: deps.every }),
+        });
 
         return {
           write: (pcm) => {
-            this.#dictation?.reference(pcm);
+            reference.written(pcm);
             this.#learn(pcm);
             return playback.write(pcm);
           },
           drain: () => playback.drain(),
-          stop: () => playback.stop(),
+          stop: () => {
+            reference.stop();
+            playback.stop();
+          },
         };
       },
     };

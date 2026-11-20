@@ -90,6 +90,17 @@ describe('VoiceService', () => {
     tts.requests[0]!.audio(480);
     await settle();
     expect(calls).toContain('reference 480');
+
+    // The rest goes to the canceller as it plays, not as it is written.
+    const referenced = () => calls.filter((call) => call.startsWith('reference ')).reduce((sum, call) => sum + Number(call.slice('reference '.length)), 0);
+
+    tts.requests[0]!.audio(48_000);
+    await settle();
+    expect(referenced()).toBe(960);
+    clock.advance(500);
+    expect(referenced()).toBe(960 + 500 * 48);
+    clock.advance(1000);
+    expect(referenced()).toBe(480 + 48_000);
     service.close();
     expect(calls.at(-1)).toBe('close');
   });
