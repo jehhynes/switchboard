@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, mentionOf, mentionQuery, commandQuery, shortTitle, timeline, withEarlier } from '../src/model.js';
 import { answerText, answersIn, complete, parseQuestions } from '@switchboard/conversation/questions';
-import { artifactUrl, newView, renderArtifactView, renderHeader, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
+import { artifactUrl, newView, renderArtifactView, turnRow, renderHeader, renderList, renderTimeline, renderVoice, markdownBody } from '../src/render.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { startPage } from '../src/main.js';
 import type { ArtifactView, MessageView, ReplyView, SessionView } from '../src/types.js';
@@ -89,6 +89,15 @@ describe('drawing', () => {
     expect(html).toContain('<a href="https://example.com" target="_blank" rel="noopener noreferrer"');
     expect(html).toContain('<a class="path-link" title="src/a.ts"');
     expect(html).not.toContain('href="javascript');
+  });
+
+  it('says what the turn waits for: Starting or Thinking with the spinner, and the answer or permission the terminal asks for instead of Thinking', () => {
+    expect(turnRow(session({ state: 'starting' }), true)).toContain('Starting…');
+    expect(turnRow(session({ state: 'running' }), true)).toContain('codicon-modifier-spin');
+    expect(turnRow(session({ state: 'running' }), false)).toBe('');
+    expect(turnRow(session({ state: 'waiting', waitingFor: 'question' }), true)).toMatch(/codicon-question[\s\S]*Waiting for your answer/);
+    expect(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), false)).toMatch(/codicon-shield[\s\S]*Waiting for permission/);
+    expect(turnRow(session({ state: 'waiting', waitingFor: 'permission' }), true)).not.toContain('Thinking');
   });
 
   it('opens a page or an SVG artifact in a sandboxed frame with an opaque origin, and media in the page', () => {

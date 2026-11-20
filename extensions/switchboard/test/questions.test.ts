@@ -186,18 +186,17 @@ describe('question cards in the Conversation view', () => {
     expect(root.querySelector('.question-card')).toBeNull();
   });
 
-  it('says Claude waits for an answer in the terminal while an AskUserQuestion menu holds the session, with Open in terminal', () => {
+  it('says the session waits for an answer or a permission in the terminal while a menu holds it, with Open in terminal', () => {
     const { show, root, posted } = page();
 
     show(state([], { session: { ...SESSION, state: 'waiting', waitingFor: 'question' } }));
-    expect(root.querySelector('.terminal-question')?.textContent).toBe('Claude is waiting for an answer in the terminalOpen in terminal');
-    root.querySelector<HTMLElement>('.terminal-question button')!.click();
+    expect(root.querySelector('.working.waiting .working-label')?.textContent).toBe('Waiting for your answer');
+    root.querySelector<HTMLElement>('.working.waiting button')!.click();
     expect(posted.at(-1)).toEqual({ type: 'terminal' });
-
-    for (const session of [{ ...SESSION, state: 'waiting' as const, waitingFor: 'permission' as const }, { ...SESSION, state: 'running' as const }]) {
-      show(state([], { session }));
-      expect(root.querySelector('.terminal-question')).toBeNull();
-    }
+    show(state([], { session: { ...SESSION, state: 'waiting', waitingFor: 'permission' } }));
+    expect(root.querySelector('.working.waiting .working-label')?.textContent).toBe('Waiting for permission');
+    show(state([], { session: { ...SESSION, state: 'running' } }));
+    expect(root.querySelector('.working.waiting')).toBeNull();
   });
 
   it('leaves the Up and Down keys in an Other field to the field', () => {

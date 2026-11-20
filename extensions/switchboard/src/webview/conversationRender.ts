@@ -543,6 +543,38 @@ export function personaButton(persona: SessionView['persona'] | undefined): stri
 }
 
 /**
+ * The row at the end of the timeline while the session is in a turn (architecture.md § Conversation view): drawn as Claude Code's spinner row,
+ * "Starting…" or "Thinking…" while it works on a reply; while it waits on the operator, whether or not a reply is due, "Waiting for your answer",
+ * "Waiting for permission" or "Waiting in the terminal" with a still icon in the warning colour and Open in terminal, where the operator answers.
+ * Empty otherwise; a Codex request the view answers itself draws its own card instead.
+ */
+export function turnRow(session: SessionView | null, awaiting: boolean): string {
+  const waiting = session?.state === 'waiting' && session.waitingFor !== null && (session.requests ?? []).length === 0;
+
+  if (waiting) {
+    const label = session.waitingFor === 'question' ? 'Waiting for your answer' : session.waitingFor === 'permission' ? 'Waiting for permission' : 'Waiting in the terminal';
+    const icon = session.waitingFor === 'permission' ? 'shield' : session.waitingFor === 'question' ? 'question' : 'terminal';
+    const who = session.provider === 'codex' ? 'Codex' : 'Claude';
+    const why = session.waitingFor === 'question' ? `${who} asks you a question in the terminal.` : session.waitingFor === 'permission' ? `${who} asks for permission in the terminal.` : `${who} is waiting for you in the terminal.`;
+
+    return (
+      `<li class="working waiting" title="${escape(why)}"><span class="working-icon codicon codicon-${icon}" aria-hidden="true"></span><span class="working-label">${label}</span>` +
+      `<span role="status">${escape(`${label}. ${why}`)}</span><button type="button" class="terminal-question-open" data-action="terminal">Open in terminal</button></li>`
+    );
+  }
+
+  if (!awaiting || session === null) {
+    return '';
+  }
+
+  const label = session.state === 'starting' ? 'Starting' : 'Thinking';
+
+  // As Claude Code's panel draws it: the spinner and "Thinking…" beside it; a screen reader hears "Thinking". A turn that waits with nothing for
+  // the operator to answer here stands still.
+  return `<li class="working"><span class="working-icon codicon codicon-loading${session.state === 'waiting' ? '' : ' codicon-modifier-spin'}" aria-hidden="true"></span><span class="working-label" aria-hidden="true">${label}…</span><span role="status">${label}</span></li>`;
+}
+
+/**
  * The view's HTML: the header with the session's state, the tab strip, and the selected tab: the conversation, with a note when the view cannot
  * talk to the session, and the timeline; the status; or the artifacts.
  */
@@ -575,12 +607,8 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
 
     return questions.length === 0 ? '' : questionCard(key, questions, page.cards?.get(key), answer, canAnswer);
   };
-  // While the session works on a reply, a spinner after the newest item, so replies written mid-turn show above it; it has no data-id, so the
-  // keys skip it.
-  // While the session waits on a question or a permission, it stands still.
-  const spin = state.session?.state === 'waiting' ? '' : ' codicon-modifier-spin';
-  // As Claude Code's panel draws it: the spinner and "Thinking…" beside it; a screen reader hears "Thinking".
-  const spinner = !awaitingReply(state.items, state.session) ? '' : `<li class="working"><span class="working-icon codicon codicon-loading${spin}" aria-hidden="true"></span><span class="working-label" aria-hidden="true">Thinking…</span><span role="status">Thinking</span></li>`;
+  // The turn's row after the newest item, so replies written mid-turn show above it; it has no data-id, so the keys skip it.
+  const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
   // A turn starts at each message; one that starts on another day than the turn before it has a divider, as in Claude Code's panel.
   let turnDay: string | null = null;
   // A time shows only where the minute changes from the item before, so a message and the reply to it in the same minute read as one exchange.
@@ -613,7 +641,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
     return divider + (entry.type === 'message' ? message(entry.item, stamped) : reply(entry.item, entry.earlier, open, stamped, card, state.settings.expandReplies));
   });
   const earlier = state.more ? '<button class="earlier-items" data-action="earlier">Show earlier messages</button>' : '';
-  const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${spinner}</ol>`;
+  const body = state.session === null ? '<p class="empty">No session has started yet.</p>' : entries.length === 0 && spinner === '' ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" tabindex="0" aria-label="Conversation">${entries.join('')}${spinner}</ol>`;
 
   const unopened = state.artifacts.filter((artifact) => page.unopened.has(artifact.path)).length;
   const tabs = renderTabs(page.tab, { conversation: '', status: statusBadge(state.status, fresh) ? 'New' : '', artifacts: unopened === 0 ? '' : String(unopened) });
@@ -623,9 +651,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   const requests = state.session?.requests ?? [];
   const asking = requests.length > 0
     ? requests.map(request => `<div class="terminal-question" role="status"><span class="terminal-question-text">${escape(request.title)}</span><button type="button" data-action="answer-request" data-request="${escape(request.id)}">${request.kind === 'unsupported' ? 'Open in terminal' : request.kind === 'permission' ? 'Review permission' : 'Answer'}</button></div>`).join('')
-    : state.session?.state === 'waiting' && state.session.waitingFor === 'question'
-      ? `<div class="terminal-question" role="status"><span class="codicon codicon-question" aria-hidden="true"></span><span class="terminal-question-text">${state.session.provider === 'codex' ? 'Codex' : 'Claude'} is waiting for an answer in the terminal</span><button type="button" class="terminal-question-open" data-action="terminal">Open in terminal</button></div>`
-      : '';
+    : '';
   // Each tab's panel, and each conversation's, is its own node, so a redraw keeps its scroll position and another tab or conversation starts afresh.
   const shownKey = `${state.scope.scopeGen}-${state.session?.id ?? ''}`;
   // The New messages pill sits at the bottom of the conversation's own area, just above the composer, never behind it.

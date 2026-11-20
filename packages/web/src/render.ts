@@ -211,7 +211,7 @@ export function renderTimeline(state: PageState, view: View): string {
   const entries = timeline(state.items, state.artifacts);
   const canAnswer = state.connected && state.session.conversation === 'full';
   // After the newest item, so replies written mid-turn show above it.
-  const spinner = !awaitingReply(state.items, state.session) ? '' : `<li class="working"><span class="codicon codicon-loading${state.session.state === 'waiting' ? '' : ' codicon-modifier-spin'}" aria-hidden="true"></span><span>Thinking…</span></li>`;
+  const spinner = turnRow(state.session, awaitingReply(state.items, state.session));
   let lastMinute: string | null = null;
   let lastDay: string | null = null;
   const rows = entries.map((entry) => {
@@ -245,11 +245,30 @@ export function renderTimeline(state: PageState, view: View): string {
   const asking =
     requests.length > 0
       ? requests.map((request) => renderRequest(request, view.requestValues)).join('')
-      : state.session.state === 'waiting' && state.session.waitingFor === 'question'
-        ? `<p class="notice terminal-question"><span class="codicon codicon-question" aria-hidden="true"></span> ${state.session.provider === 'codex' ? 'Codex' : 'Claude'} is waiting for an answer in the terminal.</p>`
-        : '';
+      : '';
 
-  return `${notice}${earlier}${rows.length === 0 ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}${spinner}</ol>`}${asking}`;
+  return `${notice}${earlier}${rows.length === 0 && spinner === '' ? '<p class="empty">No messages yet.</p>' : `<ol class="timeline" aria-label="Conversation">${rows.join('')}${spinner}</ol>`}${asking}`;
+}
+
+/**
+ * The row at the end of the timeline while the session is in a turn: "Starting…" or "Thinking…" with the spinner while it works on a reply;
+ * while it waits on the operator in the terminal, "Waiting for your answer", "Waiting for permission" or "Waiting in the terminal" with a still
+ * icon in the warning colour, since the page has no terminal to open. A Codex request the page answers draws its own card instead.
+ */
+export function turnRow(session: PageState['session'], awaiting: boolean): string {
+  if (session?.state === 'waiting' && session.waitingFor !== null && (session.requests ?? []).length === 0) {
+    const label = session.waitingFor === 'question' ? 'Waiting for your answer' : session.waitingFor === 'permission' ? 'Waiting for permission' : 'Waiting in the terminal';
+    const icon = session.waitingFor === 'permission' ? 'shield' : session.waitingFor === 'question' ? 'question' : 'terminal';
+    const who = session.provider === 'codex' ? 'Codex' : 'Claude';
+
+    return `<li class="working waiting" role="status"><span class="codicon codicon-${icon}" aria-hidden="true"></span><span class="working-label">${label}</span><span class="working-detail">${who} asks in its terminal; answer it there.</span></li>`;
+  }
+
+  if (!awaiting || session === null) {
+    return '';
+  }
+
+  return `<li class="working"><span class="codicon codicon-loading${session.state === 'waiting' ? '' : ' codicon-modifier-spin'}" aria-hidden="true"></span><span>${session.state === 'starting' ? 'Starting' : 'Thinking'}…</span></li>`;
 }
 
 const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };

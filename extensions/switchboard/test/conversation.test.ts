@@ -437,9 +437,22 @@ describe('the Conversation view page', () => {
     expect(root.querySelector('.working')).toBeNull();
     root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'ended' } }));
     expect(root.querySelector('.working')).toBeNull();
-    // It stands still while the session waits on a question.
+    // "Starting…" while the session starts.
+    root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'starting' } }));
+    expect(root.querySelector('.working .working-label')?.textContent).toBe('Starting…');
+    // Waiting on the operator, it says for what, with a still icon in the warning colour and Open in terminal, and no "Thinking".
     root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'waiting', waitingFor: 'question' } }));
-    expect(root.querySelector('.working .codicon')?.className).toBe('working-icon codicon codicon-loading');
+    expect(root.querySelector('.working.waiting .codicon')?.className).toBe('working-icon codicon codicon-question');
+    expect(root.querySelector('.working .working-label')?.textContent).toBe('Waiting for your answer');
+    expect(root.textContent).not.toContain('Thinking');
+    root.innerHTML = renderConversation(state(asked, { session: { ...SESSION, state: 'waiting', waitingFor: 'permission' } }));
+    expect(root.querySelector('.working .working-label')?.textContent).toBe('Waiting for permission');
+    expect(root.querySelector('.working [role="status"]')?.textContent).toBe('Waiting for permission. Claude asks for permission in the terminal.');
+    expect(root.querySelector('.working.waiting [data-action="terminal"]')?.textContent).toBe('Open in terminal');
+    // A wait shows even when no reply is due, as before the first message.
+    root.innerHTML = renderConversation(state([], { session: { ...SESSION, state: 'waiting', waitingFor: 'permission' } }));
+    expect(root.querySelector('.working .working-label')?.textContent).toBe('Waiting for permission');
+    expect(root.querySelector('.empty')).toBeNull();
   });
 
   it('draws file:, drive-letter, relative and spaced links as links, and unsafe schemes as text', () => {
