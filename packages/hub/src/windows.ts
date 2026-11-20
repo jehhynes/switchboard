@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
 import type { Session, WindowBinding, WorkItem } from '@switchboard/core';
-import { windowFileKey } from '@switchboard/core';
+import { hostKey, isFolderHost } from '@switchboard/core';
 import { needsYou } from '@switchboard/core/group';
 import { windowItems, windowOf } from './dock.js';
 import type { Snapshot } from './snapshot.js';
@@ -14,19 +15,20 @@ export interface ConversationRef {
 
 /** What a window may see: its conversations, and of the selected one its work item and current session (architecture.md § Window scope). */
 export interface WindowScope {
-  kind: 'item';
+  /** An item window, opened from a workspace file, or a folder window, opened on a plain folder (architecture.md § Window scope). */
+  kind: 'item' | 'folder';
   /** The window key, which every conversation route names. */
   key: string;
-  /** The window's first folder, where a new conversation runs; null before it is known. */
+  /** The window's first folder, or a folder window's canonical folder, where a new conversation runs; null before it is known. */
   folder: string | null;
-  /** The primary work item's ticket title, never an issue number alone. */
+  /** The primary work item's ticket title, never an issue number alone, or a folder window's folder name. */
   title: string;
   /** Rises each time the window's selected conversation or its current session changes, so a command for the earlier one is refused. */
   scopeGen: number;
   /** The primary work item first, then the hosted conversations, newest first. */
   conversations: ConversationRef[];
-  /** The selected conversation's work item. */
-  workItemId: number;
+  /** The selected conversation's work item; null for a folder window with no conversation. */
+  workItemId: number | null;
   /** The selected conversation's current session's folder, or the checkout before its first. */
   cwd: string | null;
   /** The selected conversation's current session, the one started last; null before its first. */
@@ -34,7 +36,7 @@ export interface WindowScope {
 }
 
 export interface WindowScopesDeps {
-  /** The store's window bindings, kept by workspace file, the hosted work items and their sessions. */
+  /** The store's window bindings, kept by workspace file or a folder window's canonical folder, the hosted work items and their sessions. */
   store: {
     windowBinding(file: string): WindowBinding | null;
     setWindowBinding(binding: WindowBinding): void;
@@ -51,8 +53,13 @@ export interface WindowScopesDeps {
 
 interface Window {
   key: string;
-  /** The workspace file of an item window; null for a folder window, which has no binding yet. */
+  /** The workspace file of an item window; null for a folder window. */
   file: string | null;
+  /**
+   * What binds the window and what its hosted conversations name as `hostWindow`: an item window's workspace file or a folder window's canonical
+   * folder; null for a window bound to nothing, such as one whose folder cannot be read.
+   */
+  host: string | null;
   /** The primary work item. */
   workItemId: number | null;
   /** The primary work item's ticket, kept once seen, so its History stays readable after the work item leaves the snapshot. */
@@ -69,28 +76,35 @@ interface Window {
 
 /**
  * The window scope rule (architecture.md § Window scope): each VS Code window gets a key in the `hello` of its `/events` stream, bound to its
- * workspace file. Its conversations are its primary work item, the newest work item of that file's window that is not done, else the newest,
- * and the ad hoc conversations its binding hosts (`Ticket.hostWindow`); never another work item, even one in the same folder. `windowItems`
- * can name several work items for one file, since successive work items of a ticket reuse its worktree, so it is never authority.
+ * workspace file, or for a folder window to its canonical folder. An item window's conversations are its primary work item, the newest work
+ * item of that file's window that is not done, else the newest, and the ad hoc conversations its binding hosts (`Ticket.hostWindow`); a folder
+ * window's are only the ad hoc conversations its folder hosts. Never another work item, even one in the same folder. `windowItems` can name
+ * several work items for one file, since successive work items of a ticket reuse its worktree, so it is never authority.
  */
 export class WindowScopes {
   readonly #windows = new Map<string, Window>();
 
   constructor(private readonly deps: WindowScopesDeps) {}
 
-  /** Registers a window stream and returns its key; the key dies with the stream. */
-  open(file: string | null, snapshot: Snapshot | null): string {
+  /**
+   * Registers a window stream and returns its key; the key dies with the stream. A window with no workspace file that names `folder` is a
+   * folder window, bound to that folder's real path, so every spelling of it, by case or through a link, reaches one binding.
+   */
+  open(file: string | null, snapshot: Snapshot | null, folder: string | null = null): string {
     const key = this.deps.newKey?.() ?? randomBytes(24).toString('hex');
-    const stored = file === null ? null : this.#binding(file);
+    const canonical = file === null && folder !== null ? canonicalFolder(folder) : null;
+    const host = file ?? canonical;
+    const stored = host === null ? null : this.#binding(host);
     const workItemId = stored?.workItemId ?? null;
     // A bound work item that has left the snapshot, such as one done long ago, still names its ticket and title.
     const window: Window = {
       key,
       file,
+      host,
       workItemId,
       ticketId: stored?.ticketId ?? (workItemId === null ? null : (this.deps.store.workItem(workItemId)?.ticketId ?? null)),
-      title: stored?.title ?? '',
-      folder: file === null ? null : workspaceFolder(file),
+      title: stored?.title ?? (canonical === null ? '' : basename(canonical) || canonical),
+      folder: file === null ? canonical : workspaceFolder(file),
       scopeGen: stored?.scopeGen ?? 0,
       selected: stored?.selectedWorkItemId ?? null,
       sessionId: stored?.selectedSessionId ?? null,
@@ -100,7 +114,7 @@ export class WindowScopes {
 
     this.#windows.set(key, window);
 
-    if (file !== null) {
+    if (host !== null) {
       this.#bind(window, snapshot);
     }
 
@@ -117,19 +131,20 @@ export class WindowScopes {
 
   /** Binds every window again in a new snapshot; returns the keys whose selected conversation or its current session changed. */
   update(snapshot: Snapshot): string[] {
-    return [...this.#windows.values()].filter((window) => window.file !== null && this.#bind(window, snapshot)).map((window) => window.key);
+    return [...this.#windows.values()].filter((window) => window.host !== null && this.#bind(window, snapshot)).map((window) => window.key);
   }
 
-  #binding(file: string): WindowBinding | null {
-    return this.deps.store.windowBinding(windowFileKey(file)) ?? this.deps.store.windowBinding(file);
+  #binding(host: string): WindowBinding | null {
+    return this.deps.store.windowBinding(hostKey(host)) ?? this.deps.store.windowBinding(host);
   }
 
   /** The window's primary work item from the snapshot, its conversations and its selection; true when the selection or its session changed. */
   #bind(window: Window, snapshot: Snapshot | null): boolean {
     const before = { primary: window.workItemId, selected: window.selected, sessionId: window.sessionId, ticketId: window.ticketId, title: window.title };
 
-    if (snapshot !== null) {
-      const items = windowItems(snapshot, window.file!, this.deps.windows).sort((a, b) => a.id - b.id);
+    // A folder window has no primary work item: it never lists the item work of its folder.
+    if (snapshot !== null && window.file !== null) {
+      const items = windowItems(snapshot, window.file, this.deps.windows).sort((a, b) => a.id - b.id);
       const bound = items.filter((item) => item.status !== 'done').at(-1) ?? items.at(-1) ?? null;
 
       if (bound !== null) {
@@ -173,12 +188,12 @@ export class WindowScopes {
     const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
 
     window.sessionId = latest?.id ?? null;
-    window.cwd = latest?.cwd ?? (window.selected === window.workItemId ? window.folder : ticket?.repoRoot || window.folder);
+    window.cwd = window.selected === null ? null : (latest?.cwd ?? (window.selected === window.workItemId ? window.folder : ticket?.repoRoot || window.folder));
   }
 
   #save(window: Window): void {
     this.deps.store.setWindowBinding({
-      file: windowFileKey(window.file!),
+      file: hostKey(window.host!),
       workItemId: window.workItemId,
       since: this.deps.now(),
       scopeGen: window.scopeGen,
@@ -194,11 +209,12 @@ export class WindowScopes {
    * and the selected one even when it is done, until another is selected.
    */
   #listed(window: Window): ConversationRef[] {
-    if (window.file === null) {
+    if (window.host === null) {
       return [];
     }
 
-    const hosted = this.deps.store.hostedWorkItems(window.file).filter((item) => item.status !== 'done' || item.id === window.selected);
+    // The store matches hosts without case; a folder host where the file system has case matches only its own spelling.
+    const hosted = this.deps.store.hostedWorkItems(window.host).filter((item) => (item.status !== 'done' || item.id === window.selected) && this.#hosts(window, item.id));
 
     // A deleted primary stays the binding's, for its ticket and title, but is no conversation.
     const primary = window.workItemId !== null && this.deps.store.workItem(window.workItemId) !== null;
@@ -206,15 +222,18 @@ export class WindowScopes {
     return [...(primary ? [{ workItemId: window.workItemId!, primary: true }] : []), ...hosted.filter((item) => item.id !== window.workItemId).map((item) => ({ workItemId: item.id, primary: false }))];
   }
 
-  /** The window's scope, or null for an unknown key or a window with no conversation. */
+  /**
+   * The window's scope, or null for an unknown key, a window bound to nothing, or an item window with no conversation; a folder window has one
+   * even with no conversation, so its view offers the plus.
+   */
   scope(key: string): WindowScope | null {
     const window = this.#windows.get(key);
 
-    if (window === undefined || window.file === null || window.selected === null) {
+    if (window === undefined || window.host === null || (window.file !== null && window.selected === null)) {
       return null;
     }
 
-    return { kind: 'item', key, folder: window.folder, title: window.title, scopeGen: window.scopeGen, conversations: this.#listed(window), workItemId: window.selected, cwd: window.cwd, sessionId: window.sessionId };
+    return { kind: window.file === null ? 'folder' : 'item', key, folder: window.folder, title: window.title, scopeGen: window.scopeGen, conversations: this.#listed(window), workItemId: window.selected, cwd: window.cwd, sessionId: window.sessionId };
   }
 
   /** Whether the key names a connected window. */
@@ -222,9 +241,24 @@ export class WindowScopes {
     return this.#windows.has(key);
   }
 
-  /** The workspace file of the window the key names, or null. */
-  fileOf(key: string): string | null {
-    return this.#windows.get(key)?.file ?? null;
+  /**
+   * The binding of the window the key names, the destination an open or a claim nudge for it names: an item window's workspace file or a folder
+   * window's canonical folder; null for an unknown key or a window bound to nothing.
+   */
+  hostOf(key: string): string | null {
+    return this.#windows.get(key)?.host ?? null;
+  }
+
+  /** The keys of the connected windows bound to `host`, a workspace file or a canonical folder, by any spelling of it. */
+  keysOf(host: string): string[] {
+    return [...this.#windows.values()].filter((window) => window.host !== null && hostKey(window.host) === hostKey(host)).map((window) => window.key);
+  }
+
+  /** The canonical folder of the folder window the key names, or null for an item window, an unknown key or a window bound to nothing. */
+  folderOf(key: string): string | null {
+    const window = this.#windows.get(key);
+
+    return window === undefined || window.file !== null ? null : window.host;
   }
 
   /** Whether the work item is one of the window's conversations. */
@@ -262,7 +296,7 @@ export class WindowScopes {
     const item = this.deps.store.workItem(workItemId);
     const host = item === null ? null : (this.deps.store.ticket(item.ticketId)?.hostWindow ?? null);
 
-    return window.file !== null && host !== null && windowFileKey(host) === windowFileKey(window.file);
+    return window.host !== null && host !== null && hostKey(host) === hostKey(window.host);
   }
 
   /**
@@ -272,7 +306,7 @@ export class WindowScopes {
    */
   selectFor(workItemId: number, hostWindow: string | null): { keys: string[]; selected: boolean } {
     const windows = [...this.#windows.values()].filter((window) =>
-      window.file === null ? false : hostWindow !== null ? windowFileKey(window.file) === windowFileKey(hostWindow) && this.#hosts(window, workItemId) : window.workItemId === workItemId,
+      window.host === null ? false : hostWindow !== null ? hostKey(window.host) === hostKey(hostWindow) && this.#hosts(window, workItemId) : window.workItemId === workItemId,
     );
     let stored = false;
 
@@ -282,10 +316,10 @@ export class WindowScopes {
       const item = this.deps.store.workItem(workItemId);
       const host = item === null ? null : (this.deps.store.ticket(item.ticketId)?.hostWindow ?? null);
 
-      if (binding !== null && host !== null && windowFileKey(host) === windowFileKey(hostWindow)) {
+      if (binding !== null && host !== null && hostKey(host) === hostKey(hostWindow)) {
         const latest = this.deps.store.sessionsFor(workItemId).at(-1);
 
-        this.deps.store.setWindowBinding({ ...binding, file: windowFileKey(hostWindow), scopeGen: binding.scopeGen + 1, selectedWorkItemId: workItemId, selectedSessionId: latest?.id ?? null });
+        this.deps.store.setWindowBinding({ ...binding, file: hostKey(hostWindow), scopeGen: binding.scopeGen + 1, selectedWorkItemId: workItemId, selectedSessionId: latest?.id ?? null });
         stored = true;
       }
     }
@@ -336,6 +370,21 @@ export class WindowScopes {
     }
 
     return window.ticketId === ticketId || window.granted.has(ticketId) || this.#listed(window).some((ref) => this.deps.store.workItem(ref.workItemId)?.ticketId === ticketId);
+  }
+}
+
+/**
+ * A folder window's folder as the hub binds it: its real path, which resolves links and, on Windows, the case of each name, so every spelling
+ * of one folder gives one host; null for a path that is not a readable folder, or one whose name ends in `.code-workspace`, which a host link
+ * would read as an item window's file (`isFolderHost`).
+ */
+export function canonicalFolder(path: string): string | null {
+  try {
+    const real = realpathSync.native(path);
+
+    return statSync(real).isDirectory() && isFolderHost(real) ? real : null;
+  } catch {
+    return null;
   }
 }
 

@@ -47,8 +47,10 @@ export class Artifacts {
 
     // The first time a work item's artifacts are seen in this workspace, they count as opened, so the badge counts only later ones. They are seen
     // once a hello named the folder, not on the scope event before it.
-    if (state.connected && state.scope !== null && state.artifactsDir !== null && this.#opened(state.scope.workItemId) === null) {
-      void this.#record(state.scope.workItemId, Object.fromEntries(state.artifacts.map((artifact) => [artifact.path, artifact.updatedAt]))).then(() => this.changed());
+    const shown = state.scope?.workItemId ?? null;
+
+    if (state.connected && shown !== null && state.artifactsDir !== null && this.#opened(shown) === null) {
+      void this.#record(shown, Object.fromEntries(state.artifacts.map((artifact) => [artifact.path, artifact.updatedAt]))).then(() => this.changed());
     }
 
     this.#panels.update(state);
@@ -84,9 +86,9 @@ export class Artifacts {
         await vscode.commands.executeCommand('vscode.open', uri, { preview: false });
     }
 
-    const workItemId = this.#state.scope?.workItemId;
+    const workItemId = this.#state.scope?.workItemId ?? null;
 
-    if (workItemId !== undefined) {
+    if (workItemId !== null) {
       await this.#record(workItemId, { ...(this.#opened(workItemId) ?? {}), [artifact.path]: artifact.updatedAt });
       this.changed();
     }
@@ -101,9 +103,9 @@ export class Artifacts {
   }
 
   #unopened(): ArtifactView[] {
-    const workItemId = this.#state.scope?.workItemId;
+    const workItemId = this.#state.scope?.workItemId ?? null;
 
-    return workItemId === undefined ? [] : unopened(this.#state.artifacts, this.#opened(workItemId) ?? {});
+    return workItemId === null ? [] : unopened(this.#state.artifacts, this.#opened(workItemId) ?? {});
   }
 }
 

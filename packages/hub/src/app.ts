@@ -4,7 +4,7 @@ import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
-import { hubBundlePath, NEW_CONVERSATION_TITLE, Store, switchboardHome, windowFileKey } from '@switchboard/core';
+import { hostKey, hubBundlePath, NEW_CONVERSATION_TITLE, Store, switchboardHome } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
@@ -235,7 +235,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   let sendDock: (event: string, data: unknown) => number = () => 0;
   let clickDock: (data: unknown) => boolean = () => false;
-  let sendWindows: (event: string, data: unknown, workspace?: string) => number = () => 0;
+  let sendWindows: (event: string, data: unknown, keys?: readonly string[]) => number = () => 0;
   /**
    * Tells the window opened from `workspace` to claim what was left for it, because VS Code reports no focus change when the dock brings an open
    * window forward; a window claims on focus too. Nothing left for any window is announced, because only the window brought forward takes it.
@@ -255,8 +255,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   };
 
   /**
-   * The workspace file of a work item's window, its host's for a hosted conversation, from the store when the snapshot no longer lists it, as for
-   * a History link to a session done long ago; null for a work item with no window.
+   * The destination of a work item's window: its workspace file, its host's for a hosted conversation, which for a folder-hosted one is the host
+   * folder; from the store when the snapshot no longer lists it, as for a History link to a session done long ago; null for a work item with no window.
    */
   const itemWindowFile = (workItemId: number): string | null => {
     const shown = views().snapshot.workItems.find((one) => one.id === workItemId);
@@ -264,7 +264,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     const ticket = item === null ? null : store.ticket(item.ticketId);
     const view = shown ?? (item === null || ticket === null ? null : ({ ...item, ticket, sessions: store.sessionsFor(item.id), worktree: store.worktreeFor(ticket.id) } as unknown as WorkItemView));
 
-    return view === null ? null : (windowOf(view, windows)?.file ?? null);
+    const window = view === null ? null : windowOf(view, windows);
+
+    return window === null ? null : (window.file ?? window.folder ?? null);
   };
 
   /** The attach terminal command for a claimed open of a Code Mode session, which the Claude view refuses (PRD R95); null for any other session. */
@@ -276,10 +278,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     return session === null || ticket === null ? null : codeModeTerminal(ticket, session);
   };
 
-  // Only the destination window's streams hear the nudge (architecture.md § Window scope).
+  // Only the destination window's streams hear the nudge, by the keys bound to it, an item window's file or a folder window's folder (architecture.md § Window scope).
   const askToClaim = (workspace: string | null): void => {
     if (workspace !== null) {
-      sendWindows('claim', { workspace }, workspace);
+      sendWindows('claim', { workspace }, scopes.keysOf(workspace));
     }
   };
   /** Why a write from a Settings window that read another config folder is refused, or null; a body without `configDir` names none. */
@@ -524,11 +526,11 @@ const dockWithRuns = () => {
         // The destination window (architecture.md § Window scope): the window that asked, for a session of its own conversations, else the
         // session's own window, its host's for a hosted conversation. A workspace the caller names must be that window, so no caller can route
         // another work item's session to a window of its choice; only a session the store does not know goes where the caller names.
-        const asker = window !== null && session !== null && scopes.holds(window, session.workItemId) ? scopes.fileOf(window) : null;
+        const asker = window !== null && session !== null && scopes.holds(window, session.workItemId) ? scopes.hostOf(window) : null;
         const own = session === null ? null : itemWindowFile(session.workItemId);
         const named = body['workspace'] ?? null;
 
-        if (asker === null && session !== null && named !== null && (own === null || windowFileKey(named) !== windowFileKey(own))) {
+        if (asker === null && session !== null && named !== null && (own === null || hostKey(named) !== hostKey(own))) {
           return { status: 409, body: { error: 'The session opens only in its own window.' } };
         }
 
@@ -545,7 +547,10 @@ const dockWithRuns = () => {
         deps.log(`session ${sessionId} left for ${workspace}`);
         askToClaim(workspace);
 
-        return { status: 200, body: { recorded: true, workspace } };
+        // `here`: the destination is the asking window, which then claims at once, since it gains no focus; a folder window cannot tell from the path.
+        const mine = window === null ? null : scopes.hostOf(window);
+
+        return { status: 200, body: { recorded: true, workspace, here: mine !== null && hostKey(mine) === hostKey(workspace) } };
       },
       '/history': async (body) => {
         if (!isRecord(body) || !Number.isInteger(body['ticketId']) || typeof body['window'] !== 'string') {
@@ -583,7 +588,7 @@ const dockWithRuns = () => {
 
         const keyed = typeof body['window'] === 'string' && scopes.has(body['window']);
         // A window claims an open only by its key's binding, never by a workspace or folder it names (architecture.md § Window scope).
-        const bound = keyed ? scopes.fileOf(body['window'] as string) : null;
+        const bound = keyed ? scopes.hostOf(body['window'] as string) : null;
         // Commands left for a workspace go only to the window its key binds; a claim with no binding takes only those left for any window.
         const workspace = bound;
         const claimed = windowQueue.claimOpen(bound);
@@ -759,7 +764,8 @@ const dockWithRuns = () => {
       },
     },
     snapshot: () => runtime.snapshot(),
-    windowOpened: (workspace) => scopes.open(workspace, builder.latest()?.snapshot ?? null),
+    windowOpened: (workspace, folder = null) => scopes.open(workspace, builder.latest()?.snapshot ?? null, folder),
+    windowFolder: (key) => scopes.folderOf(key),
     windowClosed: (key) => {
       scopes.close(key);
       conversation.windowClosed();

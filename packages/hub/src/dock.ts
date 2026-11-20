@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { switchboardHome } from '@switchboard/core';
+import { isFolderHost, switchboardHome } from '@switchboard/core';
 import type { OpenTerminal, OpenVSCode, Provider } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
@@ -64,10 +64,15 @@ export interface DockWindow {
   name: string;
   title: string;
   folders: string[];
-  /** The window's `.code-workspace` file, `<Switchboard home>/windows/<name>.code-workspace`. */
-  file: string;
+  /** The window's `.code-workspace` file, `<Switchboard home>/windows/<name>.code-workspace`; null for a folder window, which has none. */
+  file: string | null;
   /** A hosted conversation's host window (architecture.md § Hosted conversations), whose file its primary work item writes, not this row. */
   hosted?: true;
+  /**
+   * A folder-hosted conversation's host: the folder window's canonical folder, opened with `code <folder>` and reached only by a folder window on
+   * it, never by an item window that holds the folder. Set only when `file` is null.
+   */
+  folder?: string;
 }
 
 /** Where the item windows' workspace files are, `<Switchboard home>/windows`. */
@@ -90,28 +95,30 @@ export function workspaceText(window: DockWindow): string {
 /** Writes a window's workspace file when its text differs, because VS Code applies any change to an open window; `written` caches what each file holds. */
 export function writeWorkspaceFile(window: DockWindow, written: Map<string, string> = new Map()): void {
   const text = workspaceText(window);
+  const file = window.file;
 
-  if (written.get(window.file) === text) {
+  // A folder window has no workspace file to write.
+  if (file === null || written.get(file) === text) {
     return;
   }
 
   let current: string | null = null;
 
   try {
-    current = readFileSync(window.file, 'utf8');
+    current = readFileSync(file, 'utf8');
   } catch {
     // A missing file is written.
   }
 
   if (current !== text) {
-    const temporary = `${window.file}.${process.pid}.tmp`;
+    const temporary = `${file}.${process.pid}.tmp`;
 
-    mkdirSync(dirname(window.file), { recursive: true });
+    mkdirSync(dirname(file), { recursive: true });
     writeFileSync(temporary, text);
-    renameSync(temporary, window.file);
+    renameSync(temporary, file);
   }
 
-  written.set(window.file, text);
+  written.set(file, text);
 }
 
 /**
@@ -517,6 +524,10 @@ export function windowOf(item: WorkItemView, windows: string): DockWindow | null
   const host = item.ticket.hostWindow ?? null;
 
   // A hosted conversation has no window of its own: it opens its host's (architecture.md § Hosted conversations).
+  if (host !== null && isFolderHost(host)) {
+    return { name: folderName(host), title: item.ticket.title, folders: [host], file: null, hosted: true, folder: host };
+  }
+
   if (host !== null) {
     const name = (host.split(/[\\/]/).pop() ?? host).replace(/\.code-workspace$/i, '');
 
@@ -547,7 +558,7 @@ export function windowItems(snapshot: Snapshot, file: string, windows: string): 
   return snapshot.workItems.filter((item) => {
     const window = windowOf(item, windows);
 
-    return window !== null && window.hosted !== true && samePath(window.file, file);
+    return window !== null && window.hosted !== true && window.file !== null && samePath(window.file, file);
   });
 }
 

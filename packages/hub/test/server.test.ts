@@ -252,8 +252,8 @@ describe('listenHub routes and state', () => {
     docked.close();
   });
 
-  it('sends a window event named for a workspace file only to the streams of that window, by any spelling of the file', async () => {
-    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}) });
+  it('sends a window event named for window keys only to the streams of those windows', async () => {
+    server = await listenHub({ identity, onShutdown: () => {}, snapshot: () => ({}), dock: () => ({}), windowOpened: (workspace) => `key-${/zoho-(\d)/.exec(workspace!)![1]}` });
 
     const chunks: Record<string, string[]> = { a: [], b: [] };
 
@@ -268,10 +268,11 @@ describe('listenHub routes and state', () => {
     }
 
     await until(() => (server.clients() === 2 ? true : null));
-    expect(server.notifyWindows('claim', { workspace: 'one' }, 'c:\\h\\windows\\ZOHO-1.code-workspace')).toBe(1);
+    expect(server.notifyWindows('claim', { workspace: 'one' }, ['key-1'])).toBe(1);
     await until(() => (chunks['a']!.join('').includes('event: claim') ? true : null));
     expect(chunks['b']!.join('')).not.toContain('event: claim');
-    expect(server.notifyWindows('claim', { workspace: 'none' }, 'C:/h/windows/zoho-3.code-workspace')).toBe(0);
+    expect(server.notifyWindows('claim', { workspace: 'none' }, ['key-3'])).toBe(0);
+    expect(server.notifyWindows('claim', { workspace: 'none' }, [])).toBe(0);
   });
 
   it('sends a window event to the /events streams only, and counts them', async () => {
@@ -379,31 +380,31 @@ describe('listenHub routes and state', () => {
     const focus = (body: unknown) => call(server.port, 'POST', '/window/focus', server.token, 2000, body);
     const item = '/home/op/.switchboard/windows/gh-107-58c609.code-workspace';
 
-    await sees({ open: [], front: null, count: 0 });
+    await sees({ open: [], front: null, count: 0, folders: [] });
 
     const itemWindow = open(`/events?workspace=${encodeURIComponent(item)}&focused=1`);
 
-    await sees({ open: [item], front: item, count: 1 });
+    await sees({ open: [item], front: item, count: 1, folders: [] });
 
     const other = open('/events');
 
-    await sees({ open: [item], front: item, count: 2 });
+    await sees({ open: [item], front: item, count: 2, folders: [] });
     expect((await focus({ workspace: null, focused: true }))?.status).toBe(200);
-    await sees({ open: [item], front: null, count: 2 });
+    await sees({ open: [item], front: null, count: 2, folders: [] });
     // The item window's late blur does not clear the other window's focus.
     await focus({ workspace: item, focused: false });
-    await sees({ open: [item], front: null, count: 2 });
+    await sees({ open: [item], front: null, count: 2, folders: [] });
     await focus({ workspace: item, focused: true });
-    await sees({ open: [item], front: item, count: 2 });
+    await sees({ open: [item], front: item, count: 2, folders: [] });
 
     // A reload opens the window's new stream before the old one closes; the window stays listed once and keeps its focus.
     const reloaded = open(`/events?workspace=${encodeURIComponent(item)}&focused=1`);
 
-    await sees({ open: [item], front: item, count: 3 });
+    await sees({ open: [item], front: item, count: 3, folders: [] });
     itemWindow.close();
-    await sees({ open: [item], front: item, count: 2 });
+    await sees({ open: [item], front: item, count: 2, folders: [] });
     reloaded.close();
-    await sees({ open: [], front: null, count: 1 });
+    await sees({ open: [], front: null, count: 1, folders: [] });
 
     // A report of an earlier change that arrives late changes nothing.
     const later = Date.now() + 60_000;
@@ -416,40 +417,40 @@ describe('listenHub routes and state', () => {
     };
     const again = open(`/events?workspace=${encodeURIComponent(item)}&focused=0&at=${later - 100}`);
 
-    await sees({ open: [item], front: null, count: 2 });
+    await sees({ open: [item], front: null, count: 2, folders: [] });
     await focus({ workspace: item, focused: true, at: later });
-    await sees({ open: [item], front: item, count: 2 });
+    await sees({ open: [item], front: item, count: 2, folders: [] });
     expect((await focus({ workspace: null, focused: true, at: later - 1 }))?.status).toBe(200);
     expect((await focus({ workspace: item, focused: false, at: later - 1 }))?.status).toBe(200);
     await resent();
-    await sees({ open: [item], front: item, count: 2 });
+    await sees({ open: [item], front: item, count: 2, folders: [] });
     await focus({ workspace: null, focused: true, at: later + 1 });
-    await sees({ open: [item], front: null, count: 2 });
+    await sees({ open: [item], front: null, count: 2, folders: [] });
 
     // A window that is not an item window has no workspace, as no front has none; its blur does not hold back the item window's earlier focus.
     await focus({ workspace: null, focused: false, at: later + 30 });
     await focus({ workspace: item, focused: true, at: later + 20 });
-    await sees({ open: [item], front: item, count: 2 });
+    await sees({ open: [item], front: item, count: 2, folders: [] });
 
     // A window's blur that arrives before its own earlier focus leaves that focus ignored.
     await focus({ workspace: item, focused: false, at: later + 50 });
     await focus({ workspace: item, focused: true, at: later + 40 });
     await resent();
-    await sees({ open: [item], front: null, count: 2 });
+    await sees({ open: [item], front: null, count: 2, folders: [] });
 
     // A stream opens with the time the window read its focus, so an older reading does not take the front.
     const stale = open(`/events?workspace=${encodeURIComponent(item)}&focused=1&at=${later}`);
 
-    await sees({ open: [item], front: null, count: 3 });
+    await sees({ open: [item], front: null, count: 3, folders: [] });
     stale.close();
-    await sees({ open: [item], front: null, count: 2 });
+    await sees({ open: [item], front: null, count: 2, folders: [] });
 
     // A report that arrives after its window's stream closed does not bring the window back.
     again.close();
-    await sees({ open: [], front: null, count: 1 });
+    await sees({ open: [], front: null, count: 1, folders: [] });
     expect((await focus({ workspace: item, focused: true, at: later + 100 }))?.status).toBe(200);
     await resent();
-    await sees({ open: [], front: null, count: 1 });
+    await sees({ open: [], front: null, count: 1, folders: [] });
 
     expect((await focus({ workspace: item, focused: true, at: 'now' }))?.status).toBe(400);
     expect((await focus({ workspace: 3, focused: true }))?.status).toBe(400);
@@ -457,6 +458,98 @@ describe('listenHub routes and state', () => {
     expect((await call(server.port, 'POST', '/window/focus', null, 2000, { workspace: item, focused: true }))?.status).toBe(401);
     other.close();
     docked.close();
+  });
+
+  it("hands a folder window's folder to the app, and tells two folder windows' focus apart by their keys", async () => {
+    const opened: Array<[string | null, string | null]> = [];
+    server = await listenHub({
+      identity,
+      onShutdown: () => {},
+      snapshot: () => ({}),
+      dock: () => ({ d: 1 }),
+      windowOpened: (workspace, folder) => {
+        opened.push([workspace, folder]);
+        return `key-${opened.length}`;
+      },
+      // The app answers a folder window's canonical folder; an item window has none.
+      windowFolder: (key) => ({ 'key-1': 'D:\\git\\support', 'key-2': 'D:\\git\\other', 'key-4': 'D:\\git\\support' } as Record<string, string>)[key] ?? null,
+    });
+    const docked: string[] = [];
+    const dock = request({ host: '127.0.0.1', port: server.port, path: '/dock/events', headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => docked.push(chunk));
+    });
+
+    dock.on('error', () => {});
+    dock.end();
+    await until(() => (server.clients() === 1 ? true : null));
+
+    const streams: Array<{ destroy(): void }> = [dock];
+    const open = async (path: string) => {
+      const expected = server.clients() + 1;
+      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => response.resume());
+
+      outbound.on('error', () => {});
+      outbound.end();
+      streams.push(outbound);
+      await until(() => (server.clients() === expected ? true : null));
+      return outbound;
+    };
+    const focus = (body: unknown) => call(server.port, 'POST', '/window/focus', server.token, 2000, body);
+    const item = 'C:/h/windows/gh-1.code-workspace';
+
+    await open(`/events?folder=${encodeURIComponent('D:/git/support')}&focused=0`);
+    await open(`/events?folder=${encodeURIComponent('D:/git/other')}&focused=0`);
+    // An item window's folder is never read: its workspace file binds it.
+    await open(`/events?workspace=${encodeURIComponent(item)}&folder=${encodeURIComponent('D:/git/support')}&focused=0`);
+    expect(opened).toEqual([[null, 'D:/git/support'], [null, 'D:/git/other'], [item, null]]);
+    expect(server.focusedWindow()).toBeNull();
+    // The dock learns which folders have a folder window, which a folder-hosted row's click waits for.
+    await until(() => (docked.join('').includes('"folders":["D:\\\\git\\\\support","D:\\\\git\\\\other"]') ? true : null));
+
+    expect((await focus({ window: 'key-1', focused: true }))?.status).toBe(200);
+    expect(server.focusedWindow()).toBe('key-1');
+    await focus({ window: 'key-2', focused: true });
+    expect(server.focusedWindow()).toBe('key-2');
+    // The first folder window's late blur does not clear the second's focus; the second's own blur does.
+    await focus({ window: 'key-1', focused: false });
+    expect(server.focusedWindow()).toBe('key-2');
+    await focus({ window: 'key-3', focused: true });
+    expect(server.focusedWindow()).toBe('key-3');
+    await focus({ window: 'key-2', focused: true });
+    await focus({ window: 'key-2', focused: false });
+    expect(server.focusedWindow()).toBeNull();
+
+    // A key no stream holds brings no window to the front, and a key that is not a string is refused.
+    await focus({ window: 'forged', focused: true });
+    expect(server.focusedWindow()).toBeNull();
+    expect((await focus({ window: 3, focused: true }))?.status).toBe(400);
+
+    // A second, unfocused stream on the same folder does not inherit the focus when the focused one closes.
+    const settled = server.clients();
+    const second = await open(`/events?folder=${encodeURIComponent('D:/git/support')}&focused=0`);
+
+    await focus({ window: 'key-1', focused: true });
+    expect(server.focusedWindow()).toBe('key-1');
+    streams[1]!.destroy();
+    await until(() => (server.focusedWindow() === null ? true : null));
+    second.destroy();
+    await until(() => (server.clients() === settled - 1 ? true : null));
+
+    // A newer stream's focus report older than the front's last change is rejected, and so never wins the hand-off either.
+    const later = Date.now() + 60_000;
+    const third = await open(`/events?folder=${encodeURIComponent('D:/git/other')}&focused=0`);
+
+    await focus({ window: 'key-2', focused: true, at: later + 100 });
+    await focus({ window: 'key-5', focused: true, at: later });
+    expect(server.focusedWindow()).toBe('key-2');
+    streams[2]!.destroy();
+    await until(() => (server.focusedWindow() === null ? true : null));
+    third.destroy();
+
+    for (const stream of streams) {
+      stream.destroy();
+    }
   });
 
   it("drops a closed window from the front, and still takes another window's focus that happened before the close but arrives after it", async () => {
@@ -478,20 +571,20 @@ describe('listenHub routes and state', () => {
 
     itemWindow.on('error', () => {});
     itemWindow.end();
-    await sees({ open: [a], front: a, count: 1 });
+    await sees({ open: [a], front: a, count: 1, folders: [] });
 
     const b = '/w/b.code-workspace';
     const other = request({ host: '127.0.0.1', port: server.port, path: `/events?workspace=${encodeURIComponent(b)}&focused=0&at=1010`, headers: { Authorization: `Bearer ${server.token}` } });
 
     other.on('error', () => {});
     other.end();
-    await sees({ open: [a, b], front: a, count: 2 });
+    await sees({ open: [a, b], front: a, count: 2, folders: [] });
     clock = 1_100;
     itemWindow.destroy();
-    await sees({ open: [b], front: null, count: 1 });
+    await sees({ open: [b], front: null, count: 1, folders: [] });
     // B gained focus at 1060, before A's stream closed at 1100.
     await call(server.port, 'POST', '/window/focus', server.token, 2000, { workspace: b, focused: true, at: 1_060 });
-    await sees({ open: [b], front: b, count: 1 });
+    await sees({ open: [b], front: b, count: 1, folders: [] });
     other.destroy();
     docked.destroy();
   });

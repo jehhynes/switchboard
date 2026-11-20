@@ -2,7 +2,6 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { HubIdentity } from '@switchboard/core';
-import { windowFileKey } from '@switchboard/core';
 
 export interface Reply {
   status: number;
@@ -19,8 +18,13 @@ export interface HubServerOptions {
    * window's scoped snapshot (architecture.md § Window scope). Undefined sends nothing, as before the first build.
    */
   snapshot?: (window: { workspace: string | null; key: string | null }) => unknown;
-  /** Registers a window's `/events` stream and returns the window key its `hello` carries. */
-  windowOpened?: (workspace: string | null) => string;
+  /**
+   * Registers a window's `/events` stream and returns the window key its `hello` carries: an item window names its workspace file, a folder
+   * window, which has none, its folder.
+   */
+  windowOpened?: (workspace: string | null, folder: string | null) => string;
+  /** The canonical folder of the folder window a key names, or null, for the dock's `windows.folders`. */
+  windowFolder?: (key: string) => string | null;
   /** The window's `/events` stream closed, so its key dies. */
   windowClosed?: (key: string) => void;
   /** Opens a window's conversation stream for its key, writing each SSE frame; null for a key no window holds. */
@@ -45,8 +49,10 @@ export interface HubServer {
   update(): void;
   /** Sends an event to every `/dock/events` stream, such as `show` or `config`; returns how many streams it reached. */
   notifyDock(event: string, data: unknown): number;
-  /** Sends an event to every `/events` stream, or with `workspace` only to that window's, such as `claim`; returns how many streams it reached. */
-  notifyWindows(event: string, data: unknown, workspace?: string): number;
+  /** Sends an event to every `/events` stream, or with `keys` only to the streams of those window keys, such as `claim`; returns how many streams it reached. */
+  notifyWindows(event: string, data: unknown, keys?: readonly string[]): number;
+  /** The key of the window that last gained focus and still has it, item or folder window, or null (architecture.md § Window scope). */
+  focusedWindow(): string | null;
   /**
    * Sends a `click` event to the newest `/dock/events` stream opened with `?click=1`, so one dock runs a click VS Code forwards (PRD R65, R69);
    * returns whether one was open.
@@ -66,10 +72,12 @@ type View = 'window' | 'dock' | 'conversation';
 export interface OpenWindows {
   /** The workspace files of connected item windows, in the order they connected. */
   open: string[];
-  /** The workspace file of the item window that last gained focus and still has it, or null. */
+  /** The workspace file of the item window that last gained focus and still has it; null while a folder window or none has it. */
   front: string | null;
   /** Connected windows, item windows or not. */
   count: number;
+  /** The canonical folders of connected folder windows, which reach a folder-hosted conversation's destination (architecture.md § Dock). */
+  folders: string[];
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -120,12 +128,20 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const workspaces = new Map<ServerResponse, string | null>();
   // Each window stream's key, when the app issues them.
   const keys = new Map<ServerResponse, string>();
-  let front: string | null = null;
+  // Each window stream's folder, for a folder window, so a reload's new stream takes over the focus of its old one.
+  const folders = new Map<ServerResponse, string | null>();
+  // The window stream in front, reported by its key, so two folder windows, which have no workspace file, are told apart.
+  let front: ServerResponse | null = null;
   // When the focus change that set `front` happened, and each window's latest reported change, so a report that arrives late changes nothing.
   let frontAt = -Infinity;
   let theme: 'light' | 'dark' | undefined;
   let themeAt = -Infinity;
-  const reportedAt = new Map<string | null, number>();
+  const reportedAt = new Map<ServerResponse, number>();
+  // Each window stream's latest applied focus report, and the order streams opened, so only a newer stream of a reloaded window, still focused,
+  // takes over the focus when the old one closes.
+  const focusedNow = new Map<ServerResponse, boolean>();
+  const openedAt = new Map<ServerResponse, number>();
+  let opened = 0;
 
   let emptySince: number | null = now();
 
@@ -135,7 +151,12 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     return given.length === expected.length && timingSafeEqual(given, expected);
   };
 
-  const openWindows = (): OpenWindows => ({ open: [...new Set([...workspaces.values()].filter((file): file is string => file !== null))], front, count: workspaces.size });
+  const openWindows = (): OpenWindows => ({
+    open: [...new Set([...workspaces.values()].filter((file): file is string => file !== null))],
+    front: front === null ? null : (workspaces.get(front) ?? null),
+    count: workspaces.size,
+    folders: [...new Set([...keys].flatMap(([stream, key]) => (workspaces.has(stream) && workspaces.get(stream) === null ? [options.windowFolder?.(key) ?? null] : [])).filter((folder): folder is string => folder !== null))],
+  });
   const dock = options.dock;
   const views: Record<Exclude<View, 'conversation'>, { event: string; data: ((stream: ServerResponse) => unknown) | undefined }> = {
     window: { event: 'state', data: options.snapshot === undefined ? undefined : (stream) => options.snapshot!({ workspace: workspaces.get(stream) ?? null, key: keys.get(stream) ?? null }) },
@@ -170,29 +191,44 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
   };
 
-  const focus = (workspace: string | null, focused: boolean, at: number): void => {
-    const last = reportedAt.get(workspace) ?? -Infinity;
+  /** A window stream's focus change; null for a report that names no connected window, which counts only as a blur of none. */
+  const focus = (stream: ServerResponse | null, focused: boolean, at: number): void => {
+    const last = stream === null ? -Infinity : (reportedAt.get(stream) ?? -Infinity);
 
-    reportedAt.set(workspace, Math.max(last, at));
+    if (stream !== null) {
+      reportedAt.set(stream, Math.max(last, at));
+
+      // A report the front rejects as older than its last change counts as no focus, so it never wins a hand-off.
+      if (at >= last) {
+        focusedNow.set(stream, focused && at >= frontAt);
+      }
+    }
 
     if (at < last || at < frontAt) {
       return;
     }
 
-    // A window that is not an item window has no workspace, as no front has none, so only an item window's blur clears the front.
+    // A focus report with no window, as from a window with neither workspace file nor key, clears the front, as another app's window would.
     if (focused) {
-      front = workspace;
+      front = stream;
       frontAt = at;
-    } else if (workspace !== null && front === workspace) {
+    } else if (stream !== null && front === stream) {
       front = null;
       frontAt = at;
     }
   };
+  /** The same window, reloaded: a stream with the same workspace file, or for a folder window the same folder, named the same way. */
+  const sameWindow = (a: ServerResponse, b: ServerResponse): boolean =>
+    workspaces.get(a) != null ? workspaces.get(a) === workspaces.get(b) : folders.get(a) != null && workspaces.get(b) == null && folders.get(a) === folders.get(b);
 
-  /** A window stream's `workspace` names its workspace file, `focused=1` says it has focus, and `at` is when the window read its focus. */
+  /**
+   * A window stream's `workspace` names its workspace file, or for a folder window, which has none, `folder` its folder; `focused=1` says it has
+   * focus, and `at` is when the window read its focus.
+   */
   const openStream = (request: IncomingMessage, response: ServerResponse, view: View, query?: URLSearchParams): void => {
     const workspace = view === 'window' ? query?.get('workspace') || null : null;
-    const key = view === 'window' ? (options.windowOpened?.(workspace) ?? null) : null;
+    const folder = view === 'window' && workspace === null ? query?.get('folder') || null : null;
+    const key = view === 'window' ? (options.windowOpened?.(workspace, folder) ?? null) : null;
 
     if (key !== null) {
       keys.set(response, key);
@@ -200,6 +236,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     if (view === 'window') {
       workspaces.set(response, workspace);
+      folders.set(response, folder);
+      openedAt.set(response, ++opened);
     }
 
     response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -215,7 +253,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     if (view === 'window') {
       const at = Number(query?.get('at'));
 
-      focus(workspace, query?.get('focused') === '1', Number.isFinite(at) && query?.get('at') ? at : now());
+      focus(response, query?.get('focused') === '1', Number.isFinite(at) && query?.get('at') ? at : now());
       windowsChanged();
     }
 
@@ -232,16 +270,17 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       }
 
       if (workspaces.has(response)) {
-        const workspace = workspaces.get(response)!;
-
-        workspaces.delete(response);
-
         // A reloaded window opens its new stream before the old one closes, and keeps its focus. A closed window leaves the front without
         // setting its time, so another window's focus that happened earlier but arrives later still applies.
-        if (front === workspace && ![...workspaces.values()].includes(workspace)) {
-          front = null;
+        if (front === response) {
+          front = [...workspaces.keys()].reverse().find((stream) => openedAt.get(stream)! > openedAt.get(response)! && focusedNow.get(stream) === true && sameWindow(response, stream)) ?? null;
         }
 
+        workspaces.delete(response);
+        folders.delete(response);
+        reportedAt.delete(response);
+        focusedNow.delete(response);
+        openedAt.delete(response);
         windowsChanged();
       }
 
@@ -326,16 +365,20 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     } else if (request.method === 'POST' && path === '/window/focus') {
       readJson(request).then(
         (body) => {
-          const { workspace, focused, at } = (body ?? {}) as { workspace?: unknown; focused?: unknown; at?: unknown };
+          const { window, workspace, focused, at } = (body ?? {}) as { window?: unknown; workspace?: unknown; focused?: unknown; at?: unknown };
 
-          if ((workspace !== null && typeof workspace !== 'string') || typeof focused !== 'boolean' || (at !== undefined && typeof at !== 'number')) {
-            json(response, 400, { error: 'Expected {workspace, focused, at?} with workspace a path or null and at the epoch milliseconds of the change.' });
+          if ((window !== undefined && typeof window !== 'string') || (workspace !== undefined && workspace !== null && typeof workspace !== 'string') || typeof focused !== 'boolean' || (at !== undefined && typeof at !== 'number')) {
+            json(response, 400, { error: 'Expected {window, focused, at?} with window the key of its stream and at the epoch milliseconds of the change.' });
           } else {
-            const file = workspace === '' ? null : workspace;
+            // A window reports by its key; a window older than keys by its workspace file, the newest stream of that file.
+            const file = workspace === '' ? null : (workspace ?? null);
+            const stream =
+              typeof window === 'string' ? ([...keys].find(([, key]) => key === window)?.[0] ?? null) : file === null ? null : ([...workspaces].reverse().find(([, one]) => one === file)?.[0] ?? null);
+            const named = typeof window === 'string' || file !== null;
 
             // A report that arrives after its window's stream closed does not bring the window back.
-            if (file === null || !focused || [...workspaces.values()].includes(file)) {
-              focus(file, focused, at ?? now());
+            if (!named || stream !== null || !focused) {
+              focus(stream, focused, at ?? now());
               windowsChanged();
             }
 
@@ -363,13 +406,13 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
   });
 
-  const notify = (to: View, event: string, data: unknown, workspace?: string): number => {
+  const notify = (to: View, event: string, data: unknown, only?: readonly string[]): number => {
     let sent = 0;
 
     for (const [stream, view] of streams) {
-      const file = workspaces.get(stream) ?? null;
+      const key = keys.get(stream);
 
-      if (view === to && (workspace === undefined || (file !== null && windowFileKey(file) === windowFileKey(workspace)))) {
+      if (view === to && (only === undefined || (key !== undefined && only.includes(key)))) {
         stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         sent++;
       }
@@ -418,7 +461,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
           }
         },
         notifyDock: (event, data) => notify('dock', event, data),
-        notifyWindows: (event, data, workspace) => notify('window', event, data, workspace),
+        notifyWindows: (event, data, only) => notify('window', event, data, only),
+        focusedWindow: () => (front === null ? null : (keys.get(front) ?? null)),
         clickDock: (data) => {
           const stream = clickStreams.at(-1);
 

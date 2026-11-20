@@ -1556,7 +1556,7 @@ export class Store {
 
   /** The work items of the ad hoc tickets a window binding hosts (`Ticket.hostWindow`, compared by `windowFileKey`), newest first. */
   hostedWorkItems(file: string): WorkItem[] {
-    return this.#all<WorkItem>("SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE lower(replace(t.hostWindow, '\\', '/')) = ? ORDER BY w.id DESC", windowFileKey(file));
+    return this.#all<WorkItem>("SELECT w.* FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE rtrim(lower(replace(t.hostWindow, '\\', '/')), '/') = ? ORDER BY w.id DESC", windowFileKey(file));
   }
 
   #replyRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationReply[] {

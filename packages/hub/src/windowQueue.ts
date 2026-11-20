@@ -1,4 +1,5 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { hostKey } from '@switchboard/core';
 
 /** How long a pending open or window command waits for its window. */
 export const OPEN_CLAIM_MS = 2 * 60_000;
@@ -177,6 +178,7 @@ function sameWorkspace(a: string | null, b: string | null): boolean {
   return a === null || b === null ? a === b : folderKey(a) === folderKey(b);
 }
 
+/** A destination compared as a window binding is (`hostKey`), so a folder destination keeps its case where the file system does. */
 function folderKey(path: string): string {
-  return path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+  return hostKey(path);
 }

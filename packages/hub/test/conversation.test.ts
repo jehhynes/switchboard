@@ -1,13 +1,13 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PERMISSION_PROMPT, Store, windowFileKey } from '@switchboard/core';
 import type { Session as StoredSession } from '@switchboard/core';
 import { projectSlug } from '@switchboard/claude';
 import { ConversationService, sessionView } from '../src/conversation.js';
 import { windowOf } from '../src/dock.js';
-import { WindowScopes } from '../src/windows.js';
+import { canonicalFolder, WindowScopes } from '../src/windows.js';
 import { NOW, item, session, snapshot } from './views.js';
 
 let dir: string;
@@ -28,8 +28,8 @@ function world() {
   const done = item(1, { status: 'done', worktree: worktree('D:/w12'), sessions: [session({ id: 's1', workItemId: 1, cwd: 'D:/w12', state: 'ended' })] });
   const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree('D:/w12'), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: 'D:/w12', codeMode: true, nativeSessionId: 'n2' })] });
   const other = item(3, { worktree: worktree('D:/w3'), sessions: [session({ id: 's3', workItemId: 3, cwd: 'D:/w3', codeMode: true, nativeSessionId: 'n3' })] });
-  const file = windowOf(current, WINDOWS)!.file;
-  const otherFile = windowOf(other, WINDOWS)!.file;
+  const file = windowOf(current, WINDOWS)!.file!;
+  const otherFile = windowOf(other, WINDOWS)!.file!;
 
   return { done, current, other, file, otherFile, view: snapshot([done, current, other]) };
 }
@@ -371,6 +371,176 @@ class FakeHeld {
     return this.cannotType_;
   }
 }
+
+describe('folder-hosted conversations (architecture.md § Window scope)', () => {
+  function setup(made?: (hostWindow: string, folder: string) => { workItemId: number } | { refused: string }) {
+    const store = Store.open(':memory:');
+    let keys = 0;
+    const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });
+    let id = 0;
+    const service = new ConversationService({
+      store,
+      windows: scopes,
+      projectsDir: join(dir, 'projects'),
+      claudeConfig: join(dir, '.claude.json'),
+      screen: async () => null,
+      input: new FakeHeld(),
+      hooks: () => true,
+      now: () => NOW,
+      newId: () => String(++id),
+      ...(made === undefined ? {} : { newConversation: made }),
+      log: () => {},
+    });
+    // Support runs every work item in one folder with no worktree: two item windows on it, and a link to it.
+    const support = join(dir, 'support');
+    const link = join(dir, 'support-link');
+    const elsewhere = join(dir, 'elsewhere');
+
+    mkdirSync(support);
+    mkdirSync(elsewhere);
+    symlinkSync(support, link, 'junction');
+
+    const first = item(1, { sessions: [session({ id: 's1', workItemId: 1, cwd: support, codeMode: true, nativeSessionId: 'n1' })] });
+    const second = item(2, { sessions: [session({ id: 's2', workItemId: 2, cwd: support, codeMode: true, nativeSessionId: 'n2' })] });
+    const view = snapshot([first, second]);
+
+    for (const one of [first, second]) {
+      const ticket = store.insertTicket({ ...one.ticket, adhocKey: null } as never);
+
+      store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: one.status, createdAt: NOW } as never);
+      store.insertSession(one.sessions[0] as StoredSession);
+    }
+
+    /** An ad hoc conversation hosted by `host`, run in `folder`, as the flow makes one. */
+    const host = (hostWindow: string, sessionId: string, folder = support) => {
+      const ticket = store.insertTicket({ source: 'adhoc', sourceKey: sessionId, ref: `#${sessionId}`, sourceId: null, title: 'New session', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: NOW, lastPolledAt: null, repoRoot: folder, hostWindow });
+      const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: NOW } as never);
+
+      store.insertSession(session({ id: sessionId, workItemId: workItem.id, cwd: folder, codeMode: true, nativeSessionId: `n-${sessionId}`, state: 'idle' }) as StoredSession);
+
+      return workItem.id;
+    };
+    const frames = (key: string) => {
+      const seen: Array<{ type: string; [field: string]: unknown }> = [];
+
+      service.open(key, (frame) => seen.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!) as { type: string }));
+
+      return seen;
+    };
+
+    return { store, scopes, service, view, support: canonicalFolder(support)!, link, elsewhere: canonicalFolder(elsewhere)!, files: [windowOf(first, WINDOWS)!.file!, windowOf(second, WINDOWS)!.file!], host, frames };
+  }
+
+  it("lists only the conversations its folder hosts, never the folder's item work, and item windows on that folder list none of them", () => {
+    const { scopes, service, view, support, files, host, frames } = setup();
+    const inFolder = host(support, 'f1');
+    const inItem = host(files[0]!, 'a1');
+    const folder = scopes.open(null, view, support);
+    const item1 = scopes.open(files[0]!, view);
+    const item2 = scopes.open(files[1]!, view);
+
+    expect(scopes.scope(folder)).toEqual({ kind: 'folder', key: folder, folder: support, title: 'support', scopeGen: 1, conversations: [{ workItemId: inFolder, primary: false }], workItemId: inFolder, cwd: support, sessionId: 'f1' });
+    expect(scopes.scoped(folder, view).workItems).toEqual([]);
+    expect(scopes.scope(item1)?.conversations).toEqual([{ workItemId: 1, primary: true }, { workItemId: inItem, primary: false }]);
+    expect(scopes.scope(item2)?.conversations).toEqual([{ workItemId: 2, primary: true }]);
+    expect(frames(folder)[0]).toMatchObject({ type: 'hello', scope: { kind: 'folder', conversations: [{ workItemId: inFolder, title: 'New session', sessionId: 'f1' }] }, sessions: [{ id: 'f1' }] });
+
+    // Neither side reaches the other's work: select, history and send are refused both ways.
+    for (const [key, workItemId] of [[folder, 1], [folder, inItem], [item1, inFolder], [item2, inFolder]] as const) {
+      expect(service.select({ window: key, scopeGen: 1, opId: `o-${key}-${workItemId}`, workItemId })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    }
+
+    expect(service.history({ window: folder, scopeGen: 1, opId: 'h1', sessionId: 's1', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: item1, scopeGen: 1, opId: 'h2', sessionId: 'f1', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.send({ window: item2, scopeGen: 1, opId: 'h3', sessionId: 'f1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(scopes.allowsTicket(folder, 1, view)).toBe(false);
+  });
+
+  it('reaches one host from every spelling of the folder, by a link or in another case, and none from a path that is no folder', () => {
+    const { scopes, view, support, link, host } = setup();
+    const inFolder = host(support, 'f1');
+    const spellings = [link, `${support}${sep}`, ...(process.platform === 'win32' ? [support.toUpperCase(), support.toLowerCase()] : [])];
+
+    for (const spelling of spellings) {
+      const key = scopes.open(null, view, spelling);
+
+      expect(scopes.hostOf(key)).toBe(support);
+      expect(scopes.scope(key)?.conversations).toEqual([{ workItemId: inFolder, primary: false }]);
+    }
+
+    expect(scopes.keysOf(support.toLowerCase())).toHaveLength(spellings.length);
+
+    writeFileSync(join(dir, 'a.txt'), '');
+
+    const missing = scopes.open(null, view, join(dir, 'missing'));
+    const file = scopes.open(null, view, join(dir, 'a.txt'));
+
+    expect(scopes.scope(missing)).toBeNull();
+    expect(scopes.hostOf(missing)).toBeNull();
+    expect(scopes.scope(scopes.open(null, view))).toBeNull();
+    expect(scopes.scope(file)).toBeNull();
+  });
+
+  it('keeps two folders that differ only in case apart where the file system has case, and refuses a folder named like a workspace file', () => {
+    const { scopes, view, support, host } = setup();
+    const shouting = host(support.toUpperCase(), 'f1');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+
+    try {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      expect(scopes.scope(scopes.open(null, view, support))?.conversations).toEqual([]);
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      expect(scopes.scope(scopes.open(null, view, support))?.conversations).toEqual([{ workItemId: shouting, primary: false }]);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+
+    mkdirSync(join(dir, 'odd.code-workspace'));
+    expect(canonicalFolder(join(dir, 'odd.code-workspace'))).toBeNull();
+    expect(scopes.scope(scopes.open(null, view, join(dir, 'odd.code-workspace')))).toBeNull();
+  });
+
+  it('gives an empty folder a scope with no selection, and makes a conversation there hosted by the folder and run in it', () => {
+    const calls: Array<[string, string]> = [];
+    const context = setup((hostWindow, folder) => {
+      calls.push([hostWindow, folder]);
+
+      return { workItemId: context.host(hostWindow, `n${calls.length}`, folder) };
+    });
+    const { scopes, service, view, elsewhere, frames } = context;
+    const key = scopes.open(null, view, elsewhere);
+    const seen = frames(key);
+
+    expect(scopes.scope(key)).toEqual({ kind: 'folder', key, folder: elsewhere, title: 'elsewhere', scopeGen: 0, conversations: [], workItemId: null, cwd: null, sessionId: null });
+    expect(seen[0]).toMatchObject({ type: 'hello', scope: { kind: 'folder', conversations: [], workItemId: null }, sessions: [], items: [], status: null, artifacts: [] });
+    expect(service.send({ window: key, scopeGen: 0, opId: 'x', sessionId: 's1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+
+    expect(service.newConversation({ window: key, scopeGen: 0, opId: 'new-1' })).toEqual({ status: 200, body: { workItemId: 3 } });
+    expect(calls).toEqual([[elsewhere, elsewhere]]);
+    expect(scopes.scope(key)).toMatchObject({ kind: 'folder', workItemId: 3, sessionId: 'n1', cwd: elsewhere, scopeGen: 1, conversations: [{ workItemId: 3, primary: false }] });
+    expect(seen.slice(-2)).toMatchObject([{ type: 'scope', scope: { workItemId: 3 } }, { type: 'hello', sessions: [{ id: 'n1' }] }]);
+    expect(service.newConversation({ window: key, scopeGen: 1, opId: 'new-1' })).toEqual({ status: 200, body: { workItemId: 3 } });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps a dock row's selection for a folder window not open yet, selects it in an open one, and never in an item window on that folder", () => {
+    const { scopes, store, view, support, link, files, host } = setup();
+    const older = host(support, 'f1');
+    const newer = host(support, 'f2');
+    const folder = scopes.open(null, view, support);
+    const item1 = scopes.open(files[0]!, view);
+
+    expect(scopes.scope(folder)).toMatchObject({ workItemId: newer, scopeGen: 1 });
+    expect(scopes.selectFor(older, support)).toEqual({ keys: [folder], selected: true });
+    expect(scopes.scope(folder)).toMatchObject({ workItemId: older, scopeGen: 2 });
+    expect(scopes.scope(item1)).toMatchObject({ workItemId: 1, scopeGen: 1 });
+
+    scopes.close(folder);
+    expect(scopes.selectFor(newer, support)).toEqual({ keys: [], selected: true });
+    expect(store.windowBinding(windowFileKey(support))).toMatchObject({ workItemId: null, selectedWorkItemId: newer, selectedSessionId: 'f2', scopeGen: 3 });
+    expect(scopes.scope(scopes.open(null, view, link))).toMatchObject({ kind: 'folder', workItemId: newer, scopeGen: 3 });
+  });
+});
 
 describe('ConversationService', () => {
   function setup(held = new FakeHeld()) {
@@ -955,7 +1125,7 @@ describe('ConversationService artifacts', () => {
     const done = item(1, { status: 'done', worktree: worktree(w12), sessions: [session({ id: 's1', workItemId: 1, cwd: w12, state: 'ended' })] });
     const current = item(2, { ticketId: 1, ticket: { ...done.ticket }, worktree: worktree(w12), status: 'blocked', sessions: [session({ id: 's2', workItemId: 2, cwd: w12, codeMode: true, nativeSessionId: 'n2' })] });
     const other = item(3, { worktree: worktree(w3), sessions: [session({ id: 's3', workItemId: 3, cwd: w3, codeMode: true, nativeSessionId: 'n3' })] });
-    const view = { done, current, other, file: windowOf(current, WINDOWS)!.file, otherFile: windowOf(other, WINDOWS)!.file, view: snapshot([done, current, other]) };
+    const view = { done, current, other, file: windowOf(current, WINDOWS)!.file!, otherFile: windowOf(other, WINDOWS)!.file!, view: snapshot([done, current, other]) };
     const store = Store.open(':memory:');
     let keys = 0;
     const scopes = new WindowScopes({ store, windows: WINDOWS, now: () => NOW, newKey: () => `k${++keys}` });

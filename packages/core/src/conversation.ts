@@ -121,6 +121,25 @@ export interface WindowBinding {
   title?: string | null;
 }
 
+/**
+ * Whether a host link or a window binding names a folder window's canonical folder rather than an item window's workspace file
+ * (architecture.md § Window scope): item windows' files always end in `.code-workspace`.
+ */
+export function isFolderHost(host: string): boolean {
+  return !/\.code-workspace$/i.test(host.replace(/[\\/]+$/, ''));
+}
+
+/**
+ * How a window binding or a host link is compared: `windowFileKey`, except that a folder host keeps its case where the file system does, off
+ * Windows and macOS, so two Linux folders that differ only in case stay two hosts (architecture.md § Window scope).
+ */
+export function hostKey(host: string): string {
+  const platform = (globalThis as { process?: { platform?: string } }).process?.platform;
+
+  // A POSIX folder name may hold a backslash, so only a trailing separator is dropped there.
+  return isFolderHost(host) && platform !== 'win32' && platform !== 'darwin' ? host.replace(/(.)\/+$/, '$1') : windowFileKey(host);
+}
+
 /** How a workspace file is kept as a window binding and a host link: forward slashes, no trailing slash, lower case, so spellings of one file match. */
 export function windowFileKey(file: string): string {
   return file.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();

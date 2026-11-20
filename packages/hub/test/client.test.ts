@@ -70,7 +70,7 @@ describe('openEvents', () => {
       const file = '/home/op/.switchboard/windows/gh-1 2.code-workspace';
       const window = await openEvents(recordFor(server.port, server.token), () => {}, undefined, undefined, { workspace: file, focused: '1' });
 
-      await until(() => (views.at(-1) === JSON.stringify({ windows: { open: [file], front: file, count: 1 } }) ? true : null));
+      await until(() => (views.at(-1) === JSON.stringify({ windows: { open: [file], front: file, count: 1, folders: [] } }) ? true : null));
       window?.close();
       dock.destroy();
     } finally {

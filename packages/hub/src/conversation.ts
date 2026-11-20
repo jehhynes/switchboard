@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
-import { artifactsDir, PERMISSION_PROMPT, START_PROMPT, windowFileKey } from '@switchboard/core';
+import { artifactsDir, hostKey, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
 import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
 import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
@@ -582,7 +582,7 @@ export class ConversationService {
   #artifactFolder(scope: WindowScope, key?: string): ArtifactFolder | null {
     this.#followArtifacts(key);
 
-    return this.#artifacts.get(scope.workItemId) ?? null;
+    return scope.workItemId === null ? null : (this.#artifacts.get(scope.workItemId) ?? null);
   }
 
   /** Watches the artifact folder of each work item a window with a stream shows, and stops watching the others. */
@@ -592,7 +592,7 @@ export class ConversationService {
     for (const key of new Set([...this.#streams.keys(), ...(opening === undefined ? [] : [opening])])) {
       const scope = this.deps.windows.scope(key);
 
-      if (scope?.cwd != null) {
+      if (scope?.cwd != null && scope.workItemId !== null) {
         wanted.set(scope.workItemId, artifactsDir(scope.cwd, scope.workItemId));
       }
     }
@@ -644,7 +644,7 @@ export class ConversationService {
       return statusView(latest);
     }
 
-    const item = this.deps.store.workItem(scope.workItemId);
+    const item = scope.workItemId === null ? null : this.deps.store.workItem(scope.workItemId);
 
     if (item?.stage == null || item.stage.trim() === '') {
       return null;
@@ -989,14 +989,15 @@ export class ConversationService {
       return { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } };
     }
 
-    const file = this.deps.windows.fileOf(window);
+    // The window's binding hosts it: an item window's workspace file, or a folder window's canonical folder.
+    const file = this.deps.windows.hostOf(window);
     const scope = this.deps.windows.scope(window);
 
     if (file === null || scope === null || this.deps.newConversation === undefined) {
       return { status: 403, body: { error: 'Not in this window.' } };
     }
 
-    const done = `${windowFileKey(file)} ${opId}`;
+    const done = `${hostKey(file)} ${opId}`;
     const earlier = this.#created.get(done);
 
     if (earlier !== undefined) {

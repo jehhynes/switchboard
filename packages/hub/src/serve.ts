@@ -14,7 +14,8 @@ export interface HubApp {
   post: Record<string, (body: unknown) => Promise<Reply>>;
   snapshot(): unknown;
   /** Registers a window's `/events` stream and returns its window key (architecture.md § Window scope). */
-  windowOpened?(workspace: string | null): string;
+  windowOpened?(workspace: string | null, folder?: string | null): string;
+  windowFolder?(key: string): string | null;
   windowClosed?(key: string): void;
   /** The snapshot a window's stream shows: its own work item only. */
   windowState?(key: string): unknown;
@@ -36,7 +37,7 @@ export interface HubApp {
   /** Receives the sender of forwarded clicks to the dock (PRD R65, R69). */
   attachDockClick?(click: (data: unknown) => boolean): void;
   /** Gives the app the way to send an event to the VS Code windows' streams. */
-  attachWindows?(send: (event: string, data: unknown, workspace?: string) => number): void;
+  attachWindows?(send: (event: string, data: unknown, keys?: readonly string[]) => number): void;
   /** While true, the hub does not exit for lack of clients (PRD R43). */
   busy(): boolean;
   close(): void;
@@ -122,7 +123,8 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
           post: app.post,
           snapshot: ({ key }: { key: string | null }) => (key !== null && app.windowState !== undefined ? app.windowState(key) : app.snapshot()),
           dock: () => app.dock(),
-          ...(app.windowOpened === undefined ? {} : { windowOpened: (workspace: string | null) => app.windowOpened!(workspace) }),
+          ...(app.windowOpened === undefined ? {} : { windowOpened: (workspace: string | null, folder: string | null) => app.windowOpened!(workspace, folder) }),
+          ...(app.windowFolder === undefined ? {} : { windowFolder: (key: string) => app.windowFolder!(key) }),
           ...(app.windowClosed === undefined ? {} : { windowClosed: (key: string) => app.windowClosed!(key) }),
           ...(app.conversation === undefined ? {} : { conversation: (key: string, write: (frame: string) => void) => app.conversation!(key, write) }),
         }),
@@ -139,7 +141,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   });
   app?.attachDock?.((event, data) => server.notifyDock(event, data));
   app?.attachDockClick?.((data) => server.clickDock(data));
-  app?.attachWindows?.((event, data, workspace) => server.notifyWindows(event, data, workspace));
+  app?.attachWindows?.((event, data, keys) => server.notifyWindows(event, data, keys));
 
   const browserPort = options.browserPort === undefined ? BROWSER_PORT : options.browserPort;
   let browser: BrowserServer | null = null;

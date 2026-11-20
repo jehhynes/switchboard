@@ -46,7 +46,7 @@ export function paneModel(snapshot: Snapshot | null, file: string | null, window
  */
 export function windowRows(snapshot: Snapshot, file: string, windows: string, now: number): DockRow[] {
   const rows = dockView(snapshot, now, windows).groups.flatMap((group) =>
-    group.rows.filter((row) => row.window !== null && normal(row.window.file) === normal(file)).map((row) => ({ row, done: group.key === 'done' })),
+    group.rows.filter((row) => row.window?.file != null && normal(row.window.file) === normal(file)).map((row) => ({ row, done: group.key === 'done' })),
   );
   const open = rows.filter((entry) => !entry.done);
 

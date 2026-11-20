@@ -732,13 +732,26 @@ describe('windowOf', () => {
     const hosted = item(9, { ticket: { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: host }, focus: null, sessions: [session({ cwd: 'D:/git/support' })] });
     const primary = item(7, { sessions: [session({ cwd: 'D:/git/support' })] });
     const view = snapshot([primary, hosted]);
-    const file = windowOf(primary, W)!.file;
+    const file = windowOf(primary, W)!.file!;
 
     expect(windowOf(hosted, W)).toEqual({ name: 'GH-7-widgets-655280', title: hosted.ticket.title, folders: ['D:/git/support'], file: host, hosted: true });
     expect(windowItems(view, file, W).map((one) => one.id)).toEqual([7]);
     expect(windowItems(view, host, W).map((one) => one.id)).toEqual([]);
     expect(hostedItems(view, 'c:\\sb\\windows\\gh-7-widgets-655280.code-workspace').map((one) => one.id)).toEqual([9]);
     expect(hostedItems(view, file)).toEqual([]);
+  });
+
+  it('opens a folder-hosted conversation in the folder window, with no workspace file, and never in an item window on that folder (architecture.md § Hosted conversations)', () => {
+    const host = 'D:\\git\\support';
+    const hosted = item(9, { ticket: { ...item(9).ticket, source: 'adhoc', sourceKey: '4', url: '', hostWindow: host }, focus: null, sessions: [session({ cwd: host })] });
+    const primary = item(7, { sessions: [session({ cwd: host })] });
+    const view = snapshot([primary, hosted]);
+    const file = windowOf(primary, W)!.file!;
+
+    expect(windowOf(hosted, W)).toEqual({ name: 'support', title: hosted.ticket.title, folders: [host], file: null, hosted: true, folder: host });
+    expect(windowItems(view, file, W).map((one) => one.id)).toEqual([7]);
+    expect(hostedItems(view, file)).toEqual([]);
+    expect(hostedItems(view, 'd:/git/support').map((one) => one.id)).toEqual([9]);
   });
 
   it('opens the latest session folder first, with the worktree second when the session ran elsewhere', () => {

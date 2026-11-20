@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FlowAction } from '../src/flow.js';
 import { NEEDS_CODE_MODE, NEW_CONVERSATION_TITLE } from '../src/flow.js';
 import { heldSlots } from '../src/queue.js';
+import { hostKey } from '../src/conversation.js';
 import { Harness, settings } from './flowHarness.js';
 
 const HOST = 'C:/Users/me/.switchboard/windows/GH-7-widgets-655280.code-workspace';
@@ -37,6 +38,11 @@ describe('hosted conversations (architecture.md § Hosted conversations)', () =>
     // The host link is compared by windowFileKey, so another spelling of the file finds it.
     expect(h.store.hostedWorkItems(HOST).map((item) => item.id)).toEqual([2]);
     expect(h.store.hostedWorkItems('C:/Users/me/.switchboard/windows/GH-8-widgets-655280.code-workspace')).toEqual([]);
+
+    // A folder window on a drive root hosts by the root, whose trailing separator both sides drop.
+    only(h.act({ type: 'new-conversation', hostWindow: 'D:\\', folder: 'D:\\' }), 'start-session');
+    expect(h.store.hostedWorkItems('d:/').map((item) => item.id)).toEqual([3]);
+    expect(h.store.hostedWorkItems('D:\\')).toHaveLength(1);
     expect(h.item(2)).toMatchObject({ status: 'running', taskPrompt: null });
     expect(h.store.session(start.sessionId)).toMatchObject({ promptless: true, codeMode: true, reports: ['stage', 'worktree', 'link', 'paste', 'task'] });
   });
@@ -80,5 +86,24 @@ describe('hosted conversations (architecture.md § Hosted conversations)', () =>
     other.act({ type: 'adhoc', prompt: 'New session', repoRoot: 'D:/scratch' });
     other.act({ type: 'conversation-title', workItemId: 1, text: 'Renamed' });
     expect(other.store.ticket(other.item(1).ticketId)?.title).toBe('New session');
+  });
+});
+
+describe('hostKey (architecture.md § Window scope)', () => {
+  it('compares item files without case, and folder hosts without case only where the file system has none', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+
+    try {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      expect(hostKey('/home/op/.switchboard/windows/GH-7.code-workspace')).toBe('/home/op/.switchboard/windows/gh-7.code-workspace');
+      expect(hostKey('/repo/Foo/')).toBe('/repo/Foo');
+      expect(hostKey('/repo/Foo')).not.toBe(hostKey('/repo/foo'));
+      expect(hostKey('/tmp/a\\b')).not.toBe(hostKey('/tmp/a/b'));
+      expect(hostKey('/')).toBe('/');
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      expect(hostKey('D:\\git\\Support\\')).toBe('d:/git/support');
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
   });
 });

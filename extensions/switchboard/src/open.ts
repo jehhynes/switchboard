@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import * as vscode from 'vscode';
 import type { HubRecord } from '@switchboard/core';
 import { executableDirOnPath } from '@switchboard/core';
@@ -261,20 +262,18 @@ export async function openSession(
   run: (command: WindowCommand) => Promise<unknown> = async () => {},
 ): Promise<'opened' | 'other-folder' | 'refused'> {
   // The hub answers the session's own window, which claims the open, even for a session of this window's folder, since another work item can share
-  // it, as Support's do; a folder window has no binding to claim it (architecture.md § Window scope).
+  // it, as Support's do (architecture.md § Window scope).
   const destination = await leave(record, sessionId, cwd);
 
   if (destination === null || record === null) {
     return 'refused';
   }
 
-  const mine = workspaceFile();
-
-  if (mine !== null && samePath(mine, destination)) {
+  if (destination.here) {
     return (await claim(record, run)).answered ? 'opened' : 'refused';
   }
 
-  await openFolder(destination);
+  await openFolder(destination.workspace);
   return 'other-folder';
 }
 
@@ -290,11 +289,9 @@ export async function openAttach(record: HubRecord | null, sessionId: string, cw
     return 'refused';
   }
 
-  // The hub names the window the open waits for: this one for its own conversations, else the session's own window (architecture.md § Window scope).
-  // A folder window has no binding, so it claims no open and opens the session's window instead.
-  const mine = workspaceFile();
-
-  if (mine !== null && samePath(mine, destination)) {
+  // The hub names the window the open waits for: this one for its own conversations, else the session's own window, an item window's workspace
+  // file or a folder window's folder (architecture.md § Window scope).
+  if (destination.here) {
     if (!(await claim(record, run)).answered) {
       void vscode.window.showErrorMessage('Switchboard: the hub did not answer.');
       return 'refused';
@@ -303,7 +300,7 @@ export async function openAttach(record: HubRecord | null, sessionId: string, cw
     return 'opened';
   }
 
-  await openFolder(destination);
+  await openFolder(destination.workspace);
   return 'other-folder';
 }
 
@@ -314,17 +311,24 @@ function here(cwd: string): boolean {
   return folder !== undefined && samePath(folder, cwd);
 }
 
-/** Leaves the session with the hub for its destination window, which the hub answers; null, after saying why, when the hub refused or did not answer. */
-async function leave(record: HubRecord | null, sessionId: string, cwd: string): Promise<string | null> {
+/**
+ * Leaves the session with the hub for its destination window, which the hub answers: its workspace file or folder, and whether it is this window;
+ * null, after saying why, when the hub refused or did not answer.
+ */
+async function leave(record: HubRecord | null, sessionId: string, cwd: string): Promise<{ workspace: string; here: boolean } | null> {
   const reply = record === null ? null : await postToHub(record, '/open', { sessionId, cwd, ...(windowKey === null ? {} : { window: windowKey }) }, ACTION_TIMEOUT_MS);
-  const workspace = (reply?.body as { workspace?: unknown } | null | undefined)?.workspace;
+  const body = reply?.body as { workspace?: unknown; here?: unknown } | null | undefined;
+  const workspace = body?.workspace;
 
   if (reply?.status !== 200 || typeof workspace !== 'string') {
     void vscode.window.showErrorMessage(`Switchboard: ${reply?.error ?? 'the hub did not answer.'}`);
     return null;
   }
 
-  return workspace;
+  // A hub older than folder windows says nothing of `here`; then only this window's own workspace file is here.
+  const mine = workspaceFile();
+
+  return { workspace, here: body?.here === true || (body?.here === undefined && mine !== null && samePath(mine, workspace)) };
 }
 
 /** Opens a folder's or a workspace file's window; VS Code focuses a window that already has it instead of opening another. */
@@ -335,6 +339,26 @@ async function openFolder(path: string): Promise<void> {
 /** This window's `.code-workspace` file, or null for a folder window. */
 export function workspaceFile(): string | null {
   return vscode.workspace.workspaceFile?.scheme === 'file' ? vscode.workspace.workspaceFile.fsPath : null;
+}
+
+/** This window's folder when it is a folder window, opened on one plain folder with no workspace file; null otherwise (architecture.md § Window scope). */
+export function windowFolder(): string | null {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+
+  return vscode.workspace.workspaceFile === undefined && folders.length === 1 && folders[0]!.uri.scheme === 'file' ? folders[0]!.uri.fsPath : null;
+}
+
+/** Whether two paths name one folder, through links and, on Windows and macOS, in any case, as the hub binds a folder window. */
+function sameFolder(a: string, b: string): boolean {
+  const real = (path: string): string => {
+    try {
+      return realpathSync.native(path);
+    } catch {
+      return path;
+    }
+  };
+
+  return process.platform === 'linux' ? real(a).replace(/(.)\/+$/, '$1') === real(b).replace(/(.)\/+$/, '$1') : samePath(real(a), real(b));
 }
 
 /** Opens a session another window or the dock left for this window, and runs the dock's commands for it. Runs when the window connects or gains focus. */
@@ -486,7 +510,8 @@ async function click(context: OpenContext, key: string, replaced: () => boolean,
     return 'url';
   }
 
-  // A hosted conversation's window is its host's, whose file the host's primary work item writes (architecture.md § Hosted conversations).
+  // A hosted conversation's window is its host's, whose file the host's primary work item writes, or a folder window, which has no file
+  // (architecture.md § Hosted conversations).
   if (row.window.hosted !== true) {
     try {
       writeWorkspaceFile(row.window);
@@ -531,7 +556,7 @@ async function click(context: OpenContext, key: string, replaced: () => boolean,
   }
 
   if (open?.type === 'session') {
-    const left = context.record === null ? null : await postToHub(context.record, '/open', { sessionId: open.sessionId, cwd: open.cwd, workspace: row.window.file }, ACTION_TIMEOUT_MS);
+    const left = context.record === null ? null : await postToHub(context.record, '/open', { sessionId: open.sessionId, cwd: open.cwd, workspace: row.window.file ?? row.window.folder ?? null }, ACTION_TIMEOUT_MS);
 
     if (replaced()) {
       return 'replaced';
@@ -543,10 +568,16 @@ async function click(context: OpenContext, key: string, replaced: () => boolean,
     }
   }
 
-  // This window is the item window: it claims at once, because it does not gain focus again.
-  const here = workspaceFile();
+  // A folder destination is reached only by a folder window on that folder, never by an item window that holds it (architecture.md § Dock).
+  const destination = row.window.file ?? row.window.folder ?? null;
+  const here = row.window.file !== null ? workspaceFile() : windowFolder();
 
-  if (here !== null && samePath(here, row.window.file)) {
+  if (destination === null) {
+    return 'nothing';
+  }
+
+  // This window is the destination: it claims at once, because it does not gain focus again.
+  if (here !== null && (row.window.file !== null ? samePath(here, destination) : sameFolder(here, destination))) {
     if (context.record !== null) {
       await claimOpen(context.record, context.run);
     }
@@ -554,8 +585,8 @@ async function click(context: OpenContext, key: string, replaced: () => boolean,
     return 'here';
   }
 
-  // VS Code focuses the window that has the file open, or opens one; the window claims the session when it gains focus.
-  await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(row.window.file), { forceNewWindow: true });
+  // VS Code focuses the window that has the file or folder open, or opens one; the window claims the session when it gains focus.
+  await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(destination), { forceNewWindow: true });
   return 'window';
 }
 
