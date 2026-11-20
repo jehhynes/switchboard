@@ -169,6 +169,16 @@ describe('Code Mode command', () => {
     expect(codeModeStartArgs({ ...action, prompt: '' }, NATIVE).at(-1)).toBe(SETTINGS);
   });
 
+  it("appends a persona's tone section after the conversation rules at a start and a resume (architecture.md § Personas)", () => {
+    const action = { permissionMode: 'auto', name: 'Switchboard · #12', model: null, contract: 'Report with …', prompt: '', cwd: 'D:/w12', workItemId: 12 } as const;
+    const tone = '## Persona\nIn this session you are Nova. Warm.';
+
+    expect(codeModeStartArgs({ ...action, tone }, NATIVE)).toContain(`Report with …\n\n${PROMPT}\n\n${tone}`);
+    expect(codeModePrompt(ARTIFACTS, false, tone)).toBe(`${PROMPT}\n\n${tone}`);
+    expect(codeModePrompt(ARTIFACTS, false, null)).toBe(PROMPT);
+    expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS, false, tone)).toContain(`${PROMPT}\n\n${tone}`);
+  });
+
   it("resumes with no prompt, keeping the permission mode, model and settings, and appends the panel's sections for after a compaction", () => {
     expect(codeModeResumeArgs(NATIVE, 'manual', 'opus', ARTIFACTS)).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--append-system-prompt', PROMPT, '--settings', SETTINGS]);
     expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', PROMPT, '--settings', SETTINGS]);
@@ -659,6 +669,13 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
     expect(await runner({ voice: () => true }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l9')).toEqual({ launchId: 'l9' });
     expect(holder.spawned[0]!.args).toEqual(codeModeResumeArgs(NATIVE, 'auto', 'haiku', join('D:/work', '.wip', 'artifacts', 'w1'), true));
     expect(holder.spawned[0]!.args.join(' ')).toContain('## Spoken replies');
+
+    // A resume reads the session's tone section as the settings have it now.
+    holder.spawned.length = 0;
+    const asked: string[] = [];
+    expect(await runner({ tone: (id) => (asked.push(id), '## Persona\nIn this session you are Orion.') }).resumeHeld(session(), 'auto', 'haiku', 'label', 'l10')).toEqual({ launchId: 'l10' });
+    expect(asked).toEqual(['sb-1']);
+    expect(holder.spawned[0]!.args.at(-3)).toMatch(/\n\n## Persona\nIn this session you are Orion\.$/);
   });
 
   it('settles sessions a stopped hub left starting with the same check', async () => {

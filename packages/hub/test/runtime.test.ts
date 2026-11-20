@@ -4,7 +4,7 @@ import { delimiter, join } from 'node:path';
 import { ClaudeRunner, conversationRules } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
-import { DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
+import { DEFAULT_SETTINGS, parsePlaybook, Store, toneSection, toneVersion, UNCONFIRMED_DONE } from '@switchboard/core';
 import { recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { NotWritten } from '@switchboard/conversation';
@@ -2668,6 +2668,37 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     context.runtime.reload({ ...voiced, settings: { ...voiced.settings, voice: { ...voiced.settings.voice, enabled: true } } });
     expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(conversationRules(join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`), true));
     expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toContain('## Spoken replies');
+    context.runtime.stop();
+  });
+
+  it("gives a Code Mode session its persona's tone section last, as the settings have it now, and records it (architecture.md § Personas)", async () => {
+    const codeMode = fakeRunner();
+    const base = config({ codeMode: true });
+    const nova = { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm and direct.' } as const;
+    const orion = { id: 'orion', name: 'Orion', voice: 'ash', style: 'none', personality: 'Terse.' } as const;
+    const voiced = { ...base, settings: { ...base.settings, voice: { ...base.settings.voice, enabled: true, personas: [nova, orion] } } };
+    const context = setup(voiced, () => T0, { codeMode });
+    const starts: StartAction[] = [];
+
+    codeMode.start = async (action) => (starts.push(action), { shortId: action.nativeSessionId!.slice(0, 8), nativeSessionId: action.nativeSessionId!, launchId: action.launchId! });
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+
+    const session = context.store.activeSessions()[0]!;
+
+    expect(starts[0]?.tone).toBe(toneSection(nova));
+    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toMatch(/\n\n## Persona\nIn this session you are Nova\. Warm and direct\.\n[^#]*$/);
+
+    // A pin waits for the hook, which records the section it gave.
+    context.runtime.send({ type: 'persona', sessionId: session.id, personaId: 'orion' });
+    expect(context.store.session(session.id)?.personaVersion).toBe(toneVersion(toneSection(nova)));
+    expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toContain('In this session you are Orion. Terse.');
+    expect(context.store.session(session.id)?.personaVersion).toBe(toneVersion(toneSection(orion)));
+
+    // With voice off, a reset in place of the section the launch's prompt may still carry.
+    context.runtime.reload(base);
+    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toMatch(/\n\n## Persona\nNo persona applies in this session any more: ignore any earlier Persona section\.$/);
+    expect(context.store.session(session.id)?.personaVersion).toBeNull();
     context.runtime.stop();
   });
 

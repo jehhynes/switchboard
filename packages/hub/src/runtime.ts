@@ -6,7 +6,7 @@ import { classify, ClaudeRunner, findTranscript, CodeModeRunner, conversationRul
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, deliveredTone, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -213,6 +213,7 @@ export class Runtime {
           holder: (start) => this.holder.find(start),
           transcriptExists: (cwd, nativeSessionId) => findTranscript(join(dirname(deps.claudeSettings), 'projects'), cwd, nativeSessionId) !== null,
           voice: () => this.config.settings.voice.enabled,
+          tone: (sessionId) => deliveredTone(this.config.settings.voice, this.deps.store.session(sessionId) ?? {}),
           now: deps.now,
           sleep: deps.sleep,
           ...(deps.codeModeIdleMs === undefined ? {} : { idleMs: deps.codeModeIdleMs }),
@@ -958,17 +959,25 @@ export class Runtime {
       return null;
     }
 
+    // A Code Mode session's persona tone section comes last, as the settings have it now (architecture.md § Personas).
+    const tone = session.codeMode === true ? deliveredTone(this.config.settings.voice, session) : null;
+    const rules = (): string => `${conversationRules(artifactsDir(session.cwd, session.workItemId), this.config.settings.voice.enabled)}${tone === null ? '' : `\n\n${tone}`}`;
+
+    if (session.codeMode === true) {
+      this.send({ type: 'persona-delivered', sessionId: session.id });
+    }
+
     if (source === 'resume') {
       this.deps.log(`gave session ${session.id} the conversation rules on resume`);
 
-      return conversationRules(artifactsDir(session.cwd, session.workItemId), this.config.settings.voice.enabled);
+      return rules();
     }
 
     this.deps.log(`restored the report contract of session ${session.id} after compaction`);
 
     const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
 
-    return session.codeMode === true ? `${contract}\n\n${conversationRules(artifactsDir(session.cwd, session.workItemId), this.config.settings.voice.enabled)}` : contract;
+    return session.codeMode === true ? `${contract}\n\n${rules()}` : contract;
   }
 
   /**
