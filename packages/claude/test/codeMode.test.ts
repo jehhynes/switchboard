@@ -7,7 +7,6 @@ import type { Session, StartAction } from '@switchboard/core';
 import type { SessionEntry, SpawnRequest } from '@switchboard/holder';
 import {
   CODE_MODE_IDLE_MS,
-  CODE_MODE_PROMPT,
   CodeModeRunner,
   HOOKS_REQUIRED,
   LINK_PROMPT,
@@ -15,13 +14,15 @@ import {
   claudeFile,
   codeModeEnvironment,
   codeModeEvidence,
+  codeModePrompt,
   codeModeResumeArgs,
   codeModeSettings,
   codeModeStartArgs,
+  makeArtifactsDir,
   showsStartPrompt,
 } from '../src/codeMode.js';
 import type { CodeModeRunnerDeps, HolderAccess, HolderLookup } from '../src/codeMode.js';
-import { CONVERSATION_RULES } from '../src/conversationRules.js';
+import { conversationRules } from '../src/conversationRules.js';
 
 const fixture = (name: string): { head: string; text: string } => JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures', 'codemode', `${name}.json`), 'utf8')) as { head: string; text: string };
 const ON = fixture('on');
@@ -30,9 +31,12 @@ const TRUST = fixture('trust');
 const SETTINGS = '{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com","ANTHROPIC_API_KEY":"","ANTHROPIC_AUTH_TOKEN":"","ANTHROPIC_CUSTOM_HEADERS":""},"viewMode":"focus","tui":"default"}';
 const NATIVE = '11111111-2222-3333-4444-555555555555';
 const LAUNCH = 'launch-1';
+const ARTIFACTS = join('D:/w12', '.wip', 'artifacts', 'w12');
+const RULES = conversationRules(ARTIFACTS);
+const PROMPT = codeModePrompt(ARTIFACTS);
 
 describe('Code Mode command', () => {
-  it('builds the environment from the hub\'s without VS Code, Node.js options, session markers or credentials, with Code Mode, the direct API and the launch', () => {
+  it('builds the environment from the hub\'s without VS Code, Node.js options, session markers or credentials, with Code Mode, the direct API, the launch and the artifact folder', () => {
     const env = codeModeEnvironment(
       {
         PATH: 'C:/bin',
@@ -54,6 +58,7 @@ describe('Code Mode command', () => {
       },
       LAUNCH,
       'claude',
+      'D:/w/.wip/artifacts/w7',
     );
 
     expect(env).toEqual({
@@ -64,22 +69,52 @@ describe('Code Mode command', () => {
       CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1',
       ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
       SWITCHBOARD_LAUNCH: LAUNCH,
+      CLAUDE_ARTIFACTS_DIR: 'D:/w/.wip/artifacts/w7',
     });
   });
 
   it('puts an absolute claudePath\'s folder first on PATH', () => {
     const claude = join(tmpdir(), 'tools', 'claude.exe');
-    const env = codeModeEnvironment({ Path: 'C:/bin' }, LAUNCH, claude);
+    const env = codeModeEnvironment({ Path: 'C:/bin' }, LAUNCH, claude, ARTIFACTS);
 
     expect(env['Path']).toBe(`${join(tmpdir(), 'tools')}${delimiter}C:/bin`);
     expect(env['PATH']).toBeUndefined();
   });
 
   it('appends conversation rules that name only the tags the view reads, aside, rewrite and status, and set no reply length or shape', () => {
-    expect(CONVERSATION_RULES.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]', '[status]']);
-    expect(CONVERSATION_RULES).toContain('they do not change how you write');
-    expect(CONVERSATION_RULES).not.toMatch(/\bwords\b|\bsentences\b|short answer/);
-    expect(CODE_MODE_PROMPT.endsWith(CONVERSATION_RULES)).toBe(true);
+    expect(RULES.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[aside]', '[rewrite]', '[status]']);
+    expect(RULES).toContain('they do not change how you write');
+    expect(RULES).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
+    expect(PROMPT.endsWith(RULES)).toBe(true);
+  });
+
+  it('explains where and how to write an artifact, naming the folder and its variable, and not when to write one', () => {
+    expect(RULES).toMatch(/\n\n## Artifacts\n/);
+    expect(RULES).toContain(`artifact folder, \`${ARTIFACTS}\` (also in the \`CLAUDE_ARTIFACTS_DIR\` environment variable)`);
+    expect(RULES).toContain('they do not say when to write one');
+    expect(RULES).toContain('`<owner>/<kind>-<slug>.md`');
+    expect(RULES).toContain('kind: plan\n  title: ');
+    expect(RULES).toContain('rewrite the same file');
+    expect(RULES).toContain('```mermaid code block');
+    expect(RULES).not.toMatch(/15 lines|three columns|when an answer/);
+  });
+
+  it('makes the artifact folder with a .gitignore that ignores everything in it, and keeps one the session changed', () => {
+    const root = mkdtempSync(join(tmpdir(), 'artifacts-'));
+    const dir = join(root, '.wip', 'artifacts', 'w3');
+
+    try {
+      makeArtifactsDir(dir);
+      expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('*\n');
+      writeFileSync(join(dir, '.gitignore'), '*\n!keep\n');
+      makeArtifactsDir(dir);
+      expect(readFileSync(join(dir, '.gitignore'), 'utf8')).toBe('*\n!keep\n');
+      // A folder that cannot be made, under a file, fails nothing.
+      writeFileSync(join(root, 'file'), '');
+      expect(() => makeArtifactsDir(join(root, 'file', 'w4'))).not.toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('overrides the gateway and credentials in --settings, so user settings cannot restore them (mechanics M64), and starts in Focus view in the classic renderer', () => {
@@ -93,20 +128,20 @@ describe('Code Mode command', () => {
   });
 
   it('adds a link section after the panel\'s, so relative link targets start with ./ and the terminal makes them clickable (mechanics M83)', () => {
-    expect(CODE_MODE_PROMPT).toBe(`${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${CONVERSATION_RULES}`);
+    expect(PROMPT).toBe(`${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${RULES}`);
     expect(LINK_PROMPT).toMatch(/^## Links in this terminal\nStart each relative file link target with "\.\/", as in \[filename\.ts:42\]\(\.\/src\/filename\.ts#L42\), so VS Code's terminal makes it clickable\.$/);
   });
 
   it('starts with the session ID, permission mode, name, model, contract and settings, and the prompt as one last argument', () => {
-    const action = { permissionMode: 'auto', name: 'Switchboard · #12', model: 'haiku', contract: 'Report with …', prompt: '/fix the bug\nnow' } as const;
+    const action = { permissionMode: 'auto', name: 'Switchboard · #12', model: 'haiku', contract: 'Report with …', prompt: '/fix the bug\nnow', cwd: 'D:/w12', workItemId: 12 } as const;
 
-    expect(codeModeStartArgs(action, NATIVE)).toEqual(['--session-id', NATIVE, '--permission-mode', 'auto', '-n', 'Switchboard · #12', '--model', 'haiku', '--append-system-prompt', `Report with …\n\n${CODE_MODE_PROMPT}`, '--settings', SETTINGS, '/fix the bug\nnow']);
+    expect(codeModeStartArgs(action, NATIVE)).toEqual(['--session-id', NATIVE, '--permission-mode', 'auto', '-n', 'Switchboard · #12', '--model', 'haiku', '--append-system-prompt', `Report with …\n\n${PROMPT}`, '--settings', SETTINGS, '/fix the bug\nnow']);
     expect(codeModeStartArgs({ ...action, model: null }, NATIVE)).not.toContain('--model');
   });
 
   it("resumes with no prompt, keeping the permission mode, model and settings, and appends the panel's sections for after a compaction", () => {
-    expect(codeModeResumeArgs(NATIVE, 'manual', 'opus')).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--append-system-prompt', CODE_MODE_PROMPT, '--settings', SETTINGS]);
-    expect(codeModeResumeArgs(NATIVE, 'auto', null)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', CODE_MODE_PROMPT, '--settings', SETTINGS]);
+    expect(codeModeResumeArgs(NATIVE, 'manual', 'opus', ARTIFACTS)).toEqual(['--resume', NATIVE, '--permission-mode', 'manual', '--model', 'opus', '--append-system-prompt', PROMPT, '--settings', SETTINGS]);
+    expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS)).toEqual(['--resume', NATIVE, '--permission-mode', 'auto', '--append-system-prompt', PROMPT, '--settings', SETTINGS]);
   });
 
   it('runs claude.exe on Windows when the path names no extension', () => {
@@ -228,6 +263,7 @@ let lookup: HolderLookup;
 let hooks: boolean;
 let onSleep: ((now: number) => void) | null;
 let roster: Array<{ sessionId: string; pid?: number }>;
+let made: string[];
 
 function marker(sessionId: string, fields: Record<string, unknown>): void {
   mkdirSync(join(home, 'activity'), { recursive: true });
@@ -252,6 +288,7 @@ function runner(extra: Partial<CodeModeRunnerDeps> = {}): CodeModeRunner {
     readTimeoutMs: 20,
     environment: { PATH: 'C:/bin' },
     platform: 'linux',
+    makeArtifactsDir: (dir) => made.push(dir),
     ...extra,
   });
 }
@@ -264,6 +301,7 @@ beforeEach(() => {
   hooks = true;
   onSleep = null;
   roster = [];
+  made = [];
 });
 
 afterEach(() => {
@@ -288,11 +326,12 @@ describe('CodeModeRunner.start', () => {
         file: 'claude',
         args: codeModeStartArgs(ACTION, NATIVE),
         cwd: 'D:/work',
-        env: { PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'https://api.anthropic.com', SWITCHBOARD_LAUNCH: LAUNCH },
+        env: { PATH: 'C:/bin', CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: 'https://api.anthropic.com', SWITCHBOARD_LAUNCH: LAUNCH, CLAUDE_ARTIFACTS_DIR: join('D:/work', '.wip', 'artifacts', 'w1') },
         cols: 120,
         rows: 40,
       },
     ]);
+    expect(made).toEqual([join('D:/work', '.wip', 'artifacts', 'w1')]);
     expect(holder.killed).toEqual([]);
   });
 
@@ -560,7 +599,8 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
 
   it('resumes an ended session in the holder with a new launch and no prompt', async () => {
     expect(await runner().resumeHeld(session(), 'auto', 'haiku', 'label')).toEqual({ launchId: 'new-id' });
-    expect(holder.spawned[0]).toMatchObject({ session: 'sb-1', label: 'label', args: codeModeResumeArgs(NATIVE, 'auto', 'haiku'), env: { SWITCHBOARD_LAUNCH: 'new-id' } });
+    expect(holder.spawned[0]).toMatchObject({ session: 'sb-1', label: 'label', args: codeModeResumeArgs(NATIVE, 'auto', 'haiku', join('D:/work', '.wip', 'artifacts', 'w1')), env: { SWITCHBOARD_LAUNCH: 'new-id', CLAUDE_ARTIFACTS_DIR: join('D:/work', '.wip', 'artifacts', 'w1') } });
+    expect(made).toEqual([join('D:/work', '.wip', 'artifacts', 'w1')]);
     expect(await runner().resumeHeld(session({ nativeSessionId: null }), 'auto', null, 'label')).toEqual({ error: 'The session never started, so it cannot be resumed.' });
   });
 

@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { classify, ClaudeRunner, CodeModeRunner, CONVERSATION_RULES, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
+import { classify, ClaudeRunner, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster } from '@switchboard/claude';
 import { classifyCodex, CodexRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, MarkerReading, ObservedFork, ObservedSession, PolledTicket, Provider, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree } from '@switchboard/core';
-import { activeSession, ADHOC_SOURCE, awaitsRecheck, CONVERSATION_RULES_VERSION, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
+import { activeSession, ADHOC_SOURCE, artifactsDir, awaitsRecheck, CONVERSATION_RULES_VERSION, RESUME_PROMPT, executableDirOnPath, handle, launchOptions, nothingNew, PROVIDERS, recordRefusal, homeRepo, repoOf, sessionName, ticketRoot, sessionContract, switchboardHome, triageModel } from '@switchboard/core';
 import { noKind } from './config.js';
 import type { Config } from './config.js';
 import { listWorktrees, reportedWorktree } from './git.js';
@@ -964,14 +964,14 @@ export class Runtime {
     if (source === 'resume') {
       this.deps.log(`gave session ${session.id} the conversation rules on resume`);
 
-      return CONVERSATION_RULES;
+      return conversationRules(artifactsDir(session.cwd, session.workItemId));
     }
 
     this.deps.log(`restored the report contract of session ${session.id} after compaction`);
 
     const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
 
-    return session.codeMode === true ? `${contract}\n\n${CONVERSATION_RULES}` : contract;
+    return session.codeMode === true ? `${contract}\n\n${conversationRules(artifactsDir(session.cwd, session.workItemId))}` : contract;
   }
 
   /**

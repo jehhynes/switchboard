@@ -33,3 +33,13 @@ export function resolveConfigDir(setting: string, home: string, profile: string)
 
   return isAbsolute(expanded) ? { dir: resolve(expanded) } : { error: `switchboard.configDir must be an absolute path or start with ~: ${value}` };
 }
+/** The environment variable naming a Code Mode session's artifact folder (architecture.md § Artifacts). */
+export const ARTIFACTS_ENV = 'CLAUDE_ARTIFACTS_DIR';
+
+/**
+ * A work item's artifact folder, `<session folder>/.wip/artifacts/w<work item ID>` (architecture.md § Artifacts): its own, so a later work item
+ * that shares the worktree never lists an earlier one's artifacts.
+ */
+export function artifactsDir(cwd: string, workItemId: number): string {
+  return join(cwd, '.wip', 'artifacts', `w${workItemId}`);
+}

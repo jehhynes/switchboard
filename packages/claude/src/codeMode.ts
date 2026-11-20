@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { START_PROMPT } from '@switchboard/core';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ARTIFACTS_ENV, artifactsDir, START_PROMPT } from '@switchboard/core';
 import type { LiveState, StopReason, MarkerReading, ObservedFork, ObservedSession, PermissionMode, Reconciled, Session, SessionRunner, SessionTarget, StartAction, StartResult } from '@switchboard/core';
 import { killTree, processTable } from '@switchboard/holder';
 import type { ProcessRow, SessionEntry, SpawnRequest } from '@switchboard/holder';
@@ -7,7 +9,7 @@ import { executableDirOnPath } from '@switchboard/core';
 import { markerState } from './hooks.js';
 import type { Marker } from './hooks.js';
 import { readMarkers } from './install.js';
-import { CONVERSATION_RULES } from './conversationRules.js';
+import { conversationRules } from './conversationRules.js';
 
 /** The line Claude prints under its banner when Code Mode is on, the start's positive evidence (mechanics M63). */
 export const CODE_MODE_ON = 'Code Mode (experimental) is on';
@@ -35,10 +37,11 @@ const REMOVED =
   /^(ELECTRON_.*|VSCODE_.*|NODE_OPTIONS|CLAUDECODE|CLAUDE_PID|CLAUDE_AGENT_SDK_VERSION|CLAUDE_EFFORT|AI_AGENT|CLAUDE_CODE_(CHILD_SESSION|SESSION_ID|ENTRYPOINT|EXECPATH|SSE_PORT|SESSION_ATTENDED|MESSAGING_\w+|EMIT_STARTUP_TIMING|STARTUP_FAILURE_RESULTS|ENABLE_SDK_FILE_CHECKPOINTING|QUESTION_PREVIEW_FORMAT|ENABLE_TASKS|NO_FLICKER)|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
 
 /**
- * The environment of a Code Mode session's process, from the hub's: Code Mode on, the direct API, the launch, and an absolute
- * `sessions.claudePath`'s folder first on PATH. `CLAUDE_CONFIG_DIR` passes through as for background sessions.
+ * The environment of a Code Mode session's process, from the hub's: Code Mode on, the direct API, the launch, the work item's artifact folder
+ * (`CLAUDE_ARTIFACTS_DIR`), and an absolute `sessions.claudePath`'s folder first on PATH. `CLAUDE_CONFIG_DIR` passes through as for background
+ * sessions.
  */
-export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, claudePath: string): Record<string, string> {
+export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, claudePath: string, artifacts: string): Record<string, string> {
   const env: Record<string, string> = {};
 
   for (const [name, value] of Object.entries(base)) {
@@ -47,7 +50,7 @@ export function codeModeEnvironment(base: NodeJS.ProcessEnv, launchId: string, c
     }
   }
 
-  return { ...env, ...executableDirOnPath(claudePath, env), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: DIRECT_API, SWITCHBOARD_LAUNCH: launchId };
+  return { ...env, ...executableDirOnPath(claudePath, env), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: '1', ANTHROPIC_BASE_URL: DIRECT_API, SWITCHBOARD_LAUNCH: launchId, [ARTIFACTS_ENV]: artifacts };
 }
 
 /**
@@ -75,7 +78,9 @@ export const LINK_PROMPT = `## Links in this terminal
 Start each relative file link target with "./", as in [filename.ts:42](./src/filename.ts#L42), so VS Code's terminal makes it clickable.`;
 
 /** The panel's sections, then Switchboard's link section and the conversation rules, appended to every Code Mode start and resume. */
-export const CODE_MODE_PROMPT = `${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${CONVERSATION_RULES}`;
+export function codeModePrompt(artifacts: string): string {
+  return `${PANEL_PROMPT}\n\n${LINK_PROMPT}\n\n${conversationRules(artifacts)}`;
+}
 
 /**
  * `--settings` overrides user settings, so a gateway or credential there cannot apply; empty strings remove the credential variables, so the
@@ -88,7 +93,7 @@ export function codeModeSettings(): string {
 }
 
 /** An interactive `claude` with a known session ID; the prompt is one argument and runs as the first turn (mechanics M63). */
-export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt'>, nativeSessionId: string): string[] {
+export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | 'name' | 'model' | 'contract' | 'prompt' | 'cwd' | 'workItemId'>, nativeSessionId: string): string[] {
   return [
     '--session-id',
     nativeSessionId,
@@ -98,7 +103,7 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
     action.name,
     ...(action.model === null ? [] : ['--model', action.model]),
     '--append-system-prompt',
-    `${action.contract}\n\n${CODE_MODE_PROMPT}`,
+    `${action.contract}\n\n${codeModePrompt(artifactsDir(action.cwd, action.workItemId))}`,
     '--settings',
     codeModeSettings(),
     action.prompt,
@@ -107,11 +112,24 @@ export function codeModeStartArgs(action: Pick<StartAction, 'permissionMode' | '
 
 /**
  * A promptless resume, which reads as idle until the operator types (mechanics M68). Claude resends the start's system prompt until a
- * compaction, which renders it again from this process's flags (mechanics M30), so the resume appends `CODE_MODE_PROMPT`; the contract hook
+ * compaction, which renders it again from this process's flags (mechanics M30), so the resume appends `codeModePrompt`; the contract hook
  * restores the contract after a compaction.
  */
-export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null): string[] {
-  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', CODE_MODE_PROMPT, '--settings', codeModeSettings()];
+export function codeModeResumeArgs(nativeSessionId: string, permissionMode: PermissionMode, model: string | null, artifacts: string): string[] {
+  return ['--resume', nativeSessionId, '--permission-mode', permissionMode, ...(model === null ? [] : ['--model', model]), '--append-system-prompt', codeModePrompt(artifacts), '--settings', codeModeSettings()];
+}
+
+/**
+ * Makes a work item's artifact folder, so the Artifacts view can watch it from the start, with a `.gitignore` that ignores everything in it, so
+ * an artifact is never committed with the worktree's work. A folder that cannot be made fails nothing: the session makes it when it writes.
+ */
+export function makeArtifactsDir(dir: string): void {
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '.gitignore'), '*\n', { flag: 'wx' });
+  } catch {
+    // Made before, or not writable.
+  }
 }
 
 /** The file the pseudo-terminal runs: Windows looks for `claude.exe` when the path names no extension. */
@@ -204,6 +222,8 @@ export interface CodeModeRunnerDeps {
   processes?(): Promise<ProcessRow[] | { error: string }>;
   /** Ends a process and its descendants; `killTree` by default. */
   killTree?(pid: number): Promise<{ error: string } | null>;
+  /** Makes a work item's artifact folder before its session starts; `makeArtifactsDir` by default. */
+  makeArtifactsDir?(dir: string): void;
 }
 
 /** The members of a tree the table lists with the same pid and creation time, so a reused pid does not match. */
@@ -309,7 +329,7 @@ export class CodeModeRunner implements SessionRunner {
 
     const nativeSessionId = action.nativeSessionId ?? this.newId();
     const launchId = action.launchId ?? this.newId();
-    const spawned = await this.spawn(action.sessionId, `${action.name} ${nativeSessionId}`, codeModeStartArgs(action, nativeSessionId), action.cwd, launchId);
+    const spawned = await this.spawn(action.sessionId, `${action.name} ${nativeSessionId}`, codeModeStartArgs(action, nativeSessionId), action.cwd, launchId, artifactsDir(action.cwd, action.workItemId));
 
     if ('error' in spawned) {
       return spawned;
@@ -323,18 +343,19 @@ export class CodeModeRunner implements SessionRunner {
   }
 
   /** Resumes an ended session in the holder with a new launch; the session keeps the mode, model and permission mode it started with. */
-  async resumeHeld(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd'>, permissionMode: PermissionMode, model: string | null, label: string, launch?: string): Promise<{ launchId: string } | { error: string }> {
+  async resumeHeld(session: Pick<Session, 'id' | 'nativeSessionId' | 'cwd' | 'workItemId'>, permissionMode: PermissionMode, model: string | null, label: string, launch?: string): Promise<{ launchId: string } | { error: string }> {
     if (session.nativeSessionId === null) {
       return { error: 'The session never started, so it cannot be resumed.' };
     }
 
     const launchId = launch ?? this.newId();
-    const spawned = await this.spawn(session.id, label, codeModeResumeArgs(session.nativeSessionId, permissionMode, model), session.cwd, launchId);
+    const artifacts = artifactsDir(session.cwd, session.workItemId);
+    const spawned = await this.spawn(session.id, label, codeModeResumeArgs(session.nativeSessionId, permissionMode, model, artifacts), session.cwd, launchId, artifacts);
 
     return 'error' in spawned ? spawned : { launchId };
   }
 
-  private async spawn(session: string, label: string, args: string[], cwd: string, launchId: string): Promise<{ holder: HolderAccess } | { error: string }> {
+  private async spawn(session: string, label: string, args: string[], cwd: string, launchId: string, artifacts: string): Promise<{ holder: HolderAccess } | { error: string }> {
     const found = await this.deps.holder(true);
 
     if (!('holder' in found)) {
@@ -343,8 +364,10 @@ export class CodeModeRunner implements SessionRunner {
 
     const claudePath = this.deps.claudePath();
 
+    (this.deps.makeArtifactsDir ?? makeArtifactsDir)(artifacts);
+
     try {
-      await found.holder.spawn({ session, label, file: claudeFile(claudePath, this.deps.platform), args, cwd, env: codeModeEnvironment(this.deps.environment ?? process.env, launchId, claudePath), cols: COLS, rows: ROWS });
+      await found.holder.spawn({ session, label, file: claudeFile(claudePath, this.deps.platform), args, cwd, env: codeModeEnvironment(this.deps.environment ?? process.env, launchId, claudePath, artifacts), cols: COLS, rows: ROWS });
     } catch (error) {
       return { error: (error as Error).message };
     }

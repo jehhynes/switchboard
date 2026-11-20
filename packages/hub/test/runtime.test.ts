@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { ClaudeRunner, CONVERSATION_RULES } from '@switchboard/claude';
+import { ClaudeRunner, conversationRules } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
 import { CONVERSATION_RULES_VERSION, DEFAULT_SETTINGS, parsePlaybook, Store, UNCONFIRMED_DONE } from '@switchboard/core';
@@ -2659,7 +2659,8 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
     // A session started before the rules existed.
     context.store.updateSession(session.id, { rulesVersion: null });
-    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(CONVERSATION_RULES);
+    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toBe(conversationRules(join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`)));
+    expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toContain(`artifact folder, \`${join(session.cwd, '.wip', 'artifacts', `w${session.workItemId}`)}\``);
     expect(context.store.session(session.id)?.rulesVersion).toBe(CONVERSATION_RULES_VERSION);
     expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toMatch(/^Report to Switchboard with these commands:\n[\s\S]*\n\n## Conversation view\n/);
     context.runtime.stop();
