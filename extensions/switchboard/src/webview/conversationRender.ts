@@ -103,7 +103,7 @@ export function renderMarkdown(text: string): string {
   return markdown.render(text).replace(/<a href="([^"]*)"/g, (_match, href: string) => `<a href="#" data-href="${href}"`);
 }
 
-/** One of our messages: its box, and for one typed in the composer, whether it went and why not. */
+/** One of our messages: its bubble with its time under it, and for one typed in the composer, whether it went and why not. */
 function message(item: MessageView): string {
   const delivery =
     item.origin !== 'typed' || item.delivery === null
@@ -113,7 +113,7 @@ function message(item: MessageView): string {
   // A message sent in the terminal while the session was busy waits, dimmed, until Claude reads it; a typed message's line says where it is.
   const queued = item.provisional && item.origin === 'terminal';
 
-  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}>${stamp(item.at)}<div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${delivery}</li>`;
+  return `<li class="message${item.provisional ? ' provisional' : ''}" data-id="${escape(item.id)}" tabindex="-1"${queued ? ' title="Sent; Claude has not read it yet"' : ''}><div class="box${COMMAND.test(item.text) ? ' command' : ''}">${escape(item.text)}</div>${stamp(item.at)}${delivery}</li>`;
 }
 
 function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<string>): string {

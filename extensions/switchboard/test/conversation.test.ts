@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -194,6 +195,24 @@ describe('the Conversation view page', () => {
     expect(renderConversation(state([reply('r1', T0)], { more: true }))).toContain('data-action="earlier"');
   });
 
+  it('draws our messages as bubbles on the right, at most 85% wide in the Chat view\'s request bubble colour with a smaller bottom-right corner, with the time and delivery under them', () => {
+    const css = readFileSync(join(__dirname, '../src/webview/conversation.css'), 'utf8');
+    const rule = (selector: string) => css.split('\n').find((line) => line.startsWith(`${selector} {`)) ?? '';
+
+    expect(rule('.message')).toContain('align-items: flex-end;');
+    expect(rule('.message .box')).toContain('max-width: 85%;');
+    expect(rule('.message .box')).toContain('border-radius: 12px 12px 4px 12px;');
+    expect(rule('.message .box')).toContain('background: var(--vscode-chat-requestBubbleBackground, var(--vscode-editor-inactiveSelectionBackground,');
+    expect(rule('.message .box')).toContain('border: 1px solid var(--vscode-contrastBorder, transparent);');
+    expect(rule('.message .box')).toContain('color: var(--vscode-foreground);');
+    expect(rule('body.vscode-high-contrast .message .box, body.vscode-high-contrast-light .message .box')).toContain('background: transparent;');
+
+    const root = document.createElement('div');
+
+    root.innerHTML = renderConversation(state([typed('t1', 'uncertain', 'The transcript does not show the message.')]), new Set(), T0);
+    expect([...root.querySelector('li[data-id="t1"]')!.children].map((child) => child.className)).toEqual(['box', 'stamp-line', 'delivery uncertain']);
+  });
+
   it('stamps each message and reply with its time, not a note, and puts a divider before a turn that starts on another day', () => {
     const at = (day: number, hour: number, minute: number) => new Date(2026, 10, day, hour, minute).getTime();
     const root = document.createElement('div');
@@ -216,8 +235,8 @@ describe('the Conversation view page', () => {
     expect(['m1', 'r1', 'n1', 'a1', 'm2', 'r2'].map(stamps)).toEqual(['1:46 PM', '1:47 PM', null, '2:05 PM', '9:00 AM', '9:30 PM']);
     expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('datetime')).toBe(new Date(at(19, 13, 46)).toISOString());
     expect(root.querySelector('li[data-id="m1"] time')?.getAttribute('title')).toMatch(/^2026-11-19 13:46:00 \S+$/);
-    // The stamp sits above a message's box, and a slash command shows in the editor font.
-    expect([...root.querySelector('li[data-id="m1"]')!.children].map((child) => child.className)).toEqual(['stamp-line', 'box command']);
+    // The stamp sits under a message's bubble, and a slash command shows in the editor font.
+    expect([...root.querySelector('li[data-id="m1"]')!.children].map((child) => child.className)).toEqual(['box command', 'stamp-line']);
     expect(root.querySelector('li[data-id="m2"] .box')?.className).toBe('box');
     // No divider before the first turn; one, without the year, before the turn on the next day, which the keys skip.
     expect([...root.querySelectorAll('.timeline > li')].map((li) => li.getAttribute('data-id') ?? li.className)).toEqual(['m1', 'r1', 'n1', 'a1', 'day', 'm2', 'r2']);
