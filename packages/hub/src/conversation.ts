@@ -4,8 +4,8 @@ import { countsUnread, inTranscript } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationStatus, Session, Store } from '@switchboard/core';
 import { artifactsDir, CONVERSATION_RULES_VERSION, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
-import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
-import type { Artifact, ConversationChange, InputOutcome } from '@switchboard/conversation';
+import { ArtifactFolder, MAX_MESSAGE_CHARS, NotWritten, SNAPSHOT_SCROLLBACK, SessionCommands, SessionConversation, SessionInput, readSnapshot } from '@switchboard/conversation';
+import type { Artifact, ConversationChange, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import type { WindowScope, WindowScopes } from './windows.js';
 
@@ -165,6 +165,8 @@ interface Reader {
 export class ConversationService {
   readonly #readers = new Map<string, Reader>();
   readonly #inputs = new Map<string, SessionInput>();
+  /** Each session's slash commands, read from its transcript as `commands` asks for them. */
+  readonly #commands = new Map<string, SessionCommands>();
   readonly #streams = new Map<string, Set<Send>>();
   /** The artifact folder each shown work item's windows follow, by work item. */
   readonly #artifacts = new Map<number, ArtifactFolder>();
@@ -227,6 +229,7 @@ export class ConversationService {
 
         reader.conversation.end();
         this.#readers.delete(id);
+        this.#commands.delete(id);
       }
 
       // A queue is kept while it holds a message, so a session's messages are never typed by two queues at once.
@@ -588,13 +591,14 @@ export class ConversationService {
    * `send` (architecture.md § Typing a message): a message typed in the window's composer to its current session. Refused with 403 outside the
    * window's scope, 409 for a stale `scopeGen`, a session that cannot take it or one resumed under another launch, and 400 for an empty or long
    * text. The message is stored `open` and answered at once; its typing runs in the session's queue, and its delivery arrives as `message`
-   * events. A repeated `opId` returns the message it added and types nothing again.
+   * events. A repeated `opId` returns the message it added and types nothing again. `command` types a slash command chosen from the composer's
+   * list without the escape that keeps every other message a message; it must be one line that starts with `/name`.
    */
   send(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, sessionId, launch, text } = body;
+    const { window, scopeGen, opId, sessionId, launch, text, command } = body;
 
-    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof sessionId !== 'string' || !(launch === null || typeof launch === 'string') || typeof text !== 'string') {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text}.' } };
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof sessionId !== 'string' || !(launch === null || typeof launch === 'string') || typeof text !== 'string' || !(command === undefined || typeof command === 'boolean')) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } };
     }
 
     const scope = this.deps.windows.scope(window);
@@ -627,6 +631,10 @@ export class ConversationService {
 
     if (text.length > MAX_MESSAGE_CHARS) {
       return { status: 400, body: { error: `The message is longer than ${MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.` } };
+    }
+
+    if (command === true && !SLASH_COMMAND.test(text.trim())) {
+      return { status: 400, body: { error: 'A slash command is one line that starts with /name.' } };
     }
 
     const session = this.deps.store.session(sessionId);
@@ -664,6 +672,7 @@ export class ConversationService {
       check: () => this.#check(sessionId, launch),
       reserve: () => this.deps.input.reserve(sessionId, launch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
+      command: command === true,
     });
 
     return { status: 200, body: { message: itemView({ type: 'message', ...message }) } };
@@ -839,10 +848,42 @@ export class ConversationService {
 
     return { status: 200, body: { statuses: page.statuses.map(statusView), more: page.more } };
   }
+
+  /**
+   * `commands` (architecture.md § Slash commands): the slash commands the window's current session offers, for the composer's list: the built-ins,
+   * then the skills its transcript lists. Refused as `history` is: 403 outside the scope, 409 for a stale `scopeGen`. It only reads.
+   */
+  commands(body: Record<string, unknown>): { status: number; body: unknown } {
+    const { window, scopeGen, sessionId } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof sessionId !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } };
+    }
+
+    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    let commands = this.#commands.get(sessionId);
+
+    if (commands === undefined) {
+      commands = new SessionCommands();
+      this.#commands.set(sessionId, commands);
+    }
+
+    const list: SlashCommand[] = commands.list(transcriptOf(this.#readers.get(sessionId), this.deps.projectsDir, this.deps.store.session(sessionId)));
+
+    return { status: 200, body: { commands: list } };
+  }
 }
 
 /** How many not-sent `opId`s the service remembers, for a `send` repeated after its message left the conversation. */
 const UNSENT_KEPT = 100;
+
+/** A slash command as `send` types it unescaped: `/name`, then arguments on the same line. */
+const SLASH_COMMAND = /^\/[\w:.-]+(?: [^\n]*)?$/;
 
 /** How long a typed message waits for the holder to answer a screen read or a write. */
 export const HOLDER_ANSWER_MS = 5_000;

@@ -398,6 +398,37 @@ describe('ConversationService', () => {
     expect(service.statuses({ window: key, scopeGen: 1, opId: 'o8', sessionId: 's2', before: theirs.body.statuses[0]!.id })).toEqual({ status: 200, body: { statuses: [], more: false } });
   });
 
+  it("lists its session's slash commands from the transcript for the window's composer, and refuses another window's session, a forged key or a stale scope generation", async () => {
+    const { view, service, transcript, reply, open } = setup();
+    const listing = (initial: boolean, skills: Array<[string, string]>) =>
+      JSON.stringify({ type: 'attachment', attachment: { type: 'skill_listing', content: skills.map(([name, description]) => `- ${name}: ${description}`).join('\n'), isInitial: initial, names: skills.map(([name]) => name) } });
+
+    transcript('D:/w12', 'n2', [listing(true, [['hello7', 'Say hello seven'], ['init', 'Initialize a new CLAUDE.md file']]), reply('a1', 'Hi.'), listing(false, [['demo-video', 'Record a video']])]);
+    transcript('D:/w3', 'n3', [listing(true, [['theirs', 'Not yours']])]);
+    await service.poll();
+
+    const { key } = open(view.file);
+    const other = open(view.otherFile).key;
+
+    expect(service.commands({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's2' })).toEqual({
+      status: 200,
+      body: {
+        commands: [
+          { name: 'clear', description: 'Clear the conversation history and free up context' },
+          { name: 'compact', description: 'Clear the conversation history but keep a summary in context. Optional: /compact [instructions]' },
+          { name: 'hello7', description: 'Say hello seven' },
+          { name: 'init', description: 'Initialize a new CLAUDE.md file' },
+          { name: 'demo-video', description: 'Record a video' },
+        ],
+      },
+    });
+    expect(service.commands({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.commands({ window: other, scopeGen: 1, opId: 'o3', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.commands({ window: 'forged', scopeGen: 1, opId: 'o4', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.commands({ window: key, scopeGen: 0, opId: 'o5', sessionId: 's2' })).toEqual({ status: 409, body: { error: "The window's work item changed." } });
+    expect(service.commands({ window: key, scopeGen: 1, sessionId: 7 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } });
+  });
+
   it("tells a window its session's new state once, and starts a moved window from a fresh hello", () => {
     const { view, service, open, store, scopes } = setup();
     const { frames, key } = open(view.file);
@@ -498,7 +529,7 @@ describe('ConversationService send', () => {
     const other = open(view.otherFile).key;
     const refused = (patch: Record<string, unknown>, window = key) => service.send(body(window, patch));
 
-    expect(service.send({ window: key, scopeGen: 1, sessionId: 's2', text: 'x' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text}.' } });
+    expect(service.send({ window: key, scopeGen: 1, sessionId: 's2', text: 'x' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } });
     expect(refused({}, 'forged')).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(refused({ sessionId: 's3', launch: 'launch-3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
     expect(refused({}, other)).toEqual({ status: 403, body: { error: 'Not in this window.' } });
@@ -517,6 +548,23 @@ describe('ConversationService send', () => {
 
     expect(store.conversation('s2', null, 10).items).toEqual([]);
     expect(held.writes).toEqual([]);
+  });
+
+  it('types a slash command chosen from the list as it is, refuses one that is not a single /name line, and escapes a message that starts with a slash', async () => {
+    const { service, held, open, body, view, store } = setupSend();
+    const { key } = open(view.file);
+
+    expect(service.send(body(key, { opId: 'op-c0', text: '/compact\nnow', command: true }))).toEqual({ status: 400, body: { error: 'A slash command is one line that starts with /name.' } });
+    expect(service.send(body(key, { opId: 'op-c1', text: 'compact now', command: true }))).toEqual({ status: 400, body: { error: 'A slash command is one line that starts with /name.' } });
+    expect(service.send(body(key, { opId: 'op-c2', text: '/compact', command: 'yes' }))).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } });
+    expect(held.writes).toEqual([]);
+
+    expect(service.send(body(key, { opId: 'op-c3', text: '/compact keep the plan', command: true }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: '/compact keep the plan' } } });
+    await vi.waitFor(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    expect(service.send(body(key, { opId: 'op-c4', text: '/compact keep the plan', command: false }))).toMatchObject({ status: 200 });
+    await vi.waitFor(() => expect(store.message('m-2')?.delivery).toBe('sent'));
+
+    expect(held.writes).toEqual(['\u001b[200~/compact keep the plan\u001b[201~', '\r', '\u001b[200~\\/compact keep the plan\u001b[201~', '\r']);
   });
 
   it('types nothing when the session ends while the message waits on a menu, and says why', async () => {
