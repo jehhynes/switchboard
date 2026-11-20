@@ -565,6 +565,8 @@
             <StackPanel Orientation="Horizontal" Spacing="12">
               <Button Name="SearchFurtherButton" Classes="link" Content="Search further back" IsVisible="{Binding CanSearchFurther}" Click="OnSearchFurtherClicked" />
               <Button Name="SearchAllTimeButton" Classes="link" Content="All time" IsVisible="{Binding OffersAllTime}" Click="OnSearchAllTimeClicked" />
+              <!-- A search that matched nothing offers a way back to the whole list. -->
+              <Button Name="NoMatchesClear" Classes="link" Content="Clear search" IsVisible="{Binding NoMatches}" Click="OnClearSearchClicked" />
             </StackPanel>
           </StackPanel>
         </StackPanel>
