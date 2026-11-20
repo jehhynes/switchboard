@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it';
-import type { MessageView, ReplyView, StatusView } from '@switchboard/hub';
-import { awaitingReply, stateIcon, statusLine, timeline } from '../conversationModel.js';
+import type { ArtifactView, MessageView, ReplyView, StatusView } from '@switchboard/hub';
+import { artifactIcon, awaitingReply, stateIcon, statusLine, timeline } from '../conversationModel.js';
 import type { ConversationState } from '../conversationModel.js';
 
 /** What the page posts to the extension. */
@@ -12,7 +12,8 @@ export type ConversationMessage =
   | { type: 'send'; id: number; text: string; target: SendTarget }
   | { type: 'copy'; id: number; text: string }
   | { type: 'status-open' }
-  | { type: 'statuses' };
+  | { type: 'statuses' }
+  | { type: 'artifact'; path: string };
 
 /** The session the page showed when Enter was pressed; the message goes there or is refused. */
 export interface SendTarget {
@@ -127,6 +128,15 @@ function reply(item: ReplyView, earlier: ReplyView | null, open: ReadonlySet<str
   return `<li class="reply ${item.kind}" data-id="${escape(item.id)}" tabindex="-1">${stamp(item.at)}<span class="dot"></span><div class="body">${renderMarkdown(item.opening)}${rewritten}</div>${actions}</li>`;
 }
 
+/** An artifact as a one-line row where it was written: it opens, it does not expand (architecture.md § Conversation view). */
+function artifactRow(artifact: ArtifactView): string {
+  return (
+    `<li class="artifact" data-id="artifact:${escape(artifact.path)}" data-path="${escape(artifact.path)}" tabindex="-1">` +
+    `<button class="artifact-open" type="button" data-action="artifact" data-path="${escape(artifact.path)}" title="${escape(`Open ${artifact.path}`)}" aria-label="${escape(`Open artifact: ${artifact.title}`)}">` +
+    `<span class="codicon codicon-${artifactIcon(artifact.type)}" aria-hidden="true"></span><span class="artifact-title">${escape(artifact.title)}</span><span class="artifact-kind">${escape(artifact.kind)}</span></button></li>`
+  );
+}
+
 /** How long ago a status was posted, as the status row says it: "just now", "4 min ago", "2 h ago", "3 d ago". */
 export function ago(at: number, now: number): string {
   const minutes = Math.floor(Math.max(0, now - at) / 60_000);
@@ -171,7 +181,7 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
       ? []
       : [state.session.rules === 'none' ? 'This session started without the conversation rules, so its replies show whole.' : 'This session started with older conversation rules, so the view reads only the tags they explained. Resume it to give it the current ones.']),
   ];
-  const shown = timeline(state.items);
+  const shown = timeline(state.items, state.artifacts);
   const waiting = awaitingReply(state.items, shown, state.session);
   // While the session works on a reply, a spinner under the operator's latest message; it has no data-id, so the keys skip it.
   // While the session waits on a question or a permission, it stands still.
@@ -180,6 +190,10 @@ export function renderConversation(state: ConversationState, open: ReadonlySet<s
   // A turn starts at each message; one that starts on another day than the turn before it has a divider, as in Claude Code's panel.
   let turnDay: string | null = null;
   const entries = shown.map((entry, index) => {
+    if (entry.type === 'artifact') {
+      return artifactRow(entry.artifact) + (index === waiting ? spinner : '');
+    }
+
     let divider = '';
 
     if (index === 0 || entry.type === 'message') {

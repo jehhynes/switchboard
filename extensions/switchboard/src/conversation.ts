@@ -43,6 +43,10 @@ export function statusIdOf(uri: vscode.Uri): string {
 export interface ConversationViewDeps {
   /** Opens this window's session in its attach terminal, as the pane's Open in terminal does. */
   openTerminal(): Promise<unknown>;
+  /** Opens one of the window's artifacts by its path (architecture.md § Artifacts). */
+  openArtifact(path: string): Promise<unknown>;
+  /** Hears each new state, as the Artifacts view does. */
+  changed?(state: ConversationState): void;
   log(line: string): void;
 }
 
@@ -352,6 +356,7 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
   #set(state: ConversationState): void {
     this.#state = state;
     this.#post({ type: 'state', state });
+    this.deps.changed?.(state);
   }
 
   /** Loads the items before the oldest the view shows. */
@@ -468,6 +473,8 @@ export class ConversationView implements vscode.WebviewViewProvider, vscode.Text
             return this.#state.status === null ? Promise.resolve() : this.openStatus(this.#state.status);
           case 'statuses':
             return this.earlierStatuses();
+          case 'artifact':
+            return this.deps.openArtifact(String(message.path));
           case 'copy':
             return Promise.resolve(vscode.env.clipboard.writeText(String(message.text))).then(
               () => view.webview.postMessage({ type: 'copied', id: message.id, ok: true }),

@@ -310,6 +310,8 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
 
     if (action === 'terminal' || action === 'earlier' || action === 'statuses') {
       vscode.postMessage({ type: action });
+    } else if (action === 'artifact') {
+      vscode.postMessage({ type: 'artifact', path: button!.dataset['path'] ?? '' });
     } else if (action === 'status-open') {
       seenStatus();
       vscode.postMessage({ type: 'status-open' });
@@ -375,6 +377,13 @@ export function startConversation(root: HTMLElement, live: HTMLElement, vscode: 
     } else if (event.key === 'ArrowUp') {
       move(index === -1 ? items.length - 1 : index - 1);
     } else if ((event.key === 'Enter' || event.key === ' ') && current !== null && (event.target as HTMLElement).closest('button, a') === null) {
+      // An artifact's row opens it.
+      if (current.dataset['path'] !== undefined) {
+        vscode.postMessage({ type: 'artifact', path: current.dataset['path'] });
+        event.preventDefault();
+        return;
+      }
+
       const fold = current.querySelector<HTMLDetailsElement>('details');
 
       if (fold !== null) {

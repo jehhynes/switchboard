@@ -1,9 +1,9 @@
-import type { ItemView, MessageView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
+import type { ArtifactView, ItemView, MessageView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY_CONVERSATION, isWorking, stateIcon, statusLine, timeline, withEarlier } from '../src/conversationModel.js';
-import type { ConversationState } from '../src/conversationModel.js';
+import type { ConversationState, Entry } from '../src/conversationModel.js';
 import { linkTarget, previewLinks, supportsSecondarySidebar } from '../src/links.js';
 import { shortTitle, startConversation, STATUS_NEW_MS } from '../src/webview/conversationMain.js';
 import { ago, linkAllowed, renderConversation, renderMarkdown } from '../src/webview/conversationRender.js';
@@ -17,7 +17,9 @@ const reply = (id: string, at: number, patch: Partial<ReplyView> = {}): ReplyVie
 const message = (id: string, at: number, text: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's2', at, ord: at, origin: 'terminal', text, provisional: false, withdrawn: false, delivery: null, error: null, ...patch });
 const typed = (id: string, delivery: 'open' | 'sent' | 'not-sent' | 'uncertain', error: string | null = null): ItemView => ({ type: 'message', id, sessionId: 's2', at: T0, ord: T0, origin: 'typed', text: `Typed ${id}`, provisional: delivery === 'open' || delivery === 'sent', withdrawn: false, delivery, error });
 
-const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean; status: StatusView | null }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, ...patch });
+const hello = (items: ItemView[] = [], patch: Partial<{ scope: WindowScope | null; sessions: SessionView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[] }> = {}) => ({ type: 'hello', scope: SCOPE, sessions: [SESSION], items, more: false, status: null, artifactsDir: null, artifacts: [], ...patch });
+/** A timeline entry's ID: an item's, or an artifact's path. */
+const idOf = (entry: Entry): string => (entry.type === 'artifact' ? entry.artifact.path : entry.item.id);
 
 describe('the conversation state', () => {
   it('starts from each hello, adds and replaces items in time order, and takes only its current session\'s state', () => {
@@ -37,7 +39,7 @@ describe('the conversation state', () => {
 
     const moved = applyEvent(applyEvent(state, { type: 'scope', scope: { ...SCOPE, workItemId: 3, sessionId: null } }), hello([], { scope: { ...SCOPE, workItemId: 3, sessionId: null }, sessions: [] }));
 
-    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null });
+    expect(moved).toEqual({ scope: { ...SCOPE, workItemId: 3, sessionId: null }, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [] });
   });
 
   it("keeps items in the transcript's order, by ord and not by time, with a sent message and a screen copy after them until their lines are read", () => {
@@ -56,7 +58,7 @@ describe('the conversation state', () => {
 
     // A sent message Claude never received leaves the timeline.
     state = applyEvent(state, { type: 'message', message: message('m3', T0 + 4, 'Never', { ord: 8, withdrawn: true }) });
-    expect(timeline(state.items).map((entry) => entry.item.id)).toEqual(['m1', 'r1', 'r3', 'r2', 'm2']);
+    expect(timeline(state.items).map((entry) => idOf(entry))).toEqual(['m1', 'r1', 'r3', 'r2', 'm2']);
   });
 
   it('drops a typed message that was not sent, from an event, a hello or a page of earlier items', () => {
@@ -86,12 +88,12 @@ describe('the conversation state', () => {
       reply('r5', T0 + 5, { replaces: 'r4', withdrawn: true }),
     ]);
 
-    expect(entries.map((entry) => `${entry.item.id}${entry.type === 'reply' && entry.earlier !== null ? `<${entry.earlier.id}` : ''}`)).toEqual(['r3<r1', 'm1', 'r4']);
+    expect(entries.map((entry) => `${idOf(entry)}${entry.type === 'reply' && entry.earlier !== null ? `<${entry.earlier.id}` : ''}`)).toEqual(['r3<r1', 'm1', 'r4']);
 
     // Rewritten twice: the last rewrite alone, in the first reply's place.
     const chain = timeline([reply('a', T0, { rewrittenBy: 'b' }), reply('b', T0 + 1, { replaces: 'a', rewrittenBy: 'c' }), reply('c', T0 + 2, { replaces: 'b' })]);
 
-    expect(chain.map((entry) => `${entry.item.id}${entry.type === 'reply' && entry.earlier !== null ? `<${entry.earlier.id}` : ''}`)).toEqual(['c<b']);
+    expect(chain.map((entry) => `${idOf(entry)}${entry.type === 'reply' && entry.earlier !== null ? `<${entry.earlier.id}` : ''}`)).toEqual(['c<b']);
   });
 
   it("names the header's codicon for each state", () => {
@@ -134,7 +136,7 @@ describe('the conversation state', () => {
 });
 
 describe('the Conversation view page', () => {
-  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, ...patch });
+  const state = (items: ItemView[], patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items, more: false, connected: true, status: null, artifactsDir: null, artifacts: [], ...patch });
 
   it('draws the header, messages as boxes, replies whole, asides, notes and rewrites, escaping every text', () => {
     const html = renderConversation(
@@ -364,7 +366,7 @@ describe('the Conversation view page', () => {
 });
 
 describe('the composer', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], ...patch });
 
   function page() {
     // Pages of earlier tests still listen on the window, and jsdom has no CSS.escape for the one that kept a focused item.
@@ -619,7 +621,7 @@ describe('reply links and the secondary side bar', () => {
 });
 
 describe('the status row', () => {
-  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, ...patch });
+  const state = (patch: Partial<ConversationState> = {}): ConversationState => ({ scope: SCOPE, session: SESSION, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [], ...patch });
   const status = (id: string, markdown: string, patch: Partial<StatusView> = {}): StatusView => ({ id, sessionId: 's2', at: T0, markdown, fallback: false, ...patch });
 
   it("takes the hello's status and each status of the window's session or work item, and drops another session's", () => {
@@ -660,7 +662,7 @@ describe('the status row', () => {
   });
 
   it('leaves a reply that is only a status out of the timeline', () => {
-    expect(timeline([reply('r1', T0, { opening: '' }), reply('r2', T0 + 1)]).map((entry) => entry.item.id)).toEqual(['r2']);
+    expect(timeline([reply('r1', T0, { opening: '' }), reply('r2', T0 + 1)]).map((entry) => idOf(entry))).toEqual(['r2']);
   });
 
   it('says how long ago a status came, and gives its first line without Markdown marks', () => {

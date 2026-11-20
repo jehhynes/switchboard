@@ -82,6 +82,11 @@
           "id": "switchboard.conversation",
           "name": "Conversation",
           "when": "!switchboard.noSecondarySidebar"
+        },
+        {
+          "id": "switchboard.artifacts",
+          "name": "Artifacts",
+          "when": "!switchboard.noSecondarySidebar"
         }
       ],
       "switchboard-conversation-activity": [
@@ -89,6 +94,11 @@
           "type": "webview",
           "id": "switchboard.conversationActivity",
           "name": "Conversation",
+          "when": "switchboard.noSecondarySidebar"
+        },
+        {
+          "id": "switchboard.artifactsActivity",
+          "name": "Artifacts",
           "when": "switchboard.noSecondarySidebar"
         }
       ]
@@ -126,6 +136,11 @@
         "title": "Continue in Background",
         "category": "Switchboard",
         "icon": "$(debug-step-out)"
+      },
+      {
+        "command": "switchboard.openArtifact",
+        "title": "Open Artifact",
+        "category": "Switchboard"
       }
     ],
     "menus": {
@@ -148,6 +163,10 @@
         },
         {
           "command": "switchboard.continueSidebarInBackground",
+          "when": "false"
+        },
+        {
+          "command": "switchboard.openArtifact",
           "when": "false"
         }
       ],
@@ -181,7 +200,25 @@
           "when": "switchboard.noSecondarySidebar"
         }
       ]
-    }
+    },
+    "markdown.markdownItPlugins": true,
+    "markdown.previewScripts": [
+      "./dist/mermaid/mermaid.min.js",
+      "./dist/mermaidPreview.js"
+    ],
+    "markdown.previewStyles": [
+      "./dist/mermaidPreview.css"
+    ],
+    "viewsWelcome": [
+      {
+        "view": "switchboard.artifacts",
+        "contents": "The session's artifacts show here as it writes them: plans, reports, comparisons, diagrams, pages and media."
+      },
+      {
+        "view": "switchboard.artifactsActivity",
+        "contents": "The session's artifacts show here as it writes them: plans, reports, comparisons, diagrams, pages and media."
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.js",
@@ -212,6 +249,7 @@
     "markdown-it": "^14.3.3",
     "mocha": "^12.0.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "mermaid": "^12.3.0"
   }
 }

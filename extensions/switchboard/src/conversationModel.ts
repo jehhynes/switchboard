@@ -1,4 +1,4 @@
-import type { ItemView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
+import type { ArtifactView, ItemView, ReplyView, SessionView, StatusView, WindowScope } from '@switchboard/hub';
 
 /** What a window's Conversation view shows, kept from its conversation stream (architecture.md § Conversation view). */
 export interface ConversationState {
@@ -13,18 +13,23 @@ export interface ConversationState {
   connected: boolean;
   /** The status row's status: the current session's latest, or the work item's stage before it; null for neither. */
   status: StatusView | null;
+  /** The work item's artifact folder, which the artifacts' paths are relative to; null when the window has none. */
+  artifactsDir: string | null;
+  /** The work item's artifacts, newest first (architecture.md § Artifacts). */
+  artifacts: ArtifactView[];
 }
 
-export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null };
+export const EMPTY_CONVERSATION: ConversationState = { scope: null, session: null, items: [], more: false, connected: false, status: null, artifactsDir: null, artifacts: [] };
 
 /** An event of the conversation stream, as parsed from its data line. */
 export type ConversationEvent =
-  | { type: 'hello'; scope: WindowScope | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null }
+  | { type: 'hello'; scope: WindowScope | null; sessions: SessionView[]; items: ItemView[]; more: boolean; status: StatusView | null; artifactsDir: string | null; artifacts: ArtifactView[] }
   | { type: 'scope'; scope: WindowScope | null }
   | { type: 'session'; session: SessionView }
   | { type: 'message'; message: ItemView }
   | { type: 'reply'; reply: ItemView }
   | { type: 'status'; status: StatusView | null }
+  | { type: 'artifact'; artifact: ArtifactView | { path: string }; removed?: true }
   | { type: string };
 
 /**
@@ -66,14 +71,19 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
         more: hello.more,
         connected: true,
         status: hello.status ?? null,
+        artifactsDir: hello.artifactsDir,
+        artifacts: newestFirst(hello.artifacts),
       };
     }
     case 'scope': {
       const { scope } = event as Extract<ConversationEvent, { type: 'scope' }>;
       const moved = scope?.workItemId !== state.scope?.workItemId || scope?.sessionId !== state.scope?.sessionId;
 
-      // The row of a work item or session the window no longer shows goes; the next hello brings the new one.
-      return { ...state, scope, status: moved ? null : state.status };
+      // The row of a work item or session the window no longer shows goes, and the artifacts of a work item it no longer shows; the next hello
+      // brings the new ones.
+      const left = scope?.workItemId !== state.scope?.workItemId;
+
+      return { ...state, scope, status: moved ? null : state.status, artifacts: left ? [] : state.artifacts, artifactsDir: left ? null : state.artifactsDir };
     }
     case 'session': {
       const { session } = event as Extract<ConversationEvent, { type: 'session' }>;
@@ -94,9 +104,19 @@ export function applyEvent(state: ConversationState, event: ConversationEvent): 
       // A status of a session the window no longer shows, sent before its scope moved, is dropped.
       return status === null || status.sessionId === state.scope?.sessionId || (status.fallback && status.id === `stage-${state.scope?.workItemId}`) ? { ...state, status } : state;
     }
+    case 'artifact': {
+      const { artifact, removed } = event as Extract<ConversationEvent, { type: 'artifact' }>;
+      const rest = state.artifacts.filter((one) => one.path !== artifact.path);
+
+      return { ...state, artifacts: removed === true || !('updatedAt' in artifact) ? rest : newestFirst([...rest, artifact]) };
+    }
     default:
       return state;
   }
+}
+
+function newestFirst(artifacts: ArtifactView[]): ArtifactView[] {
+  return [...artifacts].sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
 }
 
 /** Older items a `history` page brought, before the ones the view shows. */
@@ -106,14 +126,45 @@ export function withEarlier(state: ConversationState, items: ItemView[], more: b
   return { ...state, items: [...items.filter((item) => !known.has(item.id) && !notSent(item)), ...state.items], more };
 }
 
-/** One row of the timeline: a message, or a reply with the earlier reply it rewrote. */
-export type Entry = { type: 'message'; item: Extract<ItemView, { type: 'message' }> } | { type: 'reply'; item: ReplyView; earlier: ReplyView | null };
+/** One row of the timeline: a message, a reply with the earlier reply it rewrote, or an artifact where it was last written. */
+export type Entry = { type: 'message'; item: Extract<ItemView, { type: 'message' }> } | { type: 'reply'; item: ReplyView; earlier: ReplyView | null } | { type: 'artifact'; artifact: ArtifactView };
 
 /**
  * The timeline the view draws: withdrawn screen copies and sent messages are left out, and a rewrite takes the place of the reply it rewrote,
- * which stays one click away.
+ * which stays one click away. Each artifact last written since the oldest item shown sits after the last item from before it was written
+ * (`placeArtifacts`).
  */
-export function timeline(items: ItemView[]): Entry[] {
+export function timeline(items: ItemView[], artifacts: readonly ArtifactView[] = []): Entry[] {
+  return placeArtifacts(conversationEntries(items), artifacts);
+}
+
+/**
+ * Artifacts on the timeline (architecture.md § Conversation view): the folder is the record, so an artifact has no place in the transcript and is
+ * placed by time, after the last entry from no later than its last write; one written before the oldest item shown is only in the Artifacts view.
+ */
+export function placeArtifacts(entries: Entry[], artifacts: readonly ArtifactView[]): Entry[] {
+  const atOf = (entry: Entry): number => (entry.type === 'artifact' ? entry.artifact.updatedAt : entry.item.at);
+  const oldest = entries[0] === undefined ? null : atOf(entries[0]);
+  const placed = [...entries];
+
+  if (oldest === null) {
+    return placed;
+  }
+
+  for (const artifact of [...artifacts].filter((one) => one.updatedAt >= oldest).sort((a, b) => a.updatedAt - b.updatedAt || a.path.localeCompare(b.path))) {
+    let at = placed.length;
+
+    while (at > 0 && atOf(placed[at - 1]!) > artifact.updatedAt) {
+      at--;
+    }
+
+    placed.splice(at, 0, { type: 'artifact', artifact });
+  }
+
+  return placed;
+}
+
+function conversationEntries(items: ItemView[]): Entry[] {
   const replies = new Map(items.filter((item): item is ReplyView => item.type === 'reply' && !item.withdrawn).map((reply) => [reply.id, reply]));
   const placed = new Set<string>();
   const entries: Entry[] = [];
@@ -153,6 +204,24 @@ export function statusLine(markdown: string): string {
   const line = markdown.split('\n').find((one) => one.trim() !== '') ?? '';
 
   return line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)*/, '').replace(/[*_`]/g, '').trim();
+}
+
+/** An artifact's codicon by its type, in the timeline and the Artifacts view. */
+export function artifactIcon(type: ArtifactView['type']): string {
+  switch (type) {
+    case 'markdown':
+      return 'markdown';
+    case 'html':
+      return 'globe';
+    case 'image':
+      return 'file-media';
+    case 'audio':
+      return 'unmute';
+    case 'video':
+      return 'device-camera-video';
+    default:
+      return 'file';
+  }
 }
 
 /** Whether the session is working, which the header's spinning codicon and the timeline's spinner show. */

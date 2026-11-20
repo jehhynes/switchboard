@@ -18,8 +18,11 @@ import { claimIsFor } from './claims.js';
 import { act, claimOpen, setWindowKey, newClaudeTab, openAttach, openLink, openRow, openSession, openTab, openTerminal, openUri, providerOf, terminalCommandOf, workspaceFile } from './open.js';
 import type { OpenContext, OpenResult, WindowCommand } from './open.js';
 import { Pane } from './pane.js';
+import { ArtifactsView } from './artifacts.js';
 import { ConversationView } from './conversation.js';
-import type { ConversationState } from './conversationModel.js';
+import type { ConversationEvent, ConversationState } from './conversationModel.js';
+import { extendMarkdownIt } from './markdownMermaid.js';
+import type MarkdownIt from 'markdown-it';
 import { mainTerminal, paneModel, terminalCommand, windowRows } from './paneModel.js';
 import type { PaneModel } from './paneModel.js';
 import { POLL_MS, SIDES, SideBars } from './sideBars.js';
@@ -67,6 +70,12 @@ export interface SwitchboardApi {
   paneClick(message: PaneMessage): Promise<unknown>;
   /** What the Conversation view shows (architecture.md § Conversation view). */
   conversation(): ConversationState;
+  /** Handles a conversation stream event as if the hub sent it, for the integration suite, whose window has no work item. */
+  receiveConversation(event: ConversationEvent): void;
+  /** What the Artifacts view lists, its badge and the HTML artifact panels open (architecture.md § Artifacts view). */
+  artifacts(): ReturnType<ArtifactsView['shown']>;
+  /** Turns ```mermaid fences into diagrams in the Markdown preview (architecture.md § Artifacts), which VS Code's Markdown extension calls. */
+  extendMarkdownIt(md: MarkdownIt): MarkdownIt;
   /** The window key of this window's hub stream, or null. */
   windowKey(): string | null;
   /** The size the visible pane last reported, or null (PRD R91). */
@@ -271,7 +280,13 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
 
     return leaveTerminal(terminal);
   };
-  const conversation = new ConversationView(context.extensionUri, { openTerminal: openWindowTerminal, log: (line) => hubLog.appendLine(`[conversation] ${line}`) });
+  const artifacts = new ArtifactsView(context.workspaceState);
+  const conversation = new ConversationView(context.extensionUri, {
+    openTerminal: openWindowTerminal,
+    openArtifact: (path) => artifacts.open(path),
+    changed: (shown) => artifacts.update(shown),
+    log: (line) => hubLog.appendLine(`[conversation] ${line}`),
+  });
   const paneClick = (message: PaneMessage): Promise<unknown> => {
     switch (message.type) {
       case 'open':
@@ -417,6 +432,7 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     history.register(),
     pane.register(),
     conversation.register(),
+    artifacts.register(),
     sideBarLog,
     vscode.commands.registerCommand('switchboard.forgetSideBarWidths', async () => {
       await forgetWidths();
@@ -543,6 +559,9 @@ export function activate(context: vscode.ExtensionContext): SwitchboardApi {
     windowStateChanged,
     pane: () => pane.shown(),
     conversation: () => conversation.state(),
+    receiveConversation: (event) => conversation.receive(event),
+    artifacts: () => artifacts.shown(),
+    extendMarkdownIt,
     windowKey: () => windowKey,
     paneClick,
     paneSize: () => pane.size(),

@@ -37,9 +37,9 @@ const holder = {
   plugins: [{ name: 'holder-files', setup: (build) => build.onEnd((result) => { if (result.errors.length === 0) { copyNodePty(); writeHolderManifest(); } }) }],
 };
 
-// The History and pane scripts run in webviews, browsers.
+// The History, pane and conversation scripts run in webviews, and the Mermaid script in the Markdown preview: browsers.
 const webview = {
-  entryPoints: { history: 'src/webview/historyMain.ts', pane: 'src/webview/paneMain.ts', conversation: 'src/webview/conversationMain.ts' },
+  entryPoints: { history: 'src/webview/historyMain.ts', pane: 'src/webview/paneMain.ts', conversation: 'src/webview/conversationMain.ts', mermaidPreview: 'src/webview/mermaidPreviewMain.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -61,6 +61,11 @@ function copyAssets() {
   fs.copyFileSync('src/webview/history.css', 'dist/history.css');
   fs.copyFileSync('src/webview/pane.css', 'dist/pane.css');
   fs.copyFileSync('src/webview/conversation.css', 'dist/conversation.css');
+  fs.copyFileSync('src/webview/mermaidPreview.css', 'dist/mermaidPreview.css');
+
+  // Mermaid's self-contained build, which sets `globalThis.mermaid`, so the Markdown preview draws diagrams offline.
+  fs.mkdirSync('dist/mermaid', { recursive: true });
+  fs.copyFileSync(path.join(path.dirname(require.resolve('mermaid/package.json')), 'dist', 'mermaid.min.js'), 'dist/mermaid/mermaid.min.js');
 }
 
 /** Every file under a folder, relative with forward slashes, sorted. */

@@ -35,7 +35,7 @@ describe('the Conversation view', () => {
     await vscode.commands.executeCommand('switchboard.conversation.focus');
     // The suite's window is a folder window, which has no work item, so the hub's hello gives it no scope.
     await until(() => extension.conversation().connected, 'the view never received its hello');
-    assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true, status: null });
+    assert.deepStrictEqual(extension.conversation(), { scope: null, session: null, items: [], more: false, connected: true, status: null, artifactsDir: null, artifacts: [] });
     await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   });
 
