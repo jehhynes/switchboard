@@ -265,6 +265,36 @@ describe('Dictation', () => {
     expect(kinds(broken.sent).slice(-3)).toEqual(['piece "hello"', 'words ""', 'utterance "hello" cut']);
   });
 
+  it('loads the recogniser again at each attempt to listen, so a model put back needs no restart', async () => {
+    const options: { recognizer?: { error: string } } = { recognizer: { error: 'No speech recognition model in m.' } };
+    const missing = setup(options);
+
+    await missing.listening();
+    expect(missing.dictation.state).toBe('unavailable');
+    missing.dictation.typing(true);
+    missing.dictation.typing(false);
+    await settle();
+    expect(missing.dictation.state).toBe('unavailable');
+    expect(missing.loads.length).toBe(2);
+    expect(missing.logs.filter((line) => line.startsWith('No speech recognition model'))).toHaveLength(1);
+    delete options.recognizer;
+    missing.dictation.typing(true);
+    missing.dictation.typing(false);
+    await settle();
+    expect(missing.dictation.state).toBe('listening');
+    expect(missing.dictation.error).toBeNull();
+    expect(missing.capture.opens).toBe(1);
+
+    const turnedOn = setup(options);
+
+    options.recognizer = { error: 'No speech recognition model in m.' };
+    await turnedOn.listening();
+    delete options.recognizer;
+    turnedOn.dictation.mic(true);
+    await settle();
+    expect(turnedOn.dictation.state).toBe('listening');
+  });
+
   it('listens with no watcher where nothing can watch, or once the watcher fails, and stops it with the mic', async () => {
     const none = setup({ watcher: 'none' });
 

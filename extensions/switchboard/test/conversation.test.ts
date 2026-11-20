@@ -104,6 +104,7 @@ describe('the conversation state', () => {
     expect(micOn({ ...voice, mic: 'listening' })).toBe(true);
     expect(micOn({ ...voice, mic: 'paused-other-app' })).toBe(true);
     expect(micOn({ ...voice, mic: 'idle-off' })).toBe(false);
+    expect(micOn({ ...voice, mic: 'unavailable', error: 'No speech recognition model in m.' })).toBe(false);
     expect(micOn({ ...voice, mic: 'listening', here: false })).toBe(false);
     expect(micOn(null)).toBe(false);
 

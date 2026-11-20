@@ -340,9 +340,12 @@ export function voiceStatus(voice: VoiceView | null): { text: string; tooltip: s
   }
 }
 
-/** Whether the mic is on in this window, so Toggle Microphone turns it off; an idle stop counts as off, so the toggle starts it again. */
+/**
+ * Whether the mic is on in this window, so Toggle Microphone turns it off; an idle stop counts as off, so the toggle starts it again, and so does
+ * a mic that cannot run, so the toggle tries again.
+ */
 export function micOn(voice: VoiceView | null): boolean {
-  return voice?.here === true && voice.mic !== 'off' && voice.mic !== 'idle-off';
+  return voice?.here === true && voice.mic !== 'off' && voice.mic !== 'idle-off' && voice.mic !== 'unavailable';
 }
 
 /** The header's codicon for the session's state (architecture.md § Conversation view). */

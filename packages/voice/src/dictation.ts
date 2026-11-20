@@ -69,6 +69,9 @@ export class Dictation {
   #stream: CaptureStream | null = null;
   #opening = false;
   #error: string | null = null;
+  /** The error is the recogniser's, which each attempt to listen loads again, so a model put back needs no restart. */
+  #recognizerFailed = false;
+  #loggedRecognizerError: string | null = null;
   #engine: { key: string; engine: AsrEngine } | null = null;
   #transcriber: Transcriber | null = null;
   #utterance: Utterance | null = null;
@@ -227,7 +230,13 @@ export class Dictation {
 
   /** Starts or stops capture for the current state, and reports the state when it changed. */
   #sync(): void {
-    const wanted = this.#micOn && this.#error === null && this.#otherApp === false && !this.#idleOff && this.#target !== null && !this.#typing;
+    const ready = this.#micOn && this.#otherApp === false && !this.#idleOff && this.#target !== null && !this.#typing;
+
+    if (ready && this.#recognizerFailed) {
+      this.#error = null;
+    }
+
+    const wanted = ready && this.#error === null;
 
     if (wanted && this.#stream === null && !this.#opening) {
       void this.#startCapture();
@@ -259,11 +268,18 @@ export class Dictation {
     const engine = this.deps.recognizer(terms);
 
     if ('error' in engine) {
+      if (this.#loggedRecognizerError !== engine.error) {
+        this.#loggedRecognizerError = engine.error;
+        this.deps.log(engine.error);
+      }
+
       this.#error = engine.error;
-      this.deps.log(engine.error);
+      this.#recognizerFailed = true;
       return false;
     }
 
+    this.#recognizerFailed = false;
+    this.#loggedRecognizerError = null;
     this.#engine = { key, engine };
     this.#transcriber = new Transcriber(engine, {
       onWords: (text) => this.#words(text),
@@ -320,6 +336,7 @@ export class Dictation {
   }
 
   #failed(error: Error): void {
+    this.#recognizerFailed = false;
     this.#error = `The microphone failed: ${error.message}`;
     this.deps.log(this.#error);
     this.#cut(false);
