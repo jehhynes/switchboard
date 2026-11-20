@@ -1,6 +1,7 @@
 # Reports whether any other process records from a microphone (voice-design § 2.3): one JSON line on stdout each time that changes,
 # {"busy": true|false, "apps": ["<process name>", ...]}. Core Audio session notifications on every active capture endpoint, re-attached when
-# the endpoints change; the excluded process (the voice process) and the system-sounds session never count. Exits when stdin closes.
+# the endpoints change; the excluded process (the voice process), the processes it started (its capture helper) and the system-sounds
+# session never count. Exits when stdin closes.
 param([int]$ExcludePid = 0)
 $ErrorActionPreference = 'Stop'
 Add-Type -Language CSharp -TypeDefinition @'
@@ -37,6 +38,44 @@ namespace SwitchboardMicUse {
     void GetState(out uint state);
   }
   [StructLayout(LayoutKind.Sequential)] struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+  [StructLayout(LayoutKind.Sequential)] struct PROCESS_BASIC_INFORMATION {
+    public IntPtr ExitStatus; public IntPtr PebBaseAddress; public IntPtr AffinityMask; public IntPtr BasePriority; public IntPtr UniqueProcessId; public IntPtr InheritedFromUniqueProcessId;
+  }
+  static class Native {
+    [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process, int infoClass, ref PROCESS_BASIC_INFORMATION info, int size, out int returned);
+    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
+
+    // When pid started, as a FILETIME, or 0 when it cannot be read.
+    public static long StartOf(uint pid) {
+      IntPtr handle = OpenProcess(0x1000, false, pid);
+      if (handle == IntPtr.Zero) return 0;
+      try {
+        long creation, exit, kernel, user;
+        return GetProcessTimes(handle, out creation, out exit, out kernel, out user) ? creation : 0;
+      } finally { CloseHandle(handle); }
+    }
+
+    // Whether pid was started by the process parent, which started at parentStart: a process older than parent had another parent that
+    // used the same ID, so it counts.
+    public static bool StartedBy(uint pid, uint parent, long parentStart) {
+      if (parent == 0 || parentStart == 0 || ParentOf(pid) != parent) return false;
+      long start = StartOf(pid);
+      return start != 0 && start >= parentStart;
+    }
+
+    // The process that started pid, or 0 when it cannot be read.
+    public static uint ParentOf(uint pid) {
+      IntPtr handle = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+      if (handle == IntPtr.Zero) return 0;
+      try {
+        var info = new PROCESS_BASIC_INFORMATION();
+        int returned;
+        return NtQueryInformationProcess(handle, 0, ref info, Marshal.SizeOf(info), out returned) == 0 ? (uint)info.InheritedFromUniqueProcessId.ToInt64() : 0;
+      } finally { CloseHandle(handle); }
+    }
+  }
   [ComImport, Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
   interface IMMNotificationClient {
     [PreserveSig] int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string id, uint state);
@@ -133,13 +172,14 @@ namespace SwitchboardMicUse {
   public class Watch {
     readonly object gate = new object();
     readonly uint exclude;
+    readonly long excludeStart;
     readonly List<object> keep = new List<object>();
     readonly Dictionary<string, object> endpoints = new Dictionary<string, object>();
     readonly List<Session> sessions = new List<Session>();
     IMMDeviceEnumerator enumerator;
     string last = null;
 
-    public Watch(uint excludePid) { exclude = excludePid; }
+    public Watch(uint excludePid) { exclude = excludePid; excludeStart = excludePid == 0 ? 0 : Native.StartOf(excludePid); }
 
     // COM registration happens on an MTA thread, as the spike found it must.
     public void Start() {
@@ -202,7 +242,7 @@ namespace SwitchboardMicUse {
         var two = (IAudioSessionControl2)control;
         if (two.IsSystemSoundsSession() == 0) return;
         uint pid; two.GetProcessId(out pid);
-        if (pid == 0 || pid == exclude) return;
+        if (pid == 0 || pid == exclude || Native.StartedBy(pid, exclude, excludeStart)) return;
         int state; control.GetState(out state);
         string name = "process " + pid;
         try { name = Process.GetProcessById((int)pid).ProcessName; } catch { }

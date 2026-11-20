@@ -181,6 +181,7 @@ describe('the packaged voice process (architecture.md § Voice)', () => {
     // Dictation (architecture.md § Dictation): the turn model's process, the other-app watcher, recognition and onnxruntime for this platform only.
     expect(manifest.files).toContain('turn.js');
     expect(manifest.files).toContain('micuse.ps1');
+    expect(manifest.files).toContain('commcapture.ps1');
     expect(manifest.files).toContain('node_modules/sherpa-onnx-node/package.json');
     expect(manifest.files.some((file) => /^node_modules\/sherpa-onnx-[a-z]+-[a-z0-9]+\/sherpa-onnx\.node$/.test(file))).toBe(true);
     expect(manifest.files.some((file) => file.startsWith(`node_modules/onnxruntime-node/bin/napi-v6/${process.platform}/${process.arch}/`) && file.endsWith('.node'))).toBe(true);

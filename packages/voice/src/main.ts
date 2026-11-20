@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from 'node:path';
 import { ASR_MODEL, ASR_RATE, sherpaEngine } from './asr.js';
 import { decibriCapture, decibriOutput } from './decibri.js';
+import { windowsCapture, withFallback } from './windowsCapture.js';
 import { Dictation } from './dictation.js';
 import { writeHotwords } from './hotwords.js';
 import { watchMicUse } from './micUse.js';
@@ -104,7 +105,10 @@ async function main(): Promise<void> {
   const voiceHome = join(home, 'voice');
   const scripts = dirname(process.argv[1]!);
   const vocabulary = new Vocabulary(voiceHome, Date.now, log);
-  const capture = await decibriCapture(ASR_RATE, SAMPLE_RATE);
+  const decibri = await decibriCapture(ASR_RATE, SAMPLE_RATE);
+  // On Windows, Windows' own echo cancellation in communications mode; decibri's canceller when its helper fails (mechanics.md M94).
+  const capture =
+    process.platform === 'win32' ? withFallback(windowsCapture({ script: join(scripts, 'commcapture.ps1'), speakers: () => service.settings.outputDevice, log }), decibri, log, "decibri with its tau echo canceller") : decibri;
   // The speaker model loads at its first use, the first piece or enrolment.
   const voiceprint = new Voiceprint({ dir: voiceHome, embedder: () => sherpaEmbedder(join(voiceHome, 'models', SPEAKER_MODEL), process.argv[1]!), log });
   const service: VoiceService = new VoiceService({
