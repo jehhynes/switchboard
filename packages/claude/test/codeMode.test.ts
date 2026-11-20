@@ -116,6 +116,19 @@ describe('Code Mode command', () => {
     expect(codeModeResumeArgs(NATIVE, 'auto', null, ARTIFACTS, true)).toContain(codeModePrompt(ARTIFACTS, true));
   });
 
+  it('adds the dictation section after the spoken-reply section only with voice on: [voice], [partial] and the heard tag', () => {
+    const voiced = conversationRules(ARTIFACTS, true);
+
+    expect(RULES).not.toContain('## Dictated messages');
+    expect(RULES).not.toContain('<!--heard:');
+    expect(voiced.indexOf('## Spoken replies')).toBeLessThan(voiced.indexOf('## Dictated messages'));
+    expect(voiced.indexOf('## Dictated messages')).toBeLessThan(voiced.indexOf('## Artifacts'));
+    expect(voiced).toContain('A message from the operator that starts with `[voice]` was dictated');
+    expect(voiced).toContain("A message tagged `[voice] [partial]` is the next part of a long message the operator is still speaking while you work. Don't answer or acknowledge it");
+    expect(voiced).toContain('carries the rest; answer the parts together as one message.');
+    expect(voiced).toContain('add `<!--heard:what came through=what was meant-->` to your reply, for example `<!--heard:a llama=Ollama-->`');
+  });
+
   it('explains where and how to write an artifact, naming the folder and its variable, and not when to write one', () => {
     expect(RULES).toMatch(/\n\n## Artifacts\n/);
     expect(RULES).toContain(`artifact folder, \`${ARTIFACTS}\` (also in the \`CLAUDE_ARTIFACTS_DIR\` environment variable)`);

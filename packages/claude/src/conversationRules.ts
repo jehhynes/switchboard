@@ -1,1 +1,1 @@
-export { conversationRules, SPOKEN_RULES } from '@switchboard/conversation';
+export { conversationRules, SPOKEN_RULES, DICTATION_RULES } from '@switchboard/conversation';

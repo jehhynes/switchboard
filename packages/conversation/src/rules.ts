@@ -27,7 +27,7 @@ ${provider === 'claude' ? '- Text written directly before a tool call in the sam
   The card sends the answer as an ordinary message, such as "1A, 2B" or "2 Other: use port 8800"; the operator may also type an answer or ignore the card.
 ${provider === 'claude' ? "- Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal, so the operator's messages wait behind it, and the view cannot show it. Ask in a reply instead; the answer comes as the operator's next message." : "- You may ask a question with request_user_input; the view can show its request and return the operator's answer."}
 
-${voice ? `${SPOKEN_RULES}\n\n` : ''}${artifactRules(artifactsDir)}`;
+${voice ? `${SPOKEN_RULES}\n\n${DICTATION_RULES}\n\n` : ''}${artifactRules(artifactsDir)}`;
 }
 
 /** How to mark the part of a reply read aloud (architecture.md § Voice), from claude-collab's `instructions/live-collaboration.md`. */
@@ -39,6 +39,18 @@ The operator may hear some replies read aloud. A message from the operator that 
 - The view shows the reply whole, without the markers. A reply with no marked passage is not read aloud. Don't mark a passage in a reply to a message without \`[spoken]\`.
 - When the message also carries \`[expressive]\`, start the reply with a tone line, \`[tone: …]\` alone on its first line, saying in a few words how the reply sounds when spoken, such as \`[tone: calm, slightly amused]\`. It is never read aloud or shown.
 - \`[spoken]\` and \`[expressive]\` are Switchboard's tags, not the operator's words.`;
+
+/**
+ * How to read a dictated message (architecture.md § Dictation), from claude-collab's `instructions/live-collaboration.md`: what `[voice]` and
+ * `[partial]` mean and the heard tag, never how to write the reply.
+ */
+export const DICTATION_RULES = `## Dictated messages
+A message from the operator that starts with \`[voice]\` was dictated: its words come from speech-to-text.
+
+- Speech-to-text makes mistakes ("cloud code" means Claude Code). Read the words loosely, and ask only when two readings would lead to different work.
+- A message tagged \`[voice] [partial]\` is the next part of a long message the operator is still speaking while you work. Don't answer or acknowledge it: read, search and prepare, and write nothing unless it changes what you are doing. The message that ends it, tagged \`[voice]\` without \`[partial]\`, carries the rest; answer the parts together as one message.
+- When you read a misheard word or phrase as a proper noun or a technical term, such as a product, tool, model or project name or jargon like worktree or autosquash, add \`<!--heard:what came through=what was meant-->\` to your reply, for example \`<!--heard:a llama=Ollama-->\`. Don't tag a mishearing of an ordinary word or phrase. Switchboard boosts the tagged terms in the speech-to-text, so the same mistake stops recurring. Tag each mishearing once; the view hides the tag.
+- \`[voice]\` and \`[partial]\` are Switchboard's tags, not the operator's words.`;
 
 /** Where and how to write an artifact, from claude-collab's `instructions/artifacts.md`, without its rules on when to write one or how to reply. */
 function artifactRules(dir: string): string {
