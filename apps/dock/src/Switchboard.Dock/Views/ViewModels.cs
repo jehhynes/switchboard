@@ -468,6 +468,9 @@ public sealed class BandViewModel(string key, string? title, bool open, Action<B
 
     public bool HasTitle => title is not null;
 
+    /// <summary>A band of Done, which draws only its rows in view.</summary>
+    public bool InDone => key == "done" || key.StartsWith("done:", StringComparison.Ordinal);
+
     public bool IsOpen
     {
         get => isOpen;
@@ -481,12 +484,19 @@ public sealed class BandViewModel(string key, string? title, bool open, Action<B
 
     public IReadOnlyList<RowViewModel> Rows => rows;
 
+    /// <summary>
+    /// The rows the list draws, the same as &lt;see cref="Rows"/&gt;, changed by inserting and removing rows, so a search keeps the rows it still shows
+    /// instead of drawing every row again.
+    /// </summary>
+    public ObservableCollection<RowViewModel> Shown { get; } = [];
+
     public string Count => rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public void Show(IReadOnlyList<RowViewModel> shown, bool filtered)
     {
         rows = shown;
         filtering = filtered;
+        Lists.Sync(Shown, shown);
         Changed(nameof(Rows));
         Changed(nameof(Count));
         Changed(nameof(ShowsRows));
@@ -502,13 +512,72 @@ public sealed class BandViewModel(string key, string? title, bool open, Action<B
     }
 }
 
+static class Lists
+{
+    /// <summary>
+    /// Makes &lt;paramref name="target"/&gt; hold &lt;paramref name="items"/&gt; in order. When both keep one order, as a narrower or wider search of the same
+    /// rows does, it merges them in one pass with the fewest inserts and removals; after many changes or a new order it lists them again.
+    /// </summary>
+    public static void Sync<T>(ObservableCollection<T> target, IReadOnlyList<T> items) where T : class
+    {
+        var wanted = new HashSet<T>(items, ReferenceEqualityComparer.Instance);
+        var kept = target.Where(wanted.Contains).ToList();
+        var position = new Dictionary<T, int>(ReferenceEqualityComparer.Instance);
+
+        for (var at = 0; at < items.Count; at++)
+        {
+            position[items[at]] = at;
+        }
+
+        var ordered = kept.Select((item) => position[item]).Zip(kept.Select((item) => position[item]).Skip(1)).All((pair) => pair.First < pair.Second);
+        var changes = target.Count - kept.Count + items.Count - kept.Count;
+
+        // Each insert or removal shifts the rest of the collection, so many of them cost more than listing the rows again.
+        if (!ordered || changes > 64)
+        {
+            if (changes > 0 || !ordered)
+            {
+                target.Clear();
+
+                foreach (var item in items)
+                {
+                    target.Add(item);
+                }
+            }
+
+            return;
+        }
+
+        var index = 0;
+
+        foreach (var item in items)
+        {
+            while (index < target.Count && !wanted.Contains(target[index]))
+            {
+                target.RemoveAt(index);
+            }
+
+            if (index == target.Count || !ReferenceEquals(target[index], item))
+            {
+                target.Insert(index, item);
+            }
+
+            index++;
+        }
+
+        while (target.Count > index)
+        {
+            target.RemoveAt(target.Count - 1);
+        }
+    }
+}
+
 public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel> toggled, Func<string, bool>? bandOpen = null, Action<BandViewModel>? bandToggled = null)
     : Observable
 {
     readonly Dictionary<string, BandViewModel> kept = [];
     bool isOpen = open;
     string glyph = "";
-    IReadOnlyList<BandViewModel> bands = [];
     string title = "";
     string? empty;
     string filter = "";
@@ -550,12 +619,11 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
 
     public IReadOnlyList<RowViewModel> AllRows => all;
 
-    /// <summary>The shown rows by date band, in list order; Done's rows are sorted newest first, so each band's rows are consecutive.</summary>
-    public IReadOnlyList<BandViewModel> Bands
-    {
-        get => bands;
-        private set => Set(ref bands, value);
-    }
+    /// <summary>
+    /// The shown rows by date band, in list order; Done's rows are sorted newest first, so each band's rows are consecutive. Changed in place, so a
+    /// search does not draw the bands it keeps again.
+    /// </summary>
+    public ObservableCollection<BandViewModel> Bands { get; } = [];
 
     public string Count => Rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
@@ -590,7 +658,7 @@ public sealed class GroupViewModel(string key, bool open, Action<GroupViewModel>
     {
         filter = text;
         Rows = all.Where((row) => Matches(row.Row.Search, text)).ToList();
-        Bands = Rows.GroupBy((row) => row.Row.Band).Select((rows) => BandOf(rows.Key, rows.ToList())).ToList();
+        Lists.Sync(Bands, Rows.GroupBy((row) => row.Row.Band).Select((rows) => BandOf(rows.Key, rows.ToList())).ToList());
         Changed(nameof(Count));
         Changed(nameof(IsZero));
         Changed(nameof(ShowEmpty));

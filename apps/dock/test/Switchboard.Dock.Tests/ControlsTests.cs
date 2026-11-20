@@ -488,6 +488,71 @@ public sealed class ControlsTests
     }
 
     [AvaloniaFact]
+    public void Search_Narrowed_KeepsTheRowsItStillShows()
+    {
+        var (window, model) = Open();
+
+        model.Filter = "gh 10";
+        Dispatcher.UIThread.RunJobs();
+        var shown = RowOf(window, "item:7");
+
+        model.Filter = "gh 107";
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(["Issue <7>"], VisibleTitles(window));
+        Assert.Same(shown, RowOf(window, "item:7"));
+    }
+
+    /// <summary>A Done group of &lt;paramref name="count"/&gt; finished rows in one band, the last being item 7's with its window.</summary>
+    static DockView ManyDone(int count) =>
+        Fixtures.View with
+        {
+            Groups =
+            [
+                .. Fixtures.View.Groups.Take(3),
+                new DockGroup("done", "Done", null, [
+                    .. Enumerable.Range(100, count - 1).Select((id) => Fixtures.Row("item:9") with { Key = $"item:{id}", Title = $"Finished {id}", Search = $"Finished {id}", Band = "Today", Window = null }),
+                    Fixtures.Row("item:7") with { Key = "item:999", Title = "Finished last", Search = "Finished last", Band = "Today", Window = Fixtures.Row("item:7").Window! with { Name = "gh-999-000999" } },
+                ]),
+            ],
+        };
+
+    [AvaloniaFact]
+    public void Search_HundredsOfDoneRows_DrawsOnlyTheRowsInView()
+    {
+        var (window, model) = Open(ManyDone(300));
+
+        window.Height = 600;
+        model.Filter = "finished";
+        Dispatcher.UIThread.RunJobs();
+
+        var done = model.Groups.Single((group) => group.Key == "done");
+        var drawn = window.GetVisualDescendants().OfType<Border>().Count((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel row && row.Title.StartsWith("Finished"));
+
+        Assert.Equal(300, done.Rows.Count);
+        Assert.InRange(drawn, 1, 60);
+    }
+
+    [AvaloniaFact]
+    public void SelectWindow_DoneRowOutOfView_ScrollsItIntoView()
+    {
+        var (window, model) = Open(ManyDone(300));
+
+        window.Height = 600;
+        model.Filter = "finished";
+        Dispatcher.UIThread.RunJobs();
+        window.ShowForeground("Finished last · sb:gh-999-000999");
+        Dispatcher.UIThread.RunJobs();
+
+        var scroller = window.FindControl<ScrollViewer>("RowScroller")!;
+        var row = RowOf(window, "item:999");
+        var top = row.TranslatePoint(new Point(0, 0), scroller)!.Value.Y;
+
+        Assert.Equal("item:999", model.Selected);
+        Assert.InRange(top, 0, scroller.Viewport.Height - row.Bounds.Height);
+    }
+
+    [AvaloniaFact]
     public void Search_ClosedGroup_OpensWhileFilteringOnly()
     {
         var (window, model) = Open();

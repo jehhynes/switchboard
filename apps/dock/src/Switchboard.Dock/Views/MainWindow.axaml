@@ -13,6 +13,15 @@
         FontFamily="Segoe UI" FontSize="13"
         WindowDecorations="None" CanResize="False" ShowInTaskbar="False" Topmost="True">
   <Window.Styles>
+    <!-- Done draws only its rows in view, so a search that opens it with hundreds of rows draws a screenful (PRD R63). Other groups draw every row,
+         which dragging in Ready for review measures. -->
+    <Style Selector="ItemsControl.band-rows.done">
+      <Setter Property="ItemsPanel">
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+      </Setter>
+    </Style>
     <Style Selector="TextBlock.muted">
       <Setter Property="Foreground" Value="{DynamicResource DockMuted}" />
     </Style>
@@ -428,7 +437,7 @@
                                 <Border Grid.Column="3" Classes="band-rule" />
                               </Grid>
                             </Border>
-                    <ItemsControl ItemsSource="{Binding Rows}" IsVisible="{Binding ShowsRows}">
+                    <ItemsControl Classes="band-rows" Classes.done="{Binding InDone}" ItemsSource="{Binding Shown}" IsVisible="{Binding ShowsRows}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="views:RowViewModel">
                           <Border Classes="row" Classes.selected="{Binding IsSelected}" Classes.dim="{Binding IsDim}" Tapped="OnRowTapped" ContextRequested="OnRowContext">

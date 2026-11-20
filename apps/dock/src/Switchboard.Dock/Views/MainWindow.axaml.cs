@@ -934,7 +934,18 @@ public sealed partial class MainWindow : Window
     /// <summary>Scrolls the row into view once a group or band it opened has drawn its rows.</summary>
     void ScrollTo(string key) =>
         Dispatcher.UIThread.Post(
-            () => this.GetVisualDescendants().OfType<Border>().FirstOrDefault((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel row && row.Key == key)?.BringIntoView(),
+            () =>
+            {
+                if (this.GetVisualDescendants().OfType<Border>().FirstOrDefault((border) => border.Classes.Contains("row") && border.DataContext is RowViewModel row && row.Key == key) is { } shown)
+                {
+                    shown.BringIntoView();
+                }
+                // Done draws only its rows in view, so a row out of view has no border yet.
+                else if (this.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault((list) => list.DataContext is BandViewModel band && band.Shown.Any((row) => row.Key == key)) is { DataContext: BandViewModel band } list)
+                {
+                    list.ScrollIntoView(band.Shown.First((row) => row.Key == key));
+                }
+            },
             DispatcherPriority.Loaded);
 
     async void OnKey(object? sender, KeyEventArgs e)
