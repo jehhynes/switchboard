@@ -162,5 +162,7 @@ describe('needsMessage', () => {
     expect(needsMessage(item(1, 'awaiting-approval', { sessions: [ended] }))).toBe('Switchboard: Issue 1 — Review, then approve');
     expect(needsMessage(item(2, 'running', { sessions: [session({ state: 'waiting' })] }))).toBe('Switchboard: Issue 2 — Answer a question');
     expect(needsMessage(item(3, 'blocked', { sessions: [ended] }))).toBe('Switchboard: Issue 3 — Blocked');
+    // A held turn that ended on an unanswered question card (PRD R103).
+    expect(needsMessage(item(4, 'running', { sessions: [session({ state: 'idle', stateDetail: 'question-card', codeMode: true })] }))).toBe('Switchboard: Issue 4 — Answer a question');
   });
 });

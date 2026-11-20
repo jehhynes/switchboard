@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MESSAGES, PERMISSION_PROMPT } from '@switchboard/core';
+import { MESSAGES, PERMISSION_PROMPT, QUESTION_CARD } from '@switchboard/core';
 import { wakeText } from '@switchboard/core/snooze';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dockView, hostedItems, sourceGroups, windowItems, windowOf, windowsDir, windowTabs, workspaceText, writeWorkspaceFile } from '../src/dock.js';
@@ -158,6 +158,14 @@ describe('dockView', () => {
       details: [{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.', tone: null }],
     });
     expect(permission.open).toBeNull();
+  });
+
+  it('marks a held turn that ended on an unanswered question card Answer a question in Blocked on you, without the stage or a main control (PRD R103)', () => {
+    const card = row(item(7, { status: 'running', sessions: [session({ state: 'idle', stateDetail: QUESTION_CARD, codeMode: true })], stage: 'checking refunds', stageAt: NOW - 60_000 }));
+
+    expect(card).toMatchObject({ mark: { kind: 'question', title: 'Answer a question' }, stripe: 'warning', details: [{ text: 'Answer a question', title: null, tone: null }] });
+    expect(card.main).toBeNull();
+    expect(dockView(snapshot([item(7, { status: 'running', sessions: [session({ state: 'idle', stateDetail: QUESTION_CARD, codeMode: true })] })]), NOW, W).groups.find((group) => group.rows.length > 0)?.key).toBe('blocked');
   });
 
   it('says why an unstarted work item waits when nothing is newer than the earlier work item (PRD R80)', () => {
