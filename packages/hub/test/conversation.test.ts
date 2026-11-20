@@ -1085,6 +1085,35 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(pins).toEqual(['s2 nova', 's2 null', 's3 nova']);
   });
 
+  it('gives the fragments log a dictated message the transcript confirmed before its typing ended', async () => {
+    const { voice, calls } = fakeVoice({ spoken: false, expressive: false });
+    const held = new FakeHeld();
+    const pieces = [{ text: 'fix the build', score: null, f0: null, dropped: false }];
+    let dictatedId = '';
+
+    voice.delivered = (message) => void calls.push(`delivered ${message.id} ${message.delivery}`);
+
+    const { service, open, view, store } = setupSend(held, undefined, voice);
+    const mine = open(view.file);
+    const write = held.write.bind(held);
+
+    // The transcript reader confirms the dictated message as its Enter goes in, before its typing ends.
+    held.write = async (session, data) => {
+      const result = await write(session, data);
+
+      if (data === '\r' && dictatedId !== '') {
+        store.updateMessage(dictatedId, { delivery: 'sent' });
+      }
+
+      return result;
+    };
+
+    const sent = service.dictate(mine.key, 's2', 'fix the build', pieces, false);
+
+    dictatedId = 'message' in sent ? sent.message.id : '';
+    await vi.waitFor(() => expect(calls).toContain(`delivered ${dictatedId} sent`));
+  });
+
   it('types a draft that holds dictation as a [voice] message with its pieces, and the voice\'s turns and [partial] parts with their tags (architecture.md § Dictation)', async () => {
     const { voice, calls } = fakeVoice({ spoken: true, expressive: false });
     const pieces = [{ text: 'fix the build', score: null, f0: null, dropped: false }];

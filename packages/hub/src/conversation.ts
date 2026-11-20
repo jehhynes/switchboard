@@ -1099,7 +1099,13 @@ export class ConversationService {
     // A message the voice sent itself has no composer waiting on it, so one not sent returns its text to the draft of every window showing it.
     giveBack ||= this.#spoken.delete(id);
 
-    if (message === null || message.delivery === 'sent') {
+    if (message === null) {
+      return;
+    }
+
+    // The transcript confirmed it before its typing ended; the fragments log still gets its delivery.
+    if (message.delivery === 'sent') {
+      this.deps.voice?.delivered?.(message);
       return;
     }
 
