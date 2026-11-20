@@ -26,7 +26,7 @@
     "changes": [
       {
         "newValue": "Support",
-        "field": "Escalation",
+        "field": "Queue",
         "oldValue": "General"
       }
     ]
@@ -48,7 +48,7 @@
     "changes": [
       {
         "newValue": "General",
-        "field": "Escalation"
+        "field": "Queue"
       }
     ]
   },

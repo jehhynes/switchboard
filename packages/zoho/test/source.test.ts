@@ -13,7 +13,20 @@ const fixture = (name: string): unknown => JSON.parse(readFileSync(join(import.m
 const SELF = '8000000000000000001';
 const SEARCH = '/tickets/search?status=Open&customField1=cf_queue%3ASupport&sortBy=createdTime&limit=100&from=0';
 const SEARCH_2 = SEARCH.replace(/from=0$/, 'from=100');
-const CONFIG = (parseZohoConfig({ orgId: '700000001', agentId: SELF }) as { config: ZohoConfig }).config;
+const TEAMS = ['Helpdesk', 'Support', 'Onboarding', 'Marketing', 'Engagement'];
+const CONFIG = (
+  parseZohoConfig({
+    orgId: '700000001',
+    agentId: SELF,
+    tokenCommand: 'print-token',
+    scopeField: 'cf_queue',
+    scopeValue: 'Support',
+    scopeHistoryField: 'Queue',
+    poolTeams: TEAMS,
+    automationAgentIds: ['8000000000000000002'],
+    contextFields: ['cf_queue', 'cf_user_id', 'cf_account_id', 'cf_page_url'],
+  }) as { config: ZohoConfig }
+).config;
 
 /** Answers Desk paths from fixtures; fails on an unexpected path. */
 function desk(overrides: Record<string, DeskResult> = {}) {
@@ -63,18 +76,18 @@ function desk(overrides: Record<string, DeskResult> = {}) {
 }
 
 const search = fixture('search') as { data: { ticketNumber: string; id: string; createdTime: string; customerResponseTime: string | null; assigneeId: string | null; cf: { cf_queue: string | null } }[] };
-const support = search.data.filter((row) => row.cf.cf_queue === 'Support');
+const inScope = search.data.filter((row) => row.cf.cf_queue === 'Support');
 
 describe('ZohoSource.poll', () => {
   it('lists Support tickets by ticket number with the internal ID: none of them yours, the unclaimed ones in the pool, and another engineer’s left out', async () => {
     const get = desk();
     const result = await new ZohoSource(CONFIG, get).poll();
 
-    expect(get.mock.calls.map(([path]) => path)).toEqual(['/teams', SEARCH, ...support.slice(0, 3).map((row) => `/tickets/${row.id}/history?from=1&limit=100`)]);
+    expect(get.mock.calls.map(([path]) => path)).toEqual(['/teams', SEARCH, ...inScope.slice(0, 3).map((row) => `/tickets/${row.id}/history?from=1&limit=100`)]);
     expect(search.data).toHaveLength(17);
     // Recorded live: three Support tickets held by support agents, so in the pool, and two by an engineer, so left out and their histories not read.
     expect(result).toEqual({
-      tickets: support.slice(0, 3).map((row) => ({
+      tickets: inScope.slice(0, 3).map((row) => ({
         sourceKey: row.ticketNumber,
         ref: `#${row.ticketNumber}`,
         repo: '',
@@ -88,7 +101,7 @@ describe('ZohoSource.poll', () => {
         enteredAt: row.id === (fixture('ticket') as { id: string }).id ? Date.parse('2026-10-03T00:53:39.000Z') : Date.parse(row.createdTime),
       })),
     });
-    expect(support).toHaveLength(5);
+    expect(inScope).toHaveLength(5);
   });
 
   it('pages until a short page and fails past maxPages', async () => {
@@ -99,14 +112,15 @@ describe('ZohoSource.poll', () => {
     expect(get).toHaveBeenCalledTimes(3);
 
     expect(await new ZohoSource({ ...CONFIG, maxPages: 1 }, desk({ [SEARCH]: full })).poll()).toEqual({
-      error: 'More than 1 pages of Open Support tickets; raise sources.zoho.maxPages.',
+      error: 'More than 1 pages of Open tickets in scope; raise sources.zoho.maxPages.',
     });
   });
 
   it('fails the poll when the teams cannot be read, and on any Desk error', async () => {
     expect(await new ZohoSource(CONFIG, desk({ '/teams': { json: { teams: [] } } })).poll()).toEqual({
-      error: 'Zoho Desk returned no teams, so support assignees cannot be told from engineers.',
+      error: 'Zoho Desk returned no teams, so sources.zoho.poolTeams cannot be matched.',
     });
+    expect(await new ZohoSource({ ...CONFIG, poolTeams: [] }, desk({ '/teams': { json: { teams: [] } } })).poll()).toMatchObject({ tickets: expect.any(Array) });
     expect(await new ZohoSource(CONFIG, desk({ '/teams': { error: 'Zoho Desk rate-limited the read.' } })).poll()).toEqual({ error: 'Zoho Desk rate-limited the read.' });
     expect(await new ZohoSource(CONFIG, desk({ [SEARCH]: { json: { data: 'x' } } })).poll()).toEqual({ error: 'Zoho Desk returned an unexpected response.' });
   });
@@ -119,7 +133,7 @@ describe('ZohoSource.poll', () => {
     });
   });
 
-  it('enters scope at the later of the last escalation to Support and the last change to Open, reading the history again only when the ticket changes', async () => {
+  it('enters scope at the later of the last change of the scope field to its value and the last change to Open, reading the history again only when the ticket changes', async () => {
     const id = (fixture('ticket') as { id: string }).id;
     const row = (modifiedTime?: string) => ({
       id,
@@ -135,23 +149,25 @@ describe('ZohoSource.poll', () => {
     const page = (modifiedTime?: string) => ({ [SEARCH]: { json: { data: [row(modifiedTime)] } } });
     const entered = async (source: ZohoSource) => ((await source.poll()) as { tickets: { enteredAt: number | null }[] }).tickets[0]?.enteredAt;
 
-    // The fixture: escalated to Support at 18:52, then Open → Deferred → Open, which is out of scope and back.
+    // The fixture: moved to Support at 18:52, then Open → Deferred → Open, which is out of scope and back.
     const get = desk(page('2026-10-03T01:00:00Z'));
     const source = new ZohoSource(CONFIG, get);
     expect(await entered(source)).toBe(Date.parse('2026-10-03T00:53:39.000Z'));
     expect(await entered(source)).toBe(Date.parse('2026-10-03T00:53:39.000Z'));
     expect(get.mock.calls.filter(([path]) => path.includes('/history?'))).toHaveLength(1);
 
-    // A re-escalation after a de-escalation counts; an escalation to another tier and another field do not.
+    // A move back to the scope value counts; a move to another value and another field's change do not.
     const history = [
       { eventTime: '2026-10-04T12:00:00Z', changes: [{ field: 'Team', newValue: 'Support' }] },
-      { eventTime: '2026-10-04T00:00:00Z', changes: [{ field: 'Escalation', oldValue: 'General', newValue: 'Support' }] },
-      { eventTime: '2026-10-03T00:00:00Z', changes: [{ field: 'Escalation', oldValue: 'Support', newValue: 'General' }] },
+      { eventTime: '2026-10-04T00:00:00Z', changes: [{ field: 'Queue', oldValue: 'General', newValue: 'Support' }] },
+      { eventTime: '2026-10-03T00:00:00Z', changes: [{ field: 'Queue', oldValue: 'Support', newValue: 'General' }] },
       { eventTime: '2026-10-02T00:00:00Z', changes: [{ field: 'Status', oldValue: 'On Hold', newValue: 'Open' }] },
     ];
     const changed = desk({ ...page(), [`/tickets/${id}/history?from=1&limit=100`]: { json: history } });
     const again = new ZohoSource(CONFIG, changed);
     expect(await entered(again)).toBe(Date.parse('2026-10-04T00:00:00Z'));
+    // Without scopeHistoryField, only the change to Open counts.
+    expect(await entered(new ZohoSource({ ...CONFIG, scopeHistoryField: '' }, desk({ ...page(), [`/tickets/${id}/history?from=1&limit=100`]: { json: history } })))).toBe(Date.parse('2026-10-02T00:00:00Z'));
     // Without a modifiedTime the history is read on every poll.
     await again.poll();
     expect(changed.mock.calls.filter(([path]) => path.includes('/history?'))).toHaveLength(2);
@@ -167,7 +183,7 @@ describe('ZohoSource.poll', () => {
     const id = (fixture('ticket') as { id: string }).id;
     const data = [{ id, ticketNumber: '7', subject: 's', webUrl: 'u', status: 'Open', createdTime: '2026-09-01T00:00:00Z', assigneeId: null, cf: { cf_queue: 'Support' } }];
     const noise = (n: number) => Array.from({ length: n }, () => ({ eventTime: '2026-10-04T00:00:00Z', changes: [{ field: 'Priority', newValue: 'High' }] }));
-    const escalated = { eventTime: '2026-09-10T00:00:00Z', changes: [{ field: 'Escalation', oldValue: 'General', newValue: 'Support' }] };
+    const escalated = { eventTime: '2026-09-10T00:00:00Z', changes: [{ field: 'Queue', oldValue: 'General', newValue: 'Support' }] };
     const pages = (second: unknown[]) =>
       desk({
         [SEARCH]: { json: { data } },
@@ -215,7 +231,7 @@ describe('ZohoSource.poll', () => {
     expect(reads()).toBe(3);
   });
 
-  it('reads a current ticket the search omits on its own, keeping it while it is still Open and Support, with no memory of earlier polls', async () => {
+  it('reads a current ticket the search omits on its own, keeping it while it is still Open and in scope, with no memory of earlier polls', async () => {
     const row = (id: string, status = 'Open') => ({ id, ticketNumber: `9${id}`, subject: 's', webUrl: 'u', status, assigneeId: SELF, cf: { cf_queue: 'Support' } });
     let rows: object[] = [row('1'), row('2'), row('3')];
     const detail: Record<string, DeskResult> = {};
@@ -238,7 +254,7 @@ describe('ZohoSource.poll', () => {
     expect(await keys(['1', '2'])).toEqual(['91', '92', '93']);
     expect(details()).toEqual([]);
 
-    // 1 is still Open and Support, 2 was closed, 3 was deleted, 4 and 5 are in the trash, still Open, and a ticket without an ID is not read.
+    // 1 is still Open and in scope, 2 was closed, 3 was deleted, 4 and 5 are in the trash, still Open, and a ticket without an ID is not read.
     rows = [];
     detail['/tickets/1'] = { json: row('1') };
     detail['/tickets/2'] = { json: row('2', 'Closed') };
@@ -272,11 +288,11 @@ describe('ZohoSource.poll', () => {
 });
 
 describe('ZohoSource.classify', () => {
-  it('tells mine, none, support and engineer apart (Support board classifyAssignee)', () => {
-    const source = new ZohoSource(CONFIG, desk());
-    const teamOf = new Map([['111', ['Helpdesk']]]);
+  it('tells mine, none, pool and other apart, with only pool teams and automations leaving a ticket in the pool', () => {
+    const source = new ZohoSource({ ...CONFIG, poolTeams: ['Helpdesk'] }, desk());
+    const teamOf = new Map([['111', ['Helpdesk']], ['333', ['Development']]]);
 
-    expect([SELF, null, '', '8000000000000000002', '111', '222'].map((id) => source.classify(id, teamOf))).toEqual(['mine', 'none', 'none', 'support', 'support', 'engineer']);
+    expect([SELF, null, '', '8000000000000000002', '111', '222', '333'].map((id) => source.classify(id, teamOf))).toEqual(['mine', 'none', 'none', 'pool', 'pool', 'other', 'other']);
   });
 });
 
@@ -289,11 +305,11 @@ describe('ZohoSource.context', () => {
     const text = (result as { context: string }).context;
     const lines = text.split('\n');
 
-    expect(lines.slice(0, 3)).toEqual([`Zoho Desk ticket #900007: Ticket ${detail.ticketNumber}`, `Status: ${detail.status}`, expect.stringMatching(/^Assignee: (support|engineer) agent \d{19}$/)]);
+    expect(lines.slice(0, 3)).toEqual([`Zoho Desk ticket #900007: Ticket ${detail.ticketNumber}`, `Status: ${detail.status}`, expect.stringMatching(/^Assignee: (pool )?agent \d{19}$/)]);
     expect(lines[3]).toBe('cf_queue: Support');
-    expect(text).toContain('## Tier, owner and status history\n2026-10-02 16:43');
-    expect(text).toContain('Escalation General → Support');
-    expect(text).toMatch(/Team \(none\) → (Helpdesk|General|Engagement|Marketing|Onboarding)/);
+    expect(text).toContain('## Field history\n2026-10-02 16:43');
+    expect(text).toContain('Queue General → Support');
+    expect(text).toMatch(/Team \(none\) → (Helpdesk|Support|Engagement|Marketing|Onboarding)/);
     expect(text.match(/^### /gm)).toHaveLength(20);
     expect(text.indexOf('## Conversation, oldest first\n\n### Message from the customer by Customer 1, 2026-10-02 16:42')).toBeGreaterThan(0);
     expect(text).toContain('### Internal note by Agent');

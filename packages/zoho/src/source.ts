@@ -7,15 +7,15 @@ import { clip, stripHtml } from './text.js';
 /** Each thread body and comment is clipped to this many characters, as GitHub's are. */
 export const TEXT_LIMIT = 2_000;
 
-/** How long the agent-to-teams map is trusted; team membership changes over months (Support board). */
+/** How long the agent-to-teams map is trusted; team membership changes over months. */
 export const TEAMS_TTL_MS = 6 * 60 * 60 * 1000;
 
 const PAGE = 100;
 /** History pages read for a scope change before falling back to the ticket's creation. */
 const HISTORY_PAGES = 10;
 
-/** Who holds a ticket, from Support's side (Support board `classifyAssignee`). Only `engineer` is a claim by somebody else. */
-export type AssigneeClass = 'mine' | 'none' | 'support' | 'engineer';
+/** Who holds a ticket. Only `other` is a claim by somebody else; a member of a pool team or an automation leaves it in the pool. */
+export type AssigneeClass = 'mine' | 'none' | 'pool' | 'other';
 
 interface SearchTicket {
   id: string;
@@ -76,12 +76,6 @@ interface HistoryEvent {
   changes?: { field: string; oldValue?: unknown; newValue?: unknown }[];
 }
 
-/** Custom fields the triage context shows (architecture.md § Settings). */
-const CONTEXT_FIELDS = ['cf_queue', 'cf_user_id', 'cf_account_id', 'cf_page_url'];
-
-/** History fields that show a ticket's tier, owner and status moves. */
-const HISTORY_FIELDS = new Set(['Escalation', 'Case Owner', 'Status', 'Team']);
-
 function nameOf(person: Person | undefined): string {
   if (person === undefined) {
     return 'someone';
@@ -103,7 +97,7 @@ class DeskError extends Error {}
 export class ZohoSource implements Source {
   readonly queue = true;
   private teams: { teamOf: Map<string, string[]>; names: Map<string, string>; until: number } | null = null;
-  /** Each Support ticket's scope entry, by ticket ID, with the modifiedTime it was read at. */
+  /** Each ticket's scope entry, by ticket ID, with the modifiedTime it was read at. */
   private entered = new Map<string, { modifiedTime: string; at: number | null }>();
 
   constructor(
@@ -114,8 +108,8 @@ export class ZohoSource implements Source {
   ) {}
 
   /**
-   * Reads the Open Support tickets, filtered by the search (mechanics M46): yours are assigned, unclaimed ones are the pool (PRD R46, R47).
-   * A current ticket this search omits is read on its own and kept while it is still Open and Support. A failed team read fails the poll.
+   * Reads the Open tickets in scope, filtered by the search (mechanics M46): yours are assigned, unclaimed ones are the pool (PRD R46, R47).
+   * A current ticket this search omits is read on its own and kept while it is still Open and in scope. A failed team read fails the poll.
    */
   async poll(current: readonly Ticket[] = []): Promise<PollResult> {
     try {
@@ -123,7 +117,7 @@ export class ZohoSource implements Source {
       const rows = await this.search();
 
       if (rows === null) {
-        return { error: `More than ${this.config.maxPages} pages of Open Support tickets; raise sources.${this.name}.maxPages.` };
+        return { error: `More than ${this.config.maxPages} pages of Open tickets in scope; raise sources.${this.name}.maxPages.` };
       }
 
       const found = new Set(rows.map((row) => String(row.id)));
@@ -144,7 +138,7 @@ export class ZohoSource implements Source {
         const holder = this.classify(ticket.assigneeId, teamOf);
 
         // Another engineer's ticket is neither assigned nor in the pool, so it is left out.
-        if (holder !== 'engineer') {
+        if (holder !== 'other') {
           tickets.push(await this.polled(ticket, holder));
         }
       }
@@ -163,9 +157,9 @@ export class ZohoSource implements Source {
     }
   }
 
-  /** Every Open ticket with the escalation value, oldest first; null past maxPages. */
+  /** Every Open ticket with the scope value, oldest first; null past maxPages. */
   private async search(): Promise<SearchTicket[] | null> {
-    const filter = encodeURIComponent(`${this.config.escalationField}:${this.config.escalationValue}`);
+    const filter = encodeURIComponent(`${this.config.scopeField}:${this.config.scopeValue}`);
     const rows: SearchTicket[] = [];
 
     for (let page = 0; page < this.config.maxPages; page++) {
@@ -186,7 +180,7 @@ export class ZohoSource implements Source {
     return null;
   }
 
-  /** The ticket when it is still Open and Support, read by its ID; null when it is not, is in the trash, or no longer exists. */
+  /** The ticket when it is still Open and in scope, read by its ID; null when it is not, is in the trash, or no longer exists. */
   private async stillListed(id: string): Promise<SearchTicket | null> {
     const result = await this.get(`/tickets/${encodeURIComponent(id)}`);
 
@@ -200,7 +194,7 @@ export class ZohoSource implements Source {
   }
 
   private inScope(ticket: SearchTicket): boolean {
-    return ticket.cf?.[this.config.escalationField] === this.config.escalationValue;
+    return ticket.cf?.[this.config.scopeField] === this.config.scopeValue;
   }
 
   private async polled(ticket: SearchTicket, holder: AssigneeClass): Promise<PolledTicket> {
@@ -214,7 +208,7 @@ export class ZohoSource implements Source {
       title: ticket.subject,
       url: ticket.webUrl,
       assigned: holder === 'mine',
-      pool: holder === 'none' || holder === 'support',
+      pool: holder === 'none' || holder === 'pool',
       sortAt: Number.isNaN(waiting) ? null : waiting,
       repo: '',
       enteredAt: await this.enteredScope(ticket),
@@ -222,9 +216,9 @@ export class ZohoSource implements Source {
   }
 
   /**
-   * When the ticket last entered Support scope (PRD R27): the later of its last escalation to Support and its last change to its current Open
-   * status, such as back from Deferred. A history that ends without either gives its creation; one longer than 1,000 events gives null, so
-   * Switchboard keeps the time it has.
+   * When the ticket last entered scope (PRD R27): the later of its last change of the scope field to the scope value and its last change to
+   * its current Open status, such as back from a deferral. A history that ends without either gives its creation; one longer than 1,000
+   * events gives null, so Switchboard keeps the time it has.
    */
   private async enteredScope(ticket: SearchTicket): Promise<number | null> {
     const cached = this.entered.get(ticket.id);
@@ -235,7 +229,7 @@ export class ZohoSource implements Source {
 
     const status = ticket.status ?? 'Open';
     const entersScope = (event: HistoryEvent) =>
-      (event.changes ?? []).some((change) => (change.field === 'Escalation' && change.newValue === this.config.escalationValue) || (change.field === 'Status' && change.newValue === status));
+      (event.changes ?? []).some((change) => (this.config.scopeHistoryField !== '' && change.field === this.config.scopeHistoryField && change.newValue === this.config.scopeValue) || (change.field === 'Status' && change.newValue === status));
     const created = Date.parse(ticket.createdTime ?? '');
     let at: number | null = null;
 
@@ -278,15 +272,15 @@ export class ZohoSource implements Source {
         `Zoho Desk ticket #${ticket.sourceKey}: ${detail?.subject ?? ticket.title}`,
         `Status: ${detail?.status ?? 'unknown'}`,
         `Assignee: ${this.ownerLabel(detail?.assigneeId ?? null)}`,
-        ...CONTEXT_FIELDS.map((field) => `${field}: ${detail?.cf?.[field] ?? 'none'}`),
+        ...this.config.contextFields.map((field) => `${field}: ${detail?.cf?.[field] ?? 'none'}`),
       ];
       const moves = history
-        .flatMap((event) => (event.changes ?? []).filter((change) => HISTORY_FIELDS.has(change.field)).map((change) => ({ event, change })))
+        .flatMap((event) => (event.changes ?? []).filter((change) => this.config.historyFields.includes(change.field)).map((change) => ({ event, change })))
         .map(({ event, change }) => `${event.eventTime.slice(0, 16).replace('T', ' ')} ${event.agentName ?? 'Zoho'}: ${change.field} ${this.value(change.field, change.oldValue)} → ${this.value(change.field, change.newValue)}`)
         .reverse();
 
       if (moves.length > 0) {
-        lines.push('', '## Tier, owner and status history', ...moves);
+        lines.push('', '## Field history', ...moves);
       }
 
       lines.push('', '## Conversation, oldest first');
@@ -312,7 +306,7 @@ export class ZohoSource implements Source {
     return null;
   }
 
-  /** The Support board's `classifyAssignee`, with the team map deciding support from engineer. */
+  /** Who holds the ticket: you, nobody, a pool team member or automation, or somebody else. */
   classify(assigneeId: string | null, teamOf: Map<string, string[]>): AssigneeClass {
     if (assigneeId === null || assigneeId === '') {
       return 'none';
@@ -325,10 +319,10 @@ export class ZohoSource implements Source {
     }
 
     if (this.config.automationAgentIds.includes(id)) {
-      return 'support';
+      return 'pool';
     }
 
-    return (teamOf.get(id) ?? []).length > 0 ? 'support' : 'engineer';
+    return (teamOf.get(id) ?? []).some((team) => this.config.poolTeams.includes(team)) ? 'pool' : 'other';
   }
 
   private async teamMap(): Promise<Map<string, string[]>> {
@@ -339,8 +333,8 @@ export class ZohoSource implements Source {
     const body = json(await this.get('/teams')) as { teams?: Team[] } | null;
     const teams = body?.teams ?? [];
 
-    if (teams.length === 0) {
-      throw new DeskError('Zoho Desk returned no teams, so support assignees cannot be told from engineers.');
+    if (teams.length === 0 && this.config.poolTeams.length > 0) {
+      throw new DeskError(`Zoho Desk returned no teams, so sources.${this.name}.poolTeams cannot be matched.`);
     }
 
     const teamOf = new Map<string, string[]>();
@@ -368,7 +362,7 @@ export class ZohoSource implements Source {
 
     const kind = this.classify(id, this.teams?.teamOf ?? new Map());
 
-    return kind === 'mine' ? 'you' : `${kind} agent ${id}`;
+    return kind === 'mine' ? 'you' : kind === 'pool' ? `pool agent ${id}` : `agent ${id}`;
   }
 
   private value(field: string, value: unknown): string {

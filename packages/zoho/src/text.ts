@@ -1,4 +1,4 @@
-/** Zoho thread and comment bodies are HTML; this keeps their text and line breaks (Support board `stripHtml`). */
+/** Zoho thread and comment bodies are HTML; this keeps their text and line breaks. */
 export function stripHtml(html: string): string {
   return html
     .replace(/<\s*(br|\/p|\/div|\/li|\/tr)\s*\/?>/gi, '\n')

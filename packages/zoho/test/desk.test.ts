@@ -24,10 +24,12 @@ async function fakeDesk(...answers: { status: number; body?: unknown }[]) {
   });
   await new Promise<void>((done) => server!.listen(0, '127.0.0.1', done));
   const port = (server!.address() as { port: number }).port;
-  const config = (parseZohoConfig({ orgId: '700000001', agentId: '1', apiBase: `http://127.0.0.1:${port}/api/v1/` }) as { config: ZohoConfig }).config;
+  const config = (parseZohoConfig({ ...REQUIRED, orgId: '700000001', agentId: '1', apiBase: `http://127.0.0.1:${port}/api/v1/` }) as { config: ZohoConfig }).config;
 
   return { seen, config };
 }
+
+const REQUIRED = { tokenCommand: 'print-token', scopeField: 'cf_queue', scopeValue: 'Support' };
 
 describe('deskClient', () => {
   it('sends GETs with the token and org, reuses the token, and refreshes once on 401', async () => {
@@ -60,7 +62,7 @@ describe('deskClient', () => {
 
 describe('deskClient without a server', () => {
   it('reports an unreachable Desk', async () => {
-    const config = (parseZohoConfig({ orgId: '1', agentId: '1', apiBase: 'http://127.0.0.1:1/api/v1' }) as { config: ZohoConfig }).config;
+    const config = (parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', apiBase: 'http://127.0.0.1:1/api/v1' }) as { config: ZohoConfig }).config;
 
     expect(await deskClient(config, async () => ({ token: 't' }))('/teams')).toEqual({ error: expect.stringMatching(/^Zoho Desk could not be reached: /) });
   });
@@ -76,24 +78,38 @@ describe('commandToken', () => {
 });
 
 describe('parseZohoConfig', () => {
-  it('applies defaults and requires the org and agent IDs as strings', () => {
-    expect(parseZohoConfig({ orgId: '700000001', agentId: '8000000000000000001' })).toEqual({
+  it('applies defaults and requires the IDs, the token command and the scope', () => {
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '700000001', agentId: '8000000000000000001' })).toEqual({
       config: {
-        tokenCommand: 'bash ~/.claude/scripts/desk-token.sh',
+        tokenCommand: 'print-token',
         apiBase: 'https://desk.zoho.com/api/v1',
         orgId: '700000001',
         agentId: '8000000000000000001',
-        escalationField: 'cf_queue',
-        escalationValue: 'Support',
-        automationAgentIds: ['8000000000000000002', '8000000000000000003'],
+        scopeField: 'cf_queue',
+        scopeValue: 'Support',
+        scopeHistoryField: '',
+        poolTeams: [],
+        automationAgentIds: [],
+        contextFields: ['cf_queue'],
+        historyFields: ['Status', 'Case Owner', 'Team'],
         maxPages: 20,
       },
     });
-    expect(parseZohoConfig({ agentId: '1' })).toEqual({ error: 'sources.zoho.orgId must be set to the Desk organization ID, as a string.' });
-    expect(parseZohoConfig({ orgId: '1', agentId: 8000000000000000001 })).toEqual({ error: 'sources.zoho.agentId must be set to your Zoho agent ID, as a string.' });
-    expect(parseZohoConfig({ orgId: '1', agentId: '1', credentialsPath: 'x' })).toEqual({ error: 'sources.zoho.credentialsPath is not a setting.' });
-    expect(parseZohoConfig({ orgId: '1', agentId: '1', tokenCommand: '' })).toEqual({ error: 'sources.zoho.tokenCommand must be a non-empty string.' });
-    expect(parseZohoConfig({ orgId: '1', agentId: '1', automationAgentIds: [1] })).toEqual({ error: 'sources.zoho.automationAgentIds must list agent IDs as strings.' });
-    expect(parseZohoConfig({ orgId: '1', agentId: '1', maxPages: 0 })).toEqual({ error: 'sources.zoho.maxPages must be a whole number of at least 1.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', scopeHistoryField: 'Queue', historyFields: ['Status'], contextFields: [] })).toMatchObject({
+      config: { scopeHistoryField: 'Queue', historyFields: ['Queue', 'Status'], contextFields: [] },
+    });
+    expect(parseZohoConfig({ ...REQUIRED, agentId: '1' })).toEqual({ error: 'sources.zoho.orgId must be set to the Desk organization ID, as a string.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: 8000000000000000001 })).toEqual({ error: 'sources.zoho.agentId must be set to your Zoho agent ID, as a string.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', credentialsPath: 'x' })).toEqual({ error: 'sources.zoho.credentialsPath is not a setting.' });
+    expect(parseZohoConfig({ orgId: '1', agentId: '1', escalationValue: 'x' }, 'desk')).toEqual({ error: 'sources.desk.escalationValue is now scopeValue.' });
+    for (const key of ['tokenCommand', 'scopeField', 'scopeValue'] as const) {
+      expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', [key]: undefined })).toEqual({ error: `sources.zoho.${key} must be a non-empty string.` });
+    }
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', tokenCommand: '' })).toEqual({ error: 'sources.zoho.tokenCommand must be a non-empty string.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', scopeHistoryField: 1 })).toEqual({ error: 'sources.zoho.scopeHistoryField must be a string.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', automationAgentIds: [1] })).toEqual({ error: 'sources.zoho.automationAgentIds must list agent IDs as strings.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', poolTeams: [''] })).toEqual({ error: 'sources.zoho.poolTeams must list names as non-empty strings.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', contextFields: 'cf_queue' })).toEqual({ error: 'sources.zoho.contextFields must list names as non-empty strings.' });
+    expect(parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', maxPages: 0 })).toEqual({ error: 'sources.zoho.maxPages must be a whole number of at least 1.' });
   });
 });
