@@ -1,4 +1,5 @@
 import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { stripMessageTags } from './tags.js';
 
 /**
  * One transcript entry the conversation shows: a reply Claude wrote, a message Claude received, or a message the operator sent while Claude was
@@ -49,12 +50,15 @@ export function unwrapPasted(text: string): string {
   return text.replace(/<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<\/pasted_content id="\1">/g, '$2');
 }
 
-/** A slash command as the operator typed it, `/name args`, from the tags Claude Code records it with; the text itself otherwise. */
+/**
+ * A slash command as the operator typed it, `/name args`, from the tags Claude Code records it with; the text itself otherwise, without the tags
+ * Switchboard typed before it, such as `[spoken]` (architecture.md § Voice).
+ */
 export function typedText(text: string): string {
   const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1];
 
   if (name === undefined) {
-    return unwrapPasted(text).trim();
+    return stripMessageTags(unwrapPasted(text));
   }
 
   const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? '';

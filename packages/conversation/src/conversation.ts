@@ -24,7 +24,7 @@ export interface ConversationStore {
   /** A session's typed messages that were pasted and that no transcript line has confirmed yet. */
   typedAwaitingTranscript(sessionId: string): ConversationMessage[];
   placeLast(id: string): void;
-  addReply(reply: Omit<ConversationReply, 'ord' | 'seenAt'>): void;
+  addReply(reply: Omit<ConversationReply, 'ord' | 'seenAt' | 'spokenState' | 'spokenAtMs' | 'saidChars'>): void;
   updateReply(id: string, patch: Partial<Omit<ConversationReply, 'id' | 'sessionId' | 'workItemId' | 'ord'>>): void;
   reply(id: string): ConversationReply | null;
   /** Newest first; with `before`, only those before that reply in the conversation's order. */
@@ -465,6 +465,8 @@ export class SessionConversation {
         at: via === 'transcript' ? at : existing.at,
         kind: parsed.kind,
         opening: parsed.opening,
+        speak: parsed.speak,
+        tone: parsed.tone,
         source: via,
         transcriptUuid: this.#transcriptUuid ?? existing.transcriptUuid,
         // A screen copy answered the latest message when it was seen; its transcript line says which message it answers.
@@ -495,7 +497,7 @@ export class SessionConversation {
       return existing.id;
     }
 
-    const reply: Omit<ConversationReply, 'ord' | 'seenAt'> = {
+    const reply: Omit<ConversationReply, 'ord' | 'seenAt' | 'spokenState' | 'spokenAtMs' | 'saidChars'> = {
       id: `r-${this.deps.newId()}`,
       sessionId: this.sessionId,
       workItemId: this.workItemId,
@@ -503,6 +505,8 @@ export class SessionConversation {
       kind: parsed.kind,
       answers: this.#answers ?? this.#lastMessage,
       opening: parsed.opening,
+      speak: parsed.speak,
+      tone: parsed.tone,
       source: via,
       replaces: null,
       rewrittenBy: null,

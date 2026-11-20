@@ -105,6 +105,21 @@ describe('SessionConversation', () => {
     expect(changes.map((change) => change.type)).toEqual(['message', 'message', 'reply']);
   });
 
+  it('confirms a message typed with [spoken] by its tagged line, shows it without the tags, and keeps a reply\'s passage and tone line', () => {
+    const { store, conversation, path, append, items } = setup();
+
+    store.addMessage({ id: 'm-spoken', sessionId: 's1', workItemId: 7, at: T0, origin: 'typed', text: '/x? no, why', transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open', error: null, opId: 'op1', pastedAt: T0, spokenRequested: true });
+    append(user('u1', T0 + 500, '[spoken] [expressive] \\/x? no, why'), user('u2', T0 + 600, '[spoken] typed in the terminal'), assistant('a1', T0 + 1000, '[tone: calm]\n[speak]Because it failed.[/speak]\n\nThe log says so.'));
+    conversation.readTranscript(path);
+
+    expect(items()).toMatchObject([
+      { type: 'message', id: 'm-spoken', delivery: 'sent', transcriptUuid: 'u1', text: '/x? no, why', spokenRequested: true },
+      { type: 'message', origin: 'terminal', text: 'typed in the terminal', spokenRequested: false },
+      { type: 'reply', opening: 'Because it failed.\n\nThe log says so.', speak: 'Because it failed.', tone: 'calm', spokenState: 'none' },
+    ]);
+    expect(items()).toHaveLength(3);
+  });
+
   it('confirms a slash command chosen from the composer by its command line, and keeps it apart from the same words sent as a message', () => {
     const { store, conversation, path, append, items } = setup();
     const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'open' as const };
