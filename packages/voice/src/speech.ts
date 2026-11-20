@@ -59,12 +59,22 @@ export class Speech {
   #chiming = false;
   /** The turn whose reply the operator spoke over: its later replies are skipped, so only the answer to what they said is heard. */
   #bargedTurn: string | null = null;
+  /** When the last reply or needs-you sound stopped playing. */
+  #quietSince = -Infinity;
 
   constructor(private readonly deps: SpeechDeps) {}
 
   /** The reply playing now, or null. */
   get playing(): SpeechItem | null {
     return this.#current?.item ?? null;
+  }
+
+  /**
+   * Until when the voice plays: `Infinity` while a reply (from its request, before its audio comes) or the needs-you sound plays, else when the
+   * last one stopped, `-Infinity` before any; half-duplex dictation does not listen until a tail after it (architecture.md § Dictation).
+   */
+  get playedUntil(): number {
+    return this.#current !== null || this.#chiming ? Infinity : this.#quietSince;
   }
 
   /** The replies waiting their turn. */
@@ -201,6 +211,7 @@ export class Speech {
       this.deps.failed((error as Error).message);
     } finally {
       this.#chiming = false;
+      this.#quietSince = this.deps.now();
       this.#next();
     }
   }
@@ -302,6 +313,7 @@ export class Speech {
 
     if (this.#current === current) {
       this.#current = null;
+      this.#quietSince = this.deps.now();
     }
 
     if (state !== null) {

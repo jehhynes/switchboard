@@ -1,7 +1,7 @@
 # Captures the default (or named) microphone in communications mode, the mode calls use, so Windows applies its own echo cancellation
 # against what the speakers play, with no reference to feed (architecture.md § Dictation, mechanics.md M94). Writes 16 kHz mono 16-bit PCM
 # to stdout until stdin closes. stderr carries JSON lines: first the device, the speakers, the mode, the audio effects Windows applies (echo
-# cancellation among them, or not) and the echo reference; or {"error"}; and, once stdin closes, how many packets after the first Windows
+# cancellation among them, or not), the echo reference and whether this is a Remote Desktop session; or {"error"}; and, once stdin closes, how many packets after the first Windows
 # marked as following lost audio. -List initializes the stream and reports without recording. -DefaultMode captures in the default mode,
 # as other apps and decibri do. -Device picks the capture device whose name contains it, and -Speakers the playback device, the echo
 # reference, whose name contains it; each defaults to the system default.
@@ -80,6 +80,8 @@ namespace SbCommCapture {
   [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] public class MMDeviceEnumerator {}
 
   public static class Capture {
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    const int SmRemoteSession = 0x1000;
     const int Render = 0, CaptureFlow = 1, Console = 0, Active = 1;
     const uint AutoConvert = 0x80000000, SrcDefaultQuality = 0x08000000;
     const int Communications = 3, Other = 0;
@@ -205,7 +207,7 @@ namespace SbCommCapture {
       Check(client.GetService(ref captureIid, out captureService), "GetService(IAudioCaptureClient)");
       IAudioCaptureClient capture = (IAudioCaptureClient)captureService;
 
-      string header = "{\"device\":" + Json(Name(device)) + ",\"speakers\":" + Json(speakersName ?? "") + ",\"mode\":" + Json(defaultMode ? "default" : "communications") + ",\"effects\":" + effects + ",\"reference\":" + Json(reference) + "}";
+      string header = "{\"device\":" + Json(Name(device)) + ",\"speakers\":" + Json(speakersName ?? "") + ",\"mode\":" + Json(defaultMode ? "default" : "communications") + ",\"effects\":" + effects + ",\"reference\":" + Json(reference) + ",\"remote\":" + (GetSystemMetrics(SmRemoteSession) != 0 ? "true" : "false") + "}";
       if (listOnly) {
         Console_.Error.WriteLine(header);
         Console_.Error.Flush();

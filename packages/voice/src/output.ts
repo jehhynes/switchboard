@@ -17,6 +17,11 @@ export interface Output {
 /** One open capture: 16 kHz mono 16-bit PCM as it comes, and the audio played, pushed as it plays, for echo cancellation. */
 export interface CaptureStream {
   stop(): void;
+  /**
+   * Why this capture has no working echo cancellation, such as "no echo cancellation on Remote Audio", so dictation stops listening while the
+   * voice plays (architecture.md § Dictation); null when the echo is cancelled.
+   */
+  readonly halfDuplex: string | null;
   /** Audio being played, 24 kHz mono 16-bit PCM, in played order. */
   reference(pcm: Buffer): void;
 }

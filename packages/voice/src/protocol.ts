@@ -78,8 +78,11 @@ export type VoiceMessage =
   | { type: 'active'; gen: number; sessionId: string | null; reason: ActiveReason }
   | { type: 'speech'; gen: number; replyId: string; sessionId: string; state: SpeechState; atMs: number | null; said: number | null }
   | { type: 'progress'; gen: number; replyId: string; sessionId: string; chars: number; atMs: number }
-  /** Capture's state and the last capture, playback or speech failure, or null; `device` the capture device in use, or null. */
-  | { type: 'audio'; mic: MicState; engine: string; device: string | null; error: string | null }
+  /**
+   * Capture's state and the last capture, playback or speech failure, or null; `device` the capture device in use, or null. `halfDuplex`, only
+   * while the open capture has no working echo cancellation, says why, and listening then pauses while the voice plays.
+   */
+  | { type: 'audio'; mic: MicState; engine: string; device: string | null; error: string | null; halfDuplex?: string }
   /** The live words of an utterance, not settled yet; empty once they settled or were dropped. */
   | { type: 'words'; gen: number; utteranceId: string; sessionId: string; text: string }
   /** A piece of an utterance settled, with its voice check: its match score and median pitch (null when not judged), and whether it failed. */

@@ -136,6 +136,33 @@ describe('Speech', () => {
     expect(output.playbacks[0]!.stopped).toBe(true);
   });
 
+  it('says until when it plays: always while a reply is requested or plays or the needs-you sound plays, then when it stopped', async () => {
+    const { clock, tts, output, speech } = setup();
+
+    expect(speech.playedUntil).toBe(-Infinity);
+    clock.advance(1_000);
+    speech.speak(item('r1'));
+    // From the request, before any audio comes.
+    expect(speech.playedUntil).toBe(Infinity);
+    await settle();
+    tts.requests[0]!.audio(4_800);
+    tts.requests[0]!.finish();
+    await settle();
+    expect(speech.playedUntil).toBe(1_000);
+    clock.advance(500);
+    speech.speak(item('r2', 'm2'));
+    clock.advance(200);
+    speech.stop();
+    expect(speech.playedUntil).toBe(1_700);
+
+    clock.advance(300);
+    speech.earcon();
+    expect(speech.playedUntil).toBe(Infinity);
+    await settle();
+    expect(output.playbacks.at(-1)!.drained).toBe(true);
+    expect(speech.playedUntil).toBe(2_000);
+  });
+
   it('plays the needs-you sound at once, or after the reply playing now and before the next', async () => {
     const { tts, output, speech, states } = setup();
 

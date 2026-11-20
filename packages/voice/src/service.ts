@@ -23,6 +23,7 @@ export interface VoiceServiceDeps {
     spoke(): void;
     send(message: VoiceMessage): void;
     playing(): { replyId: string; text: string; voice: string } | null;
+    playedUntil(): number;
     interrupt(): Interrupted | null;
   }) => Dictation;
   /** Learns the reply voices' prints from the audio played, for barge-in; none when left out. */
@@ -62,6 +63,7 @@ export class VoiceService {
 
           return item === null ? null : { replyId: item.replyId, text: item.text, voice: item.as?.voice ?? this.#settings.voice };
         },
+        playedUntil: () => this.#speech.playedUntil,
         interrupt: () => {
           const stopped = this.#speech.interrupt();
 
@@ -243,12 +245,15 @@ export class VoiceService {
   }
 
   #audio(): VoiceMessage {
+    const halfDuplex = this.#dictation?.halfDuplex ?? null;
+
     return {
       type: 'audio',
       mic: this.#dictation?.state ?? 'off',
       engine: this.deps.output.engine,
       device: this.#dictation === null ? this.#settings.outputDevice : this.#settings.inputDevice,
       error: this.#dictation?.error ?? this.#error,
+      ...(halfDuplex === null ? {} : { halfDuplex }),
     };
   }
 }

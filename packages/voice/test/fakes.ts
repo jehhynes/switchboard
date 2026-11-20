@@ -191,6 +191,8 @@ export class FakeCapture implements Capture {
   stream: { onPcm: (pcm: Buffer) => void; onError: (error: Error) => void; stopped: boolean } | null = null;
   opens = 0;
   fail: Error | null = null;
+  /** What each stream opened says of its echo cancellation (`CaptureStream.halfDuplex`). */
+  halfDuplex: string | null = null;
 
   /** When set, an open waits for it before answering. */
   hold: Promise<void> | null = null;
@@ -212,6 +214,7 @@ export class FakeCapture implements Capture {
       stop: () => {
         stream.stopped = true;
       },
+      halfDuplex: this.halfDuplex,
       reference: (pcm) => this.references.push(pcm),
     };
   }

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import type { Capture } from '../src/output.js';
-import { WINDOWS_CAPTURE_START_MS, windowsCapture, withFallback } from '../src/windowsCapture.js';
+import { NoEchoCancellation, noEchoReason, WINDOWS_CAPTURE_START_MS, windowsCapture, withFallback } from '../src/windowsCapture.js';
 import { Clock } from './fakes.js';
 
 class FakeChild extends EventEmitter {
@@ -51,6 +51,7 @@ describe('windowsCapture', () => {
     const stream = await opening;
 
     expect(logs).toEqual([`windows capture: ${HEADER}`]);
+    expect(stream.halfDuplex).toBeNull();
     // A sample split across two reads is joined; nothing from before the header is passed on.
     child.stdout.write(Buffer.from([1, 2, 3]));
     await tick();
@@ -114,6 +115,15 @@ describe('windowsCapture', () => {
     ]);
     expect(runs.map((run) => run.child.killed)).toEqual([1, 1, 1, 1, 1]);
 
+    // No echo cancellation says why for half-duplex listening, naming Remote Desktop when the helper reports a remote session.
+    const remote = capture.open(null, () => undefined, () => undefined).catch((error: unknown) => error);
+
+    runs[5]!.child.stderr.write('{"device":"Microphone (Remote Audio)","effects":[],"remote":true}\n');
+    await tick();
+    expect(await remote).toBeInstanceOf(NoEchoCancellation);
+    expect(((await remote) as NoEchoCancellation).halfDuplex).toBe('no echo cancellation on Remote Audio');
+    expect(runs[5]!.child.killed).toBe(1);
+
     // A helper that failed to open stays silent, even if it answers late.
     runs[3]!.child.stderr.write(`${HEADER}\n`);
     runs[3]!.child.stdout.write(Buffer.from([1, 2, 3, 4]));
@@ -122,12 +132,44 @@ describe('windowsCapture', () => {
   });
 });
 
+describe('noEchoReason', () => {
+  it('names Remote Audio, another device over Remote Desktop, or the device', () => {
+    expect(noEchoReason('Microphone (Remote Audio)', false)).toBe('no echo cancellation on Remote Audio');
+    expect(noEchoReason('Microphone (Remote Audio)', true)).toBe('no echo cancellation on Remote Audio');
+    expect(noEchoReason('Headset', true)).toBe('no echo cancellation on Headset over Remote Desktop');
+    expect(noEchoReason('Headset', false)).toBe('no echo cancellation on Headset');
+  });
+});
+
 describe('withFallback', () => {
+  it('gives a half-duplex fallback the reason of a device with no echo cancellation, and its own reason after another failure', async () => {
+    let failure: Error = new NoEchoCancellation('Windows applies no echo cancellation to Microphone (Remote Audio)', 'no echo cancellation on Remote Audio');
+    const references: number[] = [];
+    let stopped = 0;
+    const primary: Capture = {
+      open: async () => {
+        throw failure;
+      },
+    };
+    const fallback: Capture = {
+      open: async () => ({ stop: () => void stopped++, reference: (pcm) => void references.push(pcm.length), halfDuplex: "decibri's echo canceller removes too little echo" }),
+    };
+    const capture = withFallback(primary, fallback, () => undefined, 'decibri');
+    const stream = await capture.open(null, () => undefined, () => undefined);
+
+    expect(stream.halfDuplex).toBe('no echo cancellation on Remote Audio');
+    stream.reference(Buffer.alloc(6));
+    stream.stop();
+    expect([references, stopped]).toEqual([[6], 1]);
+    failure = new Error('the Windows capture helper exited with code 1');
+    expect((await capture.open(null, () => undefined, () => undefined)).halfDuplex).toBe("decibri's echo canceller removes too little echo");
+  });
+
   it('opens through the fallback, logging why, only when the first capture fails', async () => {
     const logs: string[] = [];
     const opened: string[] = [];
     let failing = true;
-    const stream = { stop: () => undefined, reference: () => undefined };
+    const stream = { stop: () => undefined, reference: () => undefined, halfDuplex: null };
     const primary: Capture = {
       open: async (device) => {
         if (failing) {

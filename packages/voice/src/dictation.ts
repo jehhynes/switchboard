@@ -32,6 +32,8 @@ export interface DictationDeps {
   voiceprint?: Voiceprint | null;
   /** The reply being played, its spoken passage and voice, for barge-in; null while none plays. */
   playing?(): { replyId: string; text: string; voice: string } | null;
+  /** Until when the voice plays: `Infinity` while it plays, else when it last stopped (`Speech.playedUntil`), for half-duplex capture. */
+  playedUntil?(): number;
   /** Barge-in: stops the reply playing, and says how much of its passage was heard; null when none was playing. */
   interrupt?(): Interrupted | null;
   /** `words`, `piece`, `utterance` and `enrollment` to the hub. */
@@ -112,6 +114,10 @@ export class Dictation {
   /** Voiceprint enrolment's recording, while one runs: capture goes to it instead of the recogniser. */
   #enrollment: { chunks: Float32Array[]; timer: unknown } | null = null;
   #playback: Playback | null = null;
+  /** Half-duplex capture is not listening: the voice plays, or played within `voice.halfDuplexTailMs`. */
+  #deaf = false;
+  /** The capture mode last logged: a half-duplex reason, or null for full duplex; undefined before the first open. */
+  #loggedDuplex: string | null | undefined = undefined;
 
   constructor(private readonly deps: DictationDeps) {}
 
@@ -146,6 +152,11 @@ export class Dictation {
     }
 
     return this.#utterance === null ? 'listening' : 'hearing';
+  }
+
+  /** Why the open capture has no working echo cancellation, so listening pauses while the voice plays; null with none or with no capture. */
+  get halfDuplex(): string | null {
+    return this.#stream?.halfDuplex ?? null;
   }
 
   /** Why capture or recognition cannot run; null while they can. */
@@ -368,7 +379,7 @@ export class Dictation {
   }
 
   #report(): void {
-    const text = `${this.state} ${this.#error ?? ''}`;
+    const text = `${this.state} ${this.#error ?? ''} ${this.halfDuplex ?? ''}`;
 
     if (text !== this.#reported) {
       this.#reported = text;
@@ -448,6 +459,13 @@ export class Dictation {
     }
 
     this.#stream = stream;
+    this.#deaf = false;
+
+    if (!forEnrollment && stream.halfDuplex !== this.#loggedDuplex) {
+      this.#loggedDuplex = stream.halfDuplex;
+      this.deps.log(stream.halfDuplex === null ? 'listening: full duplex (echo cancelled)' : `listening: half-duplex (${stream.halfDuplex})`);
+    }
+
     this.#ticker = (this.deps.every ?? every)(() => this.#tick(), TURN_TICK_MS);
     this.#armIdle();
     this.#report();
@@ -470,12 +488,44 @@ export class Dictation {
       return;
     }
 
+    if (this.#stream?.halfDuplex != null && this.#halfDuplexDeaf()) {
+      return;
+    }
+
     this.#trackPlayback();
     this.#transcriber?.feed(samples);
 
     if (this.#holding()) {
       this.#checkBarge();
     }
+  }
+
+  /**
+   * Half-duplex capture (architecture.md § Dictation): while the voice plays and for `voice.halfDuplexTailMs` after, audio is dropped unheard,
+   * so there is no barge-in. Going deaf cuts the open utterance as the composer's focus does, its words kept in the draft and nothing sent;
+   * hearing again starts the recogniser afresh, with nothing of the time before.
+   */
+  #halfDuplexDeaf(): boolean {
+    const deaf = this.deps.now() < (this.deps.playedUntil?.() ?? -Infinity) + this.deps.settings().halfDuplexTailMs;
+
+    if (deaf && !this.#deaf) {
+      this.#deaf = true;
+      this.#playback = null;
+
+      if (this.#utterance !== null || (this.#transcriber?.words ?? '') !== '') {
+        this.deps.log('listening paused while the voice plays (half-duplex): the utterance being heard is cut and kept in the draft');
+        this.#cut(true);
+      } else {
+        this.deps.log('listening paused while the voice plays (half-duplex)');
+        this.#transcriber?.end(false);
+      }
+    } else if (!deaf && this.#deaf) {
+      this.#deaf = false;
+      this.deps.log('listening resumes');
+      this.#transcriber?.end(false);
+    }
+
+    return deaf;
   }
 
   /** Words are held back while a reply plays and no utterance is open: until barge-in fires, they may be its echo. */
@@ -690,6 +740,11 @@ export class Dictation {
 
   /** Closes the open utterance once its words have been quiet for the wait the turn model earned, or for the end-of-message pause. */
   #tick(): void {
+    // The voice may have started playing since the last audio came: an utterance open then is cut, never ended as final.
+    if (this.#stream?.halfDuplex != null && this.#halfDuplexDeaf()) {
+      return;
+    }
+
     const utterance = this.#utterance;
 
     if (utterance === null) {

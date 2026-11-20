@@ -47,7 +47,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
   let spoke = 0;
   let changed = 0;
   /** The reply the fake speech plays, and what a barge-in's stop answers. */
-  const speech: { playing: { replyId: string; text: string; voice: string } | null; interrupts: number; heard: { said: string; rest: string } } = { playing: null, interrupts: 0, heard: { said: '', rest: '' } };
+  const speech: { playing: { replyId: string; text: string; voice: string } | null; until: number; interrupts: number; heard: { said: string; rest: string } } = { playing: null, until: -Infinity, interrupts: 0, heard: { said: '', rest: '' } };
   let id = 0;
   const watch: { changed: ((busy: boolean, apps: string[]) => void) | null; failed: (() => void) | null; closed: number } = { changed: null, failed: null, closed: 0 };
   const settings: VoiceSettings = { ...DEFAULT_SETTINGS.voice, enabled: true, ...options.settings };
@@ -87,6 +87,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     settings: () => settings,
     ...(options.voiceprint === undefined ? {} : { voiceprint: options.voiceprint as unknown as Voiceprint }),
     playing: () => speech.playing,
+    playedUntil: () => speech.until,
     interrupt: () => {
       const playing = speech.playing;
 
@@ -562,6 +563,101 @@ describe('Dictation', () => {
     expect(kinds(sent)).toEqual(['words "about the"', 'words "about the other thing"']);
     expect(speech.interrupts).toBe(0);
   });
+  it('on half-duplex capture hears nothing while the voice plays and for the tail after, with no barge-in, and then listens afresh', async () => {
+    const { clock, capture, engine, dictation, say, quiet, loud, sent, logs, speech, listening } = setup();
+
+    capture.halfDuplex = 'no echo cancellation on Remote Audio';
+    await listening();
+    expect(dictation.halfDuplex).toBe('no echo cancellation on Remote Audio');
+    expect(logs).toContain('listening: half-duplex (no echo cancellation on Remote Audio)');
+    speech.playing = { replyId: 'r1', text: 'The session token is refreshed in two places.', voice: 'marin' };
+    speech.until = Infinity;
+    loud('hold on wait', 2_000);
+    expect(sent).toEqual([]);
+    expect(speech.interrupts).toBe(0);
+    expect(logs).toContain('listening paused while the voice plays (half-duplex)');
+
+    // The reply ended: still deaf for voice.halfDuplexTailMs (800 ms), as the echo comes back late over Remote Desktop.
+    speech.playing = null;
+    speech.until = clock.t;
+    loud('places', 700);
+    expect(sent).toEqual([]);
+    expect(dictation.state).toBe('listening');
+
+    const streams = engine.streams;
+
+    quiet(200);
+    expect(logs.at(-1)).toBe('listening resumes');
+    expect(engine.streams).toBe(streams + 1);
+    say('fix the login', 300);
+    quiet(PHRASE_SILENCE_MS + 3_000);
+    expect(kinds(sent)).toEqual(['words "fix the login"', 'piece "fix the login"', 'words ""', 'utterance "fix the login" final']);
+    expect(sent.at(-1)).toMatchObject({ interrupted: null });
+
+    // The mode is logged when it changes, not at each open.
+    dictation.typing(true);
+    dictation.typing(false);
+    await settle();
+    expect(logs.filter((line) => line.startsWith('listening: '))).toHaveLength(1);
+    capture.halfDuplex = null;
+    dictation.typing(true);
+    dictation.typing(false);
+    await settle();
+    expect(dictation.halfDuplex).toBeNull();
+    expect(logs.filter((line) => line.startsWith('listening: '))).toEqual(['listening: half-duplex (no echo cancellation on Remote Audio)', 'listening: full duplex (echo cancelled)']);
+  });
+
+  it('on half-duplex capture cuts the utterance open when the voice starts playing, keeping its words unsent, and follows voice.halfDuplexTailMs', async () => {
+    const { clock, capture, say, quiet, loud, sent, logs, speech, listening } = setup({ settings: { halfDuplexTailMs: 300 } });
+
+    capture.halfDuplex = 'no echo cancellation on Remote Audio';
+    await listening();
+    say('about the', 200);
+    speech.until = Infinity;
+    loud('about the', 100);
+    expect(kinds(sent)).toEqual(['words "about the"', 'piece "about the"', 'words ""', 'utterance "about the" cut']);
+    // Nothing heard over the reply is reported.
+    loud('about the other thing', 1_000);
+    expect(sent).toHaveLength(4);
+    expect(logs).toContain('listening paused while the voice plays (half-duplex): the utterance being heard is cut and kept in the draft');
+    speech.until = clock.t;
+    quiet(200);
+    expect(logs).not.toContain('listening resumes');
+    quiet(100);
+    expect(logs.at(-1)).toBe('listening resumes');
+    say('next', 100);
+    expect(kinds(sent).at(-1)).toBe('words "next"');
+  });
+
+  it('on half-duplex capture cuts an utterance when the voice starts playing between two chunks of audio, never ending it as final', async () => {
+    const { clock, capture, say, sent, speech, listening } = setup();
+
+    capture.halfDuplex = 'no echo cancellation on Remote Audio';
+    await listening();
+    say('fix the login', 100);
+    // Quiet past the piece's pause, then a reply starts with the end-of-message pause almost over and no audio after it.
+    for (let at = 0; at < 2_500; at += 100) {
+      capture.pcm(100);
+      clock.advance(100);
+    }
+
+    speech.until = Infinity;
+    clock.advance(1_000);
+    expect(kinds(sent).at(-1)).toBe('utterance "fix the login" cut');
+    expect(sent.some((one) => one.type === 'utterance' && one.final)).toBe(false);
+  });
+
+  it('on full-duplex capture ignores when the voice played', async () => {
+    const { capture, say, sent, speech, listening, logs } = setup();
+
+    await listening();
+    expect(capture.halfDuplex).toBeNull();
+    expect(logs).toContain('listening: full duplex (echo cancelled)');
+    speech.until = Infinity;
+    say('fix it', 100);
+    expect(kinds(sent)).toEqual(['words "fix it"']);
+  });
+
   it('checks the words an early end was judged on before closing, and judges again without them when they fail', async () => {
     const voiceprint = fakeVoiceprint({ verdict: (text) => (text.includes('go ahead') ? { score: 0.2, f0: 120, dropped: true, reason: 'score' } : null) });
     const { say, quiet, sent, chats, listening } = setup({ voiceprint, turn: (chat) => (chat[1]!.content.includes('go ahead') ? 0.9 : 0.0001) });

@@ -31,6 +31,9 @@ async function loadDecibri(): Promise<DecibriModule | Error> {
   }
 }
 
+/** decibri's `tau` canceller removed almost none of the echo in the echo checks (mechanics.md M94), so its capture is half-duplex. */
+export const DECIBRI_HALF_DUPLEX = "decibri's echo canceller removes too little echo";
+
 /**
  * Capture through decibri's `Microphone` (architecture.md § Dictation) at 16 kHz mono 16-bit in 100 ms chunks, with its `tau` echo canceller fed
  * the 24 kHz audio the voice plays, so a reply played aloud is taken out of what the recogniser hears.
@@ -72,6 +75,7 @@ export async function decibriCapture(sampleRate: number, referenceRate: number):
             mic.stop();
           }
         },
+        halfDuplex: DECIBRI_HALF_DUPLEX,
         reference: (pcm) => {
           if (!stopped) {
             mic.pushAecReference(pcm);

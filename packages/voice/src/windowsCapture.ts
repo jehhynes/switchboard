@@ -23,7 +23,7 @@ export interface WindowsCaptureDeps {
  * Capture on Windows through `commcapture.ps1` (architecture.md § Dictation): the mic in communications mode, where Windows cancels the echo of
  * what the voice's speakers play itself, so the audio the voice plays is not fed to it. 16 kHz mono 16-bit PCM from the helper's stdout; its
  * first stderr line, the device and the effects Windows applies, goes to the voice log, and a device Windows applies no echo cancellation to
- * fails the open, so capture falls back to decibri's canceller.
+ * fails the open with a `NoEchoCancellation`, so capture falls back to decibri, half-duplex for that reason.
  */
 export function windowsCapture(deps: WindowsCaptureDeps): Capture {
   const run = deps.spawn ?? spawn;
@@ -40,7 +40,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
         let stopped = false;
         let ended = false;
         let odd: Buffer | null = null;
-        const fail = (why: string): void => {
+        const fail = (why: string, halfDuplex?: string): void => {
           if (stopped || ended) {
             return;
           }
@@ -55,7 +55,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
             child.stdout?.removeAllListeners('data');
             child.stdout?.resume();
             child.kill();
-            reject(new Error(why));
+            reject(halfDuplex === undefined ? new Error(why) : new NoEchoCancellation(why, halfDuplex));
           }
         };
         const startTimer = setTimer(() => fail(`the Windows capture helper did not start within ${WINDOWS_CAPTURE_START_MS / 1000} s`), WINDOWS_CAPTURE_START_MS);
@@ -83,7 +83,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
             return;
           }
 
-          let message: { device?: unknown; error?: unknown; discontinuities?: unknown; effects?: unknown };
+          let message: { device?: unknown; error?: unknown; discontinuities?: unknown; effects?: unknown; remote?: unknown };
 
           try {
             message = JSON.parse(line) as typeof message;
@@ -102,7 +102,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
             deps.log(`windows capture: ${line}`);
 
             if (!cancelsEcho(message.effects)) {
-              fail(`Windows applies no echo cancellation to ${message.device}`);
+              fail(`Windows applies no echo cancellation to ${message.device}`, noEchoReason(message.device, message.remote === true));
               return;
             }
 
@@ -122,6 +122,7 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
 
                 child.on('exit', () => clearTimer(kill));
               },
+              halfDuplex: null,
               // Windows' echo canceller takes its reference from the speakers.
               reference: () => undefined,
             });
@@ -131,12 +132,37 @@ export function windowsCapture(deps: WindowsCaptureDeps): Capture {
   };
 }
 
+/** The device has no echo cancellation; `halfDuplex` says so for the voice log and the mic's tooltip. */
+export class NoEchoCancellation extends Error {
+  constructor(
+    message: string,
+    readonly halfDuplex: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Why a device has no echo cancellation, naming Remote Desktop when the helper reports a remote session or the device is its "Remote Audio",
+ * whose capture Windows applies no effects to.
+ */
+export function noEchoReason(device: string, remote: boolean): string {
+  if (/remote audio/i.test(device)) {
+    return 'no echo cancellation on Remote Audio';
+  }
+
+  return remote ? `no echo cancellation on ${device} over Remote Desktop` : `no echo cancellation on ${device}`;
+}
+
 /** Whether the helper's effects list has acoustic echo cancellation on. */
 function cancelsEcho(effects: unknown): boolean {
   return Array.isArray(effects) && effects.some((effect: { effect?: unknown; on?: unknown } | null) => effect?.effect === 'acoustic echo cancellation' && effect.on === true);
 }
 
-/** Opens through `primary`, and through `fallback` when it fails, logging why. */
+/**
+ * Opens through `primary`, and through `fallback` when it fails, logging why. A half-duplex fallback after a `NoEchoCancellation` gives
+ * that error's reason, which names the device, instead of its own.
+ */
 export function withFallback(primary: Capture, fallback: Capture, log: (line: string) => void, fallbackName: string): Capture {
   return {
     open: async (device, onPcm, onError) => {
@@ -144,7 +170,10 @@ export function withFallback(primary: Capture, fallback: Capture, log: (line: st
         return await primary.open(device, onPcm, onError);
       } catch (error) {
         log(`${(error as Error).message}; capturing through ${fallbackName}`);
-        return fallback.open(device, onPcm, onError);
+
+        const stream = await fallback.open(device, onPcm, onError);
+
+        return error instanceof NoEchoCancellation && stream.halfDuplex !== null ? { stop: () => stream.stop(), reference: (pcm) => stream.reference(pcm), halfDuplex: error.halfDuplex } : stream;
       }
     },
   };
