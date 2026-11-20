@@ -38,6 +38,34 @@ describe('Router', () => {
     expect(changes.slice(3)).toEqual(['4 none focus', '5 b focus']);
   });
 
+  it('follows a session terminal window as it follows a window, and keeps the target when the focus moves between them for one session', () => {
+    const { clock, changes, router, targets } = setup(2);
+
+    router.update(targets, { sessionId: 'a', via: 'terminal' });
+    clock.advance(FOCUS_DEBOUNCE_MS - 1);
+    expect(changes).toEqual([]);
+    clock.advance(1);
+    expect(changes).toEqual(['1 a focus']);
+
+    // Its item window showing the same session takes the focus: nothing stops.
+    router.update(targets, { sessionId: 'a', via: 'window' });
+    clock.advance(FOCUS_DEBOUNCE_MS);
+    expect(changes).toEqual(['1 a focus']);
+
+    // Another session's terminal: a hard cut, then the debounce.
+    router.update(targets, { sessionId: 'b', via: 'terminal' });
+    expect(changes).toEqual(['1 a focus', '2 none focus']);
+    clock.advance(FOCUS_DEBOUNCE_MS);
+    expect(changes).toEqual(['1 a focus', '2 none focus', '3 b focus']);
+
+    // The terminal leaves the front for an unrelated app: the target stays until the away timeout.
+    router.update(targets, null);
+    clock.advance(2 * 60_000 - 1);
+    expect(router.target).toBe('b');
+    clock.advance(1);
+    expect(changes.at(-1)).toBe('4 none gone');
+  });
+
   it('keeps the target while the focus is outside every scoped window, until the away timeout drops it', () => {
     const { clock, changes, router, targets } = setup(2);
 

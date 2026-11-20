@@ -118,7 +118,7 @@ describe('voice protocol', () => {
     expect(parseHubMessage('{"type":"settings","settings":{"enabled":true}}')).toMatchObject({ type: 'settings' });
     expect(parseHubMessage('{"type":"speak","gen":-1,"replyId":"r","sessionId":"s","text":"Hi.","tone":null,"turn":null}')).toEqual({ error: 'Invalid speak message.' });
     expect(parseHubMessage('{"type":"targets","targets":[{"sessionId":""}],"focus":null}')).toEqual({ error: 'Invalid targets message.' });
-    expect(parseHubMessage('{"type":"targets","targets":[],"focus":{"sessionId":"s","via":"terminal"}}')).toEqual({ error: 'Invalid targets message.' });
+    expect(parseHubMessage('{"type":"targets","targets":[],"focus":{"sessionId":"s","via":"tab"}}')).toEqual({ error: 'Invalid targets message.' });
     expect(parseHubMessage('{"type":"earcon","kind":"other"}')).toEqual({ error: 'Invalid earcon message.' });
     expect(parseHubMessage('{"type":"hello"}')).toEqual({ error: 'Invalid hello message.' });
     expect(parseHubMessage('{"type":"talk-here"}')).toEqual({ error: 'Invalid talk-here message.' });

@@ -31,4 +31,14 @@ describe('voice protocol', () => {
     });
     expect(parseHubMessage('{"type":"targets","targets":[{"sessionId":"s1","workItemId":1,"repo":5}],"focus":null}')).toEqual({ error: 'Invalid targets message.' });
   });
+
+  it('reads a focus on a session terminal window as well as a window, and refuses another kind', () => {
+    expect(parseHubMessage('{"type":"targets","targets":[{"sessionId":"s1","workItemId":1}],"focus":{"sessionId":"s1","via":"terminal"}}')).toEqual({
+      type: 'targets',
+      targets: [{ sessionId: 's1', workItemId: 1, repo: null }],
+      focus: { sessionId: 's1', via: 'terminal' },
+    });
+    expect(parseHubMessage('{"type":"targets","targets":[],"focus":{"sessionId":"s1","via":"window"}}')).toMatchObject({ focus: { sessionId: 's1', via: 'window' } });
+    expect(parseHubMessage('{"type":"targets","targets":[],"focus":{"sessionId":"s1","via":"tab"}}')).toEqual({ error: 'Invalid targets message.' });
+  });
 });

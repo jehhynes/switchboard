@@ -7,7 +7,7 @@ export const PROTOCOL = 1;
 export const MAX_LINE_BYTES = 1024 * 1024;
 export const HELLO_DEADLINE_MS = 5_000;
 
-/** A session the voice can speak for: a `full` session with a connected scoped window. */
+/** A session the voice can speak for: a `full` session with a connected scoped window, or whose terminal window the dock has seen in front. */
 export interface VoiceTarget {
   sessionId: string;
   workItemId: number;
@@ -20,8 +20,11 @@ export const MIC_STATES = ['off', 'listening', 'hearing', 'typing', 'idle-off', 
 
 export type MicState = (typeof MIC_STATES)[number];
 
-/** The focused scoped window's selected conversation's current session, or null while no scoped window has the focus. */
-export type VoiceFocus = { sessionId: string; via: 'window' } | null;
+/**
+ * The focused scoped window's selected conversation's current session (`window`), or the session whose terminal window is in front
+ * (`terminal`), or null while neither has the focus.
+ */
+export type VoiceFocus = { sessionId: string; via: 'window' | 'terminal' } | null;
 
 /** What became of a reply's speech, as the voice process reports it. */
 export type SpeechState = 'playing' | 'played' | 'interrupted' | 'skipped' | 'failed';
@@ -148,14 +151,14 @@ export function parseHubMessage(line: string): HubMessage | { error: string } {
         return invalid;
       }
 
-      if (!(focus === null || (isObject(focus) && isId(focus.sessionId) && focus.via === 'window'))) {
+      if (!(focus === null || (isObject(focus) && isId(focus.sessionId) && (focus.via === 'window' || focus.via === 'terminal')))) {
         return invalid;
       }
 
       return {
         type: 'targets',
         targets: targets.map((one) => ({ sessionId: (one as Fields).sessionId as string, workItemId: (one as Fields).workItemId as number, repo: ((one as Fields).repo as string | null | undefined) ?? null })),
-        focus: focus === null ? null : { sessionId: (focus as Fields).sessionId as string, via: 'window' },
+        focus: focus === null ? null : { sessionId: (focus as Fields).sessionId as string, via: (focus as Fields).via as 'window' | 'terminal' },
       };
     }
     case 'talk-here':
